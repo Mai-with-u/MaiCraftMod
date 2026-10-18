@@ -133,6 +133,13 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
         if (status instanceof ActionStatus.Failed failure) {
+            // 取物动作没走完也可能东西已经进包了（例如收手时正在关界面）：先按身上的再看一次，有就接着放。
+            PlayerContext player = context.player();
+            CatchesFall late = player == null ? null : rescues.apply(player);
+            if (late != null) {
+                rescue = late;
+                return Next.go(Phase.CATCH, "用" + rescue.itemId() + "接住，落点 " + rescue.landingFeet().toShortString());
+            }
             return Next.fail(Problem.of(Problem.Kind.DANGER,
                     "这一掉会掉血，可身上没有能接住自己的东西，从无线终端现取也没成：" + failure.problem().message(),
                     "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
