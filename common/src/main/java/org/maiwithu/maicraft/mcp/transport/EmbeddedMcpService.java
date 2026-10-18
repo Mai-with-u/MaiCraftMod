@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.mcp.transport;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
@@ -58,6 +59,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private final long sessionTtlNanos;
     /** 已经接上行为的工具；还没接上的工具照旧回答"还没接入"。 */
     private final ToolDispatcher tools;
+    /** 资源层：随包的玩法技能这类只读资源；没有资源时不声明 resources。 */
+    private final McpResources resources;
     private final ConcurrentMap<String, McpSession> sessions = new ConcurrentHashMap<>();
     private final AtomicBoolean stopping = new AtomicBoolean();
 
@@ -67,22 +70,28 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private Thread shutdownHook;
 
     public EmbeddedMcpService(McpConfig config) {
-        this(config, DEFAULT_SESSION_TTL_NANOS, new ToolDispatcher(List.of()));
+        this(config, DEFAULT_SESSION_TTL_NANOS, new ToolDispatcher(List.of()), null);
     }
 
     public EmbeddedMcpService(McpConfig config, ToolDispatcher tools) {
-        this(config, DEFAULT_SESSION_TTL_NANOS, tools);
+        this(config, DEFAULT_SESSION_TTL_NANOS, tools, null);
+    }
+
+    /** 带资源层的服务：有随包技能时握手声明 resources，并接上 resources/list 与 resources/read。 */
+    public EmbeddedMcpService(McpConfig config, ToolDispatcher tools, McpResources resources) {
+        this(config, DEFAULT_SESSION_TTL_NANOS, tools, resources);
     }
 
     /** 会话时限按纳秒注入，供离线测试把空闲回收压缩到可控时长。 */
     EmbeddedMcpService(McpConfig config, long sessionTtlNanos) {
-        this(config, sessionTtlNanos, new ToolDispatcher(List.of()));
+        this(config, sessionTtlNanos, new ToolDispatcher(List.of()), null);
     }
 
-    private EmbeddedMcpService(McpConfig config, long sessionTtlNanos, ToolDispatcher tools) {
+    private EmbeddedMcpService(McpConfig config, long sessionTtlNanos, ToolDispatcher tools, McpResources resources) {
         this.config = Objects.requireNonNull(config, "config");
         this.sessionTtlNanos = sessionTtlNanos;
         this.tools = Objects.requireNonNull(tools, "tools");
+        this.resources = resources;
     }
 
     /** 启动本地端口和网络线程；已经启动时不重复开一个服务。 */
@@ -122,19 +131,25 @@ public final class EmbeddedMcpService implements AutoCloseable {
      * 最后一次绑定异常。配置端口为 0 时由系统分配，不会触发让行。
      */
     public static EmbeddedMcpService startWithFallback(McpConfig config, int extraAttempts) throws IOException {
-        return startWithFallback(config, extraAttempts, new ToolDispatcher(List.of()));
+        return startWithFallback(config, extraAttempts, new ToolDispatcher(List.of()), null);
     }
 
     /** 同上，并把调用交给已经接上行为的工具。 */
     public static EmbeddedMcpService startWithFallback(McpConfig config, int extraAttempts, ToolDispatcher tools)
             throws IOException {
+        return startWithFallback(config, extraAttempts, tools, null);
+    }
+
+    /** 同上，并带上资源层：随包技能经 MCP 资源接口读出。 */
+    public static EmbeddedMcpService startWithFallback(McpConfig config, int extraAttempts, ToolDispatcher tools,
+            McpResources resources) throws IOException {
         IOException lastBindFailure = null;
         for (int attempt = 0; attempt <= extraAttempts; attempt++) {
             int port = config.port() + attempt;
             if (port > 65_535) break;
             EmbeddedMcpService candidate = new EmbeddedMcpService(new McpConfig(
                     config.host(), port, config.bearerToken(), config.maxRequestBytes(), config.requestTimeout()),
-                    DEFAULT_SESSION_TTL_NANOS, tools);
+                    DEFAULT_SESSION_TTL_NANOS, tools, resources);
             try {
                 candidate.start();
                 return candidate;
@@ -290,7 +305,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private void handleInitialize(HttpExchange exchange, JsonElement id, JsonElement rawParams) throws IOException {
-        // 协商协议版本并分配连接编号；能力声明只报告工具，还没有可订阅的资源。
+        // 协商协议版本并分配连接编号；能力声明报告工具，有随包资源时再报告 resources。
         JsonObject params = JsonRpc.optionalObject(rawParams);
         String requested = params.has("protocolVersion") && params.get("protocolVersion").isJsonPrimitive()
                 ? params.get("protocolVersion").getAsString()
@@ -299,10 +314,14 @@ public final class EmbeddedMcpService implements AutoCloseable {
 
         McpSession session = createSession(negotiated);
 
+        boolean hasResources = resources != null && !resources.isEmpty();
         JsonObject capabilities = new JsonObject();
         JsonObject tools = new JsonObject();
         tools.addProperty("listChanged", false);
         capabilities.add("tools", tools);
+        if (hasResources) {
+            capabilities.add("resources", new JsonObject());
+        }
 
         JsonObject serverInfo = new JsonObject();
         serverInfo.addProperty("name", "maicraft");
@@ -312,12 +331,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         result.addProperty("protocolVersion", negotiated);
         result.add("capabilities", capabilities);
         result.add("serverInfo", serverInfo);
-        result.addProperty("instructions", ToolCatalog.INSTRUCTIONS);
+        result.addProperty("instructions", ToolCatalog.instructions(hasResources));
         sendJson(exchange, 200, JsonRpc.success(id, result), session);
     }
 
     private JsonElement dispatch(String method, JsonObject params) {
-        // 工具列出与调用在这里分流；不知道的方法明确返回“不支持”。
+        // 工具列出与调用、资源列出与读取在这里分流；不知道的方法明确返回“不支持”。
         return switch (method) {
             case "ping" -> new JsonObject();
             case "tools/list" -> {
@@ -326,8 +345,45 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 yield result;
             }
             case "tools/call" -> callTool(params);
+            case "resources/list" -> listResources(params);
+            case "resources/templates/list" -> templates();
+            case "resources/read" -> readResource(params);
             default -> throw new JsonRpc.RpcException(-32601, "Method not found");
         };
+    }
+
+    private JsonObject listResources(JsonObject params) {
+        // 随包技能的目录一次全给；没有分页，所以不接受旧游标，免得客户端拿着过期的页号反复问。
+        JsonRpc.only(params, "cursor", "_meta");
+        JsonRpc.optionalMeta(params);
+        String cursor = JsonRpc.nullableString(params, "cursor");
+        if (cursor != null && !cursor.isBlank()) {
+            throw new IllegalArgumentException("Invalid cursor");
+        }
+        return requireResources().list();
+    }
+
+    private JsonObject readResource(JsonObject params) {
+        JsonRpc.only(params, "uri", "_meta");
+        JsonRpc.optionalMeta(params);
+        String uri = JsonRpc.requiredString(params, "uri");
+        if (uri.isBlank()) {
+            throw new IllegalArgumentException("uri is required");
+        }
+        return requireResources().read(uri);
+    }
+
+    private static JsonObject templates() {
+        JsonObject result = new JsonObject();
+        result.add("resourceTemplates", new JsonArray());
+        return result;
+    }
+
+    private McpResources requireResources() {
+        if (resources == null || resources.isEmpty()) {
+            throw new JsonRpc.RpcException(-32601, "Method not found");
+        }
+        return resources;
     }
 
     private JsonObject callTool(JsonObject params) {

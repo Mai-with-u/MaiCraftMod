@@ -75,7 +75,7 @@ class InterfaceSnapshotTest {
     @Test
     void theToolsMatchTheSnapshot() throws IOException {
         JsonObject tools = new JsonObject();
-        tools.addProperty("instructions", ToolCatalog.INSTRUCTIONS);
+        tools.addProperty("instructions", ToolCatalog.instructions(true));
         tools.add("tools", ToolCatalog.definitions());
         check("mcp-tools.json", tools);
     }

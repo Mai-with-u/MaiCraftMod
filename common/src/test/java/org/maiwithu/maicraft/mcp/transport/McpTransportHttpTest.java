@@ -17,10 +17,13 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.mcp.skill.SkillLibrary;
+import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 
 /**
  * 用真实 HTTP 往返核对传输语义：鉴权与来源检查、会话的建立与过期、协议版本协商、
@@ -238,6 +241,48 @@ class McpTransportHttpTest {
             }
         } finally {
             shortLived.close();
+        }
+    }
+
+    @Test
+    void resourcesListAndReadExposeBundledSkills() throws Exception {
+        EmbeddedMcpService withSkills = new EmbeddedMcpService(McpConfig.local(0),
+                new ToolDispatcher(List.of()), new SkillLibrary(mod -> true));
+        withSkills.start();
+        try {
+            URI endpoint = URI.create("http://127.0.0.1:" + withSkills.port() + "/mcp");
+            Response handshake = initialize(endpoint, null, null);
+            assertNotNull(handshake.capabilities().getAsJsonObject("resources"), "有技能时声明 resources");
+            String skillsSession = handshake.session();
+
+            HttpResponse<String> list = post(skillsSession, 90, "resources/list", new JsonObject(), null, endpoint, null);
+            JsonArray resources = result(list).getAsJsonArray("resources");
+            assertEquals(9, resources.size(), "九篇随包技能都在目录里");
+            JsonObject opening = null;
+            for (JsonElement element : resources) {
+                JsonObject resource = element.getAsJsonObject();
+                if ("skill://survival/survival-opening/SKILL.md".equals(resource.get("uri").getAsString())) {
+                    opening = resource;
+                }
+            }
+            assertNotNull(opening, "目录里有生存开局");
+            assertEquals("survival-opening", opening.get("name").getAsString());
+            assertEquals("text/markdown", opening.get("mimeType").getAsString());
+
+            JsonObject readArgs = new JsonObject();
+            readArgs.addProperty("uri", "skill://survival/survival-opening/SKILL.md");
+            HttpResponse<String> read = post(skillsSession, 91, "resources/read", readArgs, null, endpoint, null);
+            JsonObject content = result(read).getAsJsonArray("contents").get(0).getAsJsonObject();
+            assertEquals("text/markdown", content.get("mimeType").getAsString());
+            assertTrue(content.get("text").getAsString().startsWith("---\nname: survival-opening\n"),
+                    "读回来的就是 SKILL.md 原文");
+
+            JsonObject missingArgs = new JsonObject();
+            missingArgs.addProperty("uri", "skill://survival/no-such-skill/SKILL.md");
+            HttpResponse<String> missing = post(skillsSession, 92, "resources/read", missingArgs, null, endpoint, null);
+            assertEquals(-32602, error(missing).get("code").getAsInt(), "不认识的地址按 Invalid params 报错");
+        } finally {
+            withSkills.close();
         }
     }
 

@@ -1,0 +1,9 @@
+survival/survival-opening
+survival/survival-mining
+create/create-machine-workflow
+create/create-power-network
+mekanism/mekanism-getting-started
+mekanism/mekanism-ore-processing
+progression/progression-ender-dragon
+progression/progression-ftb-quests
+building/building-workflow

@@ -125,6 +125,7 @@ import org.maiwithu.maicraft.kernel.goal.RemembersPlaces;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
+import org.maiwithu.maicraft.mcp.skill.SkillLibrary;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
@@ -588,10 +589,13 @@ public final class Bootstrap {
             walks.fallBrakes(() -> compat.fallBrakes());
             tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
+            // 随包的玩法技能按联动登记表筛：需要的模组都真的接上了才发布，没接上的不进目录。
+            // 每次问登记表此刻的样子：运行中某个联动因版本对不上停用时，靠它的技能也跟着消失。
+            SkillLibrary skills = new SkillLibrary(modId -> compat.installedModIds().contains(modId));
             try {
-                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools);
-                LOG.info("{} MCP 服务已启动（端口 {}；五个工具都已接上）",
-                        ModIdentity.NAME, mcp.port());
+                mcp = EmbeddedMcpService.startWithFallback(mcpConfig, 2, tools, skills);
+                LOG.info("{} MCP 服务已启动（端口 {}；五个工具与 {} 项技能都已接上）",
+                        ModIdentity.NAME, mcp.port(), skills.catalog().size());
             } catch (IOException exception) {
                 LOG.error("{} MCP 服务启动失败", ModIdentity.NAME, exception);
                 mcpStartFailure = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
