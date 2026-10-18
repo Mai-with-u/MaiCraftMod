@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -392,6 +393,78 @@ class MenuContainerTakesTest {
         assertInstanceOf(ActionStatus.Failed.class, again, "只剩一半了，不再拿");
         assertEquals(20, box.box.get(0).getCount(), "还给机器留着一半");
         assertTrue(((ActionStatus.Failed) again).problem().message().contains("至少留 20 件给机器"));
+    }
+
+    @Test
+    void 一次要两样_只开一次箱_两样都拿够() {
+        // 箱里有铁锭与煤，这一趟两样都要：开一次箱把两样一起拿，拿完关一次。
+        FakeBox box = new FakeBox();
+        box.box.set(3, new ItemStack(Items.IRON_INGOT, 5));
+        box.box.set(8, new ItemStack(Items.COAL, 4));
+        AtomicInteger opens = new AtomicInteger();
+        MenuContainerTakes takes = takesCounting(box, opens);
+        Action take = takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
+                List.of(request("minecraft:iron_ingot", 5), request("minecraft:coal", 3)),
+                Permissions.DEFAULT).orElseThrow();
+        ActionStatus status = runToFinish(take);
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(1, opens.get(), "两样只开一次箱");
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(3, box.carried(new ItemStack(Items.COAL)), "第二样也拿够");
+        assertEquals(1, box.box.get(8).getCount(), "箱里剩下的煤不多拿");
+        assertTrue(box.closed, "两样都拿完才关上");
+    }
+
+    @Test
+    void 单子里箱里没有的那样不碰也不失败() {
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 5));
+        AtomicInteger opens = new AtomicInteger();
+        MenuContainerTakes takes = takesCounting(box, opens);
+        Action take = takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
+                List.of(request("minecraft:iron_ingot", 5), request("minecraft:gold_ingot", 2)),
+                Permissions.DEFAULT).orElseThrow();
+        ActionStatus status = runToFinish(take);
+
+        assertInstanceOf(ActionStatus.Done.class, status, "箱里没有另一样不算失败");
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(0, box.carried(new ItemStack(Items.GOLD_INGOT)));
+        assertTrue(box.closed);
+    }
+
+    @Test
+    void 背包放不下第二样_第一样照拿() {
+        // 只剩一格空位：铁锭先占了，煤放不下就不再点它，别的照算，箱子照常关上。
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 5));
+        box.box.set(9, new ItemStack(Items.COAL, 4));
+        for (int i = 0; i < 35; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        AtomicInteger opens = new AtomicInteger();
+        MenuContainerTakes takes = takesCounting(box, opens);
+        Action take = takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
+                List.of(request("minecraft:iron_ingot", 5), request("minecraft:coal", 3)),
+                Permissions.DEFAULT).orElseThrow();
+        ActionStatus status = runToFinish(take);
+
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(5, box.carried(new ItemStack(Items.IRON_INGOT)), "第一样照拿");
+        assertEquals(0, box.carried(new ItemStack(Items.COAL)), "放不下的第二样不硬点");
+        assertEquals(4, box.box.get(9).getCount());
+        assertTrue(box.closed);
+    }
+
+    private MenuContainerTakes takesCounting(FakeBox box, AtomicInteger opens) {
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
+        return new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
+                (at, permissions) -> {
+                    opens.incrementAndGet();
+                    return new OpenAtOnce(box);
+                }, at -> false);
+    }
+
+    private static ItemRequest request(String itemId, int count) {
+        return new ItemRequest(WantedItem.ofItem(itemId), count, "工具准备");
     }
 
     private MenuContainerTakes machineTakes(FakeBox box) {

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -109,13 +110,28 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     public List<ItemRequest> inProgress() {
         List<ItemRequest> chain = new ArrayList<>();
-        advancing.descendingIterator().forEachRemaining(run -> chain.add(run.request));
+        advancing.descendingIterator().forEachRemaining(run -> {
+            chain.add(run.request);
+            // 这一趟顺手还要拿的也是手上正在拿的：路上垫脚不先动它们。
+            chain.addAll(run.remainingAlsoWanted());
+        });
         return List.copyOf(chain);
     }
 
     /** 这次要拿东西的动作：逐刻推进，把东西弄进背包算做完，弄不到以问题失败。途径、距离、半径都不限。 */
     public Action need(ItemRequest request, Permissions permissions) {
         return need(request, permissions, Scope.ALL, null, null);
+    }
+
+    /**
+     * 一次要几样：按单子逐样推进，每样仍走原来那套问价、挑路、重新清点；已经拿够的跳过，
+     * 一样弄不到不耽误别的。几样一起开箱拿的事由来源按 {@code alsoWanted} 做。
+     */
+    public Action needSeveral(List<ItemRequest> requests, Permissions permissions, Scope scope,
+            Consumer<String> onDelivered, TaskRecords records) {
+        // 每样仍交给一次拿东西的动作去办，其余还缺的随它一起交给来源（开箱时顺路拿）。
+        return new SeveralNeeds(List.copyOf(requests), backpack, offhand, tags,
+                (request, alsoWanted) -> new Run(request, permissions, scope, onDelivered, records, alsoWanted));
     }
 
     /** 带限定的一次拿东西，不接发起任务的记账口：途中腾地方的变化、没能确认的交互都不进任何结果。 */
@@ -175,6 +191,15 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
         return new Run(request, permissions, Scope.ALL, null, records);
+    }
+
+    /**
+     * 带"这一趟还要的另外几样"的内部需求：备料时把同一张单子里的其它几样带上，开箱时一起拿。
+     * 其余与上面那个一样。
+     */
+    @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records,
+            List<ItemRequest> alsoWanted) {
+        return new Run(request, permissions, Scope.ALL, null, records, alsoWanted);
     }
 
     /** 这一次拿东西里已经问遍各来源都没拿到它：看此刻在推进的这一串最外层记下的。 */
@@ -268,14 +293,51 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private int forwardedFacts;
         /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
         private int target = -1;
+        /** 这一趟顺手还要拿的另外几样（同一次要货里还缺的）；没有为空。 */
+        private final List<ItemRequest> alsoWanted;
+        /** 顺手还要的那几样第一次推进时定的目标件数（身上原有加还缺的），按物品写法记。 */
+        private final Map<String, Integer> alsoTargets = new LinkedHashMap<>();
+        /** 顺手还要的那几样的目标定过没有。 */
+        private boolean alsoStarted;
 
         private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
                 TaskRecords records) {
+            this(request, permissions, scope, onDelivered, records, List.of());
+        }
+
+        private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
+                TaskRecords records, List<ItemRequest> alsoWanted) {
             this.request = request;
             this.permissions = permissions;
             this.scope = scope;
             this.onDelivered = onDelivered;
             this.records = records;
+            this.alsoWanted = List.copyOf(alsoWanted);
+        }
+
+        // 顺手还要的那几样这一刻还缺几件：第一次推进时按"身上原有加还缺的"定目标，之后按身上的重新算。
+        // 已经拿够的不再交给来源，免得开箱时多拿。
+        private List<ItemRequest> remainingAlsoWanted() {
+            if (!alsoStarted) return List.of();
+            List<ItemRequest> pending = new ArrayList<>();
+            for (ItemRequest extra : alsoWanted) {
+                Integer goal = alsoTargets.get(extra.wanted().specifier());
+                if (goal == null) continue;
+                int remaining = goal - CarriedItems.matching(backpack, offhand, extra, tags);
+                if (remaining > 0) pending.add(extra.just(remaining));
+            }
+            return pending;
+        }
+
+        private void startAlsoWanted() {
+            if (alsoStarted) return;
+            alsoStarted = true;
+            for (ItemRequest extra : alsoWanted) {
+                String key = extra.wanted().specifier();
+                if (key.equals(request.wanted().specifier())) continue;
+                alsoTargets.putIfAbsent(key,
+                        CarriedItems.matching(backpack, offhand, extra, tags) + extra.count());
+            }
         }
 
         // 推进一刻：先压进"正在推进"的链，来源在这一刻里回引擎要原料时才看得见外层；推进完不管成败都弹出。
@@ -285,6 +347,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 Problem refused = refusedByChain();
                 if (refused != null) return settle(refused);
             }
+            startAlsoWanted();
             ActionStatus status;
             advancing.push(this);
             try {
@@ -533,7 +596,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         private ActionStatus startStep() {
             SourceContext context = new SourceContext(position.currentPosition(), permissions,
-                    scope.radiusBlocks(), scope.maxDistanceBlocks(), bookedRecords());
+                    scope.radiusBlocks(), scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()

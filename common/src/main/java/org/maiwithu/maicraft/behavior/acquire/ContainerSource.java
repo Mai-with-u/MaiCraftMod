@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
@@ -116,7 +117,13 @@ public final class ContainerSource implements ItemSource {
         }
         KnownContainer known = new KnownContainer(
                 container.blockType() + " " + offer.hint(), container.position(), container.blockType());
-        return takes.take(known, request, context.permissions());
+        // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
+        List<ItemRequest> wants = new ArrayList<>();
+        wants.add(request);
+        for (ItemRequest extra : context.alsoWanted()) {
+            if (!extra.wanted().specifier().equals(request.wanted().specifier())) wants.add(extra);
+        }
+        return takes.take(known, wants, context.permissions());
     }
 
     /** 这只箱子能不能翻：自己或自家人放的、野外无主的能翻；别人的、在玩家地盘里的、额外保护的、拿不准的不翻。 */

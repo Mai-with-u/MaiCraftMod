@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.spi;
 
+import java.util.List;
+
+import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -18,28 +21,37 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
  * @param records      发起任务的记账口：来源动作在世界上确认做过的事（自己做出了什么）直接记进那次任务的
  *                     结果。null 表示这次问价或不接记账口的执行，做了什么都不记。交给来源前已滤掉
  *                     最外层要的东西进背包的那一笔——那一件由任务自己结算，来源再记就重了
+ * @param alsoWanted   这一趟还要的另外几样（同一次要货里还缺的）：开一次箱能一起拿的来源用它，
+ *                     每样都写着这一刻还缺几件；已经拿够的、别样任务要的不在这里面
  */
 public record SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
-        Double maxDistanceBlocks, TaskRecords records) {
+        Double maxDistanceBlocks, TaskRecords records, List<ItemRequest> alsoWanted) {
 
     public SourceContext {
         if (characterAt == null) throw new IllegalArgumentException("问询来源必须带着角色的位置");
         if (permissions == null) throw new IllegalArgumentException("问询来源必须带着这次的许可");
+        alsoWanted = alsoWanted == null ? List.of() : List.copyOf(alsoWanted);
     }
 
     /** 不限搜索半径与距离的问询：来源按自己的默认半径找。 */
     public SourceContext(WorldPosition characterAt, Permissions permissions) {
-        this(characterAt, permissions, null, null);
+        this(characterAt, permissions, null, null, null, List.of());
     }
 
     /** 只限搜索半径的问询。 */
     public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks) {
-        this(characterAt, permissions, radiusBlocks, null);
+        this(characterAt, permissions, radiusBlocks, null, null, List.of());
     }
 
     /** 不记账口的问询：问价，以及不算进任务结果的执行。 */
     public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
             Double maxDistanceBlocks) {
-        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, null);
+        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, null, List.of());
+    }
+
+    /** 带记账口的问询，没有顺路要拿的东西。 */
+    public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
+            Double maxDistanceBlocks, TaskRecords records) {
+        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, List.of());
     }
 }

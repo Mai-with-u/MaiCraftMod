@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.spi;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 内部需求的入口：来源备料时缺的原料、缺的工具，都回到同一个拿到物品的引擎去弄。
@@ -30,6 +35,67 @@ public interface ItemNeeds {
      */
     default Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
         return actionFor(request, permissions);
+    }
+
+    /**
+     * 带"这一趟还要的另外几样"的内部需求：来源动手时能把好几样一起拿（开一次箱拿几样）就用上它，
+     * 用不上的来源照旧只拿自己那一样。每样写着这一刻还缺几件，已经拿够的不放进来。
+     * 默认实现忽略它，等价于上面那个。
+     */
+    default Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records,
+            List<ItemRequest> alsoWanted) {
+        return actionFor(request, permissions, records);
+    }
+
+    /**
+     * 一次要几样：一张要货单交给引擎逐样去弄，一样弄不到不耽误别的。
+     * 拿到物品的引擎按单子逐样推进、每样重新清点；默认实现逐样串起来，替身实现不必懂批量。
+     */
+    default Action actionForSeveral(List<ItemRequest> requests, Permissions permissions, TaskRecords records) {
+        List<ItemRequest> wants = List.copyOf(requests);
+        return new Action() {
+            private int index;
+            private Action current;
+            /** 有一项没拿到：记下第一条原因，别的照走，走完再以问题收场。 */
+            private Problem firstFailure;
+
+            @Override public ActionStatus tick(TickContext context) {
+                if (current == null) {
+                    if (index >= wants.size()) {
+                        return firstFailure == null ? ActionStatus.done() : ActionStatus.failed(firstFailure);
+                    }
+                    current = actionFor(wants.get(index), permissions, records);
+                }
+                ActionStatus status = current.tick(context);
+                if (status instanceof ActionStatus.Running) return status;
+                if (status instanceof ActionStatus.Failed failed && firstFailure == null) {
+                    firstFailure = failed.problem();
+                }
+                current.close();
+                current = null;
+                index++;
+                return ActionStatus.progressed();
+            }
+
+            @Override public void pause() {
+                if (current != null) current.pause();
+            }
+
+            @Override public void close() {
+                if (current != null) {
+                    current.close();
+                    current = null;
+                }
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return current == null ? Interruptibility.BETWEEN_ACTIONS : current.interruptibility();
+            }
+
+            @Override public String describe() {
+                return current == null ? "逐样去拿" : current.describe();
+            }
+        };
     }
 
     /**

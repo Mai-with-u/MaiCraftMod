@@ -387,7 +387,7 @@ public final class RecipeSource implements ItemSource {
 
     // 背包合成的一整串：缺的原料逐项去弄，然后打开背包在合成格里做，不走工作台。
     private Action assembleInInventory(WorkstationRecipe recipe, int times, SourceContext context) {
-        Shortfall shortfall = new Shortfall(recipe, context);
+        RecipeShortfall shortfall = new RecipeShortfall(recipe, context, choice, needs, backpack, offhand, tags, this::pick);
         List<Action> steps = shortfall.ingredients(times, context.permissions());
         Optional<Action> run = runs.runInInventory(recipe, times, context.records());
         if (run.isEmpty()) {
@@ -403,7 +403,7 @@ public final class RecipeSource implements ItemSource {
     // 备齐后差一点就在关口再补一轮（见 topUp），不带着缺口去动手。
     private Action assemble(WorkstationRecipe recipe, WorldPosition station, int times, SourceContext context) {
         Permissions permissions = context.permissions();
-        Shortfall shortfall = new Shortfall(recipe, context);
+        RecipeShortfall shortfall = new RecipeShortfall(recipe, context, choice, needs, backpack, offhand, tags, this::pick);
         List<Action> steps = shortfall.ingredients(times, permissions);
         if (recipe.kind().cooks()) {
             fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, null, 0, permissions)));
@@ -489,7 +489,7 @@ public final class RecipeSource implements ItemSource {
     // 备完料的关口：身上的料够做一份就往下走；不够就把还缺的再备一轮——先备出来的中间产物被后面的
     // 步骤用掉时（做木棍用掉镐头要的木板），差的那点在这里照实补上，手上的原料还有就先补，不说原料不够。
     // 补一轮一件没多（缺的那样真弄不来）才以备料的原因收场，不围着同一处空转。
-    private Action topUp(WorkstationRecipe recipe, Shortfall shortfall, int times, Permissions permissions) {
+    private Action topUp(WorkstationRecipe recipe, RecipeShortfall shortfall, int times, Permissions permissions) {
         return new Action() {
             private Action round;
             private int lastMissing = -1;
@@ -536,138 +536,12 @@ public final class RecipeSource implements ItemSource {
     }
 
     // 关口的失败说明：备料时记下过弄不来的就说缺哪几样；一步都没记过（步骤都做成了、量还是不够）就直说身上不够。
-    private Problem gateProblem(WorkstationRecipe recipe, Shortfall shortfall) {
+    private Problem gateProblem(WorkstationRecipe recipe, RecipeShortfall shortfall) {
         return shortfall.missing.isEmpty()
                 ? Problem.of(Problem.Kind.NEED_ITEM, "身上的原料不够做一份" + recipe.result().describe())
                 : shortfall.problem();
     }
 
-    /**
-     * 备料弄不来的经过：一样原料弄不来，身上这样原料还够做一份就接着备别的，先把够做的做掉；
-     * 连一份的量都没有就当场放弃这个做法——别的原料弄来也做不成，不白跑去弄（没有羊毛就不去砍床板的木头）。
-     * 里层为什么弄不来只转述它的结论句，经过由拿东西的引擎收着，最外层讲一次。
-     */
-    private final class Shortfall {
-        private final WorkstationRecipe recipe;
-        /** 这次动手时的现场：可以互换的原料挑哪一样时按它问代价。 */
-        private final SourceContext context;
-        /** 弄不来的原料：东西×件数。 */
-        private final List<String> missing = new ArrayList<>();
-        /** 里层没弄来的结论句。 */
-        private final List<String> reasons = new ArrayList<>();
-
-        private Shortfall(WorkstationRecipe recipe, SourceContext context) {
-            this.recipe = recipe;
-            this.context = context;
-        }
-
-        // 缺的原料逐项回引擎去弄，身上已有的不再要，用途写清是为谁备的。这一次里已经知道拿不到的那样排最前：
-        // 身上一份的量都没有，碰一下就放弃这个做法，不先去弄排在它前面的原料（没有白色羊毛，就不先去采染红色要的花）。
-        List<Action> ingredients(int times, Permissions permissions) {
-            List<WorkstationRecipe.IngredientStack> ordered = new ArrayList<>(recipe.ingredients());
-            ordered.sort(Comparator.comparingInt((WorkstationRecipe.IngredientStack ingredient) ->
-                    ingredient.options().stream().allMatch(needs::knownUnobtainable) ? 0 : 1));
-            List<Action> steps = new ArrayList<>();
-            for (WorkstationRecipe.IngredientStack ingredient : ordered) {
-                int needed = ingredient.count() * times;
-                int carried = choice.carried(ingredient);
-                if (carried < needed) {
-                    // 可以互换的原料身上没有就挑最省的那样去弄，不只认配方里排第一的。
-                    steps.add(tolerant(new ItemRequest(pick(ingredient, needed - carried, context), needed - carried,
-                            "为「做" + recipe.result().describe() + "」备原料"), ingredient, ingredient.count(), permissions));
-                }
-            }
-            return steps;
-        }
-
-        // 备料的一步：回引擎去弄。perCraft 是做一份要几件，为 0 表示不按份数止损（燃料不够还能烧一部分）；
-        // ingredient 是这一步备的哪一格原料（燃料没有为空），身上够不够一份按这一格收的几样一起数。
-        Action tolerant(ItemRequest request, WorkstationRecipe.IngredientStack ingredient, int perCraft,
-                Permissions permissions) {
-            return new Tolerant(needs.actionFor(request, permissions), request, ingredient, perCraft);
-        }
-
-        // 原料没备齐、一份都做不了：结论句点名缺哪几样，展开写里层没弄来的结论。
-        // 做的是什么由转述的一层写在前面（哪种做法、哪样东西），这里不再重复成品的名字。
-        Problem problem() {
-            StringBuilder message = new StringBuilder("原料没备齐（缺").append(String.join("、", missing))
-                    .append("），一份都做不了");
-            for (String reason : reasons) message.append("；").append(reason);
-            return Problem.of(Problem.Kind.NEED_ITEM, message.toString());
-        }
-
-        // 动手那一步：做不下去时（料用完了）在它的结论后面补上缺哪几样，引擎写进结果。
-        Action explaining(Action run) {
-            return new Action() {
-                @Override public ActionStatus tick(TickContext context) {
-                    ActionStatus status = run.tick(context);
-                    if (!(status instanceof ActionStatus.Failed failed) || missing.isEmpty()) return status;
-                    Problem problem = failed.problem();
-                    String headline = problem.headline();
-                    StringBuilder message = new StringBuilder(headline).append("（原料没备齐：缺")
-                            .append(String.join("、", missing)).append("，身上的料能做的已经做了）")
-                            .append(problem.message().substring(headline.length()));
-                    for (String reason : reasons) message.append("；").append(reason);
-                    return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, message.toString(),
-                            problem.suggestion()));
-                }
-                @Override public void pause() {
-                    run.pause();
-                }
-                @Override public void close() {
-                    run.close();
-                }
-                @Override public Interruptibility interruptibility() {
-                    return run.interruptibility();
-                }
-                @Override public String describe() {
-                    return run.describe();
-                }
-            };
-        }
-
-        private final class Tolerant implements Action {
-            private final Action step;
-            private final ItemRequest request;
-            private final WorkstationRecipe.IngredientStack ingredient;
-            private final int perCraft;
-
-            private Tolerant(Action step, ItemRequest request, WorkstationRecipe.IngredientStack ingredient,
-                    int perCraft) {
-                this.step = step;
-                this.request = request;
-                this.ingredient = ingredient;
-                this.perCraft = perCraft;
-            }
-
-            // 弄不来：记下缺什么和里层的结论句。身上这样原料还够做一份就按做完往下走，先把够做的做掉；
-            // 一份的量都没有就整个做法到此为止，别的原料弄来也做不成。
-            @Override public ActionStatus tick(TickContext context) {
-                ActionStatus status = step.tick(context);
-                if (!(status instanceof ActionStatus.Failed failed)) return status;
-                missing.add(request.wanted().describe() + "×" + request.count());
-                reasons.add(failed.problem().headline());
-                int onHand = ingredient == null ? CarriedItems.matching(backpack, offhand, request.wanted(), tags)
-                        : choice.carried(ingredient);
-                if (perCraft > 0 && onHand < perCraft) {
-                    return ActionStatus.failed(problem());
-                }
-                return ActionStatus.done();
-            }
-            @Override public void pause() {
-                step.pause();
-            }
-            @Override public void close() {
-                step.close();
-            }
-            @Override public Interruptibility interruptibility() {
-                return step.interruptibility();
-            }
-            @Override public String describe() {
-                return step.describe();
-            }
-        }
-    }
 
     // 摆一个设施要的几步：身上没有设施方块就先去弄一个，然后在身边放下。摆不了（没接上）时给一个当场说明问题的动作。
     // 真放下了，落在哪一格写进 placedAt：做完合成按这一格收回。

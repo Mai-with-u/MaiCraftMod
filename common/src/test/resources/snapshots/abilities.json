@@ -46,8 +46,8 @@
       },
       {
         "ability": "maicraft:obtain",
-        "summary": "让背包里某样东西再多几件；可用 via 指定途径",
-        "parameters": "item: string, count: integer = 1, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
+        "summary": "让背包里某样东西再多几件，或一次要几样；可用 via 指定途径",
+        "parameters": "item?: string, count?: integer, items?: array, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
         "targets": [],
         "mode": "controls_player"
       },
@@ -552,22 +552,27 @@
     },
     {
       "ability": "maicraft:obtain",
-      "summary": "让背包里某样东西再多几件；可用 via 指定途径",
+      "summary": "让背包里某样东西再多几件，或一次要几样；可用 via 指定途径",
       "parameters": [
         {
           "name": "item",
           "type": "string",
-          "required": true,
-          "doc": "要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）"
+          "required": false,
+          "doc": "要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）。填了 items 时不填"
         },
         {
           "name": "count",
           "type": "integer",
           "required": false,
-          "doc": "再多拿几件（不是背包里的总数）",
-          "default": 1,
+          "doc": "再多拿几件（不是背包里的总数），不给算 1；填了 items 时不填，件数写在每一项里",
           "min": 1,
           "max": 2147483647
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "required": false,
+          "doc": "一次要几样：每项 {\"item\": 物品 ID 或 # 标签, \"count\": 再多拿几件}，最多 16 项；同一样写两次合并成一项、件数相加；与 item、count、drops_from 互斥"
         },
         {
           "name": "via",

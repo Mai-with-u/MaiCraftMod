@@ -164,6 +164,37 @@ class ContainerSourceTest {
     }
 
     @Test
+    void 动手时把这一趟还要的另外几样一起交给开箱接缝() {
+        // 开都开了：这一样与旁边还缺的那样一起交给取货动作，箱里有的就顺手拿了。
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
+        AtomicReference<List<ItemRequest>> wants = new AtomicReference<>();
+        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, requests, permissions) -> {
+            wants.set(requests);
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "开箱取物";
+                }
+            });
+        });
+        ItemRequest iron = request(1);
+        ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "工具准备");
+        SourceContext withAlso = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT,
+                null, null, null, List.of(coal));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(iron, CONTEXT));
+        source.begin(iron, offer, withAlso).orElseThrow();
+
+        assertEquals(2, wants.get().size());
+        assertEquals("minecraft:iron_ingot", wants.get().get(0).wanted().specifier());
+        assertEquals("minecraft:coal", wants.get().get(1).wanted().specifier());
+        assertEquals(3, wants.get().get(1).count());
+    }
+
+    @Test
     void 报价认的箱子从记忆里没了_交回空由引擎换路() {
         WorldMemory memory = memory();
         ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());

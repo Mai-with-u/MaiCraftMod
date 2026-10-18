@@ -107,6 +107,15 @@ class ObtainTaskTest {
             };
         }
 
+        @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+            lastRequests = requests;
+            return need(requests.getFirst(), permissions, scope, onDelivered, records);
+        }
+
+        /** 一次要几样时给的整张单子。 */
+        List<ItemRequest> lastRequests;
+
         BackpackView backpack;
         String deliveredItem = "minecraft:torch";
         String deliveredItem() {
@@ -324,6 +333,47 @@ class ObtainTaskTest {
         assertEquals(TaskResult.Status.DONE, finished.status());
         assertEquals(List.of(Interruptibility.BETWEEN_ACTIONS, Interruptibility.UNSAFE_TO_STOP,
                 Interruptibility.BETWEEN_ACTIONS), reported, "问价时是空当，点下单时停不得，站着等成品时又是空当");
+    }
+
+    @Test
+    void 一次要几样_逐样写拿到几件与还差几件() {
+        FakeBackpack backpack = new FakeBackpack();
+        StartsAcquisition acquisition = new StartsAcquisition() {
+            @Override public Action need(ItemRequest request, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                throw new IllegalStateException("一次要几样该走 needSeveral");
+            }
+
+            @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add("minecraft:torch", 8);
+                        backpack.add("minecraft:coal", 3);
+                        return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "煤不够"));
+                    }
+
+                    @Override public String describe() {
+                        return "一次拿两样";
+                    }
+                };
+            }
+        };
+        ItemRequest torch = new ItemRequest(WantedItem.ofItem("minecraft:torch"), 8, "照明");
+        ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 4, "烧炼");
+        ObtainItems input = new ObtainItems(List.of(torch, coal), ItemAcquisition.Scope.ALL,
+                Permissions.DEFAULT, "按需要拿取", "再拿 8 个火把、4 个煤");
+        ObtainTask task = new ObtainTask(input, acquisition, backpack, null, itemId -> Set.of());
+        task.start(tick(0));
+        TaskResult finished = runTask(task);
+
+        assertEquals(TaskResult.Status.PARTIAL, finished.status());
+        assertEquals(2, finished.changes().size(), "逐样记 item_gained");
+        assertEquals(List.of("还差 1 个" + WantedItem.ofItem("minecraft:coal").describe()), finished.remaining());
+        assertTrue(finished.summary().contains("8 个" + WantedItem.ofItem("minecraft:torch").describe()),
+                finished.summary());
+        assertTrue(finished.summary().contains("3 个" + WantedItem.ofItem("minecraft:coal").describe()),
+                finished.summary());
     }
 
     private TaskResult runTask(ObtainTask task) {

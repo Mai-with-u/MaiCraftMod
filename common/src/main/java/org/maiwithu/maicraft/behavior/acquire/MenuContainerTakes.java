@@ -41,8 +41,9 @@ import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，按要的量把装着想要东西的槽位
- * 搬进背包（整堆够用整堆拿，尾数按件拿，拿够就停），搬完、拿够或背包放不下了就关上。
+ * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，把这一趟要的几样东西搬进背包
+ * （整堆够用整堆拿，尾数按件拿，拿够就停），搬完、拿够或背包放不下了就关上。
+ * 一次要几样时只开一次箱：箱里有的那几样一起拿，箱里没有的不碰、也不因此失败。
  *
  * <p>点开、认领界面与等同步走玩家行为层共用的打开容器动作（每次点开都新建读端）。
  * 每一笔拿几件、点哪几下由取货计划给出，这里只按计划逐刻点、等游戏确认；
@@ -63,7 +64,7 @@ public final class MenuContainerTakes implements ContainerTakes {
     private final Supplier<PlayerContext> contexts;
     /** 打开一只箱子的动作怎么建：按箱子位置与这次任务的许可。 */
     private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
-    /** 这只容器是不是在给机器供料（进料箱、补料箱）：是的话最多拿走一半，给机器留着。 */
+    /** 这只容器是不是在给机器供料（进料箱、补料箱）：是的话每样最多拿走一半，给机器留着。 */
     private final Predicate<BlockPos> feedsMachine;
     /** 机器料箱里每种东西见过最满的时候有几件（按维度、位置、要的东西记）：留一半按它算，不按这一回剩的算。 */
     private final Map<String, Integer> fullestFeeders = new HashMap<>();
@@ -105,31 +106,39 @@ public final class MenuContainerTakes implements ContainerTakes {
     }
 
     @Override
-    public Optional<Action> take(KnownContainer container, ItemRequest request, Permissions permissions) {
-        return Optional.of(new TakeAction(container, request, permissions));
+    public Optional<Action> take(KnownContainer container, List<ItemRequest> wants, Permissions permissions) {
+        if (wants.isEmpty()) return Optional.empty();
+        return Optional.of(new TakeAction(container, List.copyOf(wants), permissions));
     }
 
-    /** 开箱取货的动作：点开 → 逐格搬 → 关上，跨刻推进；没能确认的点击经交回接缝原样交回。 */
+    /** 开一次箱取几样的动作：点开 → 逐样搬 → 关上，跨刻推进；没能确认的点击经交回接缝原样交回。 */
     private final class TakeAction implements Action, ReportsUnconfirmed {
 
         private final KnownContainer container;
-        private final ItemRequest request;
+        /** 这一趟要拿的几样；每样写着这一刻还缺几件。 */
+        private final List<ItemRequest> wants;
         private final BlockPos at;
         private final MenuOpening opening;
         private Stage stage = Stage.OPEN;
         private OpenedMenu menu;
         private Action closing;
         private int waited;
-        /** 刚打开时容器那一侧装着想要的东西的总件数：拿走多少按它与当刻的差算。 */
-        private int startTotal = -1;
-        /** 这一只最多拿几件：给机器供料的箱子留一半，别的不限。 */
-        private int allowance = Integer.MAX_VALUE;
-        /** 是机器料箱时，它见过最满的时候有几件（留一半按它算）；不是为 -1。 */
-        private int limitedFor = -1;
-        /** 机器料箱只剩一半、一件没拿时的说明：关上界面后以它收场；别的情况为 null。 */
+        /** 刚打开时容器那一侧每样装着几件：拿走多少按它与当刻的差算。 */
+        private final int[] startTotals;
+        /** 每样最多拿几件：给机器供料的箱子每样留一半，别的不限。 */
+        private final int[] allowances;
+        /** 是机器料箱时，它见过最满的时候每样有几件（留一半按它算）；不是为 -1。 */
+        private final int[] limitedFor;
+        /** 这一趟已经取不动的那几样：箱里没有、背包这一刻放不下、或点了没反应。 */
+        private final boolean[] settled;
+        /** 机器料箱只剩一半、一样没拿时的说明：关上界面后以它收场；别的情况为 null。 */
         private Problem held;
-        /** 正在点的那一笔动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
+        /** 这一趟是不是真的拿到了东西：拿到过就不拿"给机器留一半"当整场失败。 */
+        private boolean tookAnything;
+        /** 正在点的那一样动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
         private int beforeMove = -1;
+        /** 正在点的那样在清单里的第几项；没有在点的为 -1。 */
+        private int wantIndex = -1;
         /** 正在点的那一笔按计划要搬几件、要点哪几下：结算与交回"没能确认"时说得清。 */
         private int moveAmount;
         private int moveClicks;
@@ -138,11 +147,22 @@ public final class MenuContainerTakes implements ContainerTakes {
         /** 点出去了却没能确认结果的交互，一句一笔，经交回接缝交给引擎。 */
         private final List<String> unconfirmed = new ArrayList<>();
         private int quietTicks;
+        /** 第一份读数到了没有：到了才按它定每样的起点。 */
+        private boolean opened;
 
-        TakeAction(KnownContainer container, ItemRequest request, Permissions permissions) {
+        TakeAction(KnownContainer container, List<ItemRequest> wants, Permissions permissions) {
             this.container = container;
-            this.request = request;
+            this.wants = wants;
             this.at = container.cell();
+            this.startTotals = new int[wants.size()];
+            this.allowances = new int[wants.size()];
+            this.limitedFor = new int[wants.size()];
+            this.settled = new boolean[wants.size()];
+            for (int i = 0; i < wants.size(); i++) {
+                startTotals[i] = -1;
+                allowances[i] = Integer.MAX_VALUE;
+                limitedFor[i] = -1;
+            }
             // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
             this.opening = openings.apply(at, permissions);
         }
@@ -160,7 +180,7 @@ public final class MenuContainerTakes implements ContainerTakes {
                 case OPEN -> open(tick);
                 case TRANSFER -> transfer();
                 case CLOSE -> closeMenu(tick);
-                case DONE -> held == null ? ActionStatus.done() : ActionStatus.failed(held);
+                case DONE -> held != null && !tookAnything ? ActionStatus.failed(held) : ActionStatus.done();
             };
         }
 
@@ -173,8 +193,8 @@ public final class MenuContainerTakes implements ContainerTakes {
             return ActionStatus.progressed();
         }
 
-        // 按量搬：整堆够用整堆拿，尾数按件拿，拿够就停；上一笔没结清就本刻不动手，
-        // 拿够、没有可拿的或背包放不下尾数了就去关界面。
+        // 按量搬：清单里哪一样还缺就盘哪一样，整堆够用整堆拿、尾数按件拿；取不动的那样先放下，
+        // 试试别的；都取不动、都取够了，或上一笔没结清就本刻不动手。
         private ActionStatus transfer() {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
@@ -184,32 +204,19 @@ public final class MenuContainerTakes implements ContainerTakes {
                 return ActionStatus.done();
             }
             MenuContent.Reading open = reading.get();
-            if (startTotal < 0) {
-                startTotal = matchedTotal(open);
-                // 机器的进料箱、补料箱（下面挂着溜槽漏斗、旁边贴着往外抽的漏斗）能翻，但最多拿走一半，给机器留着，
-                // 不把人家搬空（用户 10-13 定）。出料箱不算，成品照样能拿完。
-                allowance = feedsMachine.test(at) ? feederAllowance(startTotal) : Integer.MAX_VALUE;
+            if (!opened) {
+                opened = true;
+                // 机器的进料箱、补料箱（下面挂着溜槽漏斗、旁边贴着往外抽的漏斗）能翻，但每样最多拿走一半，
+                // 给机器留着，不把人家搬空（用户 10-13 定）。出料箱不算，成品照样能拿完。
+                boolean feeder = feedsMachine.test(at);
+                for (int i = 0; i < wants.size(); i++) {
+                    startTotals[i] = matchedTotal(open, i);
+                    if (feeder) allowances[i] = feederAllowance(i, startTotals[i]);
+                }
             }
             if (menu.busy()) return ActionStatus.running();
             if (beforeMove < 0) {
-                // 上一笔已结清：按还缺的件数盘下一笔要点的几下，冻结动手前容器那侧的总数再动手。
-                int now = matchedTotal(open);
-                int remaining = Math.min(request.count(), allowance) - (startTotal - now);
-                Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open, this::matches, remaining);
-                if (next.isEmpty()) {
-                    if (allowance == 0 && startTotal > 0) {
-                        // 机器料箱已经只剩一半了：一件不拿，说清为什么，引擎好换别处。
-                        held = Problem.of(Problem.Kind.NOT_FOUND, container.name() + " 是给机器供料的箱子，最满时 "
-                                + limitedFor + " 件，至少留 " + (limitedFor + 1) / 2 + " 件给机器，现在只剩 "
-                                + startTotal + " 件，不再拿");
-                    }
-                    return toClose(open);
-                }
-                beforeMove = now;
-                moveAmount = next.get().amount();
-                moveClicks = next.get().clicks().size();
-                quietTicks = 0;
-                pressing.addAll(next.get().clicks());
+                if (!planNext(open)) return toClose(open);
             }
             if (!pressing.isEmpty()) {
                 // 本刻发不出去（界面刚刷新还没画好、没有交互机会）就下一刻再点：没发出去不是背包放不下。
@@ -218,25 +225,69 @@ public final class MenuContainerTakes implements ContainerTakes {
                 return ActionStatus.progressed();
             }
             // 一笔的几下都点完了：等两侧内容同步过来再结算这一笔。
-            int now = matchedTotal(open);
+            int now = matchedTotal(open, wantIndex);
             if ((now == beforeMove || !menu.cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
                 return ActionStatus.running();
             }
             // 点了容器那侧纹丝不动：多半是背包放不下，不再硬点；但点出去是事实，结果没能确认照实交回。
-            boolean stuck = now == beforeMove;
+            if (now == beforeMove) {
+                unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount
+                        + " 件的那几下都点出去了，容器那侧一直没动，没能确认结果");
+                // 这一样这一趟先放下，别的样还可以接着试；都取不动就关。
+                settled[wantIndex] = true;
+            } else {
+                tookAnything = true;
+                if (!menu.cursorEmpty()) {
+                    // 容器那侧动了、光标上还拿着东西：这一笔到底搬走多少没能确认完，也交回一句。
+                    unconfirmed.add(wantedName(wantIndex) + "：点完了光标上还拿着东西，这一笔搬走多少没能确认");
+                }
+            }
             beforeMove = -1;
+            wantIndex = -1;
             quietTicks = 0;
-            if (stuck) {
-                unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
-                        + "：搬 " + moveAmount + " 件的那几下都点出去了，容器那侧一直没动，没能确认结果");
-                return toClose(open);
-            }
-            if (!menu.cursorEmpty()) {
-                // 容器那侧动了、光标上还拿着东西：这一笔到底搬走多少没能确认完，也交回一句。
-                unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
-                        + "：点完了光标上还拿着东西，这一笔搬走多少没能确认");
-            }
             return ActionStatus.progressed();
+        }
+
+        // 盘下一笔：按清单顺序找第一样还缺、且这一刻取得到的；取得到就冻结动手前那一侧的总数。
+        // 取不动（箱里没有、背包这一刻放不下）就这一趟先放下它，试试别的；几样都取不动时关界面。
+        private boolean planNext(MenuContent.Reading open) {
+            for (int i = 0; i < wants.size(); i++) {
+                int index = i;
+                if (settled[index]) continue;
+                int now = matchedTotal(open, index);
+                int remaining = Math.min(wants.get(index).count(), allowances[index])
+                        - (startTotals[index] - now);
+                if (remaining <= 0) {
+                    settled[index] = true;
+                    if (allowances[index] == 0 && startTotals[index] > 0) noteFeederKept(index);
+                    continue;
+                }
+                Optional<ContainerTakePlan.Move> next = ContainerTakePlan.next(open,
+                        snapshot -> matches(snapshot, index), remaining);
+                if (next.isEmpty()) {
+                    // 背包这一刻放不下这样（没有空格，同种的堆也满了），或箱里已经没有了：
+                    // 这一趟不再点它，别的样还可以接着拿。
+                    settled[index] = true;
+                    if (allowances[index] == 0 && startTotals[index] > 0) noteFeederKept(index);
+                    continue;
+                }
+                wantIndex = index;
+                beforeMove = now;
+                moveAmount = next.get().amount();
+                moveClicks = next.get().clicks().size();
+                quietTicks = 0;
+                pressing.addAll(next.get().clicks());
+                return true;
+            }
+            return false;
+        }
+
+        // 机器料箱已经只剩一半了：一件不拿，说清为什么，引擎好换别处。
+        private void noteFeederKept(int index) {
+            if (held != null) return;
+            held = Problem.of(Problem.Kind.NOT_FOUND, container.name() + " 是给机器供料的箱子，"
+                    + wants.get(index).wanted().describe() + " 最满时 " + limitedFor[index] + " 件，至少留 "
+                    + (limitedFor[index] + 1) / 2 + " 件给机器，现在只剩 " + startTotals[index] + " 件，不再拿");
         }
 
         // 点这一笔的下一下：快速移动整堆；普通点击先把要从的格子登记给界面会话（中途关界面时
@@ -253,10 +304,10 @@ public final class MenuContainerTakes implements ContainerTakes {
             if (beforeMove < 0) return;
             int submitted = moveClicks - pressing.size();
             if (submitted <= 0) return;
-            unconfirmed.add("从" + container.name() + "拿" + request.wanted().describe()
-                    + "：搬 " + moveAmount + " 件的这笔点了 " + submitted + " 下，"
+            unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount + " 件的这笔点了 " + submitted + " 下，"
                     + circumstance + "没能等到结算结果");
             beforeMove = -1;
+            wantIndex = -1;
         }
 
         // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读。
@@ -272,35 +323,40 @@ public final class MenuContainerTakes implements ContainerTakes {
             ActionStatus status = closing.tick(tick);
             if (status instanceof ActionStatus.Running) return status;
             stage = Stage.DONE;
-            return held == null ? ActionStatus.done() : ActionStatus.failed(held);
+            return held != null && !tookAnything ? ActionStatus.failed(held) : ActionStatus.done();
         }
 
-        // 机器料箱这一回最多拿几件：按见过最满的时候留一半。一次没拿够、引擎回头再开，还按那时候的一半留，
+        // 机器料箱这一回一样最多拿几件：按见过最满的时候留一半。一次没拿够、引擎回头再开，还按那时候的一半留，
         // 不一回回按剩下的再削一半（实机 10-13：273 个大齿轮要 150，先拿 136 关上，还缺 14 再开，
         // 按剩的 137 又算一半，最后只剩 123）。料箱被补满了，最满的数跟着涨。
-        private int feederAllowance(int total) {
+        private int feederAllowance(int index, int total) {
             PlayerContext current = contexts.get();
             ClientLevel level = current == null ? null : current.level();
             String key = (level == null ? "" : level.dimension().location().toString()) + "@" + at.asLong()
-                    + "#" + request.wanted().describe();
+                    + "#" + wants.get(index).wanted().describe();
             int fullest = fullestFeeders.merge(key, total, Math::max);
-            limitedFor = fullest;
+            limitedFor[index] = fullest;
             return Math.max(0, total - (fullest + 1) / 2);
         }
 
-        // 容器那一侧装着想要的东西的总件数；界面内容按物品标签对上请求。
-        private int matchedTotal(MenuContent.Reading reading) {
+        // 容器那一侧装着某一样想要的东西的总件数；界面内容按物品标签对上请求。
+        private int matchedTotal(MenuContent.Reading reading, int index) {
             int total = 0;
             for (SlotSnapshot snapshot : reading.containerSnapshots()) {
-                if (matches(snapshot)) total += snapshot.count();
+                if (matches(snapshot, index)) total += snapshot.count();
             }
             return total;
         }
 
-        private boolean matches(SlotSnapshot snapshot) {
+        private boolean matches(SlotSnapshot snapshot, int index) {
             if (snapshot.isEmpty()) return false;
             String itemId = BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString();
-            return request.wanted().matches(itemId, tags.tagsOf(itemId));
+            ItemRequest want = wants.get(index);
+            return want.wanted().matches(itemId, tags.tagsOf(itemId));
+        }
+
+        private String wantedName(int index) {
+            return "从" + container.name() + "拿" + wants.get(index).wanted().describe();
         }
 
         // 世界记忆按物品记"里面有什么"：取东西时按它找箱子；件数以到场再开为准。
@@ -353,10 +409,20 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         @Override
         public String describe() {
+            StringBuilder what = new StringBuilder();
+            for (ItemRequest want : wants) {
+                if (!what.isEmpty()) what.append("、");
+                what.append(want.wanted().describe());
+            }
             // 是机器料箱就说一句留了多少：结果里看得出为什么没拿够。
-            return "从" + container.name() + "拿" + request.wanted().describe()
-                    + (limitedFor < 0 ? "" : "（这是给机器供料的箱子，最满时 " + limitedFor + " 件，至少留 "
-                            + (limitedFor + 1) / 2 + " 件给机器）");
+            for (int i = 0; i < wants.size(); i++) {
+                if (limitedFor[i] < 0) continue;
+                what.append("（这是给机器供料的箱子，").append(wants.get(i).wanted().describe())
+                        .append(" 最满时 ").append(limitedFor[i]).append(" 件，至少留 ")
+                        .append((limitedFor[i] + 1) / 2).append(" 件给机器）");
+                break;
+            }
+            return "从" + container.name() + "拿" + what;
         }
     }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire;
 
+import java.util.List;
 import java.util.Optional;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -14,6 +15,17 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  */
 public interface ContainerTakes {
 
-    /** 为一次取物生成动作：做完时想要的东西已在背包里（拿到多少以重新清点为准）。 */
-    Optional<Action> take(KnownContainer container, ItemRequest request, Permissions permissions);
+    /**
+     * 为一次取物生成动作：做完时想要的东西已在背包里（拿到多少以重新清点为准）。
+     * 一次只取一样时用它。
+     */
+    default Optional<Action> take(KnownContainer container, ItemRequest request, Permissions permissions) {
+        return take(container, List.of(request), permissions);
+    }
+
+    /**
+     * 开一次箱取几样：走过去、点开，把清单里箱里有的都搬进背包，再关上。
+     * 每样写着这一刻还缺几件；箱里没有的那样不碰，也不因此失败。
+     */
+    Optional<Action> take(KnownContainer container, List<ItemRequest> wants, Permissions permissions);
 }

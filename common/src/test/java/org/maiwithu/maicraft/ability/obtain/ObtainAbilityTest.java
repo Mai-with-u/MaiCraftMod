@@ -80,6 +80,11 @@ class ObtainAbilityTest {
                 ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
             throw new IllegalStateException("参数校验该拦下的请求到了引擎手里");
         }
+
+        @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+            throw new IllegalStateException("参数校验该拦下的请求到了引擎手里");
+        }
     }
 
     private ObtainAbility ability() {
@@ -146,8 +151,8 @@ class ObtainAbilityTest {
         params.addProperty("max_distance", 40);
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decide(params));
         ObtainItems input = assertInstanceOf(ObtainItems.class, run.input());
-        assertEquals("minecraft:torch", input.wanted().specifier());
-        assertEquals(8, input.count());
+        assertEquals("minecraft:torch", input.requests().getFirst().wanted().specifier());
+        assertEquals(8, input.requests().getFirst().count());
         assertEquals(Set.of("craft"), input.scope().vias());
         assertEquals(Double.valueOf(40), input.scope().maxDistanceBlocks());
         assertEquals(Integer.valueOf(16), input.scope().radiusBlocks());
@@ -163,8 +168,8 @@ class ObtainAbilityTest {
         params.add("drops_from", dropsFrom);
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decide(params));
         ObtainItems input = assertInstanceOf(ObtainItems.class, run.input());
-        assertEquals(List.of("create:zinc_ore"), input.dropsFrom().blocks());
-        assertEquals(List.of("minecraft:zombie"), input.dropsFrom().entities());
+        assertEquals(List.of("create:zinc_ore"), input.requests().getFirst().dropsFrom().blocks());
+        assertEquals(List.of("minecraft:zombie"), input.requests().getFirst().dropsFrom().entities());
     }
 
     @Test
@@ -184,7 +189,7 @@ class ObtainAbilityTest {
         params.addProperty("item", "minecraft:torch");
         ObtainItems input = assertInstanceOf(ObtainItems.class,
                 assertInstanceOf(StepDecision.Run.class, decide(params)).input());
-        assertTrue(input.dropsFrom().isEmpty());
+        assertTrue(input.requests().getFirst().dropsFrom().isEmpty());
     }
 
     @Test
@@ -193,6 +198,61 @@ class ObtainAbilityTest {
         params.addProperty("item", "minecraft:torch");
         params.addProperty("radius", 500);
         assertNull(ability().spec().paramSpecs().parse(params).params(), "超出上限的半径不该通过校验");
+    }
+
+    @Test
+    void 一次要几样_每项带件数_同一样合并成一项() {
+        JsonObject params = new JsonObject();
+        JsonArray items = new JsonArray();
+        items.add(entry("minecraft:torch", 8));
+        items.add(entry("minecraft:coal", 4));
+        items.add(entry("minecraft:torch", 2));
+        params.add("items", items);
+        StepDecision decision = decide(params);
+        ObtainItems input = assertInstanceOf(ObtainItems.class, assertInstanceOf(StepDecision.Run.class, decision,
+                decision instanceof StepDecision.Finish finish ? finish.result().problem().message() : "没进世界")
+                .input());
+        assertEquals(2, input.requests().size(), "同一样写两次合并成一项");
+        assertEquals("minecraft:torch", input.requests().get(0).wanted().specifier());
+        assertEquals(10, input.requests().get(0).count(), "件数相加");
+        assertEquals("minecraft:coal", input.requests().get(1).wanted().specifier());
+        assertEquals(4, input.requests().get(1).count());
+    }
+
+    @Test
+    void 一次要几样_与item或count同给进不了世界() {
+        JsonObject params = new JsonObject();
+        JsonArray items = new JsonArray();
+        items.add(entry("minecraft:torch", 8));
+        params.add("items", items);
+        params.addProperty("count", 3);
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+        assertTrue(finish.result().problem().message().contains("件数写在每一项里"));
+
+        params.addProperty("item", "minecraft:coal");
+        StepDecision.Finish both = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        assertTrue(both.result().problem().message().contains("item 与 items 只能给一样"));
+    }
+
+    @Test
+    void 一次要几样_写岔的一项与超过上限一次报全() {
+        JsonObject params = new JsonObject();
+        JsonArray items = new JsonArray();
+        for (int i = 0; i < 17; i++) items.add(entry("minecraft:torch", 1));
+        items.add(entry("minecraft:toch", 1));
+        params.add("items", items);
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        String message = finish.result().problem().message();
+        assertTrue(message.contains("最多 16 项"));
+        assertTrue(message.contains("minecraft:toch 不存在"));
+    }
+
+    private static JsonObject entry(String item, int count) {
+        JsonObject entry = new JsonObject();
+        entry.addProperty("item", item);
+        entry.addProperty("count", count);
+        return entry;
     }
 
     private static BackpackView emptyBackpack() {

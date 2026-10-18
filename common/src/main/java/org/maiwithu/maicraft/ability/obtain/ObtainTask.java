@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.obtain;
 
-import java.util.LinkedHashSet;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -13,7 +14,6 @@ import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
 import org.maiwithu.maicraft.game.player.BackpackView;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -26,9 +26,10 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 拿东西的任务：count 是"这次再多拿几件"，身上原有的不算——先记下身上原有几件，
- * 再把请求交给拿到物品的引擎：问遍来源、按代价挑路、做一个来源重新清点一次，多出 count 件才算拿够。
- * 引擎做完算拿到；引擎认输（所有路都试完）时，这次已经拿到几件照实结算——
+ * 拿东西的任务：每样的 count 是"这次再多拿几件"，身上原有的不算——先逐样记下身上原有几件，
+ * 再把整张单子交给拿到物品的引擎：问遍来源、按代价挑路、逐样重新清点，每样都多出自己要的件数才算拿够。
+ * 一次要几样时引擎逐样推进；哪一样走在路上被开箱顺手拿到了，就不再为它单独去弄。
+ * 引擎做完算拿到；引擎认输时，这次已经拿到几件照实结算——
  * 部分拿到是 partial 加还差几件，一件没拿到才是失败，两条路不混淆。
  */
 final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
@@ -45,10 +46,10 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     private final OffhandContents offhand;
     private final ReadsItemTags tags;
     private final ObtainItems input;
-    /** 任务开始时身上有几件；结算"这次拿到几件"的基准。 */
-    private int carriedAtStart;
-    /** 开工时身上这一类按物品分开的件数：要一类时算拿到的是哪几样。 */
-    private Map<String, Integer> byItemAtStart = Map.of();
+    /** 任务开始时每样身上有几件；结算"这次拿到几件"的基准。 */
+    private final Map<String, Integer> carriedAtStart = new LinkedHashMap<>();
+    /** 开工时每样按物品分开的件数：要一类时算拿到的是哪几样。 */
+    private final Map<String, Map<String, Integer>> byItemAtStart = new LinkedHashMap<>();
     /** 实际拿到东西的途径，按拿到先后排，一条不重复。 */
     private final Set<String> obtainedVia = new LinkedHashSet<>();
 
@@ -66,8 +67,8 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         // 清点是只读判断，不需要动作；引擎的动作在进入 ACQUIRE 时才发起，许可与 LLM 给的掉落线索随输入一起带过来。
         // 来源动作里点了但没能确认结果的交互、途中腾地方存了丢了什么，引擎直接记进本任务的结果。
         return phase == Phase.ACQUIRE
-                ? acquisition.need(new ItemRequest(input.wanted(), input.count(), input.purpose(), input.prefer(),
-                        input.dropsFrom()), input.permissions(), input.scope(), obtainedVia::add, records())
+                ? acquisition.needSeveral(input.requests(), input.permissions(), input.scope(),
+                        obtainedVia::add, records())
                 : null;
     }
 
@@ -78,12 +79,18 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         };
     }
 
-    // 先记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
+    // 先逐样记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
-        carriedAtStart = CarriedItems.matching(backpack, offhand, input.wanted(), tags);
-        byItemAtStart = CarriedItems.matchingByItem(backpack, offhand, input.wanted(), tags);
-        return Next.go(Phase.ACQUIRE, "身上原有 " + carriedAtStart + " 个，再去各来源弄 "
-                + input.count() + " 个");
+        int total = 0;
+        int wanted = 0;
+        for (ItemRequest request : input.requests()) {
+            String key = request.wanted().specifier();
+            carriedAtStart.put(key, CarriedItems.matching(backpack, offhand, request, tags));
+            byItemAtStart.put(key, CarriedItems.matchingByItem(backpack, offhand, request.wanted(), tags));
+            total += carriedAtStart.get(key);
+            wanted += request.count();
+        }
+        return Next.go(Phase.ACQUIRE, "身上原有 " + total + " 个，再去各来源弄 " + wanted + " 个");
     }
 
     // 引擎逐刻推进：做完重新清点结算；认输时按这次拿到几件分别落到 partial 或失败。
@@ -96,29 +103,48 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     }
 
     private Next<Phase> settle(Problem failure) {
-        int carried = CarriedItems.matching(backpack, offhand, input.wanted(), tags);
-        int gained = carried - carriedAtStart;
-        if (gained > 0) {
-            // 已确认的入包不因结果不合预期就记成"不知道"：这次拿到几件如实记进 changes。
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, input.wanted().specifier(), gained));
+        List<String> parts = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        int gainedInAll = 0;
+        int carriedInAll = 0;
+        for (ItemRequest request : input.requests()) {
+            int carried = CarriedItems.matching(backpack, offhand, request, tags);
+            int gained = carried - carriedAtStart.getOrDefault(request.wanted().specifier(), 0);
+            gainedInAll += Math.max(0, gained);
+            carriedInAll += carried;
+            if (gained > 0) {
+                // 已确认的入包不因结果不合预期就记成"不知道"：这次拿到几件如实记进 changes。
+                recordChange(Change.of(Change.Kind.ITEM_GAINED, request.wanted().specifier(), gained));
+                parts.add(gainedText(request, gained));
+            }
+            if (gained < request.count()) {
+                missing.add("还差 " + (request.count() - Math.max(0, gained)) + " 个" + request.wanted().describe());
+            }
         }
-        String item = input.wanted().describe();
         if (failure == null) {
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                    "拿到了：这次经 " + viaText() + " 拿到 " + gained + " 个" + item + whichOnes()
-                            + "，身上现在有 " + carried + " 个")
-                    .details(details()).build());
+            String got = parts.isEmpty()
+                    ? "拿到了：这次经 " + viaText()
+                    : "拿到了：这次经 " + viaText() + " 拿到 " + (input.requests().size() == 1
+                            ? parts.getFirst() + "，身上现在有 " + carriedInAll + " 个"
+                            : String.join("、", parts));
+            return Next.done(TaskResult.builder(TaskResult.Status.DONE, got).details(details()).build());
         }
-        if (gained > 0) {
-            int stillNeeded = input.count() - gained;
+        if (gainedInAll > 0) {
+            String got = input.requests().size() == 1
+                    ? "部分拿到：经 " + viaText() + " 拿到 " + parts.getFirst()
+                    : "部分拿到：这次经 " + viaText() + " 拿到 " + String.join("、", parts);
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                    "部分拿到：经 " + viaText() + " 拿到 " + gained + " 个" + item + whichOnes()
-                            + "，还差 " + stillNeeded + " 个")
+                    got + (input.requests().size() == 1 ? "，" : "；") + String.join("、", missing))
                     .problem(failure)
-                    .remaining(List.of("还差 " + stillNeeded + " 个" + item))
+                    .remaining(List.copyOf(missing))
                     .details(details()).build());
         }
         return Next.fail(failure);
+    }
+
+    // 这一样拿到几件的写法：要的是一类（标签）时括号里说清拿到的是哪几样。
+    private String gainedText(ItemRequest request, int gained) {
+        return gained + " 个" + request.wanted().describe() + whichOnes(request);
     }
 
     @Override protected ResultDetails details() {
@@ -126,11 +152,12 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     }
 
     // 要的是一类（标签）时说清拿到的是哪几样：要"能吃的"拿回来面包还是生牛肉，下一步怎么吃、要不要烤不一样。
-    private String whichOnes() {
-        if (!input.wanted().isTag()) return "";
+    private String whichOnes(ItemRequest request) {
+        if (!request.wanted().isTag()) return "";
         List<String> parts = new ArrayList<>();
-        CarriedItems.matchingByItem(backpack, offhand, input.wanted(), tags).forEach((itemId, count) -> {
-            int gained = count - byItemAtStart.getOrDefault(itemId, 0);
+        Map<String, Integer> before = byItemAtStart.getOrDefault(request.wanted().specifier(), Map.of());
+        CarriedItems.matchingByItem(backpack, offhand, request.wanted(), tags).forEach((itemId, count) -> {
+            int gained = count - before.getOrDefault(itemId, 0);
             if (gained > 0) parts.add(itemId + " " + gained + " 个");
         });
         return parts.isEmpty() ? "" : "（" + String.join("、", parts) + "）";

@@ -489,6 +489,100 @@ class ItemAcquisitionTest {
         }
     }
 
+    @Test
+    void 一次要几样_第一样被顺手拿到_第二样不再单独去弄() {
+        // 开一次箱把铁锭和煤一起拿了：引擎按单子先弄铁锭，煤已经在身上，第二样不再去开一次箱。
+        List<List<ItemRequest>> alsoSeen = new ArrayList<>();
+        ItemSource chest = new ItemSource() {
+            @Override public String describe() {
+                return "箱子";
+            }
+
+            @Override public AcquireVia via() {
+                return AcquireVia.CONTAINER;
+            }
+
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("箱子", request.count(), new AcquisitionCost(4, 2), null);
+            }
+
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                alsoSeen.add(context.alsoWanted());
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        backpack.add("minecraft:iron_ingot", 3);
+                        backpack.add("minecraft:coal", 5);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "开箱取货";
+                    }
+                });
+            }
+        };
+        ItemRequest iron = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 3, "工具准备");
+        ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 5, "工具准备");
+        ActionStatus status = runToSettlement(engine(chest).needSeveral(List.of(iron, coal), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, null, null));
+
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(1, alsoSeen.size(), "第二样已经拿到，不再单独去弄");
+        assertEquals("minecraft:coal", alsoSeen.getFirst().getFirst().wanted().specifier(),
+                "顺手还要的那一样交给来源");
+        assertEquals(3, countOf("minecraft:iron_ingot"));
+        assertEquals(5, countOf("minecraft:coal"));
+    }
+
+    @Test
+    void 一次要几样_一样弄不到_别的照拿() {
+        ItemSource picky = new ItemSource() {
+            @Override public String describe() {
+                return "箱子";
+            }
+
+            @Override public AcquireVia via() {
+                return AcquireVia.CONTAINER;
+            }
+
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("箱子", request.count(), new AcquisitionCost(4, 2), null);
+            }
+
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                if (request.wanted().itemId().equals("minecraft:iron_ingot")) {
+                    return Optional.of(new Action() {
+                        @Override public ActionStatus tick(TickContext tick) {
+                            return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, "箱子没了"));
+                        }
+
+                        @Override public String describe() {
+                            return "箱子没了";
+                        }
+                    });
+                }
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        backpack.add("minecraft:coal", 5);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "拿煤";
+                    }
+                });
+            }
+        };
+        ItemRequest iron = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 3, "工具准备");
+        ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 5, "工具准备");
+        ActionStatus status = runToSettlement(engine(picky).needSeveral(List.of(iron, coal), PERMISSIONS,
+                ItemAcquisition.Scope.ALL, null, null));
+
+        assertInstanceOf(ActionStatus.Failed.class, status, "有一样没弄到，整张单子以问题收场");
+        assertEquals(0, countOf("minecraft:iron_ingot"));
+        assertEquals(5, countOf("minecraft:coal"), "另一样照拿");
+    }
+
     private long countOf(String itemId) {
         return backpack.stacks().stream()
                 .filter(stack -> stack.itemId().equals(itemId))
