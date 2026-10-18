@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
+import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 
@@ -43,6 +44,8 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Grid grid;
     private final Ae2Patterns patterns;
     private final Ae2Transforms transforms;
+    /** 进世界时物品来源建好，落地补料也用这一份；没进世界时为空。 */
+    private volatile PlayerServices services;
 
     /** 没有样板读写端时：认不出样板，样板供应器的界面也不认。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid) {
@@ -69,12 +72,18 @@ public final class Ae2Compat extends CompatModule {
         // 样板供应器的界面：只认放样板的那几格，放进、拿出样板都经它。
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
         registry.itemSource(this, services -> {
+            this.services = services;
             SeenNetworkStock seen = new SeenNetworkStock();
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
                     seen, Instant::now);
         });
         // 腾地方、整理背包时：身上的无线终端连着网络就把东西存进网络，不往地上扔。
-        registry.networkStorage(this, services -> new MenuNetworkStores(this, services));
+        registry.networkStorage(this, services -> {
+            this.services = services;
+            return new MenuNetworkStores(this, services);
+        });
+        // 意外坠落、身上没带落地料时：拿出随身无线终端，从网络里现取一桶水。
+        registry.landingMaterial(this, new Ae2LandingMaterials(this, this::services));
         // 机器这一半：每种 ME 设备、ME 网络读取器（汇总经服务端只读操作问），线缆格还管接线缆与装部件。
         for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
             registry.machineType(this, services -> new Ae2MachineType(kind, this, services, blocksOf(kind.blocks())));
@@ -89,6 +98,11 @@ public final class Ae2Compat extends CompatModule {
     /** 这个世界里泡在流体里的转化配方；见 {@link Ae2Transforms#fluidRecipes}。 */
     public List<Ae2Transforms.Recipe> transformRecipes(Level level) {
         return call("读 AE2 的转化配方", () -> transforms.fluidRecipes(level));
+    }
+
+    /** 进世界时物品来源建好记下的那一份；没进世界时为空。落地补料拿它开无线终端。 */
+    PlayerServices services() {
+        return services;
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */

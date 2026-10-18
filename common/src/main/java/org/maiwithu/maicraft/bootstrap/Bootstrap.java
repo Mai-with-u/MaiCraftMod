@@ -41,6 +41,7 @@ import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.landing.CatchesFall;
 import org.maiwithu.maicraft.behavior.landing.FallRescues;
+import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
@@ -242,7 +243,8 @@ public final class Bootstrap {
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
             SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
-            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues, Predicate<UUID> trusted,
+            ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues,
+            Supplier<List<LandingMaterials>> landingMaterials, Predicate<UUID> trusted,
             PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         ControlLoop loop = new ControlLoop(List.of(
@@ -250,7 +252,7 @@ public final class Bootstrap {
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 // 走路里的落地救援、喷气背包飞的那一段、寻路"飞上去"那一步自己管着上下时，落地防护让开。
-                new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues,
+                new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues, landingMaterials,
                         () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
                                 || BaritoneInternals.flyingUp()),
                 // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。夜里撤不掉又打不过接同一套挖三填一。
@@ -533,8 +535,10 @@ public final class Bootstrap {
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
                     survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
-                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住。
+                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
+                    // 身上没带货时从随身无线终端现取一件（AE2）。
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
+                    () -> compat.landingMaterials(),
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
                     uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
                     // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。

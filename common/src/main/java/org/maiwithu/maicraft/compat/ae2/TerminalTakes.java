@@ -37,6 +37,14 @@ public interface TerminalTakes {
         return Optional.empty();
     }
 
+    /**
+     * 拿出身上的无线终端取一件，网络里现成没有就收场，不在空中下单合成：坠落中等成品进网络时人已经落地了。
+     * 做不了给空。
+     */
+    default Optional<Action> takeWirelessNow(String terminalItemId, ItemRequest request) {
+        return Optional.empty();
+    }
+
     /** 拿出身上的无线终端打开，等存货同步齐记下来就关上，什么都不拿；做不了给空。 */
     default Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
         return Optional.empty();

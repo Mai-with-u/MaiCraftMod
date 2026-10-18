@@ -87,15 +87,19 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     @Override public Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
             Permissions permissions, TaskRecords records) {
-        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request, false, records));
+        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request, false, records, true));
     }
 
     @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request, TaskRecords records) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, records));
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, records, true));
+    }
+
+    @Override public Optional<Action> takeWirelessNow(String terminalItemId, ItemRequest request) {
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, null, false));
     }
 
     @Override public Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true, null));
+        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true, null, false));
     }
 
     /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
@@ -186,6 +190,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private final ItemRequest request;
         /** 只看一眼：等存货同步齐记下来就关上，什么都不拿。 */
         private final boolean lookOnly;
+        /** 网络里现成没有时允不允许下单合成；坠落中取落地料不允许，等成品时人已经落地了。 */
+        private final boolean allowCrafting;
         private MenuOpening opening;
         private final TransferSettlement settlement = new TransferSettlement();
         private Stage stage = Stage.OPEN;
@@ -230,10 +236,11 @@ public final class MenuTerminalTakes implements TerminalTakes {
          * @param lookOnly 只看一眼，什么都不拿
          * @param records  发起任务的记账口，下单的结论记成 attempts；没有为 null
          */
-        TakeAction(Access access, ItemRequest request, boolean lookOnly, TaskRecords records) {
+        TakeAction(Access access, ItemRequest request, boolean lookOnly, TaskRecords records, boolean allowCrafting) {
             this.access = access;
             this.request = request;
             this.lookOnly = lookOnly;
+            this.allowCrafting = allowCrafting;
             this.opening = access.opening();
             this.craft = new NetworkCraft(compat, this::sendOnPage, access.describe(), records);
         }
@@ -358,6 +365,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 if (confirmedTotal() == 0 && stockStillArriving(stock.size())) return ActionStatus.running();
                 // 等到存货表不再变了：这时记下的才算看全了，下次报价可以照它说"没有"。
                 if (confirmedTotal() == 0) compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
+                // 坠落中取落地料不在空中下单：等网络把东西做出来时人已经落地了，现成没有就收场。
+                if (!allowCrafting) return stopNow(nothingLeft());
                 // 现货取完了还缺（或一开始就没有）：网络里那一条有样板就像玩家一样下单补缺口，件数封顶在背包装得下的；
                 // 自己之前下的这样东西还在做就不再下单、接着等；下过单就在跟前等成品进网络，进来一批取一批。
                 List<SlotSnapshot> playerSide = reading.get().playerSnapshots();

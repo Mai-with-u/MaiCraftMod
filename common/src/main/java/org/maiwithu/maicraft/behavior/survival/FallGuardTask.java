@@ -3,11 +3,15 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.landing.CatchesFall;
+import org.maiwithu.maicraft.behavior.landing.LandingFetch;
+import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -27,33 +31,51 @@ import org.slf4j.LoggerFactory;
  * 用身上带着的水桶、蛛网、浆果、藤蔓、黏液块或干草（或落点现成的水源、蛛网）接住自己，落地站稳后收回自己放的。
  *
  * <p>顺序：找落点 → 接住（边掉边把东西拿到手上、往落点推、够得着时只放一次、落地站稳、收回）。
- * 落点本来就是水不用做事；下面是虚空救不了；身上没东西、附近也没现成的就如实说，落地伤害由游戏结算。
- * 救命不看任务许可；收不回的东西留在原地，结果里写清楚。
+ * 身上没带落地料时，先从随身无线终端现取一桶水再走这一套；取不到或来不及就如实说，落地伤害由游戏结算。
+ * 落点本来就是水不用做事；下面是虚空救不了。救命不看任务许可；收不回的东西留在原地，结果里写清楚。
  */
 public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
 
     private static final Logger LOG = LoggerFactory.getLogger(FallGuardTask.class);
 
-    public enum Phase { FIND, CATCH }
+    public enum Phase { FIND, FETCH, CATCH }
+
+    /** 没带落地料时先取的那一件：水桶优先；取到别的也按落地救援自己认。 */
+    private static final List<String> WANTED_LANDING_MATERIAL = List.of("minecraft:water_bucket");
 
     private final SurvivalSituation.SituationReader reader;
     /** 就地找落点与办法，交给一次空中救援；救不了为 null。 */
     private final Function<PlayerContext, CatchesFall> rescues;
+    /** 身上没带落地料时，能从哪儿现取一件（联动模组登记；没有就当取不到）。 */
+    private final Supplier<List<LandingMaterials>> landingMaterials;
+    /** 正在进行的取物动作；进了 FETCH 阶段由它推进。 */
+    private Action fetchAction;
     private CatchesFall rescue;
 
     public FallGuardTask(SurvivalSituation.SituationReader reader, Function<PlayerContext, CatchesFall> rescues) {
+        this(reader, rescues, List::of);
+    }
+
+    public FallGuardTask(SurvivalSituation.SituationReader reader, Function<PlayerContext, CatchesFall> rescues,
+                         Supplier<List<LandingMaterials>> landingMaterials) {
         super("落地防护", Phase.FIND, new ProgressTracker(20L * 30, 20L * 60));
         this.reader = reader;
         this.rescues = rescues;
+        this.landingMaterials = landingMaterials;
     }
 
     @Override
     protected Action enter(Phase phase) {
-        return phase == Phase.CATCH ? new CatchFall(rescue) : null;
+        return switch (phase) {
+            case FETCH -> fetchAction;
+            case CATCH -> new CatchFall(rescue);
+            case FIND -> null;
+        };
     }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
+        if (phase == Phase.FETCH) return fetchThenCatch(context);
         if (phase == Phase.CATCH) return runActionThen(context, this::concluded);
         SurvivalSituation situation = reader.read(context);
         PlayerContext player = context.player();
@@ -73,14 +95,53 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
         }
         rescue = rescues.apply(player);
         if (rescue == null) {
-            // 下界放水会蒸发，水桶接不住自己：别让 LLM 照着建议去备水。实机 10-14 下界落地防护叫它带水桶。
+            // 下界放水会蒸发，水桶接不住自己：别让 LLM 照着建议去备水，也别从网络里白取一桶。实机 10-14 下界落地防护叫它带水桶。
             if (player.level() != null && player.level().dimensionType().ultraWarm()) {
                 return Next.fail(Problem.of(Problem.Kind.DANGER,
                         "这一掉会掉血，可身上没有能接住自己的东西（干草、黏液块、蛛网……；这里放水会蒸发，水桶接不住）；落地伤害由游戏结算",
                         "在下界高处走动时带干草块或黏液块，掉下去时就能接住自己"));
             }
+            // 身上没带落地料：原地从随身无线终端取一件（水桶），取到了再按落地救援放。
+            fetchAction = startFetch(player);
+            if (fetchAction != null) {
+                return Next.go(Phase.FETCH, fetchAction.describe());
+            }
             return Next.fail(Problem.of(Problem.Kind.DANGER,
                     "这一掉会掉血，可身上没有能接住自己的东西（水桶、干草、黏液块、蛛网……），落点附近也没有现成的水；落地伤害由游戏结算",
+                    "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
+        }
+        return Next.go(Phase.CATCH, "用" + rescue.itemId() + "接住，落点 " + rescue.landingFeet().toShortString());
+    }
+
+    // 从身上带着的无线终端取一件落地料；取不了（没带、没连上网络、网络里没有）给 null，照旧如实说没有东西接。
+    private Action startFetch(PlayerContext player) {
+        for (LandingMaterials materials : landingMaterials.get()) {
+            try {
+                Optional<Action> action = materials.fetch(player, WANTED_LANDING_MATERIAL);
+                if (action.isPresent()) {
+                    return new LandingFetch(action.get(), materials.describe(), "水桶");
+                }
+            } catch (RuntimeException failure) {
+                LOG.info("[落地防护] 从{}取落地料没成：{}", materials.describe(), failure.getMessage());
+            }
+        }
+        return null;
+    }
+
+    // 落地料取完（或取不成）：取到了就重新找落点、交给整套落地救援；没取到就说清是取料没成。
+    private Next<Phase> fetchThenCatch(TickContext context) {
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        if (status instanceof ActionStatus.Failed failure) {
+            return Next.fail(Problem.of(Problem.Kind.DANGER,
+                    "这一掉会掉血，可身上没有能接住自己的东西，从无线终端现取也没成：" + failure.problem().message(),
+                    "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
+        }
+        PlayerContext player = context.player();
+        rescue = player == null ? null : rescues.apply(player);
+        if (rescue == null) {
+            return Next.fail(Problem.of(Problem.Kind.DANGER,
+                    "这一掉会掉血；从无线终端取到了东西，可这个落点放不下或用不上",
                     "高处干活时身上带一桶水（或干草、黏液块），掉下去时就能接住自己"));
         }
         return Next.go(Phase.CATCH, "用" + rescue.itemId() + "接住，落点 " + rescue.landingFeet().toShortString());
@@ -104,6 +165,7 @@ public final class FallGuardTask extends PhasedTask<FallGuardTask.Phase> {
     protected String describePhase(Phase value) {
         return switch (value) {
             case FIND -> "找能接住自己的落点";
+            case FETCH -> fetchAction == null ? "从无线终端取落地料" : fetchAction.describe();
             case CATCH -> rescue == null ? "接住这一掉" : "接住这一掉：" + rescue.detail();
         };
     }

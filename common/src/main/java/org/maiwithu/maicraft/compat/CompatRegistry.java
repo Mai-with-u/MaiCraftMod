@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
+import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
@@ -77,6 +78,7 @@ public final class CompatRegistry {
     private final List<ObstacleSource> obstacleSources = new ArrayList<>();
     private final List<FluidTransforms> fluidTransforms = new ArrayList<>();
     private final List<FallBrake> fallBrakes = new ArrayList<>();
+    private final List<LandingMaterials> landingMaterials = new ArrayList<>();
     private final List<StowBeforeWalking> stowsBeforeWalking = new ArrayList<>();
     private final List<FlyUpGear> flyUpGears = new ArrayList<>();
     private final List<ModSight> modSights = new ArrayList<>();
@@ -88,7 +90,7 @@ public final class CompatRegistry {
     /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
     private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
             breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
+            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, landingMaterials, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
             vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs, networkStorages, fluidTransforms);
     private final List<String> decisions = new ArrayList<>();
 
@@ -283,6 +285,11 @@ public final class CompatRegistry {
         fallBrakes.add(new CompatFallBrake(module, brake));
     }
 
+    /** 联动入口交一样"没带落地料时从哪儿现取"（AE2 无线终端）：包一层后交给落地防护；模组停用后取不到。 */
+    public void landingMaterial(CompatModule module, LandingMaterials materials) {
+        landingMaterials.add(new CompatLandingMaterials(module, materials));
+    }
+
     /** 联动入口交一样走路前要收起来的东西（误开的喷气背包）：包一层后交给寻路；模组停用后不再收。 */
     public void stowBeforeWalking(CompatModule module, StowBeforeWalking stow) {
         stowsBeforeWalking.add(new CompatStowBeforeWalking(module, stow));
@@ -446,6 +453,11 @@ public final class CompatRegistry {
     /** 联动模组刹住一掉的办法，按联动清单的顺序；落地防护先问它们。 */
     public List<FallBrake> fallBrakes() {
         return Collections.unmodifiableList(fallBrakes);
+    }
+
+    /** 联动模组登记的落地补料来源：身上没带落地料时按顺序问；都没有就当取不到。 */
+    public List<LandingMaterials> landingMaterials() {
+        return Collections.unmodifiableList(landingMaterials);
     }
 
     /** 联动模组登记的走路前要收起来的东西：走路每刻推进前问一遍。 */
