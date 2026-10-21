@@ -149,8 +149,8 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
 
     /**
      * 卡住的收尾说明不带逐层嵌套的进行经过：进行中那句一层套一层（第几步、第几种做法），
-     * 倒给 LLM 只会把真正的卡点埋进括号堆里（实机里嵌了十一层）。结论一句；
-     * 这一場试过哪些做法、各为什么不成，由拿东西的引擎摊平讲一次。
+     * 倒给 LLM 只会把真正的问题埋进括号堆里（实机里嵌了十一层）。结论一句；
+     * 这一场试过哪些做法、各为什么不成，由拿东西的引擎摊平讲一次。
      */
     @Override protected Problem noProgressProblem(ProgressTracker.Status status) {
         if (!(status instanceof ProgressTracker.Status.Stuck stuck)) {

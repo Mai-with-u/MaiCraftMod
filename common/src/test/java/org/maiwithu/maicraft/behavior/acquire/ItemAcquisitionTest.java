@@ -384,7 +384,7 @@ class ItemAcquisitionTest {
 
     @Test
     void 一次要几样_腾背包要动贵重品_种类仍是许可() {
-        // 腾背包的回执正文在问"可以吗？"（应答式暂停），宿主按种类路由回答：
+        // 腾背包的结果正文在问"可以吗？"（应答式暂停），宿主按种类路由回答：
         // 一次要几样的收场把种类压成缺东西，同意就送不回去，角色拿着问句干等到超时（实机 214）。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:diamond", 1, 64, false, false, true, false));
@@ -404,7 +404,7 @@ class ItemAcquisitionTest {
 
     @Test
     void 一次要几样_真腾不出_种类是背包腾不出() {
-        // 背包塞满、能动的全动了也腾不出：按契约如实报 INVENTORY_FULL，不再按缺东西算。
+        // 背包塞满、能动的全动了也腾不出：按对外接口的约定如实报 INVENTORY_FULL，不再按缺东西算。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:coal", 64, 64, false, false, false, false));
         InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),

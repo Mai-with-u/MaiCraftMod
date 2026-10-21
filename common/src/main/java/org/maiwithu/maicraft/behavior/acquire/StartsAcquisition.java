@@ -32,8 +32,8 @@ public interface StartsAcquisition {
             ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records);
 
     /**
-     * 这一場拿到现在为止试过的办法与结果，一句一条、同样的只讲一次：
-     * 卡住收场时由发起任务摊平讲给 LLM，不倒出逐层嵌套的进行经过（那串括号读的人要从里面找卡点）。
+     * 这一场拿到现在为止试过的办法与结果，一句一条、同样的只讲一次：
+     * 卡住收场时由发起任务摊平讲给 LLM，不倒出逐层嵌套的进行经过（那串括号读的人要从里面找真正的问题）。
      * 不在拿东西的过程中、或实现不记这件事时为空串。
      */
     default String triedSoFar() {
