@@ -518,6 +518,14 @@ public final class AbilityCatalog {
         };
     }
 
+    /** 寻找：方块与实体扫已加载区，结构查记过的产地线索；要塞附近没有线索时扔末影之眼指路。
+     *  实体的类型、可见与特征读感知的同一份实体观察，命中直接在场景的观察编号表上领编号。 */
+    private static void registerFind(AbilityRegistry registry, Deps deps, Shared shared) {
+        registry.register(FindModule.live(deps.context(), deps.blockScans(), new ClientEntitySight(deps.context()),
+                deps.creatures(), deps.memory(), deps.scene(),
+                new ClientEnderEyes(deps.context(), deps.walks(), shared.toMainhand(), shared.drops())));
+    }
+
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、计时、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
     private static void registerStandalone(AbilityRegistry registry, Deps deps, Shared shared,
             Function<Permissions, ConstructionServices> construction) {
@@ -566,11 +574,7 @@ public final class AbilityCatalog {
                 deps.travelWorld(), travelModes(deps, services, portals),
                 new ClientStairsUp(new LiveStairsSite(deps.walks()), shared.digging(), permission)));
 
-        // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
-        // 要塞附近没有线索时扔末影之眼指路：换手、捡回落下的眼、走一段都用共用的那一套。
-        registry.register(FindModule.live(deps.context(), deps.blockScans(), new ClientEntitySight(deps.context()),
-                deps.creatures(), deps.memory(), deps.scene(),
-                new ClientEnderEyes(deps.context(), deps.walks(), shared.toMainhand(), shared.drops())));
+        registerFind(registry, deps, shared);
 
         // 探索：观察推进与走行段在探索走行里，发现落进世界记忆并经事件出口告诉宿主。
         registry.register(ExploreAbility.live(deps.context(), deps.blockScans(), deps.walks(),
