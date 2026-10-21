@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.kernel.result;
 
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 问题：任务做不下去的原因（一条游戏里的事实），以及怎样能继续。
@@ -60,6 +61,18 @@ public record Problem(Kind kind, String message, String suggestion) {
     public Problem {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(message, "message");
+    }
+
+    /**
+     * 几次失败往上层合并时种类怎么定：都一样就用它；不一样时提问的种类优先——
+     * 宿主按种类路由回答，征求同意的问题被压成别的种类，同意就送不回去，角色会拿着问句干等；
+     * 背包腾不出其次；其余按缺东西算（缺什么、试过什么已经在合并的说明里摊平）。
+     */
+    public static Kind combined(Set<Kind> kinds) {
+        if (kinds.size() == 1) return kinds.iterator().next();
+        if (kinds.contains(Kind.NEED_APPROVAL)) return Kind.NEED_APPROVAL;
+        if (kinds.contains(Kind.INVENTORY_FULL)) return Kind.INVENTORY_FULL;
+        return Kind.NEED_ITEM;
     }
 
     /** 带建议的问题。 */

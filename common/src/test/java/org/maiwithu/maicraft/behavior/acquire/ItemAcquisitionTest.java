@@ -383,6 +383,44 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 一次要几样_腾背包要动贵重品_种类仍是许可() {
+        // 腾背包的回执正文在问"可以吗？"（应答式暂停），宿主按种类路由回答：
+        // 一次要几样的收场把种类压成缺东西，同意就送不回去，角色拿着问句干等到超时（实机 214）。
+        FakeBackpack full = new FakeBackpack(1, new BackpackStack(
+                "minecraft:diamond", 1, 64, false, false, true, false));
+        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        ScriptedSource chest = new ScriptedSource("记得的箱子", full)
+                .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
+        ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
+                new FixedSpot(0, 64, 0), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+        ActionStatus status = runToSettlement(acquisition.needSeveral(
+                List.of(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "火把")),
+                PERMISSIONS, ItemAcquisition.Scope.ALL, null, null));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertEquals(Problem.Kind.NEED_APPROVAL, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("可以吗"), "正文在征求同意：" + failed.problem().message());
+    }
+
+    @Test
+    void 一次要几样_真腾不出_种类是背包腾不出() {
+        // 背包塞满、能动的全动了也腾不出：按契约如实报 INVENTORY_FULL，不再按缺东西算。
+        FakeBackpack full = new FakeBackpack(1, new BackpackStack(
+                "minecraft:coal", 64, 64, false, false, false, false));
+        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty());
+        ScriptedSource chest = new ScriptedSource("记得的箱子", full)
+                .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
+        ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
+                new FixedSpot(0, 64, 0), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+        ActionStatus status = runToSettlement(acquisition.needSeveral(
+                List.of(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "火把")),
+                PERMISSIONS, ItemAcquisition.Scope.ALL, null, null));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
+    }
+
+    @Test
     void 背包没空格但能并进半堆_不腾地方直接拿() {
         // 身上已有 30 块圆石、背包没空格：再要 5 块能并进这一堆，不该先腾格子（这里也腾不出来）。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(

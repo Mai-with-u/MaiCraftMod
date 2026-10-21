@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -48,6 +49,8 @@ final class RecipeShortfall {
     final List<String> missing = new ArrayList<>();
     /** 里层没弄来的结论句。 */
     final List<String> reasons = new ArrayList<>();
+    /** 各句结论原来的问题种类：合并成整场的问题时按它定种类，不把提问压成缺东西。 */
+    private final Set<Problem.Kind> reasonKinds = new LinkedHashSet<>();
 
     RecipeShortfall(WorkstationRecipe recipe, SourceContext context, IngredientChoice choice, ItemNeeds needs,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, Picks picker) {
@@ -129,6 +132,7 @@ final class RecipeShortfall {
                 // 里层只给一句结论，经过由拿东西的引擎收着，最外层摊平讲一次。
                 missing.add(currentRequest.wanted().describe() + "×" + currentRequest.count());
                 reasons.add(failed.problem().headline());
+                reasonKinds.add(failed.problem().kind());
                 int onHand = choice.carried(currentIngredient);
                 if (currentIngredient.count() > 0 && onHand < currentIngredient.count()) {
                     return ActionStatus.failed(problem());
@@ -195,7 +199,7 @@ final class RecipeShortfall {
         StringBuilder message = new StringBuilder("原料没备齐（缺").append(String.join("、", missing))
                 .append("），一份都做不了");
         for (String reason : reasons) message.append("；").append(reason);
-        return Problem.of(Problem.Kind.NEED_ITEM, message.toString());
+        return Problem.of(Problem.combined(reasonKinds), message.toString());
     }
 
     // 动手那一步：做不下去时（料用完了）在它的结论后面补上缺哪几样，引擎写进结果。
@@ -210,7 +214,9 @@ final class RecipeShortfall {
                         .append(String.join("、", missing)).append("，身上的料能做的已经做了）")
                         .append(problem.message().substring(headline.length()));
                 for (String reason : reasons) message.append("；").append(reason);
-                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, message.toString(),
+                Set<Problem.Kind> kinds = new LinkedHashSet<>(reasonKinds);
+                kinds.add(problem.kind());
+                return ActionStatus.failed(Problem.of(Problem.combined(kinds), message.toString(),
                         problem.suggestion()));
             }
 
@@ -253,6 +259,7 @@ final class RecipeShortfall {
             if (!(status instanceof ActionStatus.Failed failed)) return status;
             missing.add(request.wanted().describe() + "×" + request.count());
             reasons.add(failed.problem().headline());
+            reasonKinds.add(failed.problem().kind());
             int onHand = ingredient == null ? CarriedItems.matching(backpack, offhand, request.wanted(), tags)
                     : choice.carried(ingredient);
             if (perCraft > 0 && onHand < perCraft) {
