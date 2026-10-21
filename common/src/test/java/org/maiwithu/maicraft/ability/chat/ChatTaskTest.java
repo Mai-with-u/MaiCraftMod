@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -15,6 +16,8 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 发话任务：先提交，回显到了算发成；等不到就按已提交但没能确认收场，不盲目重发。 */
@@ -295,5 +298,42 @@ class ChatTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertTrue(sender.sent.isEmpty(), "框没让出来，话不会交出去");
         assertTrue(result.problem().message().contains("聊天框被别的界面占着"), result.problem().message());
+    }
+
+    @Test
+    void replacedMidTypingSaysTheMessageWasNeverSent() {
+        // 打字打到一半目标被替换：这句话没交出去，结果里要说清，替换的一方不用再等它落地。
+        StubSender sender = new StubSender();
+        StubDrafts drafts = new StubDrafts();
+        TestTick tick = new TestTick();
+        ChatTask task = new ChatTask("/time set day", sender, new StubEcho(), drafts);
+        task.start(tick);
+        task.tick(tick);
+        assertTrue(drafts.current().isEmpty(), "还在打字阶段");
+
+        TaskResult result = task.close(CloseReason.REPLACED);
+
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+        assertTrue(sender.sent.isEmpty(), "没提交就谈不上发过");
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertFalse(details.submitted(), "结果细节写明这句话没有交出去");
+        assertEquals("/time set day", details.message(), "哪句话没发，按原话列出来");
+    }
+
+    @Test
+    void submitIsRecordedWithTheTickSoLateLandingsCanBeTraced() {
+        // 提交过的事实与提交时刻留在结果细节里：命令落地迟了时，下达与落地的时间线对得上。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        TestTick tick = new TestTick();
+        ChatTask task = new ChatTask("/time set day", sender, echo, new StubDrafts());
+
+        TaskResult result = runToFinish(task, tick);
+
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertTrue(details.submitted());
+        // 打字要逐字推进：提交在打完整句之后（30 多刻），不是下达的那一刻——提交时刻留了账，迟到的落地对得上。
+        assertTrue(details.sentAtTick() > 1000, "提交在打完整句之后：" + details.sentAtTick());
+        assertFalse(result.attempts().isEmpty(), "提交动作留了账：提交了哪句、在哪个阶段");
     }
 }

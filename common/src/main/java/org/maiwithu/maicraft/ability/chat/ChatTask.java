@@ -41,6 +41,8 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     /** 提交那一刻的游戏刻；算等回显等了多久用。 */
     private long sentTick;
+    /** 这句话交出去没有：还在打字就被替换或取消时它没发出去，结果里要说清，不让人等一句永远不会出现的话。 */
+    private boolean submitted;
     /** 发命令前聊天栏的记号：之后新出现的话才算服务器对这条命令的回话。 */
     private long feedbackMark;
     /** 命令发出后聊天栏新出现的话（命令反馈行）；普通聊天为空。 */
@@ -57,8 +59,13 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
         this.command = message.startsWith("/");
     }
 
-    /** 发话的结果细节：发了哪句话；游戏命令另附发出后聊天栏新出现的话，成没成由 LLM 看它判断。 */
-    private record ChatDetails(String message, List<String> feedback) implements ResultDetails {}
+    /**
+     * 发话的结果细节：发了哪句话、交出去没有、交出去是在哪一刻；游戏命令另附发出后聊天栏新出现的话，
+     * 成没成由 LLM 看它判断。目标在打字中途被替换或取消时，结果照样带着这份细节：
+     * {@code submitted=false} 就是这句话没发出去，替换的一方不用再等它落地。
+     */
+    record ChatDetails(String message, boolean submitted, long sentAtTick,
+                       List<String> feedback) implements ResultDetails {}
 
     @Override
     protected Action enter(Phase phase) {
@@ -89,6 +96,9 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "聊天通道还没接上（角色不在世界里），这句话没有交出去", "等角色进了世界再说"));
         }
+        submitted = true;
+        // 试过什么留一笔：命令提交在哪一刻、提交了哪句，落地迟了或没落地时对得上时间线。
+        recordAttempt(command ? "提交命令" : "提交聊天", message);
         recordProgress("已把话交给聊天输入");
         return Next.go(Phase.CONFIRM, command ? "已提交命令，等聊天栏出现命令反馈行" : "已提交，等聊天栏出现自己那条");
     }
@@ -128,7 +138,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected ResultDetails details() {
-        return new ChatDetails(message, feedback);
+        return new ChatDetails(message, submitted, submitted ? sentTick : -1, feedback);
     }
 
     @Override
