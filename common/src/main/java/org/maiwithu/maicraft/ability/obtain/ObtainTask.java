@@ -147,6 +147,22 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         return gained + " 个" + request.wanted().describe() + whichOnes(request);
     }
 
+    /**
+     * 卡住的收尾说明不带逐层嵌套的进行经过：进行中那句一层套一层（第几步、第几种做法），
+     * 倒给 LLM 只会把真正的卡点埋进括号堆里（实机里嵌了十一层）。结论一句；
+     * 这一場试过哪些做法、各为什么不成，由拿东西的引擎摊平讲一次。
+     */
+    @Override protected Problem noProgressProblem(ProgressTracker.Status status) {
+        if (!(status instanceof ProgressTracker.Status.Stuck stuck)) {
+            return super.noProgressProblem(status);
+        }
+        StringBuilder message = new StringBuilder("推进了 ").append(stuck.idleTicks())
+                .append(" 刻都没有新进展，做不下去了");
+        String tried = acquisition.triedSoFar();
+        if (!tried.isEmpty()) message.append("；这一场试过的：").append(tried);
+        return Problem.of(Problem.Kind.STUCK, message.toString());
+    }
+
     @Override protected ResultDetails details() {
         return new ObtainedVia(List.copyOf(obtainedVia));
     }

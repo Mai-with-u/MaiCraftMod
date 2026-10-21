@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.obtain;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -81,6 +82,10 @@ class ObtainTaskTest {
         Integer deliverPerTick;
         String deliveredVia;
         Problem failure;
+        /** 设了就一直推进不收场：对应来源动作卡在半路（走去箱子的路长期无进展）。 */
+        boolean neverFinishes;
+        /** triedSoFar 交回的试过清单；null 表示不接。 */
+        String tried;
 
         @Override public Action need(ItemRequest request, Permissions permissions,
                 ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
@@ -98,6 +103,9 @@ class ObtainTaskTest {
                             lastDelivered.accept(deliveredVia);
                         }
                     }
+                    if (neverFinishes) {
+                        return ActionStatus.running();
+                    }
                     return failure != null ? ActionStatus.failed(failure) : ActionStatus.done();
                 }
 
@@ -105,6 +113,10 @@ class ObtainTaskTest {
                     return "按剧本拿货";
                 }
             };
+        }
+
+        @Override public String triedSoFar() {
+            return tried == null ? StartsAcquisition.super.triedSoFar() : tried;
         }
 
         @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
@@ -386,6 +398,61 @@ class ObtainTaskTest {
             }
         }
         throw new AssertionError("任务一百刻都没跑完");
+    }
+
+    @Test
+    void 卡住的收场说明是摊平的试过清单_不倒逐层嵌套的进行经过() {
+        // 来源动作卡在半路（走去记忆箱子的路长期无进展）：任务到点判卡住。
+        // 收场说明只给一句结论，加上引擎摊平的"试过哪些做法、各为什么不成"；
+        // 进行中那句一层套一层（第几步、第几种做法）不再整串塞进去——实机里嵌了十一层。
+        FakeBackpack backpack = new FakeBackpack();
+        ScriptedAcquisition acquisition = new ScriptedAcquisition();
+        acquisition.backpack = backpack;
+        acquisition.neverFinishes = true;
+        acquisition.tried = "试过记得的箱子（做完了，但一件都没拿到）；自己做：原料没备齐（缺bamboo×1），一份都做不了";
+        ObtainTask task = new ObtainTask(input(1, ItemAcquisition.Scope.ALL),
+                acquisition, backpack, null, itemId -> Set.of());
+        task.start(tick(0));
+        TickResult result = TickResult.RUNNING;
+        for (int i = 1; i <= ObtainTask_STUCK_TICKS + 10; i++) {
+            result = task.tick(tick(i));
+            if (result instanceof TickResult.Finished finished) {
+                Problem problem = finished.result().problem();
+                assertEquals(Problem.Kind.STUCK, problem.kind());
+                String message = problem.message();
+                assertTrue(message.contains("试过记得的箱子"), "摊平的试过清单要在说明里：" + message);
+                assertFalse(message.contains("按剧本拿货"), "进行中的嵌套经过不该整串塞进收场说明：" + message);
+                assertTrue(message.length() < 800, "收场说明有上界，实机那句嵌套的长说明不许回来：" + message);
+                return;
+            }
+        }
+        throw new AssertionError("过了卡住的刻数还没收场");
+    }
+
+    /** 拿东西任务判卡住的刻数，与任务的进度跟踪同一笔账。 */
+    private static final long ObtainTask_STUCK_TICKS = 20L * 60;
+
+    @Test
+    void 卡在问价阶段_收场说明只有一句结论() {
+        // 一场都还没试（问价就没问出来）：没有试过清单就不硬凑，说明短而准。
+        FakeBackpack backpack = new FakeBackpack();
+        ScriptedAcquisition acquisition = new ScriptedAcquisition();
+        acquisition.backpack = backpack;
+        acquisition.neverFinishes = true;
+        ObtainTask task = new ObtainTask(input(1, ItemAcquisition.Scope.ALL),
+                acquisition, backpack, null, itemId -> Set.of());
+        task.start(tick(0));
+        TickResult result = TickResult.RUNNING;
+        for (int i = 1; i <= ObtainTask_STUCK_TICKS + 10; i++) {
+            result = task.tick(tick(i));
+            if (result instanceof TickResult.Finished finished) {
+                assertEquals(Problem.Kind.STUCK, finished.result().problem().kind());
+                assertTrue(finished.result().problem().message().length() < 100,
+                        "没有试过清单时说明就是一句结论：" + finished.result().problem().message());
+                return;
+            }
+        }
+        throw new AssertionError("过了卡住的刻数还没收场");
     }
 
     /** 收尾理由占位：测试只关心 tick 出的结果。 */

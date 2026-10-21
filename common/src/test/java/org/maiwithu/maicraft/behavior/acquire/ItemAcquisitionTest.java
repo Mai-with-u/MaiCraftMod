@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -396,6 +397,51 @@ class ItemAcquisitionTest {
                 acquisition.need(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 5, "垫脚"), PERMISSIONS));
         assertInstanceOf(ActionStatus.Done.class, status);
         assertEquals(1, chest.begunTimes());
+    }
+
+    @Test
+    void 卡在半路时_试过的经过摊平一句一条() {
+        // 来源做砸了划掉、换下一个还在磨蹭：引擎答得出这一场试过什么、各为什么不成，
+        // 任务卡住收场时摊平讲一次，不倒逐层嵌套的进行经过。
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 3, new AcquisitionCost(5, 4), null))
+                .onBegin(ScriptedSource.Ending.DELIVER_NOTHING);
+        List<String> seen = new ArrayList<>();
+        ItemAcquisition[] engine = new ItemAcquisition[1];
+        ItemSource slow = new ItemSource() {
+            @Override public String describe() {
+                return "慢慢找";
+            }
+            @Override public AcquireVia via() {
+                return AcquireVia.MINE;
+            }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                return new SourceQuote.Offer("慢慢找", 3, new AcquisitionCost(9, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer,
+                    SourceContext context) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        // 磨蹭的那几刻正是"卡在半路"：这一场试过的经过此刻答得出（在拿东西的链上）。
+                        seen.add(engine[0].triedSoFar());
+                        return ActionStatus.running();
+                    }
+                    @Override public String describe() {
+                        return "慢慢找";
+                    }
+                });
+            }
+        };
+        engine[0] = engine(chest, slow);
+        Action need = engine[0].need(
+                new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), PERMISSIONS);
+        for (int tick = 1; tick <= 30; tick++) {
+            if (need.tick(new StubTick(tick)) instanceof ActionStatus.Failed) break;
+        }
+        assertTrue(seen.stream().anyMatch(tried -> tried.contains("记得的箱子")),
+                "试过的来源要一句一条：" + seen);
+        assertTrue(seen.stream().noneMatch(tried -> tried.contains("（第 ")),
+                "经过不带嵌套括号：" + seen);
     }
 
     @Test

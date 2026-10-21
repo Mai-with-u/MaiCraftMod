@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import java.util.ArrayDeque;
+import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
@@ -116,6 +117,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             chain.addAll(run.remainingAlsoWanted());
         });
         return List.copyOf(chain);
+    }
+
+    /** 这一場拿到现在为止试过的办法与结果，由最外层那一场交代；不在拿东西的半路上时为空串。 */
+    @Override public String triedSoFar() {
+        Run outermost = advancing.peekLast();
+        return outermost == null ? "" : outermost.explanation();
     }
 
     /** 这次要拿东西的动作：逐刻推进，把东西弄进背包算做完，弄不到以问题失败。途径、距离、半径都不限。 */
@@ -709,6 +716,18 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 case RUN -> "正在用" + stepSource + "拿" + request.wanted().describe()
                         + "：" + step.describe();
             };
+        }
+
+        /** 卡住收场时讲给人听的经过：这一场试过哪些来源、各为什么不成，一句一条；备料里没拿到的摊平接在后面。 */
+        String explanation() {
+            LinkedHashSet<String> distinct = new LinkedHashSet<>(deadEnds);
+            StringBuilder text = new StringBuilder(String.join("；", distinct));
+            String shortage = Shortage.explain(causes);
+            if (!shortage.isEmpty()) {
+                if (!text.isEmpty()) text.append("；");
+                text.append(shortage);
+            }
+            return text.toString();
         }
     }
 
