@@ -22,6 +22,7 @@ public interface EntitySight {
      * @param entityId 游戏的实体编号，同一只实体各次观察保持一致
      * @param type 实体类型注册 ID，例如 minecraft:zombie
      * @param name 名字牌或自定义名，没有为 null
+     * @param uuid 游戏给这只实体的 UUID（字符串写法），找东西靠它认保护事实；测试替身可给 null
      * @param visible 此刻视线没有被挡住
      * @param hostile 是敌对生物
      * @param targetingMe 正把攻击目标放在角色身上
@@ -29,7 +30,7 @@ public interface EntitySight {
      * @param traits 看得出来的特征：羊的颜色、是否剪过毛、幼年、着火、手持物、盔甲
      */
     record Observation(
-            int entityId, String type, String name, WorldPosition position,
+            int entityId, String type, String name, String uuid, WorldPosition position,
             boolean visible, boolean hostile, boolean targetingMe,
             Health health, Map<String, String> traits) {
 

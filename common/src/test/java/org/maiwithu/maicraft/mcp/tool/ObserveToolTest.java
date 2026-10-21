@@ -112,7 +112,7 @@ class ObserveToolTest {
         // 角色站在原点，脸朝北；正前方 12 格一只僵尸盯着它，右边 4 格一只箱子。
         scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
                 20, 18, 300, 300, "minecraft:stone_pickaxe", List.of(), List.of(), true, false));
-        scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:zombie", null,
+        scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:zombie", null, null,
                 WorldPosition.here(0, 64, -12), true, true, true,
                 new EntitySight.Health(14, 20), Map.of())));
         scene.updateFacilities(10, Instant.ofEpochMilli(1000),

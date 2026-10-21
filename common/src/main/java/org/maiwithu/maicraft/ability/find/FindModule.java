@@ -7,6 +7,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.explore.FollowsEnderEyes;
+import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.IdKind;
@@ -58,10 +59,11 @@ public final class FindModule implements AbilityModule {
      * @param memory     世界记忆：视线验证过的方块命中写进来，来源标"亲眼看到"
      * @param eyes       扔末影之眼找要塞的现场：附近没有要塞线索时扔眼指路
      */
-    /** 生产用：读端在这里接上真实客户端，能力包内可见的实现类不出包。 */
+    /** 生产用：读端在这里接上真实客户端，能力包内可见的实现类不出包。实体的类型、可见与特征读感知的同一份实体观察。 */
     public static FindModule live(Supplier<PlayerContext> context, BlockScanService scans,
-            ReadsCreatureSituation creatures, WorldMemory memory, Scene scene, FollowsEnderEyes eyes) {
-        return new FindModule(new LiveWorldTypes(), new LiveFinder(scans, context, creatures, memory),
+            EntitySight entities, ReadsCreatureSituation creatures, WorldMemory memory, Scene scene,
+            FollowsEnderEyes eyes) {
+        return new FindModule(new LiveWorldTypes(), new LiveFinder(scans, context, entities, creatures, memory),
                 scene, memory, eyes);
     }
 

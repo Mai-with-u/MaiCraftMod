@@ -11,18 +11,18 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.level.block.Block;
 import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
 import org.maiwithu.maicraft.behavior.explore.StructureClues;
-import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
+import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
@@ -34,13 +34,14 @@ import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 附近寻找的生产读端：方块走扫描服务的分刻索引，实体看一遍渲染范围内的实体，
+ * 附近寻找的生产读端：方块走扫描服务的分刻索引，实体读感知的实体观察（与 observe 同一份），
  * 结构查世界记忆里记过的产地线索。只读，不动身体、不改方块。
  *
  * <p>命中先复核实际方块状态（索引可能过时），再过视线闸——墙后的、埋着的不算找到；
- * 刚放下的方块经"最近方块变化"通道补查，不能刚放下就找不到。实体的多部件
- * （末影龙的身子各段）不是独立的实体条目，主体一条就是一条；有名字、被驯服、
- * 拴着绳、圈养着的实体照常报告，但带保护事实，不冒充"无主的找到了"。
+ * 刚放下的方块经"最近方块变化"通道补查，不能刚放下就找不到。实体的类型、可见与特征
+ * 全部来自感知读端的同一份实体观察：找东西说"没有看得见的"与 observe 列得出同一只，
+ * 是同一条事实一个实现，两边永远不会各说各话。有名字、被驯服、拴着绳、圈养着的实体
+ * 照常报告，但带保护事实，不冒充"无主的找到了"。
  */
 final class LiveFinder implements FindsAround {
 
@@ -57,6 +58,7 @@ final class LiveFinder implements FindsAround {
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
+    private final EntitySight entities;
     private final ReadsCreatureSituation creatures;
     private final WorldMemory memory;
     /** 这次要找的方块按维度补登记进扫描索引：没登记的方块索引里查不到。 */
@@ -64,10 +66,11 @@ final class LiveFinder implements FindsAround {
     /** 上一轮所在维度：扫描中换世界，这轮作废，不冒充结论。 */
     private String lastDimension;
 
-    LiveFinder(BlockScanService scans, Supplier<PlayerContext> context,
+    LiveFinder(BlockScanService scans, Supplier<PlayerContext> context, EntitySight entities,
             ReadsCreatureSituation creatures, WorldMemory memory) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
+        this.entities = Objects.requireNonNull(entities, "entities");
         this.creatures = Objects.requireNonNull(creatures, "creatures");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.registered = new ScanTargets(scans);
@@ -91,7 +94,7 @@ final class LiveFinder implements FindsAround {
         BlockPos center = player.blockPosition();
         return switch (input.kind()) {
             case BLOCK -> scanBlocks(input, level, player, center);
-            case ENTITY -> scanEntities(input, level, player, center);
+            case ENTITY -> scanEntities(input, center);
             case STRUCTURE -> structureLeads(input, center, dimension);
         };
     }
@@ -152,58 +155,65 @@ final class LiveFinder implements FindsAround {
                 ? "长在树上" : "不是树上长的（房子、木屋、栅栏柱这类搭出来的原木）");
     }
 
-    /** 找实体：渲染范围内按类型数一遍，多部件折叠到主体，受保护的带保护事实。 */
-    private Round scanEntities(FindInput input, ClientLevel level, LocalPlayer player, BlockPos center) {
-        Set<EntityType<?>> wanted = new HashSet<>();
+    /** 找实体：读感知的实体观察（与 observe 同一份），按类型与半径筛，多部件折叠已在读端做过。 */
+    private Round scanEntities(FindInput input, BlockPos center) {
+        Set<String> wanted = new HashSet<>();
         for (String selector : input.selectors()) {
-            LiveWorldTypes.entityTypeOf(selector).ifPresent(wanted::add);
+            // 参数阶段校验过 ID：这里换成注册表的规范写法，与观察里的类型 ID 对得上。
+            LiveWorldTypes.entityTypeOf(selector)
+                    .map(type -> EntityType.getKey(type).toString())
+                    .ifPresent(wanted::add);
         }
+        return entityRound(entities.nearby(), wanted, center, input.radius(),
+                uuid -> uuid == null ? Optional.empty() : creatures.situationOf(UUID.fromString(uuid)));
+    }
+
+    /**
+     * 把一轮实体观察筛成寻找的收成：类型与半径对得上、看得见的算命中，看不见的记进被挡住的线索。
+     * 纯计算，离线可测；观察从感知读端来，找东西说"没有看得见的"时它看到的清单与 observe 同一份。
+     */
+    static Round entityRound(List<EntitySight.Observation> nearby, Set<String> wanted, BlockPos center,
+            int radius, Function<String, Optional<ReadsCreatureSituation.CreatureSituation>> situations) {
         List<Hit> hits = new ArrayList<>();
         Set<Integer> seen = new HashSet<>();
-        double reach = (double) input.radius() * input.radius();
+        double reach = (double) radius * radius;
         int hidden = 0;
         BlockPos nearestHidden = null;
         double nearestHiddenDistance = 0;
-        for (Entity entity : level.entitiesForRendering()) {
-            // 角色自己不算目标；部件不是一条：末影龙的身子各段折到主体，一条就是一条。
-            if (entity == player || entity.isRemoved() || entity instanceof EnderDragonPart) {
+        for (EntitySight.Observation entity : nearby) {
+            if (!wanted.contains(entity.type())) {
                 continue;
             }
-            if (!wanted.contains(entity.getType())) {
-                continue;
-            }
-            if (entity.blockPosition().distSqr(center) > reach) {
+            BlockPos position = new BlockPos(entity.position().x(), entity.position().y(), entity.position().z());
+            if (position.distSqr(center) > reach) {
                 continue;
             }
             // 被墙挡住的实体不冒充看见：跑过去或看得见了再算；但记下有几只、最近一只在哪，
             // 找不够时交代出去（真人听得见山那边的羊叫，知道往哪边走），不让结论读成"附近没有"。
-            if (!ObservationVisibility.entity(player, entity)) {
+            if (!entity.visible()) {
                 hidden++;
-                double distance = Math.sqrt(entity.blockPosition().distSqr(center));
+                double distance = Math.sqrt(position.distSqr(center));
                 if (nearestHidden == null || distance < nearestHiddenDistance) {
-                    nearestHidden = entity.blockPosition();
+                    nearestHidden = position;
                     nearestHiddenDistance = distance;
                 }
                 continue;
             }
-            if (!seen.add(entity.getId())) {
+            if (!seen.add(entity.entityId())) {
                 continue;
             }
             boolean creatureProtected = false;
             String reason = null;
-            Optional<ReadsCreatureSituation.CreatureSituation> situation =
-                    creatures.situationOf(entity.getUUID());
+            Optional<ReadsCreatureSituation.CreatureSituation> situation = situations.apply(entity.uuid());
             if (situation.isPresent() && situation.get().bondedToSomeone()) {
                 creatureProtected = true;
                 reason = protectionWord(situation.get());
             }
             // 看得出的特征一并交出去：羊是什么毛色、是不是幼崽，LLM 才挑得出要打要剪的是哪一只。
-            hits.add(new Hit(FindInput.FindKind.ENTITY,
-                    EntityType.getKey(entity.getType()).toString(),
-                    WorldPosition.here(entity.getBlockX(), entity.getBlockY(), entity.getBlockZ()),
-                    entity.getId(), creatureProtected, reason, ClientEntitySight.traits(entity)));
+            hits.add(new Hit(FindInput.FindKind.ENTITY, entity.type(), entity.position(),
+                    entity.entityId(), creatureProtected, reason, entity.traits()));
         }
-        // 实体清单一刻读得完：这轮就是全部，如实报扫完。
+        // 观察一刻读得完：这轮就是全部，如实报扫完。
         String hiddenLead = hidden == 0 ? null : "范围内另有 " + hidden + " 只被挡住、看不见，最近一只在 ("
                 + nearestHidden.getX() + ", " + nearestHidden.getY() + ", " + nearestHidden.getZ() + ")，约 "
                 + Math.round(nearestHiddenDistance) + " 格，走过去看得见了再找";
@@ -211,7 +221,7 @@ final class LiveFinder implements FindsAround {
     }
 
     // 有名字、被驯服、拴着绳、圈养着，占哪条就写哪条：照常报告，但能不能动归许可。
-    private String protectionWord(ReadsCreatureSituation.CreatureSituation situation) {
+    private static String protectionWord(ReadsCreatureSituation.CreatureSituation situation) {
         List<String> reasons = new ArrayList<>();
         if (situation.named()) reasons.add("有名字");
         if (situation.tamed()) reasons.add("被驯服");

@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.animal.Sheep;
+import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
@@ -54,6 +55,10 @@ public final class ClientEntitySight implements EntitySight {
             if (entity == player || entity.isRemoved()) {
                 continue;
             }
+            // 末影龙的身子各段不是一条实体：折到龙主体一条，与找东西、战斗认的是同一只。
+            if (entity instanceof EnderDragonPart) {
+                continue;
+            }
             // 活体生物的血量是看得见的观察事实：按原版的LivingEntity读当前值与上限，
             // 末影龙这类boss也走同一条路；掉落物、矿车这些不是活体，不报血量。
             EntitySight.Health health = entity instanceof LivingEntity living
@@ -63,6 +68,7 @@ public final class ClientEntitySight implements EntitySight {
                     entity.getId(),
                     BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
                     entity.hasCustomName() ? entity.getCustomName().getString() : null,
+                    entity.getStringUUID(),
                     WorldPosition.here((int) Math.floor(entity.getX()),
                             (int) Math.floor(entity.getY()), (int) Math.floor(entity.getZ())),
                     ObservationVisibility.entity(player, entity),

@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.explore.ClientEnderEyes;
+import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.interaction.ClientItemFrameHits;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
@@ -567,8 +568,9 @@ public final class AbilityCatalog {
 
         // 寻找：方块与实体扫已加载区，结构查记过的产地线索；命中直接在场景的观察编号表上领编号。
         // 要塞附近没有线索时扔末影之眼指路：换手、捡回落下的眼、走一段都用共用的那一套。
-        registry.register(FindModule.live(deps.context(), deps.blockScans(), deps.creatures(), deps.memory(),
-                deps.scene(), new ClientEnderEyes(deps.context(), deps.walks(), shared.toMainhand(), shared.drops())));
+        registry.register(FindModule.live(deps.context(), deps.blockScans(), new ClientEntitySight(deps.context()),
+                deps.creatures(), deps.memory(), deps.scene(),
+                new ClientEnderEyes(deps.context(), deps.walks(), shared.toMainhand(), shared.drops())));
 
         // 探索：观察推进与走行段在探索走行里，发现落进世界记忆并经事件出口告诉宿主。
         registry.register(ExploreAbility.live(deps.context(), deps.blockScans(), deps.walks(),
