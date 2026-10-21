@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 收床会让重生点失效，家里的床留着当重生点。收床被打断（自卫撤离、去吃东西）不算收不了：处理完回来，
  * 先重新走到床边再挖。实在收不了时如实结束，并交代床留在哪、重生点是不是改到了那里。
  * 睡着就是在做这件事，等多久都不算卡住；夜里被挨打、着火叫醒，处理完还是夜里就回床上接着睡，不收床、不回站位。
+ * 觉已经睡成的，醒来后的收尾（收床、回站位）走不完只算没做完的遗留，不把整夜改判成失败。
  */
 final class NightRestTask extends SleepTask implements AnnouncesFinish {
 
@@ -96,9 +97,10 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         return switch (phase) {
             // 收床：走到床的那一格，挖掉、捡起掉出来的床。
             case COLLECT_BED -> collects.collect(cellsToCollect.getFirst(), permissions).orElse(null);
-            // 回站位：走到睡前站的那一格附近。
-            case WALK_BACK -> approaches.toward(ApproachTarget.ofBlock(
-                    new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())), permissions);
+            // 回站位：走到睡前站的那一格附近。睡前没记下站位（整夜没落地过）：没处可回，就不开走路这段。
+            case WALK_BACK -> homeSpot == null ? null
+                    : approaches.toward(ApproachTarget.ofBlock(
+                            new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())), permissions);
             default -> super.enter(phase);
         };
     }
@@ -174,6 +176,23 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         return Next.go(Phase.WALK_BACK, "睡不成，先回到原来的站位");
     }
 
+    // 睡已经睡成了，这一夜的主要目标已达成：醒来后的收尾（收床、回站位）走不完时，
+    // 不再把整夜改判成失败——实机睡着跳了夜，收场句却是"睡觉没有完成：走向站位 600 刻无进展"，
+    // 调用方会误以为没睡成而下重目标。收尾没做完的如实带在结论与遗留里。
+    private Next<Phase> concludeSlept(Problem tailProblem) {
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "醒来后收尾没做完：" + tailProblem.headline())
+                .problem(tailProblem)
+                .remaining("回到原来的站位")
+                .build());
+    }
+
+    // 卡住、超时判下来时先问一次：觉已经睡完的就照睡成的样子收场，收尾没做完带在结论里；
+    // 还没睡上就卡住的（去床的路上、点床之前）照常按失败交代。
+    @Override
+    protected Next<Phase> beforeGivingUp(Problem problem) {
+        return enteredSleep() ? concludeSlept(problem) : null;
+    }
+
     // 等自然醒：睡着时不动；醒来后等实体包与时间包对齐，再起身收床回位。
     @Override
     protected Next<Phase> tickWaitWake(TickContext context) {
@@ -224,9 +243,13 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
             return Next.stay();
         }
         if (status instanceof ActionStatus.Failed failed) {
+            Problem why = failed.problem();
+            if (enteredSleep()) {
+                // 床没收回来，但觉已经睡完：照睡成的样子收场；床留在哪、重生点改没改由收尾注记交代。
+                return concludeSlept(new Problem(why.kind(), "床没收回来：" + why.message(), why.suggestion()));
+            }
             // 实在收不了（走不到跟前、挖不下来）：如实结束，说清床留在哪、重生点改没改，
             // 不然 LLM 会以为床还在身上或放在了家里（实机 10-15 回家找了两次）。
-            Problem why = failed.problem();
             String left = bedLeftBehind();
             return Next.fail(new Problem(why.kind(), "床没收回来：" + why.message()
                     + (left == null ? "" : "；" + left), why.suggestion()));
@@ -249,13 +272,24 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     }
 
     // 回到睡前的站位：走回去了这一夜才算结束；回不去如实说，别让主任务在新地点悄悄续上。
+    // 睡前没记下站位时没有走路这段：没处可回就当已经到了。
     @Override
     protected Next<Phase> tickWalkBack(TickContext context) {
+        if (action() == null) {
+            return deferredFailure != null ? Next.fail(deferredFailure)
+                    : Next.done(TaskResult.done(sleptTillMorning ? "睡了一夜，醒来到回了原来的位置"
+                            : "睡醒了，回到原来的位置"));
+        }
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) {
             return Next.stay();
         }
         if (status instanceof ActionStatus.Failed failed) {
+            // 觉已经睡完、回站位这步走不完：照睡成的样子收场，不再把整夜改判成失败；
+            // 睡前就攒下的失败（deferredFailure）照旧如实交代。
+            if (enteredSleep() && deferredFailure == null) {
+                return concludeSlept(failed.problem());
+            }
             return deferredFailure != null ? Next.fail(deferredFailure) : Next.fail(failed.problem());
         }
         return deferredFailure != null ? Next.fail(deferredFailure)

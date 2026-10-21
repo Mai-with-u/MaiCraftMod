@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.kernel.interrupt.InterruptRule;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickResult;
@@ -641,6 +642,67 @@ class SleepTaskTest {
         }
         assertEquals(List.of(BED_A, BED_A), approaches.targets, "走回同一张床");
         assertEquals(List.of(BED_A, BED_A), usesBeds.clicked, "重新躺下");
+    }
+
+    @Test
+    void sleptNightFinishesEvenWhenThereNowhereToWalkBackTo() {
+        // 睡成了就要按睡成收场：醒后回站位这段开不起来（睡前没记下站位）时，结论仍是"睡醒了"，
+        // 明细带 entered_sleep，不能因为没有收尾就把整夜报成失败。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        boolean[] asleep = {true};
+        boolean[] windowOpen = {true};
+        NightRestTask rest = new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner,
+                new StubPlacer(), new StubObtain(), new StubApproaches(), usesBeds, () -> null, Optional::empty,
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(),
+                moment -> asleep[0], moment -> windowOpen[0], new HashSet<>(), new NightRestReports(() -> 1));
+        TickContext context = tick();
+        rest.start(context);
+        TaskResult result = null;
+        for (int i = 0; i < 200 && result == null; i++) {
+            if (usesBeds.clicked.size() == 1) {
+                // 天亮自然醒：窗口关上，睡着标记撤掉，走醒后收床回站位那一段。
+                windowOpen[0] = false;
+                asleep[0] = false;
+            }
+            if (rest.tick(context) instanceof TickResult.Finished finished) {
+                result = finished.result();
+            }
+        }
+        assertEquals(List.of(BED_A), usesBeds.clicked, "躺下过一次");
+        assertInstanceOf(TaskResult.class, result, "两百刻内要收场");
+        assertEquals(TaskResult.Status.DONE, result.status());
+        SleepDetails details = assertInstanceOf(SleepDetails.class, result.details());
+        assertTrue(details.enteredSleep(), "结论与物理结果同源：躺下过");
+    }
+
+    @Test
+    void givingUpAfterSleepingReportsTheNightAsSlept() {
+        // 实机 10-21：睡是睡成了（夜里时间跳到次日），卡住判定却把整夜改判成
+        // "睡觉没有完成：走向站位 600 刻无进展"，调用方误以为没睡成。收尾途中卡住时，
+        // 觉已睡成的按"睡了、收尾没做完"收场；还没睡上的照常按失败交代。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        boolean[] asleep = {false};
+        NightRestTask rest = nightRest(scanner, new StubPlacer(), new StubObtain(), new StubApproaches(),
+                new StubUsesBeds(), Optional::empty, moment -> asleep[0]);
+        TickContext context = tick();
+        rest.start(context);
+        assertNull(rest.beforeGivingUp(Problem.of(Problem.Kind.STUCK, "回站位的路走不完", null)),
+                "还没睡上：照常按失败收场");
+        runTicks(rest, 5);
+        Next<NightRestTask.Phase> aftercare = rest.beforeGivingUp(
+                Problem.of(Problem.Kind.STUCK, "自「正在走向站位 270, 76, -330」之后推进了 600 刻都没有新进展", null));
+        Next.Done<NightRestTask.Phase> done = assertInstanceOf(Next.Done.class, aftercare, "睡成了不再改判失败");
+        TaskResult result = done.result();
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertTrue(result.summary().contains("收尾没做完"), result.summary());
+        assertEquals("回到原来的站位", result.remaining().getFirst());
+        // 明细（entered_sleep）由基类在收场时补进结果；这里直接确认任务自己知道躺下过。
+        assertTrue(rest.enteredSleep());
     }
 }
 
