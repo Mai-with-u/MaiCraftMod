@@ -60,12 +60,19 @@ final class LightingFakes {
         }
     }
 
-    /** 亮度替身：直接查表；没记录的格是 0。 */
+    /** 亮度替身：直接查表；没记录的格方块光是 0，天空光当头顶遮着。 */
     static final class FakeLights implements ReadsLightLevels {
         final Map<BlockPos, Integer> values = new HashMap<>();
+        /** 天空光表：记了的格按表答，没记的格当头顶遮着（0）。 */
+        final Map<BlockPos, Integer> sky = new HashMap<>();
 
         FakeLights light(BlockPos pos, int level) {
             values.put(pos.immutable(), level);
+            return this;
+        }
+
+        FakeLights sky(BlockPos pos, int level) {
+            sky.put(pos.immutable(), level);
             return this;
         }
 
@@ -74,9 +81,10 @@ final class LightingFakes {
             return value == null ? OptionalInt.of(0) : OptionalInt.of(value);
         }
 
-        // 天空光：替身场景都当头顶遮着。
+        // 天空光：表里记了的按表答，没记的格当头顶遮着。
         @Override public OptionalInt skyLight(BlockPos pos) {
-            return OptionalInt.of(0);
+            Integer value = sky.get(pos.immutable());
+            return value == null ? OptionalInt.of(0) : OptionalInt.of(value);
         }
     }
 

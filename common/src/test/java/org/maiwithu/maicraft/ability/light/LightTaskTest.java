@@ -86,12 +86,24 @@ class LightTaskTest {
         final List<BlockPos> walkedTo = new ArrayList<>();
         /** 施工走近灯位时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
         Action approach;
+        /** 天光直照的格：这些格的天空光是 15（头顶没遮），其余格都当头顶遮着。 */
+        final Set<BlockPos> skyOpen = new HashSet<>();
 
         Fake ground(int from, int to) {
             for (int x = from; x <= to; x++) {
                 for (int z = from; z <= to; z++) {
                     world.put(new BlockPos(x, 63, z), STONE);
                     loadedColumns.add(new BlockPos(x, 64, z));
+                }
+            }
+            return this;
+        }
+
+        /** 标一圈天光直照的露天格（比如封顶结构外面的地表与屋顶面）。 */
+        Fake openToSky(int fromX, int toX, int y, int fromZ, int toZ) {
+            for (int x = fromX; x <= toX; x++) {
+                for (int z = fromZ; z <= toZ; z++) {
+                    skyOpen.add(new BlockPos(x, y, z).immutable());
                 }
             }
             return this;
@@ -188,10 +200,10 @@ class LightTaskTest {
             return OptionalInt.of(brightest);
         }
 
-        // 天空光：这些场景都在地下，头顶遮着。
+        // 天空光：头顶没遮的格是 15（天光直照），其余格都当遮着；没加载如实给空。
         @Override public OptionalInt skyLight(BlockPos pos) {
             if (!loadedColumns.contains(new BlockPos(pos.getX(), 64, pos.getZ()))) return OptionalInt.empty();
-            return OptionalInt.of(0);
+            return OptionalInt.of(skyOpen.contains(pos.immutable()) ? 15 : 0);
         }
 
         private static int manhattan(BlockPos a, BlockPos b) {
@@ -320,6 +332,52 @@ class LightTaskTest {
         LightDetails details = (LightDetails) result.details();
         assertEquals(0, details.placed());
         assertEquals("minecraft:torch", details.source(), "没给 item 默认火把");
+    }
+
+    @Test
+    void 整片天光直照_如实说不用补灯_不说开始时已满足() {
+        // 封顶结构顶上量一圈：能站的格全在露天，头顶没遮挡的格不是验收样本，一支灯都不插。
+        Fake fake = new Fake().ground(-2, 2).openToSky(-2, 2, 64, -2, 2);
+        TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("天光直照"), result.summary());
+        assertFalse(result.summary().contains("开始时已满足"), result.summary());
+        assertTrue(result.changes().isEmpty(), "零动作");
+        LightDetails details = (LightDetails) result.details();
+        assertEquals(0, details.samples(), "露天格不进验收样本");
+        assertEquals(1, details.unlit().size());
+        assertEquals(LightDetails.OPEN_SKY, details.unlit().getFirst().reason());
+    }
+
+    @Test
+    void 封顶暗屋_露天屋顶面不当样本_灯不往屋顶外插() {
+        Fake fake = new Fake().ground(-4, 4);
+        // 屋顶外面（9×9 里圈 5×5 之外的地表）与屋顶上面那层天光直照；屋里的格头顶有遮挡。
+        for (int x = -4; x <= 4; x++) {
+            for (int z = -4; z <= 4; z++) {
+                if (Math.abs(x) > 2 || Math.abs(z) > 2) fake.skyOpen.add(new BlockPos(x, 64, z).immutable());
+                fake.skyOpen.add(new BlockPos(x, 67, z).immutable());
+            }
+        }
+        // 中间 5×5 有一间封顶小屋：屋顶在 y=66，屋里的格（y=64、65）头顶有遮挡，照旧是验收样本。
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                fake.world.put(new BlockPos(x, 66, z), Blocks.COBBLESTONE.defaultBlockState());
+            }
+        }
+        fake.carried.put("minecraft:torch", 64);
+        TaskResult result = run(task(input(3, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        LightDetails details = (LightDetails) result.details();
+        assertTrue(details.placed() > 0, "屋里暗，插了灯：" + result.summary());
+        // 插下的每支灯都在屋顶有遮挡的里面：没有一支跑到露天的屋顶面或屋顶上。
+        for (Map.Entry<BlockPos, BlockState> entry : fake.world.entrySet()) {
+            if (entry.getValue().is(Blocks.TORCH)) {
+                assertFalse(fake.skyOpen.contains(entry.getKey().immutable()),
+                        "灯插到了露天格：" + entry.getKey());
+                assertTrue(entry.getKey().getY() <= 65, "灯插到了屋顶上面：" + entry.getKey());
+            }
+        }
     }
 
     @Test

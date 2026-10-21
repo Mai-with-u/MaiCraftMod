@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Set;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -129,5 +130,46 @@ class LightSurveyorTest {
                 List.of(new LightSample(at(5, 64, 5), SampleRules.SampleKind.WALKABLE)));
         while (!recheck.tick()) { }
         assertNull(recheck.result().getFirst().light(), "没加载的格不猜");
+    }
+
+    @Test
+    void 天光直照的露天格不进样本_记进露天名单() {
+        // 封顶结构顶上量一圈的形态：屋顶面那格能站、天光直照——它不该当验收样本。
+        LightingFakes.FakeWorld world = new LightingFakes.FakeWorld();
+        world.floor(STONE, 63, 0, 1, 0, 0);
+        world.put(at(0, 66, 0), STONE);
+        LightingFakes.FakeLights lights = new LightingFakes.FakeLights()
+                .sky(at(0, 64, 0), 15).sky(at(1, 64, 0), 0);
+        LightSurveyor.SampleScan scan = new LightSurveyor.SampleScan(world, lights,
+                List.of(at(0, 64, 0), at(1, 64, 0)), false);
+        while (!scan.tick()) { }
+        LightSurveyor.LightSurvey survey = scan.survey();
+        assertTrue(survey.samples().stream().noneMatch(sample -> sample.pos().equals(at(0, 64, 0))),
+                "天光直照的露天格不是验收样本");
+        assertTrue(survey.openSky().contains(at(0, 64, 0)), "露天格记进露天名单");
+        assertTrue(survey.samples().stream().anyMatch(sample -> sample.pos().equals(at(1, 64, 0))),
+                "头顶有遮挡的格照旧进样本");
+    }
+
+    @Test
+    void 封顶走廊_样本只出在内部_露天屋顶面不进样本() {
+        // 1 宽 2 高走廊的形态：走廊里两格（脚 64、头 65）都在屋顶遮挡下，屋顶外面天光直照。
+        LightingFakes.FakeWorld world = new LightingFakes.FakeWorld();
+        world.floor(STONE, 63, 0, 3, 0, 0);
+        for (int x = 0; x <= 1; x++) {
+            world.put(at(x, 66, 0), STONE);
+        }
+        LightingFakes.FakeLights lights = new LightingFakes.FakeLights();
+        for (int x = 0; x <= 3; x++) {
+            lights.sky(at(x, 64, 0), x <= 1 ? 0 : 15);
+        }
+        LightSurveyor.SampleScan scan = new LightSurveyor.SampleScan(world, lights,
+                List.of(at(0, 64, 0), at(1, 64, 0), at(2, 64, 0), at(3, 64, 0)), false);
+        while (!scan.tick()) { }
+        LightSurveyor.LightSurvey survey = scan.survey();
+        assertEquals(List.of(at(0, 64, 0), at(1, 64, 0)),
+                survey.samples().stream().map(LightSample::pos).toList(),
+                "样本只出在封顶走廊内部");
+        assertEquals(Set.of(at(2, 64, 0), at(3, 64, 0)), survey.openSky(), "屋顶外表面记成露天");
     }
 }

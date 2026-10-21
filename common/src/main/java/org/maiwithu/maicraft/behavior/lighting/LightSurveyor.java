@@ -27,11 +27,18 @@ public final class LightSurveyor {
     /** 采样窗口：从列的基准高度向下、向上各看多少格。 */
     static final int WINDOW = 6;
 
+    /** 原始天空光的满档：一格头顶没有任何遮挡时天空光就是这个值，说明这格在天光直照下。 */
+    static final int SKY_LIT = 15;
+
     private LightSurveyor() {}
 
-    /** 量出来的现场：冻结的样本、采样时的方块光、敏感面、没加载的列。 */
+    /**
+     * 量出来的现场：冻结的样本、采样时的方块光、敏感面、没加载的列、露天格。
+     * 露天格（天光直照）不是验收样本：它们的白天亮暗由太阳管，补灯只管头顶有遮挡的封闭格，
+     * 不然站在封顶结构顶上量一圈，把屋顶外面的天光格当样本，封闭的暗格一间都量不到。
+     */
     public record LightSurvey(List<LightSample> samples, Map<BlockPos, Integer> lights,
-                              Set<BlockPos> sensitive, Set<BlockPos> unloaded) {}
+                              Set<BlockPos> sensitive, Set<BlockPos> unloaded, Set<BlockPos> openSky) {}
 
     /** 复测出的一格：光等级；格没加载时为 null，不猜。 */
     public record Measured(BlockPos pos, SampleRules.SampleKind kind, Integer light) {}
@@ -51,6 +58,7 @@ public final class LightSurveyor {
         private final Map<BlockPos, Integer> values = new LinkedHashMap<>();
         private final Set<BlockPos> sensitive = new LinkedHashSet<>();
         private final Set<BlockPos> unloaded = new LinkedHashSet<>();
+        private final Set<BlockPos> openSky = new LinkedHashSet<>();
 
         public SampleScan(LightingWorld world, ReadsLightLevels lights, List<BlockPos> columns, boolean cropsOnly) {
             this.world = world;
@@ -77,7 +85,7 @@ public final class LightSurveyor {
         /** 扫完后的现场；没扫完时是已扫到的部分，不能当成全部。 */
         public LightSurvey survey() {
             return new LightSurvey(List.copyOf(samples), Map.copyOf(values),
-                    Set.copyOf(sensitive), Set.copyOf(unloaded));
+                    Set.copyOf(sensitive), Set.copyOf(unloaded), Set.copyOf(openSky));
         }
 
         /** 扫一列，返回读掉的格数。 */
@@ -102,7 +110,14 @@ public final class LightSurveyor {
                     classifyCrop(at, state, above);
                 } else if (SampleRules.passable(state) && SampleRules.passable(above)
                         && world.sturdy(at.below(), Direction.UP)) {
-                    addSample(at, SampleRules.SampleKind.WALKABLE);
+                    // 能站的格先看头顶：天光直照的露天格不进验收样本（夜里暗是昼夜的事，不是缺灯），
+                    // 头顶有遮挡的格才量方块光、才判暗——补光管的是封顶结构里面。
+                    OptionalInt sky = lights.skyLight(at);
+                    if (sky.isPresent() && sky.getAsInt() >= SKY_LIT) {
+                        openSky.add(at);
+                    } else {
+                        addSample(at, SampleRules.SampleKind.WALKABLE);
+                    }
                 }
             }
             return reads;

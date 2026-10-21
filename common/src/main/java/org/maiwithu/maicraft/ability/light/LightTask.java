@@ -150,6 +150,8 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             for (LightSample sample : fresh.samples()) byPosition.put(sample.pos(), sample);
             Set<BlockPos> sensitive = new LinkedHashSet<>(survey.sensitive());
             sensitive.addAll(fresh.sensitive());
+            Set<BlockPos> openSky = new LinkedHashSet<>(survey.openSky());
+            openSky.addAll(fresh.openSky());
             for (Map.Entry<BlockPos, Integer> entry : fresh.lights().entrySet()) {
                 lights.put(entry.getKey(), entry.getValue());
             }
@@ -159,7 +161,7 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             unloaded.removeAll(rescanned);
             unloaded.addAll(fresh.unloaded());
             survey = new LightSurveyor.LightSurvey(new ArrayList<>(byPosition.values()),
-                    Map.copyOf(lights), sensitive, unloaded);
+                    Map.copyOf(lights), sensitive, unloaded, openSky);
         }
     }
 
@@ -236,6 +238,12 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             return Next.go(Phase.MEASURE, "有样本没加载，走过去让它加载");
         }
         if (obs.survey().samples().isEmpty()) {
+            // 能站的格全是天光直照的露天格（比如人站在封顶结构的顶上量一圈）：
+            // 这些格白天亮夜里暗是昼夜的事，补灯管不着也不该管；要照封闭的里面，得先走进去。
+            if (!obs.survey().openSky().isEmpty()) {
+                return Next.done(TaskResult.done("量到的 " + obs.survey().openSky().size()
+                        + " 格都在天光直照下（露天），不用补灯；要照封顶结构的里面，先走进去再下达一次"));
+            }
             return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
                     "查过的范围里没有能站住验收亮度的样本（走了一整遍，整片都站不进或没加载走不到）",
                     "换一个 target 或给一个小一点的 radius 再试"));
@@ -594,6 +602,7 @@ final class LightTask extends PhasedTask<LightTask.Phase> implements HandlesOwnL
             appendGroup(groups, LightDetails.PROTECTED, List.copyOf(selection.onlyProtected()));
         }
         appendGroup(groups, LightDetails.UNLOADED, unloadedSamples());
+        appendGroup(groups, LightDetails.OPEN_SKY, List.copyOf(obs.survey().openSky()));
         double ratio = checked == 0 ? 0.0 : (double) lit / checked;
         String source = lamp == null
                 ? (input.item() == null ? "minecraft:torch" : input.item()) : lamp.itemId();

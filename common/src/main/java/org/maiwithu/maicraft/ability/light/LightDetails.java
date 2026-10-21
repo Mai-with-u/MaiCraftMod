@@ -25,8 +25,9 @@ public record LightDetails(String source, int samples, int lit, Double coverageA
         }
     }
 
-    /** 分组原因：找不到能放的灯位 / 受保护插不得 / 没加载走不到。 */
+    /** 分组原因：找不到能放的灯位 / 受保护插不得 / 没加载走不到 / 天光直照的露天格（不进验收样本）。 */
     public static final String NO_SITE = "no_site";
     public static final String PROTECTED = "protected";
     public static final String UNLOADED = "unloaded";
+    public static final String OPEN_SKY = "open_sky";
 }
