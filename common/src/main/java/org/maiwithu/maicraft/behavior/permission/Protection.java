@@ -146,11 +146,37 @@ public final class Protection {
     }
 
     /**
+     * 归属记录里写着这一格是别人放的：睡过的床收回前用它挡住确实是别人的床（角色睡过一张村民的床，
+     * 不等于床就是角色的）。记录没问到、或问到了又没写着谁放的，都不算——那两种由收回来源按"睡过的床"的规矩办。
+     */
+    public boolean placedByAnotherPlayer(WorldPosition position) {
+        return ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z())
+                .map(placedBy -> !placedBy.playerId().equals(selfPlayerId))
+                .orElse(false);
+    }
+
+    /**
      * 这一格的归属问到了没有：没问到时记下要问，过一两刻再来看。收回自己放下的东西前先等它问到，
      * 拿不准是不是自己放的就不动。
      */
     public boolean ownershipKnown(WorldPosition position) {
         return ownership.known(position.dimension(), position.x(), position.y(), position.z());
+    }
+
+    /**
+     * 角色自己睡过的床受不受保护（收回它的时候问）：亲手睡过是"这是自己用的"的直接证据，
+     * 归属记录没问到、没写着谁放的，都不按受保护算——野外那张自己放下再睡的床，放下记录本就可能不在了；
+     * 玩家放置推断这一路也跳过，同一格床像不像玩家放的说明不了它是不是别人的。
+     * 归属记录写着是别人放的、记住的区域、额外保护的地标，照旧算受保护。
+     */
+    public boolean sleptBedProtected(WorldPosition position, Set<String> protectedLandmarks) {
+        Optional<ReadsBlockOwnership.PlacedBy> placedBy =
+                ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
+        if (placedBy.isPresent()) return !placedBy.get().playerId().equals(selfPlayerId);
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) return true;
+        }
+        return inProtectedLandmark(position, protectedLandmarks);
     }
 
     /**

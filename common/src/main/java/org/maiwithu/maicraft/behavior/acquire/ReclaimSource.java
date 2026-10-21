@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryOrigin;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -28,7 +29,9 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 要它时走过去挖下来捡进包，按路程算代价——床落在野外一百多格外，走回去拆回来比打羊、去远处打鱿鱼现做省事。
  *
  * <p>候选是世界记忆里记着的工作站（睡过的床、用过或看见过的工作台、熔炉），动手前到现场核对：
- * 那一格还是那个方块才算。别人放的、没有归属记录的不动；归属还没问到就等它问到，拿不准不动；
+ * 那一格还是那个方块才算。台子和炉子要归属记录写着自己才收；床放宽一档——自己睡过的床也收
+ * （野外睡过一晚的那张床是自己放下再睡的，但放下动作发生在更早的会话时归属记录未必还在），
+ * 归属记录写着是别人放的不收。归属还没问到就等它问到，拿不准不动；
  * 放在记住的"家"附近的不收——家里的床是重生点，家里的台子、炉子是摆好用的。
  * 挖那一格照许可检查点的规矩来（自己放的东西 temporary 档也能收回）。
  */
@@ -76,7 +79,7 @@ public final class ReclaimSource implements ItemSource {
             return new SourceQuote.Offer(describe(), found.spots().size(),
                     new AcquisitionCost(nearest.distance(), 1),
                     "走到 " + nearest.at().x() + ", " + nearest.at().y() + ", " + nearest.at().z()
-                            + " 把自己放下的 " + nearest.blockType() + " 挖下来收进包");
+                            + " 把自己的 " + nearest.blockType() + " 挖下来收进包");
         }
         // 记得的那几处归属还没问到：等一两刻再问，不把"还不知道是谁放的"当成"不是自己的"。
         if (found.pending() > 0) {
@@ -85,8 +88,9 @@ public final class ReclaimSource implements ItemSource {
         if (found.refusal() != null) {
             return new SourceQuote.NeedsApproval(describe(), found.refusal());
         }
-        return new SourceQuote.Unavailable(describe(), "半径 " + (int) radius(context) + " 格内没有记得的、自己放下还在原处的"
-                + request.wanted().describe() + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的不收）");
+        return new SourceQuote.Unavailable(describe(), "半径 " + (int) radius(context) + " 格内没有记得的、"
+                + "自己放下或自己睡过的还在原处的" + request.wanted().describe()
+                + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的不收）");
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -104,7 +108,8 @@ public final class ReclaimSource implements ItemSource {
     /** 找候选的结论：收得回的几处（近的在前）、归属还没问到的几处、被许可挡下的第一个原因。 */
     private record Candidates(List<Spot> spots, int pending, Problem refusal) {}
 
-    // 记得的工作站里挑：是要的东西、收得回的种类、现场还是那个方块、不在家附近、归属问到了且是自己放的、许可准挖。
+    // 记得的工作站里挑：是要的东西、收得回的种类、现场还是那个方块、不在家附近、是自己放的（床放宽到
+    // 自己睡过的也行：放下动作可能发生在更早的会话，归属记录未必还在；记录写着是别人放的不收）、许可准挖。
     private Candidates candidates(ItemRequest request, SourceContext context) {
         List<Spot> spots = new ArrayList<>();
         int pending = 0;
@@ -116,13 +121,23 @@ public final class ReclaimSource implements ItemSource {
             if (!request.wanted().matches(type, tags.tagsOf(type))) continue;
             WorldPosition at = record.position();
             if (!type.equals(blocks.blockTypeAt(at).orElse(null)) || protection.insideHome(at)) continue;
-            if (!protection.ownershipKnown(at)) {
-                pending++;
-                continue;
+            // 记忆里亲手睡过的床是自己的：不用等归属问到、也不看是不是写着自己放的，
+            // 只有记录写明是别人放的才让开（睡过一张村民的床不等于床是自己的）。
+            boolean sleptIn = type.endsWith("_bed") && record.origin() == MemoryOrigin.USED;
+            if (sleptIn) {
+                if (protection.placedByAnotherPlayer(at)) continue;
+            } else {
+                if (!protection.ownershipKnown(at)) {
+                    pending++;
+                    continue;
+                }
+                if (!protection.selfPlaced(at)) continue;
             }
-            if (!protection.selfPlaced(at)) continue;
-            Optional<Problem> refused = permission.blockAllowed(context.permissions(),
-                    PermissionCheck.WorldAction.DIG_BLOCK, at, type);
+            Optional<Problem> refused = sleptIn
+                    // 睡过的床按"自己用的"判保护与档位，归属没问到也不挡；台子、炉子照许可检查点的常例。
+                    ? permission.sleptBedReclaimAllowed(context.permissions(), at)
+                    : permission.blockAllowed(context.permissions(),
+                            PermissionCheck.WorldAction.DIG_BLOCK, at, type);
             if (refused.isPresent()) {
                 if (refusal == null) refusal = refused.get();
                 continue;

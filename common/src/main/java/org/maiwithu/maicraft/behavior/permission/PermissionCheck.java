@@ -95,6 +95,22 @@ public final class PermissionCheck {
     }
 
     /**
+     * 收回自己睡过的床，挖那一格能不能动：床是角色亲手睡过的，这就是"自己用的"的直接证据，
+     * 归属记录没问到、没写着谁放的都不按受保护挡（别的保护来路见 {@link #blockAllowed}）；
+     * 许可档位上按自己放的东西算，temporary 档也放行收回。是别人放的床在收回来源里已经让开。
+     */
+    public Optional<Problem> sleptBedReclaimAllowed(Permissions permissions, WorldPosition position) {
+        if (protection.sleptBedProtected(position, permissions.protectedLandmarks())) {
+            return Optional.of(protectedBlockRejection(WorldAction.DIG_BLOCK, position, permissions));
+        }
+        // 档位按"收回自己放的"算：temporary 档放行，none 一格都不动。
+        if (permissions.changeBlocks() == Permissions.BlockChanges.NONE) {
+            return Optional.of(tierRejection(permissions, describe(position)));
+        }
+        return Optional.empty();
+    }
+
+    /**
      * 角色自己挑中的一格方块能不能动：先过保护（归属记录、记住的区域、额外地标、玩家放置推断），
      * 再过许可档位。观察编号不用走这里，{@link #allows} 已把点名当许可。
      */

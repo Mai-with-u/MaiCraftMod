@@ -132,6 +132,37 @@ class ReclaimSourceTest {
     }
 
     @Test
+    void 只睡过没有放下记录的床_也收() {
+        // 野外睡过一晚的床：记忆里只有"亲手睡过"一条，放下动作发生在更早的会话、归属记录不在了。
+        // 按能力说明它是收得回的招牌场景——不再等归属问到，也不因"不是自己放的记录"就划掉。
+        placedBed(FIELD_BED, "self");
+        owners.remove(FIELD_BED);
+        unknownOwnership.add(FIELD_BED);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
+        source().begin(new ItemRequest(ANY_BED, 1, "睡觉"), offer, new SourceContext(HERE, Permissions.DEFAULT))
+                .orElseThrow();
+        assertEquals(List.of(new BlockPos(-86, 66, 50)), collected);
+    }
+
+    @Test
+    void 睡过的床_归属记录写着是别人放的_不收() {
+        // 睡过一张村民的床不等于床是自己的：记录写明是别人放的就让开。
+        placedBed(FIELD_BED, "someone");
+        assertInstanceOf(SourceQuote.Unavailable.class, quote(ANY_BED, Permissions.DEFAULT));
+    }
+
+    @Test
+    void 睡过的床只给了临时的档位_也收得回() {
+        // 收回自己放的东西 temporary 档就放行；睡过的床按"自己用的"算，不吃"记录不是自己放的"那一档。
+        placedBed(FIELD_BED, "self");
+        owners.remove(FIELD_BED);
+        unknownOwnership.add(FIELD_BED);
+        Permissions temporary = new Permissions(Permissions.BlockChanges.TEMPORARY, Permissions.Fight.HOSTILE_MOBS,
+                false, Permissions.AnimalKilling.WILD, Permissions.SurvivalNeeds.ON, Set.of());
+        assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, temporary));
+    }
+
+    @Test
     void 家附近的床_不收() {
         placedBed(FIELD_BED, "self");
         places.put("家", WorldPosition.here(-84, 66, 52));
@@ -140,9 +171,14 @@ class ReclaimSourceTest {
 
     @Test
     void 归属还没问到_先等一等再问() {
-        placedBed(FIELD_BED, "self");
-        unknownOwnership.add(FIELD_BED);
-        assertInstanceOf(SourceQuote.NotYet.class, quote(ANY_BED, Permissions.DEFAULT));
+        // 台子、炉子仍要归属记录说话：没问到就等一两刻，不把"还不知道是谁放的"当成"不是自己的"。
+        // 床放宽了这一档——自己睡过的床不用等归属问到（放下记录可能本就不在记忆里）。
+        WorldPosition table = WorldPosition.here(24, 63, 30);
+        memory().rememberWorkstationUsed(table, "minecraft:crafting_table", Instant.now());
+        world.put(table, "minecraft:crafting_table");
+        unknownOwnership.add(table);
+        assertInstanceOf(SourceQuote.NotYet.class,
+                quote(WantedItem.ofItem("minecraft:crafting_table"), Permissions.DEFAULT));
     }
 
     @Test
