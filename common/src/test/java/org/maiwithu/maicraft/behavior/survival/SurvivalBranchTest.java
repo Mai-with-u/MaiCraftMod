@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -92,6 +93,38 @@ class SurvivalBranchTest {
         @Override public void pause() {}
         @Override public TaskResult close(CloseReason reason) { return TaskResult.done("结束"); }
         @Override public String describe() { return "陪着人"; }
+    }
+
+    /** 只用来认身份的任务替身。 */
+    private static final class Named implements Task {
+        @Override public TickResult tick(TickContext context) { return TickResult.RUNNING; }
+        @Override public void pause() {}
+        @Override public TaskResult close(CloseReason reason) { return TaskResult.done("结束"); }
+        @Override public String describe() { return "替身"; }
+    }
+
+    @Test
+    void createTaskFollowsTheBranchUrgencyChose() {
+        // 关掉自动去睡后夜里不能再建夜间休息任务（实机关掉后两夜照睡照跳夜）：
+        // 露天打不过这条分路建的必须是封坑任务；重新打开且有床，建的才是夜间休息。
+        AutoSleep autoSleep = new AutoSleep();
+        NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
+        Task burrow = new Named();
+        Task rest = new Named();
+        boolean[] restAsked = {false};
+        NightfallNeed need = new NightfallNeed(context -> danger, () -> burrow, context -> true,
+                context -> {
+                    restAsked[0] = true;
+                    return rest;
+                }, autoSleep);
+        TickContext tick = TickContext.of(0, null);
+        autoSleep.disable();
+        assertEquals(Urgency.SOON, need.urgency(tick), "关掉后有床也不去睡，露天打不过改封坑");
+        assertSame(burrow, need.createTask(tick), "关掉后夜里建的是封坑任务");
+        assertFalse(restAsked[0], "关掉后不再问夜间休息");
+        autoSleep.enable();
+        assertEquals(Urgency.LATER, need.urgency(tick));
+        assertSame(rest, need.createTask(tick), "打开且有床：建夜间休息");
     }
 
     @Test

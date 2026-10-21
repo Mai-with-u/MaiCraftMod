@@ -71,6 +71,8 @@ public final class NightfallNeed implements SurvivalNeed {
     private final ReadsBedAvailability beds;
     private final NightRestMoves nightRest;
     private final AutoSleep autoSleep;
+    /** 上一回分流给出的急迫程度：创建任务时要按同一条分路走，不能不管分路先问要夜间休息。 */
+    private Urgency lastDecision;
 
     public NightfallNeed(ReadsNight reader, BurrowMoves burrow,
             ReadsBedAvailability beds, NightRestMoves nightRest) {
@@ -98,18 +100,29 @@ public final class NightfallNeed implements SurvivalNeed {
     public Urgency urgency(TickContext context, Task currentTask) {
         Facts facts = reader.read(context);
         if (facts == null) {
+            lastDecision = null;
             return null;
         }
         // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：当作弄不到床，不去睡；露天打不过照旧挖坑。
         // 正陪着一个人（跟随）而他还醒着：同样当作弄不到床，不自己走开去睡，免得把人跟丢；他躺下了才去附近找床睡。
         boolean companionAwake = currentTask instanceof KeepsCompany company && !company.companionAsleep();
-        return branch(facts, !companionAwake && autoSleep.enabled() && beds.bedReady(context));
+        lastDecision = branch(facts, !companionAwake && autoSleep.enabled() && beds.bedReady(context));
+        return lastDecision;
     }
 
     @Override
     public Task createTask(TickContext context) {
-        // 分流里只有"能弄到床"和"露天又打不过"会走到创建：能弄到床走夜间休息，弄不到走封坑。
-        Task rest = nightRest.nightRest(context);
-        return rest != null ? rest : burrow.burrowIn();
+        // 按分流的结论建任务：只有"能弄到床"这条分路走夜间休息，"露天又打不过"直接封坑。
+        // 开关拦住了选床分路、没拦住任务创建，夜里就会照睡照跳夜（实机 10-21 goal 246 之后两夜照睡）——
+        // 所以这里不无条件先问夜间休息，而是看 urgency 刚判出的那条路。
+        Urgency decision = lastDecision != null ? lastDecision
+                : branch(reader.read(context), autoSleep.enabled() && beds.bedReady(context));
+        if (decision == Urgency.LATER) {
+            Task rest = nightRest.nightRest(context);
+            if (rest != null) {
+                return rest;
+            }
+        }
+        return burrow.burrowIn();
     }
 }
