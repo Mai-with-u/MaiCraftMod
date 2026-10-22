@@ -77,7 +77,7 @@ class HungerNeedTest {
     }
 
     @Test
-    void 不饿了这一回就过去_下回饿了重新说() {
+    void 不饿了这一回就过去_下回饿了照常找_同样的失败十分钟内不重说() {
         EatSoonTaskTest.FetchThenBite moves = new EatSoonTaskTest.FetchThenBite(-1,
                 Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到"));
         HungerNeed need = new HungerNeed(context -> now.get(), moves, (kind, message) -> events.add(message));
@@ -90,7 +90,16 @@ class HungerNeedTest {
         now.set(new HungerNeed.Facts(5, false, 0));
         assertEquals(Urgency.SOON, need.urgency(tick), "新的一回饿不再歇着");
         runToEnd(need.createTask(tick));
-        assertEquals(2, events.size(), "新的一回饿没吃上，再说一次");
+        assertEquals(1, events.size(), "新的一回饿没吃上，但同样的失败刚说过，不重说");
+
+        // 过了窗口：旧的那份多半已被整理掉，新的一回饿没吃上再完整说一次。
+        now.set(new HungerNeed.Facts(20, false, 0));
+        assertNull(need.urgency(tick));
+        player.tick += HungerBout.SAME_FAILURE_WINDOW_TICKS;
+        now.set(new HungerNeed.Facts(5, false, 0));
+        assertEquals(Urgency.SOON, need.urgency(tick));
+        runToEnd(need.createTask(tick));
+        assertEquals(2, events.size(), "窗口过了再完整说一次");
     }
 
     @Test

@@ -138,24 +138,83 @@ class EatSoonTaskTest {
     }
 
     @Test
-    void tellsTheLlmOncePerHungerBoutUnlessItGetsMoreUrgent() {
-        // 10-15 直播：哪儿都弄不到吃的，二十秒里报了三次、每次一千多字。同一回饿只说一次；饿到掉血是新的事实，再说一次。
+    void tellsTheLlmOncePerHungerBoutAndOnlyTheNewFactWhenItGetsMoreUrgent() {
+        // 10-15 直播：哪儿都弄不到吃的，二十秒里报了三次、每次一千多字。同一回饿只说一次；
+        // 饿到掉血是新的事实，要再说，但各来源的原因没变，只说"更急了"，不把上千字再抄一遍。
         HungerBout bout = new HungerBout();
-        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到");
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：没有；打猎：附近没有动物");
         for (int i = 0; i < 3; i++) {
             TaskResult result = run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
             assertEquals(TaskResult.Status.FAILED, result.status());
         }
         assertEquals(1, events.size(), "同样急时只说一次：" + events);
         assertTrue(events.getFirst().contains("过一分钟再找"), events.getFirst());
+        assertTrue(events.getFirst().contains("箱子：没有"), "第一次完整说各来源的原因：" + events.getFirst());
 
         HungerNeed.Facts starving = new HungerNeed.Facts(0, true, 0);
         run(new FetchThenBite(-1, nowhere), starving, () -> starving, bout);
         assertEquals(2, events.size(), "饿到掉血了要再说一次");
+        String worse = events.get(1);
+        assertTrue(worse.contains("更急") && worse.contains("掉血"), "只说更急了这件新事实：" + worse);
+        assertFalse(worse.contains("箱子：没有"), "各来源的原因没变，不再抄一遍：" + worse);
+        assertTrue(worse.contains("刚才说过了"), "告诉 LLM 前面那份说明在哪：" + worse);
+    }
+
+    @Test
+    void sameFailureInANewHungerBoutInsideTheWindowIsNotToldAgain() {
+        // 实机：吃一口腐肉饿的这一回就结束，4 分钟后又饿，各来源还是没有吃的，一字不差的几千字又来一遍。
+        // 同一段失败说明窗口内不重说，新的一回饿也一样。
+        HungerBout bout = new HungerBout();
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：没有");
+        run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+        assertEquals(1, events.size());
 
         bout.over();
+        player.tick += 20L * 60 * 4;
         run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
-        assertEquals(3, events.size(), "不饿过一回之后再饿是新的一回");
+        assertEquals(1, events.size(), "4 分钟后同样的失败不再说：" + events);
+    }
+
+    @Test
+    void worseSituationInANewBoutInsideTheWindowSaysOnlyWhatIsNew() {
+        // 新的一回饿、同样的失败说明说过不到十分钟、这回比上回说时更急：只说更急，并带上前面那份是几分钟前说的。
+        HungerBout bout = new HungerBout();
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：没有");
+        run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+
+        bout.over();
+        player.tick += 20L * 60 * 4;
+        HungerNeed.Facts starving = new HungerNeed.Facts(0, true, 0);
+        run(new FetchThenBite(-1, nowhere), starving, () -> starving, bout);
+
+        assertEquals(2, events.size(), events.toString());
+        assertTrue(events.get(1).contains("掉血") && events.get(1).contains("4 分钟前说过了"), events.get(1));
+        assertFalse(events.get(1).contains("箱子：没有"), events.get(1));
+
+        // 同一段失败说明在这个窗口里已经说到掉血这一档，再饿到掉血没有新事实。
+        bout.over();
+        run(new FetchThenBite(-1, nowhere), starving, () -> starving, bout);
+        assertEquals(2, events.size(), "没有更急就不再说：" + events);
+    }
+
+    @Test
+    void failureToldBeforeTheWindowOrChangedIsToldInFullAgain() {
+        // 窗口过了，旧的那份多半已被整理掉：重新完整说一次。失败说明本身变了（换了地方、来源变了）也是新事实。
+        HungerBout bout = new HungerBout();
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：没有");
+        run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+
+        bout.over();
+        player.tick += HungerBout.SAME_FAILURE_WINDOW_TICKS;
+        run(new FetchThenBite(-1, nowhere), facts(5, false), () -> facts(5, false), bout);
+        assertEquals(2, events.size(), "窗口过了重新完整说：" + events);
+        assertTrue(events.get(1).contains("箱子：没有"), events.get(1));
+
+        bout.over();
+        Problem changed = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：在 40 格外");
+        run(new FetchThenBite(-1, changed), facts(5, false), () -> facts(5, false), bout);
+        assertEquals(3, events.size(), "原因变了就是新的事实：" + events);
+        assertTrue(events.get(2).contains("40 格外"), events.get(2));
     }
 
     // 插进来时读到 initial，之后每刻读到 now 的最新值；推进到结束，最多一百刻。
