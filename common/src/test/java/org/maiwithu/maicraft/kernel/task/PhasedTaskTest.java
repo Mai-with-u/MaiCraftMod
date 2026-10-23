@@ -101,6 +101,124 @@ class PhasedTaskTest {
         assertTrue(task.stoppedSafely());
     }
 
+    /** 手上拿着几件事的任务：第一个阶段把给的事登记到手上，模拟跟随这类一个阶段里同时推进多件事的走法。 */
+    static final class Errands extends PhasedTask<Phase> {
+        private final List<Action> given;
+        private boolean held;
+        /** 换阶段时只带这一件手上的事过去；为 null 表示都不带。 */
+        Action kept;
+        /** 置位后下一步就换阶段。 */
+        boolean go;
+
+        Errands(List<Action> given) {
+            super("跑腿", Phase.APPROACH, new ProgressTracker(100, 1000));
+            this.given = given;
+        }
+
+        @Override protected Action enter(Phase phase) {
+            return null;
+        }
+
+        @Override protected boolean carriesInto(Phase nextPhase, Action hand) {
+            return hand == kept;
+        }
+
+        @Override protected Next<Phase> tick(Phase phase, TickContext context) {
+            if (!held) {
+                held = true;
+                for (Action hand : given) {
+                    hold(hand);
+                }
+            }
+            if (phase == Phase.APPROACH) return go ? Next.go(Phase.LIE_DOWN, "到了") : Next.stay();
+            return Next.done(TaskResult.done("做完了"));
+        }
+
+        /** 做到一半又接了一件手上的事。 */
+        void takeUp(Action hand) {
+            hold(hand);
+        }
+
+        /** 手上的一件事做完了：任务自己收尾并放下，基类收场时不再收它一次。 */
+        void letGoOf(Action hand) {
+            hand.close();
+            release(hand);
+        }
+    }
+
+    @Test
+    void pauseAndCloseReachEveryHand() {
+        // 被生存需求打断：手上的每一样都跟着松手；被取消收场：每一样都结清，只收一次。
+        ScriptedAction walk = new ScriptedAction("走路", ActionStatus.running());
+        ScriptedAction fight = new ScriptedAction("帮打", ActionStatus.running());
+        var task = new Errands(List.of(walk, fight));
+        task.start(new TestTick(0));
+        task.tick(new TestTick(1));
+
+        task.pause();
+        assertEquals(1, walk.pauses, "手上的路跟着暂停");
+        assertEquals(1, fight.pauses, "手上的仗跟着暂停");
+
+        TaskResult result = task.close(CloseReason.CANCELLED);
+        assertEquals(1, walk.closes, "收场时手上的路结清");
+        assertEquals(1, fight.closes, "收场时手上的仗结清");
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+    }
+
+    @Test
+    void phaseChangeKeepsTheCarriedHandAndClosesTheRest() {
+        // 换阶段：说好带过去的那件照原样接着做，其余的当场收尾；被替换真收场时带过来的也要结清。
+        ScriptedAction walk = new ScriptedAction("走路", ActionStatus.running());
+        ScriptedAction fight = new ScriptedAction("帮打", ActionStatus.running());
+        var task = new Errands(List.of(walk, fight));
+        task.kept = walk;
+        task.start(new TestTick(0));
+        task.tick(new TestTick(1));
+        task.go = true;
+        task.tick(new TestTick(2));
+
+        assertEquals(0, walk.closes, "带进下一阶段的手上的事不收");
+        assertEquals(1, fight.closes, "不带的手上的事换阶段就收尾");
+
+        task.close(CloseReason.REPLACED);
+        assertEquals(1, walk.closes, "被替换收场时带过来的那件也结清");
+    }
+
+    @Test
+    void handsJoinedAndFinishedMidPhase() {
+        // 做到一半接了一件、做完了一件自己放下：收场时新接的收尾、放下的不再收第二次。
+        ScriptedAction walk = new ScriptedAction("走路", ActionStatus.running());
+        ScriptedAction board = new ScriptedAction("上车", ActionStatus.running());
+        ScriptedAction look = new ScriptedAction("看着他", ActionStatus.running());
+        var task = new Errands(List.of(walk));
+        task.start(new TestTick(0));
+        task.tick(new TestTick(1));
+        task.takeUp(board);
+        task.takeUp(look);
+        task.letGoOf(look);
+
+        task.close(CloseReason.CANCELLED);
+        assertEquals(1, walk.closes, "还在手上的收尾");
+        assertEquals(1, board.closes, "半路接进来的也算手上的，收场时结清");
+        assertEquals(1, look.closes, "已经放下并收尾的不再收一次");
+    }
+
+    @Test
+    void safeStopAsksEveryHandAndWaitForItToSettle() {
+        // 手上悬着一件要先落地的：叫先停稳转给它，落地前任务不报停稳；其余手上的事当场就能停。
+        Flying drone = new Flying(ActionStatus.running());
+        ScriptedAction look = new ScriptedAction("看着他", ActionStatus.running());
+        var task = new Errands(List.of(drone, look));
+        task.start(new TestTick(0));
+        task.tick(new TestTick(1));
+
+        assertTrue(task.stopSafely(), "悬着的那件要先落地");
+        assertTrue(drone.asked);
+        assertFalse(task.stoppedSafely(), "还没落地不算停稳");
+        drone.landed = true;
+        assertTrue(task.stoppedSafely(), "落地了才算停稳");
+    }
+
     private static TickResult runUntilFinished(Task task, int maxTicks) {
         TickResult tickResult = TickResult.RUNNING;
         for (int tick = 0; tick < maxTicks && tickResult instanceof TickResult.Running; tick++) {

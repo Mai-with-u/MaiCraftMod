@@ -25,11 +25,13 @@ import java.util.function.Supplier;
  *
  * <p>任务的进度用一个阶段枚举表达，例如睡觉的"选床 → 拿床 → 放床 → 走到床边 → 躺下"。
  * 子类只写两件事：进入某阶段时要做什么动作（{@link #enter}），以及每刻这个阶段怎么走（{@link #tick(Enum, TickContext)}）。
+ * 一个阶段里还有别的事同时在做时，用 {@link #hold} 登记到手上，基类把它们的暂停、先停稳、收尾一起办了，
+ * 换阶段时要带着哪些接着做，由子类在 {@link #carriesInto} 里说。
  *
  * <p>下面这些每个任务都要做的事由基类统一处理，子类不再各写一遍：
  * <ul>
  *   <li>换阶段时收尾旧动作、准备新动作，并写日志；</li>
- *   <li>被生存需求打断时暂停动作，结束时收尾动作；</li>
+ *   <li>被生存需求打断时暂停动作和手上的事，结束时逐个收尾；</li>
  *   <li>停滞判定：动作报告的真实进展才算进展，<b>换阶段本身不算</b>，
  *       否则在两个阶段之间来回跳的任务永远不会被判为原地打转；</li>
  *   <li>记下运行中确认发生的变化、没能确认的交互和试过的办法，结束时组装成结果；</li>
@@ -69,6 +71,8 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     private final Deque<TaskProgress.PhaseChange> recentPhases = new ArrayDeque<>();
     private P phase;
     private Action action;
+    /** 阶段内手上同时在推进的事：跟当前动作一起被暂停、先停稳、收尾，子类不再自备扇出外壳。 */
+    private final List<Action> hands = new ArrayList<>();
     private boolean entered;
     /** 被叫先收尾再停（飞着的就近落地）；被打断或接着做时清掉。 */
     private boolean stopping;
@@ -119,7 +123,10 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         return action;
     }
 
-    /** 推进当前动作一刻；动作报告的真实进展会自动记进进度跟踪。 */
+    /**
+     * 推进当前动作一刻；动作报告的真实进展会自动记进进度跟踪。
+     * 一个阶段里除了当前动作还有别的事同时在做（走路之外还在帮打）时，那些事用 {@link #hold} 登记到手上，自己逐刻推进。
+     */
     protected final ActionStatus runAction(TickContext context) {
         if (action == null) {
             throw new IllegalStateException(label + " 的阶段 " + phase + " 没有动作，不能调用 runAction()");
@@ -142,6 +149,33 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             case ActionStatus.Done done -> whenDone.get();
             case ActionStatus.Failed failed -> Next.fail(failed.problem());
         };
+    }
+
+    /**
+     * 把一件手上正在做的事登记进来：一个阶段里跟当前动作同时在做的，例如跟着走之外还在帮他打、开打之外还在捡拾。
+     * 之后被生存需求打断时跟着暂停、被叫先到安全处再停时逐个问过去、收尾时逐个结清，子类不再为它们各写一遍扇出。
+     */
+    protected final void hold(Action hand) {
+        hands.add(Objects.requireNonNull(hand, "hand"));
+    }
+
+    /** 手上的一件事由任务自己收尾了：从登记里放下。还在做却没放下的，留给基类在换阶段或结束时收。 */
+    protected final void release(Action hand) {
+        hands.remove(hand);
+    }
+
+    /**
+     * 换阶段时对每件手上的事问一次：要不要带进下一个阶段接着做？要的照原样留着（跟不过去转去等他时那趟路还在走），
+     * 不要的当场收尾。默认都不带：和单个动作一样，换阶段就收尾旧的。
+     */
+    protected boolean carriesInto(P nextPhase, Action hand) {
+        return false;
+    }
+
+    /** 手上正在做的那件事的一句话，跟在阶段名后面给面板与日志；默认是当前动作，或最近登记的一件手上的事。 */
+    protected String doing() {
+        if (action != null) return action.describe();
+        return hands.isEmpty() ? null : hands.getLast().describe();
     }
 
     /** 记一次不经过动作的真实进展，例如判断阶段确认选中了一张能用的床。 */
@@ -223,22 +257,35 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         // 暂停或从收尾里放回来：不再收尾，回来照原样接着做。
         stopping = false;
         if (action != null) action.pause();
+        // 手上的事一起松手：走路松键、帮打收手、拉了一半的弓放下，恢复后按当时的处境重新起步。
+        for (Action hand : hands) {
+            hand.pause();
+        }
     }
 
     /**
-     * 先到安全的地方再停：交给手上的动作（飞着的就近落地、车上的刹停）；动作说现在就能停就不用收尾。
+     * 先到安全的地方再停：交给当前动作和手上的事逐个问过去（飞着的就近落地、车上的刹停）；
+     * 有一样说要收尾就先收尾，都说现在就能停就不用收尾。
      * 子类有自己的收尾（行程里一段坐完别再开下一段）时改写它，记得调回这里。
      */
     @Override
     public boolean stopSafely() {
         stopping = action != null && action.stopSafely();
+        for (Action hand : hands) {
+            if (hand.stopSafely()) stopping = true;
+        }
         return stopping;
     }
 
-    /** 收尾做完了：动作说停稳了，或那个动作已经结束、这一阶段没有动作。 */
+    /** 收尾做完了：当前动作与每件手上的事都说停稳了，或那件事已经结束、手上没有了。 */
     @Override
     public boolean stoppedSafely() {
-        return !stopping || action == null || action.stoppedSafely();
+        if (!stopping) return true;
+        if (action != null && !action.stoppedSafely()) return false;
+        for (Action hand : hands) {
+            if (!hand.stoppedSafely()) return false;
+        }
+        return true;
     }
 
     /** 此刻在收尾（被叫先到安全的地方再停）：子类别再往前开新的一段。 */
@@ -282,7 +329,8 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
     @Override
     public final String describe() {
         String text = label + "：" + describePhase(phase);
-        return action == null ? text : text + "，" + action.describe();
+        String doing = doing();
+        return doing == null ? text : text + "，" + doing;
     }
 
     private void enterIfNeeded() {
@@ -296,7 +344,7 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             case Next.Stay<P> stay -> TickResult.RUNNING;
             case Next.Go<P> go -> {
                 P from = phase;
-                closeAction();
+                carryOver(go.phase());
                 phase = go.phase();
                 entered = false;
                 enterIfNeeded();
@@ -363,10 +411,28 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         return TickResult.finished(value);
     }
 
+    // 换阶段：当前动作照旧收尾；手上的事按子类的意思分流——带进下一阶段的照原样留着，其余的收尾并放下。
+    private void carryOver(P nextPhase) {
+        if (action != null) {
+            action.close();
+            action = null;
+        }
+        hands.removeIf(hand -> {
+            if (carriesInto(nextPhase, hand)) return false;
+            hand.close();
+            return true;
+        });
+    }
+
+    // 真结束（完成、失败、被取消、被替换）：当前动作与每件手上的事都结清，不留一趟没人推进的路、一场没人管的仗悬着。
     private void closeAction() {
         if (action != null) {
             action.close();
             action = null;
         }
+        for (Action hand : hands) {
+            hand.close();
+        }
+        hands.clear();
     }
 }

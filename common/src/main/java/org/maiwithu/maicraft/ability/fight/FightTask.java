@@ -92,6 +92,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 为什么撤的：撤离收场时写进结果。 */
     private String retreatWhy;
     private Battle battle;
+    /** 引擎接进基类手上动作的那一层：换阶段去开打时靠它留住引擎。 */
+    private Action battleHand;
     /** 最后一个目标倒下的位置：拾荒以它为中心。 */
     private double[] lastKillSpot;
     private boolean fled;
@@ -128,23 +130,49 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         this.consent = Objects.requireNonNull(consent, "consent");
     }
 
-    private final Driver driver = new Driver();
-    /** 这一刻决定换去的阶段：基类紧接着收尾外壳，靠它分清是换阶段还是任务真结束。 */
-    private Phase goingTo;
+    /** 战斗引擎包成动作：引擎每刻读回的是战况不是动作状态，包一层让基类的暂停、收尾、换阶段保留都够得着它。 */
+    private final class BattleHand implements Action {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.running();
+        }
 
-    @Override protected Action enter(Phase phase) { return driver; }
+        @Override public void pause() {
+            battle.pause();
+        }
+
+        @Override public void close() {
+            battle.close();
+        }
+
+        @Override public String describe() {
+            return battle.describe();
+        }
+    }
+
+    @Override protected Action enter(Phase phase) { return null; }
+
+    // 换阶段去开打时引擎留着不关：它是刚为这一仗建好的，开打第一刻就能出手、走位；去别的阶段照常收尾。
+    @Override
+    protected boolean carriesInto(Phase nextPhase, Action hand) {
+        return nextPhase == Phase.FIGHT && hand == battleHand;
+    }
+
+    @Override
+    protected String doing() {
+        if (pickup != null) return pickup.describe();
+        if (current != null) return current.describe();
+        return battle == null ? "观察战场" : battle.describe();
+    }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         currentContext = context;
-        Next<Phase> next = switch (phase) {
+        return switch (phase) {
             case CHECK -> check();
             case ASSESS -> assess(context);
             case FIGHT -> fight(context);
             case LOOT -> loot(context);
         };
-        goingTo = next instanceof Next.Go<Phase> go ? go.phase() : null;
-        return next;
     }
 
     private Next<Phase> check() {
@@ -211,6 +239,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         battle = new Battle(senses, moves, new Roster(), radius);
+        battleHand = new BattleHand();
+        hold(battleHand);
         // 夜里退无可退、打不过：引擎报要挖坑时这一仗停下，交给自卫接挖三填一。
         battle.offerShelter();
         fightCursor = moves.dropCursor(context);
@@ -254,6 +284,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         experienceBefore = moves.experience(context);
         battle = new Battle(senses, moves, new Roster(),
                 named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS);
+        battleHand = new BattleHand();
+        hold(battleHand);
         battle.offerShelter();
         fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");
@@ -525,7 +557,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 dropCurrent();
             }
         }
-        if (pickup == null) pickup = moves.pickUpNewSince(moves.dropsLyingBefore(context, fightCursor));
+        if (pickup == null) {
+            pickup = moves.pickUpNewSince(moves.dropsLyingBefore(context, fightCursor));
+            hold(pickup);
+        }
         ActionStatus status = pickup.tick(context);
         if (status instanceof ActionStatus.Running running) {
             if (running.progressed()) recordProgress(pickup.describe());
@@ -535,6 +570,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             recordAttempt("捡这一仗掉出来的东西", failed.problem().message());
         }
         pickup.close();
+        release(pickup);
         pickup = null;
         for (FightMoves.Gained gained : moves.pickedUpSince(context, fightCursor)) {
             lootGained.add(gained.item());
@@ -617,6 +653,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         if (current == null) {
             current = make.get();
+            hold(current);
             currentKey = key;
         }
     }
@@ -624,6 +661,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private void dropCurrent() {
         if (current != null) {
             current.close();
+            release(current);
             current = null;
         }
         currentKey = null;
@@ -691,39 +729,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return battle != null ? battle.interruptibility() : Interruptibility.WORKING;
     }
 
-    /** 引擎与拾荒的动作接进基类的暂停与收尾：基类持有的是这个外壳。 */
-    private final class Driver implements Action {
-        @Override
-        public ActionStatus tick(TickContext context) {
-            return ActionStatus.running();
-        }
-
-        @Override
-        public void pause() {
-            if (current != null) current.pause();
-            if (pickup != null) pickup.pause();
-            if (battle != null) battle.pause();
-        }
-
-        @Override
-        public void close() {
-            // 换阶段或任务结束时基类收尾外壳：拾荒的走到、引擎的出手与寻路、拉了一半的弓都收尾。
-            // 评估完换去开打时，引擎是刚为这一仗建好的，不关它，开打第一刻就能出手、走位。
-            boolean battleGoesOn = goingTo == Phase.FIGHT;
-            goingTo = null;
-            dropCurrent();
-            if (pickup != null) pickup.close();
-            pickup = null;
-            if (battle != null && !battleGoesOn) battle.close();
-        }
-
-        @Override
-        public String describe() {
-            if (pickup != null) return pickup.describe();
-            if (current != null) return current.describe();
-            return battle == null ? "观察战场" : battle.describe();
-        }
-    }
+    /**
 
     /**
      * 战斗的结果细节。

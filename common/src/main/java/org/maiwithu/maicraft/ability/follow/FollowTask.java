@@ -158,6 +158,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Action gettingOff;
 
     private FollowMoves.HelpFight help;
+    private HelpHand helpHand;
     private long helpEndedTick = Long.MIN_VALUE / 2;
     /** 上一场帮打之后要歇多久才再上（刻）：撤出来了、或一下都没打着时歇一阵，免得来回冲。 */
     private long helpCooldown;
@@ -175,76 +176,57 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         this.permit = TerrainPermit.of(input.permissions());
     }
 
-    /** 手上正在做的那一样（走路、上车、下车、帮打、过门）接进基类的暂停与收尾：基类持有的是这个外壳。 */
-    private final class Driver implements Action {
-        @Override
-        public ActionStatus tick(TickContext context) {
+    /** 一场帮打包成动作：战斗引擎每刻读回的是战况不是动作状态，包一层让基类的暂停、先停稳、收尾都够得着它。 */
+    private final class HelpHand implements Action {
+        private final FollowMoves.HelpFight fight;
+
+        HelpHand(FollowMoves.HelpFight fight) {
+            this.fight = fight;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
             return ActionStatus.running();
         }
 
-        // 被生存需求打断：走路松键撤路线、上下车松手、帮打收手、过门的那一段跟着暂停；恢复后按当时的处境重新起步。
-        @Override
-        public void pause() {
-            if (walk != null) walk.pause();
-            if (boarding != null) boarding.pause();
-            if (gettingOff != null) gettingOff.pause();
-            if (help != null) help.pause();
-            if (portalRun != null) portalRun.pause();
+        @Override public void pause() {
+            fight.pause();
         }
 
-        // 被叫先到安全处再停：走着的路、过门那一段转给它们（悬空的先落地），没停稳跟随也不报停稳；上下车、帮打当场停。
-        // 跟丢进过门前先收掉了路，两样不会同时在手上。
-        @Override public boolean stopSafely() {
-            return walk != null ? walk.stopSafely() : portalRun != null && portalRun.stopSafely();
+        @Override public void close() {
+            fight.close();
         }
 
-        @Override public boolean stoppedSafely() {
-            return (walk == null || walk.stoppedSafely()) && (portalRun == null || portalRun.stoppedSafely());
+        @Override public Interruptibility interruptibility() {
+            return fight.interruptibility();
         }
 
-        // 换阶段时基类也会叫收尾：手上的路、车、仗要带进下一阶段接着做，不收。
-        // 真正结束（完成、失败、被取消、被替换）才把每一样都结清，不留一趟没人推进的路、一场没人管的仗悬着。
-        @Override
-        public void close() {
-            if (changingPhase) {
-                changingPhase = false;
-                return;
-            }
-            closeWalk();
-            if (boarding != null) {
-                boarding.close();
-                boarding = null;
-            }
-            if (gettingOff != null) {
-                gettingOff.close();
-                gettingOff = null;
-            }
-            endHelp();
-            // 跟随结束时还在过门：那一段按取消收尾，它交代的事实照样并进跟随的结果。
-            if (portalRun != null) portalRun.close();
-        }
-
-        @Override
-        public String describe() {
-            if (portalRun != null) return portalRun.describe();
-            if (help != null) return "帮他打：" + help.describe();
-            if (boarding != null) return boarding.describe();
-            if (gettingOff != null) return gettingOff.describe();
-            if (walk != null) return yielding ? "让路：" + walk.describe() : walk.describe();
-            return "看着他";
+        @Override public String describe() {
+            return fight.describe();
         }
     }
 
-    private final Driver driver = new Driver();
-    /** 这一刻的走向是换阶段：基类紧接着叫的收尾只是换阶段，不是任务结束。 */
-    private boolean changingPhase;
+    @Override protected Action enter(Phase phase) { return null; }
 
-    @Override protected Action enter(Phase phase) { return driver; }
+    // 换阶段时手上的事都带过去接着做：走路跟过阶段、上下车那一下跟着换阶段，收哪一样由任务按处境自己定。
+    @Override
+    protected boolean carriesInto(Phase nextPhase, Action hand) {
+        return true;
+    }
+
+    @Override
+    protected String doing() {
+        if (portalRun != null) return portalRun.describe();
+        if (help != null) return "帮他打：" + help.describe();
+        if (boarding != null) return boarding.describe();
+        if (gettingOff != null) return gettingOff.describe();
+        if (walk != null) return yielding ? "让路：" + walk.describe() : walk.describe();
+        return "看着他";
+    }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         now = context.gameTick();
-        Next<Phase> next = switch (phase) {
+        return switch (phase) {
             case LOCK -> lock(context);
             case KEEP -> keep(context);
             case BLOCKED -> blocked(context);
@@ -255,8 +237,6 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             case GET_OFF -> getOff(context);
             case HELP -> help(context);
         };
-        changingPhase = next instanceof Next.Go;
-        return next;
     }
 
     private Next<Phase> lock(TickContext context) {
@@ -336,6 +316,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         if (board.isPresent()) {
             closeWalk();
             boarding = board.get();
+            hold(boarding);
             boardingVehicle = vehicle;
             tell("他坐上了 " + him.vehicleType() + "，上面还有空座，走过去坐上");
             return Next.go(Phase.BOARD, "走过去坐上他那辆");
@@ -406,6 +387,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         yielding = false;
         // 走到他脚下那一格的 distance 以内就算跟上；路上进了 distance 也会叫停。
         walk = walks.start(goalNear(him.ground()), permit);
+        hold(walk);
         walk.allowSprint(him.groundGap() > input.distance() + SPRINT_MARGIN);
         lastTryTick = now;
     }
@@ -434,6 +416,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         Optional<BlockPos> spot = view.asideSpot(context, him, heading[0], heading[1], input.distance());
         if (spot.isEmpty()) return;
         walk = walks.start(GoalCompiler.standOn(spot.get()), permit);
+        hold(walk);
         walk.allowSprint(false);
         walkAnchor = null;
         yielding = true;
@@ -538,6 +521,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         tell("跟丢了：" + where + "，去那儿找");
         if (last != null) {
             walk = walks.start(GoalCompiler.near(last.ground(), 1.5), permit);
+            hold(walk);
             walkAnchor = null;
             yielding = false;
             // 找人时朝他离开的方向看：从最后的位置顺着他走的方向往前 8 格。
@@ -580,12 +564,14 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Next<Phase> portal(TickContext context) {
         if (portalRun == null) {
             portalRun = new ChildTaskAction(moves.crossPortal(portalTarget, input.permissions()), records());
+            hold(portalRun);
         }
         if (portalRun.tick(context) instanceof ActionStatus.Running running) {
             if (running.progressed()) recordProgress("跟着过传送门");
             return Next.stay();
         }
         TaskResult crossed = portalRun.settle();
+        release(portalRun);
         portalRun = null;
         lostSince = now;
         lookOut = null;
@@ -644,10 +630,14 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     }
 
     private Next<Phase> getOff(TickContext context) {
-        if (gettingOff == null) gettingOff = moves.getOff();
+        if (gettingOff == null) {
+            gettingOff = moves.getOff();
+            hold(gettingOff);
+        }
         ActionStatus status = gettingOff.tick(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
         gettingOff.close();
+        release(gettingOff);
         gettingOff = null;
         if (status instanceof ActionStatus.Failed failed) {
             recordAttempt("从载具上下来", failed.problem().message());
@@ -663,6 +653,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         FollowView.Sighting him = see(context);
         if (help == null) {
             help = moves.helpFight(() -> last == null ? null : last.feet());
+            helpHand = new HelpHand(help);
+            hold(helpHand);
             helpLanded = false;
             tell("他在跟敌对生物打（" + spot(last) + "），上去帮他");
         }
@@ -693,8 +685,10 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     }
 
     private void endHelp() {
-        if (help == null) return;
-        help.close();
+        if (helpHand == null) return;
+        release(helpHand);
+        helpHand.close();
+        helpHand = null;
         help = null;
         helpEndedTick = now;
     }
@@ -702,6 +696,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private void endBoarding() {
         if (boarding != null) {
             boarding.close();
+            release(boarding);
             boarding = null;
         }
         boardingVehicle = null;
@@ -715,6 +710,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private void closeWalk() {
         if (walk != null) {
             walk.close();
+            release(walk);
             walk = null;
         }
         walkAnchor = null;
