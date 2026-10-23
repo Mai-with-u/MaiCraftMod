@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
@@ -21,6 +22,7 @@ import net.minecraft.world.level.block.FarmBlock;
 import net.minecraft.world.level.block.FlowerPotBlock;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.SeaPickleBlock;
+import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.TurtleEggBlock;
 import net.minecraft.world.level.block.piston.MovingPistonBlock;
@@ -35,13 +37,42 @@ import net.minecraft.world.level.block.state.properties.Property;
 import net.minecraft.world.level.block.state.properties.SlabType;
 
 /**
- * 方块状态规则：蓝图里一格的目标状态怎么归一、哪一半不用单独放、拿什么物品放、特殊格要几样料、哪些格建不了。
+ * 方块状态规则：蓝图里一格的目标状态怎么归一、抄现场时哪些属性当标准、哪一半不用单独放、拿什么物品放、特殊格要几样料、哪些格建不了。
  * 例如图纸里的成熟小麦归成幼苗、装满的炼药锅归成空锅、树叶设成玩家手放后不腐烂。
  * 这些只改目标数据，不在世界里放方块、倒水或使用物品。
  */
 public final class BlockStateRules {
 
     private BlockStateRules() {}
+
+    /**
+     * 运行态属性：机器一转、红石一通就会变的（开关、充能、亮灭、在不在线），抄现场时不写进目标，
+     * 写进去照着建完一比对全是"状态不对"。含水、伸出归一规则已把它们归成默认，目标里也不再点名；
+     * AE2 控制器的 state 是在线、离线、摆法冲突。
+     */
+    private static final Set<String> RUNTIME_PROPERTIES = Set.of("powered", "lit", "active", "open", "enabled",
+            "triggered", "occupied", "power", "locked", "state", "waterlogged", "extended");
+
+    /** 机器与建筑读现场共用这一份取舍：运行态属性不抄进目标、不当验收标准。 */
+    public static boolean isRuntimeProperty(String name) {
+        return RUNTIME_PROPERTIES.contains(name);
+    }
+
+    /**
+     * 放置属性：随方块放下时由放法定下的（朝向、上下半、铰链、床的哪一头、轴向、贴哪面、转动、
+     * 挂点、吊着、横竖），抄现场时照实记、当验收标准。开关、充能、连接这些运行态不带。
+     */
+    private static final Set<String> PLACEMENT_PROPERTIES = Set.of("facing", "half", "hinge", "part", "axis", "face",
+            "rotation", "attachment", "hanging", "orientation");
+
+    /**
+     * 这一格的目标里写不写这个属性：放法定下的那几样都写。半砖的上下片、双层也叫 type，
+     * 只在半砖上算放置属性；别的方块也有 type（箱子单双联这些），不在这里照抄。
+     */
+    public static boolean isPlacementProperty(BlockState state, Property<?> property) {
+        return PLACEMENT_PROPERTIES.contains(property.getName())
+                || property.getName().equals("type") && state.getBlock() instanceof SlabBlock;
+    }
 
     /**
      * 归一后的目标状态；传入对象不改。没列出的属性保持原值。

@@ -38,13 +38,6 @@ import org.maiwithu.maicraft.behavior.construction.PlannedCell;
  */
 final class MachineSiteCopy {
 
-    /**
-     * 不写进蓝图的属性：机器一转、红石一通就会变，写进去照着建完一比对全是"状态不对"。
-     * 含水、伸出在施工的归一规则里已经去掉，这里一并不写；AE2 控制器的 state 是在线、离线、摆法冲突。
-     */
-    static final Set<String> RUNNING_PROPERTIES = Set.of("powered", "lit", "active", "open", "enabled", "triggered",
-            "occupied", "power", "locked", "state", "waterlogged", "extended");
-
     private MachineSiteCopy() {
     }
 
@@ -161,7 +154,8 @@ final class MachineSiteCopy {
             JsonObject properties = new JsonObject();
             if (!(kept.getBlock() instanceof LiquidBlock)) {
                 for (Property<?> property : kept.getProperties()) {
-                    if (RUNNING_PROPERTIES.contains(property.getName())) continue;
+                    // 转起来就会变的属性不写，取舍与建筑读现场共用施工层的方块状态规则
+                    if (BlockStateRules.isRuntimeProperty(property.getName())) continue;
                     required.add(property.getName());
                     properties.addProperty(property.getName(), valueName(kept, property));
                 }

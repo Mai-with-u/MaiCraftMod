@@ -16,7 +16,6 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
@@ -39,10 +38,6 @@ final class SiteCapture {
     static final String OBJECT_NAME = "现场";
     /** 自动框找第一块搭出来的方块时，从目标往外找几格。 */
     private static final int SEED_REACH = 2;
-    /** 随方块放下时由放法定下、要照着验收的属性；连接、形状、开关这些不带。 */
-    private static final Set<String> PLACEMENT_PROPERTIES = Set.of("facing", "half", "hinge", "part", "axis", "face",
-            "rotation", "attachment", "hanging", "orientation");
-
     private SiteCapture() {}
 
     /**
@@ -178,12 +173,6 @@ final class SiteCapture {
         return BlockStateRules.normalize(state);
     }
 
-    // 哪些属性写进材料：放法定下的那几样；半砖的上下片、双层也是放法定下的。
-    private static boolean writes(BlockState state, Property<?> property) {
-        return PLACEMENT_PROPERTIES.contains(property.getName())
-                || property.getName().equals("type") && state.getBlock() instanceof SlabBlock;
-    }
-
     /**
      * 把读到的现场画成一张图纸：材料表每种状态一项（名字是方块 ID 加摆放属性），一个层图对象一层一张字符图。
      *
@@ -267,7 +256,8 @@ final class SiteCapture {
         JsonObject properties = new JsonObject();
         TreeMap<String, String> sorted = new TreeMap<>();
         for (Property<?> property : state.getProperties()) {
-            if (writes(state, property)) sorted.put(property.getName(), valueName(state, property));
+            // 放法定下的那几样照实记，取舍共用施工层的方块状态规则；半砖的上下片、双层也是放法定下的
+            if (BlockStateRules.isPlacementProperty(state, property)) sorted.put(property.getName(), valueName(state, property));
         }
         sorted.forEach(properties::addProperty);
         if (!properties.isEmpty()) json.add("properties", properties);
