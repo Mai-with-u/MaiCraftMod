@@ -105,7 +105,7 @@ class PortalBuilderTest {
             ConstructionFakes site, DimensionFakes.FakeUses uses) {
         return new DimensionTravelServices(world, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(),
                 obtain, new DimensionFakes.FakeToMainhand(), uses,
-                permissions -> site.services(), null, () -> List.of(), progress -> {});
+                permissions -> site.services(), null, () -> List.of(), progress -> {}, null, null);
     }
 
     /** 点火生效的替身：对点火格使用后，门框内侧长满门方块（原版一次填满整扇）。 */
@@ -221,7 +221,7 @@ class PortalBuilderTest {
                 view, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(),
                 new DimensionFakes.FakeObtain(), new DimensionFakes.FakeToMainhand(), uses,
                 permissions -> new ConstructionFakes(view.blocks).services(), null,
-                () -> List.of(), progress -> {})));
+                () -> List.of(), progress -> {}, null, null)));
 
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(result.summary().contains("门面已出现"), result.summary());
@@ -317,7 +317,7 @@ class PortalBuilderTest {
         TaskResult result = run(new PortalBuilder(Permissions.DEFAULT, 128, new DimensionTravelServices(
                 view, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(), site,
                 new DimensionFakes.FakeToMainhand(), lights(view, SHORE.frame()),
-                permissions -> site.services(), null, () -> List.of(), progress -> {})));
+                permissions -> site.services(), null, () -> List.of(), progress -> {}, null, null)));
 
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
         assertTrue(result.details() instanceof PortalBuildDetails built
@@ -417,7 +417,7 @@ class PortalBuilderTest {
         PortalBuilder builder = new PortalBuilder(Permissions.DEFAULT, 128, new DimensionTravelServices(
                 view, () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(), needs,
                 new DimensionFakes.FakeToMainhand(), new DimensionFakes.FakeUses(),
-                permissions -> site.services(), null, () -> List.of(), progress -> {}));
+                permissions -> site.services(), null, () -> List.of(), progress -> {}, null, null));
         runUntilBusy(builder, scooping);
 
         assertEquals(Interruptibility.UNSAFE_TO_STOP, builder.interruptibility(tick()),

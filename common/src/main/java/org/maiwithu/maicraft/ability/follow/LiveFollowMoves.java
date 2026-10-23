@@ -16,10 +16,13 @@ import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
+import org.maiwithu.maicraft.behavior.travel.GetsOffVehicle;
+import org.maiwithu.maicraft.behavior.travel.LiveEntityUses;
 import org.maiwithu.maicraft.behavior.travel.SameDimensionTravel;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -45,19 +48,23 @@ public final class LiveFollowMoves implements FollowMoves {
     private final DimensionTravelServices portals;
     private final CombatSenses senses;
     private final BattleMoves battleMoves;
+    private final HoldsSneak sneaks;
 
     /**
      * @param modRides 联动登记的模组载具同乘办法（机械动力的列车）；没装为空表
      */
     public LiveFollowMoves(WalkTo walks, Interactions interactions, List<RideAlong> modRides,
-                           DimensionTravelServices portals, CombatSenses senses, BattleMoves battleMoves) {
+                           DimensionTravelServices portals, CombatSenses senses, BattleMoves battleMoves,
+                           HoldsSneak sneaks) {
         List<RideAlong> all = new ArrayList<>();
-        all.add(new VanillaRideAlong(walks, interactions));
+        // 坐上原版的船与骆驼用的是玩家行为层共有的"成为乘客"那份，右键实体的生产实现在这里包好交给它。
+        all.add(new VanillaRideAlong(walks, new LiveEntityUses(interactions)));
         all.addAll(modRides);
         this.rides = List.copyOf(all);
         this.portals = portals;
         this.senses = senses;
         this.battleMoves = battleMoves;
+        this.sneaks = sneaks;
     }
 
     // 看着他：从眼睛到他眼睛算偏航与俯仰，交给导航视角——镜头按平滑转头过去；同一刻有真要瞄准的动作时让给它。
@@ -90,7 +97,8 @@ public final class LiveFollowMoves implements FollowMoves {
 
     @Override
     public Action getOff() {
-        return new GetsOff();
+        // 下车走按住潜行的手势那一份：按着直到真的不坐在上面，不裸写按键。
+        return new GetsOffVehicle(sneaks);
     }
 
     // 过门只走现成的门：许可里的改地形降到不改，找不到门就如实说没找到，不替他建一扇。

@@ -53,7 +53,7 @@ class MinecartModeTest {
     private final DimensionFakes.FakeWorld world = new DimensionFakes.FakeWorld();
     private final FakeScout scout = new FakeScout();
     private final DimensionTravelServices services =
-            new DimensionTravelServices(world, () -> null, null, null, null, null, null, null, null, null);
+            new DimensionTravelServices(world, () -> null, null, null, null, null, null, null, null, null, null, null);
     private final MinecartMode mode = new MinecartMode(scout, services);
     private final RecordingSink sink = new RecordingSink();
 

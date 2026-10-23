@@ -14,6 +14,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.travel.GetsOffVehicle;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -46,8 +47,6 @@ final class TrainRide implements TravelLeg {
     static final int MAX_SEATS = 3;
     /** 坐着这么多刻离下车站一点没近就在下一个停靠站下车。 */
     static final int NO_GAIN_TICKS = 2400;
-    /** 下车最多潜行多少刻。 */
-    static final int ALIGHT_TICKS = 40;
     /** 离座位这么近（格）才伸手坐。 */
     static final double SEAT_REACH = 3.5;
 
@@ -60,6 +59,8 @@ final class TrainRide implements TravelLeg {
 
     private Step step = Step.WALK;
     private Action current;
+    /** 下车在用的按住潜行动作：交给玩家行为层共有的那份"下车"。 */
+    private Action dismount;
     private long stepStart = Long.MIN_VALUE;
     private long stillSince = Long.MIN_VALUE;
     private int seatsTried;
@@ -102,7 +103,7 @@ final class TrainRide implements TravelLeg {
             case BOARD -> boardTrain(level, player, now);
             case SIT -> sitDown(level, player, now);
             case RIDE -> ride(context, level, player, now);
-            case ALIGHT -> alightHere(context, player, now);
+            case ALIGHT -> alightHere(tick, context, player, now);
         };
     }
 
@@ -182,8 +183,8 @@ final class TrainRide implements TravelLeg {
         return ActionStatus.running();
     }
 
-    // 下车：潜行，直到不坐在车上。
-    private ActionStatus alightHere(PlayerContext context, LocalPlayer player, long now) {
+    // 下车：交给共有的那份"下车"——按住潜行直到真的离开座位；到站下车是完成，中途弃乘下车如实说停在哪。
+    private ActionStatus alightHere(TickContext tick, PlayerContext context, LocalPlayer player, long now) {
         if (!player.isPassenger()) {
             input().halt(player);
             if (gaveUp) {
@@ -192,10 +193,12 @@ final class TrainRide implements TravelLeg {
             }
             return ActionStatus.done();
         }
-        if (now - stepStart >= ALIGHT_TICKS) {
-            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "到站后潜行了 " + ALIGHT_TICKS / 20 + " 秒还没下车"));
+        if (dismount == null) {
+            dismount = new GetsOffVehicle(services.sneak());
         }
-        input().applyMovement(new PlayerInput.Movement(0.0f, 0.0f, false, true, false), now);
+        if (dismount.tick(tick) instanceof ActionStatus.Failed failed) {
+            return ActionStatus.failed(failed.problem());
+        }
         return ActionStatus.running();
     }
 
@@ -260,6 +263,8 @@ final class TrainRide implements TravelLeg {
 
     @Override public void pause() {
         if (current != null) current.pause();
+        // 下车途中被让路：先松开潜行，回来重新按住接着下。
+        if (dismount != null) dismount.pause();
         PlayerContext context = services.context().get();
         if (context != null && context.input() != null && context.localPlayer() != null) context.input().halt(context.localPlayer());
     }
@@ -268,6 +273,10 @@ final class TrainRide implements TravelLeg {
         if (current != null) {
             current.close();
             current = null;
+        }
+        if (dismount != null) {
+            dismount.close();
+            dismount = null;
         }
         PlayerContext context = services.context().get();
         if (context != null && context.input() != null && context.localPlayer() != null) context.input().halt(context.localPlayer());

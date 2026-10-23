@@ -11,7 +11,6 @@ import java.util.UUID;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.phys.AABB;
@@ -24,7 +23,6 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
-import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -51,10 +49,8 @@ final class MinecartRide implements TravelLeg {
     /** 乘一段矿车的几步。 */
     private enum Step { CART, WALK, PLACE, PUSH, BOARD, RIDE, ALIGHT, SETTLE }
 
-    /** 放车、上车的确认期限（刻）。 */
+    /** 放车的确认期限（刻）。 */
     private static final int CONFIRM_TIMEOUT_TICKS = 30;
-    /** 对着矿车最多点几次没坐上就算了。 */
-    private static final int MAX_CLICKS = 6;
     /** 车被推走这么远（格）还没坐上就放弃，不再追。 */
     private static final double CART_GONE_AWAY = 12.0;
     /** 推车这么久（刻）车一点没动就放弃。 */
@@ -63,8 +59,6 @@ final class MinecartRide implements TravelLeg {
     private static final double PUSHED_ENOUGH = 1.0;
     /** 坐着车几乎不动连续这么多刻，就当到站（或半路停了），下车。 */
     private static final int STATIONARY_TICKS = 30;
-    /** 下车最多潜行多少刻。 */
-    private static final int MAX_ALIGHT_TICKS = 40;
     /** 落地后脚下这么多刻没动算站稳；最多等这么久。 */
     private static final int STILL_TICKS = 10;
     private static final int MAX_SETTLE_TICKS = 60;
@@ -80,15 +74,12 @@ final class MinecartRide implements TravelLeg {
     private Step step = Step.CART;
     private Action current;
     private WalkRun walk;
-    private PendingInteraction pending;
     private UUID cartId;
     private boolean usedParkedCart;
-    private int clicks;
     private int pushTicks;
     private Vec3 pushAnchor;
     private int stationary;
     private double bestDistance = Double.MAX_VALUE;
-    private int alightTicks;
     private BlockPos lastFeet;
     private int still;
     private int settleTicks;
@@ -255,7 +246,8 @@ final class MinecartRide implements TravelLeg {
         return ActionStatus.running();
     }
 
-    // 坐上去：够得着就对准车右键，以人真是这辆车的乘客为准；车自己溜远了（推过头）如实放弃。
+    // 坐上去：走近、对准、右键，以人真是这辆车的乘客为准（收在玩家行为层共有的那份"成为乘客"里）；
+    // 车自己溜远了（推过头）如实放弃。
     private ActionStatus board(PlayerContext context, LocalPlayer player) {
         AbstractMinecart cart = findCart(context);
         if (cart == null) return failed(Problem.Kind.TARGET_GONE, "要坐的那辆矿车不见了", null);
@@ -264,30 +256,10 @@ final class MinecartRide implements TravelLeg {
             return failed(Problem.Kind.STUCK, "车推走了没坐上（车在 " + cart.blockPosition().toShortString() + "）",
                     "追上车再坐，或重新放一辆");
         }
-        double reach = player.entityInteractionRange();
-        if (cart.getBoundingBox().distanceToSqr(player.getEyePosition()) > reach * reach) {
-            dropCurrent();
-            walk = services.walks().start(GoalCompiler.near(cart.blockPosition(), 1.5),
-                    TerrainPermit.of(permissions));
-            current = walk;
-            return ActionStatus.progressed();
-        }
-        dropCurrent();
-        lookAt(context, player, cart.getBoundingBox().getCenter());
-        if (pending == null) {
-            if (++clicks > MAX_CLICKS) {
-                return failed(Problem.Kind.STUCK, "对着矿车点了 " + MAX_CLICKS + " 次都没坐上", null);
-            }
-            pending = context.interactionSender().interact(context, cart, InteractionHand.MAIN_HAND,
-                    InteractionConfirmation.ridingOn(cart), CONFIRM_TIMEOUT_TICKS);
-        }
-        pending = context.interactionSender().poll(context, pending);
-        if (pending.terminal()) {
-            boolean applied = pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED;
-            pending = null;
-            if (!applied) return ActionStatus.progressed();
-        }
-        return ridingCart(player) != null ? next(Step.RIDE) : ActionStatus.running();
+        // 矿车只坐一个人，没有"挑空座"那一说；车在推着溜时走近它再点。
+        current = new BoardsVehicle(services.walks(), services.usesEntities(), cart,
+                TerrainPermit.of(permissions), null, "那辆矿车");
+        return ActionStatus.progressed();
     }
 
     // 坐着：每刻看车到了哪，离目的地最近的那格记下来；车几乎不动半秒就是到站（或半路停了），去下车。
@@ -321,18 +293,14 @@ final class MinecartRide implements TravelLeg {
         return ActionStatus.running();
     }
 
-    // 下车：按住潜行，直到不坐在车上。
+    // 下车：交给共有的那一份——按住潜行直到真的不坐在车上，两秒下不来如实失败。
     private ActionStatus alight(PlayerContext context, LocalPlayer player) {
         if (!player.isPassenger()) {
             halt(context);
             return next(Step.SETTLE);
         }
-        if (++alightTicks > MAX_ALIGHT_TICKS) {
-            return failed(Problem.Kind.STUCK, "按住潜行 " + MAX_ALIGHT_TICKS / 20 + " 秒还没下车", null);
-        }
-        context.input().applyMovement(new PlayerInput.Movement(0.0f, 0.0f, false, true, false),
-                context.clientTick());
-        return ActionStatus.running();
+        current = new GetsOffVehicle(services.sneaks());
+        return ActionStatus.progressed();
     }
 
     // 站稳收尾：脚下半秒没动算站稳；车留下的位置记进世界记忆，交还行程从这儿接着走。
@@ -458,7 +426,6 @@ final class MinecartRide implements TravelLeg {
 
     @Override public void close() {
         pause();
-        pending = null;
     }
 
     @Override public List<Change> changes() {

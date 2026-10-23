@@ -72,7 +72,7 @@ class DimensionTravelTaskTest {
         services = new DimensionTravelServices(world, () -> context, walks,
                 new DimensionFakes.FakeObtain(), new DimensionFakes.FakeToMainhand(),
                 new DimensionFakes.FakeUses(), permissions -> null, null,
-                () -> List.of(), progress -> {});
+                () -> List.of(), progress -> {}, null, null);
     }
 
     private static TickContext tick() {
@@ -205,7 +205,7 @@ class DimensionTravelTaskTest {
         crossToNetherOnThirdRead();
         DimensionTravelServices building = new DimensionTravelServices(world, () -> context, walks,
                 new DimensionFakes.FakeObtain(), new DimensionFakes.FakeToMainhand(), lights,
-                permissions -> null, null, () -> List.of(), progress -> {});
+                permissions -> null, null, () -> List.of(), progress -> {}, null, null);
         TaskResult result = run(new DimensionTravelTask(new DimensionTravelTask.Journey(
                 DimensionRoute.NETHER, null, 128, 0, Permissions.DEFAULT), building, SameDimensionTravel.walkingOnly(building)));
 
@@ -457,7 +457,7 @@ class DimensionTravelTaskTest {
     /** 能扔珍珠的一份现场部件：用一格方块的接缝换成扔东西的替身。 */
     private DimensionTravelServices pearlServices() {
         return new DimensionTravelServices(world, () -> context, walks, new DimensionFakes.FakeObtain(),
-                new DimensionFakes.FakeToMainhand(), throwing, permissions -> null, null, () -> List.of(), progress -> {});
+                new DimensionFakes.FakeToMainhand(), throwing, permissions -> null, null, () -> List.of(), progress -> {}, null, null);
     }
 
     /**

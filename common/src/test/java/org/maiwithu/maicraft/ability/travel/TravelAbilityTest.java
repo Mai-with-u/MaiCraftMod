@@ -342,7 +342,7 @@ class TravelAbilityTest {
         // 折跃门原版自带、参数表里总有 via；主世界里没指定方式照旧直接走路，末地里交给行程（隔着虚空只能过门），
         // 只给 via=end_gateway 不给 target 也能下：过最近的一扇门。
         PearlCrossing gateway = new PearlCrossing(new DimensionTravelServices(null, null, null, null, null, null,
-                null, null, null, null));
+                null, null, null, null, null, null));
         TravelAbility overworld = standingIn(DimensionRoute.OVERWORLD, gateway);
         Goal far = new Goal("maicraft:travel", null, new Target.Position(5, 120, 5, null), params("{}"),
                 Permissions.DEFAULT, List.of(), null);
@@ -367,7 +367,7 @@ class TravelAbilityTest {
         // 跨维度那一程前后在同一个维度里的那段：到了末地交给行程（隔着虚空先过折跃门），在主世界只走路；
         // 外岛回主岛只用折跃门送一段，没登记折跃门就建不出来。
         PearlCrossing gateway = new PearlCrossing(new DimensionTravelServices(null, null, null, null, null, null,
-                null, null, null, null));
+                null, null, null, null, null, null));
         TravelDestination outer = TravelDestination.confirmed(new WorldPosition(1100, 64, 0, DimensionRoute.END), 2);
         assertInstanceOf(JourneyTask.class, standingIn(DimensionRoute.END, gateway).sameDimensionTravel()
                 .toward(outer, Permissions.DEFAULT, 0));

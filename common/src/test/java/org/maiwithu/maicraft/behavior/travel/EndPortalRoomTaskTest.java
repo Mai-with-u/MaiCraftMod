@@ -89,7 +89,7 @@ class EndPortalRoomTaskTest {
             DimensionFakes.FakeObtain obtain, DimensionFakes.FakeUses uses, Permissions permissions) {
         DimensionTravelServices services = new DimensionTravelServices(world, () -> new DimensionFakes.FakeContext(),
                 new DimensionFakes.FakeWalks(), obtain, new DimensionFakes.FakeToMainhand(), uses,
-                perms -> null, memory, () -> List.of(), progress -> {});
+                perms -> null, memory, () -> List.of(), progress -> {}, null, null);
         return new EndPortalRoomTask(permissions, 128, services);
     }
 

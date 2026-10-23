@@ -80,7 +80,7 @@ class PortalLavaCastingTest {
     private static DimensionTravelServices services(Scene scene) {
         return new DimensionTravelServices(scene.view(), () -> new DimensionFakes.FakeContext(), new DimensionFakes.FakeWalks(),
                 scene.site(), new DimensionFakes.FakeToMainhand(), new DimensionFakes.FakeUses(),
-                permissions -> scene.site().services(), null, () -> List.of(), progress -> {});
+                permissions -> scene.site().services(), null, () -> List.of(), progress -> {}, null, null);
     }
 
     private static PortalLavaCasting casting(Scene scene) {

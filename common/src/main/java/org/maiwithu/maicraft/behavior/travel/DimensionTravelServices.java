@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -26,9 +27,12 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  * @param memory          世界记忆：末地找要塞查记过的产地线索
  * @param placedBlocks    走到垫过的方块读端：继续步行段结算用
  * @param progressListener 出行进展的去处：继续步行段的进度从这里报
+ * @param usesEntities     对一只实体右键使用：坐上载具（船、骆驼、矿车）
+ * @param sneaks           按住潜行做一件事：从载具上下来
  */
 public record DimensionTravelServices(DimensionWorldView world, Supplier<PlayerContext> context, WalkTo walks,
         ItemNeeds obtain, MovesToMainhand toMainhand, UsesBlocks uses,
         Function<Permissions, ConstructionServices> construction, WorldMemory memory,
-        ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener) {
+        ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+        UsesEntities usesEntities, HoldsSneak sneaks) {
 }

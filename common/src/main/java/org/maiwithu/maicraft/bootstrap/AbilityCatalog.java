@@ -135,6 +135,7 @@ import org.maiwithu.maicraft.behavior.travel.ClientDimensionWorld;
 import org.maiwithu.maicraft.behavior.travel.ClientRailScout;
 import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
 import org.maiwithu.maicraft.behavior.travel.LiveBlockUses;
+import org.maiwithu.maicraft.behavior.travel.LiveEntityUses;
 import org.maiwithu.maicraft.behavior.travel.BoatCrossing;
 import org.maiwithu.maicraft.behavior.travel.MinecartMode;
 import org.maiwithu.maicraft.behavior.travel.PearlCrossing;
@@ -539,13 +540,15 @@ public final class AbilityCatalog {
                         new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations())), permission));
 
         // 跨维度出行的现场部件一次拼好：找门、进门、建门与末地门房间，出行与跟着过门共用。
+        // 右键实体（坐上载具）与按住潜行（下车）也是出行共用的两样，一并交给它。
         DimensionTravelServices portals = new DimensionTravelServices(
                 new ClientDimensionWorld(deps.context(),
                         new PortalFinder(deps.context(), deps.blockScans()), deps.blockScans()),
                 deps.context(),
                 deps.walks(), shared.innerNeeds(), shared.toMainhand(),
                 new LiveBlockUses(deps.interactions()), construction,
-                deps.memory(), deps.walkInternals(), deps.travelProgress());
+                deps.memory(), deps.walkInternals(), deps.travelProgress(),
+                new LiveEntityUses(deps.interactions()), new LiveHoldsSneak(deps.inputs(), deps.context()));
 
         // 跟随：常驻任务，目标从场景的观察编号找；坐车先认原版的船与骆驼、再问联动登记的（列车座位），过门走出行的跨维度段，
         // 帮打用和自卫同一套战斗动手，跟不过去、跟丢了经事件出口告诉宿主。
@@ -553,7 +556,8 @@ public final class AbilityCatalog {
                 new LiveFollowMoves(deps.walks(), deps.interactions(), deps.compat().rideAlongs(services), portals,
                         deps.senses(),
                         new LiveBattleMoves(deps.walks(), deps.useKeyProjection(),
-                                new ModRangedWeapons(deps.compat()::rangedWeapons, deps.foods()))),
+                                new ModRangedWeapons(deps.compat()::rangedWeapons, deps.foods())),
+                        new LiveHoldsSneak(deps.inputs(), deps.context())),
                 deps.events()));
 
         // 等待占着身体站在原地等；不占身体的"过 N 秒叫我"归计时，往启动侧每刻看钟的那份计时表里挂。

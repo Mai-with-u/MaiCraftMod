@@ -60,7 +60,7 @@ class PearlCrossingTest {
     private final PearlSupply supply = new PearlSupply();
     private final DimensionFakes.Throws throwing = new DimensionFakes.Throws();
     private final DimensionTravelServices services = new DimensionTravelServices(world, () -> null, walks, supply,
-            hands, throwing, null, null, null, null);
+            hands, throwing, null, null, null, null, null, null);
     private final TravelFakes.TestTick tick = new TravelFakes.TestTick();
 
     PearlCrossingTest() {

@@ -51,10 +51,8 @@ final class BoatCrossingLeg implements TravelLeg {
     /** 划一段的几步。 */
     enum Step { PREP, WALK, PLACE, MOUNT, ROW, DISMOUNT, SETTLE }
 
-    /** 放船、上船等服务器确认的期限。 */
+    /** 放船等服务器确认的期限。 */
     private static final int CONFIRM_TIMEOUT_TICKS = 30;
-    /** 按住潜行这么久还没下船就放弃。 */
-    private static final long DISMOUNT_LIMIT_TICKS = 40;
     /** 下了船这么多刻还站不到地上（也没站得住的地方）就按落水收场。 */
     private static final int DISMOUNT_SETTLE_LIMIT_TICKS = 60;
     /** 离靠岸点这么近（格）就开始贴岸下船。 */
@@ -78,7 +76,6 @@ final class BoatCrossingLeg implements TravelLeg {
     private boolean boatPlaced;
     private PendingInteraction pending;
     private long lastTick = Long.MIN_VALUE;
-    private long dismountStarted = Long.MIN_VALUE;
     private int afterDismountTicks;
     private BlockPos windowAnchor;
     private long windowStart;
@@ -132,7 +129,7 @@ final class BoatCrossingLeg implements TravelLeg {
         };
     }
 
-    // 推进手上的动作（换主手、走到）；做完按步骤接下一步，走不到如实失败。
+    // 推进手上的动作（换主手、走到、坐上船、下船）；做完按步骤接下一步，走不到如实失败。
     private ActionStatus runCurrent(TickContext context, PlayerContext live) {
         ActionStatus status = current.tick(context);
         if (status instanceof ActionStatus.Running) {
@@ -144,6 +141,8 @@ final class BoatCrossingLeg implements TravelLeg {
         Problem problem = status instanceof ActionStatus.Failed failed ? failed.problem() : null;
         if (step == Step.PREP) return afterPrep(problem, live);
         if (step == Step.WALK) return afterWalk(problem, live);
+        // 坐上船、潜行下船的动作自己有了结论：没做成如实把原因交上去，做成了下一步由各自的步骤接着看。
+        if (problem != null) return failed(problem.message(), problem.kind(), problem.suggestion());
         return ActionStatus.running();
     }
 
@@ -238,10 +237,15 @@ final class BoatCrossingLeg implements TravelLeg {
         return InteractionConfirmation.Verdict.APPLIED;
     }
 
-    // 上船：船还在、没人坐才右键它；以真坐在这条船里为准。用岸边现成的船时先按记下的位置认出它是哪条。
+    // 上船：先认出是哪条船、上面还有没有人；坐上去交给共有的那份"成为乘客"——走近、对准、右键，
+    // 以角色真是这条船的乘客为准，连点几次没坐上如实放弃。
     private ActionStatus mount(PlayerContext live) {
         step = Step.MOUNT;
         var player = live.localPlayer();
+        // 已经坐在这条船上（上一段没下船、或刚才坐上了）：直接开划。
+        if (player.getVehicle() instanceof Boat riding && riding.getUUID().equals(boatId)) {
+            return startRowing();
+        }
         Boat boat = findBoat(live);
         if (boat == null && boatId == null && plan.existingBoat() != null) {
             for (Boat nearby : live.level().getEntitiesOfClass(Boat.class,
@@ -259,16 +263,11 @@ final class BoatCrossingLeg implements TravelLeg {
         if (!boat.getPassengers().isEmpty()) {
             return failed("那条船被人坐了，这一段坐不成", Problem.Kind.UNREACHABLE, null);
         }
-        look(live, boat.getBoundingBox().getCenter(), false);
-        if (!player.canInteractWithEntity(boat, 0) || player.isShiftKeyDown() || !live.canInteractThisTick()) {
-            return ActionStatus.running();
+        if (current == null) {
+            current = new BoardsVehicle(services.walks(), services.usesEntities(), boat,
+                    TerrainPermit.of(permissions), v -> v.getPassengers().isEmpty(), "那条船");
         }
-        UUID target = boatId;
-        pending = live.interactionSender().interact(live, boat, InteractionHand.MAIN_HAND,
-                InteractionConfirmation.serverObservedEntity(l -> target.equals(vehicleId(l))
-                        ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING),
-                CONFIRM_TIMEOUT_TICKS);
-        return ActionStatus.progressed();
+        return ActionStatus.running();
     }
 
     // 坐稳开划：从当前位置朝靠岸点划，每刻看前方避障、每个观察窗看前进没前进。
@@ -304,7 +303,6 @@ final class BoatCrossingLeg implements TravelLeg {
         Vec3 target = Vec3.atCenterOf(landing());
         if (Math.sqrt(boatPos.distanceToSqr(target.x, boatPos.y, target.z)) <= ARRIVAL_DISTANCE) {
             releaseKeys(live);
-            dismountStarted = live.clientTick();
             step = Step.DISMOUNT;
             return ActionStatus.progressed();
         }
@@ -341,14 +339,12 @@ final class BoatCrossingLeg implements TravelLeg {
         return ActionStatus.running();
     }
 
-    // 下船：贴岸按住潜行（按键在这里给），下来了等站稳、脚下有支撑才算上岸；船留在水里不收。
+    // 下船：交给共有的那份"下车"——贴岸按住潜行，真的不坐在船上了再看脚下站不站得住；船留在水里不收。
     private ActionStatus dismount(PlayerContext live) {
         var player = live.localPlayer();
         if (player.isPassenger()) {
-            live.input().applyMovement(new PlayerInput.Movement(0, 0, false, true, false), live.clientTick());
-            if (live.clientTick() - dismountStarted > DISMOUNT_LIMIT_TICKS) {
-                return failed("按住潜行两秒还没下船，船停在 " + player.blockPosition().toShortString() + " 附近",
-                        Problem.Kind.STUCK, null);
+            if (current == null) {
+                current = new GetsOffVehicle(services.sneaks());
             }
             return ActionStatus.running();
         }
@@ -379,7 +375,7 @@ final class BoatCrossingLeg implements TravelLeg {
         return still >= STILL_TICKS ? ActionStatus.done() : ActionStatus.running();
     }
 
-    // 等放船、上船的确认：确认过了接下一步，没确认如实失败，不放第二条、不右键别的东西。回了非空表示这段有了结论。
+    // 等放船的确认：确认过了接着去坐船，没确认如实失败，不放第二条、不右键别的东西。回了非空表示这段有了结论。
     private ActionStatus settlePending(PlayerContext live) {
         pending = live.interactionSender().poll(live, pending);
         if (!pending.terminal()) return null;
@@ -387,27 +383,17 @@ final class BoatCrossingLeg implements TravelLeg {
                 : Problem.of(Problem.Kind.UNREACHABLE, pending.detail());
         pending = null;
         if (problem != null) {
-            String doing = step == Step.PLACE ? "放船" : "上船";
-            return failed(doing + "没得到服务器确认：" + problem.message(), problem.kind(), null);
+            return failed("放船没得到服务器确认：" + problem.message(), problem.kind(), null);
         }
-        if (step == Step.PLACE) {
-            if (boatId == null) {
-                return failed("放了船但没认出哪条是新放的，不冒认", Problem.Kind.UNREACHABLE, null);
-            }
-            if (boatPlaced) {
-                changes.add(Change.of(Change.Kind.ITEM_CONSUMED,
-                        plan.boatItem() + "（放到水里 " + plan.launchWater().toShortString() + " 附近）", 1));
-            }
-            step = Step.MOUNT;
-        } else if (step == Step.MOUNT) {
-            return startRowing();
+        if (boatId == null) {
+            return failed("放了船但没认出哪条是新放的，不冒认", Problem.Kind.UNREACHABLE, null);
         }
+        if (boatPlaced) {
+            changes.add(Change.of(Change.Kind.ITEM_CONSUMED,
+                    plan.boatItem() + "（放到水里 " + plan.launchWater().toShortString() + " 附近）", 1));
+        }
+        step = Step.MOUNT;
         return null;
-    }
-
-    /** 人此刻坐的载具编号；不在任何东西上给 null。 */
-    private static UUID vehicleId(PlayerContext live) {
-        return live.localPlayer().getVehicle() == null ? null : live.localPlayer().getVehicle().getUUID();
     }
 
     private Boat findBoat(PlayerContext live) {

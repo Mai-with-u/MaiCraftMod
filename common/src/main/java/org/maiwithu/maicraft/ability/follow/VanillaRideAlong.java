@@ -9,9 +9,10 @@ import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.entity.vehicle.ChestBoat;
 
 import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
-import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.travel.BoardsVehicle;
+import org.maiwithu.maicraft.behavior.travel.UsesEntities;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -23,18 +24,19 @@ import org.maiwithu.maicraft.kernel.task.Action;
 final class VanillaRideAlong implements RideAlong {
 
     private final WalkTo walks;
-    private final Interactions interactions;
+    private final UsesEntities uses;
 
-    VanillaRideAlong(WalkTo walks, Interactions interactions) {
+    VanillaRideAlong(WalkTo walks, UsesEntities uses) {
         this.walks = walks;
-        this.interactions = interactions;
+        this.uses = uses;
     }
 
     @Override
     public Optional<Action> board(PlayerContext context, Entity vehicle, Permissions permissions) {
         String label = label(vehicle);
         if (label == null || !freeSeat(vehicle)) return Optional.empty();
-        return Optional.of(new BoardsVehicle(walks, interactions, vehicle, TerrainPermit.of(permissions),
+        // 走过去坐上交给玩家行为层共有的那一份：走近、右键、以真是这条的乘客为准。
+        return Optional.of(new BoardsVehicle(walks, uses, vehicle, TerrainPermit.of(permissions),
                 VanillaRideAlong::freeSeat, label));
     }
 
@@ -51,8 +53,9 @@ final class VanillaRideAlong implements RideAlong {
     }
 
     private static String label(Entity vehicle) {
-        if (vehicle instanceof Boat) return "船";
-        if (vehicle instanceof Camel) return "骆驼";
+        // 结果里说事情用的话带量词说全：失败原因、走到哪一步都拿这句拼。
+        if (vehicle instanceof Boat) return "那条船";
+        if (vehicle instanceof Camel) return "那头骆驼";
         return null;
     }
 }
