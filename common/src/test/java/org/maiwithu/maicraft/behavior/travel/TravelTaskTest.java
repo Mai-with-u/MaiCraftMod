@@ -155,56 +155,57 @@ class TravelTaskTest {
 
     @Test
     void survivalInterruptionResumesWalkingFromSameSpot() {
-        ScriptedWalk firstLeg = new ScriptedWalk(
+        // 同一趟运行被生存需求打断、停稳后从原地接着走：不收掉重开一趟，目标也不用重发。
+        ScriptedWalk leg = new ScriptedWalk(
                 WalkReport.onTheWay(new BlockPos(2, 64, 0), false),
-                WalkReport.stopped(new BlockPos(4, 64, -1), false));
-        ScriptedWalk secondLeg = new ScriptedWalk(WalkReport.arrived(HOME, false));
-        walks.enqueue(firstLeg);
-        walks.enqueue(secondLeg);
+                WalkReport.stopped(new BlockPos(4, 64, -1), false),
+                WalkReport.arrived(HOME, false));
+        walks.enqueue(leg);
         TravelTask travel = task(new Target.Position(12, 64, -2, null));
         travel.start(tick);
         assertTrue(travel.tick(tick) instanceof TickResult.Running);
 
         // 生存需求打断：走到运行先收到暂停请求；回来后从原地接着走。
         travel.pause();
-        assertTrue(firstLeg.pauseRequests >= 1, "打断时暂停交给走到运行处理");
+        assertTrue(leg.pauseRequests >= 1, "打断时暂停交给走到运行处理");
         TaskResult result = runToFinish(travel);
 
         assertEquals(TaskResult.Status.DONE, result.status());
-        assertEquals(2, walks.started.size(), "被打断后从原地重新上路");
+        assertEquals(1, walks.started.size(), "被打断后不重开一趟");
+        assertEquals(1, leg.resumes, "停稳的运行从原地接着走");
     }
 
     @Test
     void askedToStopSafelyInMidAirLandsThenWaitsWithoutSettingOffAgain() {
-        // 走在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；落地停稳后站着等，不从原地重新上路；
+        // 走在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；落地停稳后站着等，不接着走；
         // 暂停过后接着做，才从原地上路走完。
-        ScriptedWalk firstLeg = new ScriptedWalk(
+        ScriptedWalk leg = new ScriptedWalk(
                 WalkReport.onTheWay(new BlockPos(2, 64, 0), false),
                 WalkReport.onTheWay(new BlockPos(3, 65, 0), false),
-                WalkReport.stopped(new BlockPos(4, 64, -1), false));
-        firstLeg.airborne = true;
-        ScriptedWalk secondLeg = new ScriptedWalk(WalkReport.arrived(HOME, false));
-        walks.enqueue(firstLeg);
-        walks.enqueue(secondLeg);
+                WalkReport.stopped(new BlockPos(4, 64, -1), false),
+                WalkReport.arrived(HOME, false));
+        leg.airborne = true;
+        walks.enqueue(leg);
         TravelTask travel = task(new Target.Position(12, 64, -2, null));
         travel.start(tick);
         assertTrue(travel.tick(tick) instanceof TickResult.Running);
         tick.nextTick();
 
         assertTrue(travel.stopSafely(), "悬在半空，要先落地");
-        assertEquals(1, firstLeg.safeStops, "走路收到先停稳");
+        assertEquals(1, leg.safeStops, "走路收到先停稳");
         assertFalse(travel.stoppedSafely(), "还没落地");
         for (int i = 0; i < 4; i++) {
             assertTrue(travel.tick(tick) instanceof TickResult.Running, "收尾途中不收场");
             tick.nextTick();
         }
         assertTrue(travel.stoppedSafely(), "落地停稳了");
-        assertEquals(1, walks.started.size(), "收尾途中不从原地重新上路");
+        assertEquals(1, walks.started.size(), "收尾途中不从原地接着走");
 
         travel.pause();
         TaskResult result = runToFinish(travel);
         assertEquals(TaskResult.Status.DONE, result.status());
-        assertEquals(2, walks.started.size(), "暂停过后从原地重新上路走完");
+        assertEquals(1, walks.started.size(), "暂停过后也不重开一趟");
+        assertEquals(1, leg.resumes, "暂停过后从原地接着走走完");
     }
 
     @Test

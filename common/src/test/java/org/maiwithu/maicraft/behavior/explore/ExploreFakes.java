@@ -185,6 +185,11 @@ final class ExploreFakes {
 
         @Override public void pause() { }
 
+        /** 探索的走行段还没接续走：续不上，按收掉重开一路对待。 */
+        @Override public boolean resume() {
+            return false;
+        }
+
         @Override public void close() { }
 
         @Override public String describe() {

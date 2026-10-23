@@ -201,8 +201,37 @@ class WalkRunProgressTest {
     }
 
     @Test
+    void aResumedRunPlansAgainFromWhereItStopped() {
+        // 被打断停稳的运行从原地接着走：收回停下请求、回到正在算路，从停下的地方重新上路照样走到目标。
+        var progress = progressExact();
+        progress.observe(seen(ELSEWHERE, true, false, true, false));
+        progress.requestStop();
+        var stopped = progress.observe(seen(ELSEWHERE.east(), true, false, true, false));
+        assertEquals(WalkReport.State.STOPPED, stopped.report().state());
+        progress.resume();
+        assertFalse(progress.stopRequested(), "续走收回停下请求");
+        var replanning = progress.observe(seen(ELSEWHERE.east(), true, false, false, false));
+        assertEquals(WalkReport.State.PLANNING, replanning.report().state(), "续走后回到正在算路");
+        assertFalse(replanning.done());
+        var arrived = progress.observe(seen(TARGET, true, false, true, false));
+        assertEquals(WalkReport.State.ARRIVED, arrived.report().state(), "接着走照样按原目标判到达");
+    }
+
+    @Test
+    void onlyAStoppedRunResumes() {
+        // 在路上、到达与走不通的运行都续不上：只有停稳的运行能从原地接着走。
+        var progress = progressExact();
+        progress.observe(seen(ELSEWHERE, true, false, true, false));
+        progress.resume();
+        assertEquals(WalkReport.State.ON_THE_WAY, progress.report().state());
+        progress.fail(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null), ELSEWHERE);
+        progress.resume();
+        assertEquals(WalkReport.State.FAILED, progress.report().state(), "走不通是结论，续不走");
+    }
+
+    @Test
     void yieldingTheBodySettlesAsStoppedButKeepsAnEarlierConclusion() {
-        // 被暂停的走到交出身体：按"已停下"结算，恢复时任务会从原地重新上路；已经有结论的不改。
+        // 被暂停的走到交出身体：按"已停下"结算，恢复时让运行从原地接着走；已经有结论的不改。
         var stopped = progressExact();
         stopped.observe(seen(ELSEWHERE, true, false, true, false));
         stopped.stopWhereLastSeen(ELSEWHERE.north());

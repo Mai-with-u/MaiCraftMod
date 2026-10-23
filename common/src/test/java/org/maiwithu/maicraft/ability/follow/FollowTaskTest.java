@@ -161,6 +161,10 @@ class FollowTaskTest {
             return false;
         }
 
+        @Override public boolean resume() {
+            return false;
+        }
+
         @Override public boolean stopSafely() {
             if (!airborne) return false;
             safeStops++;

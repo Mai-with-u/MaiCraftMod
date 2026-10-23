@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import baritone.behavior.PathingBehavior;
+import baritone.pathing.path.PathExecutor;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
+
+import java.util.List;
+
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 
 /**
  * 普通行走的镜头航向：既不左右乱晃，也不歪着跑。
@@ -91,5 +101,50 @@ final class NavigationCameraCourse {
         tick = Long.MIN_VALUE;
         driftSince = Long.MIN_VALUE;
         driftSide = 0;
+    }
+
+    // 普通走路的镜头看路线往前约四格的那个点：格子路线斜着走时一格一拐的锯齿被平均掉，长直线上就对着整条线，
+    // 到拐角也像人一样提前一点转头。转法交给本航向（疾跑时对正到原版擦边判定以内，走路时小修正不转、持续偏一边才转），
+    // 俯仰平地固定略向下，潜泳时跟着实际潜泳方向。
+    // 不追引擎每刻给的方块中心瞄点——那会压低视线、随靠近越来越陡、每段交接弹回，逐格点头。
+    void alongRoute(PathingBehavior pathing, PlayerInput playerInput, PlayerContext context,
+                    LocalPlayer player, boolean routePresent, boolean sprinting) {
+        Vec3 anchor = null;
+        var executor = pathing.getCurrent();
+        boolean submerged = false;
+        float submergedPitch = 0.0f;
+        if (routePresent && executor != null) {
+            anchor = lookAhead(executor.getPath().positions(), executor.getPosition() + 1, player.position());
+            if (executor instanceof PathExecutor pathExecutor && pathExecutor.submergedWaterTravelActive()) {
+                submerged = true;
+                submergedPitch = pathExecutor.submergedWaterCameraPitch();
+            }
+        }
+        if (anchor == null) return;
+        Vec3 delta = anchor.subtract(player.getEyePosition());
+        // 前方的点就在头顶或脚下（搭柱子、往下挖）时水平方向说不准，保持现在的朝向，不让镜头乱转。
+        float rawYaw = delta.horizontalDistanceSqr() < 1.0
+                ? player.getYRot()
+                : (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
+        float yaw = target(rawYaw, sprinting, context.clientTick());
+        float pitch = pitch(submergedPitch, submerged);
+        playerInput.requestNavigationLook(yaw, pitch, context.clientTick());
+    }
+
+    /** 镜头往前看多远（水平格数）。 */
+    static final double LOOK_AHEAD_BLOCKS = 4.0;
+    /** 往前最多数几个路点：绕圈的楼梯这类路线，直线距离总也不够远，不能一直数下去。 */
+    static final int LOOK_AHEAD_NODES = 6;
+
+    // 从下一个路点起往前数，取第一个水平离身体够四格的路点；都不够远就取数到的最后一个。
+    static Vec3 lookAhead(List<? extends BlockPos> positions, int next, Vec3 body) {
+        int index = Math.clamp(next, 0, positions.size() - 1);
+        int last = Math.min(positions.size() - 1, index + LOOK_AHEAD_NODES - 1);
+        for (; index < last; index++) {
+            Vec3 point = Vec3.atBottomCenterOf(positions.get(index));
+            double dx = point.x - body.x, dz = point.z - body.z;
+            if (dx * dx + dz * dz >= LOOK_AHEAD_BLOCKS * LOOK_AHEAD_BLOCKS) break;
+        }
+        return Vec3.atBottomCenterOf(positions.get(index));
     }
 }

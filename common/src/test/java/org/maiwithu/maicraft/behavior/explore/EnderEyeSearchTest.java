@@ -92,6 +92,7 @@ class EnderEyeSearchTest {
                 }
                 @Override public WalkReport report() { return report; }
                 @Override public boolean stop() { return true; }
+                @Override public boolean resume() { return false; }
                 @Override public String describe() { return "演出来的走一段"; }
             };
         }

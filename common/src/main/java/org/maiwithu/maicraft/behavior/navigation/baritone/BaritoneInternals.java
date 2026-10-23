@@ -191,6 +191,12 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         return run;
     }
 
+    /** 停稳的运行要从原地接着走：重新排队等身体，等到了按原目标从脚下重新算路上路。 */
+    void resume(BaritoneWalkRun run) {
+        if (queued != null && queued != run) queued.abandon();
+        queued = run;
+    }
+
     /** 走到实现方每刻推进一个运行；同时只推进拥有身体的那一个。 */
     void drive(BaritoneWalkRun run, PlayerContext context) {
         long now = context.clientTick();

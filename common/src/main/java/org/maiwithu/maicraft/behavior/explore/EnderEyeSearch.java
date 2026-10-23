@@ -221,12 +221,12 @@ public final class EnderEyeSearch implements Action {
         };
     }
 
-    // 沿飞向走一段：走到了再扔；中途被停下就从原地接着走；走不通但已经走出一截就在那里再扔。
+    // 沿飞向走一段：走到了再扔；中途被停下（让给生存需求）就让同一趟运行从原地接着走；
+    // 走不通但已经走出一截就在那里再扔。
     private ActionStatus walkLeg(TickContext context) {
         ActionStatus status = walk.tick(context);
         if (walk.report().state() == WalkReport.State.STOPPED) {
-            walk.close();
-            walk = eyes.walkToward(targetX, targetZ, permit);
+            walk.resume();
             return ActionStatus.running();
         }
         return switch (status) {

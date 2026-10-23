@@ -227,6 +227,8 @@ final class TravelFakes {
         private WalkReport last = WalkReport.planning();
         int stopRequests;
         int pauseRequests;
+        /** 从停稳里续走的次数：任务不该收掉重开一趟，而是让停稳的运行接着走。 */
+        int resumes;
         /** 悬在半空走着：叫它先停稳就答应收尾，落地报"已停下"才算停稳；落地的过程由报告脚本演出来。 */
         boolean airborne;
         int safeStops;
@@ -234,6 +236,14 @@ final class TravelFakes {
         /** 被生存需求打断：只记请求；停下的过程由测试用报告脚本演出来。 */
         @Override public void pause() {
             pauseRequests++;
+        }
+
+        /** 只有报过"已停下"才续得上：续走后回到正在算路，后面的脚本接着演。 */
+        @Override public boolean resume() {
+            if (last.state() != WalkReport.State.STOPPED) return false;
+            resumes++;
+            last = WalkReport.planning();
+            return true;
         }
 
         ScriptedWalk(WalkReport... reports) {
@@ -259,6 +269,10 @@ final class TravelFakes {
         }
 
         @Override public ActionStatus tick(TickContext context) {
+            // 停稳的运行自己不再往前演：脚本留在原地，续走（resume）之后才接着演后面的报告。
+            if (last.state() == WalkReport.State.STOPPED) {
+                return ActionStatus.done();
+            }
             if (reports.isEmpty()) {
                 return ActionStatus.running();
             }

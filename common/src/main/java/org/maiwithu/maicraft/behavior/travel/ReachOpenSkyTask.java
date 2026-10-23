@@ -155,8 +155,13 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         ActionStatus status = runAction(context);
         WalkReport report = walk.report();
         observeWalk(report);
-        // 生存需求打断时请求过停；停稳了就从原地重新上路。
-        if (report.state() == WalkReport.State.STOPPED) return Next.go(Phase.WALK, "上一段走到已停稳，从原地接着走");
+        // 生存需求打断时请求过停；停稳了就让同一趟运行从原地接着走，不收掉重开。
+        // 被叫先到安全处再停、落地停稳了的：站着等外层停下，暂停过后接着做时再续走。
+        if (report.state() == WalkReport.State.STOPPED) {
+            if (stopping()) return Next.stay();
+            walk.resume();
+            return Next.stay();
+        }
         return switch (status) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> afterWalk(null);

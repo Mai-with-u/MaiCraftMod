@@ -98,13 +98,13 @@ class NavigationCameraCourseTest {
         List<BlockPos> staircase = List.of(new BlockPos(0, 64, 0), new BlockPos(1, 64, 0), new BlockPos(2, 64, 1),
                 new BlockPos(3, 64, 1), new BlockPos(4, 64, 2), new BlockPos(5, 64, 2), new BlockPos(6, 64, 3));
         Vec3 body = new Vec3(0.5, 64, 0.5);
-        assertEquals(Vec3.atBottomCenterOf(new BlockPos(4, 64, 2)), BaritoneWalkRun.lookAhead(staircase, 1, body));
+        assertEquals(Vec3.atBottomCenterOf(new BlockPos(4, 64, 2)), NavigationCameraCourse.lookAhead(staircase, 1, body));
         // 往上搭柱子：路点都在头顶，数到上限就停，取数到的最后一个。
         List<BlockPos> pillar = List.of(new BlockPos(0, 64, 0), new BlockPos(0, 65, 0), new BlockPos(0, 66, 0),
                 new BlockPos(0, 67, 0), new BlockPos(0, 68, 0), new BlockPos(0, 69, 0), new BlockPos(0, 70, 0),
                 new BlockPos(0, 71, 0), new BlockPos(0, 72, 0));
-        assertEquals(Vec3.atBottomCenterOf(new BlockPos(0, 70, 0)), BaritoneWalkRun.lookAhead(pillar, 1, body));
-        assertEquals(Vec3.atBottomCenterOf(new BlockPos(6, 64, 3)), BaritoneWalkRun.lookAhead(staircase, 9, body),
+        assertEquals(Vec3.atBottomCenterOf(new BlockPos(0, 70, 0)), NavigationCameraCourse.lookAhead(pillar, 1, body));
+        assertEquals(Vec3.atBottomCenterOf(new BlockPos(6, 64, 3)), NavigationCameraCourse.lookAhead(staircase, 9, body),
                 "past the end the last point is used");
     }
 

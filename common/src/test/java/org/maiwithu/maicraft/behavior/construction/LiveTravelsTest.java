@@ -36,6 +36,7 @@ class LiveTravelsTest {
         @Override public ActionStatus tick(TickContext context) { return ActionStatus.running(); }
         @Override public WalkReport report() { return WalkReport.planning(); }
         @Override public boolean stop() { return true; }
+        @Override public boolean resume() { return false; }
         @Override public String describe() { return "替身走到"; }
     }
 

@@ -67,8 +67,6 @@ final class BoatCrossingLeg implements TravelLeg {
     private Step step = Step.PREP;
     private Action current;
     private WalkRun walk;
-    private BlockPos walkTarget;
-    private List<BlockPos> walkStances = List.of();
     private UUID boatId;
     private int landingIndex;
     private Set<UUID> boatsBefore = Set.of();
@@ -117,26 +115,24 @@ final class BoatCrossingLeg implements TravelLeg {
             ActionStatus settled = settlePending(live);
             if (settled != null) return settled;
         }
-        if (current != null) return runCurrent(context, live);
-        return switch (step) {
-            case PREP -> prep(live);
-            case PLACE -> place(live);
-            case MOUNT -> mount(live);
-            case ROW -> row(live);
-            case DISMOUNT -> dismount(live);
-            case SETTLE -> settleDown(live);
-            case WALK -> resumeWalk();
-        };
-    }
-
-    // 推进手上的动作（换主手、走到、坐上船、下船）；做完按步骤接下一步，走不到如实失败。
-    private ActionStatus runCurrent(TickContext context, PlayerContext live) {
-        ActionStatus status = current.tick(context);
-        if (status instanceof ActionStatus.Running) {
-            // 走到被停下（让给生存需求）：收掉这一趟，回来从原地重新走。
-            if (current == walk && walk.report().state() == WalkReport.State.STOPPED) dropCurrent();
-            return status;
+        // 手上没有动作：按步骤起下一步；走到那一步先看停稳的运行能不能从原地接着走。
+        if (current == null) {
+            if (step == Step.WALK) return resumeWalk();
+            return switch (step) {
+                case PREP -> prep(live);
+                case PLACE -> place(live);
+                case MOUNT -> mount(live);
+                case ROW -> row(live);
+                case DISMOUNT -> dismount(live);
+                case SETTLE -> settleDown(live);
+                default -> ActionStatus.running();
+            };
         }
+        // 推进手上的动作（换主手、走到、坐上船、下船）；做完按步骤接下一步，走不到如实失败。
+        ActionStatus status = current.tick(context);
+        // 走到被停下（让给生存需求）：先把手松开，回来让停稳的运行从原地接着走。
+        if (current == walk && walk.report().state() == WalkReport.State.STOPPED) current = null;
+        if (status instanceof ActionStatus.Running) return status;
         dropCurrent();
         Problem problem = status instanceof ActionStatus.Failed failed ? failed.problem() : null;
         if (step == Step.PREP) return afterPrep(problem, live);
@@ -174,20 +170,21 @@ final class BoatCrossingLeg implements TravelLeg {
         return walkTo(plan.launchFeet(), List.of(plan.launchFeet()));
     }
 
-    // 走到岸边站位（或停着的船旁）：记下要去哪，走到被让路收掉后从原地照原目标重走。
+    // 走到岸边站位（或停着的船旁）：交给走到；被让路停稳后由运行自己从原地接着走。
     private ActionStatus walkTo(BlockPos target, List<BlockPos> stances) {
         step = Step.WALK;
-        walkTarget = target.immutable();
-        walkStances = List.copyOf(stances);
         walk = services.walks().start(GoalCompiler.interactionStances(target, stances),
                 TerrainPermit.of(permissions));
         current = walk;
         return ActionStatus.progressed();
     }
 
-    // 走到被让路（饿、被打）后回来：已停下的走到不会自己接着走，从原地照原目标重新上路。
+    // 走到被让路（饿、被打）后回来：停稳的运行从原地接着走；还没来得及停的重新接上手上的运行照旧走。
     private ActionStatus resumeWalk() {
-        return current == null ? walkTo(walkTarget, walkStances) : ActionStatus.running();
+        if (current != null) return ActionStatus.running();
+        if (walk != null && walk.report().state() == WalkReport.State.STOPPED) walk.resume();
+        current = walk;
+        return ActionStatus.progressed();
     }
 
     private ActionStatus afterWalk(Problem problem, PlayerContext live) {
@@ -445,10 +442,10 @@ final class BoatCrossingLeg implements TravelLeg {
         if (live != null && live.localPlayer() != null) releaseKeys(live);
     }
 
+    // 松手收掉手上的动作；走到运行留在 walk 里，停稳了还能从原地接着走，这一段整个结束时才一并收掉。
     private void dropCurrent() {
         if (current != null) current.close();
         current = null;
-        walk = null;
     }
 
     @Override public Interruptibility interruptibility() {
@@ -460,15 +457,20 @@ final class BoatCrossingLeg implements TravelLeg {
         stopRequested = true;
     }
 
-    // 让给生存需求：松开按键船停原地，回来接着划；走到那一趟收掉，回来从原地重走。
+    // 让给生存需求：松开按键船停原地，回来接着划；手上的走到先松开，停稳后由运行自己从原地接着走。
     @Override public void pause() {
         releaseKeysIfPossible();
-        dropCurrent();
+        if (current == walk) current = null;
+        else dropCurrent();
     }
 
     @Override public void close() {
         releaseKeysIfPossible();
         dropCurrent();
+        if (walk != null) {
+            walk.close();
+            walk = null;
+        }
     }
 
     @Override public List<Change> changes() {

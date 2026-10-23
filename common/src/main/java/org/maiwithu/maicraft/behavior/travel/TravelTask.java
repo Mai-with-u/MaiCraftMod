@@ -160,12 +160,20 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         ActionStatus status = runAction(context);
         WalkReport report = walk.report();
         observe(context, report);
-        // 生存需求打断时请求过停；停稳了就从原地重新上路，接着走完剩下的路。
-        // 被叫先到安全处再停、走路落地停稳了：站着等外层停下，暂停过后接着做时再从原地上路。
+        // 生存需求打断时请求过停；停稳了就让同一趟运行从原地接着走，不收掉重开。
+        // 被叫先到安全处再停、走路落地停稳了：站着等外层停下，暂停过后接着做时再续走。
         if (report.state() == WalkReport.State.STOPPED) {
             if (stopping()) return Next.stay();
+            // 地表小段被停下过：按现在站的地方重新截一段落点再续，不朝身后的旧落点往回走；
+            // 截不出（那一列没加载、或已经离得近了）就按目的地直接走，与分段走不通时的改法一致。
+            if (onSurfaceLeg) {
+                NavGoal refreshed = surfaceLeg();
+                walk.retarget(new GoalCompiler.Compiled(
+                        refreshed != null ? refreshed : destination.navGoal(), LongSets.emptySet()));
+            }
+            walk.resume();
             recordProgress("从原地接着走");
-            return Next.go(Phase.WALK, "上一段走到已停稳，从原地接着走");
+            return Next.stay();
         }
         if (onSurfaceLeg && !(status instanceof ActionStatus.Running)) {
             // 地表的一小段走完了：接着从这里往目的地方向再定一段；这一段走不通就记一次，接连不行改成直接走。

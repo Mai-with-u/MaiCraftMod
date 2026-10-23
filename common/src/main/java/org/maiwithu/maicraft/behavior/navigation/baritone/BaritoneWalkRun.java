@@ -100,6 +100,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final NavigationStallMemory stalls = new NavigationStallMemory();
     /** 路线前方被正在动的东西挡着时原地等它过去。 */
     private final MovingObstacleWait obstacleWait = new MovingObstacleWait();
+    /** 刚从停稳里续走：下一刻驱动时进展计时重新起算、按原目标重新算路。 */
+    private boolean resumed;
     /** 只有半截路时看人有没有离目标更近：半分钟没更近就交还上层换个去处。 */
     private final PartialRouteWatch partialRoute = new PartialRouteWatch();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
@@ -222,8 +224,8 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /**
-     * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后读到"已停下"，
-     * 会像打断后那样从原地重新上路；没人再管的运行就此结束，不再挡住后面所有的走到。
+     * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后让运行从原地接着走；
+     * 没人再管的运行就此结束，不再挡住后面所有的走到。
      * 交出身体放在 finally 里：结算出了岔子也必须交出去，否则这个运行永远占着身体，
      * 之后每一次走到都会撞上同一个岔子、全部走不了，只能重启游戏。
      *
@@ -266,11 +268,14 @@ final class BaritoneWalkRun implements WalkRun {
         return progress.report();
     }
 
-    // 走着换目标点：结算了、被顶掉的不换；排队的只换目标；正在走的交给引擎的追踪入口，旧路线还在往新目标靠近就接着走。
+    // 走着换目标点：结算了、被顶掉的不换；排队的与停稳的都只换目标（停稳的续走时按新目标上路）；
+    // 正在走的交给引擎的追踪入口，旧路线还在往新目标靠近就接着走。
     // 人按 F8 收回、正在停下时不碰引擎，交回后重新算路或停稳结算都用新目标。
     @Override
     public boolean retarget(GoalCompiler.Compiled next) {
-        if (progress.done() || abandoned) return false;
+        if (abandoned) return false;
+        var state = progress.report().state();
+        if (state == WalkReport.State.ARRIVED || state == WalkReport.State.FAILED) return false;
         target = next;
         goal = next.goal();
         engineGoal = new MaiCraftGoalAdapter(goal);
@@ -286,6 +291,18 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     @Override public void allowSprint(boolean allowed) { sprintAllowed = allowed; }
+
+    // 已停稳的运行从原地接着走：收回停下请求、重新排队等身体，等到了从身体此刻站的地方按原目标重新算路。
+    // 停下的路上垫过的方块与卡住记忆都留着：垫块清单要连成完整一段行程，列过的障碍照样绕开。
+    @Override
+    public boolean resume() {
+        // 只有停稳的运行续得上：到达与走不通是结论，还在走的运行不用续，被顶掉的运行已经交了队位。
+        if (abandoned || progress.report().state() != WalkReport.State.STOPPED) return false;
+        resumed = true;
+        progress.resume();
+        owner.resume(this);
+        return true;
+    }
 
     @Override
     public boolean stop() {
@@ -320,6 +337,14 @@ final class BaritoneWalkRun implements WalkRun {
     void drivePlayer(PlayerContext context) {
         lastContext = context;
         LocalPlayer player = context.localPlayer();
+        if (resumed) {
+            // 刚从停稳里续走：这一刻按原目标重新上路，进展计时重新起算，停半路的旧路线与等待作废。
+            resumed = false;
+            displacement.restart(context.clientTick());
+            partialRoute.reset();
+            transientRetries = 0;
+            replanWhenSafe = false;
+        }
         var pathing = owner.pathing();
         IBaritone engine = owner.engine();
         resumeAfterHuman(engine, context);
@@ -455,52 +480,6 @@ final class BaritoneWalkRun implements WalkRun {
         }
     }
 
-    // 普通走路的镜头看路线往前约四格的那个点：格子路线斜着走时一格一拐的锯齿被平均掉，长直线上就对着整条线，
-    // 到拐角也像人一样提前一点转头。转法交给航向（疾跑时对正到原版擦边判定以内，走路时小修正不转、持续偏一边才转），
-    // 俯仰平地固定略向下，潜泳时跟着实际潜泳方向。
-    // 不追引擎每刻给的方块中心瞄点——那会压低视线、随靠近越来越陡、每段交接弹回，逐格点头。
-    private void lookAlongRoute(IBaritone engine, PlayerInput playerInput, PlayerContext context,
-                                LocalPlayer player, boolean routePresent, boolean sprinting) {
-        Vec3 anchor = null;
-        var executor = engine.getPathingBehavior().getCurrent();
-        boolean submerged = false;
-        float submergedPitch = 0.0f;
-        if (routePresent && executor != null) {
-            anchor = lookAhead(executor.getPath().positions(), executor.getPosition() + 1, player.position());
-            if (executor instanceof PathExecutor pathExecutor && pathExecutor.submergedWaterTravelActive()) {
-                submerged = true;
-                submergedPitch = pathExecutor.submergedWaterCameraPitch();
-            }
-        }
-        if (anchor == null) return;
-        Vec3 delta = anchor.subtract(player.getEyePosition());
-        // 前方的点就在头顶或脚下（搭柱子、往下挖）时水平方向说不准，保持现在的朝向，不让镜头乱转。
-        float rawYaw = delta.horizontalDistanceSqr() < 1.0
-                ? player.getYRot()
-                : (float) (Math.atan2(delta.z, delta.x) * (180 / Math.PI)) - 90.0f;
-        float yaw = course.target(rawYaw, sprinting, context.clientTick());
-        float pitch = NavigationCameraCourse.pitch(submergedPitch, submerged);
-        playerInput.requestNavigationLook(yaw, pitch, context.clientTick());
-    }
-
-    /** 镜头往前看多远（水平格数）。 */
-    static final double LOOK_AHEAD_BLOCKS = 4.0;
-    /** 往前最多数几个路点：绕圈的楼梯这类路线，直线距离总也不够远，不能一直数下去。 */
-    static final int LOOK_AHEAD_NODES = 6;
-
-    // 从下一个路点起往前数，取第一个水平离身体够四格的路点；都不够远就取数到的最后一个。
-    static Vec3 lookAhead(List<? extends BlockPos> positions, int next, Vec3 body) {
-        if (positions.isEmpty()) return null;
-        int index = Math.clamp(next, 0, positions.size() - 1);
-        int last = Math.min(positions.size() - 1, index + LOOK_AHEAD_NODES - 1);
-        for (; index < last; index++) {
-            Vec3 point = Vec3.atBottomCenterOf(positions.get(index));
-            double dx = point.x - body.x, dz = point.z - body.z;
-            if (dx * dx + dz * dz >= LOOK_AHEAD_BLOCKS * LOOK_AHEAD_BLOCKS) break;
-        }
-        return Vec3.atBottomCenterOf(positions.get(index));
-    }
-
     // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
     private void resumeAfterHuman(IBaritone engine, PlayerContext context) {
         if (!routeDropped) return;
@@ -543,7 +522,7 @@ final class BaritoneWalkRun implements WalkRun {
             // 路线在手而引擎本刻没按键：保持站立但按住路线朝向，等执行段下一刻的指令。
             playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
         }
-        lookAlongRoute(engine, playerInput, context, player, routePresent, sprint);
+        course.alongRoute(pathing, playerInput, context, player, routePresent, sprint);
         workBlocks(context, input);
     }
 
@@ -735,7 +714,7 @@ final class BaritoneWalkRun implements WalkRun {
     @Override
     public void pause() {
         // 生存需求打断：请求停下，安全时立刻撤路线、松开按键；停稳后这一趟按"已停下"结算，
-        // 不会自己续上——调用方恢复时读到"已停下"，从原地重新上路。
+        // 不会自己续上——调用方恢复时让运行从原地接着走（resume）。
         progress.requestStop();
         clicks.stop(lastContext);
         var pathing = owner.pathing();

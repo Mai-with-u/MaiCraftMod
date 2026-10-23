@@ -43,6 +43,7 @@ class LiveSpotWalksTest {
         }
 
         @Override public boolean stop() { return true; }
+        @Override public boolean resume() { return false; }
         @Override public ActionStatus tick(TickContext context) {
             if (stopTicks >= 0) stopTicks++;
             return paused || landed() ? ActionStatus.done() : ActionStatus.running();

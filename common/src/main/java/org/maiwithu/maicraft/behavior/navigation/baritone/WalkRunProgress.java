@@ -83,6 +83,14 @@ final class WalkRunProgress {
         return stopRequested;
     }
 
+    /** 已停稳的运行从原地接着走：收回停下请求、回到正在算路；泅渡是这段路的累计事实，照旧带着。不是已停下的不改。 */
+    void resume() {
+        if (report.state() != WalkReport.State.STOPPED) return;
+        stopRequested = false;
+        failureExplained = false;
+        report = WalkReport.planning();
+    }
+
     /** 由执行方在路线确实无法继续时写入失败（长时间没有进展、引擎内部出错等）。 */
     void fail(Problem problem, BlockPos feet) {
         if (done()) return;
