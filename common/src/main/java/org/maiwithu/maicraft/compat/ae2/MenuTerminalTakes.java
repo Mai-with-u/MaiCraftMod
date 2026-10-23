@@ -17,8 +17,6 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
-import org.maiwithu.maicraft.behavior.menu.HeldItemMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
@@ -75,104 +73,31 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     private final Ae2Compat compat;
     private final PlayerServices services;
-    private final SeenNetworkStock seen;
-    private final Supplier<Instant> clock;
+    /** 认终端、到终端跟前：和存东西共用一套认法。 */
+    private final NearbyTerminals terminals;
 
     public MenuTerminalTakes(Ae2Compat compat, PlayerServices services, SeenNetworkStock seen,
             Supplier<Instant> clock) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");
-        this.seen = Objects.requireNonNull(seen, "seen");
-        this.clock = Objects.requireNonNull(clock, "clock");
+        this.terminals = new NearbyTerminals(compat, services, seen, clock);
     }
 
     @Override public Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
             Permissions permissions, TaskRecords records) {
-        return Optional.of(new TakeAction(new Placed(terminal, dimension, permissions), request, false, records, true));
+        return Optional.of(new TakeAction(terminals.placed(terminal, dimension, permissions), request, false, records, true));
     }
 
     @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request, TaskRecords records) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, records, true));
+        return Optional.of(new TakeAction(terminals.wireless(terminalItemId), request, false, records, true));
     }
 
     @Override public Optional<Action> takeWirelessNow(String terminalItemId, ItemRequest request) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, false, null, false));
+        return Optional.of(new TakeAction(terminals.wireless(terminalItemId), request, false, null, false));
     }
 
     @Override public Optional<Action> lookWireless(String terminalItemId, ItemRequest request) {
-        return Optional.of(new TakeAction(new Wireless(terminalItemId), request, true, null, false));
-    }
-
-    /** 到网络跟前的办法：走到一台装着的终端点开，或拿出身上的无线终端打开。取货的其余步骤两者一样。 */
-    private interface Access {
-        /** 怎么打开终端界面；每次给一个新的打开动作（下单合成后要重新打开看成品）。 */
-        MenuOpening opening();
-
-        /** 点开的这份界面是不是这一台的。 */
-        boolean belongs(AbstractContainerMenu raw, ClientLevel level);
-
-        /** 给结果与日志看的一句话。 */
-        String describe();
-
-        /** 记下这次看到的网络存货，下次报价用。 */
-        void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete);
-    }
-
-    /** 装在线缆上的一台终端：走过去、点在面板上打开（不点线缆芯）。 */
-    private final class Placed implements Access {
-        private final Ae2Terminals.Terminal terminal;
-        private final String dimension;
-        private final Permissions permissions;
-
-        Placed(Ae2Terminals.Terminal terminal, String dimension, Permissions permissions) {
-            this.terminal = terminal;
-            this.dimension = dimension;
-            this.permissions = permissions;
-        }
-
-        // 走过去能动多少地形按这次任务的许可来；靠近与右键都对准面板，不点线缆芯。
-        @Override public MenuOpening opening() {
-            return new ClientMenuOpening(terminal.block(), terminal.panel(), permissions,
-                    services.menuLayouts(), services.approach(), services.interactions(), services.context());
-        }
-
-        @Override public boolean belongs(AbstractContainerMenu raw, ClientLevel level) {
-            return compat.menuBelongsTo(raw, level, terminal.block(), terminal.side());
-        }
-
-        @Override public String describe() {
-            return terminal.describe();
-        }
-
-        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete) {
-            seen.saw(dimension, terminal, linked, stock, clock.get(), complete);
-        }
-    }
-
-    /** 身上带着的无线终端：不用走路，拿到主手右键打开，连的是它绑定的那张网。 */
-    private final class Wireless implements Access {
-        private final String itemId;
-
-        Wireless(String itemId) {
-            this.itemId = itemId;
-        }
-
-        @Override public MenuOpening opening() {
-            return new HeldItemMenuOpening(itemId, services.menuLayouts(), services.toMainhand(),
-                    services.interactions(), services.context());
-        }
-
-        @Override public boolean belongs(AbstractContainerMenu raw, ClientLevel level) {
-            return compat.wirelessMenu(raw);
-        }
-
-        @Override public String describe() {
-            return "身上的" + itemId;
-        }
-
-        @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete) {
-            seen.sawWireless(linked, stock, clock.get(), complete);
-        }
+        return Optional.of(new TakeAction(terminals.wireless(terminalItemId), request, true, null, false));
     }
 
     /** 从终端取货的先后顺序；现货取完还缺、网络里有样板时，插一步下单合成，开工后重新打开终端等成品。 */
@@ -187,7 +112,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
     /** 从终端取货的动作：点开 → 等同步 → 逐笔取 → 关上，跨刻推进。 */
     private final class TakeAction implements Action {
 
-        private final Access access;
+        private final TerminalAccess access;
         private final ItemRequest request;
         /** 只看一眼：等存货同步齐记下来就关上，什么都不拿。 */
         private final boolean lookOnly;
@@ -237,7 +162,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
          * @param lookOnly 只看一眼，什么都不拿
          * @param records  发起任务的记账口，下单的结论记成 attempts；没有为 null
          */
-        TakeAction(Access access, ItemRequest request, boolean lookOnly, TaskRecords records, boolean allowCrafting) {
+        TakeAction(TerminalAccess access, ItemRequest request, boolean lookOnly, TaskRecords records, boolean allowCrafting) {
             this.access = access;
             this.request = request;
             this.lookOnly = lookOnly;

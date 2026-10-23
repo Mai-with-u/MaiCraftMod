@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -11,10 +10,8 @@ import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -24,7 +21,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -53,19 +49,20 @@ public final class Ae2TerminalSource implements ItemSource {
     /** 走到终端前、点开、取、关上，大约几个动作：和开一只箱子差不多。 */
     private static final int ACTIONS_PER_VISIT = 4;
 
-    private final Ae2Compat compat;
     private final PlayerServices services;
     private final TerminalTakes takes;
     private final SeenNetworkStock seen;
     private final Supplier<Instant> clock;
+    /** 认终端：身上的无线终端、附近能用的装着的终端，和存东西共用一套认法。 */
+    private final NearbyTerminals terminals;
 
     public Ae2TerminalSource(Ae2Compat compat, PlayerServices services, TerminalTakes takes, SeenNetworkStock seen,
             Supplier<Instant> clock) {
-        this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");
         this.takes = Objects.requireNonNull(takes, "takes");
         this.seen = Objects.requireNonNull(seen, "seen");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.terminals = new NearbyTerminals(compat, services, seen, clock);
     }
 
     @Override public String describe() {
@@ -82,22 +79,15 @@ public final class Ae2TerminalSource implements ItemSource {
             return new SourceQuote.Unavailable(describe(), "角色不在世界里，找不了终端");
         }
         // 身上的无线终端：带在身上就能开，比走去任何一台装着的终端都近，先报它。
-        Optional<String> wireless = carriedWirelessTerminal(player);
+        Optional<String> wireless = terminals.carriedWireless();
         if (wireless.isPresent()) {
             return wirelessQuote(wireless.get(), request, clock.get());
         }
-        ClientLevel level = player.level();
-        String dimension = level.dimension().location().toString();
         int radius = context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
         WorldPosition here = context.characterAt();
         Instant now = clock.get();
-        List<TerminalChooser.Candidate> candidates = new ArrayList<>();
-        for (Ae2Terminals.Terminal terminal : compat.terminalsNear(level,
-                new BlockPos(here.x(), here.y(), here.z()), radius)) {
-            candidates.add(new TerminalChooser.Candidate(terminal, distance(here, terminal),
-                    usable(level, dimension, terminal, context.permissions()),
-                    seen.lastSeen(dimension, terminal, now)));
-        }
+        List<TerminalChooser.Candidate> candidates = terminals.around(new BlockPos(here.x(), here.y(), here.z()),
+                radius, context.permissions());
         Predicate<String> wanted = itemId -> request.wanted().matches(itemId, services.itemTags().tagsOf(itemId));
         return quoteFrom(TerminalChooser.choose(candidates, wanted, request.wanted().describe(), radius),
                 request, describe(), now);
@@ -131,7 +121,7 @@ public final class Ae2TerminalSource implements ItemSource {
     @Override public Optional<Action> look(ItemRequest request, SourceContext context) {
         PlayerContext player = services.context().get();
         if (player == null || player.level() == null) return Optional.empty();
-        Optional<String> wireless = carriedWirelessTerminal(player);
+        Optional<String> wireless = terminals.carriedWireless();
         if (wireless.isEmpty()) return Optional.empty();
         Optional<SeenNetworkStock.Sighting> lastTime = seen.lastSeenWireless(clock.get());
         if (lastTime.isPresent() && lastTime.get().linked() && lastTime.get().complete()) return Optional.empty();
@@ -144,43 +134,20 @@ public final class Ae2TerminalSource implements ItemSource {
         // 报的是身上的无线终端：动手前再看一眼它还在身上，就拿出来打开。
         if (offer.hint().startsWith(WIRELESS_HINT)) {
             String itemId = offer.hint().substring(WIRELESS_HINT.length());
-            return carriedWirelessTerminal(player).filter(itemId::equals)
+            return terminals.carriedWireless().filter(itemId::equals)
                     .flatMap(id -> takes.takeWireless(id, request, context.records()));
         }
-        ClientLevel level = player.level();
-        String dimension = level.dimension().location().toString();
+        String dimension = player.level().dimension().location().toString();
         TerminalAt at = TerminalAt.parse(offer.hint());
-        // 到了动手时终端可能已经被拆、换了部件：重新找一遍那一格，找不到就忘掉它的记录，交回空让引擎换路。
-        Optional<Ae2Terminals.Terminal> terminal = compat.terminalsNear(level, at.block(), 0).stream()
-                .filter(found -> found.side() == at.side())
-                .findFirst();
-        if (terminal.isEmpty()) {
-            seen.forget(dimension, at.block(), at.side());
-            return Optional.empty();
-        }
-        // 报价之后才问清归属（例如刚知道是别人放的）：同样不用，交回空让引擎换路。
-        if (!usable(level, dimension, terminal.get(), context.permissions())) {
-            return Optional.empty();
-        }
-        return takes.take(terminal.get(), dimension, request, context.permissions(), context.records());
+        // 到了动手时终端可能已经被拆、换了部件（忘掉它的记录），或刚问清是别人放的：交回空让引擎换路。
+        return terminals.stillUsable(at.block(), at.side(), context.permissions())
+                .flatMap(terminal -> takes.take(terminal, dimension, request, context.permissions(), context.records()));
     }
 
     /** 报价线索里标明"用身上的无线终端"的前缀，后面跟物品 ID。 */
     static final String WIRELESS_HINT = "wireless:";
     /** 拿出无线终端、右键、取、关上，大约几个动作：不用走路。 */
     private static final int ACTIONS_WITH_WIRELESS = 3;
-
-    // 身上（主背包、快捷栏、副手）第一件绑过访问点的无线终端的物品 ID。
-    private Optional<String> carriedWirelessTerminal(PlayerContext player) {
-        var inventory = player.localPlayer().getInventory();
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            var stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && compat.linkedWirelessTerminal(stack)) {
-                return Optional.of(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
-            }
-        }
-        return Optional.empty();
-    }
 
     /**
      * 身上无线终端的报价。像玩家一样先看一眼 AE：这次还没打开过就按够数报（打开看一眼只要一两秒，
@@ -235,24 +202,6 @@ public final class Ae2TerminalSource implements ItemSource {
     private SourceQuote wirelessQuote(String itemId, ItemRequest request, Instant now) {
         Predicate<String> wanted = id -> request.wanted().matches(id, services.itemTags().tagsOf(id));
         return wirelessQuote(itemId, request, seen.lastSeenWireless(now), wanted);
-    }
-
-    // 能不能取用：问保护判断里"存储能不能取用"那一条，自己或自家人放的才行，归属没问清的不用。
-    private boolean usable(ClientLevel level, String dimension, Ae2Terminals.Terminal terminal,
-            Permissions permissions) {
-        BlockPos block = terminal.block();
-        String blockType = BuiltInRegistries.BLOCK.getKey(level.getBlockState(block).getBlock()).toString();
-        return services.protection().mayUseStorage(
-                new WorldPosition(block.getX(), block.getY(), block.getZ(), dimension), blockType,
-                permissions.protectedLandmarks());
-    }
-
-    private static double distance(WorldPosition here, Ae2Terminals.Terminal terminal) {
-        var center = terminal.panel().getCenter();
-        double dx = center.x - (here.x() + 0.5);
-        double dy = center.y - (here.y() + 0.5);
-        double dz = center.z - (here.z() + 0.5);
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     // 多久以前：给 LLM 看的粗略说法。

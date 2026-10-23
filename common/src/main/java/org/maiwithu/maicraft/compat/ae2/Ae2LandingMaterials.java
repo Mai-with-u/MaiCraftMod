@@ -7,8 +7,6 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.WantedItem;
@@ -42,7 +40,7 @@ public final class Ae2LandingMaterials implements LandingMaterials {
         if (terminal == null) return Optional.empty();
         if (takes == null || builtFor != current) {
             builtFor = current;
-            takes = new MenuTerminalTakes(compat, current, new SeenNetworkStock(), Instant::now);
+            takes = new MenuTerminalTakes(compat, current, compat.seenStock(), Instant::now);
         }
         for (String itemId : itemIds) {
             if (itemId == null || itemId.isBlank()) continue;
@@ -58,20 +56,9 @@ public final class Ae2LandingMaterials implements LandingMaterials {
         return "身上的无线终端";
     }
 
-    // 身上（主背包、快捷栏、副手）第一件绑过访问点的无线终端。
+    // 身上第一件绑过访问点的无线终端：和取货、存东西问同一处。
     private String carriedTerminal(PlayerContext context) {
         LocalPlayer player = context.localPlayer();
-        if (player == null) return null;
-        for (int slot = 0; slot < Math.min(36, player.getInventory().getContainerSize()); slot++) {
-            ItemStack stack = player.getInventory().getItem(slot);
-            if (!stack.isEmpty() && compat.linkedWirelessTerminal(stack)) {
-                return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-            }
-        }
-        ItemStack offhand = player.getOffhandItem();
-        if (!offhand.isEmpty() && compat.linkedWirelessTerminal(offhand)) {
-            return BuiltInRegistries.ITEM.getKey(offhand.getItem()).toString();
-        }
-        return null;
+        return player == null ? null : compat.carriedWirelessTerminal(player).orElse(null);
     }
 }

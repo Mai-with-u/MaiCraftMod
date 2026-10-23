@@ -13,6 +13,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -46,6 +48,11 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Transforms transforms;
     /** 进世界时物品来源建好，落地补料也用这一份；没进世界时为空。 */
     private volatile PlayerServices services;
+    /**
+     * 上次在各台终端、身上无线终端里看到的网络存货与连没连上：取货报价、存东西挑终端、落地补料记的是同一份，
+     * 存东西时看到哪台没连上，下次取货也知道。只在这次启动内有效。
+     */
+    private final SeenNetworkStock seen = new SeenNetworkStock();
 
     /** 没有样板读写端时：认不出样板，样板供应器的界面也不认。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid) {
@@ -73,14 +80,13 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
         registry.itemSource(this, services -> {
             this.services = services;
-            SeenNetworkStock seen = new SeenNetworkStock();
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
                     seen, Instant::now);
         });
         // 腾地方、整理背包时：身上的无线终端连着网络就把东西存进网络，不往地上扔。
         registry.networkStorage(this, services -> {
             this.services = services;
-            return new MenuNetworkStores(this, services);
+            return new MenuNetworkStores(this, services, seen, Instant::now);
         });
         // 意外坠落、身上没带落地料时：拿出随身无线终端，从网络里现取一桶水。
         registry.landingMaterial(this, new Ae2LandingMaterials(this, this::services));
@@ -103,6 +109,11 @@ public final class Ae2Compat extends CompatModule {
     /** 进世界时物品来源建好记下的那一份；没进世界时为空。落地补料拿它开无线终端。 */
     PlayerServices services() {
         return services;
+    }
+
+    /** 记网络存货的那一份；见 {@link #seen}。 */
+    SeenNetworkStock seenStock() {
+        return seen;
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
@@ -143,6 +154,21 @@ public final class Ae2Compat extends CompatModule {
     /** 这件物品是不是绑过无线访问点的无线终端；见 {@link Ae2Terminals#linkedWirelessTerminal}。 */
     public boolean linkedWirelessTerminal(ItemStack stack) {
         return call("认无线终端", () -> terminals.linkedWirelessTerminal(stack));
+    }
+
+    /**
+     * 身上（主背包、快捷栏、护甲栏、副手）第一件绑过访问点的无线终端的物品 ID；没带给空。
+     * 取货、存东西、落地补料认"身上有没有无线终端"都问这一处，翻背包的顺序只写一份。
+     */
+    public Optional<String> carriedWirelessTerminal(Player player) {
+        Inventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && linkedWirelessTerminal(stack)) {
+                return Optional.of(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            }
+        }
+        return Optional.empty();
     }
 
     /** 点开的界面是不是身上的无线终端打开的；见 {@link Ae2TerminalMenu#wirelessMenu}。 */

@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
-import org.maiwithu.maicraft.behavior.menu.HeldItemMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -41,34 +41,23 @@ public final class MenuNetworkStores implements NetworkStorage {
     private static final int SETTLE_TICKS = 10;
 
     private final Ae2Compat compat;
-    private final PlayerServices services;
+    /** 认终端、到终端跟前：和取货共用一套认法。 */
+    private final NearbyTerminals terminals;
 
-    public MenuNetworkStores(Ae2Compat compat, PlayerServices services) {
+    public MenuNetworkStores(Ae2Compat compat, PlayerServices services, SeenNetworkStock seen,
+            Supplier<Instant> clock) {
         this.compat = Objects.requireNonNull(compat, "compat");
-        this.services = Objects.requireNonNull(services, "services");
+        this.terminals = new NearbyTerminals(compat, services, seen, clock);
     }
 
     @Override public boolean available() {
-        return carriedTerminal().isPresent();
+        return terminals.carriedWireless().isPresent();
     }
 
     @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
         if (stacks.isEmpty()) return Optional.empty();
-        return carriedTerminal().map(terminal -> new Storing(terminal, stacks, purpose, records));
-    }
-
-    // 身上（主背包、快捷栏、副手）第一件绑过访问点的无线终端的物品 ID。
-    private Optional<String> carriedTerminal() {
-        PlayerContext player = services.context().get();
-        if (player == null || player.localPlayer() == null) return Optional.empty();
-        var inventory = player.localPlayer().getInventory();
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            var stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && compat.linkedWirelessTerminal(stack)) {
-                return Optional.of(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
-            }
-        }
-        return Optional.empty();
+        return terminals.carriedWireless()
+                .map(terminal -> new Storing(terminals.wireless(terminal), stacks, purpose, records));
     }
 
     private enum Stage { OPEN, SYNC, STORE, CLOSE, DONE }
@@ -76,6 +65,8 @@ public final class MenuNetworkStores implements NetworkStorage {
     /** 存几堆进网络：打开 → 等连上 → 一样样一格格快速移动 → 关上，跨刻推进。 */
     private final class Storing implements Action {
 
+        /** 到网络跟前的办法；describe 给结果与日志看是哪一台。 */
+        private final TerminalAccess access;
         private final String terminal;
         private final List<BackpackStack> stacks;
         /** 正在存第几样。 */
@@ -101,14 +92,14 @@ public final class MenuNetworkStores implements NetworkStorage {
         /** 最近一样存不进的原因：样样都存不进时按它收场。 */
         private Problem lastProblem;
 
-        Storing(String terminal, List<BackpackStack> stacks, String purpose, TaskRecords records) {
-            this.terminal = terminal;
+        Storing(TerminalAccess access, List<BackpackStack> stacks, String purpose, TaskRecords records) {
+            this.access = access;
+            this.terminal = access.describe();
             this.stacks = List.copyOf(stacks);
             this.stack = this.stacks.getFirst();
             this.purpose = purpose;
             this.records = records;
-            this.opening = new HeldItemMenuOpening(terminal, services.menuLayouts(), services.toMainhand(),
-                    services.interactions(), services.context());
+            this.opening = access.opening();
         }
 
         @Override public ActionStatus tick(TickContext tick) {
@@ -139,7 +130,7 @@ public final class MenuNetworkStores implements NetworkStorage {
             if (menu.reading().isEmpty()) {
                 return finish(Problem.of(Problem.Kind.TARGET_GONE, "终端界面刚打开就被关上了", null));
             }
-            if (!compat.wirelessMenu(raw)) {
+            if (!access.belongs(raw, tick.player().level())) {
                 return stopNow(Problem.of(Problem.Kind.TARGET_GONE, "点开的不是 " + terminal + " 的界面", null));
             }
             Optional<Boolean> linked = compat.networkLinked(raw);
