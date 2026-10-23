@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 点开后的一份容器界面的生产实现：读数经点开时新建的读端，点击与关闭经认领时绑定的通道，
- * 关闭走一份界面会话从头用到尾（只请求游戏关一次，期限按这份会话算）。
+ * 关闭走一份界面会话从头用到尾（到期限没关上时重认领会话再请游戏关一次，补试也只有一次）。
  *
  * <p>打开者声明过服务端换页的换法（{@link PageSwaps}）时，认领的那一页被服务端换成声明认的一页，
  * 每次用之前先把通道与读端换绑过去，会话也跟着接管；请游戏关过以后不再跟，免得关的路上又认领一页。
@@ -144,11 +144,12 @@ final class ClientOpenedMenu implements OpenedMenu {
         return Optional.ofNullable(session);
     }
 
-    /** 关上这份界面：一份会话从头用到尾；界面先一步没了（玩家关掉、被顶掉）也算关上了。 */
+    /** 关上这份界面：会话到期限没关上时补试一次；界面先一步没了（玩家关掉、被顶掉）也算关上了。 */
     private final class Closing implements Action {
 
         /** 认领不了会话时自己数的期限，与会话的关闭期限同量级。 */
         private static final int UNOWNED_CLOSE_TICKS = 100;
+        private final MenuCloseRetry retry = new MenuCloseRetry();
         private boolean askedWithoutSession;
         private int waitedWithoutSession;
 
@@ -172,7 +173,15 @@ final class ClientOpenedMenu implements OpenedMenu {
             }
             return switch (owned.get().closeNow(channel, tick.player().clientTick())) {
                 case MenuSession.Closing.Closed closed -> ActionStatus.done();
-                case MenuSession.Closing.Failed failed -> ActionStatus.failed(failed.problem());
+                case MenuSession.Closing.Failed failed -> {
+                    // 到期限还没关上不认输：重认领一份会话再请游戏关一次，期限按新会话重算；
+                    // 补试也到期限才认输。只请一次就收场的话界面可能还开着，格里的东西看着像没了。
+                    if (retry.grantOne()) {
+                        session = null;
+                        yield ActionStatus.running();
+                    }
+                    yield ActionStatus.failed(failed.problem());
+                }
                 default -> ActionStatus.running();
             };
         }
