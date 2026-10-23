@@ -38,7 +38,7 @@ import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
  *
  * <p>取代旧版 manage_container 的存入；从容器拿东西归 obtain。target 点名容器时只用它，
  * 不点名就在附近挑：已经放着同种东西的优先，一只满了换下一只。别人的箱子不乱塞，
- * 除非点名了它。
+ * 除非点名了它。存进 ME 网络时身上的无线终端和装着的终端都认，和腾地方、取货认终端是同一份。
  */
 public final class DepositModule implements AbilityModule {
 
@@ -56,8 +56,8 @@ public final class DepositModule implements AbilityModule {
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 128).defaultValue(32)
                             .doc("自己挑容器时的范围（格）").build(),
                     ParamSpec.of("into", ParamType.CHOICE).choices("container", "network").defaultValue("container")
-                            .doc("存进哪里：container 箱子、木桶这类容器；network 身上无线终端连着的 ME 网络"
-                                    + "（拿出终端打开、快速移动进去，不用走路，target 不用给）").build()),
+                            .doc("存进哪里：container 箱子、木桶这类容器；network ME 网络"
+                                    + "（不给 target 先用身上的无线终端，没带走去附近的 ME 终端；给了 target 去那里的终端）").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,

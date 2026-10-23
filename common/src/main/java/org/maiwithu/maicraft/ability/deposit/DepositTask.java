@@ -71,6 +71,10 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private final Set<String> networkTried = new HashSet<>();
     /** 存进网络没成的原因；没有为 null。 */
     private Problem networkFailure;
+    /** 存进网络去哪里找终端：开工时按 target 定一次；还没定为 null。 */
+    private NetworkStorage.TerminalSearch terminalSearch;
+    /** 点名一格存进网络时那一格的说法，写在"附近没有终端"前面；不是点名一格为空串。 */
+    private String searchedAt = "";
     private boolean planned;
     private Action prepared;
     private ContainerChooser.Entry current;
@@ -122,8 +126,10 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             return Next.done(TaskResult.done(input.itemIds().isEmpty() ? "身上没有要存的东西"
                     : "身上没有要存的 " + String.join("、", input.itemIds())));
         }
-        if (input.network()) return nextToNetwork();
-        Optional<ContainerChooser.Pick> pick = pick();
+        Place place = place();
+        // 说了存进网络，或点名的那一格没有容器却装着 ME 终端（玩家对着终端放东西），就不找容器。
+        if (input.network() || terminalInsteadOfContainer(place)) return toNetwork(place);
+        Optional<ContainerChooser.Pick> pick = pick(place);
         if (pick.isEmpty()) {
             recordProgress("正在扫附近 " + input.radius() + " 格内的容器");
             return Next.stay();
@@ -167,32 +173,46 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         }
     }
 
-    // 目标对象分两种：一格容器（b#、坐标）只用它；一片地方（f#、地标、脚边、不给）在那里挑。还在扫给空。
-    private Optional<ContainerChooser.Pick> pick() {
+    /** target 落在哪：一片地方（在 center 附近挑）、点名的一格，或落不了（why 写原因）。 */
+    private sealed interface Place {
+        record Area(BlockPos center) implements Place {}
+        record Cell(WorldPosition at) implements Place {}
+        record Missing(String why) implements Place {}
+    }
+
+    // 目标对象分两种：一格（b#、坐标）只用它；一片地方（f#、地标、脚边、不给）在那里挑。落不了照实说。
+    private Place place() {
         return switch (input.target()) {
-            case null -> area(services.places().feet());
-            case Target.Here here -> area(services.places().feet());
+            case null -> new Place.Area(services.places().feet());
+            case Target.Here here -> new Place.Area(services.places().feet());
             case Target.Seen seen -> services.places().seen(seen.id())
-                    .map(at -> seen.id().startsWith("f") ? area(cellOf(at)) : Optional.of(named(at)))
-                    .orElseGet(() -> Optional.of(new ContainerChooser.Pick.NotFound(
-                            "观察编号 " + seen.id() + " 对应的东西已经不在了")));
-            case Target.Position position -> Optional.of(position.y() == null
-                    ? new ContainerChooser.Pick.NotFound("点名容器要给全坐标，包括 y")
-                    : named(new WorldPosition(position.x(), position.y(), position.z(), position.dimension())));
-            case Target.Landmark landmark -> landmarkArea(landmark.name());
-            default -> Optional.of(new ContainerChooser.Pick.NotFound("存东西不接受这种目标：" + input.target().kind()));
+                    .<Place>map(at -> seen.id().startsWith("f") ? new Place.Area(cellOf(at)) : new Place.Cell(at))
+                    .orElseGet(() -> new Place.Missing("观察编号 " + seen.id() + " 对应的东西已经不在了"));
+            case Target.Position position -> position.y() == null
+                    ? new Place.Missing("点名容器要给全坐标，包括 y")
+                    : new Place.Cell(new WorldPosition(position.x(), position.y(), position.z(), position.dimension()));
+            case Target.Landmark landmark -> landmarkPlace(landmark.name());
+            default -> new Place.Missing("存东西不接受这种目标：" + input.target().kind());
         };
     }
 
-    // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌（"仓库"路牌），都当一片地方在附近找容器；
+    // 挑容器：一格只用它，一片地方在那里挑；还在扫给空。
+    private Optional<ContainerChooser.Pick> pick(Place place) {
+        return switch (place) {
+            case Place.Area area -> area(area.center());
+            case Place.Cell cell -> Optional.of(named(cell.at()));
+            case Place.Missing missing -> Optional.of(new ContainerChooser.Pick.NotFound(missing.why()));
+        };
+    }
+
+    // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌（"仓库"路牌），都当一片地方在附近找；
     // 落不了就如实说没记过、牌子上也没有，或几块隔开的牌子都写着它，不退回脚边去存。
-    private Optional<ContainerChooser.Pick> landmarkArea(String name) {
+    private Place landmarkPlace(String name) {
         var located = LandmarkResolver.resolve(name, services.places()::landmark, services.places()::signs);
         if (located instanceof LandmarkResolver.Resolution.Found found) {
-            return area(cellOf(found.position()));
+            return new Place.Area(cellOf(found.position()));
         }
-        LandmarkResolver.Resolution.Missing missing = (LandmarkResolver.Resolution.Missing) located;
-        return Optional.of(new ContainerChooser.Pick.NotFound(missing.sentence()));
+        return new Place.Missing(((LandmarkResolver.Resolution.Missing) located).sentence());
     }
 
     // 一片地方：radius 内的容器加上世界记忆里记过的，按"已放着同种 > 有空位 > 近"排；没扫完给空。
@@ -225,13 +245,50 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
                 && (changes == Permissions.BlockChanges.NATURAL || changes == Permissions.BlockChanges.ANY);
     }
 
-    // 存进网络：还没存的几样一次交给网络存储（拿出终端打开一次、一样样快速移动进去、都存完才关上），
-    // 存进的按背包少了几件记账；存不进（没连上、样样放不下）就带着还剩多少收尾。
+    // 点名的那一格没有容器、那一格（含紧挨着的一圈）却装着能用的 ME 终端：存进它连着的网络，不说"那里没有容器"。
+    private boolean terminalInsteadOfContainer(Place place) {
+        if (!(place instanceof Place.Cell cell) || services.spots().at(cell.at()).isPresent()) return false;
+        return services.network().get()
+                .map(storage -> storage.reachable(cellSearch(cell.at())))
+                .orElse(false);
+    }
+
+    // 存进网络先定去哪里找终端：没给 target 或给的是脚边，就在身边找（身上绑好的无线终端优先，没带找脚边 radius 内装着的）；
+    // 一片地方（f#、地标）走去那里 radius 内装着的终端；点名一格只认那一格和紧挨着的一圈。落不了照实说。
+    private Next<Phase> toNetwork(Place place) {
+        int radius = (int) input.radius();
+        switch (place) {
+            case Place.Missing missing -> {
+                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, missing.why(), null));
+            }
+            case Place.Cell cell -> {
+                terminalSearch = cellSearch(cell.at());
+                searchedAt = "（" + cell.at().x() + ", " + cell.at().y() + ", " + cell.at().z() + "）";
+            }
+            case Place.Area area when input.target() == null || input.target() instanceof Target.Here ->
+                    terminalSearch = NetworkStorage.TerminalSearch.nearMe(radius, input.permissions());
+            case Place.Area area -> {
+                if (area.center() == null) {
+                    return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, "这一刻角色不在世界里，找不了终端", null));
+                }
+                terminalSearch = NetworkStorage.TerminalSearch.around(area.center(), radius, input.permissions());
+            }
+        }
+        return nextToNetwork();
+    }
+
+    // 点名一格找终端：那一格和紧挨着的一圈（终端是贴在线缆上的面板，点到它贴着的那块墙也认）。
+    private NetworkStorage.TerminalSearch cellSearch(WorldPosition at) {
+        return NetworkStorage.TerminalSearch.around(cellOf(at), 1, input.permissions());
+    }
+
+    // 存进网络：还没存的几样一次交给网络存储（挑好终端、打开一次、一样样快速移动进去、都存完才关上），
+    // 存进的按背包少了几件记账；挑不到终端、存不进（没连上、样样放不下）就带着还剩多少收尾。
     private Next<Phase> nextToNetwork() {
         Optional<NetworkStorage> storage = services.network().get();
-        if (storage.isEmpty() || !storage.get().available()) {
-            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "身上没有绑了访问点的无线终端，存不进网络",
-                    "带上绑好访问点的无线终端，或改存进箱子（into=container）"));
+        if (storage.isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "没装能存进网络的联动模组（例如 AE2），存不进网络",
+                    "改存进箱子（into=container）"));
         }
         List<BackpackStack> batch = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : wanted.entrySet()) {
@@ -241,9 +298,16 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             batch.add(new BackpackStack(entry.getKey(), left, 64, false, false, false, false));
         }
         if (batch.isEmpty()) return finish();
-        Optional<Action> store = storage.get().store(batch, "存东西", networkLedger());
-        if (store.isEmpty()) return finish();
-        return goWith(Phase.NETWORK, store.get(), "把 " + batch.size() + " 样东西存进网络");
+        return switch (storage.get().store(batch, "存东西", terminalSearch, networkLedger())) {
+            case NetworkStorage.TerminalPick.Chosen chosen ->
+                    goWith(Phase.NETWORK, chosen.storing(), "把 " + batch.size() + " 样东西存进网络");
+            case NetworkStorage.TerminalPick.NotFound notFound -> {
+                // 身上没带、附近也没有能用的终端：照实说是哪种情况，一件没存进就按它失败。
+                networkFailure = Problem.of(Problem.Kind.NOT_FOUND, searchedAt + notFound.reason(),
+                        "带上绑好访问点的无线终端，或走近 ME 终端、用 target 点名一台再存，或改存进箱子（into=container）");
+                yield finish();
+            }
+        };
     }
 
     private Next<Phase> network(TickContext context) {
@@ -449,7 +513,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             case DIG -> "清开盖子上的方块";
             case STORE -> "走过去点开容器、搬进去、关上";
             case NEXT -> "换下一只容器";
-            case NETWORK -> "拿出无线终端存进网络";
+            case NETWORK -> "打开 ME 终端存进网络";
             case OFFHAND -> "把副手的东西放回背包";
         };
     }

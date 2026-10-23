@@ -16,7 +16,7 @@ import java.util.Set;
  * 腾挪计划：看着背包现在有什么、要腾几格，排出"先动哪一堆"的清单。
  *
  * <p>纯判断，不碰游戏。顺序照真人玩家的做法：能合的散堆先合起来；然后从最不值钱的开始
- * 往外挪——身上的无线终端连着网络就存进网络，随身背包能塞就塞，附近有记得的容器就存进去，
+ * 往外挪——身上带着无线终端或附近有能用的 ME 终端就存进网络，随身背包能塞就塞，附近有记得的容器就存进去，
  * 都没有才丢；"有用的"只存不丢，存不了又要动到它就停下来问，不自作主张。任务留用、贵重品与装备永远不在计划里。
  */
 final class SpacePlanner {
@@ -33,7 +33,7 @@ final class SpacePlanner {
      * @param stackMergerAvailable      合并散堆的接缝接上了没有
      * @param carriedBackpackFreeSlots  随身背包还空着几格；没有随身背包时为 0
      * @param nearbyContainers          记得的附近容器；接缝没接上时为空
-     * @param networkStorage            身上的无线终端连着网络、能把东西存进去
+     * @param networkStorage            有终端能把东西存进网络：身上绑好的无线终端，或附近能用的装着的终端
      */
     record Scene(
             List<BackpackStack> stacks,

@@ -25,7 +25,8 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 /**
  * 背包空间：捡东西、合成取出、交易、开箱取物、卸下装备之前，统一来这里腾格子，任务自己不再各自处理"背包满了"。
  *
- * <p>腾挪照真人玩家的做法一步步来：合并散堆 → 身上的无线终端连着网络就存进网络 → 放进随身背包
+ * <p>腾挪照真人玩家的做法一步步来：合并散堆 → 能存网络就存进网络（身上绑好的无线终端拿出来存，没带就走去附近装着的
+ * ME 终端存，和存东西能力同一份） → 放进随身背包
  * → 存进附近记得的容器 → 丢最不值钱的；有用的只存不丢，要动到它才停下来问。每一步都是一个真实的动作（并散堆、存箱子用的是存东西能力同一份存放动作，
  * 丢东西用的是丢弃能力同一份丢东西动作），确认的变化与没能确认的交互直接记进发起任务的结果。
  *
@@ -44,7 +45,7 @@ public final class InventorySpace {
     private final Optional<KnownContainers> knownContainers;
     private final Optional<StoresInContainer.Parts> storing;
     private final Optional<DropsItems.Parts> dropping;
-    /** 网络存储（身上的无线终端）；没接上为空。每次腾挪时现取，联动模组在进世界后才登记。 */
+    /** 网络存储（身上的无线终端、附近装着的终端）；没接上为空。每次腾挪时现取，联动模组在进世界后才登记。 */
     private final Supplier<Optional<NetworkStorage>> network;
 
     /**
@@ -65,7 +66,7 @@ public final class InventorySpace {
         this(backpack, stackMerger, carriedBackpack, knownContainers, storing, dropping, Optional::empty);
     }
 
-    /** @param network 网络存储（身上的无线终端）；没有联动时给空 */
+    /** @param network 网络存储（身上的无线终端、附近装着的终端）；没有联动时给空 */
     public InventorySpace(
             BackpackView backpack,
             Optional<StackMerger> stackMerger,
@@ -191,7 +192,12 @@ public final class InventorySpace {
                     stackMerger.isPresent() && !mergeBroken,
                     carriedBroken ? 0 : carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
                     storing.isPresent() ? containers : List.of(),
-                    !networkBroken && network.get().map(NetworkStorage::available).orElse(false));
+                    !networkBroken && network.get().map(storage -> storage.reachable(nearMe())).orElse(false));
+        }
+
+        // 腾地方找终端就在身边：身上绑好的无线终端优先，没带就找和记得的容器一样近（16 格内）的装着的终端。
+        private NetworkStorage.TerminalSearch nearMe() {
+            return NetworkStorage.TerminalSearch.nearMe(NEARBY_CONTAINER_RANGE, permissions);
         }
 
         // 把计划里的一步变成动作；部件没接上就给空。
@@ -199,8 +205,12 @@ public final class InventorySpace {
             return switch (move) {
                 case SpaceMove.MergeStacks merge -> stackMerger.map(merger -> merger.mergeOne(records));
                 case SpaceMove.ToCarriedBackpack(var stack) -> carriedBackpack.flatMap(pack -> pack.store(stack, records));
-                case SpaceMove.ToNetwork(var stacks) -> network.get()
-                        .flatMap(storage -> storage.store(stacks, "腾地方（" + purpose + "）", records));
+                // 挑不到终端（刚才还在、这会儿被拆了）就当这一步做不了，换下一步。
+                case SpaceMove.ToNetwork(var stacks) -> network.get().flatMap(storage ->
+                        switch (storage.store(stacks, "腾地方（" + purpose + "）", nearMe(), records)) {
+                            case NetworkStorage.TerminalPick.Chosen chosen -> Optional.of(chosen.storing());
+                            case NetworkStorage.TerminalPick.NotFound notFound -> Optional.<Action>empty();
+                        });
                 case SpaceMove.ToKnownContainer(var container, var stack) -> storing.map(parts -> {
                     storingStep = new StoresInContainer(container, List.of(stack.itemId()), storeLedger(stack),
                             permissions, parts);

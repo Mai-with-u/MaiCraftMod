@@ -87,6 +87,13 @@ final class NearbyTerminals {
         return terminal.filter(found -> usable(level, dimension, found, permissions));
     }
 
+    /** 角色脚下那一格：存东西、腾地方在身边找装着的终端时从这里量远近；不在世界里为空。 */
+    Optional<BlockPos> feet() {
+        PlayerContext player = services.context().get();
+        return player == null || player.localPlayer() == null ? Optional.empty()
+                : Optional.of(player.localPlayer().blockPosition());
+    }
+
     /** 角色此刻所在的维度；不在世界里为空。 */
     Optional<String> dimension() {
         PlayerContext player = services.context().get();

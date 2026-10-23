@@ -125,6 +125,37 @@ class TerminalChooserTest {
     }
 
     @Test
+    void 存东西去最近一台能用的_上次没连上的排后面_别人的不去() {
+        // 存东西不看网络里有什么：别人的不用，上次看没连上的虽然近也排后面，其余最近的先。
+        TerminalChooser.Choice choice = TerminalChooser.toStore(List.of(
+                candidate(1, 2, false, null),
+                candidate(2, 4, true, seen(false, Map.of())),
+                candidate(3, 9, true, seen(true, Map.of())),
+                candidate(4, 12, true, null)), 32);
+        TerminalChooser.Unknown unknown = assertInstanceOf(TerminalChooser.Unknown.class, choice);
+        assertEquals(terminalAt(3), unknown.candidate().terminal());
+    }
+
+    @Test
+    void 存东西_能用的都上次没连上_照样去最近那台_写明上次的情况() {
+        TerminalChooser.Choice choice = TerminalChooser.toStore(List.of(
+                candidate(1, 8, true, seen(false, Map.of())),
+                candidate(2, 3, true, seen(false, Map.of()))), 32);
+        TerminalChooser.Unknown unknown = assertInstanceOf(TerminalChooser.Unknown.class, choice);
+        assertEquals(terminalAt(2), unknown.candidate().terminal());
+        assertTrue(unknown.lastTime().orElseThrow().contains("没连上"));
+    }
+
+    @Test
+    void 存东西_附近没有终端或都是别人的_写明是哪种() {
+        TerminalChooser.None none = assertInstanceOf(TerminalChooser.None.class, TerminalChooser.toStore(List.of(), 32));
+        assertTrue(none.reason().contains("32 格内没有 ME 终端"), none.reason());
+        TerminalChooser.None others = assertInstanceOf(TerminalChooser.None.class,
+                TerminalChooser.toStore(List.of(candidate(1, 2, false, null), candidate(2, 5, false, null)), 32));
+        assertTrue(others.reason().contains("都是别人的") && others.reason().contains("2 台"), others.reason());
+    }
+
+    @Test
     void 上次看到的网络存货按物品合计_五分钟后当没看过() {
         SeenNetworkStock stock = new SeenNetworkStock();
         Ae2Terminals.Terminal terminal = terminalAt(1);

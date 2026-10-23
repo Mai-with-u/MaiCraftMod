@@ -149,42 +149,93 @@ class DepositTaskTest {
     void 存进网络_拿出终端一样样存进去_不找箱子() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32).carry(SAND, 16);
-        List<Integer> batches = new ArrayList<>();
-        rig.network = new NetworkStorage() {
-            @Override public boolean available() {
-                return true;
-            }
-
-            @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
-                batches.add(stacks.size());
-                return Optional.of(new Action() {
-                    @Override public ActionStatus tick(TickContext context) {
-                        for (BackpackStack stack : stacks) {
-                            int moved = Math.min(stack.count(), rig.carried(stack.itemId()));
-                            rig.take(stack.itemId(), moved);
-                            records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved,
-                                    purpose + "：存进了网络"));
-                        }
-                        return ActionStatus.done();
-                    }
-
-                    @Override public String describe() {
-                        return "替身存进网络";
-                    }
-                });
-            }
-        };
+        FakeNetwork network = new FakeNetwork(rig);
+        network.wireless = true;
+        rig.network = network;
         TaskResult result = rig.run(new DepositInput(null, List.of(DIRT, SAND), null, 32, Permissions.DEFAULT, true));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertEquals(0, rig.carried(DIRT));
         assertEquals(0, rig.carried(SAND));
         assertEquals(0, rig.opens, "存进网络不去开箱子");
-        assertEquals(List.of(2), batches, "两样一次交给终端，不每样开关一次");
+        assertEquals(List.of(2), network.batches, "两样一次交给终端，不每样开关一次");
+        assertEquals(List.of("无线终端"), network.used, "身上带着无线终端就拿出来开，不走路");
         assertEquals(48, stored(result));
     }
 
     @Test
-    void 存进网络_身上没有终端如实说() {
+    void 存进网络_没带无线终端_走去附近装着的终端() {
+        // 身上没带无线终端：在身边 radius 格内找墙上装着的终端，走过去点开存。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeNetwork network = new FakeNetwork(rig);
+        network.terminals.add(new BlockPos(5, 0, 3));
+        rig.network = network;
+        TaskResult result = rig.run(new DepositInput(null, List.of(DIRT), null, 32, Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, rig.carried(DIRT));
+        assertEquals(List.of("装着的终端"), network.used);
+        assertTrue(network.searches.getFirst().nearMeFirst());
+        assertEquals(32, network.searches.getFirst().radius());
+    }
+
+    @Test
+    void 存进网络_给了地方就去那里的终端_不用身上的() {
+        // 点了那台终端的坐标：走过去用它，身上带着的无线终端不拿出来。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeNetwork network = new FakeNetwork(rig);
+        network.wireless = true;
+        network.terminals.add(new BlockPos(40, 64, 0));
+        rig.network = network;
+        TaskResult result = rig.run(new DepositInput(new Target.Position(40, 64, 0, null), List.of(DIRT), null, 32,
+                Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("装着的终端"), network.used);
+        assertEquals(new BlockPos(40, 64, 0), network.searches.getFirst().near());
+        assertEquals(1, network.searches.getFirst().radius(), "点名一格只认那一格和紧挨着的一圈");
+    }
+
+    @Test
+    void 点名一格没有容器_装着终端_不写into也存进网络() {
+        // 对着墙上的 ME 终端说"存进去"：那里没有箱子，存进终端连着的网络，不报"那里没有容器"。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeNetwork network = new FakeNetwork(rig);
+        network.terminals.add(new BlockPos(7, 64, 7));
+        rig.network = network;
+        TaskResult result = rig.run(rig.input(new Target.Position(7, 64, 7, null), List.of(DIRT), null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(0, rig.opens);
+        assertEquals(0, rig.carried(DIRT));
+        assertEquals(List.of("装着的终端"), network.used);
+    }
+
+    @Test
+    void 点名一格没有容器也没有终端_照旧说那里没有容器() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.network = new FakeNetwork(rig);
+        TaskResult result = rig.run(rig.input(new Target.Position(7, 64, 7, null), List.of(DIRT), null));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("那里没有容器"), result.problem().message());
+    }
+
+    @Test
+    void 存进网络_身上没带附近也没有终端_如实说() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.network = new FakeNetwork(rig);
+        TaskResult result = rig.run(new DepositInput(null, List.of(DIRT), null, 32, Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("身上没有绑了访问点的无线终端"), result.problem().message());
+        assertTrue(result.problem().message().contains("没有 ME 终端"), result.problem().message());
+        assertEquals(32, rig.carried(DIRT));
+    }
+
+    @Test
+    void 存进网络_没装联动如实说() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
         TaskResult result = rig.run(new DepositInput(null, List.of(DIRT), null, 32, Permissions.DEFAULT, true));
@@ -346,6 +397,63 @@ class DepositTaskTest {
 
     private static ItemStack stack(String id, int count) {
         return new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.parse(id)), count);
+    }
+
+    /**
+     * 网络存储替身：身上带不带无线终端、哪几格装着终端。挑终端照真的挑法（在身边且带着无线终端就用它，
+     * 不然找 near 周围 radius 格内装着的）；存的时候从背包表里拿掉，记下走的哪条路、照什么挑法找的终端。
+     */
+    private static final class FakeNetwork implements NetworkStorage {
+        final Rig rig;
+        boolean wireless;
+        final Set<BlockPos> terminals = new HashSet<>();
+        final List<String> used = new ArrayList<>();
+        final List<TerminalSearch> searches = new ArrayList<>();
+        final List<Integer> batches = new ArrayList<>();
+
+        FakeNetwork(Rig rig) {
+            this.rig = rig;
+        }
+
+        @Override public boolean reachable(TerminalSearch search) {
+            return way(search) != null;
+        }
+
+        @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
+                TaskRecords records) {
+            searches.add(search);
+            String way = way(search);
+            if (way == null) {
+                return new TerminalPick.NotFound((search.nearMeFirst() ? "身上没有绑了访问点的无线终端，" : "")
+                        + "附近 " + search.radius() + " 格内没有 ME 终端");
+            }
+            batches.add(stacks.size());
+            return new TerminalPick.Chosen(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    used.add(way);
+                    for (BackpackStack stack : stacks) {
+                        int moved = Math.min(stack.count(), rig.carried(stack.itemId()));
+                        rig.take(stack.itemId(), moved);
+                        records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), moved,
+                                purpose + "：存进了网络"));
+                    }
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "替身存进网络";
+                }
+            });
+        }
+
+        // 在身边且带着无线终端就用它；不然找 near（在身边时是脚下）周围 radius 格内装着的。
+        private String way(TerminalSearch search) {
+            if (search.nearMeFirst() && wireless) return "无线终端";
+            BlockPos center = search.nearMeFirst() ? BlockPos.ZERO : search.near();
+            return terminals.stream().anyMatch(at -> Math.abs(at.getX() - center.getX()) <= search.radius()
+                    && Math.abs(at.getY() - center.getY()) <= search.radius()
+                    && Math.abs(at.getZ() - center.getZ()) <= search.radius()) ? "装着的终端" : null;
+        }
     }
 
     /** 一套离线替身：背包、附近的箱子、打开箱子。 */

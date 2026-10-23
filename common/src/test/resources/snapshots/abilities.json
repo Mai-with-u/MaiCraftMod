@@ -657,7 +657,7 @@
           "name": "into",
           "type": "string",
           "required": false,
-          "doc": "存进哪里：container 箱子、木桶这类容器；network 身上无线终端连着的 ME 网络（拿出终端打开、快速移动进去，不用走路，target 不用给）",
+          "doc": "存进哪里：container 箱子、木桶这类容器；network ME 网络（不给 target 先用身上的无线终端，没带走去附近的 ME 终端；给了 target 去那里的终端）",
           "default": "container",
           "choices": [
             "container",

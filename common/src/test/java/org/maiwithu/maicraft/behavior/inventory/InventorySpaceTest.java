@@ -121,22 +121,29 @@ class InventorySpaceTest {
         }
     }
 
-    // 测试替身：身上的无线终端连着网络，存一堆就从背包表里拿掉；坏了就说没连上。
+    // 测试替身：有终端可用（身上的或附近装着的）时存一堆就从背包表里拿掉；坏了就说没连上；
+    // 没有终端时挑不到。记下每次是照什么挑法找终端的。
     private static final class FakeNetwork implements NetworkStorage {
         final List<String> stored = new ArrayList<>();
+        final List<TerminalSearch> searches = new ArrayList<>();
         boolean broken;
+        boolean reachable = true;
         private final FakeBackpack backpack;
 
         FakeNetwork(FakeBackpack backpack) {
             this.backpack = backpack;
         }
 
-        @Override public boolean available() {
-            return true;
+        @Override public boolean reachable(TerminalSearch search) {
+            searches.add(search);
+            return reachable;
         }
 
-        @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
-            return Optional.of(oneTick(() -> {
+        @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
+                TaskRecords records) {
+            searches.add(search);
+            if (!reachable) return new TerminalPick.NotFound("附近 16 格内没有 ME 终端");
+            return new TerminalPick.Chosen(oneTick(() -> {
                 if (broken) return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "终端没连上 ME 网络"));
                 for (BackpackStack stack : stacks) {
                     stored.add(stack.itemId());
@@ -247,6 +254,35 @@ class InventorySpaceTest {
         assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
         assertEquals(List.of("minecraft:chain"), network.stored);
         assertTrue(records.changes.getFirst().note().contains("存进了网络"), records.changes::toString);
+    }
+
+    @Test
+    void 腾地方找终端就在身边_身上的优先_没带找16格内装着的() {
+        // 存进网络的挑法交给网络存储：腾地方只说"就在身边、16 格内"，身上带不带无线终端由它去认。
+        FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:dirt", 64));
+        FakeNetwork network = new FakeNetwork(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), () -> Optional.of(network));
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
+        assertEquals(List.of("minecraft:dirt"), network.stored);
+        assertTrue(network.searches.stream().allMatch(search -> search.nearMeFirst()
+                && search.radius() == InventorySpace.NEARBY_CONTAINER_RANGE), network.searches::toString);
+    }
+
+    @Test
+    void 身上没带附近也没有终端_不排存网络这一步() {
+        // 没有终端可用：计划里不出现存网络，零碎照常放进随身背包。
+        FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:dirt", 64));
+        FakeNetwork network = new FakeNetwork(backpack);
+        network.reachable = false;
+        FakeCarried carried = new FakeCarried(backpack);
+        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+                Optional.empty(), Optional.empty(), Optional.empty(), () -> Optional.of(network));
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
+        assertTrue(network.stored.isEmpty());
+        assertEquals(List.of("minecraft:dirt"), carried.stored);
     }
 
     @Test

@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.compat;
 
 import java.util.Objects;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
@@ -25,13 +24,17 @@ public final class CompatNetworkStorage implements NetworkStorage {
         this.storage = Objects.requireNonNull(storage, "storage");
     }
 
-    @Override public boolean available() {
-        return ask(storage::available, false);
+    @Override public boolean reachable(TerminalSearch search) {
+        return ask(() -> storage.reachable(search), false);
     }
 
-    @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
-        return ask(() -> storage.store(stacks, purpose, records), Optional.<Action>empty())
-                .map(action -> CompatAction.of(module, action));
+    // 挑到的存的动作同样包一层；停用或接口对不上时按"没有能用的终端"说。
+    @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
+            TaskRecords records) {
+        TerminalPick pick = ask(() -> storage.store(stacks, purpose, search, records),
+                new TerminalPick.NotFound(module.name() + " 的联动用不了，存不进网络"));
+        return pick instanceof TerminalPick.Chosen chosen
+                ? new TerminalPick.Chosen(CompatAction.of(module, chosen.storing())) : pick;
     }
 
     // 问一句：停用了或对不上时给"用不了"时的那个答案。

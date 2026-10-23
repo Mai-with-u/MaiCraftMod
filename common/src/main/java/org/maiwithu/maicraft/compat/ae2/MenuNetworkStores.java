@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
@@ -25,15 +26,17 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 往 ME 网络里存东西的生产实现：拿出身上的无线终端打开（不用走路）→ 核对是无线终端的界面、等连接状态同步过来
+ * 往 ME 网络里存东西的生产实现：挑一台终端（在身边时身上的无线终端优先，没带或点了地方就找装着的）→
+ * 拿出无线终端右键打开，或走过去点在装着的终端面板上 → 核对是这台的界面、等连接状态同步过来
  * → 把要存的几样东西一样样、一格格快速移动进网络（像玩家潜行点背包格）→ 都存完才关上，不每样开关一次。
  *
  * <p>每一下按背包里那种东西一共少了几件结算，少了才记"存进了网络"；点了一会儿没少，是网络放不下（存储满了、
- * 不收这种东西），如实收场。没连上网络（超出访问点范围、没电）照抄界面上的原因收场，腾地方改走箱子或丢。
+ * 不收这种东西），如实收场。没连上网络（超出访问点范围、没电）照抄界面上的原因收场并记下这台没连上，
+ * 下次挑终端排后面；腾地方改走箱子或丢。认终端、开终端和取货是同一份（{@link NearbyTerminals}）。
  */
 public final class MenuNetworkStores implements NetworkStorage {
 
-    /** 一次存东西的总期限（刻）：拿出终端、打开、存几格、关上，半分钟足够；到点如实收场。 */
+    /** 打开以后存东西的期限（刻）：存几格、关上，半分钟足够；到点如实收场。走过去的路由靠近自己管。 */
     private static final long GIVE_UP_TICKS = 20L * 30;
     /** 打开后等连接状态同步过来的期限（刻）。 */
     private static final int LINK_WAIT_TICKS = 40;
@@ -50,14 +53,44 @@ public final class MenuNetworkStores implements NetworkStorage {
         this.terminals = new NearbyTerminals(compat, services, seen, clock);
     }
 
-    @Override public boolean available() {
-        return terminals.carriedWireless().isPresent();
+    @Override public boolean reachable(TerminalSearch search) {
+        return pick(search).access() != null;
     }
 
-    @Override public Optional<Action> store(List<BackpackStack> stacks, String purpose, TaskRecords records) {
-        if (stacks.isEmpty()) return Optional.empty();
-        return terminals.carriedWireless()
-                .map(terminal -> new Storing(terminals.wireless(terminal), stacks, purpose, records));
+    @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
+            TaskRecords records) {
+        if (stacks.isEmpty()) return new TerminalPick.NotFound("没有要存的东西");
+        Picked picked = pick(search);
+        return picked.access() == null ? new TerminalPick.NotFound(picked.reason())
+                : new TerminalPick.Chosen(new Storing(picked.access(), stacks, purpose, records));
+    }
+
+    /** 挑终端的结果：挑到了 access 不为空；挑不到 reason 写明身上和附近各是什么情况。 */
+    private record Picked(TerminalAccess access, String reason) {
+    }
+
+    // 在身边找：身上绑好的无线终端拿出来就能开，比走去哪台都近，先用它；没带再找脚边的。
+    // 点了地方：只找那里装着的终端，走过去点开。装着的按存东西的挑法挑（别人的不用，上次没连上的排后面）。
+    private Picked pick(TerminalSearch search) {
+        if (search.nearMeFirst()) {
+            Optional<String> wireless = terminals.carriedWireless();
+            if (wireless.isPresent()) return new Picked(terminals.wireless(wireless.get()), null);
+        }
+        Optional<BlockPos> center = search.nearMeFirst() ? terminals.feet() : Optional.of(search.near());
+        Optional<String> dimension = terminals.dimension();
+        if (center.isEmpty() || dimension.isEmpty()) return new Picked(null, "角色不在世界里，找不了终端");
+        TerminalChooser.Choice choice = TerminalChooser.toStore(
+                terminals.around(center.get(), search.radius(), search.permissions()), search.radius());
+        String noWireless = search.nearMeFirst() ? "身上没有绑了访问点的无线终端，" : "";
+        return switch (choice) {
+            case TerminalChooser.None none -> new Picked(null, noWireless + none.reason());
+            case TerminalChooser.Unknown unknown -> placed(unknown.candidate(), dimension.get(), search);
+            case TerminalChooser.Known known -> placed(known.candidate(), dimension.get(), search);
+        };
+    }
+
+    private Picked placed(TerminalChooser.Candidate candidate, String dimension, TerminalSearch search) {
+        return new Picked(terminals.placed(candidate.terminal(), dimension, search.permissions()), null);
     }
 
     private enum Stage { OPEN, SYNC, STORE, CLOSE, DONE }
@@ -103,7 +136,8 @@ public final class MenuNetworkStores implements NetworkStorage {
         }
 
         @Override public ActionStatus tick(TickContext tick) {
-            if (++waited > GIVE_UP_TICKS && stage.ordinal() < Stage.CLOSE.ordinal()) {
+            // 走过去、点开由打开动作自己管（走不到它会如实失败）；点开以后才开始算存东西的期限。
+            if (stage != Stage.OPEN && ++waited > GIVE_UP_TICKS && stage.ordinal() < Stage.CLOSE.ordinal()) {
                 stop(Problem.of(Problem.Kind.STUCK, "往 " + terminal + " 连着的网络存东西超时", null));
             }
             return switch (stage) {
@@ -141,6 +175,8 @@ public final class MenuNetworkStores implements NetworkStorage {
                 return ActionStatus.running();
             }
             if (!linked.get()) {
+                // 记下这台没连上：下次存东西挑终端排后面，取货报价也知道。连上时不记，存货没等全，记了会把没到的当成没有。
+                access.remember(false, List.of(), true);
                 String why = compat.unlinkedWhy(raw).map(text -> "（" + text + "）").orElse("（没电或没频道）");
                 return stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, terminal + " 没连上 ME 网络" + why + "，存不了", null));
             }

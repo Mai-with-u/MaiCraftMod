@@ -72,6 +72,31 @@ public final class TerminalChooser {
     }
 
     /**
+     * 存东西挑哪一台：能用的里面，上次看没连上网络的排后面，其余离找终端的那一格最近的先（点名一格时就是点的那台）。
+     * 存东西不看网络里有什么，放不放得下到了界面里才知道，所以挑到的都按"不知道"给。
+     * 一台能用的都没有给 None，写明附近是没有终端还是都是别人的。
+     *
+     * @param candidates   找终端的那一格附近的终端
+     * @param radiusBlocks 这次找终端的半径，写进"附近没有终端"的原因里
+     */
+    public static Choice toStore(List<Candidate> candidates, int radiusBlocks) {
+        if (candidates.isEmpty()) {
+            return new None("附近 " + radiusBlocks + " 格内没有 ME 终端");
+        }
+        Comparator<Candidate> order = Comparator.<Candidate>comparingInt(candidate -> lastSeenUnlinked(candidate) ? 1 : 0)
+                .thenComparingDouble(Candidate::distance);
+        return candidates.stream().filter(Candidate::usable).min(order)
+                .<Choice>map(candidate -> new Unknown(candidate, lastSeenUnlinked(candidate)
+                        ? Optional.of("上次看没连上网络（没电或没频道）") : Optional.empty()))
+                .orElseGet(() -> new None("附近的 ME 终端都是别人的，不往里存（" + candidates.size() + " 台）"));
+    }
+
+    // 上次看这台没连上网络：旧记录只排先后，不拒绝。
+    private static boolean lastSeenUnlinked(Candidate candidate) {
+        return candidate.seen().map(sighting -> !sighting.linked()).orElse(false);
+    }
+
+    /**
      * 从候选里挑一台。
      *
      * @param candidates   附近找到的终端
