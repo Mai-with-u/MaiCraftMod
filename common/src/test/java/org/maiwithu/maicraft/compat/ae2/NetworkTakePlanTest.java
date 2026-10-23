@@ -98,6 +98,20 @@ class NetworkTakePlanTest {
     }
 
     @Test
+    void 主背包满了只剩快捷栏空格时不取_不占工具位() {
+        // 主背包 27 格全满，快捷栏 9 格全空：读数挑的路径不占快捷栏空格，取与放都停。
+        List<SlotSnapshot> slots = new ArrayList<>();
+        for (int i = 0; i < 36; i++) {
+            slots.add(i < 27 ? SlotSnapshot.of(new ItemStack(Items.DIRT, 64)) : SlotSnapshot.empty());
+        }
+        assertInstanceOf(NetworkTakePlan.NoRoom.class, NetworkTakePlan.next(5, SlotSnapshot.empty(),
+                cobbleInNetwork(200), PLAYER_SLOT_IDS, slots));
+        assertInstanceOf(NetworkTakePlan.NoRoom.class, NetworkTakePlan.next(5,
+                SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 2)), cobbleInNetwork(100),
+                PLAYER_SLOT_IDS, slots));
+    }
+
+    @Test
     void 背包满了就停() {
         NetworkTakePlan.Move move = NetworkTakePlan.next(64, SlotSnapshot.empty(), cobbleInNetwork(200),
                 PLAYER_SLOT_IDS, fullOf(new ItemStack(Items.DIRT, 64)));

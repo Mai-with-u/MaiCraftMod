@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.menu.TransferSettlement;
+import org.maiwithu.maicraft.game.menu.CursorStowing;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -409,7 +410,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             boolean networkHasBucket = stock.stream()
                     .anyMatch(other -> !other.fillsBucket() && other.stored() > 0 && other.sample().is(Items.BUCKET));
             if (networkHasBucket) {
-                if (NetworkTakePlan.slotFor(entry.sample(), 1, reading.playerSlotIds(), reading.playerSnapshots()).isEmpty()) {
+                if (stowSlot(entry.sample().copyWithCount(1), reading) < 0) {
                     return stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
                             "背包放不下从 " + access.describe() + " 装的" + request.wanted().describe(), null));
                 }
@@ -607,9 +608,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 return ActionStatus.progressed();
             }
             if (menu.busy()) return ActionStatus.running();
-            Optional<Integer> slot = NetworkTakePlan.slotFor(cursor.stack(), cursor.count(),
-                    reading.get().playerSlotIds(), reading.get().playerSnapshots());
-            if (slot.isPresent()) return putDown(slot.get(), cursor, raw);
+            int slot = stowSlot(cursor.stack().copyWithCount(cursor.count()), reading.get());
+            if (slot >= 0) return putDown(slot, cursor, raw);
             return putBack(cursor, raw);
         }
 
@@ -755,6 +755,12 @@ public final class MenuTerminalTakes implements TerminalTakes {
             String doing = "从 " + access.describe() + " 取" + request.wanted().describe();
             return craft.waiting() ? doing + "，" + craft.waitingText() : doing;
         }
+    }
+
+    // 只有一份读数、拿不到原界面：放光标、装不装得下的判断走统一的收进背包挑选。
+    private static int stowSlot(ItemStack stack, MenuContent.Reading reading) {
+        return CursorStowing.fromSnapshots(reading.playerSlotIds(),
+                reading.playerSnapshots().stream().map(SlotSnapshot::stack).toList(), stack);
     }
 
     // 界面里这些槽位此刻的样子，按给的顺序。

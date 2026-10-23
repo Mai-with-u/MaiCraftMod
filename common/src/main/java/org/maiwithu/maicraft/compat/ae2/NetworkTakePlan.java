@@ -9,6 +9,7 @@ import java.util.function.Predicate;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.game.menu.CursorStowing;
 
 /**
  * 从终端里怎么取：只拿需要的量，又不在一件一件上耗太久。纯函数，不读世界也不动手。
@@ -78,44 +79,33 @@ public final class NetworkTakePlan {
         if (onCursor > 0) {
             // 光标上已经有：够数、满一组、网络里没了、或再叠一件就没有一格放得下，都先放下。
             boolean enough = onCursor >= remaining || onCursor >= stackSize || entry.stored() <= 0;
-            boolean roomForOneMore = slotFor(entry.sample(), onCursor + 1, playerSlotIds, playerSnapshots).isPresent();
+            boolean roomForOneMore = stowSlot(entry.sample().copyWithCount(onCursor + 1),
+                    playerSlotIds, playerSnapshots) >= 0;
             if (enough || !roomForOneMore) {
-                return slotFor(entry.sample(), onCursor, playerSlotIds, playerSnapshots)
-                        .<Move>map(PutDown::new).orElseGet(NoRoom::new);
+                int slot = stowSlot(entry.sample().copyWithCount(onCursor), playerSlotIds, playerSnapshots);
+                return slot >= 0 ? new PutDown(slot) : new NoRoom();
             }
             return new TakeOne(entry.serial());
         }
         if (remaining <= 0 || entry.stored() <= 0) {
             return new Done();
         }
+        // 整组：Shift 点进哪一格由游戏挑，能叠进没满的同种堆也行，所以只要主背包里还有一处能放下一件就点。
         if (remaining >= stackSize) {
-            // 整组：Shift 点进哪一格由游戏挑，能叠进没满的同种堆也行，所以只要背包里还有一处能放下一件就点。
-            return slotFor(entry.sample(), 1, playerSlotIds, playerSnapshots).isPresent()
+            return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerSnapshots) >= 0
                     ? new TakeStack(entry.serial()) : new NoRoom();
         }
-        return slotFor(entry.sample(), 1, playerSlotIds, playerSnapshots).isPresent()
+        return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerSnapshots) >= 0
                 ? new TakeOne(entry.serial()) : new NoRoom();
     }
 
     /**
-     * 角色背包那一侧能一次放下 count 件这种东西的一格：先找已经放着同一种、还装得下的，再找空格。
-     * 两种都没有就给空。
+     * 只有一份角色侧读数、拿不到原界面，挑选走统一的收进背包：先叠同种，再主背包空格，
+     * 不占快捷栏空格；装不下给 -1。
      */
-    static Optional<Integer> slotFor(ItemStack sample, int count, List<Integer> playerSlotIds,
-            List<SlotSnapshot> playerSnapshots) {
-        SlotSnapshot kind = SlotSnapshot.of(sample.copyWithCount(1));
-        Integer empty = null;
-        for (int i = 0; i < playerSlotIds.size(); i++) {
-            SlotSnapshot slot = playerSnapshots.get(i);
-            if (slot.isEmpty()) {
-                if (empty == null) empty = playerSlotIds.get(i);
-                continue;
-            }
-            if (slot.sameIdentity(kind) && slot.count() + count <= slot.stack().getMaxStackSize()) {
-                return Optional.of(playerSlotIds.get(i));
-            }
-        }
-        return Optional.ofNullable(empty);
+    private static int stowSlot(ItemStack stack, List<Integer> playerSlotIds, List<SlotSnapshot> playerSnapshots) {
+        return CursorStowing.fromSnapshots(playerSlotIds,
+                playerSnapshots.stream().map(SlotSnapshot::stack).toList(), stack);
     }
 
     /**
