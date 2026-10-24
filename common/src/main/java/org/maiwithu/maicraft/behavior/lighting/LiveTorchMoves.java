@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.survival;
+package org.maiwithu.maicraft.behavior.lighting;
 
 import java.util.Objects;
 import java.util.Set;
@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
-import org.maiwithu.maicraft.behavior.lighting.FrontLampSites;
+import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;

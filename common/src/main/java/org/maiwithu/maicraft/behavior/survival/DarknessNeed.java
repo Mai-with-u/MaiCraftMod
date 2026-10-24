@@ -48,7 +48,7 @@ public final class DarknessNeed implements SurvivalNeed {
         DarknessFacts read(TickContext context);
     }
 
-    /** 随行插火把怎么落地：创建这次的临时任务；出手过（成不成都算）时回调记下位置。生产实现在本包。 */
+    /** 随行插火把怎么落地：创建这次的临时任务；出手过（成不成都算）时回调记下位置。生产实现在照明包。 */
     @FunctionalInterface
     public interface TorchMoves {
         Task placeTorch(TickContext context, Consumer<BlockPos> onAttempt);

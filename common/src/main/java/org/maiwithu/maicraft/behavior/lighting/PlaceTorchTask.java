@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.survival;
+package org.maiwithu.maicraft.behavior.lighting;
 
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -13,8 +13,6 @@ import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
-import org.maiwithu.maicraft.behavior.lighting.FrontLampSites;
-import org.maiwithu.maicraft.behavior.lighting.LampItem;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
