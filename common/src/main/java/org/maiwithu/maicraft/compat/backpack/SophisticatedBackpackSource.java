@@ -17,7 +17,6 @@ import java.util.function.Supplier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
-import org.maiwithu.maicraft.behavior.acquire.sources.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
@@ -25,6 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
+import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;

@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
+import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
