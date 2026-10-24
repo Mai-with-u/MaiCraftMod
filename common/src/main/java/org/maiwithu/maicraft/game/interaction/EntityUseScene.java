@@ -5,6 +5,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.Boat;
 
+import org.maiwithu.maicraft.game.mixin.BoatOutOfControlTicksAccessor;
+
 /**
  * 右键实体提交那一刻的手势现场：潜行按着没有、眼睛到目标碰撞箱多远、实体交互距离多大、目标身上有没有乘客、
  * 目标是船时它已经连续没在水下多少刻。原版拒收这类点击时不发解释，把提交现场命中的拒收条件记下来，
@@ -19,7 +21,9 @@ record EntityUseScene(boolean sneakHeld, double eyeDistance, double interactionR
     /** 提交现场取一份：按键读角色的输入状态，距离按眼睛到目标碰撞箱的最近距离，泡水时长只有船才有。 */
     static EntityUseScene of(LocalPlayer player, Entity target) {
         double eyeDistance = Math.sqrt(target.getBoundingBox().distanceToSqr(player.getEyePosition()));
-        Float boatSubmergedTicks = target instanceof Boat boat ? boat.outOfControlTicks : null;
+        Float boatSubmergedTicks = target instanceof Boat boat && boat instanceof BoatOutOfControlTicksAccessor ticks
+                ? ticks.maicraft$outOfControlTicks()
+                : null;
         return new EntityUseScene(player.isShiftKeyDown(), eyeDistance, player.entityInteractionRange(),
                 !target.getPassengers().isEmpty(), boatSubmergedTicks);
     }
