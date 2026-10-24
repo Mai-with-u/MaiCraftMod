@@ -454,6 +454,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         private final long startTick;
         private long lastTick;
         private boolean settled;
+        /** 上次记进展时人所在的位置：挪出一步就再记一次，坐着的一段不用整趟替它掐表。 */
+        private BlockPos progressAnchor;
 
         RidingLeg(TravelOffer offer, TravelLeg leg, BlockPos from, long startTick) {
             this.offer = offer;
@@ -465,7 +467,16 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
 
         @Override public ActionStatus tick(TickContext context) {
             lastTick = context.gameTick();
-            return leg.tick(context);
+            ActionStatus status = leg.tick(context);
+            // 坐着的一段（划船、坐电梯）自己不报进度：身体挪出一步就给整趟记一次进展，
+            // 划得久的船、开得久的车不被整趟的卡住计时误杀；原地不动什么都不记，真卡死了照旧按超时收场。
+            BlockPos feet = feetNow();
+            if (feet != null
+                    && (progressAnchor == null || Math.sqrt(feet.distSqr(progressAnchor)) >= MOVED_BLOCKS)) {
+                progressAnchor = feet;
+                recordProgress(offer.via().name() + " 载着人挪到了 " + feet.toShortString());
+            }
+            return status;
         }
 
         /** 这段结束了：记一段；返回身体挪没挪地方。 */

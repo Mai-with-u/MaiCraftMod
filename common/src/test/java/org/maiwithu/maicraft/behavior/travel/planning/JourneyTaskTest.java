@@ -250,6 +250,62 @@ class JourneyTaskTest {
         assertEquals(List.of("walk"), details(result).legs().stream().map(JourneyDetails.Leg::via).toList());
     }
 
+    @Test
+    void 坐着的一段身体在挪_坐多久都不被整趟判卡住() {
+        // 划船这类坐着的一段自己不报进度：身体在挪整趟就活着，坐得再久也不被整趟的卡住计时误杀。
+        FakeMode ferry = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(),
+                100, List.of(), List.of(), ""), WorldPosition.here(42, 64, 0));
+        ferry.legTicks = 4000;
+        ferry.drift = true;
+        JourneyTask task = journey(at(42, 64, 0), null, ferry);
+        task.start(tick);
+        for (int i = 0; i < 20 && ferry.started == 0; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertEquals(1, ferry.started);
+        // 船在水上来回挪（每刻换一格），一路划过整趟的卡住时限；到岸这一段收场，行程站在目的地结束。
+        TaskResult result = null;
+        for (int t = 0; t < 4200; t++) {
+            if (task.tick(tick) instanceof TickResult.Finished finished) {
+                result = finished.result();
+                break;
+            }
+            tick.nextTick();
+        }
+        assertEquals(TaskResult.Status.DONE, assertResult(result).status(), assertResult(result).summary());
+        assertEquals(1, ferry.started, "送到了不再问报价");
+    }
+
+    @Test
+    void 坐着的一段原地不动_照旧按整趟时限判卡住() {
+        // 身体不挪（船顶着岸划不动）：没有进展可言，整趟照旧按卡住收场，不无限等下去。
+        FakeMode grounded = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(),
+                100, List.of(), List.of(), ""), null);
+        grounded.legTicks = Integer.MAX_VALUE;
+        JourneyTask task = journey(at(42, 64, 0), null, grounded);
+        task.start(tick);
+        for (int i = 0; i < 20 && grounded.started == 0; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        TaskResult result = null;
+        for (int t = 0; t < 4200; t++) {
+            if (task.tick(tick) instanceof TickResult.Finished finished) {
+                result = finished.result();
+                break;
+            }
+            tick.nextTick();
+        }
+        assertEquals(TaskResult.Status.FAILED, assertResult(result).status());
+        assertEquals(Problem.Kind.STUCK, assertResult(result).problem().kind());
+    }
+
+    private static TaskResult assertResult(TaskResult result) {
+        if (result == null) throw new AssertionError("整趟没有结束");
+        return result;
+    }
+
     /** 走路一段的替身：推进两刻后按给定结果收场（null 表示一直走），收场时把角色挪到给定位置。 */
     private final class FakeWalk implements Task {
         private final TaskResult outcome;
@@ -317,6 +373,10 @@ class JourneyTaskTest {
         int safeStops;
         /** 这一段坐着时停下不安全（在轿厢里）。 */
         boolean unsafe;
+        /** 这一段坐多少刻才收场；第一刻报进展，之后只报在走。 */
+        int legTicks = 2;
+        /** 坐的这一段身体来回挪（船在划）：每刻换一下位置。 */
+        boolean drift;
 
         @Override public boolean claims(TravelRequest request) {
             return claims && started == 0;
@@ -348,7 +408,13 @@ class JourneyTaskTest {
                 private int ticks;
 
                 @Override public ActionStatus tick(TickContext context) {
-                    if (++ticks < 2) return ActionStatus.progressed();
+                    if (++ticks < legTicks) {
+                        if (drift) {
+                            world.spot = ticks % 2 == 0
+                                    ? WorldPosition.here(10, 64, 0) : WorldPosition.here(11, 64, 0);
+                        }
+                        return ticks == 1 ? ActionStatus.progressed() : ActionStatus.running();
+                    }
                     if (failure != null) return ActionStatus.failed(failure);
                     if (dropOff != null) world.spot = dropOff;
                     return ActionStatus.done();
