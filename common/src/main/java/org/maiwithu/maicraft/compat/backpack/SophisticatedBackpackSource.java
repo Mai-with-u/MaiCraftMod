@@ -181,7 +181,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 openingSlot = toOpen.poll();
             }
             // 手上的笔先跑完：够没够等它结清再说。
-            if (run != null && !run.idle()) return drive();
+            if (run != null && !run.idle()) return run.tickAction(this::onSettled);
             if (enough() && stage != Stage.CLOSE) {
                 // 已经够了：界面还开着就记一笔存货、关上；还没开包就直接完成。
                 return stage == Stage.OPEN && menu == null ? ActionStatus.done() : toClose();
@@ -307,16 +307,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
             run.begin(new TransferRun.Move(next.get().clicks(),
                     new TransferRun.Check.IntoBackpack(this::matches, moveAmount),
                     "从随身背包拿" + request.wanted().describe()));
-            return drive();
-        }
-
-        // 推进手上的笔一刻：点出去算进展，等同步算还在做，出了结论按结论走。
-        private ActionStatus drive() {
-            return switch (run.tick()) {
-                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
-                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
-                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
-            };
+            return run.tickAction(this::onSettled);
         }
 
         // 一笔出了结论：结清接着盘；点出去了身上一直没多、或对不上账的，如实交回后收场，

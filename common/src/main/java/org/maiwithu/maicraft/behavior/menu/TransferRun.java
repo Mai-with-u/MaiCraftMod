@@ -8,9 +8,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation.Verdict;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 
 /**
  * 对着开着的界面跑一笔搬运：调用方提交一笔（点哪几下、怎么核对），这里逐刻点、等同步、
@@ -117,6 +119,19 @@ public final class TransferRun {
             case IDLE -> throw new IllegalStateException("没有在跑的一笔");
             case PRESSING -> press();
             case SETTLING -> settle();
+        };
+    }
+
+    /**
+     * 推进一刻并把进展换算成动作的一刻：点出去算进展，等同步算还在做，出了结论交给结论钩子记账并接住。
+     * 记账是调用方的决定：钩子拿到带全证据的结论，返回接住之后的动作状态。
+     * 没有在跑的一笔时调用是程序错误。
+     */
+    public ActionStatus tickAction(Function<MoveResult, ActionStatus> settled) {
+        return switch (tick()) {
+            case Progress.Advanced advanced -> ActionStatus.progressed();
+            case Progress.Waiting waiting -> ActionStatus.running();
+            case Progress.Settled done -> settled.apply(done.result());
         };
     }
 

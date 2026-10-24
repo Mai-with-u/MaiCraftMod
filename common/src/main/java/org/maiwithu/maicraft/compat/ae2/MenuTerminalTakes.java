@@ -279,7 +279,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 return finishWithout(null);
             }
             if (pending != null) return awaitTake(player, raw, reading.get());
-            if (putDownPending) return drive();
+            if (putDownPending) return transport.tickAction(this::onSettled);
             if (menu.busy()) return ActionStatus.running();
 
             List<Ae2TerminalMenu.StockEntry> stock = compat.networkStock(raw).orElse(List.of());
@@ -499,16 +499,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             putDownPending = true;
             transport.begin(new TransferRun.Move(List.of(new MenuClick(slotId, false, 0, false)),
                     new TransferRun.Check.PutDown(slotId), "把光标上的东西放进背包"));
-            return drive();
-        }
-
-        // 推进放下光标的那一笔一刻。
-        private ActionStatus drive() {
-            return switch (transport.tick()) {
-                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
-                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
-                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
-            };
+            return transport.tickAction(this::onSettled);
         }
 
         // 放下光标的结论：确认了记账；纹丝不动（多半那一格放不下）回到计划重新挑格；
@@ -541,7 +532,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) return finishWithout(null);
             if (putBackPending != null) return awaitPutBack(tick.player());
-            if (putDownPending) return drive();
+            if (putDownPending) return transport.tickAction(this::onSettled);
             SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
             if (cursor.isEmpty() || ++cursorWaited > CURSOR_TICKS) {
                 stage = Stage.CLOSE;

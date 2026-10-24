@@ -321,12 +321,11 @@ final class EnchantMenuWork implements Action {
 
     // 推进手上的搬运一刻；出了结论按当前一步接住。
     private ActionStatus drive() {
-        TransferRun.Progress progress = run.tick();
-        if (!(progress instanceof TransferRun.Progress.Settled settled)) {
-            return progress instanceof TransferRun.Progress.Advanced
-                    ? ActionStatus.progressed() : ActionStatus.running();
-        }
-        TransferRun.MoveResult result = settled.result();
+        return run.tickAction(this::onMoveSettled);
+    }
+
+    // 一笔出了结论，按当前一步接住：装料成了接着装，取回对不上就如实收场。
+    private ActionStatus onMoveSettled(TransferRun.MoveResult result) {
         switch (step) {
             case LOAD_ITEM -> {
                 if (result instanceof TransferRun.MoveResult.Confirmed) {

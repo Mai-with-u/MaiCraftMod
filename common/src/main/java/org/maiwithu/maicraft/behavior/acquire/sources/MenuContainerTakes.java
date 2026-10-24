@@ -193,7 +193,7 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         // 按量搬：手上的笔交给搬运执行逐刻点、等结清、出结论；空手时盘下一笔。
         private ActionStatus transfer() {
-            if (!run.idle()) return drive();
+            if (!run.idle()) return run.tickAction(this::onSettled);
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
                 // 界面被合上了（打断或服务端关的）：拿走多少由引擎清点，这里照常收场。
@@ -211,17 +211,8 @@ public final class MenuContainerTakes implements ContainerTakes {
                     if (feeder) allowances[i] = feederAllowance(i, startTotals[i]);
                 }
             }
-            if (planNext(open)) return drive();
+            if (planNext(open)) return run.tickAction(this::onSettled);
             return toClose(open);
-        }
-
-        // 推进手上的笔一刻：点出去算进展，等同步算还在做，出了结论按结论走。
-        private ActionStatus drive() {
-            return switch (run.tick()) {
-                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
-                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
-                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
-            };
         }
 
         // 一笔出了结论：结清就接着盘下一笔；点出去了身上一直没多（多半背包放不下）记下没能确认，
