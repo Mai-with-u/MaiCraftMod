@@ -11,7 +11,7 @@ import java.util.Optional;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
-import org.maiwithu.maicraft.behavior.acquire.TradeOffers;
+import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
 import org.maiwithu.maicraft.behavior.menu.OpenScreen;
 import org.maiwithu.maicraft.game.menu.ScreenOpening;
 

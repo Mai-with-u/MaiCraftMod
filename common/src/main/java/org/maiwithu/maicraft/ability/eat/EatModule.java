@@ -8,8 +8,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.survival.FoodPicker;

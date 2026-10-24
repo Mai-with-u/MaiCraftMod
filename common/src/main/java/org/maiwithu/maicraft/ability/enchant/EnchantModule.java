@@ -9,13 +9,13 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemRegistry;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
-import org.maiwithu.maicraft.behavior.travel.SceneSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.planning.SceneSeenTargets;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;

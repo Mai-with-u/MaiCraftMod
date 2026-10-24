@@ -10,11 +10,11 @@ import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.acquire.CarriedItems;
-import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;

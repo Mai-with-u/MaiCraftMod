@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.ability.travel;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
-import org.maiwithu.maicraft.behavior.travel.JourneyTask;
+import org.maiwithu.maicraft.behavior.travel.planning.JourneyTask;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 
 /**

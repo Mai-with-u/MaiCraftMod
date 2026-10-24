@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.inventory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;

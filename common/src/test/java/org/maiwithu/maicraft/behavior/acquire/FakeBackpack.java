@@ -7,11 +7,11 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 
 /** 测试替身：背包就是一张可以改的格子表，来源的执行直接往里放，好核对引擎重新清点看到的现场。 */
-final class FakeBackpack implements BackpackView {
-    final List<BackpackStack> stacks = new ArrayList<>();
+public final class FakeBackpack implements BackpackView {
+    public final List<BackpackStack> stacks = new ArrayList<>();
     private final int capacity;
 
-    FakeBackpack(int capacity, BackpackStack... initial) {
+    public FakeBackpack(int capacity, BackpackStack... initial) {
         this.capacity = capacity;
         stacks.addAll(List.of(initial));
     }
@@ -29,12 +29,12 @@ final class FakeBackpack implements BackpackView {
     }
 
     /** 往背包里放进几件东西，占一格（数量上限按最大堆叠截断）。 */
-    void add(String itemId, int count) {
+    public void add(String itemId, int count) {
         stacks.add(new BackpackStack(itemId, count, 64, false, false, false, false));
     }
 
     /** 从背包里拿走几件（来源的执行用掉原料）：够就扣掉、给真，不够给假、一件不动。 */
-    boolean take(String itemId, int count) {
+    public boolean take(String itemId, int count) {
         int have = stacks.stream().filter(stack -> stack.itemId().equals(itemId)).mapToInt(BackpackStack::count).sum();
         if (have < count) return false;
         int left = count;
@@ -54,7 +54,7 @@ final class FakeBackpack implements BackpackView {
     }
 
     /** 一件装备（工具）放进背包。 */
-    void addGear(String itemId) {
+    public void addGear(String itemId) {
         stacks.add(new BackpackStack(itemId, 1, 1, true, false, false, false));
     }
 }

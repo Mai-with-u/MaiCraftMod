@@ -4,9 +4,9 @@ package org.maiwithu.maicraft.behavior.construction;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
-import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;

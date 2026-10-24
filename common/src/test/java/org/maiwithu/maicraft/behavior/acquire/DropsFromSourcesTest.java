@@ -29,6 +29,19 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.sources.MiningSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.HuntSource;
+import org.maiwithu.maicraft.behavior.acquire.mining.ScansMinables;
+import org.maiwithu.maicraft.behavior.acquire.mining.MinableSpot;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.field.ScansCreatures;
+import org.maiwithu.maicraft.behavior.acquire.field.Hunts;
+import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 
 /**
  * 掉落线索接进来源：给了线索，采掘照它去挖看得见的模组矿、狩猎照它去打模组生物；没给线索时照旧只认原版对照，

@@ -11,8 +11,8 @@ import java.util.function.Function;
 
 import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;

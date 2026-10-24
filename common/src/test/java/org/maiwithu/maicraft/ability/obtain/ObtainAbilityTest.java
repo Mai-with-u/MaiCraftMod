@@ -14,10 +14,10 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.ItemAcquisition;
-import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemRegistry;
-import org.maiwithu.maicraft.behavior.acquire.StartsAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemRegistry;
+import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.world.IdKind;

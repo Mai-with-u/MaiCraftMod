@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import java.util.List;
-import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;

@@ -27,7 +27,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.LeavesBlock;
-import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
+import org.maiwithu.maicraft.behavior.acquire.mining.NaturalTrees;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

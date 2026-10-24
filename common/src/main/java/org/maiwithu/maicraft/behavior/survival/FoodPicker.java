@@ -10,7 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 

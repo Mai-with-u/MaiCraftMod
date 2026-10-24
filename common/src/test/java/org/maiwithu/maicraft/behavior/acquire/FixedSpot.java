@@ -2,12 +2,13 @@
 package org.maiwithu.maicraft.behavior.acquire;
 
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 
 /** 测试替身：角色一直站在摆好的位置上，问价的路程都从这里算。 */
-final class FixedSpot implements ReadsCharacterPosition {
+public final class FixedSpot implements ReadsCharacterPosition {
     private final WorldPosition position;
 
-    FixedSpot(int x, int y, int z) {
+    public FixedSpot(int x, int y, int z) {
         this.position = WorldPosition.here(x, y, z);
     }
 

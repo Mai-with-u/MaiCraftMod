@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.follow;
 
-import org.maiwithu.maicraft.behavior.travel.DimensionRoute;
+import org.maiwithu.maicraft.behavior.travel.modes.DimensionRoute;
 
 /**
  * 他走进的那扇门通到哪个维度：下界门连着主世界与下界，末地门从主世界通到末地。

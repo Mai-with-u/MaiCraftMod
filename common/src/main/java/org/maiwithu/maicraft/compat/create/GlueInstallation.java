@@ -9,8 +9,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
-import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.StepsInOrder;

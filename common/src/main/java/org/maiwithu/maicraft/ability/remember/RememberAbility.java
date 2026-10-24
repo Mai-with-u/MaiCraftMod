@@ -6,9 +6,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
-import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
-import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;

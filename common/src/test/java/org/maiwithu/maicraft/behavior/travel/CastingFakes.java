@@ -17,8 +17,8 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
 
-import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
@@ -37,46 +37,47 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.travel.modes.PortalCastingLayout;
 
 /**
  * 浇筑的离线现场替身：一张方块表外加原版流体反应的最简规则——岩浆源旁边或上面有水就成黑曜石、
  * 流动的岩浆成圆石；水往空格里流（只在模板范围内流，别淹了整张表）；舀走水源时流水跟着退。
  * 背包按物品数记：倒桶换成空桶、舀桶换成满桶；拿东西按脚本给。每个小动作一刻做完，写进与世界视图共用的那张表。
  */
-final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
+public final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
         ConstructionSeams.Clicks, DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards,
         ConstructionSeams.Ledger, BringsPlayerClose {
 
-    static final String BUCKET = "minecraft:bucket";
-    static final String WATER_BUCKET = "minecraft:water_bucket";
-    static final String LAVA_BUCKET = "minecraft:lava_bucket";
-    static final String COBBLESTONE = "minecraft:cobblestone";
-    static final String OBSIDIAN = "minecraft:obsidian";
+    public static final String BUCKET = "minecraft:bucket";
+    public static final String WATER_BUCKET = "minecraft:water_bucket";
+    public static final String LAVA_BUCKET = "minecraft:lava_bucket";
+    public static final String COBBLESTONE = "minecraft:cobblestone";
+    public static final String OBSIDIAN = "minecraft:obsidian";
 
-    final Map<BlockPos, BlockState> world;
-    final Map<String, Integer> inventory = new HashMap<>();
-    final List<ItemRequest> asked = new ArrayList<>();
-    final List<BlockPos> placed = new ArrayList<>();
-    final List<BlockPos> poured = new ArrayList<>();
-    final List<BlockPos> scooped = new ArrayList<>();
-    final List<BlockPos> dug = new ArrayList<>();
-    final List<BlockPos> temporaries = new ArrayList<>();
+    public final Map<BlockPos, BlockState> world;
+    public final Map<String, Integer> inventory = new HashMap<>();
+    public final List<ItemRequest> asked = new ArrayList<>();
+    public final List<BlockPos> placed = new ArrayList<>();
+    public final List<BlockPos> poured = new ArrayList<>();
+    public final List<BlockPos> scooped = new ArrayList<>();
+    public final List<BlockPos> dug = new ArrayList<>();
+    public final List<BlockPos> temporaries = new ArrayList<>();
     /** 水在哪些格里能流：模板范围加池面一圈，流出去就不管了。 */
-    final Set<BlockPos> flowRegion = new HashSet<>();
+    public final Set<BlockPos> flowRegion = new HashSet<>();
     /** 附近有没有能舀的水：没有时要水桶按缺东西失败。 */
-    boolean waterNearby = true;
+    public boolean waterNearby = true;
     /** 这些格倒岩浆进去成圆石（旁边是流动的岩浆、或别的意外），用来演"没成黑曜石"。 */
-    final Set<BlockPos> castsCobblestone = new HashSet<>();
-    BlockPos feet = new BlockPos(0, 65, 0);
+    public final Set<BlockPos> castsCobblestone = new HashSet<>();
+    public BlockPos feet = new BlockPos(0, 65, 0);
     /** 施工走近时交出的动作；没给就一刻走到。用来演"施工正走在半路"。 */
-    Action approach;
+    public Action approach;
 
-    CastingFakes(Map<BlockPos, BlockState> world) {
+    public CastingFakes(Map<BlockPos, BlockState> world) {
         this.world = world;
     }
 
     /** 直岸场景：岸上是石头、池里两格深的岩浆源、上面是空气；模板范围与池面都加载着。 */
-    static Map<BlockPos, BlockState> straightShore(PortalCastingLayout layout, int poolDepth) {
+    public static Map<BlockPos, BlockState> straightShore(PortalCastingLayout layout, int poolDepth) {
         Map<BlockPos, BlockState> world = new HashMap<>();
         for (int across = -8; across <= 9; across++) {
             for (int behind = -8; behind <= 8; behind++) {
@@ -98,7 +99,7 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
     }
 
     /** 让水在模板范围与池面一圈里流。 */
-    void allowFlowAround(PortalCastingLayout layout) {
+    public void allowFlowAround(PortalCastingLayout layout) {
         flowRegion.addAll(layout.footprint());
         for (int across = -2; across <= 3; across++) {
             for (int behind = -2; behind <= 0; behind++) {
@@ -108,12 +109,12 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
         }
     }
 
-    void give(String itemId, int count) {
+    public void give(String itemId, int count) {
         inventory.merge(itemId, count, Integer::sum);
     }
 
     /** 背包的物品栈快照，给世界视图替身。 */
-    List<BackpackStack> stacks() {
+    public List<BackpackStack> stacks() {
         List<BackpackStack> stacks = new ArrayList<>();
         for (Map.Entry<String, Integer> entry : inventory.entrySet()) {
             if (entry.getValue() <= 0) continue;
@@ -124,11 +125,11 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
         return stacks;
     }
 
-    ConstructionServices services() {
+    public ConstructionServices services() {
         return new ConstructionServices(this, this, this, this, this, this, this, this, this, null);
     }
 
-    BlockState state(BlockPos pos, BlockState fallback) {
+    public BlockState state(BlockPos pos, BlockState fallback) {
         return world.getOrDefault(pos, fallback);
     }
 
@@ -241,7 +242,7 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
     }
 
     /** 原版流体的最简结算：水往模板范围里的空格流；岩浆源贴水成黑曜石，流动的岩浆成圆石。 */
-    void settle() {
+    public void settle() {
         for (int round = 0; round < 12; round++) {
             boolean changed = false;
             List<BlockPos> waters = new ArrayList<>();
@@ -284,7 +285,7 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
         for (BlockPos at : flowing) world.put(at, Blocks.AIR.defaultBlockState());
     }
 
-    static Action immediate(Runnable effect) {
+    public static Action immediate(Runnable effect) {
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 effect.run();
@@ -297,7 +298,7 @@ final class CastingFakes implements ConstructionSeams.ReadsSite, ConstructionSea
         };
     }
 
-    static Action failing(Problem problem) {
+    public static Action failing(Problem problem) {
         return new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 return ActionStatus.failed(problem);

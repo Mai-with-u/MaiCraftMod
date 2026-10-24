@@ -15,15 +15,16 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 
 /**
  * 测试替身：一个按剧本回答的物品来源。问价按排好的答案依次回答；
  * 动手按设定的方式收场——往背包里放货、以问题失败、装模作样做完却一件不给、或干脆接不上。
  */
-final class ScriptedSource implements ItemSource {
+public final class ScriptedSource implements ItemSource {
 
     /** 动手时怎么收场。 */
-    enum Ending {
+    public enum Ending {
         /** 往背包里放进报价认的数，然后做完。 */
         DELIVER,
         /** 以问题失败。 */
@@ -40,7 +41,7 @@ final class ScriptedSource implements ItemSource {
         UNCONFIRMED
     }
 
-    final String name;
+    public final String name;
     /** 这条来源自报的途径；核对 via 只走指定路时用它。 */
     private final AcquireVia via;
     private final FakeBackpack backpack;
@@ -52,37 +53,37 @@ final class ScriptedSource implements ItemSource {
     /** 先放货后收尾的那一种，收尾跑完了没有。 */
     private boolean tidied;
 
-    ScriptedSource(String name, FakeBackpack backpack) {
+    public ScriptedSource(String name, FakeBackpack backpack) {
         this(name, AcquireVia.CARRIED, backpack);
     }
 
-    ScriptedSource(String name, AcquireVia via, FakeBackpack backpack) {
+    public ScriptedSource(String name, AcquireVia via, FakeBackpack backpack) {
         this.name = name;
         this.via = via;
         this.backpack = backpack;
     }
 
-    ScriptedSource answer(SourceQuote quote) {
+    public ScriptedSource answer(SourceQuote quote) {
         quotes.add(quote);
         return this;
     }
 
-    ScriptedSource onBegin(Ending ending) {
+    public ScriptedSource onBegin(Ending ending) {
         this.ending = ending;
         return this;
     }
 
-    int askedTimes() {
+    public int askedTimes() {
         return asked;
     }
 
     /** 动手了几次：核对"只用了一条路"时看它，问价与动手是两回事。 */
-    int begunTimes() {
+    public int begunTimes() {
         return begun;
     }
 
     /** 先放货后收尾的那一种，收尾跑完了没有：引擎没等它做完就收工时为假。 */
-    boolean tidied() {
+    public boolean tidied() {
         return tidied;
     }
 
@@ -140,7 +141,7 @@ final class ScriptedSource implements ItemSource {
         private final boolean failsAfterDelivering;
         private int ticks;
 
-        DeliverFirst(String itemId, int count, boolean failsAfterDelivering) {
+        public DeliverFirst(String itemId, int count, boolean failsAfterDelivering) {
             this.itemId = itemId;
             this.count = count;
             this.failsAfterDelivering = failsAfterDelivering;
@@ -171,7 +172,7 @@ final class ScriptedSource implements ItemSource {
         private final String itemId;
         private final int count;
 
-        Delivering(String source, FakeBackpack backpack, String itemId, int count) {
+        public Delivering(String source, FakeBackpack backpack, String itemId, int count) {
             this.source = source;
             this.backpack = backpack;
             this.itemId = itemId;

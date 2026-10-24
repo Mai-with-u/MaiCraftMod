@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;

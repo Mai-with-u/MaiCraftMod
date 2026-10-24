@@ -27,8 +27,8 @@ import org.junit.jupiter.api.Test;
 
 import net.minecraft.server.Bootstrap;
 import net.minecraft.SharedConstants;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;

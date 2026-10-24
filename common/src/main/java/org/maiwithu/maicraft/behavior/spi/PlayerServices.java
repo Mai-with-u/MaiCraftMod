@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.behavior.spi;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;

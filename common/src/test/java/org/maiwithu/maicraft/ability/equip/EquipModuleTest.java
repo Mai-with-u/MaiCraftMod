@@ -9,7 +9,7 @@ import java.util.Set;
 import com.google.gson.JsonParser;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.GearSlotName;

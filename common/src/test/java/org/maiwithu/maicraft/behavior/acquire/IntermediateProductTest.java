@@ -32,6 +32,13 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.acquire.sources.RecipeSource;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
+import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
+import org.maiwithu.maicraft.behavior.acquire.cook.SetsUpWorkstation;
+import org.maiwithu.maicraft.behavior.acquire.cook.RecipeRuns;
 
 /**
  * 备料链上的中间产物（例如为做床就地摆的工作台）清点原料时，身上的成品料也算数：

@@ -20,7 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Block;
-import org.maiwithu.maicraft.behavior.acquire.NaturalTrees;
+import org.maiwithu.maicraft.behavior.acquire.mining.NaturalTrees;
 import org.maiwithu.maicraft.behavior.explore.StructureClues;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;

@@ -6,7 +6,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 

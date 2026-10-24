@@ -6,10 +6,10 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 
-import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
-import org.maiwithu.maicraft.behavior.acquire.ReplantsCrops;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
+import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;

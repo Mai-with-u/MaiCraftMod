@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.travel;
 
-import org.maiwithu.maicraft.behavior.acquire.DigsStairsUp;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
-import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
-import org.maiwithu.maicraft.behavior.travel.DimensionTravelServices;
-import org.maiwithu.maicraft.behavior.travel.DimensionTravelTask;
-import org.maiwithu.maicraft.behavior.travel.JourneyTask;
-import org.maiwithu.maicraft.behavior.travel.OpenSkySpots;
-import org.maiwithu.maicraft.behavior.travel.ReachOpenSkyTask;
-import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
-import org.maiwithu.maicraft.behavior.travel.SameDimensionTravel;
-import org.maiwithu.maicraft.behavior.travel.TravelDestination;
-import org.maiwithu.maicraft.behavior.travel.TravelProgressListener;
-import org.maiwithu.maicraft.behavior.travel.TravelTask;
-import org.maiwithu.maicraft.behavior.travel.TravelWorldView;
+import org.maiwithu.maicraft.behavior.travel.planning.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.modes.DimensionTravelServices;
+import org.maiwithu.maicraft.behavior.travel.modes.DimensionTravelTask;
+import org.maiwithu.maicraft.behavior.travel.planning.JourneyTask;
+import org.maiwithu.maicraft.behavior.travel.settle.OpenSkySpots;
+import org.maiwithu.maicraft.behavior.travel.settle.ReachOpenSkyTask;
+import org.maiwithu.maicraft.behavior.travel.settle.ReadsPlacedBlocks;
+import org.maiwithu.maicraft.behavior.travel.planning.SameDimensionTravel;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
+import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
+import org.maiwithu.maicraft.behavior.travel.settle.TravelTask;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;

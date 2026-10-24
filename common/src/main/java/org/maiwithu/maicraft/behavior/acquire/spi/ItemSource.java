@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.spi;
 
-import org.maiwithu.maicraft.behavior.acquire.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 import java.util.Optional;

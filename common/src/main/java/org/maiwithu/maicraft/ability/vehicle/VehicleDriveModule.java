@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
-import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;

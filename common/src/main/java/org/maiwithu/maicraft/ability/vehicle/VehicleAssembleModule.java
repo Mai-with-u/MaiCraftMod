@@ -12,8 +12,8 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
-import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
-import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;

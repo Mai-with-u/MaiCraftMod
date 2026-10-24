@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 
 import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 
 /**
  * 存东西能力的协作服务：启动时创建并登记从构造函数递进来。

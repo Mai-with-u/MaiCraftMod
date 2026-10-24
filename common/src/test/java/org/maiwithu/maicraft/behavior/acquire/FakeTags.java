@@ -4,12 +4,13 @@ package org.maiwithu.maicraft.behavior.acquire;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 
 /** 测试替身：物品标签就是一张查表，摆哪个物品挂哪些标签由测试说了算。 */
-final class FakeTags implements ReadsItemTags {
+public final class FakeTags implements ReadsItemTags {
     private final Map<String, Set<String>> table = new HashMap<>();
 
-    void put(String itemId, String... tags) {
+    public void put(String itemId, String... tags) {
         table.put(itemId, Set.of(tags));
     }
 

@@ -35,14 +35,19 @@ import java.util.HashMap;
 import java.util.Map;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
+import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
+import org.maiwithu.maicraft.behavior.travel.settle.TravelProgress;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.settle.ReadsPlacedBlocks;
 
 /** 出行的离线测试替身：摆现场、演走到，不碰游戏对象。 */
-final class TravelFakes {
+public final class TravelFakes {
 
     private TravelFakes() {}
 
     /** 本刻上下文替身：只有刻号，角色可换（默认没有角色——出行测试多半不碰角色对象）。 */
-    static final class TestTick implements TickContext {
+    public static final class TestTick implements TickContext {
         private long gameTick = 0;
         private PlayerContext player;
 
@@ -54,21 +59,21 @@ final class TravelFakes {
             return player;
         }
 
-        void nextTick() {
+        public void nextTick() {
             gameTick++;
         }
 
         /** 给这一刻摆上角色（出行记账要看背包）。 */
-        void withPlayer(PlayerContext player) {
+        public void withPlayer(PlayerContext player) {
             this.player = player;
         }
     }
 
     /** 角色替身：只有一个背包视图，其余一概不接（出行任务只读背包记账）。 */
-    static final class FakePlayer implements PlayerContext {
+    public static final class FakePlayer implements PlayerContext {
         private final BackpackView backpack;
 
-        FakePlayer(BackpackView backpack) {
+        public FakePlayer(BackpackView backpack) {
             this.backpack = backpack;
         }
 
@@ -95,10 +100,10 @@ final class TravelFakes {
     }
 
     /** 背包替身：手工登记格子里的物品堆。 */
-    static final class FakeBag implements BackpackView {
-        final List<BackpackStack> stacks = new ArrayList<>();
+    public static final class FakeBag implements BackpackView {
+        public final List<BackpackStack> stacks = new ArrayList<>();
 
-        void put(String itemId, int count) {
+        public void put(String itemId, int count) {
             stacks.add(new BackpackStack(itemId, count, 64, false, false, false, true));
         }
 
@@ -116,9 +121,9 @@ final class TravelFakes {
     }
 
     /** 现场替身：角色站哪、朝哪。 */
-    static final class FakeWorld implements TravelWorldView {
-        WorldPosition spot = WorldPosition.here(0, 64, 0);
-        Target.Toward facing = Target.Toward.NORTH;
+    public static final class FakeWorld implements TravelWorldView {
+        public WorldPosition spot = WorldPosition.here(0, 64, 0);
+        public Target.Toward facing = Target.Toward.NORTH;
 
         @Override public WorldPosition currentSpot() {
             return spot;
@@ -129,7 +134,7 @@ final class TravelFakes {
         }
 
         /** 地表脚的高度；没摆为读不到（那一片没加载）。 */
-        Integer surface;
+        public Integer surface;
 
         @Override public OptionalInt surfaceFeet(int x, int z) {
             return surface == null ? OptionalInt.empty() : OptionalInt.of(surface);
@@ -137,10 +142,10 @@ final class TravelFakes {
     }
 
     /** 记过的地点替身：手工登记。 */
-    static final class FakePlaces implements ReadsRememberedPlaces {
+    public static final class FakePlaces implements ReadsRememberedPlaces {
         private final Map<String, WorldPosition> places = new HashMap<>();
 
-        void put(String name, WorldPosition position) {
+        public void put(String name, WorldPosition position) {
             places.put(name, position);
         }
 
@@ -150,16 +155,16 @@ final class TravelFakes {
     }
 
     /** 观察编号替身：手工登记编号与看得见的告示牌。 */
-    static final class FakeSeen implements ReadsSeenTargets {
+    public static final class FakeSeen implements ReadsSeenTargets {
         private final Map<String, WorldPosition> seen = new HashMap<>();
         private final List<SceneSign> signs = new ArrayList<>();
 
-        void put(String id, WorldPosition position) {
+        public void put(String id, WorldPosition position) {
             seen.put(id, position);
         }
 
         /** 摆一块看得见的告示牌：正面几行字，方位东、距离按给的算。 */
-        void sign(String id, WorldPosition position, int distance, String... frontLines) {
+        public void sign(String id, WorldPosition position, int distance, String... frontLines) {
             signs.add(new SceneSign(id, "minecraft:oak_sign", position, "前方", "东", distance,
                     new SignLines(List.of(frontLines), List.of())));
         }
@@ -174,10 +179,10 @@ final class TravelFakes {
     }
 
     /** 垫过的方块替身：结算时照实交出。 */
-    static final class FakePlaced implements ReadsPlacedBlocks {
+    public static final class FakePlaced implements ReadsPlacedBlocks {
         private final List<BlockPos> placed = new ArrayList<>();
 
-        void put(BlockPos cell) {
+        public void put(BlockPos cell) {
             placed.add(cell);
         }
 
@@ -187,8 +192,8 @@ final class TravelFakes {
     }
 
     /** 进展记录替身：把逐刻报告收下来。 */
-    static final class ProgressRecorder implements TravelProgressListener {
-        final List<TravelProgress> received = new ArrayList<>();
+    public static final class ProgressRecorder implements TravelProgressListener {
+        public final List<TravelProgress> received = new ArrayList<>();
 
         @Override public void onTravelProgress(TravelProgress progress) {
             received.add(progress);
@@ -199,14 +204,14 @@ final class TravelFakes {
      * 走到替身：按脚本逐刻交出走到情况；记下收到的导航目标与许可。
      * stop 脚本控制"先请求、落到安全边界才停"要演几刻。
      */
-    static final class FakeWalks implements WalkTo {
-        final List<GoalCompiler.Compiled> started = new ArrayList<>();
-        final List<TerrainPermit> permits = new ArrayList<>();
+    public static final class FakeWalks implements WalkTo {
+        public final List<GoalCompiler.Compiled> started = new ArrayList<>();
+        public final List<TerrainPermit> permits = new ArrayList<>();
         private final Deque<ScriptedWalk> walks = new ArrayDeque<>();
         private ScriptedWalk current;
 
         /** 登记一段走到运行；每次 start 依次取用，取完后复用最后一段。 */
-        void enqueue(ScriptedWalk walk) {
+        public void enqueue(ScriptedWalk walk) {
             walks.add(walk);
         }
 
@@ -221,17 +226,17 @@ final class TravelFakes {
     }
 
     /** 一段演出来的走到运行。 */
-    static final class ScriptedWalk implements WalkRun {
+    public static final class ScriptedWalk implements WalkRun {
         private final Deque<WalkReport> reports = new ArrayDeque<>();
         private final Deque<Boolean> stopAnswers = new ArrayDeque<>();
         private WalkReport last = WalkReport.planning();
-        int stopRequests;
-        int pauseRequests;
+        public int stopRequests;
+        public int pauseRequests;
         /** 从停稳里续走的次数：任务不该收掉重开一趟，而是让停稳的运行接着走。 */
-        int resumes;
+        public int resumes;
         /** 悬在半空走着：叫它先停稳就答应收尾，落地报"已停下"才算停稳；落地的过程由报告脚本演出来。 */
-        boolean airborne;
-        int safeStops;
+        public boolean airborne;
+        public int safeStops;
 
         /** 被生存需求打断：只记请求；停下的过程由测试用报告脚本演出来。 */
         @Override public void pause() {
@@ -246,14 +251,14 @@ final class TravelFakes {
             return true;
         }
 
-        ScriptedWalk(WalkReport... reports) {
+        public ScriptedWalk(WalkReport... reports) {
             for (WalkReport report : reports) {
                 this.reports.add(report);
             }
         }
 
         /** stop() 的回答队列：false 表示"接受了请求还没停稳"，true 表示本刻已停住。 */
-        ScriptedWalk stopAnswers(Boolean... answers) {
+        public ScriptedWalk stopAnswers(Boolean... answers) {
             for (Boolean answer : answers) {
                 stopAnswers.add(answer);
             }
@@ -261,7 +266,7 @@ final class TravelFakes {
         }
 
         /** 测试中途改剧本：清掉没演的脚本换成新的。 */
-        void rerun(WalkReport... reports) {
+        public void rerun(WalkReport... reports) {
             this.reports.clear();
             for (WalkReport report : reports) {
                 this.reports.add(report);
@@ -311,17 +316,17 @@ final class TravelFakes {
     }
 
     /** 给断言用的快捷取值：编好的导航目标。 */
-    static NavGoal goalOf(GoalCompiler.Compiled compiled) {
+    public static NavGoal goalOf(GoalCompiler.Compiled compiled) {
         return compiled.goal();
     }
 
     /** 提问原因快捷判断。 */
-    static Question.Reason reasonOf(Question question) {
+    public static Question.Reason reasonOf(Question question) {
         return question.reason();
     }
 
     /** 问题种类快捷判断。 */
-    static Problem.Kind kindOf(Problem problem) {
+    public static Problem.Kind kindOf(Problem problem) {
         return problem.kind();
     }
 }

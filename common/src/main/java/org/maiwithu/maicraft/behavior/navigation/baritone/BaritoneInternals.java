@@ -40,7 +40,7 @@ import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.behavior.travel.ReadsPlacedBlocks;
+import org.maiwithu.maicraft.behavior.travel.settle.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 

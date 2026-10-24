@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.ability.drop;
 import java.util.List;
 import java.util.Objects;
 
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.inventory.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
 import org.maiwithu.maicraft.game.player.BackpackView;

@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
-import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

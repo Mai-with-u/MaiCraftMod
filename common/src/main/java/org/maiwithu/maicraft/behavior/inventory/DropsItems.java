@@ -9,7 +9,7 @@ import java.util.function.IntSupplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.interaction.AimCheck;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.game.player.PlayerContext;

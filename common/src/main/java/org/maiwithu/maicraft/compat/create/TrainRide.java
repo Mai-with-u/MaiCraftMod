@@ -14,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.travel.GetsOffVehicle;
+import org.maiwithu.maicraft.behavior.travel.modes.GetsOffVehicle;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;

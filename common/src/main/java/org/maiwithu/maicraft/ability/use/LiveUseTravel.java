@@ -9,7 +9,7 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
-import org.maiwithu.maicraft.behavior.travel.TravelDestination;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;

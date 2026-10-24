@@ -19,7 +19,7 @@ import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.entity.monster.Monster;
 import net.minecraft.world.phys.AABB;
 
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;

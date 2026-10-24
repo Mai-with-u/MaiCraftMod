@@ -8,7 +8,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;

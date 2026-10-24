@@ -5,8 +5,8 @@ import java.util.Map;
 
 import org.maiwithu.maicraft.ability.travel.JourneyInput;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
-import org.maiwithu.maicraft.behavior.travel.JourneyTask;
-import org.maiwithu.maicraft.behavior.travel.TravelDestination;
+import org.maiwithu.maicraft.behavior.travel.planning.JourneyTask;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TaskInput;

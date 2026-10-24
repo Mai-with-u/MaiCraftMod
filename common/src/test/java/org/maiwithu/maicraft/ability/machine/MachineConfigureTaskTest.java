@@ -20,7 +20,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
-import org.maiwithu.maicraft.behavior.travel.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;

@@ -7,8 +7,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.player.ReadsGearFit;

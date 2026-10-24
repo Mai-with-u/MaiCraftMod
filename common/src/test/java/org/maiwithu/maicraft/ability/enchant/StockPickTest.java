@@ -8,8 +8,8 @@ import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
 
 /**
  * 选料判据的离线场景：已附魔、含储存附魔的不选；与点名对不上的不选；挑的是第一件合格的。

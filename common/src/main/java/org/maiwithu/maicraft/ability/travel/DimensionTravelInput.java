@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.travel;
 
-import org.maiwithu.maicraft.behavior.travel.TravelDestination;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 

@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.util.List;
 import java.util.Objects;
 
-import org.maiwithu.maicraft.behavior.acquire.ItemsInUse;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;

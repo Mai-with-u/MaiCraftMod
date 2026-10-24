@@ -9,7 +9,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
-import org.maiwithu.maicraft.behavior.acquire.NaturalBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;

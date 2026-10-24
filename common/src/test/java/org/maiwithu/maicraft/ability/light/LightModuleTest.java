@@ -23,8 +23,8 @@ import net.minecraft.server.Bootstrap;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;

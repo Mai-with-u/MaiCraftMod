@@ -11,8 +11,8 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.acquire.CollectsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.behavior.survival.AutoSleep;
 import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.travel.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.DestinationResolver;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.BackpackView;

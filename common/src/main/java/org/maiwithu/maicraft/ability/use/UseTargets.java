@@ -7,7 +7,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
-import org.maiwithu.maicraft.behavior.travel.LandmarkResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;

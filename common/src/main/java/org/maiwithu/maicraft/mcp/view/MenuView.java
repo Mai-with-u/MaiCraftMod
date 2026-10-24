@@ -8,8 +8,8 @@ import java.util.Optional;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
-import org.maiwithu.maicraft.behavior.acquire.ReadsTradeMenu;
-import org.maiwithu.maicraft.behavior.acquire.TradeOffers;
+import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
+import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
 import org.maiwithu.maicraft.behavior.menu.OpenScreen;
 import org.maiwithu.maicraft.behavior.menu.ReadsOpenScreen;
 import org.maiwithu.maicraft.game.menu.ScreenOpening;

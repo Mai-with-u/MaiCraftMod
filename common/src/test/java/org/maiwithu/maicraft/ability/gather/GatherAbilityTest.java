@@ -14,8 +14,8 @@ import java.util.OptionalInt;
 import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.DigsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.ReadsToolRequirements;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
