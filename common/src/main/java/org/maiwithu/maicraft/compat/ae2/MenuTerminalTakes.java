@@ -18,11 +18,13 @@ import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.StepwiseActions;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.menu.TransferSettlement;
 import org.maiwithu.maicraft.game.menu.CursorStowing;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
@@ -65,8 +67,6 @@ public final class MenuTerminalTakes implements TerminalTakes {
     private static final int STOCK_FULL_WAIT_TICKS = 100;
     /** 一下取货等游戏确认的期限（刻）。 */
     private static final int TAKE_TIMEOUT_TICKS = 40;
-    /** 放下光标那一下点完后，等两侧内容同步过来的宽限（刻）。 */
-    private static final int PUT_DOWN_SETTLE_TICKS = 5;
     /** 在下单那几页上点一下等换页的期限（刻）；换页由下单那边自己看，这里只让这一下的确认按时结清。 */
     private static final int PAGE_CONFIRM_TICKS = 60;
     /** 收场前放好光标的期限（刻）：到点还没放好就照常关界面，光标上的东西交给游戏的关闭流程。 */
@@ -160,11 +160,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private List<Integer> pendingSlotIds;
         private List<SlotSnapshot> pendingBefore;
 
-        // 正在等结算的放下光标：放到哪一格、放之前光标与那一格的样子。
-        private int putDownSlot = -1;
-        private SlotSnapshot putDownCursorBefore;
-        private SlotSnapshot putDownSlotBefore;
-        private int putDownQuiet;
+        // 放下光标的一笔交给搬运执行逐刻点、按光标空掉与那一格增多核对；记下是哪种东西好记账。
+        private TransferRun transport;
+        private boolean putDownPending;
+        private String putDownItem;
 
         // 收场前放好光标：已经等了几刻、正在等确认的"放回网络"那一下。
         private int cursorWaited;
@@ -207,6 +206,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             ActionStatus status = opening.tick(tick);
             if (!(status instanceof ActionStatus.Done)) return status;
             menu = opening.opened().orElseThrow();
+            transport = new TransferRun(menu);
             // 下单时服务端会把终端换成填数量页、确认页，开工后再退回终端：这些都是这次取货接着用的页，
             // 界面跟着换绑，下单那几页上的操作、关界面都对着此刻那一页。
             menu.followPageSwaps(this::craftPage);
@@ -279,7 +279,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 return finishWithout(null);
             }
             if (pending != null) return awaitTake(player, raw, reading.get());
-            if (putDownSlot >= 0) return awaitPutDown(raw);
+            if (putDownPending) return drive();
             if (menu.busy()) return ActionStatus.running();
 
             List<Ae2TerminalMenu.StockEntry> stock = compat.networkStock(raw).orElse(List.of());
@@ -332,7 +332,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
                         () -> compat.takeStack(raw, takeStack.serial()));
                 case NetworkTakePlan.TakeOne takeOne -> submit(Pending.ONE, entry, reading.get(), raw,
                         () -> compat.takeOne(raw, takeOne.serial()));
-                case NetworkTakePlan.PutDown putDown -> putDown(putDown.slotId(), cursor, raw);
+                case NetworkTakePlan.PutDown putDown -> putDown(putDown.slotId(), cursor);
                 case NetworkTakePlan.NoRoom noRoom -> stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
                         "背包放不下从 " + access.describe() + " 取的" + request.wanted().describe(), null));
                 case NetworkTakePlan.Done done -> stopNow(remaining > 0 ? nothingLeft() : null);
@@ -387,7 +387,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
                 settlement.unconfirmed("从 " + access.describe() + " 取货的一下没等到确认就被打断了");
                 pending = null;
             }
-            putDownSlot = -1;
+            if (transport != null) transport.abandon();
+            putDownPending = false;
             return reopen();
         }
 
@@ -396,6 +397,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             closeCurrent();
             opening = access.opening();
             menu = null;
+            transport = null;
+            putDownPending = false;
             stage = Stage.OPEN;
             syncWaited = 0;
             settleWaited = 0;
@@ -489,47 +492,46 @@ public final class MenuTerminalTakes implements TerminalTakes {
             }
         }
 
-        // 把光标上的东西放进那一格：普通点格子；之后按光标空了、那一格多了核对。
+        // 把光标上的东西放进那一格：一笔交给搬运执行普通点格子，按光标空了、那一格多了核对；
         // 本刻点不出去（刚取过货、界面还没重新画好）就下一刻再点，不算点过。
-        private ActionStatus putDown(int slotId, SlotSnapshot cursor, AbstractContainerMenu raw) {
-            SlotSnapshot slotBefore = SlotSnapshot.of(raw.getSlot(slotId).getItem());
-            if (!menu.click(slotId, 0)) return ActionStatus.running();
-            putDownSlot = slotId;
-            putDownCursorBefore = cursor;
-            putDownSlotBefore = slotBefore;
-            putDownQuiet = 0;
-            return ActionStatus.progressed();
+        private ActionStatus putDown(int slotId, SlotSnapshot cursor) {
+            putDownItem = itemId(cursor.stack());
+            putDownPending = true;
+            transport.begin(new TransferRun.Move(List.of(new MenuClick(slotId, false, 0, false)),
+                    new TransferRun.Check.PutDown(slotId), "把光标上的东西放进背包"));
+            return drive();
         }
 
-        // 等放下的结论：确认了就记账；纹丝不动多等几刻，还不动就回到计划重新点；对不上如实记下收场。
-        private ActionStatus awaitPutDown(AbstractContainerMenu raw) {
-            if (menu.busy()) return ActionStatus.running();
-            NetworkTakeConfirmation.Result result = NetworkTakeConfirmation.putDown(putDownCursorBefore,
-                    putDownSlotBefore, SlotSnapshot.of(raw.getCarried()), SlotSnapshot.of(raw.getSlot(putDownSlot).getItem()));
-            String item = itemId(putDownCursorBefore.stack());
-            switch (result.verdict()) {
-                case CONFIRMED -> {
-                    settlement.confirm(item, result.amount());
-                    putDownSlot = -1;
-                    return ActionStatus.progressed();
-                }
-                case WAITING -> {
-                    if (++putDownQuiet <= PUT_DOWN_SETTLE_TICKS) return ActionStatus.running();
-                    // 点出去了却一直没动静：回到计划，下一刻按现场重新决定放哪一格。
-                    putDownSlot = -1;
-                    return ActionStatus.running();
-                }
-                default -> {
-                    putDownSlot = -1;
-                    settlement.unconfirmed("把光标上的" + item + "放进背包时两边对不上");
-                    // 已经在收场放光标时对不上：不再折腾，直接去关界面。
-                    if (stage == Stage.CURSOR) {
-                        stage = Stage.CLOSE;
-                        return ActionStatus.progressed();
-                    }
-                    return stopNow(Problem.of(Problem.Kind.STUCK, "把光标上的" + item + "放进背包时两边对不上", null));
-                }
+        // 推进放下光标的那一笔一刻。
+        private ActionStatus drive() {
+            return switch (transport.tick()) {
+                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
+                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
+                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
+            };
+        }
+
+        // 放下光标的结论：确认了记账；纹丝不动（多半那一格放不下）回到计划重新挑格；
+        // 对不上如实记下收场。已经在收场放光标时对不上：不再折腾，直接去关界面。
+        private ActionStatus onSettled(TransferRun.MoveResult result) {
+            putDownPending = false;
+            if (result instanceof TransferRun.MoveResult.Confirmed(int amount)) {
+                settlement.confirm(putDownItem, amount);
+                return ActionStatus.progressed();
             }
+            if (result instanceof TransferRun.MoveResult.MenuGone) {
+                // 界面被合上了：取到多少由引擎清点，这里照常收场。
+                return finishWithout(null);
+            }
+            if (result instanceof TransferRun.MoveResult.NotMoved) {
+                return ActionStatus.running();
+            }
+            settlement.unconfirmed("把光标上的" + putDownItem + "放进背包时两边对不上");
+            if (stage == Stage.CURSOR) {
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
+            return stopNow(Problem.of(Problem.Kind.STUCK, "把光标上的" + putDownItem + "放进背包时两边对不上", null));
         }
 
         // 收场前先把光标上的东西放回背包，再关界面：放进背包里能整个装下的一格，背包放不下就放回网络。
@@ -539,7 +541,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) return finishWithout(null);
             if (putBackPending != null) return awaitPutBack(tick.player());
-            if (putDownSlot >= 0) return awaitPutDown(raw);
+            if (putDownPending) return drive();
             SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
             if (cursor.isEmpty() || ++cursorWaited > CURSOR_TICKS) {
                 stage = Stage.CLOSE;
@@ -547,7 +549,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
             }
             if (menu.busy()) return ActionStatus.running();
             int slot = stowSlot(cursor.stack().copyWithCount(cursor.count()), reading.get());
-            if (slot >= 0) return putDown(slot, cursor, raw);
+            if (slot >= 0) return putDown(slot, cursor);
             return putBack(cursor, raw);
         }
 
@@ -678,7 +680,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
         // 此刻能不能被生存需求打断：一下取货、放下、放回网络还在等游戏确认时停不得，光标上可能拿着东西；
         // 站在终端前等网络做成品是两件事之间的空当，饿了吃一口、天黑去睡都能插进来，作业留在网络里接着做；其余是正常干活。
         @Override public Interruptibility interruptibility() {
-            if (pending != null || putDownSlot >= 0 || putBackPending != null) return Interruptibility.UNSAFE_TO_STOP;
+            if (pending != null || putDownPending || putBackPending != null) return Interruptibility.UNSAFE_TO_STOP;
             return stage == Stage.TAKE && craft.waiting() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
         }
 
