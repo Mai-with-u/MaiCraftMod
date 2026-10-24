@@ -36,7 +36,7 @@ class ExpiryNativeAnswerClauseTest {
     /** 原版当场拒了时，提交现场命中的拒收条件跟着进收场报文；点击被接受时不带这段，避免把接受读成拒收。 */
     @Test
     void aRefusedEntityClickCarriesTheOnSightConditionsItHit() {
-        EntityUseScene sneakHeld = new EntityUseScene(true, 1.5, 3.0, false);
+        EntityUseScene sneakHeld = new EntityUseScene(true, 1.5, 3.0, false, null);
         assertTrue(ExpiryContext.of(false, sneakHeld).contains("sneak key was still held"));
         assertFalse(ExpiryContext.of(true, sneakHeld).contains("sneak key was still held"));
     }
