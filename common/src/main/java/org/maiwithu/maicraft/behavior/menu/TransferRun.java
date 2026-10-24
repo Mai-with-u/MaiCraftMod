@@ -44,6 +44,8 @@ public final class TransferRun {
         record Machine(int sourceSlotId, int amount) implements Check {}
         /** 搬进背包：背包侧配对总数增长、光标空；背包侧不核对单格，源侧也不核对。 */
         record IntoBackpack(Predicate<SlotSnapshot> matched, int amount) implements Check {}
+        /** 存进容器：容器侧配对总数增长、光标空；容器侧不核对单格，背包侧少了多少由调用方对照前后差额交代。 */
+        record IntoContainer(Predicate<SlotSnapshot> matched) implements Check {}
         /** 放下光标：光标整个空掉、目标格恰好多了光标上那么多件；源就是光标本身。 */
         record PutDown(int targetSlotId) implements Check {}
     }
@@ -194,18 +196,25 @@ public final class TransferRun {
             case Check.Machine(int sourceSlotId, int amount) -> MoveConfirmation.machine(
                     before.slot(sourceSlotId), snapshot(reading, sourceSlotId), menu.cursorEmpty(), amount);
             case Check.IntoBackpack(Predicate<SlotSnapshot> matched, int amount) -> MoveConfirmation.intoBackpack(
-                    before.matchedBefore, matchedTotal(reading, matched), menu.cursorEmpty(), amount);
+                    before.matchedBefore, matchedTotal(reading.playerSnapshots(), matched), menu.cursorEmpty(), amount);
+            case Check.IntoContainer(Predicate<SlotSnapshot> matched) -> MoveConfirmation.intoContainer(
+                    before.matchedBefore, matchedTotal(reading.playerSnapshots(), matched),
+                    before.containerMatchedBefore, matchedTotal(reading.containerSnapshots(), matched),
+                    menu.cursorEmpty());
             case Check.PutDown(int targetSlotId) -> MoveConfirmation.normal(
                     before.cursor, before.slot(targetSlotId), menu.cursor(),
                     snapshot(reading, targetSlotId), before.cursor.count());
         };
     }
 
-    // 结清了报实际搬动几件：点格子的笔按计划件数，搬进背包的按背包侧真的多出来的，放下光标的按光标上的。
+    // 结清了报实际搬动几件：点格子的笔按计划件数，搬进背包与存进容器的按那一侧真的多出来的，放下光标的按光标上的。
     private int confirmedAmount(MenuContent.Reading reading) {
         Check check = move.check();
         if (check instanceof Check.IntoBackpack(Predicate<SlotSnapshot> matched, int ignored)) {
-            return matchedTotal(reading, matched) - before.matchedBefore;
+            return matchedTotal(reading.playerSnapshots(), matched) - before.matchedBefore;
+        }
+        if (check instanceof Check.IntoContainer(Predicate<SlotSnapshot> matched)) {
+            return matchedTotal(reading.containerSnapshots(), matched) - before.containerMatchedBefore;
         }
         if (check instanceof Check.PutDown) return before.cursor.count();
         if (check instanceof Check.Normal(int ignored, int ignoredToo, int amount)) return amount;
@@ -213,10 +222,10 @@ public final class TransferRun {
         throw new IllegalStateException("核对式到这里都有计划件数");
     }
 
-    // 背包那一侧配对的东西一共几件；搬进背包的核对按它的前后差结算。
-    private static int matchedTotal(MenuContent.Reading reading, Predicate<SlotSnapshot> matched) {
+    // 一侧里配对的东西一共几件；搬进背包与存进容器的核对按它动手前后的差结算。
+    private static int matchedTotal(List<SlotSnapshot> snapshots, Predicate<SlotSnapshot> matched) {
         int total = 0;
-        for (SlotSnapshot snapshot : reading.playerSnapshots()) {
+        for (SlotSnapshot snapshot : snapshots) {
             if (!snapshot.isEmpty() && matched.test(snapshot)) total += snapshot.count();
         }
         return total;
@@ -230,8 +239,9 @@ public final class TransferRun {
         return index >= 0 ? reading.containerSnapshots().get(index) : SlotSnapshot.empty();
     }
 
-    /** 动手前冻结的证据：两侧各格的样子、背包侧配对总数与光标，都在第一下点出去之前抄下来。 */
-    private record Evidence(SlotSnapshot cursor, int matchedBefore, Map<Integer, SlotSnapshot> slots) {
+    /** 动手前冻结的证据：两侧各格的样子、两侧配对总数与光标，都在第一下点出去之前抄下来。 */
+    private record Evidence(SlotSnapshot cursor, int matchedBefore, int containerMatchedBefore,
+                            Map<Integer, SlotSnapshot> slots) {
         static Evidence freeze(OpenedMenu menu, MenuContent.Reading reading, Check check) {
             Map<Integer, SlotSnapshot> slots = new HashMap<>();
             for (int i = 0; i < reading.playerSlotIds().size(); i++) {
@@ -240,9 +250,14 @@ public final class TransferRun {
             for (int i = 0; i < reading.containerSlotIds().size(); i++) {
                 slots.put(reading.containerSlotIds().get(i), reading.containerSnapshots().get(i));
             }
-            Predicate<SlotSnapshot> matched = check
-                    instanceof Check.IntoBackpack(Predicate<SlotSnapshot> m, int ignored) ? m : null;
-            return new Evidence(menu.cursor(), matched == null ? 0 : TransferRun.matchedTotal(reading, matched), slots);
+            Predicate<SlotSnapshot> matched = null;
+            if (check instanceof Check.IntoBackpack(Predicate<SlotSnapshot> m, int ignored)) matched = m;
+            if (check instanceof Check.IntoContainer(Predicate<SlotSnapshot> m)) matched = m;
+            return new Evidence(menu.cursor(),
+                    matched == null ? 0 : TransferRun.matchedTotal(reading.playerSnapshots(), matched),
+                    matched == null || !(check instanceof Check.IntoContainer)
+                            ? 0 : TransferRun.matchedTotal(reading.containerSnapshots(), matched),
+                    slots);
         }
 
         SlotSnapshot slot(int slotId) {

@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.behavior.menu;
 
 /**
- * 搬运确认：一笔搬运有没有结算的三种核对模式，纯函数。
+ * 搬运确认：一笔搬运有没有结算的四种核对模式，纯函数。
  *
  * <p>普通槽按双侧精确增减核对：源格恰好少了要搬的量、目标格恰好多了同样的量，两边都对上才算数；
  * 一边对一边不对就是现场出了岔子，宁可承认对不上，也不把对不上的一侧凑成数。
@@ -12,6 +12,10 @@ package org.maiwithu.maicraft.behavior.menu;
  *
  * <p>搬进背包按"背包侧配对总数增长 + 光标空"结算：整堆快速移动落到哪格不定，只看角色这一侧
  * 同种东西的总数；源侧不核对，料箱被漏斗中途抽走的部分不冒充这一笔搬到的。
+ *
+ * <p>存进容器按"容器侧配对总数增长 + 光标空"结算：整堆快速移动落到哪格不定，只看容器那一侧
+ * 同种东西的总数；背包侧少了多少不在这里判——放进容器又立刻被下面的溜槽、漏斗抽走时，
+ * 容器侧只多出一部分，差额由调用方拿自己冻结的前值对照后照实交代。
  */
 public final class MoveConfirmation {
 
@@ -80,6 +84,30 @@ public final class MoveConfirmation {
         if (grown > 0) return cursorEmpty ? Verdict.CONFIRMED : Verdict.WAITING;
         // 纹丝不动：同步还没到，再等；光标还拿着东西也在等它放下来。
         return Verdict.WAITING;
+    }
+
+    /**
+     * 存进容器：容器侧配对总数比动手前多了、光标为空，就算结算；容器侧不核对单格——
+     * 整堆快速移动落到哪格由游戏挑，看的是容器那一侧同种东西的总数。
+     * 背包侧少了几件不参与判定：东西一放进去就可能被容器下面的溜槽、漏斗当场抽走，
+     * 背包侧少的与容器侧多的对不齐不说明没存进，结算后由调用方对照前后差额交代去向。
+     * 容器侧反而少了，或背包侧没少容器倒多了，是现场出了岔子，对不上。
+     *
+     * @param playerBefore    动手前背包侧配对的总件数
+     * @param playerNow       此刻背包侧配对的总件数
+     * @param containerBefore 动手前容器侧配对的总件数
+     * @param containerNow    此刻容器侧配对的总件数
+     * @param cursorEmpty     光标上是否已没有物品
+     */
+    public static Verdict intoContainer(int playerBefore, int playerNow,
+                                        int containerBefore, int containerNow, boolean cursorEmpty) {
+        int out = playerBefore - playerNow;
+        int in = containerNow - containerBefore;
+        // 两侧都没动：同步还没到，再等；光标还拿着东西也在等它放下或退回来。
+        if (out == 0 && in == 0) return Verdict.WAITING;
+        if (!cursorEmpty) return Verdict.WAITING;
+        if (out > 0 && in >= 0 && in <= out) return Verdict.CONFIRMED;
+        return Verdict.DIVERGED;
     }
 
     // 源格结算：同一种物品恰好少了 amount 件；整堆搬空后源格成了空格，也算恰好减少。

@@ -210,6 +210,77 @@ class TransferRunTest {
     }
 
     @Test
+    void 整堆存进容器等容器侧多出来才算结清() {
+        FakeMenu menu = new FakeMenu();
+        menu.player.add(new ItemStack(Items.COBBLESTONE, 64));
+        for (int i = 1; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        menu.container.add(ItemStack.EMPTY);
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(100, true, 0, false)),
+                new Check.IntoContainer(snapshot -> snapshot.stack().is(Items.COBBLESTONE)),
+                "把圆石放进箱子"));
+        assertEquals(Optional.empty(), settleTo(run), "点击发出去了，容器侧还没多出来：还没到结论");
+        // 容器侧多了 64 个：结清，报容器侧真的多出来的件数。
+        menu.player.set(0, ItemStack.EMPTY);
+        menu.container.set(0, new ItemStack(Items.COBBLESTONE, 64));
+        assertEquals(new MoveResult.Confirmed(64), settleTo(run).orElseThrow());
+    }
+
+    @Test
+    void 存进容器被抽走一部分按容器侧多出来的结清() {
+        FakeMenu menu = new FakeMenu();
+        menu.player.add(new ItemStack(Items.COBBLESTONE, 64));
+        for (int i = 1; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        menu.container.add(ItemStack.EMPTY);
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(100, true, 0, false)),
+                new Check.IntoContainer(snapshot -> snapshot.stack().is(Items.COBBLESTONE)),
+                "把圆石放进料箱"));
+        settleTo(run);
+        // 背包少了 64、容器只多了 20：放进去就被下面的溜槽抽走了；这一笔仍按容器侧多出来的结清，
+        // 差额怎么记账是调用方的决定。
+        menu.player.set(0, ItemStack.EMPTY);
+        menu.container.set(0, new ItemStack(Items.COBBLESTONE, 20));
+        assertEquals(new MoveResult.Confirmed(20), settleTo(run).orElseThrow());
+    }
+
+    @Test
+    void 存进容器光标上的东西没放下来报对不上() {
+        FakeMenu menu = new FakeMenu();
+        menu.player.add(new ItemStack(Items.COBBLESTONE, 64));
+        for (int i = 1; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        menu.container.add(ItemStack.EMPTY);
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(
+                        new MenuClick(100, false, 1, true), new MenuClick(0, false, 0, false)),
+                new Check.IntoContainer(snapshot -> snapshot.stack().is(Items.COBBLESTONE)),
+                "把半堆圆石放进箱子"));
+        assertEquals(Progress.Advanced.ADVANCED, run.tick());
+        assertEquals(Progress.Advanced.ADVANCED, run.tick());
+        // 半堆拆出来还拿在光标上（放下的那一下没生效）：宽限到点承认对不上，不凑数。
+        menu.player.set(0, new ItemStack(Items.COBBLESTONE, 32));
+        menu.cursor = new ItemStack(Items.COBBLESTONE, 32);
+        for (int i = 0; i < 5; i++) assertEquals(Optional.empty(), settleTo(run), "宽限内还没到结论");
+        assertEquals(MoveResult.Diverged.DIVERGED, settleTo(run).orElseThrow());
+    }
+
+    @Test
+    void 存进容器两侧对不上当场承认() {
+        FakeMenu menu = new FakeMenu();
+        menu.player.add(new ItemStack(Items.COBBLESTONE, 64));
+        for (int i = 1; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        menu.container.add(new ItemStack(Items.COBBLESTONE, 10));
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(100, true, 0, false)),
+                new Check.IntoContainer(snapshot -> snapshot.stack().is(Items.COBBLESTONE)),
+                "把圆石放进箱子"));
+        settleTo(run);
+        // 背包没少、容器反而少了：现场出了岔子，对不上。
+        menu.container.set(0, new ItemStack(Items.COBBLESTONE, 5));
+        assertEquals(MoveResult.Diverged.DIVERGED, settleTo(run).orElseThrow());
+    }
+
+    @Test
     void 没能确认的绝不自己重发() {
         FakeMenu menu = new FakeMenu();
         menu.container.add(new ItemStack(Items.COBBLESTONE, 64));
