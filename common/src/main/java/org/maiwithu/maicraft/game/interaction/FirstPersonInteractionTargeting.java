@@ -7,6 +7,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.shapes.CollisionContext;
 
 
 import net.minecraft.world.entity.Entity;
@@ -14,6 +15,7 @@ import net.minecraft.world.item.BucketItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.MobBucketItem;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.BucketPickup;
@@ -292,21 +294,23 @@ public final class FirstPersonInteractionTargeting {
         return null;
     }
 
-    // 液体格的可见命中：在流体自己的形状（水面高度）里试中心和靠近六个面的点，射线把流体算进碰撞
-    // （原版对流体才这样点），命中必须还是这一格、在触及距离内；点名了方向时面还得朝那边。
+    // 液体格的可见命中：在流体自己的形状（水面高度）里试中心和靠近六个面的点，
+    // 射线要能落在目标格的流体表面上；点名了方向时面还得朝那边。
     private static BlockHitResult visibleLiquidHit(Level level, Entity observer, Vec3 eye,
             BlockPos target, double reach, Direction requiredFace) {
         VoxelShape fluid = level.getBlockState(target).getFluidState().getShape(level, target);
         if (fluid.isEmpty()) return null;
-        AABB bounds = new AABB(fluid.min(Direction.Axis.X), fluid.min(Direction.Axis.Y), fluid.min(Direction.Axis.Z),
-                fluid.max(Direction.Axis.X), fluid.max(Direction.Axis.Y), fluid.max(Direction.Axis.Z));
-        return hitWithin(level, observer, eye, target, reach, bounds, ClipContext.Fluid.ANY,
-                hit -> requiredFace == null || hit.getDirection() == requiredFace);
+        for (Vec3 aim : aimsWithin(target, fluidBounds(fluid))) {
+            BlockHitResult hit = liquidSurfaceHit(level, eye, aim.subtract(eye), target, fluid, reach,
+                    requiredFace, CollisionContext.of(observer));
+            if (hit != null) return hit;
+        }
+        return null;
     }
 
     /**
      * 沿视线按流体的规则核对准星（原版准星不认流体，指液体格只能这样核对）：
-     * 命中的第一格是目标液体格、且在触及距离内，才算指到了它的水面。
+     * 视线能落在目标液体格的流体表面上、且在触及距离内，才算指到了它的水面。
      */
     public static boolean liquidCrosshairHit(Level level, Entity observer, Vec3 eye, Vec3 view,
             BlockPos target, double reach) {
@@ -314,13 +318,39 @@ public final class FirstPersonInteractionTargeting {
                 || !level.isLoaded(BlockPos.containing(eye)) || !level.isLoaded(target)) {
             return false;
         }
-        if (view.lengthSqr() < EPSILON) return false;
-        Vec3 end = eye.add(view.normalize().scale(reach));
-        BlockHitResult hit = level.clip(new ClipContext(
-                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, observer));
-        return hit.getType() == HitResult.Type.BLOCK
-                && hit.getBlockPos().equals(target)
-                && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON;
+        VoxelShape fluid = level.getBlockState(target).getFluidState().getShape(level, target);
+        if (fluid.isEmpty() || view.lengthSqr() < EPSILON) return false;
+        return liquidSurfaceHit(level, eye, view, target, fluid, reach, null,
+                CollisionContext.of(observer)) != null;
+    }
+
+    /**
+     * 一条射线上的液体表面命中（package 内可见，替身世界可离线测）：
+     * 水面是一整片，射线要到远处水格的表面，会先擦过近处水格的水面——近处的水不挡视线，
+     * 挡住视线的只有非流体方块（它在目标表面之前撞上才叫挡）。返回的命中点落在目标格的流体表面上。
+     */
+    static BlockHitResult liquidSurfaceHit(BlockGetter level, Vec3 eye, Vec3 direction, BlockPos target,
+            VoxelShape fluid, double reach, Direction requiredFace, CollisionContext context) {
+        if (direction.lengthSqr() < EPSILON) return null;
+        Vec3 end = eye.add(direction.normalize().scale(reach));
+        BlockHitResult surface = fluid.clip(eye, end, target);
+        if (surface == null) return null;
+        if (requiredFace != null && surface.getDirection() != requiredFace) return null;
+        if (eye.distanceToSqr(surface.getLocation()) > reach * reach + EPSILON) return null;
+        // 只看实心世界：流体不算碰撞（准星规则本来也不认它），先撞上实心方块就是被挡住了。
+        BlockHitResult solid = level.clip(new ClipContext(
+                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, context));
+        if (solid.getType() == HitResult.Type.BLOCK
+                && eye.distanceToSqr(solid.getLocation()) < eye.distanceToSqr(surface.getLocation())) {
+            return null;
+        }
+        return surface;
+    }
+
+    /** 流体形状的包合框（水面高度）：备选瞄准点从这里取。 */
+    private static AABB fluidBounds(VoxelShape fluid) {
+        return new AABB(fluid.min(Direction.Axis.X), fluid.min(Direction.Axis.Y), fluid.min(Direction.Axis.Z),
+                fluid.max(Direction.Axis.X), fluid.max(Direction.Axis.Y), fluid.max(Direction.Axis.Z));
     }
 
     // 一个框朝 face 那一面上的瞄准点（方块内的局部坐标）：面中间和四个往里缩四分之一的点，
@@ -354,6 +384,24 @@ public final class FirstPersonInteractionTargeting {
     // 液体把流体算进碰撞，普通方块沿用准星规则不认流体。
     private static BlockHitResult hitWithin(Level level, Entity observer, Vec3 eye, BlockPos target, double reach,
             AABB bounds, ClipContext.Fluid fluid, Predicate<BlockHitResult> acceptsHit) {
+        for (Vec3 aim : aimsWithin(target, bounds)) {
+            Vec3 direction = aim.subtract(eye);
+            if (direction.lengthSqr() < EPSILON) continue;
+            Vec3 end = eye.add(direction.normalize().scale(reach));
+            BlockHitResult hit = level.clip(new ClipContext(
+                    eye, end, ClipContext.Block.OUTLINE, fluid, observer));
+            if (hit.getType() == HitResult.Type.BLOCK
+                    && hit.getBlockPos().equals(target)
+                    && acceptsHit.test(hit)
+                    && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
+                return hit;
+            }
+        }
+        return null;
+    }
+
+    // 一个框里的备选瞄准点（世界坐标）：中心和靠近六个面的点。液体格与普通方块共用这一套。
+    private static Vec3[] aimsWithin(BlockPos target, AABB bounds) {
         double minX = bounds.minX;
         double minY = bounds.minY;
         double minZ = bounds.minZ;
@@ -369,7 +417,7 @@ public final class FirstPersonInteractionTargeting {
         double highX = insetMax(minX, maxX);
         double highY = insetMax(minY, maxY);
         double highZ = insetMax(minZ, maxZ);
-        Vec3[] aims = {
+        return new Vec3[] {
                 offset(target, midX, midY, midZ),
                 offset(target, midX, lowY, midZ),
                 offset(target, midX, highY, midZ),
@@ -378,20 +426,6 @@ public final class FirstPersonInteractionTargeting {
                 offset(target, lowX, midY, midZ),
                 offset(target, highX, midY, midZ)
         };
-        for (Vec3 aim : aims) {
-            Vec3 direction = aim.subtract(eye);
-            if (direction.lengthSqr() < EPSILON) continue;
-            Vec3 end = eye.add(direction.normalize().scale(reach));
-            BlockHitResult hit = level.clip(new ClipContext(
-                    eye, end, ClipContext.Block.OUTLINE, fluid, observer));
-            if (hit.getType() == HitResult.Type.BLOCK
-                    && hit.getBlockPos().equals(target)
-                    && acceptsHit.test(hit)
-                    && eye.distanceToSqr(hit.getLocation()) <= reach * reach + EPSILON) {
-                return hit;
-            }
-        }
-        return null;
     }
 
     /** 点火面判据：被点面的相邻格必须真是可装火的空气。 */
