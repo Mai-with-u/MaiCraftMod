@@ -212,7 +212,7 @@ public final class WorldScope {
                 // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                 () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
                 new InputDriver(playerControl),
-                instanceConfig.allowGameCommands(),
+                instanceConfig.allowGameCommands(), instanceConfig.chatTypewriter(),
                 protection,
                 furnaceFuels,
                 compat,

@@ -321,6 +321,61 @@ class ChatTaskTest {
     }
 
     @Test
+    void typewriterOffSubmitsTheWholeSentenceImmediatelyWithoutOpeningTheBox() {
+        // 逐字打字关掉：不开框、不逐字打，第一刻整句提交；等回显的流程照旧。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        StubDrafts drafts = new StubDrafts();
+        TestTick tick = new TestTick();
+        echo.echo("大家好");
+
+        TaskResult result = runToFinish(new ChatTask("大家好", sender, echo, drafts, false), tick);
+
+        assertEquals(List.of("大家好"), sender.sent);
+        assertTrue(drafts.shown.isEmpty(), "瞬间模式不碰聊天框");
+        assertEquals(0, drafts.closes, "没开过框也谈不上交还");
+        assertEquals(TaskResult.Status.DONE, result.status());
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertTrue(details.submitted());
+        // 没有打字过程：提交就在下达的那一刻，不再是打完整句之后。
+        assertEquals(1000, details.sentAtTick(), "整句在下达那一刻就提交了");
+    }
+
+    @Test
+    void typewriterOffStillConfirmsCommandOnFeedbackLine() {
+        // 瞬间模式发命令：确认依据还是聊天栏冒出的反馈行，与逐字模式同一条路。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        echo.feedbackLine();
+
+        TaskResult result = runToFinish(new ChatTask("/time set day", sender, echo, new StubDrafts(), false),
+                new TestTick());
+
+        assertEquals(List.of("/time set day"), sender.sent);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("命令反馈行"), result.summary());
+        assertTrue(result.unconfirmed().isEmpty());
+    }
+
+    @Test
+    void typewriterOffHasNoMidTypingReplacementWindow() {
+        // 瞬间模式没有打字阶段：目标在第一刻就被替换时话已经交出去了，结果细节不再出现"没发出去"。
+        StubSender sender = new StubSender();
+        StubDrafts drafts = new StubDrafts();
+        TestTick tick = new TestTick();
+        ChatTask task = new ChatTask("/time set day", sender, new StubEcho(), drafts, false);
+        task.start(tick);
+        task.tick(tick);
+        assertTrue(!sender.sent.isEmpty(), "第一刻就提交了");
+
+        TaskResult result = task.close(CloseReason.REPLACED);
+
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertTrue(details.submitted(), "话已经交出去，不存在打字中途被替换");
+        assertEquals(1000, details.sentAtTick());
+    }
+
+    @Test
     void submitIsRecordedWithTheTickSoLateLandingsCanBeTraced() {
         // 提交过的事实与提交时刻留在结果细节里：命令落地迟了时，下达与落地的时间线对得上。
         StubSender sender = new StubSender();

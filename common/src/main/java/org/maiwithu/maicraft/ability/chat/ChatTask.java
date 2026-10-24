@@ -49,14 +49,23 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     private List<String> feedback = List.of();
     /** 以 / 开头的是游戏命令：没有自己的回显，完成依据换成命令反馈行。 */
     private final boolean command;
+    /** 聊天逐字打字开关：开着先逐字打草稿；关掉跳过打字，第一刻就整句提交。 */
+    private final boolean typewriter;
 
     public ChatTask(String message, SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts) {
-        super("说话", Phase.TYPING, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
+        this(message, sender, echo, drafts, true);
+    }
+
+    public ChatTask(String message, SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts,
+            boolean typewriter) {
+        // 逐字打字关掉时不进打字阶段：初始就在提交阶段，整句立即交给聊天输入，等确认的流程照旧。
+        super("说话", typewriter ? Phase.TYPING : Phase.SEND, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.message = message;
         this.sender = sender;
         this.echo = echo;
         this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.command = message.startsWith("/");
+        this.typewriter = typewriter;
     }
 
     /**

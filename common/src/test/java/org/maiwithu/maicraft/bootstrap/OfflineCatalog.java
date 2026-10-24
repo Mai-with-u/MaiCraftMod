@@ -139,6 +139,7 @@ final class OfflineCatalog {
                 () -> 0,
                 new InputDriver(new PlayerControlBoundary()),
                 false,
+                true, // 聊天逐字打字照默认开着，离线替身测的是逐字路径。
                 new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
                         SELF_ID),
                 stack -> 0,

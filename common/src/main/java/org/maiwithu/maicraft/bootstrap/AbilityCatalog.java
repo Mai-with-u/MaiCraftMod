@@ -213,6 +213,8 @@ public final class AbilityCatalog {
             LongSupplier clientTicks,
             InputDriver inputs,
             boolean allowGameCommands,
+            /** 聊天逐字打字开关（实例配置）：开着逐字打草稿，关掉整句瞬间提交。 */
+            boolean chatTypewriter,
             Protection protection,
             FurnaceFuels furnaceFuels,
             CompatRegistry compat,

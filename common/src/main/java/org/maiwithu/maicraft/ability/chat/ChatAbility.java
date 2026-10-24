@@ -37,20 +37,28 @@ public final class ChatAbility implements AbilityModule {
     private final ChatDraftScreen drafts;
     /** 本实例是否放开管理员命令；来自所有者的实例配置，任何工具参数都改不了它。普通玩家命令不受它管。 */
     private final boolean allowGameCommands;
+    /** 聊天逐字打字开关；来自所有者的实例配置。关掉时整句瞬间提交，调试时不用等逐字打完。 */
+    private final boolean chatTypewriter;
     /** 服务器的命令树：单人时认得出模组自带的管理员命令；拿不到时只按名单认。 */
     private final KnowsAdminCommands adminCommands;
 
     /** 没有命令树可问的一份：只按名单认管理员命令（离线测试、连远程服务器）。 */
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands) {
-        this(sender, echo, drafts, allowGameCommands, KnowsAdminCommands.NONE);
+        this(sender, echo, drafts, allowGameCommands, true, KnowsAdminCommands.NONE);
     }
 
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
             KnowsAdminCommands adminCommands) {
+        this(sender, echo, drafts, allowGameCommands, true, adminCommands);
+    }
+
+    public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
+            boolean chatTypewriter, KnowsAdminCommands adminCommands) {
         this.sender = sender;
         this.echo = echo;
         this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.allowGameCommands = allowGameCommands;
+        this.chatTypewriter = chatTypewriter;
         this.adminCommands = Objects.requireNonNull(adminCommands, "adminCommands");
     }
 
@@ -111,7 +119,8 @@ public final class ChatAbility implements AbilityModule {
     public void registerTasks(TaskFactories factories) {
         factories.register(ChatInput.class, input -> {
             // 每次运行新建发话任务；聊天框、发送入口与回显通过闭包交给任务，不经全局单例。
-            return new ChatTask(input.message(), sender, echo, drafts);
+            // 逐字打字关掉时任务直接从提交阶段开始，不再逐字打草稿。
+            return new ChatTask(input.message(), sender, echo, drafts, chatTypewriter);
         });
     }
 }

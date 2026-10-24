@@ -24,8 +24,10 @@ import org.slf4j.LoggerFactory;
  * 文件不存在就生成默认内容；读不出来（不是 JSON、缺键、键值类型不对）按默认值收场并记警告，
  * 不让一份坏配置挡住启动。LLM 的任何工具都触不到这里的开关：它不经参数面，只经这个文件。
  *
- * <p>现在有三项：
+ * <p>现在有四项：
  * <ul>
+ * <li>「聊天逐字打字」（chatTypewriter，默认 true）：开着时说话像真人一样逐字打进聊天框、
+ *     打完停顿再提交；关掉时整句瞬间提交，调试时省时间。</li>
  * <li>「放开管理员命令」（allowGameCommands，默认 false）：关着时 chat 能力只发普通玩家命令（/msg、/home 这类），
  *     /tp、/give 这类管理员命令拒绝；开着时管理员命令也作为游戏命令以角色自己的权限交给服务器执行。</li>
  * <li>「自家人」（trustedPlayers，默认空）：所有者信任的玩家，写玩家名或 UUID。他们放的箱子、AE 网络这类存储，
@@ -45,19 +47,22 @@ public final class InstanceConfig {
     private static final Map<String, Integer> DEFAULT_BLOCK_LIMITS = Map.of("create:chain_conveyor", 1);
 
     private final boolean allowGameCommands;
+    /** 聊天逐字打字开关：开着像真人一样逐字打进聊天框，关掉整句瞬间提交；默认开，保持直播效果。 */
+    private final boolean chatTypewriter;
     private final List<String> trustedPlayers;
     private final Map<String, Integer> machineBlockLimits;
 
-    private InstanceConfig(boolean allowGameCommands, List<String> trustedPlayers,
+    private InstanceConfig(boolean allowGameCommands, boolean chatTypewriter, List<String> trustedPlayers,
             Map<String, Integer> machineBlockLimits) {
         this.allowGameCommands = allowGameCommands;
+        this.chatTypewriter = chatTypewriter;
         this.trustedPlayers = List.copyOf(trustedPlayers);
         this.machineBlockLimits = Map.copyOf(machineBlockLimits);
     }
 
-    /** 默认一份：所有开关都关，没有自家人，链条输送机每台机器最多一个。 */
+    /** 默认一份：管理员命令不放、逐字打字开着、没有自家人，链条输送机每台机器最多一个。 */
     public static InstanceConfig defaults() {
-        return new InstanceConfig(false, List.of(), DEFAULT_BLOCK_LIMITS);
+        return new InstanceConfig(false, true, List.of(), DEFAULT_BLOCK_LIMITS);
     }
 
     /** 每台机器里某种方块最多几个：方块 ID → 上限；没列的不限。 */
@@ -75,6 +80,11 @@ public final class InstanceConfig {
         return allowGameCommands;
     }
 
+    /** 聊天逐字打字开着没有：开着逐字打进聊天框，关掉整句瞬间提交。 */
+    public boolean chatTypewriter() {
+        return chatTypewriter;
+    }
+
     /** 读配置文件所在目录（config），返回这一份实例配置；目录指向的文件不在就生成默认内容。 */
     public static InstanceConfig read(Path configDirectory) {
         Path file = configDirectory.resolve(FILE_NAME);
@@ -86,6 +96,8 @@ public final class InstanceConfig {
             JsonObject json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8))
                     .getAsJsonObject();
             boolean allow = json.has("allowGameCommands") && json.get("allowGameCommands").getAsBoolean();
+            // 这一项缺了按开着收场：默认行为是逐字打字，关掉是所有者主动要的效果。
+            boolean typewriter = !json.has("chatTypewriter") || json.get("chatTypewriter").getAsBoolean();
             // 自家人名单缺了就是没有；写成别的类型或里面混了非字符串，按坏配置收场。
             List<String> trusted = new ArrayList<>();
             if (json.has("trustedPlayers")) {
@@ -98,10 +110,10 @@ public final class InstanceConfig {
                     if (!name.isEmpty()) trusted.add(name);
                 }
             }
-            return new InstanceConfig(allow, trusted, blockLimits(json));
+            return new InstanceConfig(allow, typewriter, trusted, blockLimits(json));
         } catch (Exception exception) {
             // 坏配置不挡启动：按全关的默认值跑，并把原因记下来让所有者能发现。
-            LOG.warn("{} 配置文件读不出来，按默认值（全部关闭）运行：{}", ModIdentity.NAME, file, exception);
+            LOG.warn("{} 配置文件读不出来，按默认值运行：{}", ModIdentity.NAME, file, exception);
             return defaults();
         }
     }
@@ -124,6 +136,7 @@ public final class InstanceConfig {
     private static void writeDefault(Path file) {
         JsonObject json = new JsonObject();
         json.addProperty("allowGameCommands", false);
+        json.addProperty("chatTypewriter", true);
         json.add("trustedPlayers", new JsonArray());
         JsonObject limits = new JsonObject();
         DEFAULT_BLOCK_LIMITS.forEach(limits::addProperty);

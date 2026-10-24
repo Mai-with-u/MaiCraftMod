@@ -26,9 +26,11 @@ class InstanceConfigTest {
         Path file = configDir.resolve("maicraft.json");
         InstanceConfig config = InstanceConfig.read(configDir);
         assertFalse(config.allowGameCommands(), "默认不允许执行游戏命令");
+        assertTrue(config.chatTypewriter(), "默认开着聊天逐字打字，直播效果不变");
         // 默认文件要真的写出来，所有者照着改才有样子。
         assertTrue(Files.exists(file), "文件不存在时应生成默认配置文件");
         assertTrue(Files.readString(file, StandardCharsets.UTF_8).contains("allowGameCommands"));
+        assertTrue(Files.readString(file, StandardCharsets.UTF_8).contains("chatTypewriter"));
     }
 
     @Test
@@ -59,6 +61,26 @@ class InstanceConfigTest {
         Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
         assertFalse(InstanceConfig.read(configDir).allowGameCommands(), "缺键按关闭，不算坏文件");
         assertEquals(List.of(), InstanceConfig.read(configDir).trustedPlayers(), "缺键就是没有自家人");
+    }
+
+    @Test
+    void typewriterSwitchReadFromFile() throws IOException {
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"chatTypewriter\": false}", StandardCharsets.UTF_8);
+        assertFalse(InstanceConfig.read(configDir).chatTypewriter(), "关掉后整句瞬间提交");
+
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"chatTypewriter\": true}", StandardCharsets.UTF_8);
+        assertTrue(InstanceConfig.read(configDir).chatTypewriter());
+
+        // 缺键按开着收场：默认行为是逐字打字，不算坏文件。
+        Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
+        assertTrue(InstanceConfig.read(configDir).chatTypewriter(), "缺键按开着，不算坏文件");
+
+        // 键值不是布尔：按写的字面收，不是 true 一律按关（与 allowGameCommands 同款，不算坏文件）。
+        Files.writeString(configDir.resolve("maicraft.json"),
+                "{\"chatTypewriter\": \"关\"}", StandardCharsets.UTF_8);
+        assertFalse(InstanceConfig.read(configDir).chatTypewriter());
     }
 
     @Test
