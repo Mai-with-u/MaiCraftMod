@@ -24,8 +24,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 按 {@link BindingPlan} 一步步点——拿起终端、放进绑定格、等绑定副本出现在产出格、取回背包——再关上，
  * 最后按身上的物品核对绑定真的落上了。每一步做完以现场为准，对不上、一直没动静都如实收场。
  *
- * <p>对访问点右键只会打开这份界面，绑定是界面里的槽位流程（AE2 服务端在格子变动时把副本放进产出格），
- * 所以绑定动作点的是格子，不发模组协议。
+ * <p>对访问点右键只会打开这份界面，绑定是界面里的槽位流程：AE2 的绑定格是按"机器输入格"语义注册的
+ * 普通受限槽（WirelessAccessPointMenu），服务端在槽位内容变动的那一刻就地结算——终端放进去、副本立刻
+ * 出现在产出格——不需要点别的按钮，也不发模组协议；所以绑定动作点的是格子，一下原版的拿起、放进就够。
  */
 public final class WirelessBinding implements Action {
 
@@ -49,9 +50,10 @@ public final class WirelessBinding implements Action {
     private Problem stopReason;
     private long waited;
     private int copyWaited;
-    /** 正在等现场变化的那一下点击：点了哪一格、点之前那格的样子；不在等点击时格号为 -1。 */
+    /** 正在等现场变化的那一下点击：点了哪一格、点之前那格与光标各是什么样子；不在等点击时格号为 -1。 */
     private int clickedSlot = -1;
     private SlotSnapshot slotBefore = SlotSnapshot.empty();
+    private SlotSnapshot cursorBefore = SlotSnapshot.empty();
     private int clickQuiet;
 
     WirelessBinding(Ae2Compat compat, PlayerServices services, Ae2Terminals.AccessPoint point,
@@ -143,23 +145,36 @@ public final class WirelessBinding implements Action {
         };
     }
 
-    // 点之前记下那格的样子，生效判定按"点完现场该是什么样"来，只看两侧内容变没变；本刻点不出去就下一刻再点。
+    // 点之前记下那一格和光标各自的样子，生效判定按"点完现场该是什么样"来；本刻点不出去就下一刻再点。
     private ActionStatus click(int slotId, AbstractContainerMenu raw) {
         SlotSnapshot before = SlotSnapshot.of(raw.getSlot(slotId).getItem());
+        SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
         if (!menu.click(slotId, 0)) return ActionStatus.running();
         if (!before.isEmpty()) menu.noteCursorTakenFrom(slotId);
         clickedSlot = slotId;
         slotBefore = before;
+        cursorBefore = cursor;
         clickQuiet = 0;
         return ActionStatus.progressed();
     }
 
-    // 这一下点击生效了没有：拿起是光标有了、原格空了；放进与放下是光标空了、那格变了。
+    // 这一下点击生效了没有：现场交给纯函数判，那里写清拿起与放进各自"该是什么样"。
     private boolean clickApplied(AbstractContainerMenu raw) {
-        SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
-        SlotSnapshot clicked = SlotSnapshot.of(raw.getSlot(clickedSlot).getItem());
-        if (cursor.isEmpty()) return !clicked.sameIdentity(slotBefore);
-        return !cursor.sameIdentity(slotBefore) && clicked.isEmpty();
+        return clickApplied(slotBefore, cursorBefore,
+                SlotSnapshot.of(raw.getSlot(clickedSlot).getItem()), SlotSnapshot.of(raw.getCarried()));
+    }
+
+    /**
+     * 一下点击生效了没有：点之前那格有东西的是拿起——那格空了、光标上拿起的正是原来那份；
+     * 点之前那格是空的是放进——光标空了、东西落进了那一格。判定只认物品身份：带电的终端
+     * 电量一路上会变，组件对不上不等于没生效。
+     */
+    static boolean clickApplied(SlotSnapshot slotBefore, SlotSnapshot cursorBefore,
+            SlotSnapshot slotAfter, SlotSnapshot cursorAfter) {
+        if (!slotBefore.isEmpty()) {
+            return slotAfter.isEmpty() && cursorAfter.sameIdentity(slotBefore);
+        }
+        return cursorAfter.isEmpty() && !slotAfter.sameIdentity(slotBefore);
     }
 
     // 关界面：打开者负责关闭。关不上不冒充没绑过，照常收场。
