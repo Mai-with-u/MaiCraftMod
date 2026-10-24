@@ -93,7 +93,7 @@ public final class WorldScope {
     private final SubtitleFeed subtitles;
     private final WorldMemory memory;
     private final PainfulBlocks pains;
-    /** 这个世界的保护判断：能力挑方块、生存需求挖三填一都问它，归属查询的在途请求只留一份。 */
+    /** 这个世界的保护判断：能力挑方块、生存需求里要挖开的都问它，归属查询的在途请求只留一份。 */
     private final Protection protection;
     /** 自家人：存储能不能用、被打要不要停工都按这一份。 */
     private final TrustedPlayers trusted;

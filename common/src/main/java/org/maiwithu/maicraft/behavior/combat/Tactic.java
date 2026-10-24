@@ -13,8 +13,8 @@ import java.util.Set;
  * <ol>
  *   <li>躲爆炸：引信点着、还在它波及范围里的会炸物，压过一切（含血线撤离和点名目标）；</li>
  *   <li>已在撤离：开始了就跑到甩开（退无可退除外），回了一点血不回头；</li>
- *   <li>打不过：血线破了还有追兵，或手上什么都没有、对面会还手，就撤；撤不掉（退无可退）时，白天、
- *       没有在射我的就地垫高三格，近战怪够不着；天黑了就挖坑把自己封起来熬到天亮（挖三填一）；</li>
+ *   <li>打不过：血线破了还有追兵，或手上什么都没有、对面会还手，就撤；撤不掉（退无可退）且没有在射我的，
+ *       就地垫高三格，近战怪够不着；垫不了就转身迎战；</li>
  *   <li>挑目标：近处的苦力怕最急，其次马上要打到我的，再是点名的那一批，最后最近的；认准的那只没被更急的顶掉就接着打；</li>
  *   <li>打法：有远程且（目标点着引信、走不到、手上没近战、目标是会炸的、或离得远）就射，否则近身打；</li>
  *   <li>挑不出能打的，但还有压着我的追兵（点着引信的、刚打过我的、贴到快够得着我的）：只走位，离开所有危险半径；</li>
@@ -32,7 +32,7 @@ public final class Tactic {
     private Tactic() {}
 
     /** 这一刻的打法。 */
-    public sealed interface Plan permits EvadeBlast, Withdraw, PillarUp, DigIn, Melee, Shoot, KeepClear, Finished, Dragon {}
+    public sealed interface Plan permits EvadeBlast, Withdraw, PillarUp, Melee, Shoot, KeepClear, Finished, Dragon {}
 
     /** 打龙：这一刻按龙的打法来。 */
     public record Dragon(DragonTactic.Move move) implements Plan {}
@@ -45,9 +45,6 @@ public final class Tactic {
 
     /** 就地垫高三格自保，附上为什么。 */
     public record PillarUp(String why) implements Plan {}
-
-    /** 天黑露天、撤不掉又打不过：挖坑把自己封起来熬到天亮，附上为什么。 */
-    public record DigIn(String why) implements Plan {}
 
     /** 近身打这只。 */
     public record Melee(Battlefield.Foe target) implements Plan {}
@@ -72,24 +69,18 @@ public final class Tactic {
      * @param shooting    这一刻正在用弓（换回近战要贴得更近，进出不同线）
      * @param mayPillar   能就地垫高（白天、有料、头顶空、这一仗还没垫过）
      * @param perched     已经站在垫起来的柱顶上
-     * @param mayDigIn    天黑了、能挖坑自保（调用方接得住、这一仗还没挖过）
      * @param dragon      打龙时这一仗记着的事；不打龙为 null
      */
     public record Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
                          boolean bowGivenUp, boolean shooting, boolean mayPillar, boolean perched,
-                         boolean mayDigIn, DragonTactic.Memory dragon) {
+                         DragonTactic.Memory dragon) {
         public Memory {
             unreachable = Set.copyOf(unreachable);
         }
 
         public Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
-                      boolean bowGivenUp, boolean shooting, boolean mayPillar, boolean perched, boolean mayDigIn) {
-            this(locked, retreating, cornered, unreachable, bowGivenUp, shooting, mayPillar, perched, mayDigIn, null);
-        }
-
-        public Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
                       boolean bowGivenUp, boolean shooting, boolean mayPillar, boolean perched) {
-            this(locked, retreating, cornered, unreachable, bowGivenUp, shooting, mayPillar, perched, false);
+            this(locked, retreating, cornered, unreachable, bowGivenUp, shooting, mayPillar, perched, null);
         }
 
         public Memory(int locked, boolean retreating, boolean cornered, Set<Integer> unreachable,
@@ -119,11 +110,6 @@ public final class Tactic {
         }
         boolean chased = !field.chasers().isEmpty();
         boolean outmatched = me.belowRetreatLine() || !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
-        // 天黑了打不过：先拉开距离，追兵离得够远（挖三格来得及）就地挖坑封起来熬到天亮，
-        // 不往黑地里一路跑——夜里越跑撞上的怪越多，实机第一晚空手撤着撤着被围死。
-        if (memory.mayDigIn() && chased && outmatched && nearestFighter(field) >= DIG_IN_GAP) {
-            return new DigIn("天黑露天打不过，趁追兵还远挖坑封起来熬到天亮");
-        }
         // 2 已在撤离：保持到甩开。
         if (memory.retreating() && !memory.cornered()) return new Withdraw("已在撤离，跑到甩开为止");
         // 3 打不过。
@@ -136,13 +122,12 @@ public final class Tactic {
                 && field.chasers().stream().anyMatch(Battlefield.Foe::fightsBack)) {
             return new Withdraw("手上没有任何武器，对面会还手");
         }
-        // 撤不掉又打不过：白天、没有在射我的（站高了更挨射），就地垫高三格，近战怪够不着；
-        // 天黑了挖坑把自己封起来熬到天亮（封住的坑射不进来，不看有没有射手）。
+        // 撤不掉又打不过：没有在射我的（站高了更挨射）就就地垫高三格，近战怪够不着；
+        // 垫不了（没料、头顶不空、有射手在射）就转身迎战，不再原地熬时间。
         if (memory.cornered() && !memory.perched() && chased && outmatched) {
             if (memory.mayPillar() && field.chasers().stream().noneMatch(Tactic::shootsUp)) {
                 return new PillarUp("撤不掉又打不过，就地垫高三格");
             }
-            if (memory.mayDigIn()) return new DigIn("撤不掉又打不过，天黑露天，挖坑封起来熬到天亮");
         }
         // 4 挑目标。
         Battlefield.Foe target = pickTarget(field, memory);
@@ -163,15 +148,6 @@ public final class Tactic {
         }
         // 5 打法。
         return shoots(me, memory, target) ? new Shoot(target) : new Melee(target);
-    }
-
-    /** 天黑挖坑要的空当：最近一只会还手的追兵离这么远（格）以上才开挖，挖三格来得及。 */
-    static final double DIG_IN_GAP = 6.0;
-
-    // 最近一只会还手的追兵有多远；没有为无穷远。
-    private static double nearestFighter(Battlefield field) {
-        return field.chasers().stream().filter(Battlefield.Foe::fightsBack)
-                .mapToDouble(Battlefield.Foe::distance).min().orElse(Double.POSITIVE_INFINITY);
     }
 
     // 两只以上会还手的追兵、照威胁评估打不过（按人数、种类和自己的血、甲、武器、口粮算）。

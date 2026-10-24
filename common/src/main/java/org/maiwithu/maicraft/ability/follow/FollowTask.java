@@ -664,7 +664,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             recordProgress("帮他打：" + moment.doing());
         }
         switch (moment.state()) {
-            case FINISHED, NEEDS_SHELTER -> {
+            case FINISHED -> {
                 boolean landed = helpLanded;
                 endHelp();
                 // 一下没打着就结束（怪在够不着的地方）：歇半分钟再看，免得一直在"上去帮—帮完了"之间打转。

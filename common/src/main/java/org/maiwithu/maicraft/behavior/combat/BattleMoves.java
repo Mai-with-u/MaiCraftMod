@@ -101,14 +101,9 @@ public interface BattleMoves {
 
     /**
      * 能不能就地垫高：白天、身上有三块以上能拿去垫的废料、头顶三格空着。撤不掉又打不过时用；
-     * 夜里不垫（交给夜晚需求的挖三填一）。没接上时不能。
+     * 垫不了（夜里、没料、头顶不空、有射手在射）就转身迎战，不再原地熬时间。没接上时不能。
      */
     default boolean canPillar(TickContext context) {
-        return false;
-    }
-
-    /** 天黑了：撤不掉又打不过时不垫高，挖坑把自己封起来（由调用方交给挖三填一）。没接上时按白天。 */
-    default boolean night(TickContext context) {
         return false;
     }
 

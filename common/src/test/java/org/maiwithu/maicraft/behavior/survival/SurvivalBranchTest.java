@@ -60,25 +60,26 @@ class SurvivalBranchTest {
         // 弄不到床、露天但打得过：接着干。
         assertNull(NightfallNeed.branch(new NightfallNeed.Facts(true, false,
                 ThreatAssessment.Verdict.WINNABLE, 20, 15), false));
-        // 弄不到床、露天又打不过：极端自保。
+        // 弄不到床、露天又打不过：去备一张床来睡（跑路做床）；不原地挖坑等天亮，被打交给自卫。
         assertEquals(Urgency.SOON, NightfallNeed.branch(new NightfallNeed.Facts(true, false,
                 ThreatAssessment.Verdict.OUTMATCHED, 20, 15), false));
     }
 
     @Test
     void nightWithAutoSleepOffDoesNotGoToBed() {
-        // 有人说"晚上别睡"：自动去睡关掉后有床也不去睡；露天打不过照旧挖坑自保。打开后恢复。
+        // 有人说"晚上别睡"：自动去睡关掉后有床也不去睡；露天打不过照旧去备床。打开后恢复。
         AutoSleep autoSleep = new AutoSleep();
         NightfallNeed.Facts night = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.WINNABLE, 20, 15);
         NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
         NightfallNeed.Facts[] now = {night};
-        NightfallNeed need = new NightfallNeed(context -> now[0], () -> null, context -> true, context -> null, autoSleep);
+        NightfallNeed need = new NightfallNeed(context -> now[0], context -> true,
+                context -> null, context -> null, autoSleep);
         TickContext tick = TickContext.of(0, null);
         assertEquals(Urgency.LATER, need.urgency(tick));
         autoSleep.disable();
         assertNull(need.urgency(tick), "关掉后有床也不去睡");
         now[0] = danger;
-        assertEquals(Urgency.SOON, need.urgency(tick), "露天打不过照旧挖坑");
+        assertEquals(Urgency.SOON, need.urgency(tick), "露天打不过照旧备床");
         now[0] = night;
         autoSleep.enable();
         assertEquals(Urgency.LATER, need.urgency(tick));
@@ -106,21 +107,21 @@ class SurvivalBranchTest {
     @Test
     void createTaskFollowsTheBranchUrgencyChose() {
         // 关掉自动去睡后夜里不能再建夜间休息任务（实机关掉后两夜照睡照跳夜）：
-        // 露天打不过这条分路建的必须是封坑任务；重新打开且有床，建的才是夜间休息。
+        // 露天打不过这条分路建的必须是备床任务；重新打开且有床，建的才是夜间休息。
         AutoSleep autoSleep = new AutoSleep();
         NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
-        Task burrow = new Named();
+        Task bed = new Named();
         Task rest = new Named();
         boolean[] restAsked = {false};
-        NightfallNeed need = new NightfallNeed(context -> danger, () -> burrow, context -> true,
+        NightfallNeed need = new NightfallNeed(context -> danger, context -> true,
                 context -> {
                     restAsked[0] = true;
                     return rest;
-                }, autoSleep);
+                }, context -> bed, autoSleep);
         TickContext tick = TickContext.of(0, null);
         autoSleep.disable();
-        assertEquals(Urgency.SOON, need.urgency(tick), "关掉后有床也不去睡，露天打不过改封坑");
-        assertSame(burrow, need.createTask(tick), "关掉后夜里建的是封坑任务");
+        assertEquals(Urgency.SOON, need.urgency(tick), "关掉后有床也不去睡，露天打不过改备床");
+        assertSame(bed, need.createTask(tick), "关掉后夜里建的是备床任务");
         assertFalse(restAsked[0], "关掉后不再问夜间休息");
         autoSleep.enable();
         assertEquals(Urgency.LATER, need.urgency(tick));
@@ -128,12 +129,22 @@ class SurvivalBranchTest {
     }
 
     @Test
+    void outmatchedWithoutABedPreparerHoldsNoTask() {
+        // 备床的落地没接上（还没进世界）：不占身体，不建任何任务，不原地等天亮。
+        NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
+        NightfallNeed need = new NightfallNeed(context -> danger, context -> false, context -> null, null);
+        TickContext tick = TickContext.of(0, null);
+        assertEquals(Urgency.SOON, need.urgency(tick));
+        assertNull(need.createTask(tick), "备床接不上就不建任务，接着干活");
+    }
+
+    @Test
     void nightWhileKeepingCompanyWaitsForTheCompanionToSleep() {
-        // 跟着一个人：他还醒着就不自己走开去睡；他躺下了才去附近找床睡。露天又打不过照旧挖坑自保。
+        // 跟着一个人：他还醒着就不自己走开去睡；他躺下了才去附近找床睡。露天又打不过照旧备床。
         NightfallNeed.Facts night = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.WINNABLE, 20, 15);
         NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 15);
         NightfallNeed.Facts[] now = {night};
-        NightfallNeed need = new NightfallNeed(context -> now[0], () -> null, context -> true, context -> null);
+        NightfallNeed need = new NightfallNeed(context -> now[0], context -> true, context -> null, context -> null);
         TickContext tick = TickContext.of(0, null);
         Companion company = new Companion();
         assertNull(need.urgency(tick, company), "他醒着：不去睡");
@@ -141,7 +152,7 @@ class SurvivalBranchTest {
         assertEquals(Urgency.LATER, need.urgency(tick, company), "他睡下了：找空当去睡");
         company.asleep = false;
         now[0] = danger;
-        assertEquals(Urgency.SOON, need.urgency(tick, company), "露天打不过照旧挖坑");
+        assertEquals(Urgency.SOON, need.urgency(tick, company), "露天打不过照旧备床");
         now[0] = night;
         assertEquals(Urgency.LATER, need.urgency(tick, null), "手上不是陪人的任务：照常去睡");
     }

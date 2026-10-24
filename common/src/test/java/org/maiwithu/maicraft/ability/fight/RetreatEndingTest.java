@@ -44,11 +44,4 @@ class RetreatEndingTest {
         }
     }
 
-    @Test
-    void shelterAtNightAlsoSaysHowToHealAfterDawn() {
-        Problem stuck = RetreatEnding.needsShelter(body(4, 0), OptionalInt.of(3));
-        assertTrue(stuck.suggestion().startsWith("天亮后先 obtain"), stuck.suggestion());
-        Problem usual = RetreatEnding.needsShelter(body(4, 3), OptionalInt.of(3));
-        assertEquals("天亮后回血、换把武器再来", usual.suggestion());
-    }
 }

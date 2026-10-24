@@ -64,7 +64,6 @@ class BattleTest {
         BattleMoves.Posture posture = BattleMoves.Posture.GROUNDED;
         boolean canPillar;
         int pillars;
-        boolean night;
         /** 出手被拒（原生攻击没得到确认）。 */
         boolean rejecting;
         /** 交互入口被上一下举盾占着：出手抛"还在等确认"。 */
@@ -103,8 +102,6 @@ class BattleTest {
         }
 
         @Override public boolean crosshairOn(TickContext context, int entityId) { return crosshair; }
-
-        @Override public boolean night(TickContext context) { return night; }
 
         @Override public void stepKeepingAim(TickContext context, Footwork.Step step) {
             keptAim++;
@@ -390,22 +387,6 @@ class BattleTest {
         assertTrue(Math.abs(moves.lastStep().dz()) > 0.5, "绕到侧面再出手，实际 " + moves.lastStep());
         fight.tick(new Tick(2));
         assertTrue(fight.unreachable().contains(1), "连着被拒三次：这只打不出去，换下一只");
-    }
-
-    @Test
-    void cornedAtNightAsksForShelter() {
-        Senses senses = new Senses();
-        // 追兵贴着（挖坑来不及）：先撤，撤不掉才就地挖。
-        senses.threats.add(zombie(1, 5));
-        senses.health = 4;
-        Moves moves = new Moves();
-        moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));
-        moves.night = true;
-        Battle fight = battle(senses, moves);
-        fight.offerShelter();
-        for (int tick = 0; tick < 3; tick++) fight.tick(new Tick(tick));
-        assertEquals(Battle.State.NEEDS_SHELTER, fight.tick(new Tick(3)).state(), "天黑、退无可退、打不过：挖坑自保");
-        assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(4)).state(), "一仗只要一次，回来了就背水一战");
     }
 
     @Test

@@ -148,7 +148,7 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
         return BedChooser.NIGHT_WALK_LIMIT_BLOCKS;
     }
 
-    // 近处没床、身上也没带：夜里不摸黑去弄床，如实结束；夜晚这项需求随后按"今晚没床"改挖坑、找掩体熬夜。
+    // 近处没床、身上也没带：夜休任务不摸黑走远路去睡，如实结束；夜晚这项需求随后按"今晚没床"去备一张床来睡。
     // 筛选说明带上：是"没扫到床"还是"有床都开不出去、开不在哪"，两种情况下游要的区别对待（实机 10-16 有床被怪筛掉，被当成没床）。
     @Override
     protected Next<Phase> noBedNearby(String screening) {

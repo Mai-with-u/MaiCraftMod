@@ -17,16 +17,11 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 夜晚自保、贴边退避与回去捡东西的动手实现：挖三填一交给 {@link LiveBurrow}，退避与跑回去用走到。
+ * 贴边退避与回去捡东西的动手实现：退避与跑回去用走到。
  */
 public final class LiveNightAndEdgeMoves {
 
     private LiveNightAndEdgeMoves() {}
-
-    /** 夜晚自保（挖三填一）的动手实现。 */
-    public static NightfallNeed.BurrowMoves burrow(LiveBurrow moves, TaskEventSink events) {
-        return () -> new BurrowInTask(moves, events);
-    }
 
     /** 贴边退避的动手实现。 */
     public static EdgeProximityNeed.RetreatMoves retreat(WalkTo walks, TaskEventSink events) {

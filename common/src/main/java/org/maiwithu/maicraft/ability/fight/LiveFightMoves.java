@@ -90,7 +90,6 @@ public final class LiveFightMoves implements FightMoves {
     @Override public boolean crosshairOn(TickContext context, int entityId) { return battle.crosshairOn(context, entityId); }
     @Override public Posture posture(TickContext context) { return battle.posture(context); }
     @Override public boolean canPillar(TickContext context) { return battle.canPillar(context); }
-    @Override public boolean night(TickContext context) { return battle.night(context); }
     @Override public Action returnProjectile(int projectileId) { return battle.returnProjectile(projectileId); }
     @Override public Action pillarUp(TickContext context) { return battle.pillarUp(context); }
 

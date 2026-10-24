@@ -11,7 +11,8 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
  * 夜晚这项生存需求：到了能睡的时间，能弄到床就找空当去睡（夜间休息）；
- * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才挖坑封顶熬到天亮。
+ * 弄不到床时看处境——安全处或打得过就接着干活。夜里被打交给自卫，打不过由战斗引擎边打边撤，
+ * 这里不再有"原地熬到天亮"的任务。
  * 夜里自动去睡被 LLM 关掉时（{@link AutoSleep}）按弄不到床对待：不去睡，其余照旧。
  */
 public final class NightfallNeed implements SurvivalNeed {
@@ -35,7 +36,7 @@ public final class NightfallNeed implements SurvivalNeed {
             return null;
         }
         if (facts.verdict() == ThreatAssessment.Verdict.OUTMATCHED) {
-            // 露天、打不过：挖个坑把自己封起来熬到天亮。
+            // 露天、打不过：不再原地熬到天亮，去备一张床来睡（跑路做床）；被打时自卫照插，撤离由战斗引擎做。
             return Urgency.SOON;
         }
         // 露天但打得过：边打边干。
@@ -60,32 +61,32 @@ public final class NightfallNeed implements SurvivalNeed {
         Task nightRest(TickContext context);
     }
 
-    /** 极端自保怎么落地：生产实现就地封顶并站到天亮，测试换替身。 */
+    /** 没床时怎么备一张：生产实现由睡觉能力提供，经拿东西的引擎杀羊取毛、合成出一张床。测试换替身。 */
     @FunctionalInterface
-    public interface BurrowMoves {
-        Task burrowIn();
+    public interface PreparesNightBed {
+        Task prepareBed(TickContext context);
     }
 
     private final ReadsNight reader;
-    private final BurrowMoves burrow;
     private final ReadsBedAvailability beds;
     private final NightRestMoves nightRest;
+    private final PreparesNightBed bedPreparer;
     private final AutoSleep autoSleep;
     /** 上一回分流给出的急迫程度：创建任务时要按同一条分路走，不能不管分路先问要夜间休息。 */
     private Urgency lastDecision;
 
-    public NightfallNeed(ReadsNight reader, BurrowMoves burrow,
-            ReadsBedAvailability beds, NightRestMoves nightRest) {
-        this(reader, burrow, beds, nightRest, new AutoSleep());
+    public NightfallNeed(ReadsNight reader,
+            ReadsBedAvailability beds, NightRestMoves nightRest, PreparesNightBed bedPreparer) {
+        this(reader, beds, nightRest, bedPreparer, new AutoSleep());
     }
 
     /** @param autoSleep 夜里自动去睡的开关：关着时不去找床 */
-    public NightfallNeed(ReadsNight reader, BurrowMoves burrow,
-            ReadsBedAvailability beds, NightRestMoves nightRest, AutoSleep autoSleep) {
+    public NightfallNeed(ReadsNight reader,
+            ReadsBedAvailability beds, NightRestMoves nightRest, PreparesNightBed bedPreparer, AutoSleep autoSleep) {
         this.reader = reader;
-        this.burrow = burrow;
         this.beds = beds;
         this.nightRest = nightRest;
+        this.bedPreparer = bedPreparer;
         this.autoSleep = autoSleep;
     }
 
@@ -103,7 +104,7 @@ public final class NightfallNeed implements SurvivalNeed {
             lastDecision = null;
             return null;
         }
-        // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：当作弄不到床，不去睡；露天打不过照旧挖坑。
+        // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：当作弄不到床，不去睡；露天打不过照旧去备床。
         // 正陪着一个人（跟随）而他还醒着：同样当作弄不到床，不自己走开去睡，免得把人跟丢；他躺下了才去附近找床睡。
         boolean companionAwake = currentTask instanceof KeepsCompany company && !company.companionAsleep();
         lastDecision = branch(facts, !companionAwake && autoSleep.enabled() && beds.bedReady(context));
@@ -112,7 +113,7 @@ public final class NightfallNeed implements SurvivalNeed {
 
     @Override
     public Task createTask(TickContext context) {
-        // 按分流的结论建任务：只有"能弄到床"这条分路走夜间休息，"露天又打不过"直接封坑。
+        // 按分流的结论建任务：只有"能弄到床"这条分路走夜间休息，"露天又打不过"走备床。
         // 开关拦住了选床分路、没拦住任务创建，夜里就会照睡照跳夜（实机 10-21 goal 246 之后两夜照睡）——
         // 所以这里不无条件先问夜间休息，而是看 urgency 刚判出的那条路。
         Urgency decision = lastDecision != null ? lastDecision
@@ -123,6 +124,10 @@ public final class NightfallNeed implements SurvivalNeed {
                 return rest;
             }
         }
-        return burrow.burrowIn();
+        if (decision == Urgency.SOON) {
+            // 备床的引擎还没接上（没进世界）：不占身体，接着干；被打交给自卫。
+            return bedPreparer == null ? null : bedPreparer.prepareBed(context);
+        }
+        return null;
     }
 }

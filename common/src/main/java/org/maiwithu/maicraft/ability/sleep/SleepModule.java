@@ -51,13 +51,15 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 睡觉能力：找一张能用的床躺下，躺下即完成，不保证睡到天亮。白天不干等：先把今晚的床备好
  * （附近没有、身上没有，就走拿到物品引擎去弄一张），然后以"现在睡不了"结束；
- * 夜里附近没床时放下自带的床或现做一张。下界与末地的床会爆炸，直接结束不尝试。
+ * 夜里附近没床时放下自带的床，或经拿东西的引擎现做一张（杀羊取毛、合成）再睡。
+ * 下界与末地的床会爆炸，直接结束不尝试。
  *
  * <p>能力是薄的：选床、靠近、放床、拿床都组合玩家行为层已有的模型；这里的知识只有
  * 睡觉特有的判断——备不备床、现在睡不睡得、床从哪来。夜间自动休息（生存需求）复用
  * 同一套选床与躺下流程，从这里拿判断与任务。
  */
-public final class SleepModule implements AbilityModule, NightfallNeed.NightRestMoves {
+public final class SleepModule implements AbilityModule, NightfallNeed.NightRestMoves,
+        NightfallNeed.PreparesNightBed {
 
     private final Supplier<PlayerContext> context;
     private final LiveBedFinder beds;
@@ -138,7 +140,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
         switch (operation) {
             case "auto_off" -> {
                 autoSleep.disable();
-                return finished(TaskResult.done("夜里自动去睡已关：天黑了不会自己找床睡，露天打不过照旧挖坑自保；"
+                return finished(TaskResult.done("夜里自动去睡已关：天黑了不会自己找床睡；"
                         + "要睡时下达 sleep，或用 auto_on 打开"));
             }
             case "auto_on" -> {
@@ -269,5 +271,11 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
     public NightfallNeed.ReadsBedAvailability bedAvailability() {
         return beds;
+    }
+
+    /** 没床时怎么备一张：经拿东西的引擎去弄一张床到身上（杀羊取毛、合成都由引擎按途径挑）。 */
+    @Override
+    public Task prepareBed(TickContext tick) {
+        return new PrepareBedTask(obtain, currentPermissions(), beds::carriedBed);
     }
 }

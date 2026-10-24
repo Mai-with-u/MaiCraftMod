@@ -276,7 +276,7 @@ class GoalRunTableTest {
         // 夜里自保、睡觉这类生存需求的临时任务压在主任务上时，主目标一连几分钟不被推进；
         // 查询要如实说目标在等谁，不能把"身体被占着"呈现成"看现场决定下一件做什么"，
         // 否则对面把等天亮当成卡死，反复取消重下还是一样（夜里下的命令目标就这样耗到会话结束）。
-        HoldingTask holding = new HoldingTask("极端自保：等天亮");
+        HoldingTask holding = new HoldingTask("守夜：等天亮");
         ControlLoop occupiedLoop = new ControlLoop(List.of(new OccupyingNeed(holding)));
         GoalRunTable occupied = new GoalRunTable(registry, store, (name, position) -> {
             throw new IllegalStateException("用不到");
@@ -288,7 +288,7 @@ class GoalRunTableTest {
 
         String doing = occupied.doing(id).orElseThrow();
         assertTrue(doing.contains("占着角色"), doing);
-        assertTrue(doing.contains("极端自保：等天亮"), doing);
+        assertTrue(doing.contains("守夜：等天亮"), doing);
         assertTrue(doing.contains("第 0 步"), "目标自己的处境照样带上：" + doing);
 
         // 临时任务做完弹出：身体还给了主目标，查询不再说被占着。
@@ -297,7 +297,7 @@ class GoalRunTableTest {
         assertFalse(occupied.doing(id).orElseThrow().contains("占着角色"));
     }
 
-    /** 占着身体不走的临时任务替身：一直推进、不给结果，像挖坑等天亮那样熬着；叫它收场才结束。 */
+    /** 占着身体不走的临时任务替身：一直推进、不给结果，一熬就是很久；叫它收场才结束。 */
     private static final class HoldingTask implements Task {
         private final String name;
         private boolean finishing;

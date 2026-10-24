@@ -76,21 +76,21 @@ class TacticTest {
     }
 
     @Test
-    void cornedAtNightDigsInEvenWithShooters() {
-        Tactic.Memory night = new Tactic.Memory(-1, false, true, Set.of(), false, false, false, false, true);
-        assertInstanceOf(Tactic.DigIn.class, decide(me(4, true, false), night, zombie(1, 3),
-                foe(2, 10, ThreatAssessment.Kind.RANGED, false, true)), "封住的坑射不进来");
-        assertInstanceOf(Tactic.Melee.class, decide(me(20, true, false), night, zombie(1, 3)), "打得过就不躲");
+    void corneredWithoutAPillarFightsBackEvenAtNight() {
+        // 垫不了（夜里、有射手在射）就转身迎战：不再原地挖坑等天亮。
+        Tactic.Memory stuck = new Tactic.Memory(-1, false, true, Set.of(), false, false, false, false);
+        assertInstanceOf(Tactic.Melee.class, decide(me(4, true, false), stuck, zombie(1, 3)), "撤不掉又垫不了：背水一战");
+        assertInstanceOf(Tactic.Melee.class, decide(me(4, true, false), stuck, zombie(1, 3),
+                foe(2, 10, ThreatAssessment.Kind.RANGED, false, true)), "有骷髅在射也不挖坑：迎战");
+        assertInstanceOf(Tactic.Melee.class, decide(me(20, true, false), stuck, zombie(1, 3)), "打得过就照打");
     }
 
     @Test
-    void atNightOutmatchedDigsInOnceTheChasersAreFarEnough() {
-        // 实机（全量测试 10-12）：第一晚空手往黑地里撤，越撤撞上的怪越多，被围死三次。
-        Tactic.Memory night = new Tactic.Memory(-1, false, false, Set.of(), false, false, false, false, true);
-        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), night, zombie(1, 3)), "追兵贴着：先拉开距离");
-        assertInstanceOf(Tactic.DigIn.class, decide(me(20, false, false), night, zombie(1, 8)), "离得够远：就地挖坑");
-        Tactic.Memory fleeing = new Tactic.Memory(-1, true, false, Set.of(), false, false, false, false, true);
-        assertInstanceOf(Tactic.DigIn.class, decide(me(20, false, false), fleeing, zombie(1, 8)), "撤着撤着拉开了也挖");
+    void outmatchedAtNightKeepsRetreatingOrFighting() {
+        Tactic.Memory night = Tactic.Memory.FRESH;
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), night, zombie(1, 3)), "血线破了：先撤");
+        Tactic.Memory fleeing = new Tactic.Memory(-1, true, false, Set.of(), false, false);
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), fleeing, zombie(1, 8)), "已在撤离：跑到甩开为止");
         assertInstanceOf(Tactic.Melee.class, decide(me(20, true, false), night, zombie(1, 8)), "打得过就不躲");
     }
 

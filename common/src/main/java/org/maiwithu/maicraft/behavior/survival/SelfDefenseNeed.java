@@ -56,8 +56,6 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     /** 自家人：实例配置里所有者信任的玩家，他们打角色只发事件、不停工。 */
     private final Predicate<UUID> trusted;
-    /** 夜里退无可退、打不过时挖坑自保：和夜晚需求同一套挖三填一；没接上为 null。 */
-    private final NightfallNeed.BurrowMoves shelter;
     /** 打完捡这一仗掉出来的东西、射出去的箭：和采集、打猎同一套捡掉落物；没接上为 null。 */
     private PicksUpDrops drops;
     /** 记过的地点（当前世界的世界记忆）：撤离往"家"那一侧跑；没接上、不在世界里时为 null。 */
@@ -70,17 +68,10 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     /** @param trusted 这位玩家是不是自家人（打角色多半是玩笑，只发事件不停工） */
     public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events, Predicate<UUID> trusted) {
-        this(senses, moves, events, trusted, null);
-    }
-
-    /** @param shelter 夜里退无可退、打不过时挖坑自保的那一套（夜晚需求的挖三填一） */
-    public SelfDefenseNeed(CombatSenses senses, BattleMoves moves, TaskEventSink events, Predicate<UUID> trusted,
-                           NightfallNeed.BurrowMoves shelter) {
         this.senses = senses;
         this.moves = moves;
         this.events = events;
         this.trusted = trusted;
-        this.shelter = shelter;
     }
 
     /** 打完顺手捡掉落物和自己的箭：接上捡掉落物的那一套。 */
@@ -116,16 +107,6 @@ public final class SelfDefenseNeed implements SurvivalNeed {
 
     /** 家的地点名：和夜里认"家里的床"是同一个名字。 */
     static final String HOME = "家";
-
-    /** 接得住挖坑自保吗。 */
-    boolean offersShelter() {
-        return shelter != null;
-    }
-
-    /** 新起一次挖三填一；没接上为 null。 */
-    Task shelter() {
-        return shelter == null ? null : shelter.burrowIn();
-    }
 
     /** 这只是自家人：不躲不打，也不为它停工。 */
     boolean trusted(CombatSenses.Threat threat) {

@@ -29,9 +29,6 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.kernel.task.TickResult;
-import org.maiwithu.maicraft.kernel.task.Task;
-import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 /**
  * 自卫插曲：谁威胁角色就打谁，打完回到开打的原地。怎么打全交给战斗引擎（{@link Battle}），和点名战斗是同一个；
@@ -43,8 +40,8 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
  * 撤离往家（没记过家就往打点）那一侧跑，甩开了就是这次处理好了，人已不在原地：守着原地的主任务停下等 LLM，
  * 去某地、拿东西这类在哪做都一样的从新地点接着做（由主任务自己声明），停下时说清为什么停、离打点几格、停在哪。
  *
- * <p>夜里撤不掉又打不过：接夜晚需求那套挖三填一，挖坑封顶熬到天亮再爬回地面；坑挖不成就回去背水一战。
- * 甩开了追兵、可天黑了血又低：同样就地挖坑熬到天亮再走回打点，不停在野地里等下一只。
+ * <p>夜里撤不掉又打不过：不就地等天亮——引擎照常迎战与撤离，撤不掉就迎战到死；甩开追兵后天黑血低
+ * 也不停在野地里等下一只，撤离照常收场，夜里没床的备床睡觉由夜晚这项生存需求接手。
  *
  * <p>被没点名的玩家打：不还手，只退到他够不着外、举着盾；他停手后停下来等 LLM 决定（还手就 fight 点名他，
  * 不理就让主任务继续），不自己走回去接着干活。自家人打角色只发事件、不停工。
@@ -54,9 +51,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
 
     /**
      * 自卫的阶段：打 → 危险消失后的观察期 → 捡这一仗掉出来的东西和射出去的箭 → 走回打点。
-     * 撤离在打的阶段里由引擎做；夜里退无可退时挖坑熬到天亮。
+     * 撤离在打的阶段里由引擎做；撤不掉就迎战到死，不再有原地等天亮的分路。
      */
-    enum Phase { ENGAGE, SHELTER, WATCH, PICKUP, RETURN }
+    enum Phase { ENGAGE, WATCH, PICKUP, RETURN }
 
     /** 打点圆心到追击上限（只比水平距离）。 */
     static final double CHASE_LIMIT = 16.0;
@@ -80,8 +77,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private Action walkBack;
     /** 刚决定换去的阶段：外壳在换阶段时被基类收尾，靠它分清是换阶段还是任务真结束。 */
     private Phase goingTo;
-    /** 夜里挖坑熬着的那一次挖三填一。 */
-    private Task burrow;
     /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
     private boolean displaced;
     /** 主任务为什么停、离打点几格、人停在哪：交给控制循环写进主任务的暂停说明。 */
@@ -90,9 +85,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private boolean finishReported;
     /** 被陌生玩家打了：不管主任务在哪做都一样，都停下等 LLM 决定还不还手。 */
     private boolean awaitsOrders;
-    /** 甩开了追兵、天黑血低，正在就地挖坑熬夜：挖不成就照撤离收场；记着这次撤离的原因。 */
-    private boolean shelteringAfterEscape;
-    private String escapedWhy;
     /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
     private final Set<Integer> strangers = new LinkedHashSet<>();
     /** 这一场打掉了谁、拿什么打、挥中几下、射了几箭。 */
@@ -117,8 +109,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
                 return need.trusted(threat);
             }
         }, ThreatAssessment.VIGILANCE_RADIUS);
-        // 夜里退无可退、打不过：引擎报要挖坑，这里接夜晚需求那套挖三填一。
-        if (need.offersShelter()) battle.offerShelter();
         // 撤离往家那一侧跑；没记过家就往打点（开打时干活的地方）那一侧，不一路往野外越跑越远。
         battle.retreatToward(context -> need.home(context).orElse(new double[] {anchor[0], anchor[2]}));
     }
@@ -145,7 +135,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case ENGAGE -> engage(context);
-            case SHELTER -> shelter(context);
             case WATCH -> watch(context);
             case PICKUP -> pickUp(context);
             case RETURN -> back(context);
@@ -175,47 +164,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             events.publish(TaskEvent.Kind.NEED_UNHANDLED, "想撤也走不动：撤离路线连着走不通，退无可退，就地迎战");
         }
         return switch (moment.state()) {
-            case ESCAPED -> escaped(context, moment.retreatWhy());
+            case ESCAPED -> leaveDisplaced(context, moment.retreatWhy());
             case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
-            case NEEDS_SHELTER -> go(Phase.SHELTER, moment.doing());
             default -> Next.stay();
         };
-    }
-
-    // 挖坑熬夜：交给挖三填一，熬到天亮爬回地面再观察、走回打点。坑挖不成、人还露在外头就回去背水一战，
-    // 不站在露天硬熬（那是站着挨打）。挖坑的变化记进自卫的结果。
-    private Next<Phase> shelter(TickContext context) {
-        if (burrow == null) {
-            burrow = need.shelter();
-            if (burrow == null) {
-                // 甩开追兵后想挖坑熬夜却挖不了：照撤离收场，不回头去找已经甩掉的怪。
-                return shelteringAfterEscape ? leaveDisplaced(context, escapedWhy)
-                        : go(Phase.ENGAGE, "挖不了坑，背水一战");
-            }
-            burrow.start(context);
-        }
-        if (burrow instanceof BurrowInTask digging && digging.exposedWhileWaiting()) {
-            TaskResult stopped = burrow.close(CloseReason.FINISHED);
-            burrow = null;
-            keepFacts(stopped);
-            if (shelteringAfterEscape) return leaveDisplaced(context, escapedWhy);
-            return go(Phase.ENGAGE, "坑挖不成，回去背水一战");
-        }
-        if (burrow.tick(context) instanceof TickResult.Finished finished) {
-            // 有了结果照内核的规矩收个尾，再把它交代的变化并进自卫的结果。
-            burrow.close(CloseReason.FINISHED);
-            burrow = null;
-            keepFacts(finished.result());
-            recordProgress(finished.result().summary());
-            return watchFirst();
-        }
-        return Next.stay();
-    }
-
-    private void keepFacts(TaskResult result) {
-        if (result == null) return;
-        result.changes().forEach(this::recordChange);
-        result.unconfirmed().forEach(this::recordUnconfirmed);
     }
 
     private Next<Phase> watchFirst() {
@@ -331,19 +283,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         return Next.stay();
     }
 
-    // 撤离成功：甩开了追兵。天黑了血又低：不停在野地里等下一只，就地挖坑封起来熬到天亮，再走回打点。
-    // 实机 10-15 夜里低血撤离五次，每次甩开就停在野地里，转眼又被下一只追上。
-    private Next<Phase> escaped(TickContext context, String why) {
-        if (!shelteringAfterEscape && need.offersShelter() && moves.night(context) && lowAfterEscape(context)) {
-            shelteringAfterEscape = true;
-            escapedWhy = why;
-            recordProgress("甩开了追兵，天黑血低，就地挖坑熬到天亮");
-            return go(Phase.SHELTER, "甩开了追兵，天黑血低，就地挖坑熬到天亮");
-        }
-        return leaveDisplaced(context, why);
-    }
-
     // 甩开了追兵，这次被攻击就算处理好了（记完成）。记成失败会让生存需求缓一阵，缓着的那几秒再被追上就是站着挨打。
+    // 天黑血低也不停在野地里等下一只：照常收场，夜里没床的备床睡觉由夜晚这项生存需求接手。
     // 人已经不在开打的原地：守着原地的主任务停下等 LLM（暂停说明里写为什么停、离打点几格、停在哪），
     // 在哪做都一样的从新地点接着做——这由主任务自己声明，这里只交代事实。
     private Next<Phase> leaveDisplaced(TickContext context, String why) {
@@ -369,14 +310,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     public String finishedNote(TaskResult result) {
         if (finishReported) return null;
         return "自卫插曲收场：" + result.summary() + "；" + tally.describe();
-    }
-
-    /** 甩开追兵后有效血量（含护甲折算）到这条线以下，天黑了就地挖坑熬夜：不到半血。 */
-    static final double LOW_AFTER_ESCAPE = 10.0;
-
-    private boolean lowAfterEscape(TickContext context) {
-        CombatSenses.CombatProfile profile = senses.profile(context);
-        return ThreatAssessment.effectiveHealth(profile.health(), profile.armorPoints()) <= LOW_AFTER_ESCAPE;
     }
 
     // 主任务暂停说明里的那半句：离打点几格、人停在哪、打点在哪。
@@ -426,7 +359,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
-        if (burrow != null) return burrow.interruptibility(context);
         if (pickup != null) return pickup.interruptibility();
         return walkBack != null ? walkBack.interruptibility() : battle.interruptibility();
     }
@@ -443,27 +375,23 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             battle.pause();
             if (walkBack != null) walkBack.pause();
             if (pickup != null) pickup.pause();
-            if (burrow != null) burrow.pause();
         }
 
         @Override
         public void close() {
             // 换阶段或任务结束时基类收尾外壳。打、观察、捡东西、走回打点这几段都靠同一个战斗引擎盯着威胁，
             // 在它们之间换阶段时引擎不收尾，举着的盾、走位接着用，边界上进一出的怪不用多等几刻重建出手；
-            // 换去挖坑（坑里不推进引擎）或任务真结束时才收尾：出手、寻路、拉了一半的弓收尾，盾放下。
-            boolean battleGoesOn = goingTo != null && goingTo != Phase.SHELTER;
+            // 任务真结束（goingTo 为空）才收尾：出手、寻路、拉了一半的弓收尾，盾放下。
+            boolean battleGoesOn = goingTo != null;
             goingTo = null;
             if (!battleGoesOn) battle.close();
             if (walkBack != null) walkBack.close();
             walkBack = null;
             closePickup();
-            if (burrow != null) keepFacts(burrow.close(phase() == Phase.SHELTER ? CloseReason.CANCELLED : CloseReason.FINISHED));
-            burrow = null;
         }
 
         @Override
         public String describe() {
-            if (burrow != null) return burrow.describe();
             if (pickup != null) return pickup.describe();
             return walkBack != null ? walkBack.describe() : battle.describe();
         }

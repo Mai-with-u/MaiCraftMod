@@ -233,7 +233,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         verdict = assessment.verdict();
         if (verdict == ThreatAssessment.Verdict.OUTMATCHED) {
             // LLM 叫打就照打：评估出的差距只记一句提醒，不拒绝；开打后血线破了引擎照旧先撤，
-            // 撤不掉、天黑露天照旧交给自保挖坑。
+            // 撤不掉就转身迎战，不再原地等天亮。
             String gaps = assessment.gaps().isEmpty() ? "整体劣势" : String.join("、", assessment.gaps());
             recordAttempt("开打前评估", "看着打不过（差在" + gaps + "），照打；血到拒战线会先撤");
         }
@@ -241,8 +241,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         battle = new Battle(senses, moves, new Roster(), radius);
         battleHand = new BattleHand();
         hold(battleHand);
-        // 夜里退无可退、打不过：引擎报要挖坑时这一仗停下，交给自卫接挖三填一。
-        battle.offerShelter();
         fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, switch (verdict) {
             case OUTMATCHED -> "看着打不过，照打，盯着血线";
@@ -286,7 +284,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS);
         battleHand = new BattleHand();
         hold(battleHand);
-        battle.offerShelter();
         fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");
     }
@@ -395,8 +392,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 yield Next.fail(RetreatEnding.escaped(moment.retreatWhy(), senses.profile(context),
                         senses.foodLevel(context)));
             }
-            case NEEDS_SHELTER -> Next.fail(RetreatEnding.needsShelter(senses.profile(context),
-                    senses.foodLevel(context)));
             case FINISHED -> named.isEmpty()
                     ? Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有要打的了" : "这一批清完了，就地捡一下")
                     : lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "打完了，就地捡一下");

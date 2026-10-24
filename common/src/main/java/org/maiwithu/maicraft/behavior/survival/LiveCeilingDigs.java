@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 换气时挖开压在水面上的方块的生产实现：那一格挖得动就给一份对准它的原生挖掘。淹水是马上要命的事，
- * 是别人的东西也挖，由换气任务在结果里写明；保护判断同时给挖三填一用（那里受保护的不挖）。
+ * 是别人的东西也挖，由换气任务在结果里写明；保护判断同时给生存需求里别的挖掘用（那里受保护的不挖）。
  */
 public final class LiveCeilingDigs implements BreathTask.DigsCeiling {
 

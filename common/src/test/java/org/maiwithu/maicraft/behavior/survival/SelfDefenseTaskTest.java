@@ -73,7 +73,6 @@ class SelfDefenseTaskTest {
         int strikes;
         int walks;
         ActionStatus walkStatus = ActionStatus.progressed();
-        boolean night;
         /** 四面都是墙：哪边都迈不出去，脚只能站着——卡住收场的测试用它把移动进展也掐掉。 */
         boolean blockedGround;
         /** 出手动作的状态来源：默认一挥就中，卡住收场的测试换成一直挥不出去。 */
@@ -83,8 +82,6 @@ class SelfDefenseTaskTest {
         };
         /** 交给寻路的第一段：撤离往哪跑看它。 */
         GoalCompiler.Compiled firstWalk;
-
-        @Override public boolean night(TickContext context) { return night; }
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Fixed(strikeStatus);
@@ -261,45 +258,6 @@ class SelfDefenseTaskTest {
     }
 
     @Test
-    void shakenOffAtNightWithLowHealthDigsInInsteadOfStandingInTheWild() {
-        Senses senses = new Senses();
-        senses.threats.add(zombie(1, 6, 6));
-        senses.health = 4;
-        Moves moves = new Moves();
-        moves.night = true;
-        int[] dug = {0};
-        NightfallNeed.BurrowMoves shelter = () -> new Task() {
-            int ticks;
-
-            @Override public TickResult tick(TickContext context) {
-                dug[0]++;
-                return ++ticks < 3 ? TickResult.RUNNING
-                        : TickResult.finished(TaskResult.done("熬过了夜，回到了地面"));
-            }
-
-            @Override public TaskResult close(CloseReason reason) { return TaskResult.done("收尾"); }
-            @Override public void pause() {}
-            @Override public String describe() { return "挖三填一"; }
-        };
-        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE, uuid -> false, shelter);
-        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
-        task.start(new Tick(0));
-        run(task, 0, 2);
-        // 跑出去三十格甩开了：天黑、血还低，就地挖坑熬到天亮，不站在野地里等下一只。
-        moves.at[0] = -30;
-        senses.threats.clear();
-        run(task, 2, 10);
-        assertTrue(dug[0] > 0, "甩开后天黑血低：挖坑熬夜");
-        // 天亮爬出来：走回打点收场，主任务原地接着做。
-        moves.at[0] = 0;
-        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
-                run(task, 10, 10 + SelfDefenseTask.WATCH_TICKS + 10)).result();
-        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
-        assertTrue(finished.summary().contains("回到打点"), finished.summary());
-        assertFalse(task.cannotResumeInPlace());
-    }
-
-    @Test
     void doesNotChaseOutOfTheLeashUnlessItIsHittingMe() {
         Senses senses = new Senses();
         senses.threats.add(zombie(1, 3, 3));
@@ -390,41 +348,6 @@ class SelfDefenseTaskTest {
         assertTrue(task.cannotResumeInPlace(), "主任务暂停等指示");
         assertTrue(task.waitsForOrders(), "还不还手由 LLM 定：在哪做都一样的主任务也停下");
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("fight 点名")), events.messages.toString());
-    }
-
-    @Test
-    void cornedAtNightDigsInUntilDawnThenGoesBack() {
-        Senses senses = new Senses();
-        senses.threats.add(zombie(1, 6, 6));
-        senses.health = 4;
-        Moves moves = new Moves();
-        moves.walkStatus = ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "死路"));
-        moves.night = true;
-        int[] dug = {0};
-        // 挖三填一的替身：挖坑封顶熬三刻就天亮。
-        NightfallNeed.BurrowMoves shelter = () -> new Task() {
-            int ticks;
-
-            @Override public TickResult tick(TickContext context) {
-                dug[0]++;
-                return ++ticks < 3 ? TickResult.RUNNING
-                        : TickResult.finished(TaskResult.done("熬过了夜，回到了地面"));
-            }
-
-            @Override public TaskResult close(CloseReason reason) { return TaskResult.done("收尾"); }
-            @Override public void pause() {}
-            @Override public String describe() { return "挖三填一"; }
-        };
-        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, TaskEventSink.NONE, uuid -> false, shelter);
-        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
-        task.start(new Tick(0));
-        run(task, 0, 6);
-        assertTrue(dug[0] > 0, "撤不掉又打不过、天黑：挖坑自保");
-        // 天亮爬回地面，怪也散了：观察一阵、走回打点收场。
-        senses.threats.clear();
-        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
-                run(task, 6, 6 + SelfDefenseTask.WATCH_TICKS + 10)).result();
-        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
     }
 
     @Test

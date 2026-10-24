@@ -10,7 +10,7 @@ import org.maiwithu.maicraft.behavior.survival.HungerNeed;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
- * 点名战斗撤离收场时交给 LLM 的问题：甩开了追兵、或撤不掉又天黑露天交给挖坑自保，都写明这一仗没打赢与出路。
+ * 点名战斗撤离收场时交给 LLM 的问题：甩开了追兵这一仗没打赢，写明为什么撤与出路。
  *
  * <p>血在拒战线之下、身上没有吃了不伤身的食物、饱食度又低于原版自然回血线三样同时成立时，
  * "吃东西回血再来打"这条链断了：照普通的话术写，LLM 会在吃东西（没吃的）和再打（又撤）之间来回，
@@ -33,14 +33,6 @@ final class RetreatEnding {
         return cannotHeal(profile, foodLevel)
                 .map(dead -> Problem.of(Problem.Kind.DANGER, message + "；" + dead, HEAL_FIRST))
                 .orElseGet(() -> Problem.of(Problem.Kind.DANGER, message, "吃点东西回血到拒战线以上，或换把武器再来"));
-    }
-
-    /** 撤不掉又打不过、天黑露天：这一仗停下，交给自保挖坑熬到天亮。 */
-    static Problem needsShelter(CombatSenses.CombatProfile profile, OptionalInt foodLevel) {
-        String message = "撤不掉又打不过，天黑露天：这一仗停下，交给自保挖坑熬到天亮";
-        return cannotHeal(profile, foodLevel)
-                .map(dead -> Problem.of(Problem.Kind.DANGER, message + "；" + dead, "天亮后" + HEAL_FIRST))
-                .orElseGet(() -> Problem.of(Problem.Kind.DANGER, message, "天亮后回血、换把武器再来"));
     }
 
     /** 血线、口粮、饱食度三样都卡住时说清卡在哪；任何一样还有路就为空。 */

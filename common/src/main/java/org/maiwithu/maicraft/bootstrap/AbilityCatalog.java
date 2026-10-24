@@ -369,7 +369,7 @@ public final class AbilityCatalog {
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
     private static Shared sharedOf(Deps deps) {
         // 靠近与走向站位：站位判断问当刻的世界，走路交给走到（内嵌 Baritone）。
-        // 许可检查点：保护判断是这个世界的那一份（生存需求挖三填一也用它），来源、采集、站位补救都用这一份。
+        // 许可检查点：保护判断是这个世界的那一份（生存需求要挖开的也用它），来源、采集、站位补救都用这一份。
         PermissionCheck permission = new PermissionCheck(deps.protection(), deps.creatures());
         LiveApproaches bringsClose = new LiveApproaches(deps.context(),
                 new LiveApproachWorld(deps.context()), deps.walks(), permission);
@@ -463,7 +463,7 @@ public final class AbilityCatalog {
                         new SceneSeenTargets(deps::scene)),
                 shared.innerNeeds(), shared.refusals()::shownMessage, deps.survivalWiring().autoSleep());
         registry.register(sleepModule);
-        deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule);
+        deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule, sleepModule);
     }
 
     /**

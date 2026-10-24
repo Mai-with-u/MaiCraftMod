@@ -45,7 +45,7 @@ public final class Battle {
     private static final Logger LOG = LoggerFactory.getLogger(Battle.class);
 
     /** 这一刻在做什么。 */
-    public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED, NEEDS_SHELTER }
+    public enum State { FIGHTING, SHOOTING, EVADING, RETREATING, HOLDING, ESCAPED, FINISHED }
 
     /**
      * 一刻的结果。
@@ -124,9 +124,6 @@ public final class Battle {
     private int sidestepTicks;
     /** 撤离往哪一侧靠：家（没记过家就是打点）的水平位置 {x, z}；不知道时为空，只按追兵反方向跑。 */
     private Function<TickContext, double[]> homeSide = context -> null;
-    /** 调用方接得住"挖坑自保"（自卫交给挖三填一）；一仗只要一次。 */
-    private boolean offersShelter;
-    private boolean shelterAsked;
     /** 就地垫高：试过了没有（一仗只垫一次）、站没站上柱顶、柱顶多高。 */
     private boolean pillarTried;
     private boolean perched;
@@ -187,10 +184,8 @@ public final class Battle {
         Moment back = swapping ? null : returnFire(context, senses.returnableIncoming(context));
         if (back != null) return back;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
-        // 天黑才挖坑；拉开距离后就挖，不必等到退无可退（何时挖由打法按追兵远近定）。
-        boolean mayDigIn = offersShelter && !shelterAsked && moves.night(context);
         Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
-                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched, mayDigIn,
+                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched,
                 dragon == null ? null : dragon.memory(context)));
         // 普通打法接手（先对付贴上来的别的怪）：打龙那边的出手、寻路、拉了一半的弓收尾。
         if (dragon != null && dragonActive && !(plan instanceof Tactic.Dragon)) dragon.stand();
@@ -204,12 +199,6 @@ public final class Battle {
             case Tactic.EvadeBlast evade -> evade(context, field, evade.bomb());
             case Tactic.Withdraw withdraw -> withdraw(context, field, withdraw.why());
             case Tactic.PillarUp pillarUp -> pillarUp(context, field, pillarUp.why());
-            case Tactic.DigIn digIn -> {
-                // 挖坑熬夜是整夜的事，引擎做不了：收起手脚，交给调用方（自卫接挖三填一）。
-                shelterAsked = true;
-                standDown();
-                yield new Moment(State.NEEDS_SHELTER, digIn.why(), false, false, false, -1, digIn.why(), true);
-            }
             case Tactic.Melee melee -> melee(context, field, melee.target());
             case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
             case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
@@ -738,11 +727,6 @@ public final class Battle {
      */
     public void retreatToward(Function<TickContext, double[]> side) {
         homeSide = side == null ? context -> null : side;
-    }
-
-    /** 调用方接得住挖坑自保：夜里退无可退、打不过时引擎报 {@link State#NEEDS_SHELTER} 交给它。 */
-    public void offerShelter() {
-        offersShelter = true;
     }
 
     /** 已在撤离（甩开前不回头）。 */

@@ -70,7 +70,6 @@ import org.maiwithu.maicraft.behavior.combat.LiveCombatSenses;
 import org.maiwithu.maicraft.behavior.survival.LiveEdgeView;
 import org.maiwithu.maicraft.behavior.survival.LiveHungerView;
 import org.maiwithu.maicraft.behavior.survival.LiveNightAndEdgeMoves;
-import org.maiwithu.maicraft.behavior.survival.LiveBurrow;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
@@ -241,7 +240,7 @@ public final class Bootstrap {
             TaskEventSink events, DeathDecisionHost deathDecisions,
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
-            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveBurrow burrow, LiveCeilingDigs ceilings,
+            EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveCeilingDigs ceilings,
             SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues,
@@ -256,15 +255,15 @@ public final class Bootstrap {
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues, landingMaterials,
                         () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
                                 || BaritoneInternals.flyingUp()),
-                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。夜里撤不掉又打不过接同一套挖三填一。
+                // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
                 // 打完把这一仗掉出来的东西和射出去的箭捡回来（用回去捡尸体的同一套）；撤离往记过的"家"那一侧跑。
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged), events,
-                        trusted, LiveNightAndEdgeMoves.burrow(burrow, events)).pickingUp(lostDrops).knowingHome(places),
+                        trusted).pickingUp(lostDrops).knowingHome(places),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        LiveNightAndEdgeMoves.burrow(burrow, events), survivalWiring, survivalWiring, survivalWiring.autoSleep()),
+                        survivalWiring, survivalWiring, survivalWiring, survivalWiring.autoSleep()),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
@@ -504,7 +503,7 @@ public final class Bootstrap {
             };
         }
 
-        // 生存需求一套：吃随身食物、战斗感观、交互入口、挖三填一与换气挖顶，按急迫程度登记进控制循环。
+        // 生存需求一套：吃随身食物、战斗感观、交互入口与换气挖顶，按急迫程度登记进控制循环。
         private void buildSurvival(UseKeyProjection useKeyProjection, DeathDecisionHost deathDecisions) {
             // 吃随身食物：挑一件能直接吃的，换到主手后原生按住吃完一口。
             // 食物数值一份：饿了挑吃的、数口粮都按游戏的食物组件认。
@@ -521,20 +520,17 @@ public final class Bootstrap {
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
             ModRangedWeapons ranged = new ModRangedWeapons(() -> compat.rangedWeapons(), foods);
-            // 当前世界的保护判断：打龙射水晶前看爆炸范围、挖三填一看脚下、换气挖开头顶都问同一份。
+            // 当前世界的保护判断：打龙射水晶前看爆炸范围、换气挖开头顶都问同一份。
             Supplier<Protection> protection = () -> worldScope[0] == null ? null : worldScope[0].protection();
             combatSenses = new LiveCombatSenses(combatMemory, foods, ranged, protection);
             // 控制循环按急迫程度登记生存需求：必须立刻处理的先登记，同样急时它先插进来；
             // 生存需求的事件从同一条任务事件流出去。主任务由目标运行表挂上：LLM 用 execute 派了活，目标就成为主任务。
             // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
             interactions = new Interactions(useKeyProjection);
-            // 挖三填一：挖用原生挖掘、封口换方块原生放下、出坑用走到；脚下是不是别人的东西问当前世界的保护判断。
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
-            LiveBurrow burrow = new LiveBurrow(now, diggings, interactions, new ClientMovesToMainhand(now), walks,
-                    protection);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, burrow, new LiveCeilingDigs(diggings, protection),
+                    combatSenses, walks, foodMoves, foods, new LiveCeilingDigs(diggings, protection),
                     survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
                     // 身上没带货时从随身无线终端现取一件（AE2）。
