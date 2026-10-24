@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TickContext;

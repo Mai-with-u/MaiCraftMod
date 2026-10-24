@@ -7,6 +7,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;

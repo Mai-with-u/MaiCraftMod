@@ -12,7 +12,7 @@ import net.minecraft.world.phys.BlockHitResult;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.ChainKeyHold;
-import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;

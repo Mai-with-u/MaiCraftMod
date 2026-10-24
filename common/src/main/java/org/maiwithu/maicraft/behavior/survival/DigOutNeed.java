@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;

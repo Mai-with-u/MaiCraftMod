@@ -128,7 +128,7 @@ import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
-import org.maiwithu.maicraft.behavior.survival.BlockBreaking;
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.travel.planning.DestinationResolver;
 import org.maiwithu.maicraft.behavior.travel.modes.ClientDimensionWorld;
