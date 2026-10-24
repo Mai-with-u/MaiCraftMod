@@ -121,7 +121,8 @@ final class BaritoneWalkRun implements WalkRun {
         this.target = target;
         this.permit = permit;
         this.goal = target.goal();
-        this.engineGoal = new MaiCraftGoalAdapter(goal);
+        // 引擎目标带着现场读格：要求站实的目标搜索时就要干地终点，引擎别在水面上收线。
+        this.engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         this.progress = new WalkRunProgress(goal);
         this.probe = new TerrainProbe(engineGoal, permit);
         this.escape = new TrapEscape(permit);
@@ -278,7 +279,7 @@ final class BaritoneWalkRun implements WalkRun {
         if (state == WalkReport.State.ARRIVED || state == WalkReport.State.FAILED) return false;
         target = next;
         goal = next.goal();
-        engineGoal = new MaiCraftGoalAdapter(goal);
+        engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         partialRoute.reset();
         progress.retarget(goal);
         probe.cancel();

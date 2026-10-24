@@ -1,21 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
-import baritone.api.pathing.goals.Goal;
 import java.util.Objects;
+import java.util.function.Supplier;
+
+import baritone.api.pathing.goals.Goal;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 
 /**
  * 把项目的目标判断交给 Baritone：把三个坐标转成脚位格，再转发到达判断和搜索估价；这里不额外增加距离或高度条件。
+ *
+ * <p>要求站实落地的目标（水里漂到不算到），搜索的终点也只要干地格：引擎在水面格收线的话，
+ * 路线走完人停在水里，到达判据永远不放行，跑的只能在原地来回打转或干等下一轮路线——
+ * 收尾段就是这么死的。干地可站按 {@link BlockPassability#isDryStandable} 那一份事实判，
+ * 与到达那一刻用的身体判据同源。
  */
 final class MaiCraftGoalAdapter implements Goal {
     private final NavGoal delegate;
     private final NavGoal.SemanticFingerprint fingerprint;
+    /** 读现场地形，用来核候选脚位是不是干地；还没读到世界（没上路）时给 null，只按位置条件放行。 */
+    private final Supplier<BlockGetter> world;
 
     MaiCraftGoalAdapter(NavGoal delegate) {
+        this(delegate, () -> null);
+    }
+
+    MaiCraftGoalAdapter(NavGoal delegate, Supplier<BlockGetter> world) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
+        this.world = Objects.requireNonNull(world, "world");
         // 同一静止目标每刻重新包装仍属同一搜索请求；真正移动或改变容差时才让旧失败失效。
+        // 干地与否是世界状态不是目标语义，不进指纹。
         this.fingerprint = delegate.semanticFingerprint();
     }
 
@@ -30,7 +47,16 @@ final class MaiCraftGoalAdapter implements Goal {
 
     @Override
     public boolean isInGoal(int x, int y, int z) {
-        return delegate.isAt(new BlockPos(x, y, z));
+        BlockPos feet = new BlockPos(x, y, z);
+        if (!delegate.isAt(feet)) {
+            return false;
+        }
+        // 宽松目标（水里漂进范围也算到）照旧放行；要求站实的目标再加一道干地核验。
+        if (delegate.acceptsWaterArrival()) {
+            return true;
+        }
+        BlockGetter level = world.get();
+        return level == null || BlockPassability.isDryStandable(level, feet);
     }
 
     @Override
