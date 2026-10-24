@@ -149,46 +149,24 @@ final class ClientOpenedMenu implements OpenedMenu {
         return Optional.ofNullable(session);
     }
 
-    /** 关上这份界面：会话到期限没关上时补试一次；界面先一步没了（玩家关掉、被顶掉）也算关上了。 */
+    /** 关上这份界面：补试与认领不了的纪律长在 MenuClose，这里只先跟上换页、标记已请关。 */
     private final class Closing implements Action {
 
-        /** 认领不了会话时自己数的期限，与会话的关闭期限同量级。 */
-        private static final int UNOWNED_CLOSE_TICKS = 100;
-        private final MenuCloseRetry retry = new MenuCloseRetry();
-        private boolean askedWithoutSession;
-        private int waitedWithoutSession;
+        private final MenuClose close = new MenuClose(channel, new MenuSessionSource() {
+            @Override public Optional<MenuSession> current() {
+                return session();
+            }
+
+            @Override public void renew() {
+                session = null;
+            }
+        });
 
         @Override public ActionStatus tick(TickContext tick) {
             // 关之前先跟上服务端换上来的那一页；开始关以后不再跟。
             followSwap();
             closeAsked = true;
-            if (!channel.stillOpen()) {
-                return ActionStatus.done();
-            }
-            Optional<MenuSession> owned = session();
-            if (owned.isEmpty()) {
-                // 光标上挂着不是自己拿的东西，会话认领不了：照样请游戏关一次，东西由原版的关闭流程还回背包。
-                if (!askedWithoutSession) {
-                    askedWithoutSession = true;
-                    channel.requestClose();
-                }
-                return ++waitedWithoutSession > UNOWNED_CLOSE_TICKS
-                        ? ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "界面到期限还没有关上", null))
-                        : ActionStatus.running();
-            }
-            return switch (owned.get().closeNow(channel, tick.player().clientTick())) {
-                case MenuSession.Closing.Closed closed -> ActionStatus.done();
-                case MenuSession.Closing.Failed failed -> {
-                    // 到期限还没关上不认输：重认领一份会话再请游戏关一次，期限按新会话重算；
-                    // 补试也到期限才认输。只请一次就收场的话界面可能还开着，格里的东西看着像没了。
-                    if (retry.grantOne()) {
-                        session = null;
-                        yield ActionStatus.running();
-                    }
-                    yield ActionStatus.failed(failed.problem());
-                }
-                default -> ActionStatus.running();
-            };
+            return close.tick(tick);
         }
 
         @Override public void close() {
