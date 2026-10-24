@@ -499,6 +499,11 @@ public final class DefaultInteractionSender implements InteractionSender {
             // 确认窗只能等乘客关系同步，等不到时全靠它分清是原版规则当场拒了（船泡在水下、刚下过车），
             // 还是点击被接受了、效果丢在了客户端到服务端之间。
             pending.noteNativeAnswer(result.consumesAction());
+            // 原版当场拒收时不解释是哪条拒的：把提交瞬间的按键、距离与乘客现场记进等待记录，
+            // 确认窗过期时随收场报文带出，下一轮实机直接读出拒收原因。
+            if (!result.consumesAction()) {
+                pending.noteEntityUseScene(EntityUseScene.of(context.localPlayer(), target));
+            }
             if (result.shouldSwing()) context.localPlayer().swing(hand);
         } catch (RuntimeException failure) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
@@ -566,7 +571,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (!pending.terminal() && context.clientTick() >= pending.deadlineTick()) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
                     "the bounded read-only confirmation window expired"
-                            + ExpiryContext.of(pending.nativeAnswer()));
+                            + ExpiryContext.of(pending.nativeAnswer(), pending.entityUseScene()));
         }
         if (pending.terminal() && (pending.kind() == PendingInteraction.Kind.CREATIVE_SET_SLOT
                 || (pending.kind() == PendingInteraction.Kind.MOD_PROTOCOL && activeProtocolUsesMenu))) {

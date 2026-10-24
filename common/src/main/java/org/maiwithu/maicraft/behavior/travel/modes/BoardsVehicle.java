@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -25,11 +26,15 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>这是正常玩家都会做的同一套动作，坐船、坐矿车与跟随的同乘共用一份；
  * 各路载具自己的事（认哪条船、矿车推没推起来、火车选哪个座位）由调用方先做好。
+ * 右键前先把潜行键松开：游泳下潜、贴边站位这些前一件事按住的潜行还留在角色身上时，
+ * 原版把按住潜行的载具右键当成"想下来"当场拒收。
  */
 public final class BoardsVehicle implements Action {
 
     /** 对着它连点这么多次还没坐上就不点了（玩家常识：连点几下没反应就不会一直点下去）。 */
     public static final int MAX_CLICKS = 3;
+    /** 松开潜行键最多等这么多个刻：按住潜行去右键载具，原版把它当成"想下来"直接拒收（船、矿车同族）。 */
+    public static final int SNEAK_RELEASE_SETTLE_TICKS = 10;
     /** 它挪开这么远就换走路的目标点（格）。 */
     private static final double RETARGET = 2.0;
 
@@ -43,6 +48,8 @@ public final class BoardsVehicle implements Action {
     private BlockPos walkAnchor;
     private Action click;
     private int clicks;
+    /** 已经为松开潜行等了多少个刻；超过宽限就不干等，照常点。 */
+    private int sneakReleaseWaited;
     /** 最近一下右键没坐上的原因；连点放弃时带在结果里说清。 */
     private String lastClickProblem;
 
@@ -60,17 +67,21 @@ public final class BoardsVehicle implements Action {
         this.label = label;
     }
 
-    /** 这一刻坐上载具要做的决定：坐上了就完，出事如实失败，够不着走过去，够得着就右键。判断是纯函数，离线可测。 */
-    enum Next { DONE, GONE, NO_SEAT, WALK, CLICK, GIVE_UP, KEEP_CLICKING }
+    /** 这一刻坐上载具要做的决定：坐上了就完，出事如实失败，够不着走过去，潜行按着先松，够得着才右键。判断是纯函数，离线可测。 */
+    enum Next { DONE, GONE, NO_SEAT, WALK, RELEASE_SNEAK, CLICK, GIVE_UP, KEEP_CLICKING }
 
-    /** 坐上载具的现场：坐没坐上这辆、它还在不在、有没有我的座、够不够得着、已经点了几下。 */
-    record Scene(boolean ridingThis, boolean vehicleGone, boolean seatFree, boolean inReach, int clicksUsed) {}
+    /** 坐上载具的现场：坐没坐上这辆、它还在不在、有没有我的座、够不够得着、潜行按着没有、为松潜行等了几刻、已经点了几下。 */
+    record Scene(boolean ridingThis, boolean vehicleGone, boolean seatFree, boolean inReach,
+                 boolean sneakHeld, int sneakReleaseWaited, int clicksUsed) {}
 
     static Next decide(Scene s) {
         if (s.ridingThis) return Next.DONE;
         if (s.vehicleGone) return Next.GONE;
         if (!s.seatFree) return Next.NO_SEAT;
         if (!s.inReach) return Next.WALK;
+        // 潜行还按在角色身上：原版把按住潜行的载具右键当成"想下来"当场拒收，点击前先松开并等它真的离开；
+        // 宽限内等不到也照常点，收场报文会带着当时的按键现场，不在这一步干等。
+        if (s.sneakHeld && s.sneakReleaseWaited <= SNEAK_RELEASE_SETTLE_TICKS) return Next.RELEASE_SNEAK;
         return s.clicksUsed >= MAX_CLICKS ? Next.GIVE_UP : Next.CLICK;
     }
 
@@ -79,10 +90,12 @@ public final class BoardsVehicle implements Action {
     public ActionStatus tick(TickContext context) {
         LocalPlayer me = context.player().localPlayer();
         Next next = decide(new Scene(me.getVehicle() == vehicle, vehicle.isRemoved(),
-                freeSeat == null || freeSeat.test(vehicle), inReach(me), clicks));
+                freeSeat == null || freeSeat.test(vehicle), inReach(me),
+                me.isShiftKeyDown(), sneakReleaseWaited, clicks));
         return switch (next) {
             case DONE -> {
                 closeWalk();
+                sneakReleaseWaited = 0;
                 yield ActionStatus.done();
             }
             case GONE -> {
@@ -103,12 +116,25 @@ public final class BoardsVehicle implements Action {
             }
             case CLICK -> {
                 closeWalk();
-                clicks++;
-                click = uses.useEntity(vehicle, InteractionConfirmation.ridingOn(vehicle));
-                yield tickClick(context);
+                sneakReleaseWaited = 0;
+                yield submitClick(context);
+            }
+            case RELEASE_SNEAK -> {
+                closeWalk();
+                sneakReleaseWaited++;
+                // 本刻把潜行键从角色输入里松开；按键状态要到这一刻收尾才写进角色，下一刻决定时再看它真的松没松。
+                context.player().input().applyMovement(PlayerInput.Movement.STOPPED, context.player().clientTick());
+                yield ActionStatus.running();
             }
             case KEEP_CLICKING -> tickClick(context);
         };
+    }
+
+    // 对着它右键一下：生效与否按"真成了这辆的乘客"核对；点失败了记一笔，下一刻重新点。
+    private ActionStatus submitClick(TickContext context) {
+        clicks++;
+        click = uses.useEntity(vehicle, InteractionConfirmation.ridingOn(vehicle));
+        return tickClick(context);
     }
 
     // 推进手上的那一下右键：点失败了记一笔，下一刻重新点；点成了下一刻坐上了就完。

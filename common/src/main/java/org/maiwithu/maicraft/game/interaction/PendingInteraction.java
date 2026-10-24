@@ -35,6 +35,8 @@ public final class PendingInteraction {
      * 没出手（原生调用抛了）为 null。骑乘这类不开界面、不改世界的用法，确认窗等到过期也只有这一条
      * 现场事实能分清「原版规则当场就拒了」还是「点击被接受了、效果丢在了客户端到服务端之间」。 */
     private Boolean nativeAnswer;
+    /** 右键实体提交那一刻的手势现场（潜行、距离、乘客）；只有 interact 提交时写入一次，没出手为 null。 */
+    private EntityUseScene entityUseScene;
     /** 攻击等待记录的目标实体编号；非攻击提交为 -1，供同一目标的重提交幂等等待比对。 */
     private int attackTargetId = -1;
 
@@ -77,6 +79,10 @@ public final class PendingInteraction {
     void noteNativeAnswer(boolean accepted) { if (nativeAnswer == null) nativeAnswer = accepted; }
     /** 右键实体提交现场的原版结算结论；null 表示这一下没能送到原生入口，结论未知。 */
     public Boolean nativeAnswer() { return nativeAnswer; }
+    /** 提交那一刻的手势现场；非右键实体提交为 null。只认第一次写入。 */
+    void noteEntityUseScene(EntityUseScene scene) { if (entityUseScene == null) entityUseScene = scene; }
+    /** 提交那一刻的手势现场；非右键实体提交为 null。 */
+    EntityUseScene entityUseScene() { return entityUseScene; }
     public boolean terminal() { return status != Status.PENDING; }
 
     InteractionConfirmation confirmation() { return confirmation; }

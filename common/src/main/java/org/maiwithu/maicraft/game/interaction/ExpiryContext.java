@@ -12,9 +12,12 @@ final class ExpiryContext {
 
     private ExpiryContext() {}
 
-    /** 过期现场整段话：原版结算结论在前，界面与游戏模式在后。 */
-    static String of(Boolean nativeAnswer) {
+    /** 过期现场整段话：原版结算结论在前，命中的拒收条件、界面与游戏模式在后。 */
+    static String of(Boolean nativeAnswer, EntityUseScene entityUseScene) {
         StringBuilder text = new StringBuilder(nativeAnswerClause(nativeAnswer));
+        if (Boolean.FALSE.equals(nativeAnswer) && entityUseScene != null) {
+            text.append(entityUseScene.explain());
+        }
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft != null && minecraft.screen != null) {
             text.append("; a menu or screen opened during the window (")
