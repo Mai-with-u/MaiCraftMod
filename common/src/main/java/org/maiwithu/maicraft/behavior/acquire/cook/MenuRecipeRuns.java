@@ -19,6 +19,7 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuReopenCount;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
@@ -62,7 +63,6 @@ public final class MenuRecipeRuns implements RecipeRuns {
     /** 逐格摆料时每一下点击多给的时间（刻）：一下要等游戏确认，一轮几十下。 */
     static final int TICKS_PER_GRID_CLICK = 5;
     /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
-    private static final int MAX_REOPENS = 3;
 
     /** 合成台界面的类型注册 ID。 */
     private static final String CRAFTING_MENU = "minecraft:crafting";
@@ -199,7 +199,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
         /** 收尾关界面用的那一份会话：认领一次，之后每刻只推进它。 */
         private MenuSession closingSession;
         private int waited;
-        private int unexpectedCloses;
+        private final MenuReopenCount reopens = new MenuReopenCount();
         private boolean closedByPause;
         /** 背包里实际多出来的产出件数：每次取货按取货前后背包里的数量差记。 */
         private int produced;
@@ -267,7 +267,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
         // 界面没了：被生存需求打断时关的、或别的原因关的，都回到设施跟前重新点开接着做，不当成做完了。
         // 不是打断关的、一再被关掉才如实失败；格子里、鼠标上的料关界面时原版已经还回背包，石切台喂料从头来。
         private ActionStatus reopen() {
-            if (!closedByPause && ++unexpectedCloses > MAX_REOPENS) {
+            if (!reopens.mayReopen(closedByPause)) {
                 return fail(Problem.Kind.STUCK, workstationName() + "的界面一再被关掉，" + recipe.result().describe()
                         + "做不下去");
             }

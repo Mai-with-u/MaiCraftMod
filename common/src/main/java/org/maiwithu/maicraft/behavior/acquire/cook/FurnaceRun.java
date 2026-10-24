@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.inventory.hands.StackSplit;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuReopenCount;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -67,7 +68,6 @@ final class FurnaceRun implements Action {
     /** 换一台炉子多给的时间：走到下一台、点开看一眼。 */
     private static final int SWITCH_TICKS = 20 * 60;
     /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
-    private static final int MAX_REOPENS = 3;
     /** 零碎燃料的上限：木棍、树苗一件只烧半件，有木板以上的燃料时不拿它们。 */
     static final int SMALL_FUEL_TICKS = 300;
     /** 一格最多放一组。 */
@@ -127,7 +127,7 @@ final class FurnaceRun implements Action {
     private int produced;
     /** 发起任务的记账口：每收一次货记一笔烧出来的东西，结果里的变化能和背包净变化对得上；null 不记。 */
     private final TaskRecords records;
-    private int unexpectedCloses;
+    private final MenuReopenCount reopens = new MenuReopenCount();
     private boolean closedByPause;
     /** 自己放进燃料槽的是什么：收拾时只收回这一种，炉子里原有的燃料不拿走。 */
     private String fuelPlaced;
@@ -504,7 +504,7 @@ final class FurnaceRun implements Action {
     // 界面没了：被生存需求打断时关的、或别的原因关的，都回到熔炉跟前重新点开接着照看，不当成烧完了。
     // 不是打断关的、一再被关掉才如实失败；分堆点到一半鼠标上的东西，关界面时原版已经还回背包。
     private ActionStatus reopen() {
-        if (!closedByPause && ++unexpectedCloses > MAX_REOPENS) {
+        if (!reopens.mayReopen(closedByPause)) {
             return fail(Problem.Kind.STUCK, "熔炉的界面一再被关掉，烧" + recipe.result().describe() + "烧不下去");
         }
         closedByPause = false;
