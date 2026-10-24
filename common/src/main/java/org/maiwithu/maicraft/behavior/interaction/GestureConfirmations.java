@@ -52,6 +52,8 @@ public final class GestureConfirmations {
         switch (confirmation) {
             case HAND_BECOMES_FULL_BUCKET, HAND_EMPTIES_OR_FLUID_APPEARS ->
                 checks.add(InteractionConfirmation.heldItemChanged(hand, handBefore));
+            // 放船这类：方块不变、界面不开，放出去手上就少一个——手上变了是唯一可等的证据。
+            case OWN_USE_TAKES_EFFECT -> checks.add(InteractionConfirmation.heldItemChanged(hand, handBefore));
             case FIRE_APPEARS -> checks.add(InteractionConfirmation.ignitionWorldEffect(effectCell));
             case BLOCK_TURNS_INTO -> {
                 if (targetBefore != null) checks.add(InteractionConfirmation.blockChanged(effectCell, targetBefore));

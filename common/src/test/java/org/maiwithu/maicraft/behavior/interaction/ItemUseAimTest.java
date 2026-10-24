@@ -46,6 +46,26 @@ class ItemUseAimTest {
     }
 
     @Test
+    void boatIsItsOwnUseGestureAimingAtTargetItself() {
+        // 船与竹筏（含运输船）没有"点中方块"的用法：放下去靠物品自己的使用行为找落点，
+        // 朝目标的方向使用手里物品，手上少一个船就是放成了——方块不变、界面不开，不是它的证据。
+        assertEquals(ItemUseAim.Gesture.OWN_USE, ItemUseAim.gestureOf("minecraft:oak_boat"));
+        assertEquals(ItemUseAim.Gesture.OWN_USE, ItemUseAim.gestureOf("minecraft:spruce_chest_boat"));
+        assertEquals(ItemUseAim.Gesture.OWN_USE, ItemUseAim.gestureOf("minecraft:bamboo_raft"));
+        Optional<ItemUseAim.Aim> aim = ItemUseAim.aim(ItemUseAim.Gesture.OWN_USE, target,
+                ItemUseAim.CellNature.FLUID_SOURCE, around(Set.of(), Set.of(), false, false));
+        assertTrue(aim.isPresent());
+        assertEquals(target, aim.get().clickCell());
+        assertEquals(target, aim.get().effectCell());
+        assertEquals(ItemUseAim.Confirmation.OWN_USE_TAKES_EFFECT, aim.get().confirmation());
+        // 对实心地面、流动的水也一样：船自己找落点，不挑支撑面。
+        Optional<ItemUseAim.Aim> onLand = ItemUseAim.aim(ItemUseAim.Gesture.OWN_USE, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false));
+        assertTrue(onLand.isPresent());
+        assertEquals(ItemUseAim.Confirmation.OWN_USE_TAKES_EFFECT, onLand.get().confirmation());
+    }
+
+    @Test
     void emptyBucketOnlyAimsFluidSource() {
         Optional<ItemUseAim.Aim> source = ItemUseAim.aim(ItemUseAim.Gesture.SCOOP, target,
                 ItemUseAim.CellNature.FLUID_SOURCE, around(Set.of(), Set.of(), false, false));

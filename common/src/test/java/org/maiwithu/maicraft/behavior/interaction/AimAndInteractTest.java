@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -192,6 +193,29 @@ class AimAndInteractTest {
         }
         assertEquals("UNREACHABLE", failedKind(status));
         assertTrue(sender.submissions.isEmpty(), "没核对过命中就绝不出手");
+    }
+
+    @Test
+    void aHeldBoatOnWaterSubmitsAsUseItemWithoutABlockHit() {
+        // 手持船对水 use（实机：点击提交了、船没放出去）：原版放船不点水那一格，
+        // 是"使用手里物品"，船自己沿视线按流体的规则找落点。提交的因此是不带方块命中的那一下，
+        // 成没成由确认逐刻核对（方块不变、界面不开，手上少一个船才是放成）。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.blocks.put(TARGET, Blocks.WATER.defaultBlockState());
+        scene.itemPointsAt.add(TARGET);
+        // 原版准星不认流体：对水面的普通射线是未命中，放船核对走的是流体射线那条。
+        scene.ray = BlockHitResult.miss(Vec3.atCenterOf(TARGET), Direction.UP, TARGET);
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.BlockTarget(TARGET),
+                AimAndInteract.Gesture.USE_HELD_ITEM, InteractionHand.MAIN_HAND,
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "指到水面就出手");
+        assertEquals(1, sender.submissions.size());
+        assertEquals(PendingInteraction.Kind.USE_ITEM, sender.submissions.getFirst().kind(),
+                "放船走的是使用手里物品，不是右键水那一格");
+        assertNull(sender.submissions.getFirst().hit(), "使用手里物品不带方块命中");
     }
 
     private static String failedMessage(ActionStatus status) {

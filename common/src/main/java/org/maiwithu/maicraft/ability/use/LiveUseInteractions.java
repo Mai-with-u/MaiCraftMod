@@ -39,9 +39,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 组装这一下交互的生产实现：出手前冻结现场，按手上实际拿着的东西归手势，按手势挑点哪一格、怎样算生效。
  *
  * <p>对实体用：手上变了、点开了界面、骑了上去，有一项成立就算生效。写告示牌：编辑界面打开才算点上了。
- * 桶按自己的射线作用（舀只认源格、倒在被点面外面），所以舀和倒是"朝那一格使用手里的物品"，
- * 不是右键准星下的方块；其余都是右键要点的那一格。方块有没有自己的右键行为、能不能直接点着，
- * 按方块的种类与它给不给界面判断，不按名字猜。
+ * 桶和船按自己的射线或使用行为作用（舀只认源格、倒在被点面外面、放船由船自己找落点），
+ * 所以它们是"朝那一格使用手里的物品"，不是右键准星下的方块；其余都是右键要点的那一格。
+ * 方块有没有自己的右键行为、能不能直接点着，按方块的种类与它给不给界面判断，不按名字猜。
  */
 final class LiveUseInteractions implements UseSeams.BuildsInteraction {
 
@@ -130,9 +130,12 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 InteractionHand.MAIN_HAND, handBefore, level.getBlockState(aim.clickCell()), menuBefore);
         // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
         boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
+        // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
+        // "使用手里物品"这一步，船自己沿视线按流体的规则找落点。同样朝目标用手里物品。
+        boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
         // 指定了点哪一面、点的就是目标那一格：只点朝这一面的表面（扳手点哪一面决定绕哪根轴转）。
         boolean faced = target.face() != null && aim.clickCell().equals(cell);
-        AimAndInteract use = bucket
+        AimAndInteract use = bucket || ownUse
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
                 : faced ? interactions.useBlockFace(cell, target.face(), confirmation)
                 : target.quick() ? interactions.useBlockQuickly(aim.clickCell(), confirmation)

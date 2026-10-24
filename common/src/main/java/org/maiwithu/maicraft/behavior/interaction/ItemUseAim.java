@@ -37,6 +37,8 @@ public final class ItemUseAim {
         BRUSH,
         /** 其他对东西用的物品：骨粉、染料、剪刀、拴绳、鞍、给牛挤奶的桶……对目标本身用。 */
         USE_TARGET,
+        /** 放船这类：效果靠物品自己的使用行为生效（船沿视线按流体的规则找落点），点中的方块不参与。 */
+        OWN_USE,
         /** 没有自然结束、要凭时机松手的物品：本能力不接，计划阶段就拒绝。 */
         UNSUPPORTED
     }
@@ -64,7 +66,9 @@ public final class ItemUseAim {
         /** 二十刻内落格出现过火，或火变成了下界传送门：火可能自己熄灭，出现过就算点着。 */
         FIRE_APPEARS,
         /** 目标方块变成预期的新样子：耕地、土径、去皮的木头、点着的样子。 */
-        BLOCK_TURNS_INTO
+        BLOCK_TURNS_INTO,
+        /** 放出去的东西落在被指的水面或地面：方块不变、不开界面，手上少了一个就算放成了。 */
+        OWN_USE_TAKES_EFFECT
     }
 
     /**
@@ -121,6 +125,9 @@ public final class ItemUseAim {
         if (id.endsWith(":flint_and_steel") || id.endsWith(":fire_charge")) return Gesture.IGNITE;
         if (id.endsWith("_hoe") || id.endsWith("_shovel") || id.endsWith("_axe")) return Gesture.TRANSFORM_TOOL;
         if (id.endsWith(":brush")) return Gesture.BRUSH;
+        // 船与竹筏（含运输船）：原版里它们没有"点中方块"的用法，放下去靠物品自己的使用行为，
+        // 沿视线按流体的规则找落点；所以放船走的是"使用手里物品"，不是右键水那一格。
+        if (id.endsWith("_boat") || id.endsWith("_raft")) return Gesture.OWN_USE;
         return Gesture.USE_TARGET;
     }
 
@@ -157,6 +164,9 @@ public final class ItemUseAim {
             // 刷子点目标本身，按住直到刷完；做成以那一格变回普通方块为准。
             case EMPTY_HAND, USE_TARGET ->
                 Optional.of(new Aim(target, target, Confirmation.TARGET_OR_HAND_CHANGES, "对目标本身用"));
+            // 放船这类点不进方块：朝目标的方向使用手里物品，放出去的落点由物品自己按射线找。
+            case OWN_USE -> Optional.of(new Aim(target, target, Confirmation.OWN_USE_TAKES_EFFECT,
+                    "朝目标的方向使用手里的东西，放出的东西由物品自己找落点"));
             case BRUSH ->
                 Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO, "点目标本身，按住直到刷完"));
             case SCOOP -> aimScoop(nature, target);
