@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
@@ -73,6 +74,11 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
     @Override public boolean heldItemPointsAt(BlockPos target, InteractionHand hand) {
         Item item = player.getItemInHand(hand).getItem();
         if (!FirstPersonInteractionTargeting.usesBucketRay(item)) {
+            // 对液体格用非桶物品（对水面放船）：准星不认流体，同样沿视线按流体的规则核对。
+            BlockState state = player.level().isLoaded(target) ? player.level().getBlockState(target) : null;
+            if (state != null && state.getBlock() instanceof LiquidBlock) {
+                return sightPointsAtLiquid(target);
+            }
             return AimCheck.hitsBlock(sightRay(), target);
         }
         // 水桶不走准星的方块射线：沿当前视线按桶自己的流体规则射出去，再核对水会不会落进 target。
@@ -80,6 +86,12 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
         Vec3 end = eye.add(player.getViewVector(1.0f).scale(InteractionRange.blockReach(player)));
         BlockHitResult hit = FirstPersonInteractionTargeting.bucketRay(player.level(), player, eye, end, item);
         return FirstPersonInteractionTargeting.acceptsBucketHit(player.level(), target, item, hit);
+    }
+
+    @Override public boolean sightPointsAtLiquid(BlockPos target) {
+        // 准星射线不认流体：指到这一格的表面（水面）没指到，沿视线按流体的规则射出去才知道。
+        return FirstPersonInteractionTargeting.liquidCrosshairHit(player.level(), player,
+                player.getEyePosition(), player.getViewVector(1.0f), target, InteractionRange.blockReach(player));
     }
 
     // 依次试中心、上半身、顶上、靠近我的一侧：射线一路没碰到方块的第一点。剪羊毛时羊站在草丛里，

@@ -64,6 +64,14 @@ public interface FirstPersonScene {
     boolean heldItemPointsAt(BlockPos target, InteractionHand hand);
 
     /**
+     * 沿当前视线按流体的规则射出去（原版准星不认流体），现在准星指到的是不是 target 这个液体格的表面。
+     * 离线替身默认指不到液体；真实现场按游戏接口层的流体射线核对。
+     */
+    default boolean sightPointsAtLiquid(BlockPos target) {
+        return false;
+    }
+
+    /**
      * 实体身上从现在的眼睛看得见的一点：中心被草、栏杆挡着就试上半身、顶上、两侧，射线一路没碰到方块的那一点。
      * 都被挡着时给中心，交给准星核对如实报被挡。默认（离线替身）就是中心。
      */

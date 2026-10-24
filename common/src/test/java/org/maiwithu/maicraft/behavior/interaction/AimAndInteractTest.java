@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -25,6 +28,11 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
  * 提交时冻结现场；确认的四种结论各自如实上报；任务收尾时未确认的提交按不确定交还。
  */
 class AimAndInteractTest {
+
+    static {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     private static final BlockPos TARGET = new BlockPos(2, 64, 2);
 
@@ -147,6 +155,43 @@ class AimAndInteractTest {
         assertTrue(sender.retireCalled);
         assertNotNull(action.result());
         assertEquals(InteractionVerdict.UNCONFIRMED, action.result().verdict());
+    }
+
+    @Test
+    void aLiquidCellIsPointedAtThroughItsSurface() {
+        // 对水面用东西（实机：水道旁放船三连"看不到任何一面"）：液体格没有碰撞面，
+        // 指没指到按流体自己的射线核对；指到了水面就走原生的那一下，放船成不成由原版结算。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.blocks.put(TARGET, Blocks.WATER.defaultBlockState());
+        scene.liquidPointsAt.add(TARGET);
+        // 原版准星不认流体：对水面的普通射线是未命中。
+        scene.ray = BlockHitResult.miss(Vec3.atCenterOf(TARGET), Direction.UP, TARGET);
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.PENDING);
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "指到水面就出手");
+        assertEquals(1, sender.submissions.size());
+        assertEquals(TARGET, sender.submissions.getFirst().hit().getBlockPos(), "提交的还是目标那一格");
+    }
+
+    @Test
+    void aLiquidCellTheSightCannotReachStillAsksForAnotherStand() {
+        // 视线实际没指到水面（比如隔着岸沿）：核对不过关，换瞄准点用尽后按到不了收尾，绝不出手。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.blocks.put(TARGET, Blocks.WATER.defaultBlockState());
+        // 原版准星不认流体：对水面的普通射线是未命中，流体射线也没指到水面。
+        scene.ray = BlockHitResult.miss(Vec3.atCenterOf(TARGET), Direction.UP, TARGET);
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.APPLIED);
+        ActionStatus status = null;
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
+            status = action.tick(context.asTickContext());
+            context.advance();
+        }
+        assertEquals("UNREACHABLE", failedKind(status));
+        assertTrue(sender.submissions.isEmpty(), "没核对过命中就绝不出手");
     }
 
     private static String failedMessage(ActionStatus status) {

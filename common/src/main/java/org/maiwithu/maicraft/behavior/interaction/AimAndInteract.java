@@ -8,6 +8,7 @@ import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -148,7 +149,7 @@ public final class AimAndInteract implements Action {
         HitResult hit = scene.sightRay();
         boolean onTarget = gesture == Gesture.USE_HELD_ITEM
                 ? scene.heldItemPointsAt(((InteractionTarget.BlockTarget) target).pos(), hand)
-                : hitsTarget(hit);
+                : hitsTarget(scene, hit);
         if (!onTarget) {
             return reaimOrGiveUp(hit);
         }
@@ -251,8 +252,14 @@ public final class AimAndInteract implements Action {
         return target instanceof InteractionTarget.EntityTarget entity && entity.entity().isRemoved();
     }
 
-    private boolean hitsTarget(HitResult hit) {
+    private boolean hitsTarget(FirstPersonScene scene, HitResult hit) {
         if (target instanceof InteractionTarget.BlockTarget block) {
+            // 液体格没有实体碰撞面、准星射线不认它：指没指到改问流体自己的射线，指到水面就算瞄到了；
+            // 用下去会怎样（放船成不成）仍由手势与原版结算。
+            BlockState state = scene.blockAt(block.pos());
+            if (state != null && state.getBlock() instanceof LiquidBlock) {
+                return scene.sightPointsAtLiquid(block.pos());
+            }
             // 放方块点的那一面：点中这一格、面朝对了就行，伸出格外的轮缘也算。
             if (block.face() != null) return AimCheck.hitsFace(hit, block.pos(), block.face());
             return block.part() == null ? AimCheck.hitsBlock(hit, block.pos())

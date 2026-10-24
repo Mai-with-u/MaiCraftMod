@@ -118,6 +118,11 @@ final class InteractionTestFakes {
         final Set<BlockPos> hidden = new HashSet<>();
         /** 手里物品按自己射线规则会作用到的格子；测倒水时由测试声明。 */
         final Set<BlockPos> itemPointsAt = new HashSet<>();
+        /** 液体格按流体射线核对到的格子；测对水面出手时由测试声明。 */
+        final Set<BlockPos> liquidPointsAt = new HashSet<>();
+        @Override public boolean sightPointsAtLiquid(BlockPos target) {
+            return liquidPointsAt.contains(target);
+        }
         @Override public BlockHitResult visibleItemHit(BlockPos target, InteractionHand hand) {
             return visibleHit(target.below());
         }
