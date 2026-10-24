@@ -34,7 +34,6 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.compat.HandThenClick;
 import org.maiwithu.maicraft.compat.StepsInOrder;
-import org.maiwithu.maicraft.compat.TossFeed;
 
 /**
  * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去手上那一叠（原有的先收回背包），投料时手上先只留要投的件数，空手右键顶面收回；
