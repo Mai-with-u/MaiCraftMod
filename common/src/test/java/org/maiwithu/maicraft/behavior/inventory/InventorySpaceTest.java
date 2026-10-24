@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CollectedRecords;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.behavior.inventory.hands.StackMerger;
 
 /** 腾地方：一步一个真实动作，做完重新看背包；做不成换下一步、不原地重试；要动贵重品就停下来问。 */
 class InventorySpaceTest {

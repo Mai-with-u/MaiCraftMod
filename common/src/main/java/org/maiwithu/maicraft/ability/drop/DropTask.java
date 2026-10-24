@@ -5,8 +5,8 @@ import java.util.List;
 import java.util.Objects;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
-import org.maiwithu.maicraft.behavior.inventory.DropsItems;
-import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
+import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
+import org.maiwithu.maicraft.behavior.inventory.drops.TossesOnto;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;

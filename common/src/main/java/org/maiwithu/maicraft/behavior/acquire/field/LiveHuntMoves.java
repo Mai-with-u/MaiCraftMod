@@ -19,7 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.combat.MeleeStrike;
-import org.maiwithu.maicraft.behavior.inventory.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.GroundSteering;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import it.unimi.dsi.fastutil.longs.LongSets;

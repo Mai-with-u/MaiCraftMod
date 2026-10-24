@@ -15,9 +15,9 @@ import java.util.function.BiPredicate;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
-import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
-import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
 import org.maiwithu.maicraft.game.player.BackpackView;

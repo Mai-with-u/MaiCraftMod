@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
-import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;

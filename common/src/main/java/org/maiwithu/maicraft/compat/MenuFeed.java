@@ -8,8 +8,8 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
-import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
-import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 
 import java.util.List;
 import java.util.Optional;
-import org.maiwithu.maicraft.behavior.inventory.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;

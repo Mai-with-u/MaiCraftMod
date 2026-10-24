@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.inventory.DropAvoidance;
+import org.maiwithu.maicraft.behavior.inventory.drops.DropAvoidance;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /** 丢弃落点避让：登记过的落点周围算避让格，过期与不同维度不算。 */

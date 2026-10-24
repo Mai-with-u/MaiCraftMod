@@ -19,10 +19,10 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
-import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
-import org.maiwithu.maicraft.behavior.inventory.SplitsToHand;
-import org.maiwithu.maicraft.behavior.inventory.StepsAside;
-import org.maiwithu.maicraft.behavior.inventory.TossesTogether;
+import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.inventory.hands.SplitsToHand;
+import org.maiwithu.maicraft.behavior.inventory.drops.StepsAside;
+import org.maiwithu.maicraft.behavior.inventory.drops.TossesTogether;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

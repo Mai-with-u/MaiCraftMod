@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.compat.backpack;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.behavior.inventory.GearChanges;
+import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;

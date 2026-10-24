@@ -21,6 +21,11 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainers;
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
+import org.maiwithu.maicraft.behavior.inventory.hands.StackMerger;
 
 /**
  * 背包空间：捡东西、合成取出、交易、开箱取物、卸下装备之前，统一来这里腾格子，任务自己不再各自处理"背包满了"。

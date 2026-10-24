@@ -13,6 +13,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 
 /** 腾挪计划：合并最先，能存的存、该丢的从垃圾丢起，要动贵重品才停下来问。 */
 class SpacePlannerTest {

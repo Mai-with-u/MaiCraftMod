@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.inventory;
 import java.util.List;
 
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 
 /**
  * 腾挪的一步：计划只说"动哪一堆、怎么动"，怎么点击、怎么丢是执行接缝的事。

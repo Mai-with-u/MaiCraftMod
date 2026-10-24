@@ -25,12 +25,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 探索的离线测试替身：摆一片假世界、演走到、收事件，不碰游戏对象。 */
-final class ExploreFakes {
+public final class ExploreFakes {
 
     private ExploreFakes() {}
 
     /** 本刻上下文替身：只有刻号。 */
-    static final class TestTick implements TickContext {
+    public static final class TestTick implements TickContext {
         private long gameTick = 0;
 
         @Override public long gameTick() {
@@ -41,7 +41,7 @@ final class ExploreFakes {
             throw new IllegalStateException("探索测试不应该碰到角色对象");
         }
 
-        void nextTick() {
+        public void nextTick() {
             gameTick++;
         }
     }

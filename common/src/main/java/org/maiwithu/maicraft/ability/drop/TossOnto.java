@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.ability.drop;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
+import org.maiwithu.maicraft.behavior.inventory.drops.TossesOnto;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /** 把身上的东西朝一格扔过去（扔到传送带、工作盆上）：走到旁边、换到主手、按抛物线丢，看着它落下。 */

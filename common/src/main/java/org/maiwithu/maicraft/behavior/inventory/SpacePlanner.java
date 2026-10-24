@@ -11,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.drops.IncidentalLoot;
 
 /**
  * 腾挪计划：看着背包现在有什么、要腾几格，排出"先动哪一堆"的清单。

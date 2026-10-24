@@ -18,9 +18,9 @@ import net.minecraft.world.item.ItemStack;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.inventory.ContainerChooser;
-import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
-import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
+import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;

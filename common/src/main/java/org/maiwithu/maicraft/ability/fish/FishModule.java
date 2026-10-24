@@ -8,8 +8,8 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
-import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
-import org.maiwithu.maicraft.behavior.inventory.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.player.FishingHookFacts;
 import org.maiwithu.maicraft.game.player.PlayerContext;

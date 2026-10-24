@@ -2,9 +2,9 @@
 package org.maiwithu.maicraft.ability.find;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.explore.EnderEyeSearch;
-import org.maiwithu.maicraft.behavior.explore.EyeFlight;
-import org.maiwithu.maicraft.behavior.explore.FollowsEnderEyes;
+import org.maiwithu.maicraft.behavior.explore.endereye.EnderEyeSearch;
+import org.maiwithu.maicraft.behavior.explore.endereye.EyeFlight;
+import org.maiwithu.maicraft.behavior.explore.endereye.FollowsEnderEyes;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;

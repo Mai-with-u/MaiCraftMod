@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
-import org.maiwithu.maicraft.behavior.inventory.TossesOnto;
+import org.maiwithu.maicraft.behavior.inventory.drops.TossesOnto;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;

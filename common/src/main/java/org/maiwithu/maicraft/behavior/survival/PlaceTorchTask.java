@@ -12,7 +12,7 @@ import net.minecraft.world.item.Items;
 
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
-import org.maiwithu.maicraft.behavior.inventory.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.lighting.FrontLampSites;
 import org.maiwithu.maicraft.behavior.lighting.LampItem;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;

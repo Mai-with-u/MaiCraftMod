@@ -6,8 +6,8 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 
-import org.maiwithu.maicraft.behavior.inventory.SpotsContainers;
-import org.maiwithu.maicraft.behavior.inventory.StoresInContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 
 /**

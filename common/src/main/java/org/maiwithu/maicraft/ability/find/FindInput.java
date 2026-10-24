@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.ability.find;
 
 import java.util.List;
-import org.maiwithu.maicraft.behavior.explore.EnderEyeSearch;
+import org.maiwithu.maicraft.behavior.explore.endereye.EnderEyeSearch;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 

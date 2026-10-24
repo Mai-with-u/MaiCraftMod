@@ -8,7 +8,7 @@ import java.util.Optional;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.behavior.inventory.HotbarSwapTarget;
+import org.maiwithu.maicraft.behavior.inventory.hands.HotbarSwapTarget;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
 /**

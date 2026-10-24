@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.explore.FollowsEnderEyes;
+import org.maiwithu.maicraft.behavior.explore.endereye.FollowsEnderEyes;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
