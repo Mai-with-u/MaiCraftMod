@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -176,6 +177,11 @@ final class MachineTestDoubles {
         /** 动手顺序的流水：施工、装段、装部件、改设置谁先谁后从这里看。 */
         final List<String> touched = new ArrayList<>();
         List<ExchangePoint> ports = List.of();
+        /** 按格给的进出口与读数（加工处在这一格下面、几台机械手各拿什么）；没给按上面那份不分格的。 */
+        Function<BlockPos, List<ExchangePoint>> portsAt;
+        Function<BlockPos, MachineState> stateAt;
+        /** 每格各面装着的部件；默认没有。 */
+        Function<BlockPos, List<MountedPart>> parts = at -> List.of();
         /** 这种机器在它那种网上吃多少、给多少：审阅估算用；默认没有。 */
         Function<BlockState, Optional<NetworkLoad>> load = state -> Optional.empty();
         /** 机器自己从头做到尾的做法：默认没有，按配方那一套走。 */
@@ -209,11 +215,15 @@ final class MachineTestDoubles {
         }
 
         @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) {
-            return ports;
+            return portsAt != null ? portsAt.apply(at) : ports;
         }
 
         @Override public MachineState state(BlockPos at) {
-            return state.get();
+            return stateAt != null ? stateAt.apply(at) : state.get();
+        }
+
+        @Override public List<MountedPart> mountedParts(BlockPos at) {
+            return parts.apply(at);
         }
 
         @Override public Optional<NetworkLoad> load(BlockState blockState) {

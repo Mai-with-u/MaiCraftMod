@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -92,6 +93,13 @@ final class Ae2MachineType implements MachineType {
         Optional<Ae2Grid.GridCell> cell = compat.gridCell(level, at);
         if (cell.isEmpty()) return MachineState.unknown("这一格读不到 ME 设备（没加载，或已经不是 AE2 的设备）");
         return Ae2Readings.state(cell.get());
+    }
+
+    // 线缆格各面装着的总线、终端：看机器时它们各自单列成设备，线缆本身合进 ME 网；不是线缆格或读不到给空。
+    @Override public List<MountedPart> mountedParts(BlockPos at) {
+        ClientLevel level = level();
+        if (level == null || !isCableBus()) return List.of();
+        return compat.gridCell(level, at).map(Ae2Readings::parts).orElse(List.of());
     }
 
     // 频道：挂在网上又占频道的设备算 1 个；控制器给频道（每个控制器面 32 个，审阅里按 32 估），线缆不占。
@@ -211,15 +219,11 @@ final class Ae2MachineType implements MachineType {
         private Ae2Readings() {
         }
 
+        // 线缆格的读数只写中间那根线缆是哪一种：线缆往哪几面连着由 ME 网表示，各面的部件由 parts 单列成设备。
         static MachineState state(Ae2Grid.GridCell cell) {
             Map<String, Object> readings = new LinkedHashMap<>();
             cell.controllerState().ifPresent(state -> readings.put("controller_state", state));
             cell.cableItem().ifPresent(cable -> readings.put("cable", cable));
-            if (cell.cableBus()) readings.put("links", (long) cell.links().size());
-            List<String> parts = new ArrayList<>();
-            cell.parts().forEach((side, part) -> parts.add(side.getName() + "=" + part.itemId()
-                    + (part.active() ? "（在线）" : part.powered() ? "（有电没频道）" : "（没电）")));
-            if (!parts.isEmpty()) readings.put("parts", String.join("，", parts));
             if (cell.controllerState().map("conflicted"::equals).orElse(false)) {
                 return new MachineState(MachineState.Activity.OFFLINE, null, null, List.of(), readings,
                         "控制器摆法不对（几块控制器拼的形状不合规），整张网停摆");
@@ -234,6 +238,23 @@ final class Ae2MachineType implements MachineType {
             boolean known = cell.powered().isPresent() || cell.active().isPresent();
             return new MachineState(known ? MachineState.Activity.RUNNING : MachineState.Activity.UNKNOWN, null, null,
                     List.of(), readings, known ? "" : "这种设备读不出有没有电");
+        }
+
+        // 各面的部件按 AE2 画出来的亮法换成运行状态：有电有频道在干活，有电没频道停着，没电离线；按六个方向的固定顺序列。
+        static List<MountedPart> parts(Ae2Grid.GridCell cell) {
+            List<MountedPart> parts = new ArrayList<>();
+            for (Direction side : Direction.values()) {
+                Ae2Grid.PartView part = cell.parts().get(side);
+                if (part == null) continue;
+                MachineState state = part.active()
+                        ? new MachineState(MachineState.Activity.RUNNING, null, null, List.of(), Map.of(), "")
+                        : part.powered()
+                        ? new MachineState(MachineState.Activity.IDLE, null, null, List.of(), Map.of(),
+                                "有电但没分到频道")
+                        : new MachineState(MachineState.Activity.OFFLINE, null, null, List.of(), Map.of(), "没电");
+                parts.add(new MountedPart(side, part.itemId(), state));
+            }
+            return parts;
         }
     }
 }

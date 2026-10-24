@@ -43,6 +43,14 @@ public interface MachineType {
     MachineState state(BlockPos at);
 
     /**
+     * 这一格各面此刻装着的部件（AE2 线缆上的总线、终端）与它们在不在干活。看机器时线缆合进网络，
+     * 装在线缆上的部件才是干活的东西，要单列出来；没有部件这种东西的机器给空表。
+     */
+    default List<MountedPart> mountedParts(BlockPos at) {
+        return List.of();
+    }
+
+    /**
      * 这种方块在它那种网上吃多少、给多少（每转应力、频道）：审阅估算整份蓝图够不够用。
      * 只作估计，不拦施工；没有这类读数给空。
      */

@@ -36,8 +36,8 @@ Create 机器靠旋转动力工作：动力源按转速提供**应力容量**，
 
 ## 机器不转先查什么
 
-- `machine_inspect` 看 `running`：转速是 0，还是在转但不到门槛。
-- 看 `networks` 里那张网是不是过载（`stress` 超过 `stress_capacity`）。
+- `machine_inspect` 看那台机器在 `devices` 里的 `state`：转速是 0，还是在转但不到门槛。
+- 看 `networks` 里那张应力网是不是过载（`overstressed`，或 `stress` 超过 `stress_capacity`）。
 - 转向：粉碎轮这类成对的机器转向要相反。
 - 两端不在同一张网：看接线结果的 `route` 和 `machine_inspect` 的读数找断点。
 

@@ -17,6 +17,7 @@ import net.minecraft.core.Direction;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 
 /**
@@ -70,11 +71,20 @@ class Ae2MachinePartTest {
         assertTrue(idle.note().contains("频道"));
         assertEquals(MachineState.Activity.OFFLINE,
                 Ae2MachineType.Ae2Readings.state(device(Optional.of("conflicted"))).activity());
+        // 线缆格上的部件单列：终端有电没频道算停着；线缆格自己的读数只写是哪一种线缆，不再把部件抄成一串文字。
         Ae2Grid.GridCell withTerminal = new Ae2Grid.GridCell(true, Optional.of("ae2:fluix_glass_cable"), Set.of(),
-                Map.of(Direction.NORTH, new Ae2Grid.PartView("ae2:terminal", true, false)), Optional.of(true),
+                Map.of(Direction.NORTH, new Ae2Grid.PartView("ae2:terminal", true, false),
+                        Direction.DOWN, new Ae2Grid.PartView("ae2:export_bus", true, true)), Optional.of(true),
                 Optional.empty(), Optional.empty());
-        assertTrue(String.valueOf(Ae2MachineType.Ae2Readings.state(withTerminal).readings().get("parts"))
-                .contains("ae2:terminal（有电没频道）"));
+        List<MountedPart> parts = Ae2MachineType.Ae2Readings.parts(withTerminal);
+        assertEquals(List.of(Direction.DOWN, Direction.NORTH), parts.stream().map(MountedPart::side).toList(),
+                "按六个方向的固定顺序列");
+        assertEquals("ae2:export_bus", parts.getFirst().itemId());
+        assertEquals(MachineState.Activity.RUNNING, parts.getFirst().state().activity());
+        assertEquals(MachineState.Activity.IDLE, parts.get(1).state().activity());
+        assertTrue(parts.get(1).state().note().contains("频道"));
+        assertEquals(Map.of("cable", "ae2:fluix_glass_cable"),
+                Ae2MachineType.Ae2Readings.state(withTerminal).readings());
     }
 
     @Test

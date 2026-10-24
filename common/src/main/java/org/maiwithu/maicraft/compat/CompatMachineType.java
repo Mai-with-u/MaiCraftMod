@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
@@ -61,6 +62,11 @@ public final class CompatMachineType implements MachineType {
         } catch (ModApiMismatch broken) {
             return MachineState.unknown(broken.getMessage());
         }
+    }
+
+    // 模组停用或接口对不上时不报部件：看机器照样列出线缆格，只是不再单列它上面的部件。
+    @Override public List<MountedPart> mountedParts(BlockPos at) {
+        return ask(() -> type.mountedParts(at), List.of());
     }
 
     @Override public Optional<NetworkLoad> load(BlockState state) {

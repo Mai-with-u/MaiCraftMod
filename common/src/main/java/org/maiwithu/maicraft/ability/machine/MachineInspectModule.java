@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
- * 机器查看能力：看一台机器或一片机器区——由哪些机器组成、各自的状态、挂在哪些网络上。只读分析。
+ * 机器查看能力：看一台机器或一片机器区——有哪些网、哪些设备、设备之间怎么连着、各自的状态。只读分析。
  *
  * <p>不打开界面看机器内部（那归 use 与 deposit/obtain），不预测机器能不能转；
  * 转不转以每台的运行状态为准，一起给在结果里。范围没给就是脚下这一片。
@@ -42,7 +42,7 @@ final class MachineInspectModule implements AbilityModule {
     private final MachineVehicles vehicles;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_inspect",
-            "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；"
+            "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；"
                     + "operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
             AbilityDoc.forAbility("machine_inspect"),
             ParamSpecs.of(

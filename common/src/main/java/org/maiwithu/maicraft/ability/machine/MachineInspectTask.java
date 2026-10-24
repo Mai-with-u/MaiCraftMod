@@ -8,18 +8,14 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
 
-import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
-import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -34,8 +30,8 @@ import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 机器查看的任务：分几刻把范围里的格子读一遍，认领的机器方块按相邻与同网分成一台台，
- * 读每台的组成、进出口、运行状态与挂着的网络，一次给全，不截断。只读，不动角色。
+ * 机器查看的任务：分几刻把范围里的格子读一遍，认领的机器方块按相邻与同网分成一台台（分组规则查看与操作共用），
+ * 再整理成网、设备与连接三块交出去（{@link MachineAreaReport}），一次给全，不截断。只读，不动角色。
  *
  * <p>"看着像机器但没有机器类型认领"的格（有方块实体、又不是原版方块）按方块 ID 归并着报，
  * 写明缺哪个联动；没加载的格只数个数，不按空气算。指的是档案名时看档案的范围，并和档案整机比对：
@@ -77,6 +73,10 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     private boolean scanComplete;
     /** 交付阶段建好的机器清单；没走到交付为空。 */
     private List<MachineGrouping.Machine> machines = List.of();
+    /** 每个认领格挂着的网（网络种类 → 网络编号）：交付时每格只问一次，分组、等读数、整理报告共用。 */
+    private final Map<BlockPos, Map<String, String>> memberships = new LinkedHashMap<>();
+    /** 整理好的网、设备与连接；交付前没整理为 null，收尾时按已经看到的现整理。 */
+    private MachineAreaReport.Result report;
     /** 看的是一份档案时的整机比对；没给档案或没走到交付为 null。 */
     private ArchiveCheck.Result archiveCheck;
     /** 这次读多大范围：给了档案按档案的大小，否则按参数。 */
@@ -185,20 +185,24 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         }
     }
 
-    // 交付：分组、读组成与状态、挂网，一次给全。要问服务端的网络读数先问一遍，回答还在路上就等一会儿。
+    // 交付：先问清每格挂在哪张网上，分组，再把整张网的读数问一遍（要问服务端的回答还在路上就等一会儿），
+    // 最后整理成网、设备与连接，一次给全。
     private Next<Phase> deliver() {
         if (deliverWaits == 0) {
+            claimedStates.keySet().forEach(at -> memberships.put(at, MachineGrouping.membershipsOf(services, at)));
             List<MachineGrouping.Claimed> claimed = claimedStates.entrySet().stream()
                     .map(entry -> new MachineGrouping.Claimed(entry.getKey(),
                             services.claiming(entry.getValue())))
                     .toList();
-            machines = MachineGrouping.group(claimed, at -> MachineGrouping.membershipsOf(services, at));
-            recordProgress("分成 " + machines.size() + " 台机器");
-            machines.forEach(this::networksOf);
+            machines = MachineGrouping.group(claimed, at -> memberships.getOrDefault(at, Map.of()));
+            recordProgress("认领的机器方块分成 " + machines.size() + " 块相连的");
+            askSummaries();
         }
         if (summariesPending() && ++deliverWaits <= SUMMARY_WAIT_TICKS) {
             return Next.stay();
         }
+        report = reportNow();
+        recordProgress("整理出 " + report.devices().size() + " 个设备、" + report.networks().size() + " 张网与连接件段");
         if (input.archive() != null) {
             archiveCheck = ArchiveCheck.compare(input.archive(), services);
             recordProgress("和档案「" + input.archive().name() + "」比完");
@@ -245,8 +249,11 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         String name = input.archive() != null ? input.archive().name()
                 : input.name() != null ? input.name() : "机器@" + anchor.getX() + "," + anchor.getY() + "," + anchor.getZ();
         boolean archived = input.archive() == null && archive(name, anchor, copied.blueprint(), notes);
-        String machinesRead = String.join("、", chosen.stream().map(machine -> "m" + machine.number()).toList());
-        site = new MachineDetails.SiteRead(machinesRead, name, archived, anchor,
+        // 抄进来的设备：挑中的那几块机器方块里的设备（连接件随设备一起抄，不另列）。
+        Set<BlockPos> chosenCells = new LinkedHashSet<>();
+        chosen.forEach(machine -> chosenCells.addAll(machine.cells()));
+        List<String> devicesRead = report.devicesIn(chosenCells);
+        site = new MachineDetails.SiteRead(devicesRead, name, archived, anchor,
                 List.of(copied.size().getX(), copied.size().getY(), copied.size().getZ()), copied.json(),
                 copied.blueprint().cells().size(), copied.blueprint().installations().size(),
                 copied.blueprint().parts().size(), copied.unread(), copied.unread() == 0 && !reachesEdge, notes);
@@ -301,7 +308,8 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     private String summary() {
         StringBuilder line = new StringBuilder();
         if (site != null) {
-            line.append("把 ").append(site.machine().isEmpty() ? "档案「" + site.archive() + "」那一片" : site.machine())
+            line.append("把 ").append(site.devices().isEmpty() ? "档案「" + site.archive() + "」那一片"
+                            : String.join("、", site.devices()) + " 连同它们之间的连接件")
                     .append(" 读成了机器蓝图（").append(site.cells()).append(" 格方块、").append(site.installations())
                     .append(" 段安装段、").append(site.parts()).append(" 个部件）")
                     .append(site.archived() ? "，建了档案「" + site.archive() + "」" : "")
@@ -310,7 +318,14 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         if (machines.isEmpty()) {
             line.append("这一片没有认得的机器");
         } else {
-            line.append("看到 ").append(machines.size()).append(" 台机器");
+            // 设备、部件、网与连接件段各几个：一眼看出这一片有多少东西、连成了几张网。
+            long parts = report.parts();
+            long networks = report.readNetworks();
+            long segments = report.networks().size() - networks;
+            line.append("看到 ").append(report.devices().size() - parts).append(" 个设备");
+            if (parts > 0) line.append("、").append(parts).append(" 个线缆上的部件");
+            if (networks > 0) line.append("，挂在 ").append(networks).append(" 张网上");
+            if (segments > 0) line.append("，另有 ").append(segments).append(" 段没有网络读取器的连接件（管道这类）");
         }
         if (!unrecognized.isEmpty()) {
             line.append("；有 ").append(unrecognized.values().stream().mapToInt(value -> value.cells).sum())
@@ -323,7 +338,7 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
             line.append("；和档案「").append(input.archive().name()).append("」比：")
                     .append(archiveCheck.allMatch() ? "全部对上" : describeCheck());
         }
-        line.append("。机器能不能转以各台的运行状态为准，光看组成说不准");
+        line.append("。机器能不能转以各设备的运行状态为准，光看组成说不准");
         return line.toString();
     }
 
@@ -350,10 +365,12 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return "本轮读出 " + round.cells().size() + " 个非空格，认领了 " + claimedStates.size() + " 格";
     }
 
+    // 结果细节：交付时整理好的网、设备与连接；没走到整理就收尾（被取消、出错）时按已经看到的现整理，不当作什么都没看到。
     @Override protected ResultDetails details() {
         String missing = "装了它所属模组的联动、且该联动认领这种机器时才能认出来";
-        return new MachineDetails(machines.stream().map(this::view).toList(), unrecognized.entrySet().stream()
-                .map(entry -> new MachineDetails.UnrecognizedBlock(entry.getKey(), entry.getValue().cells,
+        MachineAreaReport.Result shown = report != null ? report : reportNow();
+        return new MachineDetails(shown.networks(), shown.devices(), shown.connections(), unrecognized.entrySet()
+                .stream().map(entry -> new MachineDetails.UnrecognizedBlock(entry.getKey(), entry.getValue().cells,
                         entry.getValue().samples, missing)).toList(),
                 unloadedSoFar, scanComplete, input.archive() == null ? null : input.archive().name(), archiveCheck,
                 note(), site);
@@ -366,79 +383,37 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return "";
     }
 
-    // 一台机器的查看视图：组成按角色分组，进出口并起来，运行状态逐格读、同种机器读数一模一样的只列一格，网络逐张汇总。
-    private MachineDetails.MachineView view(MachineGrouping.Machine machine) {
-        List<MachineDetails.RoleGroup> roles = rolesOf(machine);
-        List<ExchangePoint> ports = new ArrayList<>();
-        for (MachineGrouping.Claimed cell : cellsOf(machine)) {
-            ports.addAll(cell.type().exchangePoints(claimedStates.get(cell.pos()), cell.pos()));
-        }
-        // 同种机器读数不一样的都列出来：原先每种只读第一格，三台机械手手里各拿什么、各剩多少，
-        // 测试员只看得到第一台，第二台没料了也不知道。读数一模一样的（一排同转速的轴）只列一格。
-        List<MachineDetails.TypedState> running = new ArrayList<>();
-        Set<List<Object>> reported = new LinkedHashSet<>();
-        for (MachineGrouping.Claimed cell : cellsOf(machine)) {
-            MachineState state = cell.type().state(cell.pos());
-            if (reported.add(List.of(cell.type().id(), state))) {
-                running.add(new MachineDetails.TypedState(cell.type().id(), cell.pos(), state));
-            }
-        }
-        List<MachineDetails.NetworkView> networks = networksOf(machine);
-        return new MachineDetails.MachineView("m" + machine.number(), archiveNameOf(machine), roles, ports, running,
-                networks);
-    }
-
-    // 这台机器有格落在档案里，就写上档案名：LLM 用名字指它。
-    private String archiveNameOf(MachineGrouping.Machine machine) {
+    // 把这一眼整理成网、设备与连接：看的是档案时，有格落在档案里的设备与网带上档案名，LLM 用名字指它。
+    private MachineAreaReport.Result reportNow() {
         MachineArchive archive = input.archive();
-        if (archive == null) return null;
-        Set<BlockPos> archived = new LinkedHashSet<>(LineRoutes.cellsOf(archive));
-        return machine.cells().stream().anyMatch(archived::contains) ? archive.name() : null;
+        Set<BlockPos> archived = archive == null ? Set.of() : new LinkedHashSet<>(LineRoutes.cellsOf(archive));
+        return new MachineAreaReport(services::claiming, services.networkReaders(), services.world()::stateAt)
+                .report(machines, claimedStates, memberships, archived, archive == null ? null : archive.name());
     }
 
-    // 分组结果里存的是格子的位置，方块状态从认领账里拿回来。
-    private List<MachineGrouping.Claimed> cellsOf(MachineGrouping.Machine machine) {
-        return machine.cells().stream()
-                .map(pos -> new MachineGrouping.Claimed(pos, services.claiming(claimedStates.get(pos))))
-                .toList();
-    }
-
-    private List<MachineDetails.RoleGroup> rolesOf(MachineGrouping.Machine machine) {
-        Map<String, List<String>> byRole = new LinkedHashMap<>();
-        for (MachineGrouping.Claimed cell : cellsOf(machine)) {
-            byRole.computeIfAbsent(cell.type().role().name().toLowerCase(Locale.ROOT),
-                    key -> new ArrayList<>()).add(cell.type().id() + " (" + cell.pos().toShortString() + ")");
-        }
-        return byRole.entrySet().stream()
-                .map(entry -> new MachineDetails.RoleGroup(entry.getKey(), entry.getValue()))
-                .toList();
+    // 范围里见到的每张网问一遍整网读数：要问服务端的（ME 网）此刻发出去，回答到了整理报告时直接用。
+    private void askSummaries() {
+        seenNetworks().forEach((id, kind) -> readerOf(kind).ifPresent(reader -> reader.summary(id)));
     }
 
     // 有没有哪张网的读数还在路上（问了服务端还没回）。
     private boolean summariesPending() {
-        for (MachineGrouping.Machine machine : machines) {
-            for (MachineDetails.NetworkView network : networksOf(machine)) {
-                for (NetworkReader reader : services.networkReaders()) {
-                    if (reader.kind().equals(network.kind()) && reader.summaryPending(network.networkId())) return true;
-                }
-            }
+        for (Map.Entry<String, String> network : seenNetworks().entrySet()) {
+            Optional<NetworkReader> reader = readerOf(network.getValue());
+            if (reader.isPresent() && reader.get().summaryPending(network.getKey())) return true;
         }
         return false;
     }
 
-    private List<MachineDetails.NetworkView> networksOf(MachineGrouping.Machine machine) {
-        Map<String, String> memberships = new LinkedHashMap<>();
-        for (BlockPos pos : machine.cells()) {
-            memberships.putAll(MachineGrouping.membershipsOf(services, pos));
-        }
-        List<MachineDetails.NetworkView> networks = new ArrayList<>();
-        for (NetworkReader reader : services.networkReaders()) {
-            String id = memberships.get(reader.kind().id());
-            if (id != null) {
-                networks.add(new MachineDetails.NetworkView(reader.kind(), id, reader.summary(id)));
-            }
-        }
-        return networks;
+    /** 范围里见到的网：网络编号 → 种类，按第一次见到的顺序。 */
+    private Map<String, String> seenNetworks() {
+        Map<String, String> seen = new LinkedHashMap<>();
+        memberships.values().forEach(cell -> cell.forEach((kind, id) -> seen.putIfAbsent(id, kind)));
+        return seen;
+    }
+
+    private Optional<NetworkReader> readerOf(String kind) {
+        return services.networkReaders().stream().filter(reader -> reader.kind().id().equals(kind)).findFirst();
     }
 
     @Override protected String describePhase(Phase value) {

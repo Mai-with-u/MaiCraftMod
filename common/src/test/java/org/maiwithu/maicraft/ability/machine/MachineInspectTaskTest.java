@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 看机器的任务：分刻读格、认领分组、认不出的格与没加载的格都如实进结果。 */
+/** 看机器的任务：分刻读格、认领后整理成设备与网、认不出的格与没加载的格都如实进结果。 */
 class MachineInspectTaskTest {
 
     private static final BlockPos PRESS = new BlockPos(2, 64, 3);
@@ -55,13 +55,11 @@ class MachineInspectTaskTest {
                 new ReadsMachineArea.Cell(PRESS.above(), Blocks.FURNACE.defaultBlockState(), true)),
                 0, true, false));
         MachineDetails details = run(rig, positionOf(PRESS));
-        assertEquals(1, details.machines().size());
-        // 两格都归同一种机器：运行状态每种机器读一格，只有一条。
-        assertEquals(1, details.machines().get(0).running().size());
-        assertEquals(MachineState.Activity.RUNNING,
-                details.machines().get(0).running().get(0).state().activity());
-        assertEquals(2, details.machines().get(0).types().get(0).blocks().size(), "按角色归并的组成，两格都在");
-        assertTrue(details.machines().get(0).networks().isEmpty(), "没有挂网时不给网络条目");
+        // 同种相邻的两格合成一个设备：读数一样，只写一份。
+        assertEquals(1, details.devices().size());
+        assertEquals(2, details.devices().getFirst().cells(), "两格都算进这个设备");
+        assertEquals(MachineState.Activity.RUNNING, details.devices().getFirst().state().activity());
+        assertTrue(details.networks().isEmpty(), "没有挂网时不给网络条目");
         assertTrue(details.scanComplete());
     }
 
@@ -71,7 +69,7 @@ class MachineInspectTaskTest {
         // 任务这边用真实注册表验证"原版方块实体不进清单"，模组方块走同一条路进清单。
         assertTrue(MachineInspectTask.looksLikeUnclaimedMachine(true, "create:mechanical_press"));
         MachineDetails details = runUnclaimedViaVanillaBlock();
-        assertEquals(0, details.machines().size());
+        assertEquals(0, details.devices().size());
     }
 
     private MachineDetails runUnclaimedViaVanillaBlock() {
@@ -89,7 +87,7 @@ class MachineInspectTaskTest {
                 new ReadsMachineArea.Cell(PRESS, Blocks.CHEST.defaultBlockState(), true)),
                 0, true, false));
         MachineDetails details = run(rig, positionOf(PRESS));
-        assertEquals(0, details.machines().size());
+        assertEquals(0, details.devices().size());
         assertEquals(0, details.unrecognized().size());
         // 纯函数分两头都堵住：原版方块与没有方块实体的格都不算。
         assertTrue(!MachineInspectTask.looksLikeUnclaimedMachine(true, "minecraft:chest"));
@@ -101,7 +99,7 @@ class MachineInspectTaskTest {
         Rig rig = new Rig();
         rig.area.offer(new ReadsMachineArea.Round(List.of(), 7, true, false));
         MachineDetails details = run(rig, positionOf(PRESS));
-        assertEquals(0, details.machines().size());
+        assertEquals(0, details.devices().size());
         assertEquals(7, details.unloadedCells());
         assertTrue(details.scanComplete());
     }
@@ -113,7 +111,7 @@ class MachineInspectTaskTest {
         rig.area.offer(new ReadsMachineArea.Round(List.of(
                 new ReadsMachineArea.Cell(PRESS, Blocks.FURNACE.defaultBlockState(), true)), 0, true, false));
         MachineDetails details = run(rig, positionOf(PRESS));
-        assertEquals(1, details.machines().size());
+        assertEquals(1, details.devices().size());
     }
 
     @Test
@@ -147,7 +145,7 @@ class MachineInspectTaskTest {
         }
         MachineDetails details = (MachineDetails) result.details();
         assertEquals("压板机", details.archive());
-        assertEquals("压板机", details.machines().getFirst().name());
+        assertEquals("压板机", details.devices().getFirst().archive(), "有格落在档案里的设备带上档案名");
         assertTrue(details.check().complete());
         assertEquals(1, details.check().differences().size());
         assertEquals("wrong_block", details.check().differences().getFirst().state());

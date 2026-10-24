@@ -122,7 +122,7 @@
       },
       {
         "ability": "maicraft:machine_inspect",
-        "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+        "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
         "parameters": "radius: integer = 16, item?: string, balance?: string, operation: string = inspect, name?: string",
         "targets": [
           "here",
@@ -924,7 +924,7 @@
     },
     {
       "ability": "maicraft:machine_inspect",
-      "summary": "看一台机器或一片机器区：组成、运行状态、进出口、挂在哪些网络上；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+      "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
       "parameters": [
         {
           "name": "radius",
