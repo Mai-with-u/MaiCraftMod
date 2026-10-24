@@ -163,6 +163,20 @@ class DepositTaskTest {
     }
 
     @Test
+    void 存进网络_count按件存_不整格多存() {
+        // 实机：count=8 却存进了一整格 64 件。count 是件数，8 件就只离开背包 8 件。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 64);
+        FakeNetwork network = new FakeNetwork(rig);
+        network.wireless = true;
+        rig.network = network;
+        TaskResult result = rig.run(new DepositInput(null, List.of(DIRT), 8, 32, Permissions.DEFAULT, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(56, rig.carried(DIRT));
+        assertEquals(8, stored(result));
+    }
+
+    @Test
     void 存进网络_没带无线终端_走去附近装着的终端() {
         // 身上没带无线终端：在身边 radius 格内找墙上装着的终端，走过去点开存。
         Rig rig = new Rig();

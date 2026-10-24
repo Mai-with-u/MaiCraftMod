@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -22,13 +25,15 @@ import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 往 ME 网络里存东西的生产实现：挑一台终端（在身边时身上的无线终端优先，没带或点了地方就找装着的）→
  * 拿出无线终端右键打开，或走过去点在装着的终端面板上 → 核对是这台的界面、等连接状态同步过来
- * → 把要存的几样东西一样样、一格格快速移动进网络（像玩家潜行点背包格）→ 都存完才关上，不每样开关一次。
+ * → 把要存的几样东西一样样存进网络（像玩家潜行点背包格）：整格快速移动，不足一整格的尾数
+ * 拿上光标退回多余的件、凑出正好要存的几件再整份交回网络 → 都存完才关上，不每样开关一次。
  *
  * <p>每一下按背包里那种东西一共少了几件结算，少了才记"存进了网络"；点了一会儿没少，是网络放不下（存储满了、
  * 不收这种东西），如实收场。没连上网络（超出访问点范围、没电）照抄界面上的原因收场并记下这台没连上，
@@ -120,10 +125,15 @@ public final class MenuNetworkStores implements NetworkStorage {
         /** 正在等结算的那一下：发之前背包里这种东西一共几件（没有在等的为 -1），与等了几刻。 */
         private int before = -1;
         private int quiet;
+        /** 正在凑光标上那一小份：还没点完的几下（先拿起整份，再退回多余的件）；点完这一趟才整份交给网络。 */
+        private final Deque<TrimClick> trimming = new ArrayDeque<>();
         /** 收场的原因：一件都没存进时按它失败；存进了就算做完。 */
         private Problem stopReason;
         /** 最近一样存不进的原因：样样都存不进时按它收场。 */
         private Problem lastProblem;
+
+        /** 凑尾数的一下普通点击：在哪一格、左键还是右键；takesToCursor 表示这一下把东西拿上了光标。 */
+        private record TrimClick(int slotId, int button, boolean takesToCursor) {}
 
         Storing(TerminalAccess access, List<BackpackStack> stacks, String purpose, TaskRecords records) {
             this.access = access;
@@ -143,7 +153,7 @@ public final class MenuNetworkStores implements NetworkStorage {
             return switch (stage) {
                 case OPEN -> open(tick);
                 case SYNC -> sync(tick);
-                case STORE -> storeNext();
+                case STORE -> storeNext(tick);
                 case CLOSE -> closeMenu(tick);
                 case DONE -> result();
             };
@@ -184,12 +194,27 @@ public final class MenuNetworkStores implements NetworkStorage {
             return ActionStatus.progressed();
         }
 
-        // 上一下少了几件就记账；没在等的话挑背包里下一格这种东西快速移动进网络，存够这一样接着存下一样，都存完才关上。
-        private ActionStatus storeNext() {
+        // 上一下少了几件就记账；没在等的话按还要存的量挑下一格：整格用得上就快速移动，
+        // 不足一整格的尾数先凑上光标再整份交回网络——快速移动一下就是一整格，不截量会把 count=8 存成 64。
+        private ActionStatus storeNext(TickContext tick) {
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) return finish(null);
             if (menu.busy()) return ActionStatus.running();
             int now = total(reading.get().playerSnapshots());
+            // 正在凑光标上那一小份：一下一下点，退回多余的件；点完这趟光标上正好是要存的几件，整份交回网络。
+            // 背包总数在凑的全程不变，以交回去那一刻为基准等它变少。
+            if (!trimming.isEmpty()) {
+                TrimClick click = trimming.peek();
+                if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
+                if (!menu.click(click.slotId(), click.button())) return ActionStatus.running();
+                trimming.poll();
+                if (trimming.isEmpty()) {
+                    before = now;
+                    quiet = 0;
+                    compat.putBack(tick.player().localPlayer().containerMenu);
+                }
+                return ActionStatus.progressed();
+            }
             if (before >= 0) {
                 if (now < before) {
                     int moved = before - now;
@@ -208,16 +233,29 @@ public final class MenuNetworkStores implements NetworkStorage {
                 }
             }
             if (storedThis >= stack.count()) return nextKind(null);
-            int index = slotHolding(reading.get().playerSnapshots());
-            if (index < 0) {
-                return nextKind(storedThis > 0 ? null
+            return switch (NetworkStorePlan.next(stack.count() - storedThis, slotCounts(reading.get()))) {
+                case NetworkStorePlan.Done done -> nextKind(storedThis > 0 ? null
                         : Problem.of(Problem.Kind.NEED_ITEM, "背包里已经没有 " + stack.itemId() + " 了", null));
-            }
-            // 本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再点，不算点过。
-            if (!menu.quickMove(reading.get().playerSlotIds().get(index))) return ActionStatus.running();
-            before = now;
-            quiet = 0;
-            return ActionStatus.progressed();
+                case NetworkStorePlan.QuickMove move -> {
+                    // 本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再点，不算点过。
+                    if (!menu.quickMove(slotIdOf(reading.get(), move.slotIndex()))) {
+                        yield ActionStatus.running();
+                    }
+                    before = now;
+                    quiet = 0;
+                    yield ActionStatus.progressed();
+                }
+                case NetworkStorePlan.TrimToCursor trim -> {
+                    // 拿起这一格整份（左键），再把多出的几件一件件右键退回源格；点完的下一刻交给网络。
+                    // 拆量的几下要在交回网络前点完，不然快速移动会把整格多存进去。
+                    int slotId = slotIdOf(reading.get(), trim.slotIndex());
+                    trimming.add(new TrimClick(slotId, 0, true));
+                    for (int i = 0; i < trim.slotCount() - trim.keep(); i++) {
+                        trimming.add(new TrimClick(slotId, 1, false));
+                    }
+                    yield ActionStatus.progressed();
+                }
+            };
         }
 
         // 这一样存完或存不进：存不进的记一笔试过；还有下一样就接着存，都过完了才关上。
@@ -276,15 +314,34 @@ public final class MenuNetworkStores implements NetworkStorage {
             return sum;
         }
 
-        private int slotHolding(List<SlotSnapshot> player) {
-            for (int i = 0; i < player.size(); i++) {
-                if (!player.get(i).isEmpty() && itemId(player.get(i)).equals(stack.itemId())) return i;
+        // 背包里这种东西每一格的件数，按格子顺序；别的格不算。
+        private List<Integer> slotCounts(MenuContent.Reading reading) {
+            List<Integer> counts = new ArrayList<>();
+            for (SlotSnapshot slot : reading.playerSnapshots()) {
+                if (!slot.isEmpty() && itemId(slot).equals(stack.itemId())) counts.add(slot.count());
             }
-            return -1;
+            return counts;
+        }
+
+        // 这种东西的第 itemSlotIndex 格在界面里的槽位号：计划里的格序号是"这种东西的第几格"，要换算回界面槽位号。
+        private int slotIdOf(MenuContent.Reading reading, int itemSlotIndex) {
+            int seen = -1;
+            for (int i = 0; i < reading.playerSnapshots().size(); i++) {
+                SlotSnapshot slot = reading.playerSnapshots().get(i);
+                if (slot.isEmpty() || !itemId(slot).equals(stack.itemId())) continue;
+                if (++seen == itemSlotIndex) return reading.playerSlotIds().get(i);
+            }
+            throw new IllegalStateException("要存的 " + stack.itemId() + " 第 "
+                    + itemSlotIndex + " 格不在背包里，动手前的快照和现在的对不上");
         }
 
         private String itemId(SlotSnapshot slot) {
             return BuiltInRegistries.ITEM.getKey(slot.stack().getItem()).toString();
+        }
+
+        // 凑光标上那一小份的中途停不得：东西在光标上，撒手会落进流程外。
+        @Override public Interruptibility interruptibility() {
+            return !trimming.isEmpty() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         @Override public void pause() {
