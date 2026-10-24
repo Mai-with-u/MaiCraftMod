@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
 import org.maiwithu.maicraft.kernel.interrupt.DisplacedTask;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -48,7 +49,8 @@ import org.maiwithu.maicraft.kernel.task.CloseReason;
  * <p>被没点名的玩家打：不还手，只退到他够不着外、举着盾；他停手后停下来等 LLM 决定（还手就 fight 点名他，
  * 不理就让主任务继续），不自己走回去接着干活。自家人打角色只发事件、不停工。
  */
-final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements DisplacedTask {
+final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
+        implements DisplacedTask, AnnouncesFinish {
 
     /**
      * 自卫的阶段：打 → 危险消失后的观察期 → 捡这一仗掉出来的东西和射出去的箭 → 走回打点。
@@ -84,6 +86,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
     private boolean displaced;
     /** 主任务为什么停、离打点几格、人停在哪：交给控制循环写进主任务的暂停说明。 */
     private String displacedWhy;
+    /** 收场事件发过没有：自己走完的路当场发；卡住、出错这类被内核收场的那一刻没机会发，由 finishedNote 补一条。 */
+    private boolean finishReported;
     /** 被陌生玩家打了：不管主任务在哪做都一样，都停下等 LLM 决定还不还手。 */
     private boolean awaitsOrders;
     /** 甩开了追兵、天黑血低，正在就地挖坑熬夜：挖不成就照撤离收场；记着这次撤离的原因。 */
@@ -230,6 +234,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         }
         String who = String.join("、", names);
         displacedWhy = "被玩家 " + who + " 打了，没有还手，" + whereNow(context);
+        // 收场信息已经在这条事件里说清（还手不还手等 LLM 决定），结束时不再补一条重复的。
+        finishReported = true;
         events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
                 + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
@@ -289,6 +295,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         double heartsLost = heartsLost(context);
         if (drift < 1.5) {
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
+            finishReported = true;
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
                     "自卫结束，回到打点；" + tally.describe() + "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
@@ -302,6 +309,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         if (status instanceof ActionStatus.Failed) {
             // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
             displaced = true;
+            finishReported = true;
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             double[] self = moves.selfPosition(context);
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
@@ -345,9 +353,22 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase> implements
         double drift = distanceFromAnchor(context);
         String summary = "已撤离，甩开了追兵（" + reason + "），" + tally.describe()
                 + "离打点 " + Math.round(drift) + " 格";
+        finishReported = true;
         events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "，人在 " + here(context));
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
                 .details(details(drift, heartsLost(context))).build());
+    }
+
+    /**
+     * 收场事件的兜底：回到打点、撤离、走不回打点、被玩家打停手这几条路在走到结局的那一刻已经自己发过收场事件，
+     * 不再补；卡住被内核收场、推进中程序出错这类自己没走到结局的收场，事件还没发过——
+     * 缺了它，读事件流的一方分不清这场是打完了、还在打还是收手了（实机一场只有开始没有收场，事件对不上）。
+     * 结果的结论句原样带上，战况跟着走，不另起一套说法。
+     */
+    @Override
+    public String finishedNote(TaskResult result) {
+        if (finishReported) return null;
+        return "自卫插曲收场：" + result.summary() + "；" + tally.describe();
     }
 
     /** 甩开追兵后有效血量（含护甲折算）到这条线以下，天黑了就地挖坑熬夜：不到半血。 */

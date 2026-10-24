@@ -74,16 +74,20 @@ class SelfDefenseTaskTest {
         int walks;
         ActionStatus walkStatus = ActionStatus.progressed();
         boolean night;
+        /** 四面都是墙：哪边都迈不出去，脚只能站着——卡住收场的测试用它把移动进展也掐掉。 */
+        boolean blockedGround;
+        /** 出手动作的状态来源：默认一挥就中，卡住收场的测试换成一直挥不出去。 */
+        Supplier<ActionStatus> strikeStatus = () -> {
+            strikes++;
+            return ActionStatus.done();
+        };
         /** 交给寻路的第一段：撤离往哪跑看它。 */
         GoalCompiler.Compiled firstWalk;
 
         @Override public boolean night(TickContext context) { return night; }
 
         @Override public Action strike(TickContext context, int entityId) {
-            return new Fixed(() -> {
-                strikes++;
-                return ActionStatus.done();
-            });
+            return new Fixed(strikeStatus);
         }
 
         @Override public Action shoot(TickContext context, int entityId) { return new Fixed(ActionStatus::running); }
@@ -92,7 +96,9 @@ class SelfDefenseTaskTest {
         @Override public boolean attackReady(TickContext context) { return true; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
         @Override public void lowerGuard() {}
-        @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
+        @Override public Footwork.Ground ground(TickContext context) {
+            return blockedGround ? (dx, dz) -> Footwork.Footing.BLOCKED : (dx, dz) -> Footwork.Footing.FLAT;
+        }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) {}
 
         @Override public Action walk(GoalCompiler.Compiled goal) {
@@ -158,6 +164,32 @@ class SelfDefenseTaskTest {
         var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
         assertEquals(moves.strikes, details.hits());
         assertEquals("minecraft:iron_sword", details.weapon());
+        // 自己走完的收场当场发过一条，结束时不再补一条重复的。
+        assertEquals(1, events.messages.stream().filter(m -> m.contains("自卫结束")).count(), events.messages.toString());
+        assertNull(task.finishedNote(finished), "已经发过收场事件，不再补");
+    }
+
+    @Test
+    void aStuckEpisodeStillEndsWithAFinishEvent() {
+        // 够得着但一下都挥不出去、脚也迈不开：半小时没任何进展，内核按卡住把这场收了——
+        // 收场事件不能因此缺了，事件流里有始有终，读的一方才知道这场收手了而不是还在打。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        moves.strikeStatus = ActionStatus::running;
+        moves.blockedGround = true;
+        Events events = new Events();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, events);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        TickResult result = run(task, 0, 700);
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
+        assertEquals(TaskResult.Status.FAILED, finished.status(), finished.summary());
+        assertEquals(1, events.messages.stream().filter(m -> m.contains("插入自卫")).count(), events.messages.toString());
+        // 开始有一条、收场补一条，成对。
+        String note = task.finishedNote(finished);
+        assertTrue(note != null && note.contains("自卫插曲收场"), String.valueOf(note));
+        assertTrue(note.contains("没有新进展"), note);
     }
 
     @Test
