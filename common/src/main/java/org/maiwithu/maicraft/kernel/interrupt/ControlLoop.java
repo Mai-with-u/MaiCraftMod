@@ -177,6 +177,18 @@ public final class ControlLoop {
         return stack.isEmpty() ? null : top().task;
     }
 
+    /**
+     * 压在主任务上面、此刻占着角色身体的临时任务；主任务自己在推进、或没有插着的临时任务时为 null。
+     * 查询端据此说清"目标为什么迟迟不动"：主任务没被推进不是卡住，是身体被生存需求借走了。
+     */
+    public Task occupyingTemporaryTask() {
+        if (stack.size() < 2 || stack.getFirst().from != null) {
+            return null;
+        }
+        Frame topFrame = stack.getLast();
+        return topFrame.from == null ? null : topFrame.task;
+    }
+
     /** 运行栈每一层此刻的样子，从下往上（最底是主任务，最上是此刻在推进的）：给调试面板看角色听谁的。 */
     public List<Layer> layers() {
         List<Layer> layers = new ArrayList<>(stack.size());

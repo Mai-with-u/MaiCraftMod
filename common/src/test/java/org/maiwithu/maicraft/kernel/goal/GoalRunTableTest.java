@@ -6,10 +6,16 @@ import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.kernel.task.Urgency;
 
 import java.util.List;
 
@@ -263,6 +269,87 @@ class GoalRunTableTest {
 
         table.pause(runner.run().id());
         assertFalse(runner.survivalNeedsOff(), "暂停的目标不关");
+    }
+
+    @Test
+    void doingSaysWhoHoldsTheBodyWhileATemporaryTaskOccupiesIt() {
+        // 夜里自保、睡觉这类生存需求的临时任务压在主任务上时，主目标一连几分钟不被推进；
+        // 查询要如实说目标在等谁，不能把"身体被占着"呈现成"看现场决定下一件做什么"，
+        // 否则对面把等天亮当成卡死，反复取消重下还是一样（夜里下的命令目标就这样耗到会话结束）。
+        HoldingTask holding = new HoldingTask("极端自保：等天亮");
+        ControlLoop occupiedLoop = new ControlLoop(List.of(new OccupyingNeed(holding)));
+        GoalRunTable occupied = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("用不到");
+        }, occupiedLoop, handover, new DeathRecovery(new TaskEventLog()), new RecordingDeathActions());
+        long id = occupied.launch(GOAL, null).runner().run().id();
+
+        // 生存需求插进来，压在刚下达、还没被推进过的主目标上。
+        occupiedLoop.tick(new GoalTestTick(tick++));
+
+        String doing = occupied.doing(id).orElseThrow();
+        assertTrue(doing.contains("占着角色"), doing);
+        assertTrue(doing.contains("极端自保：等天亮"), doing);
+        assertTrue(doing.contains("第 0 步"), "目标自己的处境照样带上：" + doing);
+
+        // 临时任务做完弹出：身体还给了主目标，查询不再说被占着。
+        holding.finishNow();
+        occupiedLoop.tick(new GoalTestTick(tick++));
+        assertFalse(occupied.doing(id).orElseThrow().contains("占着角色"));
+    }
+
+    /** 占着身体不走的临时任务替身：一直推进、不给结果，像挖坑等天亮那样熬着；叫它收场才结束。 */
+    private static final class HoldingTask implements Task {
+        private final String name;
+        private boolean finishing;
+
+        HoldingTask(String name) {
+            this.name = name;
+        }
+
+        void finishNow() {
+            finishing = true;
+        }
+
+        @Override public void start(TickContext context) {}
+
+        @Override public TickResult tick(TickContext context) {
+            return finishing ? TickResult.finished(TaskResult.done(name + "结束")) : TickResult.RUNNING;
+        }
+
+        @Override public void pause() {}
+
+        @Override public TaskResult close(CloseReason reason) {
+            return TaskResult.done(name + "收尾");
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.WORKING;
+        }
+
+        @Override public String describe() {
+            return name;
+        }
+    }
+
+    /** 总是插进来的生存需求替身：创建的任务永远是同一份占着身体的。 */
+    private static final class OccupyingNeed implements SurvivalNeed {
+        private final HoldingTask task;
+
+        OccupyingNeed(HoldingTask task) {
+            this.task = task;
+        }
+
+        @Override public String name() {
+            return "夜晚";
+        }
+
+        @Override public Urgency urgency(TickContext context) {
+            return Urgency.SOON;
+        }
+
+        @Override public Task createTask(TickContext context) {
+            return task;
+        }
     }
 
     @Test

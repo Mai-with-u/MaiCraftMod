@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.slf4j.Logger;
@@ -215,6 +216,15 @@ public final class GoalRunTable {
         }
         if (!runner.run().unfinished()) return Optional.empty();
         String describe = runner.describe();
+        // 主目标在推进中却轮不到它：生存需求的临时任务（夜里自保、睡觉这类）占着身体，目标要等它做完。
+        // 这个事实不说明，对面会把"等天亮"当成卡死，反复取消重下——临时任务不随换活退场，重下还是一样。
+        if (runner.run().state() == GoalRunState.RUNNING && id == mainRunId) {
+            Task occupying = loop.occupyingTemporaryTask();
+            if (occupying != null) {
+                return Optional.of("生存需求的临时任务「" + occupying.describe() + "」占着角色，"
+                        + "这条目标要等它做完才接着推进：" + describe);
+            }
+        }
         if (runner.run().state() == GoalRunState.RUNNING && !handover.automationOwnsControls()) {
             // 人按 F8 收回了角色：只能等人交回，重新下达也抢不回来，如实说清，免得 LLM 反复下达。
             if (handover.humanTookOver()) {
