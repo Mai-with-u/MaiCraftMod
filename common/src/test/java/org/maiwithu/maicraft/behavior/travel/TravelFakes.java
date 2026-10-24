@@ -136,7 +136,14 @@ public final class TravelFakes {
         /** 地表脚的高度；没摆为读不到（那一片没加载）。 */
         public Integer surface;
 
+        /** 逐列摆的地表高度（列 x,z → 脚位高度）：摆水边这类有的柱是水、有的柱是岸的地形。 */
+        public final Map<String, Integer> columnSurfaces = new HashMap<>();
+
         @Override public OptionalInt surfaceFeet(int x, int z) {
+            Integer byColumn = columnSurfaces.get(x + "," + z);
+            if (byColumn != null) {
+                return OptionalInt.of(byColumn);
+            }
             return surface == null ? OptionalInt.empty() : OptionalInt.of(surface);
         }
     }

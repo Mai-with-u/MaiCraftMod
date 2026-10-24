@@ -71,6 +71,25 @@ class DestinationResolverTest {
     }
 
     @Test
+    void waterColumnNearShoreLandsOnTheNearestDrySpot() {
+        // 实机（goal 818/819）：目标柱整列是水、岸在几格外——落点换到最近的岸格，
+        // 到达判据站干地才放行，落点留在水里人会在水里泡到超时。
+        world.columnSurfaces.put("134,36", 62);
+        var ready = ready(resolver.resolve(new Target.Position(134, null, 32, null), 2));
+        assertTrue(ready.heightConfirmed(), "岸格的高度是挑出来的，算核实过");
+        assertTrue(ready.navGoal().isAt(new BlockPos(134, 62, 36)), "落到岸上那一格");
+    }
+
+    @Test
+    void openWaterTargetStillWalksTheColumn() {
+        // 开阔水中央：附近也没有干地，不替玩家挪目的地，照旧先走到那一柱列。
+        var ready = ready(resolver.resolve(new Target.Position(134, null, 32, null), 2));
+        NavGoal.Column column = assertInstanceOf(NavGoal.Column.class, inner(ready));
+        assertEquals(134, column.x);
+        assertEquals(32, column.z);
+    }
+
+    @Test
     void rememberedLandmarkResolvesToItsPlace() {
         places.put("家", new WorldPosition(120, 70, -80, null));
         var ready = ready(resolver.resolve(new Target.Landmark("家"), 2));

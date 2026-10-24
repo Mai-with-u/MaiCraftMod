@@ -48,6 +48,9 @@ public final class DestinationResolver {
     /** 按地表落点走时至少放宽这么多（格）：地表那一格可能是一根草、一块台阶，站在旁边就算到。 */
     private static final double SURFACE_SLACK = 1.5;
 
+    /** 目标柱整列是水时往外找干地落点几格（切比雪夫距离）：贴岸的水边几格内就有岸，再远算开阔水中央。 */
+    static final int SHORE_SEARCH_RADIUS = 8;
+
     private final TravelWorldView world;
     private final ReadsRememberedPlaces rememberedPlaces;
     private final ReadsSeenTargets seenTargets;
@@ -113,18 +116,28 @@ public final class DestinationResolver {
             return routeAcross(position.dimension(), destination);
         }
         if (position.y() == null) {
-            // 没给 y：落到这一柱里真能站的干地上（真人说"去那儿"指的是站得住的地面，
-            // 不是水面上方悬空的顶格、也不是封顶建筑的屋顶）。没加载、或整柱没有能站的地方
-            // （水面列）不猜高度，先走到那一柱列，到了再找能站的格子。
-            OptionalInt surface = world.surfaceFeet(position.x(), position.z());
-            if (surface.isPresent()) {
-                return new Resolution.Ready(TravelDestination.confirmed(new WorldPosition(position.x(),
-                        surface.getAsInt(), position.z(), position.dimension()), Math.max(radius, SURFACE_SLACK)));
-            }
-            return new Resolution.Ready(TravelDestination.anyHeight(
-                    position.x(), position.z(), radius, position.dimension()));
+            return resolveColumn(position.x(), position.z(), radius, position.dimension());
         }
         return new Resolution.Ready(destination);
+    }
+
+    /**
+     * 只给 x/z（或方向走多远算出来的落点）：落到这一柱里真能站的干地上（真人说"去那儿"指的是
+     * 站得住的地面，不是水面上方悬空的顶格、也不是封顶建筑的屋顶）。整柱是水（贴岸的水边）时
+     * 往附近找最近的干地落点——到达判据站干地才放行，落点留在水里就永远到不了，人会在水里泡到超时；
+     * 附近也没有干地（开阔水中央）时不替玩家挪目的地，照旧先走到那一柱列。
+     */
+    private Resolution resolveColumn(int x, int z, double radius, String dimension) {
+        OptionalInt surface = world.surfaceFeet(x, z);
+        if (surface.isPresent()) {
+            return new Resolution.Ready(TravelDestination.confirmed(
+                    new WorldPosition(x, surface.getAsInt(), z, dimension), Math.max(radius, SURFACE_SLACK)));
+        }
+        Optional<WorldPosition> shore = NearestDryLanding.near(x, z, SHORE_SEARCH_RADIUS, world::surfaceFeet, dimension);
+        if (shore.isPresent()) {
+            return new Resolution.Ready(TravelDestination.confirmed(shore.get(), Math.max(radius, SURFACE_SLACK)));
+        }
+        return new Resolution.Ready(TravelDestination.anyHeight(x, z, radius, dimension));
     }
 
     // 地标名：记住的地点优先，没记过再认附近看得见、写着这个名字的那块告示牌，落出来的位置和记住的地点一样走；
@@ -165,7 +178,7 @@ public final class DestinationResolver {
         int[] vector = vectorOf(direction.toward());
         int x = spot.x() + vector[0] * direction.distance();
         int z = spot.z() + vector[1] * direction.distance();
-        return new Resolution.Ready(TravelDestination.anyHeight(x, z, radius, spot.dimension()));
+        return resolveColumn(x, z, radius, spot.dimension());
     }
 
     /** 方向变成单位向量（x, z）；相对的前后左右按此刻朝向折算。 */
