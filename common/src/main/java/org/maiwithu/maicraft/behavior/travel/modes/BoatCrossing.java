@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.modes;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -214,6 +215,21 @@ public final class BoatCrossing implements TravelMode {
         return new Plan(spot.map(BoatLaunchSpots.Spot::feet).orElse(offer.from()),
                 spot.map(BoatLaunchSpots.Spot::water).orElse(offer.from()),
                 freeBoat.orElse(null), landings, carried.orElse(null), request.to());
+    }
+
+    /** 停着的船旁能站的脚位：四邻加对角八柱，各柱用干地事实挑能站的脚位；全是水就给空，由调用方决定照不照常去试。 */
+    static List<BlockPos> moorSideStances(Function<BlockPos, Optional<BlockState>> read, BlockPos boat) {
+        List<BlockPos> stances = new ArrayList<>(8);
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                int x = boat.getX() + dx;
+                int z = boat.getZ() + dz;
+                WaterCrossing.standFeet(read, x, z, boat.getY())
+                        .ifPresent(y -> stances.add(new BlockPos(x, y, z)));
+            }
+        }
+        return stances;
     }
 
     /** 出发点最近的一柱实地：从船的位置一圈圈往外找，找带着往目的地那边偏。 */

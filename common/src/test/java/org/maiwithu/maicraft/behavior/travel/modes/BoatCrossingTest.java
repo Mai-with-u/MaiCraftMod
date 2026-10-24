@@ -233,6 +233,17 @@ class BoatCrossingTest {
     }
 
     @Test
+    void 船旁的站位按干地挑_岸那一侧能站_湖心没有() {
+        lake(10, 30, 64, Blocks.WATER.defaultBlockState());
+        // 船紧贴西岸停在 (10,64,0)：西边 x=9 是石头地，站到船旁落在岸上那柱的脚位。
+        List<BlockPos> stances = BoatCrossing.moorSideStances(world(), new BlockPos(10, 64, 0));
+        assertTrue(stances.contains(new BlockPos(9, 65, 0)), "岸侧那一柱要给出脚位：" + stances);
+        // 湖心 (20,64,0) 的八邻全是水：没有能站的干地，站位清单为空。
+        assertTrue(BoatCrossing.moorSideStances(world(), new BlockPos(20, 64, 0)).isEmpty(),
+                "湖心周围挑不出干地站位");
+    }
+
+    @Test
     void 人坐在原版船上时在主世界非它不可() {
         assertTrue(BoatCrossing.claimsFor("minecraft:overworld", true));
         assertFalse(BoatCrossing.claimsFor("minecraft:overworld", false), "没坐船还有的选");

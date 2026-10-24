@@ -150,7 +150,10 @@ final class BoatCrossingLeg implements TravelLeg {
             return startRowing();
         }
         if (plan.existingBoat() != null) {
-            return walkTo(plan.existingBoat(), neighborsOf(plan.existingBoat()));
+            // 船浮在水面上，"船旁"得站在岸边的干地上：站位按干地事实挑（与放船站位、靠岸点同一份），
+            // 一柱都挑不出才退回原来的邻格清单，让走到照常去试、到不了如实说。
+            List<BlockPos> stances = BoatCrossing.moorSideStances(reader(), plan.existingBoat());
+            return walkTo(plan.existingBoat(), stances.isEmpty() ? neighborsOf(plan.existingBoat()) : stances);
         }
         if (plan.boatItem() != null) {
             Optional<Action> move = services.toMainhand().moveToMainhand(plan.boatItem());
