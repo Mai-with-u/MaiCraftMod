@@ -7,6 +7,7 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakePlaces;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakeSeen;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakeWorld;
@@ -41,18 +42,20 @@ class DestinationResolverTest {
     @Test
     void fullPositionBecomesExactOrNear() {
         var ready = ready(resolver.resolve(new Target.Position(10, 64, -30, null), 0));
-        assertInstanceOf(NavGoal.Exact.class, ready.navGoal(), "容差为 0 时要站进那一格");
+        assertInstanceOf(NavGoal.Exact.class, inner(ready), "容差为 0 时要站进那一格");
 
         var withRadius = ready(resolver.resolve(new Target.Position(10, 64, -30, null), 2));
-        NavGoal.Near near = assertInstanceOf(NavGoal.Near.class, withRadius.navGoal());
+        NavGoal.Near near = assertInstanceOf(NavGoal.Near.class, inner(withRadius));
         assertEquals(2, near.radius);
+        // 目的地恒套"到了要站在干地上"这一层：水里漂进范围不算到。
+        assertInstanceOf(StandingDry.class, withRadius.navGoal());
     }
 
     @Test
     void positionWithoutHeightWalksTheColumn() {
         // 高度纪律：没给 y 就不猜高度，先走到那一柱列，到了再找能站的格子。
         var ready = ready(resolver.resolve(new Target.Position(10, null, -30, null), 2));
-        NavGoal.Column column = assertInstanceOf(NavGoal.Column.class, ready.navGoal());
+        NavGoal.Column column = assertInstanceOf(NavGoal.Column.class, inner(ready));
         assertEquals(10, column.x);
         assertEquals(-30, column.z);
         assertEquals(2, column.radius);
@@ -185,19 +188,19 @@ class DestinationResolverTest {
     void compassDirectionLandsAtTheRightColumn() {
         // 角色在原点朝北：往北 100 格落在 (0, -100)，往东 30 格落在 (30, 0)。
         var north = ready(resolver.resolve(new Target.Direction(Target.Toward.NORTH, 100), 2));
-        NavGoal.Column northColumn = assertInstanceOf(NavGoal.Column.class, north.navGoal());
+        NavGoal.Column northColumn = assertInstanceOf(NavGoal.Column.class, inner(north));
         assertEquals(0, northColumn.x);
         assertEquals(-100, northColumn.z);
 
         world.facing = Target.Toward.NORTH;
         var forward = ready(resolver.resolve(new Target.Direction(Target.Toward.FORWARD, 20), 2));
-        NavGoal.Column forwardColumn = assertInstanceOf(NavGoal.Column.class, forward.navGoal());
+        NavGoal.Column forwardColumn = assertInstanceOf(NavGoal.Column.class, inner(forward));
         assertEquals(0, forwardColumn.x);
         assertEquals(-20, forwardColumn.z, "朝北时前方就是北");
 
         world.facing = Target.Toward.EAST;
         var left = ready(resolver.resolve(new Target.Direction(Target.Toward.LEFT, 10), 2));
-        NavGoal.Column leftColumn = assertInstanceOf(NavGoal.Column.class, left.navGoal());
+        NavGoal.Column leftColumn = assertInstanceOf(NavGoal.Column.class, inner(left));
         assertEquals(0, leftColumn.x, "朝东时左手边是北");
         assertEquals(-10, leftColumn.z);
     }
@@ -217,5 +220,10 @@ class DestinationResolverTest {
 
     private TravelDestination ready(DestinationResolver.Resolution resolution) {
         return assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolution).destination();
+    }
+
+    /** 目的地恒套"站在干地上才算到"的装饰，看位置条件时先解开这一层。 */
+    private NavGoal inner(TravelDestination destination) {
+        return ((StandingDry) destination.navGoal()).inner;
     }
 }

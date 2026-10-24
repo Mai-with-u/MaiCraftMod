@@ -20,8 +20,10 @@ public interface TravelWorldView {
     Target.Toward currentFacing();
 
     /**
-     * 这一柱列地表能站的那一格（脚的高度）：这一片加载着才读得到，树叶不算地面；读不到为空。
-     * 只给了 x/z 的目的地按它落到地面上，不在同一列的坑底、洞里算"到了"。
+     * 这一柱列里脚下站得住的落点（干地，脚的高度）：这一片加载着才读得到；
+     * 顶上有方块不等于站得上——水面列的顶格在水上、封顶建筑的顶格在屋顶，都作不了落点。
+     * 人待在盖了顶的空间里时优先取人所在层的可站格（室内指室内），其余取露天可站的地表。
+     * 读不到、或这一柱没有能站的地方（整柱是水）为空，解析方退回"先走到那一柱列"。
      */
     default OptionalInt surfaceFeet(int x, int z) {
         return OptionalInt.empty();
@@ -38,5 +40,13 @@ public interface TravelWorldView {
     /** 人能不能站在这一格（脚在这格、头在上面一格、脚下踩得住）；没加载、读不到时答能，不凭空放宽目的地。 */
     default boolean standable(int x, int y, int z) {
         return true;
+    }
+
+    /**
+     * 角色身体此刻在水里吗（泅渡、泡在浅水里都算）：判"到了"与乘船腿的出发点
+     * 按这同一份事实判，各处不再另写"脚下是不是水"。读不到角色时答不在。
+     */
+    default boolean inWater() {
+        return false;
     }
 }

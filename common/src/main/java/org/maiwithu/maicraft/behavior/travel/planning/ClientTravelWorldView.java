@@ -9,9 +9,9 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.explore.ClientExplorationWorld;
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
+import org.maiwithu.maicraft.behavior.explore.OpenSky;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -50,15 +50,29 @@ public final class ClientTravelWorldView implements TravelWorldView {
     }
 
     @Override
+    public boolean inWater() {
+        PlayerContext current = context.get();
+        return current != null && current.localPlayer() != null
+                && current.localPlayer().isInWater();
+    }
+
+    @Override
     public OptionalInt surfaceFeet(int x, int z) {
         PlayerContext current = context.get();
         if (current == null || current.level() == null) return OptionalInt.empty();
-        BlockPos column = new BlockPos(x, 0, z);
-        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
-        if (!current.level().isLoaded(column)) return OptionalInt.empty();
-        // 地表最高的实心（不算树叶）方块上面那一格就是站的地方。
-        // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
-        return OptionalInt.of(ClientSurfaceHeight.motionBlockingNoLeaves(current.level(), x, z));
+        // 客户端世界的 hasChunkAt 永远答"加载着"，没加载的格读出来是空气；按逐列样本自己带 loaded 判。
+        ColumnSample sample = ClientExplorationWorld.sample(current.level(), x, z);
+        if (!sample.loaded()) return OptionalInt.empty();
+        // 落点要在能站的干地上：水面列的顶格悬在水上、封顶建筑的顶格在屋顶，都不能只凭"顶上有方块"就当落点。
+        // 挑法见 ColumnLanding：站不站得住按 BlockPassability 的干地事实判，头顶有没有遮挡按露天判断判。
+        WorldPosition spot = currentSpot();
+        int playerY = spot == null ? sample.topY() + 1 : spot.y();
+        boolean underCover = spot != null && OpenSky.judge(
+                ClientExplorationWorld.sample(current.level(), spot.x(), spot.z()), spot.y())
+                instanceof OpenSky.Verdict.Buried;
+        return ColumnLanding.feet(sample,
+                y -> BlockPassability.isDryStandable(current.level(), new BlockPos(x, y, z)),
+                playerY, underCover);
     }
 
     // 顶盖样本和探索逐列抽样读的是同一份：回没回到露天、哪儿是露天落脚处，两边按同一条事实判。

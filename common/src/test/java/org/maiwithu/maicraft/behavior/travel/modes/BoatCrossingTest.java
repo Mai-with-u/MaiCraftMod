@@ -72,9 +72,11 @@ class BoatCrossingTest {
     }
 
     @Test
-    void 出发地泡在水里不报价放船() {
+    void 出发柱泡在水里不由勘测判() {
+        // 出发点在不在水里按角色身体的干地事实判（与走路到达同一个读法），勘测只看连线上那片水的形状：
+        // 出发柱是水、对岸是实地时，出发侧那片水没有实地岸头，隔不出"能划的一片"。
         lake(-10, 30, 64, Blocks.WATER.defaultBlockState());
-        assertEquals(WaterCrossing.Answer.WATER_AT_START,
+        assertEquals(WaterCrossing.Answer.NO_WATER,
                 WaterCrossing.between(world(), new BlockPos(0, 65, 0), new BlockPos(45, 65, 0)).answer());
     }
 

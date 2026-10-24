@@ -113,8 +113,9 @@ public final class DestinationResolver {
             return routeAcross(position.dimension(), destination);
         }
         if (position.y() == null) {
-            // 没给 y：那一列加载着就落到地表（真人说"去那儿"指的是地面上，不是同一列的坑底、洞里）；
-            // 没加载的不猜高度，先走到那一柱列，到了再找能站的格子。
+            // 没给 y：落到这一柱里真能站的干地上（真人说"去那儿"指的是站得住的地面，
+            // 不是水面上方悬空的顶格、也不是封顶建筑的屋顶）。没加载、或整柱没有能站的地方
+            // （水面列）不猜高度，先走到那一柱列，到了再找能站的格子。
             OptionalInt surface = world.surfaceFeet(position.x(), position.z());
             if (surface.isPresent()) {
                 return new Resolution.Ready(TravelDestination.confirmed(new WorldPosition(position.x(),

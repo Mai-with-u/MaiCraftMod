@@ -148,7 +148,9 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         BlockPos feet = new BlockPos(spot.x(), spot.y(), spot.z());
         lastFeet = feet;
         TravelDestination destination = journey.destination();
-        if (destination != null && destination.navGoal().isAt(feet)) {
+        // 站到了就结束：位置到了还得站在干地上——泡在浅水里的那格不算到，
+        // 与走路到达、乘船腿的出发点按同一份干地事实判，不然走路说到到了、船又说脚下是水。
+        if (destination != null && destination.navGoal().isAt(feet) && !world.inWater()) {
             arrivedAt = spot;
             return Next.done(TaskResult.done("出行：到了" + destination.describe() + "，实测位置 "
                     + feet.toShortString()));

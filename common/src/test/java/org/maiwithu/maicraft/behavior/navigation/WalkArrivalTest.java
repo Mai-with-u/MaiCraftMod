@@ -8,6 +8,7 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 
 /**
  * 到达判断的离线测试：站着算到，跳到最高点与空中经过不算，泅渡按目标自己给出的规则算数。
@@ -53,6 +54,25 @@ class WalkArrivalTest {
         assertTrue(NavGoal.adjacent(TARGET).isAt(floating));
         assertFalse(WalkArrival.reached(NavGoal.adjacent(TARGET), floating, false, true));
         assertTrue(WalkArrival.reached(NavGoal.adjacent(TARGET), floating, true, false));
+    }
+
+    @Test
+    void strictGoalRejectsStandingInShallowWater() {
+        // 要求站实的目标泡在浅水里脚踩着地也不算到：与乘船腿的出发点按同一份干地事实判，
+        // 不然走路把水里判成到了、船又拒绝从水里出发，同一片岸两边互相矛盾。
+        assertTrue(NavGoal.exact(TARGET).isAt(TARGET));
+        assertFalse(WalkArrival.reached(NavGoal.exact(TARGET), TARGET, true, true));
+    }
+
+    @Test
+    void standingWrapTightensLooseGoalsToDryGround() {
+        // 出行的目的地套"站在干地上"这一层：位置条件照旧，水里漂进范围、浅水里站着都不算到。
+        NavGoal dry = new StandingDry(NavGoal.near(TARGET, 2));
+        assertFalse(dry.acceptsWaterArrival());
+        assertTrue(dry.isAt(TARGET));
+        assertFalse(WalkArrival.reached(dry, TARGET, false, true));
+        assertFalse(WalkArrival.reached(dry, TARGET, true, true));
+        assertTrue(WalkArrival.reached(dry, TARGET, true, false));
     }
 
     @Test

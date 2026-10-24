@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -147,7 +148,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         int x = here.x() + (int) Math.round(dx / distance * SURFACE_LEG);
         int z = here.z() + (int) Math.round(dz / distance * SURFACE_LEG);
         OptionalInt y = world.surfaceFeet(x, z);
-        return y.isEmpty() ? null : NavGoal.near(new BlockPos(x, y.getAsInt(), z), SURFACE_LEG_RADIUS);
+        // 地表小段的落点同样要站在干地上：水里漂到不算走完这段，不然一段落进水里，
+        // 下一段从水里出发，与乘船腿的干地出发点互相矛盾。
+        return y.isEmpty() ? null
+                : new StandingDry(NavGoal.near(new BlockPos(x, y.getAsInt(), z), SURFACE_LEG_RADIUS));
     }
 
     @Override

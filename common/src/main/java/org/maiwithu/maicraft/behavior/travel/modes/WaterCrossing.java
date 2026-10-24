@@ -14,7 +14,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelPlanner;
 /**
  * 隔水勘测（纯函数）：人和目的地之间隔着一片连起来的活水吗，水有多宽，两头岸在哪。
  * 沿出发点到目的地连一线，逐柱找地表：顶上是水算水柱，是冰算冻住，别的是实地。
- * 出发地、目的地脚下就是水的不算"隔着水"——那种走路会泅渡，或者人正坐在船上由"非它不可"接手。
+ * 出发点在不在水里不在这里判——按角色身体的干地事实判（与走路到达同一个读法），
+ * 这里只管连线上那片水的形状。
  */
 public final class WaterCrossing {
 
@@ -32,8 +33,6 @@ public final class WaterCrossing {
         ACROSS_WATER,
         /** 连线上没找到成片的水。 */
         NO_WATER,
-        /** 出发地脚下就是水：不用放船，走路会泅渡。 */
-        WATER_AT_START,
         /** 目的地那一头到线走完还是水：划过去也上不了岸。 */
         WATER_AT_END,
         /** 水面冻住了（冰封的湖海），船放不下去。 */
@@ -57,10 +56,6 @@ public final class WaterCrossing {
     public static Survey between(Function<BlockPos, Optional<BlockState>> read, BlockPos from, BlockPos to) {
         BlockPos start = from.immutable();
         BlockPos end = to.immutable();
-        Kind startKind = surfaceKind(read, start);
-        if (startKind == Kind.WATER || startKind == Kind.FROZEN) {
-            return new Survey(Answer.WATER_AT_START, null);
-        }
         double distance = Math.sqrt(start.distSqr(end));
         if (distance < 1) return new Survey(Answer.NO_WATER, null);
         // 逐柱沿连线走；太远时按比例加大步距，水宽按步距折回格数。

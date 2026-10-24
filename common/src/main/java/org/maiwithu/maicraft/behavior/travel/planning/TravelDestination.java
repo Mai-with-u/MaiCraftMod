@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel.planning;
 
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -34,13 +35,18 @@ public record TravelDestination(WorldPosition position, boolean heightConfirmed,
         return new TravelDestination(new WorldPosition(x, 0, z, dimension), false, radius);
     }
 
-    /** 编译成走到用的导航目标：高度核实过按位置与容差走，没核实过只走到那一柱列。 */
+    /** 编译成走到用的导航目标：高度核实过按位置与容差走，没核实过只走到那一柱列；到了要站在干地上才算到。 */
     public NavGoal navGoal() {
+        NavGoal goal;
         if (!heightConfirmed) {
-            return NavGoal.column(position.x(), position.z(), radius);
+            goal = NavGoal.column(position.x(), position.z(), radius);
+        } else {
+            BlockPos cell = new BlockPos(position.x(), position.y(), position.z());
+            goal = radius <= 0 ? NavGoal.exact(cell) : NavGoal.near(cell, radius);
         }
-        BlockPos cell = new BlockPos(position.x(), position.y(), position.z());
-        return radius <= 0 ? NavGoal.exact(cell) : NavGoal.near(cell, radius);
+        // 出行是"去站到那儿"：水里漂进范围、泡在浅水里站着都不算到，
+        // 与乘船腿的出发点共用同一份干地事实，不出现走路说到到了、船说脚下是水的死结。
+        return new StandingDry(goal);
     }
 
     /** 目的地那一格；高度没核实时 y 只是占位（0），量剩余距离用 {@link #aimFrom}。 */

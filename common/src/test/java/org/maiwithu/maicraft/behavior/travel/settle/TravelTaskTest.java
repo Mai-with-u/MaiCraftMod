@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakePlaced;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakePlaces;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakeSeen;
@@ -97,7 +98,7 @@ class TravelTaskTest {
         assertEquals(new WorldPosition(12, 64, -2, null), details.arrivedAt());
         // 目的地交给走到时带上了许可；给全 y 且容差 2，按位置附近 2 格走。
         assertEquals(permit, walks.permits.get(0));
-        assertEquals(2, ((NavGoal.Near) TravelFakes.goalOf(walks.started.get(0))).radius);
+        assertEquals(2, ((NavGoal.Near) ((StandingDry) TravelFakes.goalOf(walks.started.get(0))).inner).radius);
         assertTrue(progress.received.size() >= 2, "逐刻报告进展");
     }
 
@@ -108,7 +109,7 @@ class TravelTaskTest {
         TaskResult result = runToFinish(task(new Target.Position(12, null, -2, null)));
 
         assertEquals(TaskResult.Status.DONE, result.status());
-        assertInstanceOf(NavGoal.Column.class, TravelFakes.goalOf(walks.started.get(0)));
+        assertInstanceOf(NavGoal.Column.class, ((StandingDry) TravelFakes.goalOf(walks.started.get(0))).inner);
     }
 
     @Test
