@@ -36,6 +36,7 @@ class ContainerTakePlanTest {
     private static final MenuChannel CHANNEL = new MenuChannel() {
         @Override public boolean stillOpen() { return true; }
         @Override public boolean cursorCarrying() { return false; }
+        @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
         @Override public boolean click(int slot, int button) { return true; }
         @Override public boolean quickMove(int slot) { return true; }
         @Override public boolean selectTradeOffer(int offerIndex) { return true; }
@@ -120,7 +121,7 @@ class ContainerTakePlanTest {
         ContainerTakePlan.Move move = plan(slots(27, BOX_SLOT, iron(64)), player, 5).orElseThrow();
         int giveTo = move.clicks().stream()
                 .filter(click -> !click.quickMove() && !click.takesToCursor())
-                .map(ContainerTakePlan.Click::slotId)
+                .map(MenuClick::slotId)
                 .findFirst().orElseThrow();
         assertEquals(PLAYER_SLOT, giveTo, "放进背包第一格的槽位号");
         int[] after = clickThrough(move, BOX_SLOT, giveTo, 64);
@@ -178,7 +179,7 @@ class ContainerTakePlanTest {
         int source = sourceCount;
         int player = 0;
         int cursor = 0;
-        for (ContainerTakePlan.Click click : move.clicks()) {
+        for (MenuClick click : move.clicks()) {
             if (click.quickMove()) throw new IllegalStateException("尾数计划里不该有快速移动");
             boolean onSource = click.slotId() == sourceSlotId;
             boolean onPlayer = click.slotId() == playerSlotId;

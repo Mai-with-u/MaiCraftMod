@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
@@ -140,7 +141,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
         private MenuSession session;
         private List<Integer> storageSlots = List.of();
         /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发。 */
-        private final Deque<ContainerTakePlan.Click> pressing = new ArrayDeque<>();
+        private final Deque<MenuClick> pressing = new ArrayDeque<>();
         /** 正在点的那一笔动手时身上有几件；没有在点的为 -1。 */
         private int moveStartCarried = -1;
         private int waited;
@@ -307,7 +308,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
             }
             if (!pressing.isEmpty()) {
                 // 本刻发不出去（上一下没结清、界面刚刷新）就下一刻再点：没发出去不是背包放不下。
-                ContainerTakePlan.Click click = pressing.peek();
+                MenuClick click = pressing.peek();
                 boolean sent = click.quickMove()
                         ? menu.quickMove(click.slotId())
                         : menu.click(click.slotId(), click.button());

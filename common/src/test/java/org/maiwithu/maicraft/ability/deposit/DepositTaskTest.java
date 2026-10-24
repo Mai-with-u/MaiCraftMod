@@ -677,6 +677,7 @@ class DepositTaskTest {
             MenuChannel channel = new MenuChannel() {
                 @Override public boolean stillOpen() { return CHANNEL.stillOpen(); }
                 @Override public boolean cursorCarrying() { return CHANNEL.cursorCarrying(); }
+                @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
                 @Override public boolean click(int slot, int button) { return CHANNEL.click(slot, button); }
                 @Override public boolean quickMove(int slot) { return CHANNEL.quickMove(slot); }
                 @Override public boolean selectTradeOffer(int offerIndex) { return CHANNEL.selectTradeOffer(offerIndex); }
@@ -693,6 +694,7 @@ class DepositTaskTest {
 
         @Override public boolean busy() { return false; }
         @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
+        @Override public SlotSnapshot cursor() { return cursor.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(cursor); }
 
         // 本刻发不发得出去：还有"没准备好"的次数就先消耗一次，回报假。
         private boolean sendable() {
@@ -804,6 +806,7 @@ class DepositTaskTest {
     private static final MenuChannel CHANNEL = new MenuChannel() {
         @Override public boolean stillOpen() { return true; }
         @Override public boolean cursorCarrying() { return false; }
+        @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
         @Override public boolean click(int slot, int button) { return true; }
         @Override public boolean quickMove(int slot) { return true; }
         @Override public boolean selectTradeOffer(int offerIndex) { return true; }

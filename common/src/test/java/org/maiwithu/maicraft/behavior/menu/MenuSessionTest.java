@@ -26,6 +26,7 @@ class MenuSessionTest {
 
         @Override public boolean stillOpen() { return open; }
         @Override public boolean cursorCarrying() { return cursorCarrying; }
+        @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
         @Override public boolean click(int slot, int button) { clicks.add(slot + ":" + button); return true; }
         @Override public boolean quickMove(int slot) { return true; }
         @Override public boolean selectTradeOffer(int offerIndex) { return true; }

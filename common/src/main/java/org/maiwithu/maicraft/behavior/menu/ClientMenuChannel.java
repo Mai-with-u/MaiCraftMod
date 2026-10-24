@@ -78,6 +78,13 @@ public final class ClientMenuChannel implements MenuChannel {
         return menu != null && !menu.getCarried().isEmpty();
     }
 
+    @Override
+    public SlotSnapshot cursor() {
+        AbstractContainerMenu menu = currentIfStillClaimed();
+        ItemStack carried = menu == null ? ItemStack.EMPTY : menu.getCarried();
+        return carried.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(carried);
+    }
+
     // 认领的界面还在、格号在界面里时，按那一格自己的 mayPlace 回答；界面已经不是这一份就当不收。
     @Override
     public boolean accepts(int slot, ItemStack stack) {

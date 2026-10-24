@@ -94,6 +94,7 @@ class MenuContainerTakesTest {
 
         @Override public boolean busy() { return false; }
         @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
+        @Override public SlotSnapshot cursor() { return cursor.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(cursor); }
 
         // 快速移动：本刻发不出去就什么都不做；点得出去但塞不下时收下点击、东西不动；
         // 发得出去才把箱子里这一格整堆挪进角色背包的第一个空格。
@@ -184,6 +185,7 @@ class MenuContainerTakesTest {
     private static final MenuChannel CHANNEL = new MenuChannel() {
         @Override public boolean stillOpen() { return true; }
         @Override public boolean cursorCarrying() { return false; }
+        @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
         @Override public boolean click(int slot, int button) { return true; }
         @Override public boolean quickMove(int slot) { return true; }
         @Override public boolean selectTradeOffer(int offerIndex) { return true; }

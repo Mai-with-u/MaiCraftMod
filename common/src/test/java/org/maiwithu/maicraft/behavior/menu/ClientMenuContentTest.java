@@ -62,6 +62,7 @@ class ClientMenuContentTest {
         return new MenuChannel() {
             @Override public boolean stillOpen() { return true; }
             @Override public boolean cursorCarrying() { return false; }
+            @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
             @Override public boolean click(int slot, int button) { return true; }
         @Override public boolean quickMove(int slot) { return true; }
         @Override public boolean selectTradeOffer(int offerIndex) { return true; }

@@ -6,10 +6,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.Predicate;
 
-import org.maiwithu.maicraft.behavior.menu.MenuContent;
-import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
-import org.maiwithu.maicraft.behavior.menu.TransferPlan;
-
 /**
  * 开箱取货的取货计划：下一笔从容器哪一格拿几件、要点哪几下的纯计算，不含点击本身。
  *
@@ -19,11 +15,8 @@ import org.maiwithu.maicraft.behavior.menu.TransferPlan;
  */
 public final class ContainerTakePlan {
 
-    /** 一步点击：在哪一格上、快速移动还是普通左右键、这一下会不会把东西拿到光标上。 */
-    public record Click(int slotId, boolean quickMove, int button, boolean takesToCursor) {}
-
     /** 一笔取货：从容器哪一格拿几件，按顺序要点哪几下。 */
-    public record Move(int containerSlotId, int amount, List<Click> clicks) {
+    public record Move(int containerSlotId, int amount, List<MenuClick> clicks) {
 
         public Move {
             if (clicks.isEmpty()) throw new IllegalArgumentException("一笔取货至少要有点击");
@@ -55,7 +48,7 @@ public final class ContainerTakePlan {
                 if (roomyPlayerSlot(reading.playerSnapshots(), snapshot, 1) < 0) return Optional.empty();
                 // 这整堆都用得上（含刚好够）：一笔快速移动整堆进背包，落在背包哪格由游戏挑。
                 return Optional.of(new Move(slotId, snapshot.count(),
-                        List.of(new Click(slotId, true, 0, false))));
+                        List.of(new MenuClick(slotId, true, 0, false))));
             }
             // 只要这格的一部分：按二分堆拿到光标上，放进背包侧放得下的一格。
             int targetIndex = roomyPlayerSlot(reading.playerSnapshots(), snapshot, needed);
@@ -67,18 +60,18 @@ public final class ContainerTakePlan {
     }
 
     // 尾数搬运的点击序列：与搬运计划同一个拆法——右键拿半堆、整份或一件一件放进背包那格，多拿的退回源格。
-    private static List<Click> exactClicks(int sourceSlotId, int targetSlotId, SlotSnapshot source, int amount) {
-        List<Click> clicks = new ArrayList<>();
+    private static List<MenuClick> exactClicks(int sourceSlotId, int targetSlotId, SlotSnapshot source, int amount) {
+        List<MenuClick> clicks = new ArrayList<>();
         for (TransferPlan.Step step : TransferPlan.exactAmount(source.count(), amount,
                 source.stack().getMaxStackSize()).steps()) {
             boolean onSource = step.where() == TransferPlan.Where.SOURCE;
             int slotId = onSource ? sourceSlotId : targetSlotId;
             switch (step.kind()) {
-                case QUICK_MOVE -> clicks.add(new Click(slotId, true, 0, false));
-                case TAKE_ALL -> clicks.add(new Click(slotId, false, 0, true));
-                case TAKE_HALF -> clicks.add(new Click(slotId, false, 1, true));
-                case GIVE_ALL -> clicks.add(new Click(slotId, false, 0, false));
-                case GIVE_ONE, PUT_BACK_ONE -> clicks.add(new Click(slotId, false, 1, false));
+                case QUICK_MOVE -> clicks.add(new MenuClick(slotId, true, 0, false));
+                case TAKE_ALL -> clicks.add(new MenuClick(slotId, false, 0, true));
+                case TAKE_HALF -> clicks.add(new MenuClick(slotId, false, 1, true));
+                case GIVE_ALL -> clicks.add(new MenuClick(slotId, false, 0, false));
+                case GIVE_ONE, PUT_BACK_ONE -> clicks.add(new MenuClick(slotId, false, 1, false));
             }
         }
         return clicks;

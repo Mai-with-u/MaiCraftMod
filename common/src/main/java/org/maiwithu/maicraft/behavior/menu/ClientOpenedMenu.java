@@ -87,6 +87,11 @@ final class ClientOpenedMenu implements OpenedMenu {
         return !channel.cursorCarrying();
     }
 
+    @Override public SlotSnapshot cursor() {
+        followSwap();
+        return channel.cursor();
+    }
+
     // 快速移动：本刻能动手才点（同一条规矩，见通道的 readyForAction）；搬没搬成由调用方按两侧内容核对。
     @Override public boolean quickMove(int slotId) {
         followSwap();

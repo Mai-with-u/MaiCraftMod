@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -146,7 +147,7 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int moveAmount;
         private int moveClicks;
         /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发，光标上的东西等放进背包才撒手。 */
-        private final Deque<ContainerTakePlan.Click> pressing = new ArrayDeque<>();
+        private final Deque<MenuClick> pressing = new ArrayDeque<>();
         /** 点出去了却没能确认结果的交互，一句一笔，经交回接缝交给引擎。 */
         private final List<String> unconfirmed = new ArrayList<>();
         private int quietTicks;
@@ -295,7 +296,7 @@ public final class MenuContainerTakes implements ContainerTakes {
 
         // 点这一笔的下一下：快速移动整堆；普通点击先把要从的格子登记给界面会话（中途关界面时
         // 光标上的东西放回这一格），再发左右键。
-        private boolean press(ContainerTakePlan.Click click) {
+        private boolean press(MenuClick click) {
             if (click.quickMove()) return menu.quickMove(click.slotId());
             if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
             return menu.click(click.slotId(), click.button());
