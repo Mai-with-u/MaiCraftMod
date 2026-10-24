@@ -34,6 +34,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
@@ -180,6 +181,13 @@ class MenuContainerTakesTest {
         int carried(ItemStack kind) {
             return player.stream().filter(item -> ItemStack.isSameItem(item, kind)).mapToInt(ItemStack::getCount).sum();
         }
+    }
+
+    /** 一直开不上界面的打开动作：走近箱子的路上或点开还没应答，控制循环每刻都会来问这个动作停不停。 */
+    private record NeverOpens() implements MenuOpening {
+        @Override public Optional<OpenedMenu> opened() { return Optional.empty(); }
+        @Override public ActionStatus tick(TickContext context) { return ActionStatus.running(); }
+        @Override public String describe() { return "走近箱子"; }
     }
 
     private static final MenuChannel CHANNEL = new MenuChannel() {
@@ -461,6 +469,33 @@ class MenuContainerTakesTest {
         assertEquals(0, box.carried(new ItemStack(Items.COAL)), "放不下的第二样不硬点");
         assertEquals(4, box.box.get(9).getCount());
         assertTrue(box.closed);
+    }
+
+    @Test
+    void 界面还没点开就被问停不停_不炸也不当停不得() {
+        // 控制循环每刻先问当前动作停不停再推进它：界面还没点开时手上还没有搬运的一笔，
+        // 这一问要照常答"在做"，不能因为搬运执行还不存在就抛——一抛整刻推进被跳过，动作到不了终态。
+        Action take = takesNeverOpening();
+        assertEquals(Interruptibility.WORKING, take.interruptibility());
+    }
+
+    @Test
+    void 界面还没点开就被生存需求打断_收手不炸_动作照常收场() {
+        // 问过"停得下"放行打断后，生存需求会叫停并收尾这个动作：打开动作还没做完，
+        // 收尾交给它自己，这里不得因为搬运执行还不存在而出错。
+        Action take = takesNeverOpening();
+        assertEquals(Interruptibility.WORKING, take.interruptibility());
+        take.pause();
+        take.close();
+    }
+
+    private Action takesNeverOpening() {
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
+        MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
+                (at, permissions) -> new NeverOpens(), at -> false);
+        return takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 5, "工具准备"),
+                Permissions.DEFAULT).orElseThrow();
     }
 
     private MenuContainerTakes takesCounting(FakeBox box, AtomicInteger opens) {

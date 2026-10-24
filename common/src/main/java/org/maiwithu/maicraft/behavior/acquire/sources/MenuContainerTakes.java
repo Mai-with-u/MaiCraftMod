@@ -370,9 +370,12 @@ public final class MenuContainerTakes implements ContainerTakes {
         }
 
         // 光标上拿着东西的那几下停不得：半途撒手会把拆出来的尾数交给关界面的流程，先等它放进背包。
+        // 手上还没有一笔搬运时（界面还没点开，run 只在界面认领后才建）没有在点的笔，
+        // 也就没有停不得的窗口，照常报"在做"；这时被打断由打开动作自己收手，回来引擎按身上的清点再决定。
+        // 控制循环每刻都会来问这一句，不能在这里抛：一抛整刻的推进被跳过，动作到不了终态，临时任务永远占着身体。
         @Override
         public Interruptibility interruptibility() {
-            return run.unsafeToStop() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+            return run != null && run.unsafeToStop() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         // 被生存需求打断：正在走、正在点的先停住；界面开着就请游戏关上，回来时引擎按身上的清点再决定。

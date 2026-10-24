@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /** 饿了身上没吃的：挨类问哪类口粮最近，拿最近那类；哪儿都没有、超了预算都如实说。 */
@@ -128,5 +129,19 @@ class FetchesFoodTest {
         assertInstanceOf(ActionStatus.Running.class, fetch.tick(at(0)));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, fetch.tick(at(101)));
         assertEquals(Problem.Kind.STUCK, failed.problem().kind());
+    }
+
+    @Test
+    void 去拿的动作还没点开界面时被问停不停与叫停_照常转交() {
+        // 实机 250：控制循环每刻先问"停不停"再推进，问完放行还会叫停、收尾；
+        // 拿取动作在界面点开前手上是空的，这一问一停都要照常转交出去，吃饭临时任务才能走到终态收场，
+        // 不能卡在打不开界面的一问上永远占着身体。
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 2d));
+        needs.neverDone = true;
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Running.class, fetch.tick(at(0)));
+        assertEquals(Interruptibility.WORKING, fetch.interruptibility());
+        fetch.pause();
+        fetch.close();
     }
 }
