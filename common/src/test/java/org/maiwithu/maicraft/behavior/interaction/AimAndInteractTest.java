@@ -10,11 +10,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.SharedConstants;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.Test;
@@ -328,5 +333,57 @@ class AimAndInteractTest {
         }
         assertEquals("UNREACHABLE", failedKind(status));
         assertTrue(sender.submissions.isEmpty());
+    }
+
+    @Test
+    void anEntityClickSettlesOnPassengerConfirmationWithoutAnyMenu() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity boat = fakeBoat();
+        scene.ray = new EntityHitResult(boat, boat.getBoundingBox().getCenter());
+        // 骑乘的确认就是"角色真成了乘客"：确认条件一直还没满足时等，没界面可开。
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.EntityTarget(boat),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "提交本刻算真实进展");
+        assertEquals(1, sender.submissions.size());
+        assertEquals(PendingInteraction.Kind.INTERACT_ENTITY, sender.submissions.getFirst().kind(),
+                "实体目标走右键实体的原生入口，不是点方块也不是用手里物品");
+        // 乘客关系同步下来（确认生效）：动作完成，全程没有任何界面。
+        sender.nextStatus = PendingInteraction.Status.CONFIRMED_APPLIED;
+        context.advance();
+        assertTrue(action.tick(context.asTickContext()) instanceof ActionStatus.Done);
+        assertEquals(InteractionVerdict.APPLIED, action.result().verdict());
+    }
+
+    @Test
+    void anEntityRideThatNeverSettlesReportsUnconfirmed() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity boat = fakeBoat();
+        scene.ray = new EntityHitResult(boat, boat.getBoundingBox().getCenter());
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.EntityTarget(boat),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        runUntilSubmitted(action, context);
+        // 确认窗过期也没坐上去：如实按没能确认上报，不冒充骑上了。
+        sender.nextStatus = PendingInteraction.Status.UNCERTAIN;
+        sender.nextDetail = "the bounded read-only confirmation window expired";
+        ActionStatus status = action.tick(context.asTickContext());
+        assertTrue(status instanceof ActionStatus.Failed);
+        assertEquals(InteractionVerdict.UNCONFIRMED, action.result().verdict());
+        assertTrue(action.result().scene().contains("实体（编号"), "现场要说明目标是哪只实体");
+    }
+
+    /** 离线替身的载具：只为拿一只活着、有包围盒的实体，不接触真实世界（ItemEntity 这类要在世界里出生）。 */
+    private static Entity fakeBoat() {
+        Entity boat = new Entity(EntityType.BOAT, null) {
+            @Override protected void defineSynchedData(SynchedEntityData.Builder builder) {}
+            @Override protected void readAdditionalSaveData(CompoundTag tag) {}
+            @Override protected void addAdditionalSaveData(CompoundTag tag) {}
+        };
+        boat.setPos(2.0, 64.0, 2.0);
+        return boat;
     }
 }

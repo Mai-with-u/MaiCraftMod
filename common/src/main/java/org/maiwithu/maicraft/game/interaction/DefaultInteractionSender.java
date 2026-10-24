@@ -495,6 +495,10 @@ public final class DefaultInteractionSender implements InteractionSender {
                 PendingInteraction.Kind.INTERACT_ENTITY, context, confirmation, timeoutTicks);
         try {
             var result = gameMode(context).interact(context.localPlayer(), target, hand);
+            // 原版自己的结算是这一下右键唯一在出手当时就有的权威事实：骑船这类不开界面、不改世界的用法，
+            // 确认窗只能等乘客关系同步，等不到时全靠它分清是原版规则当场拒了（船泡在水下、刚下过车），
+            // 还是点击被接受了、效果丢在了客户端到服务端之间。
+            pending.noteNativeAnswer(result.consumesAction());
             if (result.shouldSwing()) context.localPlayer().swing(hand);
         } catch (RuntimeException failure) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
@@ -561,34 +565,14 @@ public final class DefaultInteractionSender implements InteractionSender {
         }
         if (!pending.terminal() && context.clientTick() >= pending.deadlineTick()) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "the bounded read-only confirmation window expired" + expiryContext());
+                    "the bounded read-only confirmation window expired"
+                            + ExpiryContext.of(pending.nativeAnswer()));
         }
         if (pending.terminal() && (pending.kind() == PendingInteraction.Kind.CREATIVE_SET_SLOT
                 || (pending.kind() == PendingInteraction.Kind.MOD_PROTOCOL && activeProtocolUsesMenu))) {
             menuActions.interactionSubmitted(context);
         }
         return pending;
-    }
-
-    /**
-     * 确认窗过期的现场分层：窗口内打开了界面是“菜单已开但盯的事实没变”，
-     * 没开界面更可能是点击无效果或被模式拦截；当前游戏模式一句话点破创造拦截。
-     */
-    private static String expiryContext() {
-        StringBuilder text = new StringBuilder();
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft != null && minecraft.screen != null) {
-            text.append("; a menu or screen opened during the window (")
-                    .append(minecraft.screen.getClass().getSimpleName())
-                    .append(") but the watched fact never turned true");
-        } else {
-            text.append("; no menu or screen opened, so the click likely had no effect or was blocked");
-        }
-        if (minecraft != null && minecraft.gameMode != null
-                && minecraft.gameMode.getPlayerMode() != null) {
-            text.append("; game_mode=").append(minecraft.gameMode.getPlayerMode().getName());
-        }
-        return text.toString();
     }
 
     /**

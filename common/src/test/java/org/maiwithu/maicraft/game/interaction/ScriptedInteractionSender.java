@@ -140,6 +140,11 @@ public final class ScriptedInteractionSender implements InteractionSender {
     @Override public PendingInteraction interact(
             PlayerContext context, Entity target, InteractionHand hand,
             InteractionConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("替身没有实现这个入口");
+        // 右键实体（骑乘、剪毛、交易）与右键方块同一套编排：记下现场、按脚本给结论。
+        PendingInteraction pending = new PendingInteraction(
+                PendingInteraction.Kind.INTERACT_ENTITY, context, timeoutTicks, 1, confirmation, null, null);
+        submissions.add(new Submission(pending.kind(), null, confirmation, timeoutTicks));
+        last = pending;
+        return pending;
     }
 }

@@ -31,6 +31,10 @@ public final class PendingInteraction {
     private String detail = "awaiting authoritative client facts";
     /** 右键方块提交现场的插桩事实（点击面、客户端预测结果、预测包是否发出）；只有 useBlock 提交时写入一次。 */
     private String useOnTrace = "";
+    /** 右键实体提交那一刻原版自己的结算结论（这一下预测接受了没有）；只有 interact 提交时写入一次，
+     * 没出手（原生调用抛了）为 null。骑乘这类不开界面、不改世界的用法，确认窗等到过期也只有这一条
+     * 现场事实能分清「原版规则当场就拒了」还是「点击被接受了、效果丢在了客户端到服务端之间」。 */
+    private Boolean nativeAnswer;
     /** 攻击等待记录的目标实体编号；非攻击提交为 -1，供同一目标的重提交幂等等待比对。 */
     private int attackTargetId = -1;
 
@@ -69,6 +73,10 @@ public final class PendingInteraction {
     /** 攻击提交时记下目标编号；攻击动作拿它判断同一目标的重提交是不是还在等同一次挥击。 */
     void attachAttackTarget(int entityId) { if (kind == Kind.ATTACK_ENTITY) attackTargetId = entityId; }
     int attackTargetId() { return attackTargetId; }
+    /** 提交那一刻原版自己的结算结论；没出手时为 null。只认第一次写入，重提交的等待记录各自有自己的结论。 */
+    void noteNativeAnswer(boolean accepted) { if (nativeAnswer == null) nativeAnswer = accepted; }
+    /** 右键实体提交现场的原版结算结论；null 表示这一下没能送到原生入口，结论未知。 */
+    public Boolean nativeAnswer() { return nativeAnswer; }
     public boolean terminal() { return status != Status.PENDING; }
 
     InteractionConfirmation confirmation() { return confirmation; }

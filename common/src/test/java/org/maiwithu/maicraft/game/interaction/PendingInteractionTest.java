@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game.interaction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -79,5 +80,23 @@ class PendingInteractionTest {
         FakePlayerContext context = new FakePlayerContext(null);
         PendingInteraction pending = newPending(context, InteractionConfirmation.pending(), 10, 2);
         assertTrue(pending.fromSamePlayer(new FakePlayerContext(null)));
+    }
+
+    @Test
+    void nativeAnswerIsUnknownUntilTheClickReachesTheNativeEntry() {
+        FakePlayerContext context = new FakePlayerContext(null);
+        PendingInteraction pending = newPending(context, InteractionConfirmation.pending(), 10, 2);
+        // 没送到原生入口（出手前就失败）时结论未知，过期报告不能冒充有结论。
+        assertNull(pending.nativeAnswer());
+    }
+
+    @Test
+    void nativeAnswerKeepsTheFirstSettlement() {
+        FakePlayerContext context = new FakePlayerContext(null);
+        PendingInteraction pending = newPending(context, InteractionConfirmation.pending(), 10, 2);
+        // 原版结算只在这一下出手当时发生一次：后来的重试、回滚不覆盖第一次的结论。
+        pending.noteNativeAnswer(false);
+        pending.noteNativeAnswer(true);
+        assertFalse(pending.nativeAnswer());
     }
 }
