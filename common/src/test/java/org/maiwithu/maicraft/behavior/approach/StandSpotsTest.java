@@ -193,6 +193,64 @@ class StandSpotsTest {
         assertEquals("比落点高太多，扔下去会偏", failureAt(ranking, new BlockPos(2, 67, 0)));
     }
 
+    @Test
+    void 骑载具时浅水站位可用且排在干站位之后() {
+        // 船浮在水边：靠船一侧的一格泡着浅水（脚格进水、头一格在水面上、脚下有实地）。
+        world.fluids.add(new BlockPos(4, 64, 3));
+        world.fluids.add(new BlockPos(4, 64, 4));
+        ApproachTarget boat = ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1));
+        StandSpots.Ranking ranking = find(boat);
+        // 浅水位入选，和干位一起按代价排序；所有干位都排在所有湿位之前——先挑干的，干的不够才湿脚。
+        assertFalse(ranking.spots().stream().noneMatch(spot -> world.fluids.contains(spot.feet())));
+        int firstWet = -1;
+        int lastDry = -1;
+        for (int i = 0; i < ranking.spots().size(); i++) {
+            if (world.fluids.contains(ranking.spots().get(i).feet())) {
+                if (firstWet < 0) firstWet = i;
+            } else {
+                lastDry = i;
+            }
+        }
+        assertTrue(firstWet < 0 || lastDry < 0 || lastDry < firstWet, "干位要排在湿位前面");
+    }
+
+    @Test
+    void 岸边没有干位时踩进浅水也登得上去() {
+        // 船周围整片浅水（水面在脚格、头一格在水面上、水底实地）：没有干位也挑得出登船站位，不用等船漂过来。
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                for (int y = 60; y <= 68; y++) {
+                    BlockPos cell = new BlockPos(4 + dx, y, dz);
+                    // 水面那一格是浅水；其余高度的格子按头顶封住处理，替身里不另摆水的形状。
+                    if (y == 64) world.fluids.add(cell);
+                    else world.lowCeiling.add(cell);
+                }
+            }
+        }
+        ApproachTarget boat = ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1));
+        StandSpots.Ranking ranking = find(boat);
+        assertFalse(ranking.spots().isEmpty(), "全是浅水也该有能站的位置");
+        assertTrue(ranking.spots().stream().allMatch(spot -> world.fluids.contains(spot.feet())));
+    }
+
+    @Test
+    void 头也会没进水的位置骑载具照样拒() {
+        // 深水：脚格和头一格都泡在水里，湿脚的放行救不了它。
+        world.fluids.add(new BlockPos(2, 64, 0));
+        world.fluids.add(new BlockPos(2, 65, 0));
+        ApproachTarget boat = ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1));
+        StandSpots.Ranking ranking = find(boat);
+        assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 64, 0)));
+    }
+
+    @Test
+    void 没声明湿脚的目标浅水位照旧不站() {
+        // 放箱、靠墙、施工这些目标没有湿脚的许可：脚格进水一票拒，口子不外溢。
+        world.fluids.add(new BlockPos(2, 64, 1));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
+        assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 64, 1)));
+    }
+
     private String failureAt(StandSpots.Ranking ranking, BlockPos feet) {
         List<RejectedSpot> matches = ranking.rejected().stream()
                 .filter(spot -> spot.feet().equals(feet)).toList();

@@ -15,6 +15,9 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.animal.horse.AbstractHorse;
+import net.minecraft.world.entity.vehicle.AbstractMinecart;
+import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
@@ -140,9 +143,13 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     // 写告示牌默认写正面：从哪一面点就编辑哪一面，站位只挑正面那一侧，站到背面会把字写到背面去。
     // 正面朝哪边按原版告示牌自己的水平朝向角回答，立式、挂墙、悬挂、挂墙悬挂四种告示牌原版都会答；
     // 那一格不是告示牌了给空，任务按目标没了收场。
+    // 对船、矿车、马这类载具右键就是骑上去：站位候选声明允许湿脚，水边的船才登得上去；
+    // 村民、动物这些别的实体照旧只要干位，湿脚只放给成为载具的乘客这一种用法。
     @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign) {
         if (target.isEntity()) {
-            return entityById(target.entityId()).map(entity -> ApproachTarget.ofEntity(entity.getBoundingBox()));
+            return entityById(target.entityId()).map(entity ->
+                    rideableVehicle(entity) ? ApproachTarget.ofVehicle(entity.getBoundingBox())
+                            : ApproachTarget.ofEntity(entity.getBoundingBox()));
         }
         if (!writesSign) {
             // 指定了点哪一面：站位按方块外形上朝这一面的表面看不看得见挑。
@@ -166,6 +173,12 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         ClientLevel level = level();
         Entity entity = level == null ? null : level.getEntity(entityId);
         return entity == null || entity.isRemoved() ? Optional.empty() : Optional.of(entity);
+    }
+
+    // 原版空手右键就骑上去的载具：船、矿车、马这一族（骆驼也是马的分支）。与"别人的东西"里
+    // 「空手骑上船、矿车、马不改动世界」认的是同一批；村民是交易不是骑乘，不在这批里。
+    private static boolean rideableVehicle(Entity entity) {
+        return entity instanceof Boat || entity instanceof AbstractMinecart || entity instanceof AbstractHorse;
     }
 
     private ClientLevel level() {

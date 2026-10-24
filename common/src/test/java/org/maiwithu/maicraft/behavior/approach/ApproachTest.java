@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -268,5 +269,25 @@ class ApproachTest {
         assertEquals(0, moves.begun.size());
         assertEquals(1, 记录.size());
         assertTrue(记录.get(0).contains("岩浆"));
+    }
+
+    @Test
+    void 登船目标全被拒时按只剩泡水的位置交代() {
+        // 船周围整片深水（脚格和头一格都泡着）：声明允许湿脚的目标浅水已放行，还因液体被拒的
+        // 都是头会没进水的位置，交代时如实说"只剩泡水的位置"，不说成"这格不能站"。
+        for (int x = -1; x <= 9; x++) {
+            for (int z = -5; z <= 5; z++) {
+                for (int y = 59; y <= 69; y++) {
+                    world.fluids.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+        StubMoves moves = new StubMoves(world);
+        Approach approach = approach(ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1)),
+                moves, null, Permissions.DEFAULT, null);
+        approach.tick(new StubTick(1));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, approach.tick(new StubTick(2)));
+        assertTrue(failed.problem().message().contains("只剩泡水的位置"), failed.problem().message());
+        assertFalse(failed.problem().message().contains("泡在液体里"), failed.problem().message());
     }
 }

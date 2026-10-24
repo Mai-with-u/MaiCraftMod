@@ -14,6 +14,8 @@ import java.util.OptionalDouble;
 /**
  * 站位判断：围着目标找能落脚的格子，按能到、够得着、看得见、站得稳四项筛，再按走过去的代价排好序。
  * 只站正面那一侧的目标（写告示牌）先按正背筛，背面那一侧的候选不进排序。
+ * 要骑上去的载具目标声明允许湿脚：浅水站位（脚进水、头在水面上、脚下实心）照常参选，排在干站位之后，
+ * 其余目标的泡水位置照旧一票拒。
  * 纯函数：所有世界事实都从只读视图问，所有距离数值都从够得着规则拿，这里只做计算，不动角色。
  *
  * <p>候选不过四项时不丢掉事实：每个被拒的位置带着败在哪一项记进结果，
@@ -89,6 +91,17 @@ public final class StandSpots {
             }
         }
         spots.sort(null);
+        // 声明允许湿脚的目标（骑上载具）：干站位排前面，浅水站位按代价排在所有干位之后——
+        // 先挑干的，干的不够才湿脚。没有这个声明的目标候选里本来就不会有泡水的位置。
+        if (target.wetFeetAllowed()) {
+            List<StandSpot> dry = new ArrayList<>(spots.stream().filter(spot -> !world.inFluid(spot.feet())).toList());
+            List<StandSpot> wet = new ArrayList<>(spots.stream().filter(spot -> world.inFluid(spot.feet())).toList());
+            dry.sort(null);
+            wet.sort(null);
+            spots.clear();
+            spots.addAll(dry);
+            spots.addAll(wet);
+        }
         return new Ranking(spots, rejected);
     }
 
@@ -152,7 +165,7 @@ public final class StandSpots {
                                ApproachWorldView world, WalkCost walking, ProtectedCells guarded,
                                BlockPos current, List<StandSpot> spots, List<RejectedSpot> rejected) {
         if (!world.isLoaded(feet)) return;
-        String steady = steadyFailure(feet, world, guarded);
+        String steady = steadyFailure(feet, target, world, guarded);
         if (steady != null) {
             rejected.add(new RejectedSpot(feet, steady));
             return;
@@ -189,13 +202,22 @@ public final class StandSpots {
         spots.add(new StandSpot(feet, cost.getAsDouble()));
     }
 
-    /** 站得稳检查：脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子。 */
-    private static String steadyFailure(BlockPos feet, ApproachWorldView world, ProtectedCells guarded) {
+    /**
+     * 站得稳检查：脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子。
+     * 声明允许湿脚的目标（骑上载具）把液体否决改为分级：脚格进水但头那一格（脚上一格）还在水面外、
+     * 脚下实心能站，算浅水湿脚，可用并排到干位之后；头也进了水的深水位照旧按"泡在液体里"拒。
+     * 头那一格进没进水问的还是 {@link ApproachWorldView#inFluid} 这一条事实，只是换个格子问，不添新的世界读数。
+     */
+    private static String steadyFailure(BlockPos feet, ApproachTarget target, ApproachWorldView world,
+                                        ProtectedCells guarded) {
         if (guarded.contains(feet)) return "受保护";
         if (!world.solidFloor(feet)) return "脚下悬空";
         if (!world.headroom(feet)) return "头顶没空间";
         if (world.dropBelow(feet) > MAX_DROP) return "落差太深";
-        if (world.inFluid(feet)) return "泡在液体里";
+        if (world.inFluid(feet)) {
+            if (target.wetFeetAllowed() && !world.inFluid(feet.above())) return null;
+            return "泡在液体里";
+        }
         if (world.lavaBeside(feet)) return "旁边有岩浆";
         return null;
     }

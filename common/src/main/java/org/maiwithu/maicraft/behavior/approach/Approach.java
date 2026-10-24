@@ -315,11 +315,20 @@ public final class Approach implements Action {
         rejected.stream().map(RejectedSpot::failedItem).distinct().filter(item -> !items.contains(item)).forEach(items::add);
         for (int i = items.size() - 1; i >= 0; i--) {
             long count = countFailures(items.get(i));
-            if (count > 0) parts.add(items.get(i) + " " + count + " 个");
+            if (count > 0) parts.add(displayItem(items.get(i)) + " " + count + " 个");
         }
         String text = String.join("、", parts);
         return closest == null ? text
-                : text + "；最接近能用的是 " + closest.feet().toShortString() + "（" + closest.failedItem() + "）";
+                : text + "；最接近能用的是 " + closest.feet().toShortString() + "（" + displayItem(closest.failedItem()) + "）";
+    }
+
+    /**
+     * 被拒败项在结果里的说法。声明允许湿脚的目标（骑上载具）浅水位已经放行，
+     * 还因液体被拒的都是头也会没进水的位置：如实说成"只剩泡水的位置"，不说成"这格不能站"，
+     * 免得指挥的 LLM 以为水边永远登不上船。
+     */
+    private String displayItem(String item) {
+        return target.wetFeetAllowed() && "泡在液体里".equals(item) ? "只剩泡水的位置" : item;
     }
 
     private long countFailures(String item) {
