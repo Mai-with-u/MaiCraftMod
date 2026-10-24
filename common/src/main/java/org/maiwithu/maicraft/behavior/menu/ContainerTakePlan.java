@@ -59,22 +59,9 @@ public final class ContainerTakePlan {
         return Optional.empty();
     }
 
-    // 尾数搬运的点击序列：与搬运计划同一个拆法——右键拿半堆、整份或一件一件放进背包那格，多拿的退回源格。
+    // 尾数搬运的点击序列：与搬运计划同一个拆法，点法共用 MenuClicks.exact。
     private static List<MenuClick> exactClicks(int sourceSlotId, int targetSlotId, SlotSnapshot source, int amount) {
-        List<MenuClick> clicks = new ArrayList<>();
-        for (TransferPlan.Step step : TransferPlan.exactAmount(source.count(), amount,
-                source.stack().getMaxStackSize()).steps()) {
-            boolean onSource = step.where() == TransferPlan.Where.SOURCE;
-            int slotId = onSource ? sourceSlotId : targetSlotId;
-            switch (step.kind()) {
-                case QUICK_MOVE -> clicks.add(new MenuClick(slotId, true, 0, false));
-                case TAKE_ALL -> clicks.add(new MenuClick(slotId, false, 0, true));
-                case TAKE_HALF -> clicks.add(new MenuClick(slotId, false, 1, true));
-                case GIVE_ALL -> clicks.add(new MenuClick(slotId, false, 0, false));
-                case GIVE_ONE, PUT_BACK_ONE -> clicks.add(new MenuClick(slotId, false, 1, false));
-            }
-        }
-        return clicks;
+        return MenuClicks.exact(sourceSlotId, targetSlotId, source, amount);
     }
 
     // 背包那一侧放得下这么多件的一格：先并进同种东西还没满的堆，再占空格；都没有给 -1。

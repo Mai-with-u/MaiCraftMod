@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.enchant;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
+import org.maiwithu.maicraft.behavior.menu.MenuClicks;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -25,7 +27,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 附魔台界面里的一段活：认槽 → 装一件待附魔物品与恰好 tier 个青金石 → 等报价稳定冻结 →
  * 按第 tier 档按钮 → 以「成品与费用同刻吻合」确认 → 成品与剩余青金石搬回 → 核对 → 关上。
  *
- * <p>每刻最多一下点击或一次按钮；每笔搬运点完按两侧读数核对，对不上重点最多两次；
+ * <p>装槽与取回的搬运交给共用的搬运执行逐笔点、按两侧精确增减核对，对不上重点最多两次；
  * 按钮被游戏明确拒绝就全数归还、重新装料再看报价再试一次；结果不明的提交记进 unconfirmed 绝不重发。
  * 打开者负责关闭：没做完就被收尾时界面照规矩请游戏关上，装进去的东西随原版关闭流程回背包。
  */
@@ -33,9 +35,7 @@ final class EnchantMenuWork implements Action {
 
     /** 报价要连续稳定这么多刻才冻结：三档数字与线索随服务端分刻到达，等齐再抄。 */
     private static final int OFFER_STABLE_TICKS = 15;
-    /** 一笔搬运点完后等两侧同步的宽限；过了角色侧还纹丝不动才算没搬动。 */
-    private static final int SETTLE_TICKS = 5;
-    /** 搬运或报价对不上时重点重读的次数：同步偶尔滞后，不无限重试。 */
+    /** 搬运或报价对不上时重读重试的次数：同步偶尔滞后，不无限重试。 */
     private static final int RETRIES = 2;
     /** 按钮按下后等成品与费用分包抵达的期限；等级与经验的变化可能比成品晚到。 */
     private static final int BUTTON_TIMEOUT_TICKS = 400;
@@ -50,6 +50,8 @@ final class EnchantMenuWork implements Action {
     private final String itemWanted;
     private final int tier;
     private final TaskRecords records;
+    /** 装槽与取回的逐笔搬运：点哪几下、等结清、出结论都归它。 */
+    private final TransferRun run;
 
     private Step step = Step.CLAIM;
     /** 冻结的三档报价；按钮按下前后都按它核对现场。 */
@@ -58,10 +60,7 @@ final class EnchantMenuWork implements Action {
     private ItemFacts original = ItemFacts.EMPTY;
     private ItemFacts result = ItemFacts.EMPTY;
     private Map<String, Integer> backpackBefore = Map.of();
-    /** 正在点的一笔：要点哪几下、期望工作槽变成几件。 */
-    private final Deque<WorkslotMoves.Click> pressing = new ArrayDeque<>();
-    private int expectedCount;
-    private int quietTicks;
+    /** 搬运对不上后重试的次数：同步偶尔滞后，重读再试，不无限重试。 */
     private int moveRetries;
     private int offerStableTicks;
     private int offerRefreshes;
@@ -73,6 +72,8 @@ final class EnchantMenuWork implements Action {
     private int settledLapis;
     private int spentLevels;
     private int spentLapis;
+    /** 工作槽搬空后等背包侧同步跟上的刻数：取回的记账别把没到的当丢账。 */
+    private int retrieveQuiet;
 
     /** 结果：冻结的报价、实际附上的全部条目与等级、实扣的青金石。 */
     private List<String> enchantments = List.of();
@@ -84,6 +85,7 @@ final class EnchantMenuWork implements Action {
         this.itemWanted = Objects.requireNonNull(itemWanted, "itemWanted");
         this.tier = tier;
         this.records = Objects.requireNonNull(records, "records");
+        this.run = new TransferRun(menu);
     }
 
     /** 冻结的三档报价；没等到报价就结束的为 null。 */
@@ -106,10 +108,12 @@ final class EnchantMenuWork implements Action {
 
     @Override public ActionStatus tick(TickContext tick) {
         if (failure != null) return ActionStatus.failed(failure);
+        // 手上的搬运先跑完：装槽与取回的结论按当前一步各自接住。
+        if (!run.idle()) return drive();
         return switch (step) {
             case CLAIM -> claim();
-            case LOAD_ITEM -> loadOne(tick, 0, itemWanted);
-            case LOAD_LAPIS -> loadLapis(tick);
+            case LOAD_ITEM -> loadOne(0, itemWanted);
+            case LOAD_LAPIS -> loadLapis();
             case FREEZE -> freeze();
             case SUBMIT -> submit(tick);
             case TAKE_BACK -> takeBack();
@@ -135,60 +139,35 @@ final class EnchantMenuWork implements Action {
         return ActionStatus.progressed();
     }
 
-    /** 装一件进工作槽：从角色侧找出装这种东西的格，拿起、右键放一件、余量放回，点完核对。 */
-    private ActionStatus loadOne(TickContext tick, int workSlot, String itemId) {
+    // 装一件进工作槽：从角色侧找出装这种东西的格，交给搬运执行精确搬一件；对不上重读再试，最多两次。
+    private ActionStatus loadOne(int workSlot, String itemId) {
         var reading = menu.reading();
         if (reading.isEmpty()) return readingLost();
         MenuContent.Reading open = reading.get();
-        if (menu.busy()) return ActionStatus.running();
-        if (!pressing.isEmpty()) {
-            WorkslotMoves.Click click = pressing.peek();
-            boolean sent = menu.click(click.slotId(), click.button());
-            if (sent) pressing.poll();
-            return sent ? ActionStatus.progressed() : ActionStatus.running();
-        }
-        int now = open.containerSnapshots().get(workSlot).count();
-        if (expectedCount > 0) {
-            // 一笔的几下点完了：等两侧同步，再核对工作槽精确到位。
-            if ((now != expectedCount || !menu.cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
-                return ActionStatus.running();
-            }
-            if (now != expectedCount || !menu.cursorEmpty()) {
-                if (++moveRetries > RETRIES) {
-                    return fail(Problem.of(Problem.Kind.STUCK,
-                            "往工作槽装东西没核对上（要 " + expectedCount + " 件、现在是 " + now + " 件）"));
-                }
-                quietTicks = 0;
-                expectedCount = 0;
-                return ActionStatus.running();
-            }
-            expectedCount = 0;
-            quietTicks = 0;
-            if (workSlot == 0) original = ItemFacts.of(open.containerSnapshots().get(0).stack());
-            step = Step.LOAD_LAPIS;
-            return ActionStatus.progressed();
-        }
         int from = findCarryingSlot(open, itemId);
         if (from < 0) {
             return fail(Problem.of(Problem.Kind.NEED_ITEM,
                     workSlot == 0 ? "身上没有可附魔的「" + itemId + "」" : "身上没有足够的青金石"));
         }
-        expectedCount = now + 1;
         int fromSlotId = open.playerSlotIds().get(from);
-        int fromCount = open.playerSnapshots().get(from).count();
-        pressing.addAll(WorkslotMoves.load(fromSlotId, workSlot, 1, fromCount));
+        int toSlotId = open.containerSlotIds().get(workSlot);
+        SlotSnapshot source = open.playerSnapshots().get(from);
+        run.begin(new TransferRun.Move(MenuClicks.exact(fromSlotId, toSlotId, source, 1),
+                new TransferRun.Check.Normal(fromSlotId, toSlotId, 1),
+                (workSlot == 0 ? "往附魔台装" + ItemFacts.of(source.stack()).itemId()
+                        : "往附魔台装一颗青金石")));
         return ActionStatus.progressed();
     }
 
     // 青金石一件一件精确搬，绝不整堆超额：装够 tier 个进 FREEZE。
-    private ActionStatus loadLapis(TickContext tick) {
+    private ActionStatus loadLapis() {
         var reading = menu.reading();
         if (reading.isEmpty()) return readingLost();
         if (reading.get().containerSnapshots().get(1).count() >= tier) {
             step = Step.FREEZE;
             return ActionStatus.progressed();
         }
-        return loadOne(tick, 1, LAPIS);
+        return loadOne(1, LAPIS);
     }
 
     // 等报价稳定：连续多个刻读数一致才冻结，不拿还没到齐的数字按按钮。
@@ -244,6 +223,7 @@ final class EnchantMenuWork implements Action {
                 // 只有按钮确认后才列附魔条目：报价线索不冒充最终结果。
                 enchantments = List.copyOf(resultFacts().enchantmentLines());
                 result = resultFacts();
+                retrieveQuiet = 0;
                 step = Step.RETRIEVE;
                 return ActionStatus.progressed();
             }
@@ -268,18 +248,23 @@ final class EnchantMenuWork implements Action {
         }
     }
 
-    // 归还：两格工作槽整堆搬回背包，搬空后重新装料再走一遍报价。
+    // 归还：两格工作槽整堆搬回背包，一格一笔交给搬运执行；搬空后重新装料再走一遍报价。
     private ActionStatus takeBack() {
-        var reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu.reading();
         if (reading.isEmpty()) return readingLost();
-        if (quickMoveWorkslot(reading.get())) return ActionStatus.progressed();
-        if (!reading.get().containerSnapshots().get(0).isEmpty()
-                || !reading.get().containerSnapshots().get(1).isEmpty()) return ActionStatus.running();
+        MenuContent.Reading open = reading.get();
+        for (int slot = 0; slot < 2; slot++) {
+            SlotSnapshot snapshot = open.containerSnapshots().get(slot);
+            if (!snapshot.isEmpty()) {
+                beginWholeStackBack(open, slot, snapshot);
+                return ActionStatus.progressed();
+            }
+        }
         // 归还完重新来：装料、看报价（每次附魔后种子会变，报价本来就是新的）。
         original = ItemFacts.EMPTY;
         quote = null;
         offerStableTicks = 0;
-        backpackBefore = countsFrom(reading.get().playerSnapshots());
+        backpackBefore = countsFrom(open.playerSnapshots());
         step = Step.LOAD_ITEM;
         return ActionStatus.progressed();
     }
@@ -287,16 +272,21 @@ final class EnchantMenuWork implements Action {
     /** 取回后背包对不上时最多再等这么多刻同步。 */
     private static final int RETRIEVE_SETTLE_TICKS = 20;
 
-    // 取回：成品与剩余青金石搬回背包，核对「原物减一、成品加一、青金石实扣」。
+    // 取回：成品与剩余青金石搬回背包，一格一笔交给搬运执行；搬空后核对「原物减一、成品加一、青金石实扣」。
     private ActionStatus retrieve() {
-        var reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu.reading();
         if (reading.isEmpty()) return readingLost();
-        if (quickMoveWorkslot(reading.get())) return ActionStatus.progressed();
-        if (!reading.get().containerSnapshots().get(0).isEmpty()
-                || !reading.get().containerSnapshots().get(1).isEmpty()) return ActionStatus.running();
+        MenuContent.Reading open = reading.get();
+        for (int slot = 0; slot < 2; slot++) {
+            SlotSnapshot snapshot = open.containerSnapshots().get(slot);
+            if (!snapshot.isEmpty()) {
+                beginWholeStackBack(open, slot, snapshot);
+                return ActionStatus.progressed();
+            }
+        }
         // 工作槽空了再等两刻：背包侧的同步偶尔比工作槽晚到，别把没到的当丢账。
-        if (++quietTicks < 2) return ActionStatus.running();
-        Map<String, Integer> after = countsFrom(reading.get().playerSnapshots());
+        if (++retrieveQuiet < 2) return ActionStatus.running();
+        Map<String, Integer> after = countsFrom(open.playerSnapshots());
         int originalBefore = backpackBefore.getOrDefault(original.itemId(), 0);
         int lapisBefore = backpackBefore.getOrDefault(LAPIS, 0);
         boolean lapisSpent = after.getOrDefault(LAPIS, 0) == lapisBefore - spentLapis;
@@ -308,7 +298,7 @@ final class EnchantMenuWork implements Action {
         boolean resultIn = sameKind || after.getOrDefault(result.itemId(), 0)
                 == backpackBefore.getOrDefault(result.itemId(), 0) + 1;
         // 背包侧同步偶尔晚到：对不上先多等一秒，还对不上再如实说。
-        if ((!originalGone || !lapisSpent || !resultIn) && quietTicks < RETRIEVE_SETTLE_TICKS) return ActionStatus.running();
+        if ((!originalGone || !lapisSpent || !resultIn) && retrieveQuiet < RETRIEVE_SETTLE_TICKS) return ActionStatus.running();
         if (!originalGone || !lapisSpent || !resultIn) {
             return fail(Problem.of(Problem.Kind.STUCK,
                     "取回的对不上：原物减一=" + originalGone + "、青金石实扣=" + lapisSpent + "、成品进包=" + resultIn));
@@ -321,23 +311,66 @@ final class EnchantMenuWork implements Action {
         return ActionStatus.progressed();
     }
 
+    // 把一格工作槽整堆搬回背包：整堆快速移动，按机器槽核对（源格确切减、光标空）。
+    private void beginWholeStackBack(MenuContent.Reading open, int slot, SlotSnapshot snapshot) {
+        int slotId = open.containerSlotIds().get(slot);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                new TransferRun.Check.Machine(slotId, snapshot.count()),
+                "把工作槽里的东西搬回背包"));
+    }
+
+    // 推进手上的搬运一刻；出了结论按当前一步接住。
+    private ActionStatus drive() {
+        TransferRun.Progress progress = run.tick();
+        if (!(progress instanceof TransferRun.Progress.Settled settled)) {
+            return progress instanceof TransferRun.Progress.Advanced
+                    ? ActionStatus.progressed() : ActionStatus.running();
+        }
+        TransferRun.MoveResult result = settled.result();
+        switch (step) {
+            case LOAD_ITEM -> {
+                if (result instanceof TransferRun.MoveResult.Confirmed) {
+                    moveRetries = 0;
+                    var reading = menu.reading();
+                    original = reading.isEmpty() ? ItemFacts.EMPTY
+                            : ItemFacts.of(reading.get().containerSnapshots().get(0).stack());
+                    step = Step.LOAD_LAPIS;
+                } else if (result instanceof TransferRun.MoveResult.MenuGone) {
+                    return readingLost();
+                } else if (++moveRetries > RETRIES) {
+                    return fail(Problem.of(Problem.Kind.STUCK, "往工作槽装东西没核对上，重试也没成"));
+                }
+            }
+            case LOAD_LAPIS -> {
+                if (result instanceof TransferRun.MoveResult.Confirmed) {
+                    // 装够没有由 loadLapis 下一次进门时看，这里只接着走。
+                    moveRetries = 0;
+                } else if (result instanceof TransferRun.MoveResult.MenuGone) {
+                    return readingLost();
+                } else if (++moveRetries > RETRIES) {
+                    return fail(Problem.of(Problem.Kind.STUCK, "往工作槽装青金石没核对上，重试也没成"));
+                }
+            }
+            case TAKE_BACK, RETRIEVE -> {
+                if (result instanceof TransferRun.MoveResult.Confirmed) {
+                    // 一格搬空了：进门再从剩下的接着搬；都空了各自核对。
+                    moveRetries = 0;
+                } else if (result instanceof TransferRun.MoveResult.MenuGone(int submitted)) {
+                    return submitted > 0 ? readingLost() : ActionStatus.progressed();
+                } else {
+                    return fail(Problem.of(Problem.Kind.STUCK, "工作槽里的东西没能搬回背包"));
+                }
+            }
+            default -> throw new IllegalStateException("这一步没有搬运在跑");
+        }
+        return ActionStatus.progressed();
+    }
+
     private ActionStatus closeMenu(TickContext tick) {
         if (closing == null) closing = menu.closing();
         ActionStatus status = closing.tick(tick);
         if (status instanceof ActionStatus.Running) return status;
         return ActionStatus.done();
-    }
-
-    /** 还没搬空的第一个工作槽整堆快速移动一下；两个都空了返回假。 */
-    private boolean quickMoveWorkslot(MenuContent.Reading reading) {
-        if (menu.busy()) return true;
-        for (int slot = 0; slot < 2; slot++) {
-            if (!reading.containerSnapshots().get(slot).isEmpty()) {
-                menu.quickMove(reading.containerSlotIds().get(slot));
-                return true;
-            }
-        }
-        return false;
     }
 
     /** 工作槽第 0 格此刻的事实（确认后的成品）。 */
@@ -395,10 +428,10 @@ final class EnchantMenuWork implements Action {
         return ActionStatus.failed(problem);
     }
 
-    // 光标上拿着东西的那几下停不得；按钮等确认时同样不安全，其余是正常干活。
+    // 光标上拿着东西、搬运正在点、按钮等确认时都停不得；其余是正常干活。
     @Override public Interruptibility interruptibility() {
         if (buttonPending != null && !buttonPending.terminal()) return Interruptibility.UNSAFE_TO_STOP;
-        if (!menu.cursorEmpty()) return Interruptibility.UNSAFE_TO_STOP;
+        if (run.unsafeToStop() || !menu.cursorEmpty()) return Interruptibility.UNSAFE_TO_STOP;
         return Interruptibility.WORKING;
     }
 
@@ -406,8 +439,9 @@ final class EnchantMenuWork implements Action {
         if (closing != null) closing.pause();
     }
 
-    // 收尾：正在点的笔不再点（没点出去的不欠账），界面照 M11 请游戏关上，装进去的东西随原版关闭流程回背包。
+    // 收尾：手上的笔不再点（没点出去的不欠账），界面照 M11 请游戏关上，装进去的东西随原版关闭流程回背包。
     @Override public void close() {
+        run.abandon();
         if (closing != null) closing.close();
         menu.abandon();
     }
