@@ -7,6 +7,9 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.survival.breath.DrowningDanger;
+import org.maiwithu.maicraft.behavior.survival.digout.BuriedDanger;
+import org.maiwithu.maicraft.behavior.survival.fall.FallDanger;
 import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
 import org.maiwithu.maicraft.behavior.navigation.util.SwimAirBudget;
 import org.maiwithu.maicraft.game.player.PlayerContext;

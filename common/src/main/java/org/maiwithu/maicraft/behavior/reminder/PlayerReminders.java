@@ -24,7 +24,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ProjectileWeaponItem;
 import net.minecraft.world.level.LightLayer;
 
-import org.maiwithu.maicraft.behavior.survival.FoodPicker;
+import org.maiwithu.maicraft.behavior.survival.hunger.FoodPicker;
 import org.maiwithu.maicraft.game.player.DamageObserver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;

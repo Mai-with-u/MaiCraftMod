@@ -14,7 +14,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 
 /**
  * 土豆加农炮当远程武器的事实（所有者定 C5）：点一下就发，弹药是弹药类型注册表里认的东西（多是能吃的），

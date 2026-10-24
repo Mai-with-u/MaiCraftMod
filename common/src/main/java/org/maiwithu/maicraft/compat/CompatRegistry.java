@@ -18,7 +18,7 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
 import org.maiwithu.maicraft.behavior.navigation.spi.ObstacleSource;
 import org.maiwithu.maicraft.behavior.landing.spi.FallBrake;

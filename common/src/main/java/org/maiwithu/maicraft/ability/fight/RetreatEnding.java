@@ -6,7 +6,7 @@ import java.util.OptionalInt;
 
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.survival.HungerNeed;
+import org.maiwithu.maicraft.behavior.survival.hunger.HungerNeed;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**

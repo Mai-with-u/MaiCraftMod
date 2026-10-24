@@ -11,11 +11,11 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.survival.BedChooser;
-import org.maiwithu.maicraft.behavior.survival.ClientBedPlacer;
-import org.maiwithu.maicraft.behavior.survival.LiveBedFinder;
-import org.maiwithu.maicraft.behavior.survival.PlacesBed;
-import org.maiwithu.maicraft.behavior.survival.SleepRules;
+import org.maiwithu.maicraft.behavior.survival.beds.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.beds.ClientBedPlacer;
+import org.maiwithu.maicraft.behavior.survival.beds.LiveBedFinder;
+import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
+import org.maiwithu.maicraft.behavior.survival.beds.SleepRules;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -23,8 +23,8 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.behavior.survival.AutoSleep;
-import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.survival.night.AutoSleep;
+import org.maiwithu.maicraft.behavior.survival.night.NightfallNeed;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.travel.planning.DestinationResolver;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;

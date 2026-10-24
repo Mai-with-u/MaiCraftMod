@@ -11,7 +11,7 @@ import java.util.Optional;
 import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 
 /** 联动远程武器的哪一发能打：口粮不打、分成几颗的只在近处打。 */

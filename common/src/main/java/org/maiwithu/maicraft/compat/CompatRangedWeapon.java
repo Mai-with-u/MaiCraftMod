@@ -8,7 +8,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 
 /**
  * 联动模组交来的远程武器，登记表给它包的一层：模组停用后什么都不认（战斗只用弓弩），

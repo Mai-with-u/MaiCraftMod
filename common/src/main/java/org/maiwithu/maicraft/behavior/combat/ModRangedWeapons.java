@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
-import org.maiwithu.maicraft.behavior.survival.FoodPicker;
+import org.maiwithu.maicraft.behavior.survival.hunger.FoodPicker;
 
 import java.util.List;
 import java.util.Objects;
@@ -12,7 +12,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 
 /**

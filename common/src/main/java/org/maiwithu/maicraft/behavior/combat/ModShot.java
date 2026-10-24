@@ -14,7 +14,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientGearChanges;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
-import org.maiwithu.maicraft.behavior.survival.spi.RangedWeapon;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.GearSlotName;

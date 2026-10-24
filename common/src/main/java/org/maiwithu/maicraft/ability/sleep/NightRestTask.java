@@ -12,9 +12,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.state.properties.BedPart;
 
-import org.maiwithu.maicraft.behavior.survival.BedChooser;
-import org.maiwithu.maicraft.behavior.survival.BedScanner;
-import org.maiwithu.maicraft.behavior.survival.PlacesBed;
+import org.maiwithu.maicraft.behavior.survival.beds.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.beds.BedScanner;
+import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;

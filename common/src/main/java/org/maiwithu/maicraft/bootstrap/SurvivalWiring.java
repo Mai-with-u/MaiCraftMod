@@ -5,8 +5,8 @@ import java.util.Objects;
 import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
-import org.maiwithu.maicraft.behavior.survival.AutoSleep;
-import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
+import org.maiwithu.maicraft.behavior.survival.night.AutoSleep;
+import org.maiwithu.maicraft.behavior.survival.night.NightfallNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 

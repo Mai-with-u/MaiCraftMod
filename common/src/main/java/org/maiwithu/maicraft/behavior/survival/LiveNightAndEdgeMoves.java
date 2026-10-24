@@ -5,6 +5,10 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Inventory;
 
+import org.maiwithu.maicraft.behavior.survival.fall.EdgeProximityNeed;
+import org.maiwithu.maicraft.behavior.survival.fall.StepBackTask;
+import org.maiwithu.maicraft.behavior.survival.recover.LostItemsNeed;
+import org.maiwithu.maicraft.behavior.survival.recover.RecoverDropsTask;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;

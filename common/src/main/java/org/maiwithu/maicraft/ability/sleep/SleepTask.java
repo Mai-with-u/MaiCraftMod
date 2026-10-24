@@ -8,11 +8,11 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.behavior.survival.BedCandidate;
-import org.maiwithu.maicraft.behavior.survival.BedChooser;
-import org.maiwithu.maicraft.behavior.survival.BedScanner;
-import org.maiwithu.maicraft.behavior.survival.PlacesBed;
-import org.maiwithu.maicraft.behavior.survival.SleepRules;
+import org.maiwithu.maicraft.behavior.survival.beds.BedCandidate;
+import org.maiwithu.maicraft.behavior.survival.beds.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.beds.BedScanner;
+import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
+import org.maiwithu.maicraft.behavior.survival.beds.SleepRules;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;

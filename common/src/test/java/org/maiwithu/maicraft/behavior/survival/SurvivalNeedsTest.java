@@ -6,6 +6,11 @@ import java.util.List;
 import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.survival.breath.BreathNeed;
+import org.maiwithu.maicraft.behavior.survival.breath.BreathTask;
+import org.maiwithu.maicraft.behavior.survival.digout.DigOutNeed;
+import org.maiwithu.maicraft.behavior.survival.digout.DigOutTask;
+import org.maiwithu.maicraft.behavior.survival.fall.FallNeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
