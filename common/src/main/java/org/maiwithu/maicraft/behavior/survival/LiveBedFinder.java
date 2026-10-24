@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.sleep;
+package org.maiwithu.maicraft.behavior.survival;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -21,7 +21,6 @@ import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.survival.NightfallNeed;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.sleep;
+package org.maiwithu.maicraft.behavior.survival;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

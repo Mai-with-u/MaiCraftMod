@@ -11,6 +11,11 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.survival.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.ClientBedPlacer;
+import org.maiwithu.maicraft.behavior.survival.LiveBedFinder;
+import org.maiwithu.maicraft.behavior.survival.PlacesBed;
+import org.maiwithu.maicraft.behavior.survival.SleepRules;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;

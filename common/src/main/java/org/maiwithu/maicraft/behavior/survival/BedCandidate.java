@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.sleep;
+package org.maiwithu.maicraft.behavior.survival;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.BedBlock;
@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.state.properties.BedPart;
  * @param hostileNear   周围（水平八格、垂直五格）有没有敌对生物——原版不让在怪边睡
  * @param distance      角色到这一格的直线距离（格），近似路径代价
  */
-record BedCandidate(BlockPos cell, boolean occupied, boolean protectedLand,
+public record BedCandidate(BlockPos cell, boolean occupied, boolean protectedLand,
         boolean hostileNear, double distance) {
 
     /**

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.sleep;
+package org.maiwithu.maicraft.behavior.survival;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 public final class BedChooser {
 
     /** 床区半径：给了目标对象时只在这片范围里选床，太远的床不算"这片"的。玩家常识。 */
-    static final int BED_AREA_RADIUS_BLOCKS = 16;
+    public static final int BED_AREA_RADIUS_BLOCKS = 16;
 
     /**
      * 夜里自己去睡最远走多远（格，直线）：天黑了路上刷怪，走一百多格去睡上一晚野外那张床，半路被僵尸打掉大半血，
