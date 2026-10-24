@@ -83,6 +83,22 @@ class MoveConfirmationTest {
     }
 
     @Test
+    void 搬进背包按背包侧总数增长加光标空结算() {
+        // 背包侧多了计划的件数、光标空：结算。
+        assertEquals(Verdict.CONFIRMED, MoveConfirmation.intoBackpack(20, 69, true, 49));
+        // 尾数那格装不下，落进背包的比计划少（箱子里的也确实少了）：按实际搬到的结算。
+        assertEquals(Verdict.CONFIRMED, MoveConfirmation.intoBackpack(20, 53, true, 49));
+        // 光标还拿着东西：等它放下来。
+        assertEquals(Verdict.WAITING, MoveConfirmation.intoBackpack(20, 69, false, 49));
+        // 背包侧纹丝不动：回显还没到，等。
+        assertEquals(Verdict.WAITING, MoveConfirmation.intoBackpack(20, 20, true, 49));
+        // 背包侧反而少了：有别的手在动背包，对不上。
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.intoBackpack(20, 15, true, 49));
+        // 多出来的比计划还多：多出来的不是这一笔搬的，对不上。
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.intoBackpack(20, 100, true, 49));
+    }
+
+    @Test
     void 快照冻结动手前的那一刻() {
         ItemStack stack = new ItemStack(Blocks.COBBLESTONE_STAIRS.asItem(), 12);
         SlotSnapshot before = SlotSnapshot.of(stack);
