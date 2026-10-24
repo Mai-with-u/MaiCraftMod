@@ -29,6 +29,24 @@ public interface Ae2TerminalMenu {
         return false;
     }
 
+    /** 这份界面是不是一台无线访问点的：把无线终端绑到访问点，就在它的界面里点格子。 */
+    default boolean accessPointMenu(AbstractContainerMenu menu) {
+        return false;
+    }
+
+    /**
+     * 访问点界面里的绑定格：把可绑定的物品放进这里，服务端在格子变动时把绑定好的副本放进产出格。
+     * 格号按 AE2 自己给槽位标的用途认，认不出给空。
+     */
+    default Optional<Integer> bindingInputSlot(AbstractContainerMenu menu) {
+        return Optional.empty();
+    }
+
+    /** 访问点界面里的产出格：绑定好的副本出现在这里；格号按 AE2 自己标的用途认，认不出给空。 */
+    default Optional<Integer> bindingOutputSlot(AbstractContainerMenu menu) {
+        return Optional.empty();
+    }
+
     /** 终端界面显示网络连没连上（没电、没频道都算没连上）；不是 ME 终端的界面时给空。 */
     Optional<Boolean> linked(AbstractContainerMenu menu);
 

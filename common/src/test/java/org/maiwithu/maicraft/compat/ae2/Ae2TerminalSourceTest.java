@@ -230,6 +230,36 @@ class Ae2TerminalSourceTest {
                 Optional.of(new SeenNetworkStock.Sighting(true, Map.of(), NOW)), torch), "刚看过既没有也没样板：不再去开");
     }
 
+    @Test
+    void 没绑过终端_附近有访问点_报先绑定再取() {
+        Ae2Terminals.AccessPoint point = new Ae2Terminals.AccessPoint(new BlockPos(6, 65, -8));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                Ae2TerminalSource.bindingQuote("ae2:wireless_terminal", point, new BlockPos(0, 64, 0)));
+        assertTrue(offer.countUnknown(), "有没有货要打开后才知道：按不知道有多少报");
+        assertTrue(offer.risk().contains("还没绑定访问点"), offer.risk());
+        assertEquals("bind:ae2:wireless_terminal:6,65,-8", offer.hint());
+        // 线索原样带回来，动手时解析得回物品与访问点。
+        Ae2TerminalSource.BindingAt at = Ae2TerminalSource.BindingAt.parse(offer.hint());
+        assertEquals("ae2:wireless_terminal", at.itemId());
+        assertEquals(new BlockPos(6, 65, -8), at.block());
+    }
+
+    @Test
+    void 访问点界面的布局_只认三格工作格() {
+        SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2",
+                new VerifiedVersions("19.2.17", "19.3"), Ae2TerminalSourceTest::compat);
+        CompatRegistry registry = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));
+        // 绑定格、产出格、信号增强格：都按机器格核对，放进与取出都等现场变化。
+        MenuLayout.Supported layout = assertInstanceOf(MenuLayout.Supported.class,
+                registry.menuLayouts().classify(terminalSlots("ae2:wireless_access_point", 3)));
+        assertEquals(36, layout.playerSlots().size());
+        assertEquals(3, layout.containerSlots().size());
+        assertEquals(3, layout.machineSlots().size());
+        // 工作格不是三格的，说明界面的样子对不上，证明不了。
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                registry.menuLayouts().classify(terminalSlots("ae2:wireless_access_point", 2)));
+    }
+
     /** 只装了 AE2、版本给定的加载器环境替身。 */
     private static LoaderEnvironment loaderWith(String version) {
         return new LoaderEnvironment() {

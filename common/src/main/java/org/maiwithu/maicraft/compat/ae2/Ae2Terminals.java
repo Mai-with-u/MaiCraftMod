@@ -34,6 +34,35 @@ public interface Ae2Terminals {
         return false;
     }
 
+    /** 这件物品是不是无线终端，绑没绑过不算：绑定动作拿它认身上的原料；绑没绑另问 {@link #linkedWirelessTerminal}。 */
+    default boolean wirelessTerminal(ItemStack stack) {
+        return false;
+    }
+
+    /**
+     * 以 center 为中心、边长 2×radius+1 的方块范围里，已加载区块中的无线访问点。
+     * 只读客户端已经有的方块实体，不加载新区块；访问点是普通方块，不是线缆上的部件。
+     */
+    default List<AccessPoint> accessPointsNear(ClientLevel level, BlockPos center, int radius) {
+        return List.of();
+    }
+
+    /**
+     * 一台无线访问点：无线终端绑定到这里，之后就在它的信号范围里连上这张网。
+     *
+     * @param block 访问点所在的格子；点开它的界面就点这一格
+     */
+    record AccessPoint(BlockPos block) {
+        public AccessPoint {
+            block = Objects.requireNonNull(block, "block").immutable();
+        }
+
+        /** 给结果与日志看的一句话，例如"ae2:wireless_access_point（58,66,-49）"。 */
+        public String describe() {
+            return "ae2:wireless_access_point（" + block.toShortString() + "）";
+        }
+    }
+
     /**
      * 装在某一格某一面上的一台 ME 终端。
      *

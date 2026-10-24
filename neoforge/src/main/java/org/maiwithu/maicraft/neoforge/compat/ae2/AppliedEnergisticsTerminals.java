@@ -9,6 +9,7 @@ import appeng.api.parts.IPart;
 import appeng.api.parts.IPartHost;
 import appeng.parts.BusCollisionHelper;
 import appeng.items.tools.powered.WirelessTerminalItem;
+import appeng.blockentity.networking.WirelessAccessPointBlockEntity;
 import appeng.parts.reporting.AbstractTerminalPart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -67,6 +68,38 @@ public final class AppliedEnergisticsTerminals implements Ae2Terminals {
     // 无线终端（及照它做的同类）且绑过无线访问点：绑定位置是物品上的组件，客户端读得到。
     @Override public boolean linkedWirelessTerminal(ItemStack stack) {
         return stack.getItem() instanceof WirelessTerminalItem wireless && wireless.getLinkedPosition(stack) != null;
+    }
+
+    // 是无线终端就行，绑没绑不算：绑定动作拿它认身上的原料；绑没绑另看上面那条。
+    @Override public boolean wirelessTerminal(ItemStack stack) {
+        return stack.getItem() instanceof WirelessTerminalItem;
+    }
+
+    // 访问点是普通方块：翻已加载区块的方块实体，是无线访问点的记下来；点开它的界面就点那一格。
+    @Override public List<AccessPoint> accessPointsNear(ClientLevel level, BlockPos center, int radius) {
+        List<AccessPoint> found = new ArrayList<>();
+        int minX = center.getX() - radius;
+        int maxX = center.getX() + radius;
+        int minY = center.getY() - radius;
+        int maxY = center.getY() + radius;
+        int minZ = center.getZ() - radius;
+        int maxZ = center.getZ() + radius;
+        // 按区块翻方块实体表：只看客户端已经有的区块，没加载的不去加载。
+        for (int chunkX = minX >> 4; chunkX <= maxX >> 4; chunkX++) {
+            for (int chunkZ = minZ >> 4; chunkZ <= maxZ >> 4; chunkZ++) {
+                LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                if (chunk == null) continue;
+                for (Map.Entry<BlockPos, BlockEntity> entry : chunk.getBlockEntities().entrySet()) {
+                    BlockPos at = entry.getKey();
+                    if (at.getX() < minX || at.getX() > maxX || at.getY() < minY || at.getY() > maxY
+                            || at.getZ() < minZ || at.getZ() > maxZ) continue;
+                    if (entry.getValue() instanceof WirelessAccessPointBlockEntity) {
+                        found.add(new AccessPoint(at));
+                    }
+                }
+            }
+        }
+        return List.copyOf(found);
     }
 
     // 面板范围用部件自己报的形状：AE2 按装在哪一面把部件坐标转成方块内坐标，再挪到世界坐标。

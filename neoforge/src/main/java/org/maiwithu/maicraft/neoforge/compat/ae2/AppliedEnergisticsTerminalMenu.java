@@ -14,11 +14,15 @@ import appeng.api.stacks.GenericStack;
 import appeng.client.gui.me.common.PendingCraftingJobs;
 import appeng.helpers.InventoryAction;
 import appeng.helpers.WirelessTerminalMenuHost;
+import appeng.menu.AEBaseMenu;
+import appeng.menu.SlotSemantics;
+import appeng.menu.SlotSemantic;
 import appeng.menu.me.common.GridInventoryEntry;
 import appeng.menu.me.common.IClientRepo;
 import appeng.menu.me.common.MEStorageMenu;
 import appeng.menu.me.crafting.CraftAmountMenu;
 import appeng.menu.me.crafting.CraftConfirmMenu;
+import appeng.menu.implementations.WirelessAccessPointMenu;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -45,6 +49,28 @@ public final class AppliedEnergisticsTerminalMenu implements Ae2TerminalMenu {
     // 背后是拿在手里的无线终端（含无线合成终端）才算：主机就是那件物品的界面主机。
     @Override public boolean wirelessMenu(AbstractContainerMenu menu) {
         return menu instanceof MEStorageMenu storage && storage.getHost() instanceof WirelessTerminalMenuHost<?>;
+    }
+
+    // 访问点的界面：绑定就是在这份界面里点格子。
+    @Override public boolean accessPointMenu(AbstractContainerMenu menu) {
+        return menu instanceof WirelessAccessPointMenu;
+    }
+
+    // 绑定格与产出格按 AE2 给槽位标的用途认（MACHINE_INPUT / MACHINE_OUTPUT），
+    // 不写死格号：AE2 自己调槽位顺序时不跟着改。认不出（槽位被模组改动、语义不存在）给空。
+    @Override public Optional<Integer> bindingInputSlot(AbstractContainerMenu menu) {
+        return slotWithSemantic(menu, SlotSemantics.MACHINE_INPUT);
+    }
+
+    @Override public Optional<Integer> bindingOutputSlot(AbstractContainerMenu menu) {
+        return slotWithSemantic(menu, SlotSemantics.MACHINE_OUTPUT);
+    }
+
+    // 语义对应的第一格的格号；这份界面不是 AE2 的菜单、或没有这个语义的格子时给空。
+    private static Optional<Integer> slotWithSemantic(AbstractContainerMenu menu, SlotSemantic semantic) {
+        if (!(menu instanceof AEBaseMenu base)) return Optional.empty();
+        var slots = base.getSlots(semantic);
+        return slots.isEmpty() ? Optional.empty() : Optional.of(slots.getFirst().index);
     }
 
     // 没连上的原因是服务端同步过来的那句（超出范围、没电、没频道），按客户端语言读出来。

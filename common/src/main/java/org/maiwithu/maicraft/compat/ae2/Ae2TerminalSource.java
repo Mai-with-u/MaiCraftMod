@@ -78,17 +78,25 @@ public final class Ae2TerminalSource implements ItemSource {
         if (player == null || player.level() == null) {
             return new SourceQuote.Unavailable(describe(), "角色不在世界里，找不了终端");
         }
-        // 身上的无线终端：带在身上就能开，比走去任何一台装着的终端都近，先报它。
-        Optional<String> wireless = terminals.carriedWireless();
-        if (wireless.isPresent()) {
-            return wirelessQuote(wireless.get(), request, clock.get());
-        }
         int radius = context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
         WorldPosition here = context.characterAt();
         Instant now = clock.get();
-        List<TerminalChooser.Candidate> candidates = terminals.around(new BlockPos(here.x(), here.y(), here.z()),
-                radius, context.permissions());
+        BlockPos feet = new BlockPos(here.x(), here.y(), here.z());
+        // 身上的无线终端：带在身上就能开，比走去任何一台装着的终端都近，先报它。
+        Optional<String> wireless = terminals.carriedWireless();
+        if (wireless.isPresent()) {
+            return wirelessQuote(wireless.get(), request, now);
+        }
+        // 身上的无线终端还没绑定访问点：附近有访问点就报"先绑定再取"，没有就照旧只看装着的终端。
+        Optional<String> unbound = terminals.carriedUnboundWireless();
+        if (unbound.isPresent()) {
+            Optional<Ae2Terminals.AccessPoint> point = terminals.accessPointNear(feet, radius);
+            if (point.isPresent()) {
+                return bindingQuote(unbound.get(), point.get(), feet);
+            }
+        }
         Predicate<String> wanted = itemId -> request.wanted().matches(itemId, services.itemTags().tagsOf(itemId));
+        List<TerminalChooser.Candidate> candidates = terminals.around(feet, radius, context.permissions());
         return quoteFrom(TerminalChooser.choose(candidates, wanted, request.wanted().describe(), radius),
                 request, describe(), now);
     }
@@ -137,6 +145,14 @@ public final class Ae2TerminalSource implements ItemSource {
             return terminals.carriedWireless().filter(itemId::equals)
                     .flatMap(id -> takes.takeWireless(id, request, context.records()));
         }
+        // 报的是"先绑定再取"：动手前核对终端还在身上没绑、访问点也还在，才走绑定加取货这一串。
+        if (offer.hint().startsWith(BINDING_HINT)) {
+            BindingAt at = BindingAt.parse(offer.hint());
+            return terminals.carriedUnboundWireless().filter(at.itemId()::equals)
+                    .flatMap(id -> terminals.accessPointAt(at.block())
+                            .flatMap(point -> takes.pairAndTake(point, id, request,
+                                    context.permissions(), context.records())));
+        }
         String dimension = player.level().dimension().location().toString();
         TerminalAt at = TerminalAt.parse(offer.hint());
         // 到了动手时终端可能已经被拆、换了部件（忘掉它的记录），或刚问清是别人放的：交回空让引擎换路。
@@ -146,8 +162,42 @@ public final class Ae2TerminalSource implements ItemSource {
 
     /** 报价线索里标明"用身上的无线终端"的前缀，后面跟物品 ID。 */
     static final String WIRELESS_HINT = "wireless:";
+    /** 报价线索里标明"先绑定再取"的前缀，后面跟物品 ID，再跟访问点的格子坐标。 */
+    static final String BINDING_HINT = "bind:";
     /** 拿出无线终端、右键、取、关上，大约几个动作：不用走路。 */
     private static final int ACTIONS_WITH_WIRELESS = 3;
+    /** 走到访问点、点开、放进、取回、关上，再拿出终端开，大约几个动作：绑定比直取多跑一趟。 */
+    private static final int ACTIONS_THROUGH_BINDING = 7;
+
+    /**
+     * 身上无线终端还没绑定访问点时的报价：先走到访问点把它绑上，再打开看网络里有没有。
+     * 有没有货要打开后才知道，按不知道有多少报；代价按走到访问点的路程算。
+     */
+    static SourceQuote bindingQuote(String itemId, Ae2Terminals.AccessPoint point, BlockPos characterAt) {
+        double dx = point.block().getX() - characterAt.getX();
+        double dy = point.block().getY() - characterAt.getY();
+        double dz = point.block().getZ() - characterAt.getZ();
+        int distance = (int) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        BlockPos block = point.block();
+        String hint = BINDING_HINT + itemId + ":" + block.getX() + "," + block.getY() + "," + block.getZ();
+        return new SourceQuote.Offer("ME 终端", SourceQuote.Offer.UNKNOWN_COUNT,
+                new AcquisitionCost(distance, ACTIONS_THROUGH_BINDING),
+                "身上的" + itemId + "还没绑定访问点：先走到 " + point.describe() + " 把它绑上，"
+                        + "再打开看网络里有没有（绑定好了以后就不用再跑这一趟）",
+                hint);
+    }
+
+    /** 从绑定报价的线索里解析：物品 ID 与访问点的格子。物品 ID 自己也带冒号，从最后一个冒号切开。 */
+    record BindingAt(String itemId, BlockPos block) {
+        static BindingAt parse(String hint) {
+            String rest = hint.substring(BINDING_HINT.length());
+            int split = rest.lastIndexOf(':');
+            String itemId = rest.substring(0, split);
+            String[] parts = rest.substring(split + 1).split(",");
+            return new BindingAt(itemId, new BlockPos(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]),
+                    Integer.parseInt(parts[2])));
+        }
+    }
 
     /**
      * 身上无线终端的报价。像玩家一样先看一眼 AE：这次还没打开过就按够数报（打开看一眼只要一两秒，

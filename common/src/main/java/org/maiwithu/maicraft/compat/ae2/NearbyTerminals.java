@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -48,6 +49,30 @@ final class NearbyTerminals {
         PlayerContext player = services.context().get();
         if (player == null || player.localPlayer() == null) return Optional.empty();
         return compat.carriedWirelessTerminal(player.localPlayer());
+    }
+
+    /** 身上第一件还没绑定访问点的无线终端的物品 ID：绑定动作的原料；角色不在世界里或都绑过了给空。 */
+    Optional<String> carriedUnboundWireless() {
+        PlayerContext player = services.context().get();
+        if (player == null || player.localPlayer() == null) return Optional.empty();
+        return compat.carriedUnboundWirelessTerminal(player.localPlayer());
+    }
+
+    /** center 周围 radius 格里离 center 最近的一台无线访问点；已加载区块里没有给空。 */
+    Optional<Ae2Terminals.AccessPoint> accessPointNear(BlockPos center, int radius) {
+        PlayerContext player = services.context().get();
+        if (player == null || player.level() == null) return Optional.empty();
+        return compat.accessPointsNear(player.level(), center, radius).stream()
+                .min(Comparator.comparingDouble(point -> distance(center, point.block())));
+    }
+
+    /** 这一格现在还是不是一台无线访问点：绑定动作动手前核对，防着报价之后被拆。 */
+    Optional<Ae2Terminals.AccessPoint> accessPointAt(BlockPos block) {
+        PlayerContext player = services.context().get();
+        if (player == null || player.level() == null) return Optional.empty();
+        return compat.accessPointsNear(player.level(), block, 0).stream()
+                .filter(point -> point.block().equals(block))
+                .findFirst();
     }
 
     /**
@@ -126,6 +151,14 @@ final class NearbyTerminals {
         double dx = panel.x - (center.getX() + 0.5);
         double dy = panel.y - (center.getY() + 0.5);
         double dz = panel.z - (center.getZ() + 0.5);
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // 离 center 那一格的中心多远：访问点是整格方块，量到格子中心。
+    private static double distance(BlockPos center, BlockPos block) {
+        double dx = block.getX() - center.getX();
+        double dy = block.getY() - center.getY();
+        double dz = block.getZ() - center.getZ();
         return Math.sqrt(dx * dx + dy * dy + dz * dz);
     }
 

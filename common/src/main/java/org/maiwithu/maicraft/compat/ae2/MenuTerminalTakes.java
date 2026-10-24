@@ -16,6 +16,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.StepwiseActions;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -90,6 +91,17 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request, TaskRecords records) {
         return Optional.of(new TakeAction(terminals.wireless(terminalItemId), request, false, records, true));
+    }
+
+    // 先在访问点跟前把终端绑上，再拿出它取货：绑定做成了接着取，做砸了整串按绑定那一步的原因失败。
+    @Override public Optional<Action> pairAndTake(Ae2Terminals.AccessPoint point, String terminalItemId,
+            ItemRequest request, Permissions permissions, TaskRecords records) {
+        WirelessBinding binding = new WirelessBinding(compat, services, point, terminalItemId, permissions);
+        TakeAction take = new TakeAction(terminals.wireless(terminalItemId), request, false, records, true);
+        return Optional.of(new StepwiseActions(
+                "先把身上的" + terminalItemId + "绑到 " + point.describe() + "，再从 ME 网络取"
+                        + request.wanted().describe(),
+                binding, take));
     }
 
     @Override public Optional<Action> takeWirelessNow(String terminalItemId, ItemRequest request) {

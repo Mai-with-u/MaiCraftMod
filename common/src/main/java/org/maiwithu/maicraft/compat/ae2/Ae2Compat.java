@@ -78,6 +78,8 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2TerminalLayout());
         // 样板供应器的界面：只认放样板的那几格，放进、拿出样板都经它。
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
+        // 无线访问点的界面：只认绑定格与产出格，放进终端、取回绑定副本都在这两格。
+        registry.menuLayout(this, new Ae2AccessPointLayout());
         registry.itemSource(this, services -> {
             this.services = services;
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
@@ -156,6 +158,31 @@ public final class Ae2Compat extends CompatModule {
         return call("认无线终端", () -> terminals.linkedWirelessTerminal(stack));
     }
 
+    /** 这件物品是不是无线终端（绑没绑过不算）；见 {@link Ae2Terminals#wirelessTerminal}。 */
+    public boolean wirelessTerminal(ItemStack stack) {
+        return call("认无线终端", () -> terminals.wirelessTerminal(stack));
+    }
+
+    /** 角色周围已加载区块里的无线访问点；见 {@link Ae2Terminals#accessPointsNear}。 */
+    public List<Ae2Terminals.AccessPoint> accessPointsNear(ClientLevel level, BlockPos center, int radius) {
+        return call("找附近的无线访问点", () -> terminals.accessPointsNear(level, center, radius));
+    }
+
+    /**
+     * 身上（主背包、快捷栏、护甲栏、副手）第一件还没绑定访问点的无线终端的物品 ID；没带给空。
+     * 绑定动作拿它认原料；绑过的走 {@link #carriedWirelessTerminal} 那条路。
+     */
+    public Optional<String> carriedUnboundWirelessTerminal(Player player) {
+        Inventory inventory = player.getInventory();
+        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.isEmpty() && wirelessTerminal(stack) && !linkedWirelessTerminal(stack)) {
+                return Optional.of(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+            }
+        }
+        return Optional.empty();
+    }
+
     /**
      * 身上（主背包、快捷栏、护甲栏、副手）第一件绑过访问点的无线终端的物品 ID；没带给空。
      * 取货、存东西、落地补料认"身上有没有无线终端"都问这一处，翻背包的顺序只写一份。
@@ -174,6 +201,21 @@ public final class Ae2Compat extends CompatModule {
     /** 点开的界面是不是身上的无线终端打开的；见 {@link Ae2TerminalMenu#wirelessMenu}。 */
     public boolean wirelessMenu(AbstractContainerMenu menu) {
         return call("核对点开的是不是无线终端", () -> menus.wirelessMenu(menu));
+    }
+
+    /** 点开的界面是不是一台无线访问点的；见 {@link Ae2TerminalMenu#accessPointMenu}。 */
+    public boolean accessPointMenu(AbstractContainerMenu menu) {
+        return call("核对点开的是不是无线访问点", () -> menus.accessPointMenu(menu));
+    }
+
+    /** 访问点界面里的绑定格；见 {@link Ae2TerminalMenu#bindingInputSlot}。 */
+    public Optional<Integer> bindingInputSlot(AbstractContainerMenu menu) {
+        return call("认访问点界面的绑定格", () -> menus.bindingInputSlot(menu));
+    }
+
+    /** 访问点界面里的产出格；见 {@link Ae2TerminalMenu#bindingOutputSlot}。 */
+    public Optional<Integer> bindingOutputSlot(AbstractContainerMenu menu) {
+        return call("认访问点界面的产出格", () -> menus.bindingOutputSlot(menu));
     }
 
     /** 终端没连上网络时界面上写的原因；见 {@link Ae2TerminalMenu#unlinkedWhy}。 */

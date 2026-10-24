@@ -38,6 +38,21 @@ public interface TerminalTakes {
     }
 
     /**
+     * 先把身上的无线终端绑到这台访问点上，再拿出它取货：绑定是访问点界面里的槽位流程（右键只开界面，不配对）。
+     * 绑定没做成（走不到、点不开、副本一直不出现）整串如实失败。
+     *
+     * @param point           去哪一台访问点绑定
+     * @param terminalItemId 身上那件还没绑定的无线终端的物品 ID
+     * @param request        要什么、还要多少
+     * @param permissions    这次任务的许可：走过去能动多少地形按它来
+     * @param records        发起任务的记账口，同 {@link #take}
+     */
+    default Optional<Action> pairAndTake(Ae2Terminals.AccessPoint point, String terminalItemId, ItemRequest request,
+            Permissions permissions, TaskRecords records) {
+        return Optional.empty();
+    }
+
+    /**
      * 拿出身上的无线终端取一件，网络里现成没有就收场，不在空中下单合成：坠落中等成品进网络时人已经落地了。
      * 做不了给空。
      */
