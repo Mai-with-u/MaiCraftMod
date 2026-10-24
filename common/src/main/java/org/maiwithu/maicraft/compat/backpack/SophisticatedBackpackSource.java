@@ -26,11 +26,14 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
-import org.maiwithu.maicraft.behavior.menu.MenuClick;
+import org.maiwithu.maicraft.behavior.menu.MenuClose;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
+import org.maiwithu.maicraft.behavior.menu.MenuSessionSource;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
@@ -49,9 +52,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>问价按上次开包读到的存货（本次启动内，五分钟内算数）报明确数量；没读过报"包里可能有，
  * 不知道有多少"，排在数量明确的来源后面；读不到（联动停用、版本对不上）由登记表那一层如实回答。
  * 执行用模组自己的打开请求按格开包（对应玩家在背包里对着那只包按 B 键），身上几只包一只一只开，
- * 只看主存储（升级槽与幽灵槽不算货），
- * 按要的量搬进主背包，每笔以身上真的多了为准；带无限格升级的背包读数对不上，按"未证实"处理。
- * 主背包放不下就停，已取的照算；关界面前光标清空。往包里塞是腾地方的事，不在这里。
+ * 只看主存储（升级槽与幽灵槽不算货），按要的量搬进主背包，每笔以身上真的多了为准；
+ * 带无限格升级的背包读数对不上，按"未证实"处理。主背包放不下就停，已取的照算；
+ * 往包里塞是腾地方的事，不在这里。
  */
 public final class SophisticatedBackpackSource implements ItemSource {
 
@@ -137,13 +140,13 @@ public final class SophisticatedBackpackSource implements ItemSource {
         private final ItemRequest request;
         private final Permissions permissions;
         private Stage stage = Stage.OPEN;
-        private MenuChannel menu;
-        private MenuSession session;
-        private List<Integer> storageSlots = List.of();
-        /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发。 */
-        private final Deque<MenuClick> pressing = new ArrayDeque<>();
-        /** 正在点的那一笔动手时身上有几件；没有在点的为 -1。 */
-        private int moveStartCarried = -1;
+        /** 认领到的那只包的界面：读数、点击与关闭都经它。 */
+        private ClaimedMenu menu;
+        /** 手上的一笔交给它逐刻点、等结清；界面认领后才有。 */
+        private TransferRun run;
+        private Action closing;
+        /** 正在点的那一笔要搬几件：交回"没能确认"时说得清是多大的笔。 */
+        private int moveAmount;
         private int waited;
         private int totalTicks;
         private int quietTicks;
@@ -177,13 +180,15 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 if (toOpen.isEmpty()) toOpen.add(-1);
                 openingSlot = toOpen.poll();
             }
+            // 手上的笔先跑完：够没够等它结清再说。
+            if (run != null && !run.idle()) return drive();
             if (enough() && stage != Stage.CLOSE) {
                 // 已经够了：界面还开着就记一笔存货、关上；还没开包就直接完成。
                 return stage == Stage.OPEN && menu == null ? ActionStatus.done() : toClose();
             }
             // 总期限按还要开几只包放宽：一只包一份期限。
             if (++totalTicks > GIVE_UP_TICKS * (toOpen.size() + 1)) {
-                noteUnsettled("总期限到了");
+                noteAbandoned("总期限到了");
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开包取货超时", null));
             }
             return switch (stage) {
@@ -215,7 +220,6 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 if (channel == null) {
                     return nextBackpackOr(Problem.of(Problem.Kind.TARGET_GONE, "背包界面点开了又马上没了", null));
                 }
-                menu = channel;
                 Optional<List<Integer>> slots = menus.mainStorageSlotIds(opened);
                 if (slots.isEmpty()) {
                     // 带无限格升级的背包读数对不上：这只取不了货，按未证实处理，关上换下一只。
@@ -224,7 +228,8 @@ public final class SophisticatedBackpackSource implements ItemSource {
                     waited = 0;
                     return ActionStatus.progressed();
                 }
-                storageSlots = slots.get();
+                menu = new ClaimedMenu(channel, slots.get());
+                run = new TransferRun(menu);
                 stage = Stage.TAKE;
                 waited = 0;
                 return ActionStatus.progressed();
@@ -250,10 +255,9 @@ public final class SophisticatedBackpackSource implements ItemSource {
         /** 换下一只包：界面与这一只的进度清掉，从发打开请求开始。 */
         private void startNextBackpack() {
             menu = null;
-            session = null;
-            storageSlots = List.of();
-            pressing.clear();
-            moveStartCarried = -1;
+            run = null;
+            closing = null;
+            moveAmount = 0;
             quietTicks = 0;
             waited = 0;
             openRequested = false;
@@ -278,14 +282,13 @@ public final class SophisticatedBackpackSource implements ItemSource {
             return carriedWanted() - carriedAtStart >= request.count();
         }
 
-        // 按量搬：整堆够用整堆拿，尾数按件拿，拿够就停；上一笔没结清就本刻不动手。
+        // 按量搬：手上的笔交给搬运执行逐刻点、等结清；空手时盘下一笔要点的几下。
         private ActionStatus take() {
             if (menu == null || !menu.stillOpen()) {
-                // 界面被合上了（打断、模组自己关的）：没等到结果的那几下交回，搬走多少由引擎清点。
-                noteUnsettled("界面关上时");
+                // 界面被合上了（打断、模组自己关的）：搬走多少由引擎清点。
                 return toClose();
             }
-            Optional<MenuContent.Reading> reading = reading();
+            Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
                 if (++quietTicks > SETTLE_TICKS * 4) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "背包界面的内容一直没同步完", null));
@@ -293,46 +296,45 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 return ActionStatus.running();
             }
             quietTicks = 0;
-            if (moveStartCarried < 0) {
-                // 上一笔已结清：按还缺的件数盘下一笔要点的几下。
-                int stillNeeded = request.count() - (carriedWanted() - carriedAtStart);
-                Optional<ContainerTakePlan.Move> next = stillNeeded < 1 ? Optional.empty()
-                        : ContainerTakePlan.next(reading.get(), this::matches, stillNeeded);
-                if (next.isEmpty()) {
-                    // 要的都拿到了、包里没有了，或主背包放不下尾数：收场，已取的照算。
-                    return toClose();
-                }
-                moveStartCarried = carriedWanted();
-                quietTicks = 0;
-                pressing.addAll(next.get().clicks());
+            int stillNeeded = request.count() - (carriedWanted() - carriedAtStart);
+            Optional<ContainerTakePlan.Move> next = stillNeeded < 1 ? Optional.empty()
+                    : ContainerTakePlan.next(reading.get(), this::matches, stillNeeded);
+            if (next.isEmpty()) {
+                // 要的都拿到了、包里没有了，或主背包放不下尾数：收场，已取的照算。
+                return toClose();
             }
-            if (!pressing.isEmpty()) {
-                // 本刻发不出去（上一下没结清、界面刚刷新）就下一刻再点：没发出去不是背包放不下。
-                MenuClick click = pressing.peek();
-                boolean sent = click.quickMove()
-                        ? menu.quickMove(click.slotId())
-                        : menu.click(click.slotId(), click.button());
-                if (!sent) return ActionStatus.running();
-                pressing.poll();
-                return ActionStatus.progressed();
-            }
-            // 一笔的几下都点完了：等身上真的多了再结算这一笔（以背包增长为准，包里少掉只当核对）。
-            int grown = carriedWanted() - moveStartCarried;
-            if ((grown <= 0 || !cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
-                return ActionStatus.running();
-            }
-            boolean stuck = grown <= 0;
-            moveStartCarried = -1;
-            quietTicks = 0;
-            if (stuck) {
+            moveAmount = next.get().amount();
+            run.begin(new TransferRun.Move(next.get().clicks(),
+                    new TransferRun.Check.IntoBackpack(this::matches, moveAmount),
+                    "从随身背包拿" + request.wanted().describe()));
+            return drive();
+        }
+
+        // 推进手上的笔一刻：点出去算进展，等同步算还在做，出了结论按结论走。
+        private ActionStatus drive() {
+            return switch (run.tick()) {
+                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
+                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
+                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
+            };
+        }
+
+        // 一笔出了结论：结清接着盘；点出去了身上一直没多、或对不上账的，如实交回后收场，
+        // 换下一只包或让引擎清点；界面中途没了的同样收场。
+        private ActionStatus onSettled(TransferRun.MoveResult result) {
+            if (result instanceof TransferRun.MoveResult.NotMoved) {
                 unconfirmed.add("从随身背包拿" + request.wanted().describe()
                         + "：搬的那几下都点出去了，身上一直没多，没能确认结果");
                 return toClose();
             }
-            if (!cursorEmpty()) {
+            if (result instanceof TransferRun.MoveResult.Diverged) {
                 unconfirmed.add("从随身背包拿" + request.wanted().describe()
-                        + "：点完了光标上还拿着东西，这一笔搬走多少没能确认");
+                        + "：这一笔点完对不上账，搬走多少没能确认");
                 return toClose();
+            }
+            if (result instanceof TransferRun.MoveResult.MenuGone(int submitted) && submitted > 0) {
+                unconfirmed.add("从随身背包拿" + request.wanted().describe()
+                        + "：界面关上时，点了 " + submitted + " 下的最后一笔没能确认");
             }
             return ActionStatus.progressed();
         }
@@ -346,45 +348,118 @@ public final class SophisticatedBackpackSource implements ItemSource {
         }
 
         private ActionStatus closeMenu(TickContext tick) {
-            if (session == null && menu != null
-                    && MenuSession.claim(menu) instanceof MenuSession.Claim.Owned owned) {
-                session = owned.session();
+            if (closing == null) closing = menu.closing();
+            ActionStatus status = closing.tick(tick);
+            if (status instanceof ActionStatus.Running) return status;
+            if (status instanceof ActionStatus.Failed) {
+                unconfirmed.add("关随身背包的界面没能确认，光标上的东西交给游戏的关闭流程还回");
             }
-            if (session != null) {
-                return switch (session.closeNow(menu, tick.player().clientTick())) {
-                    case MenuSession.Closing.Closed closed -> afterClosed();
-                    case MenuSession.Closing.Failed failed -> {
-                        unconfirmed.add("关随身背包的界面没能确认，光标上的东西交给游戏的关闭流程还回");
-                        yield ActionStatus.done();
-                    }
-                    default -> ActionStatus.running();
-                };
-            }
-            // 认领不了会话：照样请游戏关一次，东西由原版的关闭流程还回背包。
-            if (menu != null) menu.requestClose();
-            if (menu == null || !menu.stillOpen()) return afterClosed();
-            if (++waited > SETTLE_TICKS * 10) {
-                unconfirmed.add("随身背包的界面到期限还没关上");
-                return ActionStatus.done();
-            }
-            return ActionStatus.running();
+            return afterClosed();
         }
 
-        // 读主存储与背包那一侧：升级槽与幽灵槽不在主存储清单里，天然不算货。
-        private Optional<MenuContent.Reading> reading() {
+        private void recordStock() {
+            Optional<MenuContent.Reading> reading = menu == null ? Optional.empty() : menu.reading();
+            if (reading.isEmpty()) {
+                seen.forget(openingSlot);
+                return;
+            }
+            Map<String, Integer> stock = new HashMap<>();
+            for (SlotSnapshot snapshot : reading.get().containerSnapshots()) {
+                if (snapshot.isEmpty()) continue;
+                BackpackStack stack = ClientBackpackView.snapshot(snapshot.stack());
+                stock.merge(stack.itemId(), snapshot.count(), Integer::sum);
+            }
+            seen.saw(openingSlot, stock, clock.get());
+        }
+
+        // 中途收手（总期限到、被收尾）：手上还有一笔的，点出去没等到结果的那几下原样交回。
+        private void noteAbandoned(String circumstance) {
+            if (run == null || run.idle()) return;
+            int submitted = run.abandon();
+            if (submitted > 0) {
+                unconfirmed.add("从随身背包拿" + request.wanted().describe() + "：" + circumstance
+                        + "，最后一笔没能确认");
+            }
+        }
+
+        // 这一格是不是想要的东西：按物品 ID 与它挂着的标签匹配。
+        private boolean matches(SlotSnapshot snapshot) {
+            if (snapshot.isEmpty()) return false;
+            BackpackStack stack = ClientBackpackView.snapshot(snapshot.stack());
+            return request.wanted().matches(stack.itemId(), services.itemTags().tagsOf(stack.itemId()));
+        }
+
+        /** 身上（这层只看主背包）有多少件想要的：取没取到以它的增长为准。 */
+        private int carriedWanted() {
+            int total = 0;
+            for (BackpackStack stack : services.backpack().stacks()) {
+                if (request.wanted().matches(stack.itemId(), services.itemTags().tagsOf(stack.itemId()))) {
+                    total += stack.count();
+                }
+            }
+            return total;
+        }
+
+        // 生存需求打断时没有界面操作要收：界面被请关后恢复经 begin 重新走。
+        @Override public void pause() {
+        }
+
+        @Override public void close() {
+            if (run != null && !run.idle()) run.abandon();
+            if (menu != null && menu.stillOpen()) menu.abandon();
+            menu = null;
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return menu != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+        }
+
+        @Override public List<String> unconfirmedFacts() {
+            return List.copyOf(unconfirmed);
+        }
+
+        @Override public String describe() {
+            return switch (stage) {
+                case OPEN -> "打开随身背包";
+                case TAKE -> "从随身背包搬" + request.wanted().describe() + "进主背包";
+                case CLOSE -> "关上随身背包";
+            };
+        }
+    }
+
+    /**
+     * 认领到的一份背包界面：读数按模组的主存储分侧（升级槽与幽灵槽不算货），点击与关闭走通道与会话。
+     * 打开请求是模组自己的（对着包按 B 键），认领发生在界面真开之后；关闭与会话纪律走共用的那一份。
+     */
+    private final class ClaimedMenu implements OpenedMenu {
+
+        private final MenuChannel channel;
+        /** 主存储的槽位号：升级槽与幽灵槽不在里面，天然不算货。 */
+        private final List<Integer> storage;
+        private MenuSession session;
+        private boolean closeAsked;
+
+        ClaimedMenu(MenuChannel channel, List<Integer> storage) {
+            this.channel = channel;
+            this.storage = List.copyOf(storage);
+        }
+
+        boolean stillOpen() {
+            return channel.stillOpen();
+        }
+
+        @Override public Optional<MenuContent.Reading> reading() {
             PlayerContext context = services.context().get();
-            if (context == null || context.localPlayer() == null || menu == null || !menu.stillOpen()) {
+            if (context == null || context.localPlayer() == null || !channel.stillOpen()) {
                 return Optional.empty();
             }
             AbstractContainerMenu opened = context.localPlayer().containerMenu;
-            if (opened == null || !menus.isBackpackMenu(opened)) {
-                return Optional.empty();
-            }
+            if (opened == null || !menus.isBackpackMenu(opened)) return Optional.empty();
             List<Integer> playerSlots = menus.playerSlotIds(opened);
-            List<SlotSnapshot> storage = new ArrayList<>();
-            List<SlotSnapshot> player = new ArrayList<>();
-            for (int slot : storageSlots) storage.add(snapshot(opened, slot));
-            for (int slot : playerSlots) player.add(snapshot(opened, slot));
+            List<SlotSnapshot> storageSnapshots = new ArrayList<>();
+            List<SlotSnapshot> playerSnapshots = new ArrayList<>();
+            for (int slot : storage) storageSnapshots.add(snapshot(opened, slot));
+            for (int slot : playerSlots) playerSnapshots.add(snapshot(opened, slot));
             // 背包格号取槽位背后物品格自己的格号：快捷栏 0-8、主背包 9-35，不依赖界面把哪些槽排在前。
             List<Integer> playerIndices = new ArrayList<>();
             for (int slot : playerSlots) playerIndices.add(opened.getSlot(slot).getContainerSlot());
@@ -400,84 +475,61 @@ public final class SophisticatedBackpackSource implements ItemSource {
                             ? opened.getSlot(slot).getContainerSlot() : -1;
                 }
             };
-            return Optional.of(new MenuContent.Reading(menu, slots, List.copyOf(storageSlots), playerSlots,
-                    List.copyOf(playerIndices), List.copyOf(storage), List.copyOf(player)));
+            return Optional.of(new MenuContent.Reading(channel, slots, List.copyOf(storage), playerSlots,
+                    List.copyOf(playerIndices), List.copyOf(storageSnapshots), List.copyOf(playerSnapshots)));
         }
 
-        private static SlotSnapshot snapshot(AbstractContainerMenu menu, int slot) {
-            if (slot < 0 || slot >= menu.slots.size()) return SlotSnapshot.empty();
-            var stack = menu.slots.get(slot).getItem();
-            return stack.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(stack);
+        @Override public boolean busy() {
+            PlayerContext context = services.context().get();
+            return context == null || context.menuActions().hasPendingTransaction();
         }
 
-        /** 这一格是不是想要的东西：按物品 ID 与它挂着的标签匹配。 */
-        private boolean matches(SlotSnapshot snapshot) {
-            if (snapshot.isEmpty()) return false;
-            BackpackStack stack = ClientBackpackView.snapshot(snapshot.stack());
-            return request.wanted().matches(stack.itemId(), services.itemTags().tagsOf(stack.itemId()));
+        @Override public boolean cursorEmpty() {
+            return !channel.cursorCarrying();
         }
 
-        private boolean cursorEmpty() {
-            return menu != null && !menu.cursorCarrying();
+        @Override public SlotSnapshot cursor() {
+            return channel.cursor();
         }
 
-        /** 身上（主背包与副手之外这层只看主背包）有多少件想要的：取没取到以它的增长为准。 */
-        private int carriedWanted() {
-            int total = 0;
-            for (BackpackStack stack : services.backpack().stacks()) {
-                if (request.wanted().matches(stack.itemId(), services.itemTags().tagsOf(stack.itemId()))) {
-                    total += stack.count();
+        @Override public boolean quickMove(int slotId) {
+            return channel.quickMove(slotId);
+        }
+
+        @Override public boolean click(int slotId, int button) {
+            return channel.click(slotId, button);
+        }
+
+        @Override public void noteCursorTakenFrom(int slotId) {
+            // 光标上的东西从这一格拿起：会话记下，关界面前放回这里。会话要求光标为空才认领，
+            // 第一次登记都发生在拿起之前；认领不上就交由原版的关闭流程还。
+            if (session == null && MenuSession.claim(channel) instanceof MenuSession.Claim.Owned owned) {
+                session = owned.session();
+            }
+            if (session != null) session.noteCursorTakenFrom(slotId);
+        }
+
+        @Override public Action closing() {
+            return new MenuClose(channel, new MenuSessionSource() {
+                @Override public Optional<MenuSession> current() {
+                    return Optional.ofNullable(session);
                 }
-            }
-            return total;
+
+                @Override public void renew() {
+                    session = null;
+                }
+            });
         }
 
-        private void recordStock() {
-            Optional<MenuContent.Reading> reading = reading();
-            if (reading.isEmpty()) {
-                seen.forget(openingSlot);
-                return;
-            }
-            Map<String, Integer> stock = new HashMap<>();
-            for (SlotSnapshot snapshot : reading.get().containerSnapshots()) {
-                if (snapshot.isEmpty()) continue;
-                BackpackStack stack = ClientBackpackView.snapshot(snapshot.stack());
-                stock.merge(stack.itemId(), snapshot.count(), Integer::sum);
-            }
-            seen.saw(openingSlot, stock, clock.get());
+        @Override public void abandon() {
+            closeAsked = true;
+            if (channel.stillOpen()) channel.requestClose();
         }
 
-        private void noteUnsettled(String what) {
-            if (moveStartCarried >= 0 || !pressing.isEmpty()) {
-                unconfirmed.add("从随身背包拿" + request.wanted().describe() + "：" + what + "，最后一笔没能确认");
-            }
-        }
-
-        @Override public List<String> unconfirmedFacts() {
-            return List.copyOf(unconfirmed);
-        }
-
-        @Override public void pause() {
-        }
-
-        @Override public void close() {
-            if (menu != null && menu.stillOpen()) {
-                menu.requestClose();
-            }
-            menu = null;
-            session = null;
-        }
-
-        @Override public Interruptibility interruptibility() {
-            return menu != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
-        }
-
-        @Override public String describe() {
-            return switch (stage) {
-                case OPEN -> "打开随身背包";
-                case TAKE -> "从随身背包搬" + request.wanted().describe() + "进主背包";
-                case CLOSE -> "关上随身背包";
-            };
+        private static SlotSnapshot snapshot(AbstractContainerMenu opened, int slot) {
+            if (slot < 0 || slot >= opened.slots.size()) return SlotSnapshot.empty();
+            var stack = opened.slots.get(slot).getItem();
+            return stack.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(stack);
         }
     }
 
