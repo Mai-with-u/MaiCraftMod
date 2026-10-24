@@ -85,9 +85,15 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     // 快捷栏的按数字键、副手的原生交换，都不开背包；主背包的换进快捷栏空格（或零碎格）后再选中那一格。
     private MoveAction keepingHeld(Inventory inventory, int source, String what) {
         if (source < FIRST_MAIN_SLOT || source > LAST_MAIN_SLOT) return new MoveAction(what, source);
-        int target = HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING),
-                VanillaHotbar.swapTarget(inventory.selected));
+        int target = planSwapTarget(inventory);
         return new MoveAction(what + "（换进快捷栏第 " + target + " 格）", source, target, true);
+    }
+
+    // 主背包里的一件换到快捷栏哪一格：按 HotbarSwapTarget 挑空格或零碎格，不挤掉手里拿着的。
+    // 纯判断，离线可测：船这类不可堆叠、无工具属性的大件也走同一条挑格，没有按物品种类另设的门槛。
+    static int planSwapTarget(Inventory inventory) {
+        return HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING),
+                VanillaHotbar.swapTarget(inventory.selected));
     }
 
     /**
@@ -175,7 +181,7 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         /** 身上那件东西现在的格号；副手是 40，随搬运推进更新。 */
         private int slot;
         /** 换到快捷栏的哪一格；-1 表示选中的那一格，换完还要选中它（换到主手）。 */
-        private final int hotbarTarget;
+        private int hotbarTarget;
         /** 换到指定那一格后还要按数字键选中它（打架换武器：换进空格再选中，不挤掉手里的）。 */
         private final boolean selectAfter;
         private Stage stage;
@@ -185,6 +191,10 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         /** 要搬的是哪种东西：换的时候对不上，按它现在在哪一格再换一次。 */
         private final Item item;
         private boolean retried;
+        /** 这一刻卡在提交前多久：开不出界面、轮不到出手这类没有确认可等的等待，从卡住那刻起算。 */
+        private long stalledSince = Long.MIN_VALUE;
+        /** 已经从头再打算过几次；次次都卡死就以卡在哪的原因收场。 */
+        private int restarts;
 
         MoveAction(String what, int sourceSlot) {
             this(what, sourceSlot, -1);
@@ -228,12 +238,13 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 // 原先直接在别的界面上换快捷栏，程序报错，吃饭、拿东西接连失败。
                 if (player.localPlayer().containerMenu != player.localPlayer().inventoryMenu) {
                     try {
-                        if (!actions.ensureWorldVisible(player)) return ActionStatus.running();
+                        if (!actions.ensureWorldVisible(player)) return stalled(player, "开着的旧界面一直关不掉");
                     } catch (RuntimeException stuck) {
                         return fail("开着的界面关不掉：" + stuck.getMessage());
                     }
                 }
-                if (!actions.ensureVisible(player)) return ActionStatus.running();
+                if (!actions.ensureVisible(player)) return stalled(player, "背包界面一直开不出来");
+                stalledSince = Long.MIN_VALUE;
                 // 换之前先把旧快捷栏物品的格冻结进确认条件：交换必须两端都对上调换才算数。
                 int hotbar = hotbarTarget >= 0 ? hotbarTarget
                         : VanillaHotbar.swapTarget(player.localPlayer().getInventory().selected);
@@ -297,9 +308,10 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             if (menuPending == null) {
                 try {
                     menuPending = actions.swapInventoryToOffhand(player, slot, STEP_TIMEOUT_TICKS);
+                    stalledSince = Long.MIN_VALUE;
                 } catch (IllegalStateException busy) {
-                    // 画面被占或角色正在用东西：下一刻再试，不硬抢。
-                    return ActionStatus.running();
+                    // 画面被占或角色正在用东西：下一刻再试，不硬抢；卡满期限从头再打算，再不行认输。
+                    return stalled(player, "画面一直被占，副手交换提交不出去");
                 }
                 return ActionStatus.running();
             }
@@ -319,10 +331,13 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         // 选中那一格：东西已经在快捷栏，选中就是主手。
         private ActionStatus selecting(PlayerContext player) {
             var sender = player.interactionSender();
-            if (sender == null || !player.canInteractThisTick()) return ActionStatus.running();
+            if (sender == null || !player.canInteractThisTick()) {
+                return stalled(player, "一直轮不到出手，选中快捷栏提交不出去");
+            }
             // 选中在等确认时只推进，不重复提交新的选中。
             if (selectPending == null) {
                 selectPending = sender.selectHotbar(player, slot, STEP_TIMEOUT_TICKS);
+                stalledSince = Long.MIN_VALUE;
             } else if (!selectPending.terminal()) {
                 selectPending = sender.poll(player, selectPending);
                 return ActionStatus.running();
@@ -332,6 +347,44 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 return fail("选中快捷栏没能确认");
             }
             return ActionStatus.done();
+        }
+
+        // 提交前的等待（开不出界面、轮不到出手、画面被占）也认期限：卡满一步的期限就把动作从头再打算一回
+        // （东西可能已经换进快捷栏了，按它此刻在哪一格重新走），再卡死就以写明卡在哪的原因收场。
+        // 原先这里无限等，落地备手的十秒总预算被整段烧光，最后只报得出一句笼统的超时。
+        private ActionStatus stalled(PlayerContext player, String giveUp) {
+            if (stalledSince == Long.MIN_VALUE) stalledSince = player.clientTick();
+            StalledStep.Verdict verdict = StalledStep.decide(player.clientTick() - stalledSince, restarts);
+            if (verdict == StalledStep.Verdict.KEEP_WAITING) return ActionStatus.running();
+            stalledSince = Long.MIN_VALUE;
+            if (verdict == StalledStep.Verdict.START_OVER) {
+                Integer now = relocate(player);
+                if (now == null) return fail(giveUp + "，重新打算时身上已经没有这件东西");
+                restarts++;
+                // 旧阶段开着的背包界面交给原版关上（收在 close 的路径里），再按东西此刻在哪一格重定阶段。
+                releaseScreen();
+                menuPending = null;
+                selectPending = null;
+                slot = now;
+                if (now >= FIRST_MAIN_SLOT && now <= LAST_MAIN_SLOT) {
+                    hotbarTarget = planSwapTarget(player.localPlayer().getInventory());
+                }
+                stage = now == 40 ? Stage.OFFHAND_SWAP
+                        : now >= 0 && now <= 8 ? Stage.SELECTING
+                        : Stage.MENU_STAGE;
+                return ActionStatus.running();
+            }
+            return fail(giveUp);
+        }
+
+        // 东西此刻在身上哪一格（快捷栏、主背包或副手）；身上没有，或只在盔甲格里（那是穿卸装备的事）为 null。
+        private Integer relocate(PlayerContext player) {
+            if (item == null) return null;
+            var inventory = player.localPlayer().getInventory();
+            for (int scan = 0; scan <= 35; scan++) {
+                if (inventory.getItem(scan).is(item)) return scan;
+            }
+            return inventory.getItem(40).is(item) ? 40 : null;
         }
 
         private ActionStatus fail(String message) {
