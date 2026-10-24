@@ -98,6 +98,14 @@ public final class TransferRun {
         return stage == Stage.IDLE;
     }
 
+    /** 中途撒手：这一笔不再点了，点出去没等到结果的有几下，交回调用方记没能确认；界面不由这里关。 */
+    public int abandon() {
+        int submitted = move == null ? 0 : move.clicks().size() - pressing.size();
+        stage = Stage.IDLE;
+        pressing.clear();
+        return submitted;
+    }
+
     /** 一笔没点完且光标上拿着东西：半途撒手会把拆出来的尾数交给关界面的流程，停不得。 */
     public boolean unsafeToStop() {
         return stage == Stage.PRESSING && !menu.cursorEmpty();

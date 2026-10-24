@@ -2,9 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire.sources;
 
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +28,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ContainerFeeds;
@@ -50,18 +49,16 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
  * 一次要几样时只开一次箱：箱里有的那几样一起拿，箱里没有的不碰、也不因此失败。
  *
  * <p>点开、认领界面与等同步走玩家行为层共用的打开容器动作（每次点开都新建读端）。
- * 每一笔拿几件、点哪几下由取货计划给出，这里只按计划逐刻点、等游戏确认；
+ * 每一笔拿几件、点哪几下由取货计划给出，逐刻点、等结清、出结论交给搬运执行；
  * 拿走多少以重新清点为准：引擎在动作结束后按身上的数量结算，这里保证每一笔都等确认过、界面关上了。
- * 点出去了却一直没等到结果的那几下（背包塞满点不进、界面中途被关）实现交回接缝，
- * 原样交回给引擎转述，不与确认拿到的混在一起。记得的箱子到现场可能已经不在：
+ * 点出去了却一直没等到结果的那几下（背包塞满点不进、界面中途被关）原样交回接缝，
+ * 由引擎转述，不与确认拿到的混在一起。记得的箱子到现场可能已经不在：
  * 点不开、界面一直没同步，都如实失败，引擎换别的路。
  */
 public final class MenuContainerTakes implements ContainerTakes {
 
     /** 一次开箱取货的总期限（刻）；到点如实收场，不在一只箱子上耗死。 */
     private static final long GIVE_UP_TICKS = 20L * 30;
-    /** 一笔搬运结清后，等两侧内容同步过来的宽限（刻）；过了容器那侧还纹丝不动就是背包放不下。 */
-    private static final int SETTLE_TICKS = 5;
 
     private final ReadsItemTags tags;
     private final WorldMemory memory;
@@ -139,18 +136,14 @@ public final class MenuContainerTakes implements ContainerTakes {
         private Problem held;
         /** 这一趟是不是真的拿到了东西：拿到过就不拿"给机器留一半"当整场失败。 */
         private boolean tookAnything;
-        /** 正在点的那一样动手之前，容器那一侧想要的东西有几件；没有在点的为 -1。 */
-        private int beforeMove = -1;
-        /** 正在点的那样在清单里的第几项；没有在点的为 -1。 */
+        /** 正在点的那样在清单里的第几项；没有在点的为 -1：交回"没能确认"时说得清是哪样。 */
         private int wantIndex = -1;
-        /** 正在点的那一笔按计划要搬几件、要点哪几下：结算与交回"没能确认"时说得清。 */
+        /** 正在点的那一笔按计划要搬几件：交回"没能确认"时说得清是多大的笔。 */
         private int moveAmount;
-        private int moveClicks;
-        /** 正在点的那一笔还剩哪几下没点；一笔的点击逐刻发，光标上的东西等放进背包才撒手。 */
-        private final Deque<MenuClick> pressing = new ArrayDeque<>();
+        /** 手上的一笔交给它逐刻点、等结清；界面点开后才有。 */
+        private TransferRun run;
         /** 点出去了却没能确认结果的交互，一句一笔，经交回接缝交给引擎。 */
         private final List<String> unconfirmed = new ArrayList<>();
-        private int quietTicks;
         /** 第一份读数到了没有：到了才按它定每样的起点。 */
         private boolean opened;
 
@@ -177,7 +170,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             // 原先连走路一起算 30 秒，六十格外的箱子还没走到就"开箱取货超时"。
             if (stage != Stage.OPEN && ++waited > GIVE_UP_TICKS) {
                 // 总期限到了还在一笔上：点出去没等到结果的那几下照实交回，再以卡住收场。
-                noteUnsettledMove("总期限到了");
+                noteAbandonedMove("总期限到了");
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开箱取货超时：" + container.name(), null));
             }
             return switch (stage) {
@@ -193,17 +186,17 @@ public final class MenuContainerTakes implements ContainerTakes {
             ActionStatus status = opening.tick(tick);
             if (!(status instanceof ActionStatus.Done)) return status;
             menu = opening.opened().orElseThrow();
+            run = new TransferRun(menu);
             stage = Stage.TRANSFER;
             return ActionStatus.progressed();
         }
 
-        // 按量搬：清单里哪一样还缺就盘哪一样，整堆够用整堆拿、尾数按件拿；取不动的那样先放下，
-        // 试试别的；都取不动、都取够了，或上一笔没结清就本刻不动手。
+        // 按量搬：手上的笔交给搬运执行逐刻点、等结清、出结论；空手时盘下一笔。
         private ActionStatus transfer() {
+            if (!run.idle()) return drive();
             Optional<MenuContent.Reading> reading = menu.reading();
             if (reading.isEmpty()) {
-                // 界面被合上了（打断或服务端关的）：没等到结果的那几下交回，拿走多少由引擎清点，这里照常收场。
-                noteUnsettledMove("界面关上时");
+                // 界面被合上了（打断或服务端关的）：拿走多少由引擎清点，这里照常收场。
                 stage = Stage.DONE;
                 return ActionStatus.done();
             }
@@ -218,41 +211,46 @@ public final class MenuContainerTakes implements ContainerTakes {
                     if (feeder) allowances[i] = feederAllowance(i, startTotals[i]);
                 }
             }
-            if (menu.busy()) return ActionStatus.running();
-            if (beforeMove < 0) {
-                if (!planNext(open)) return toClose(open);
-            }
-            if (!pressing.isEmpty()) {
-                // 本刻发不出去（界面刚刷新还没画好、没有交互机会）就下一刻再点：没发出去不是背包放不下。
-                if (!press(pressing.peek())) return ActionStatus.running();
-                pressing.poll();
-                return ActionStatus.progressed();
-            }
-            // 一笔的几下都点完了：等两侧内容同步过来再结算这一笔。
-            int now = matchedTotal(open, wantIndex);
-            if ((now == beforeMove || !menu.cursorEmpty()) && ++quietTicks <= SETTLE_TICKS) {
-                return ActionStatus.running();
-            }
-            // 点了容器那侧纹丝不动：多半是背包放不下，不再硬点；但点出去是事实，结果没能确认照实交回。
-            if (now == beforeMove) {
+            if (planNext(open)) return drive();
+            return toClose(open);
+        }
+
+        // 推进手上的笔一刻：点出去算进展，等同步算还在做，出了结论按结论走。
+        private ActionStatus drive() {
+            return switch (run.tick()) {
+                case TransferRun.Progress.Advanced advanced -> ActionStatus.progressed();
+                case TransferRun.Progress.Waiting waiting -> ActionStatus.running();
+                case TransferRun.Progress.Settled settled -> onSettled(settled.result());
+            };
+        }
+
+        // 一笔出了结论：结清就接着盘下一笔；点出去了身上一直没多（多半背包放不下）记下没能确认，
+        // 这一样这一趟先放下；对不上或光标没放下来的，这一笔搬走多少说不清，下一笔按现场重新盘。
+        private ActionStatus onSettled(TransferRun.MoveResult result) {
+            if (result instanceof TransferRun.MoveResult.Confirmed(int amount)) {
+                tookAnything = true;
+            } else if (result instanceof TransferRun.MoveResult.NotMoved) {
                 unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount
-                        + " 件的那几下都点出去了，容器那侧一直没动，没能确认结果");
+                        + " 件的那几下都点出去了，身上一直没多，没能确认结果");
                 // 这一样这一趟先放下，别的样还可以接着试；都取不动就关。
                 settled[wantIndex] = true;
-            } else {
+            } else if (result instanceof TransferRun.MoveResult.Diverged) {
                 tookAnything = true;
-                if (!menu.cursorEmpty()) {
-                    // 容器那侧动了、光标上还拿着东西：这一笔到底搬走多少没能确认完，也交回一句。
-                    unconfirmed.add(wantedName(wantIndex) + "：点完了光标上还拿着东西，这一笔搬走多少没能确认");
+                unconfirmed.add(wantedName(wantIndex) + "：这一笔点完对不上账，搬走多少没能确认");
+            } else if (result instanceof TransferRun.MoveResult.MenuGone(int submitted)) {
+                if (submitted > 0) {
+                    unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount + " 件的这笔点了 " + submitted
+                            + " 下，界面关上时没能等到结算结果");
                 }
+                stage = Stage.DONE;
+                return ActionStatus.done();
             }
-            beforeMove = -1;
             wantIndex = -1;
-            quietTicks = 0;
             return ActionStatus.progressed();
         }
 
-        // 盘下一笔：按清单顺序找第一样还缺、且这一刻取得到的；取得到就冻结动手前那一侧的总数。
+        // 盘下一笔：按清单顺序找第一样还缺、且这一刻取得到的；取得到就提交给搬运执行，
+        // 动手前的证据由它在第一下点出去之前冻结。
         // 取不动（箱里没有、背包这一刻放不下）就这一趟先放下它，试试别的；几样都取不动时关界面。
         private boolean planNext(MenuContent.Reading open) {
             for (int i = 0; i < wants.size(); i++) {
@@ -276,11 +274,10 @@ public final class MenuContainerTakes implements ContainerTakes {
                     continue;
                 }
                 wantIndex = index;
-                beforeMove = now;
                 moveAmount = next.get().amount();
-                moveClicks = next.get().clicks().size();
-                quietTicks = 0;
-                pressing.addAll(next.get().clicks());
+                run.begin(new TransferRun.Move(next.get().clicks(),
+                        new TransferRun.Check.IntoBackpack(snapshot -> matches(snapshot, index), moveAmount),
+                        wantedName(index)));
                 return true;
             }
             return false;
@@ -294,23 +291,15 @@ public final class MenuContainerTakes implements ContainerTakes {
                     + (limitedFor[index] + 1) / 2 + " 件给机器，现在只剩 " + startTotals[index] + " 件，不再拿");
         }
 
-        // 点这一笔的下一下：快速移动整堆；普通点击先把要从的格子登记给界面会话（中途关界面时
-        // 光标上的东西放回这一格），再发左右键。
-        private boolean press(MenuClick click) {
-            if (click.quickMove()) return menu.quickMove(click.slotId());
-            if (click.takesToCursor()) menu.noteCursorTakenFrom(click.slotId());
-            return menu.click(click.slotId(), click.button());
-        }
-
-        // 有一笔点出去了却没等到结算就停了（界面被关、总期限到、被收尾）：点出去的那几下
-        // 结果没能确认，一句交回；一下都没发出去的不算，那只是没点成。
-        private void noteUnsettledMove(String circumstance) {
-            if (beforeMove < 0) return;
-            int submitted = moveClicks - pressing.size();
-            if (submitted <= 0) return;
-            unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount + " 件的这笔点了 " + submitted + " 下，"
-                    + circumstance + "没能等到结算结果");
-            beforeMove = -1;
+        // 中途收手（总期限到、被收尾）：手上还有一笔的，点出去没等到结果的那几下原样交回；
+        // 一下都没发出去的不算，那只是没点成。
+        private void noteAbandonedMove(String circumstance) {
+            if (run.idle()) return;
+            int submitted = run.abandon();
+            if (submitted > 0) {
+                unconfirmed.add(wantedName(wantIndex) + "：搬 " + moveAmount + " 件的这笔点了 " + submitted + " 下，"
+                        + circumstance + "没能等到结算结果");
+            }
             wantIndex = -1;
         }
 
@@ -383,8 +372,7 @@ public final class MenuContainerTakes implements ContainerTakes {
         // 光标上拿着东西的那几下停不得：半途撒手会把拆出来的尾数交给关界面的流程，先等它放进背包。
         @Override
         public Interruptibility interruptibility() {
-            return !pressing.isEmpty() && !menu.cursorEmpty()
-                    ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+            return run.unsafeToStop() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         // 被生存需求打断：正在走、正在点的先停住；界面开着就请游戏关上，回来时引擎按身上的清点再决定。
@@ -401,7 +389,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             opening.close();
             if (closing != null) closing.close();
             if (menu != null && stage != Stage.DONE) {
-                noteUnsettledMove("收尾时");
+                noteAbandonedMove("收尾时");
                 menu.abandon();
             }
         }
