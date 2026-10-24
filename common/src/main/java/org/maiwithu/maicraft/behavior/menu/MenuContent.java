@@ -21,24 +21,28 @@ public interface MenuContent {
     /**
      * 一次分侧读数。
      *
-     * @param channel            界面通道，认领与关闭都经它
-     * @param slots              布局判定的输入
-     * @param containerSlotIds   容器那一侧的槽位号
-     * @param playerSlotIds      角色背包那一侧的槽位号
-     * @param containerSnapshots 与 containerSlotIds 对齐的快照
-     * @param playerSnapshots    与 playerSlotIds 对齐的快照
+     * @param channel               界面通道，认领与关闭都经它
+     * @param slots                 布局判定的输入
+     * @param containerSlotIds      容器那一侧的槽位号
+     * @param playerSlotIds         角色背包那一侧的槽位号
+     * @param playerInventoryIndices 与 playerSlotIds 对齐的角色背包格号（快捷栏 0-8、主背包 9-35）
+     * @param containerSnapshots    与 containerSlotIds 对齐的快照
+     * @param playerSnapshots       与 playerSlotIds 对齐的快照
      */
     record Reading(MenuChannel channel, MenuSlots slots,
                    List<Integer> containerSlotIds, List<Integer> playerSlotIds,
+                   List<Integer> playerInventoryIndices,
                    List<SlotSnapshot> containerSnapshots, List<SlotSnapshot> playerSnapshots) {
         public Reading {
             if (channel == null || slots == null) throw new IllegalArgumentException("界面读数缺通道或槽位描述");
             if (containerSlotIds.size() != containerSnapshots.size()
-                    || playerSlotIds.size() != playerSnapshots.size()) {
+                    || playerSlotIds.size() != playerSnapshots.size()
+                    || playerSlotIds.size() != playerInventoryIndices.size()) {
                 throw new IllegalArgumentException("槽位号与快照数量不一致");
             }
             containerSlotIds = List.copyOf(containerSlotIds);
             playerSlotIds = List.copyOf(playerSlotIds);
+            playerInventoryIndices = List.copyOf(playerInventoryIndices);
             containerSnapshots = List.copyOf(containerSnapshots);
             playerSnapshots = List.copyOf(playerSnapshots);
         }

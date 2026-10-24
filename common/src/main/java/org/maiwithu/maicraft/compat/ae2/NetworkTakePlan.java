@@ -70,19 +70,21 @@ public final class NetworkTakePlan {
      * @param cursor          此刻光标上的东西；只会是这一条的东西或空
      * @param entry           网络里这一条此刻的样子
      * @param playerSlotIds   角色背包那一侧的槽位号
+     * @param playerInventoryIndices 与 playerSlotIds 对齐的角色背包格号（快捷栏 0-8、主背包 9-35）
      * @param playerSnapshots 与槽位号对齐的此刻内容
      */
     public static Move next(int remaining, SlotSnapshot cursor, Ae2TerminalMenu.StockEntry entry,
-            List<Integer> playerSlotIds, List<SlotSnapshot> playerSnapshots) {
+            List<Integer> playerSlotIds, List<Integer> playerInventoryIndices, List<SlotSnapshot> playerSnapshots) {
         int stackSize = entry.sample().getMaxStackSize();
         int onCursor = cursor.isEmpty() ? 0 : cursor.count();
         if (onCursor > 0) {
             // 光标上已经有：够数、满一组、网络里没了、或再叠一件就没有一格放得下，都先放下。
             boolean enough = onCursor >= remaining || onCursor >= stackSize || entry.stored() <= 0;
             boolean roomForOneMore = stowSlot(entry.sample().copyWithCount(onCursor + 1),
-                    playerSlotIds, playerSnapshots) >= 0;
+                    playerSlotIds, playerInventoryIndices, playerSnapshots) >= 0;
             if (enough || !roomForOneMore) {
-                int slot = stowSlot(entry.sample().copyWithCount(onCursor), playerSlotIds, playerSnapshots);
+                int slot = stowSlot(entry.sample().copyWithCount(onCursor),
+                        playerSlotIds, playerInventoryIndices, playerSnapshots);
                 return slot >= 0 ? new PutDown(slot) : new NoRoom();
             }
             return new TakeOne(entry.serial());
@@ -92,10 +94,10 @@ public final class NetworkTakePlan {
         }
         // 整组：Shift 点进哪一格由游戏挑，能叠进没满的同种堆也行，所以只要主背包里还有一处能放下一件就点。
         if (remaining >= stackSize) {
-            return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerSnapshots) >= 0
+            return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerInventoryIndices, playerSnapshots) >= 0
                     ? new TakeStack(entry.serial()) : new NoRoom();
         }
-        return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerSnapshots) >= 0
+        return stowSlot(entry.sample().copyWithCount(1), playerSlotIds, playerInventoryIndices, playerSnapshots) >= 0
                 ? new TakeOne(entry.serial()) : new NoRoom();
     }
 
@@ -103,8 +105,9 @@ public final class NetworkTakePlan {
      * 只有一份角色侧读数、拿不到原界面，挑选走统一的收进背包：先叠同种，再主背包空格，
      * 不占快捷栏空格；装不下给 -1。
      */
-    private static int stowSlot(ItemStack stack, List<Integer> playerSlotIds, List<SlotSnapshot> playerSnapshots) {
-        return CursorStowing.fromSnapshots(playerSlotIds,
+    private static int stowSlot(ItemStack stack, List<Integer> playerSlotIds,
+            List<Integer> playerInventoryIndices, List<SlotSnapshot> playerSnapshots) {
+        return CursorStowing.fromSnapshots(playerSlotIds, playerInventoryIndices,
                 playerSnapshots.stream().map(SlotSnapshot::stack).toList(), stack);
     }
 

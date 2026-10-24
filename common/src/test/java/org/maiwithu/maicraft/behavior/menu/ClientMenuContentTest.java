@@ -34,21 +34,28 @@ class ClientMenuContentTest {
 
 
 
-    /** 替身布局：按给定清单回答菜单类型与分侧。 */
+    /** 替身布局：按给定清单回答菜单类型与分侧；背包格号按槽位号减去角色侧起点（只当摆设，读数原样抄）。 */
     private static final class FakeSlots implements MenuSlots {
         private final String typeId;
         private final int slotCount;
         private final Set<Integer> playerSide;
+        private final int playerSideStart;
 
         FakeSlots(String typeId, int slotCount, Set<Integer> playerSide) {
+            this(typeId, slotCount, playerSide, 0);
+        }
+
+        FakeSlots(String typeId, int slotCount, Set<Integer> playerSide, int playerSideStart) {
             this.typeId = typeId;
             this.slotCount = slotCount;
             this.playerSide = playerSide;
+            this.playerSideStart = playerSideStart;
         }
 
         @Override public String menuTypeId() { return typeId; }
         @Override public int slotCount() { return slotCount; }
         @Override public boolean playerBacked(int slot) { return playerSide.contains(slot); }
+        @Override public int playerInventoryIndex(int slot) { return playerSide.contains(slot) ? slot - playerSideStart : -1; }
     }
 
     private static MenuChannel emptyChannel() {
@@ -80,6 +87,20 @@ class ClientMenuContentTest {
         assertEquals(8, value.containerSnapshots().get(0).count());
         assertTrue(value.containerSnapshots().get(0).sameIdentity(
                 SlotSnapshot.of(new ItemStack(Items.OAK_LOG, 8))));
+        // 玩家侧读数带着每格的背包格号，与槽位号一一对应（替身的格号给成与槽位号一样）。
+        assertEquals(value.playerSlotIds(), value.playerInventoryIndices());
+    }
+
+    /** 模组菜单把快捷栏镜像排在前：读数里的背包格号跟权威格号走，不跟列表位置走。 */
+    @Test
+    void 快捷栏排在前时读数里的背包格号按权威格号() {
+        // 槽位 0..35 是快捷栏（格号 0-8）加主背包（格号 9-35）的镜像，容器侧排在其后；替身只管报格号，类型用认得出的。
+        MenuSlots slots = new FakeSlots("minecraft:generic_9x3", 63,
+                IntStream.range(0, 36).boxed().collect(Collectors.toSet()), 0);
+        Optional<MenuContent.Reading> reading = ClientMenuContent.reading(
+                slots, emptyChannel(), slot -> SlotSnapshot.empty());
+        assertTrue(reading.isPresent());
+        assertEquals(IntStream.range(0, 36).boxed().toList(), reading.get().playerInventoryIndices());
     }
 
     @Test

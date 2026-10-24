@@ -195,6 +195,7 @@ class CompatRegistryTest {
             @Override public String menuTypeId() { return typeId; }
             @Override public int slotCount() { return 40; }
             @Override public boolean playerBacked(int slot) { return slot >= 4; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 4; }
         };
     }
 

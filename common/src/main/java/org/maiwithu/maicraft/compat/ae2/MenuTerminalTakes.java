@@ -313,7 +313,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
             int remaining = request.count() - confirmedTotal();
             if (entry.fillsBucket() && cursor.isEmpty()) return fillBucket(entry, stock, reading.get(), raw, remaining);
             NetworkTakePlan.Move move = NetworkTakePlan.next(remaining, cursor, entry,
-                    reading.get().playerSlotIds(), reading.get().playerSnapshots());
+                    reading.get().playerSlotIds(), reading.get().playerInventoryIndices(),
+                    reading.get().playerSnapshots());
             return switch (move) {
                 case NetworkTakePlan.TakeStack takeStack -> submit(Pending.STACK, entry, reading.get(), raw,
                         () -> compat.takeStack(raw, takeStack.serial()));
@@ -682,9 +683,10 @@ public final class MenuTerminalTakes implements TerminalTakes {
         }
     }
 
-    // 只有一份读数、拿不到原界面：放光标、装不装得下的判断走统一的收进背包挑选。
+    // 只有一份读数、拿不到原界面：放光标、装不装得下的判断走统一的收进背包挑选；
+    // 背包格号用读数里的权威格号，不按界面加槽顺序猜主背包在前。
     private static int stowSlot(ItemStack stack, MenuContent.Reading reading) {
-        return CursorStowing.fromSnapshots(reading.playerSlotIds(),
+        return CursorStowing.fromSnapshots(reading.playerSlotIds(), reading.playerInventoryIndices(),
                 reading.playerSnapshots().stream().map(SlotSnapshot::stack).toList(), stack);
     }
 

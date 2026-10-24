@@ -74,13 +74,16 @@ class MenuContainerTakesTest {
                 boxSnapshots.add(snapshot(box.get(i)));
             }
             List<Integer> playerIds = new ArrayList<>();
+            List<Integer> playerIndices = new ArrayList<>();
             List<SlotSnapshot> playerSnapshots = new ArrayList<>();
             for (int i = 0; i < player.size(); i++) {
+                // 背包格号按原版顺序：主背包 9-35 在前、快捷栏 0-8 在后，与槽位号一一对应。
                 playerIds.add(27 + i);
+                playerIndices.add(i < 27 ? 9 + i : i - 27);
                 playerSnapshots.add(snapshot(player.get(i)));
             }
-            return Optional.of(new MenuContent.Reading(CHANNEL, SLOTS, boxIds, playerIds, boxSnapshots,
-                    playerSnapshots));
+            return Optional.of(new MenuContent.Reading(CHANNEL, SLOTS, boxIds, playerIds, playerIndices,
+                    boxSnapshots, playerSnapshots));
         }
 
         private static SlotSnapshot snapshot(ItemStack item) {
@@ -189,6 +192,8 @@ class MenuContainerTakesTest {
         @Override public String menuTypeId() { return "minecraft:generic_9x3"; }
         @Override public int slotCount() { return 63; }
         @Override public boolean playerBacked(int slot) { return slot >= 27; }
+        // 角色侧 27..62 对应背包格号 9..35（主背包在前、快捷栏在后的原版菜单顺序）。
+        @Override public int playerInventoryIndex(int slot) { return slot - 27 + 9; }
     };
 
     /** 打开替身箱子：一推进就开好。 */

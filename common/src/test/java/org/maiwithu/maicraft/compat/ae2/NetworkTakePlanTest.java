@@ -49,17 +49,27 @@ class NetworkTakePlanTest {
 
     private static final List<Integer> PLAYER_SLOT_IDS = IntStream.range(9, 45).boxed().toList();
 
+    /** 原版顺序对应的背包格号：列表前 27 格是主背包 9-35，后 9 格是快捷栏 0-8。 */
+    private static final List<Integer> VANILLA_INDICES = IntStream.range(0, 36)
+            .map(i -> i < 27 ? 9 + i : i - 27).boxed().toList();
+
+    /** 模组菜单可能出现的顺序：快捷栏镜像排在前；槽位号不变，每格装的是谁换了位置。 */
+    private static final List<Integer> HOTBAR_FIRST_SLOT_IDS = IntStream.range(9, 45).boxed().toList();
+
+    /** 快捷栏在前的背包格号：前 9 格是快捷栏 0-8、后 27 格是主背包 9-35，格号序列恰也递增。 */
+    private static final List<Integer> HOTBAR_FIRST_INDICES = IntStream.range(0, 36).boxed().toList();
+
     @Test
     void 缺一组以上就整组取() {
         NetworkTakePlan.Move move = NetworkTakePlan.next(69, SlotSnapshot.empty(), cobbleInNetwork(200),
-                PLAYER_SLOT_IDS, playerSide());
+                PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide());
         assertEquals(new NetworkTakePlan.TakeStack(7), move);
     }
 
     @Test
     void 不足一组就一件一件取() {
         NetworkTakePlan.Move move = NetworkTakePlan.next(5, SlotSnapshot.empty(), cobbleInNetwork(200),
-                PLAYER_SLOT_IDS, playerSide());
+                PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide());
         assertEquals(new NetworkTakePlan.TakeOne(7), move);
     }
 
@@ -67,7 +77,7 @@ class NetworkTakePlanTest {
     void 光标上凑够了就放进能整个装下的一格_先叠到同种没满的堆上() {
         SlotSnapshot cursor = SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 5));
         NetworkTakePlan.Move move = NetworkTakePlan.next(5, cursor, cobbleInNetwork(195),
-                PLAYER_SLOT_IDS, playerSide(new ItemStack(Items.DIRT, 64), new ItemStack(Items.COBBLESTONE, 30)));
+                PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide(new ItemStack(Items.DIRT, 64), new ItemStack(Items.COBBLESTONE, 30)));
         assertEquals(new NetworkTakePlan.PutDown(10), move);
     }
 
@@ -75,7 +85,7 @@ class NetworkTakePlanTest {
     void 光标上还不够就接着取一件() {
         SlotSnapshot cursor = SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 3));
         NetworkTakePlan.Move move = NetworkTakePlan.next(5, cursor, cobbleInNetwork(197),
-                PLAYER_SLOT_IDS, playerSide());
+                PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide());
         assertEquals(new NetworkTakePlan.TakeOne(7), move);
     }
 
@@ -83,7 +93,7 @@ class NetworkTakePlanTest {
     void 网络里没了就把光标上已有的放下() {
         SlotSnapshot cursor = SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 2));
         NetworkTakePlan.Move move = NetworkTakePlan.next(5, cursor, cobbleInNetwork(0),
-                PLAYER_SLOT_IDS, playerSide());
+                PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide());
         assertEquals(new NetworkTakePlan.PutDown(9), move);
     }
 
@@ -93,8 +103,24 @@ class NetworkTakePlanTest {
         List<SlotSnapshot> slots = fullOf(new ItemStack(Items.DIRT, 64));
         slots.set(0, SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 62)));
         SlotSnapshot cursor = SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 2));
-        NetworkTakePlan.Move move = NetworkTakePlan.next(5, cursor, cobbleInNetwork(100), PLAYER_SLOT_IDS, slots);
+        NetworkTakePlan.Move move = NetworkTakePlan.next(5, cursor, cobbleInNetwork(100), PLAYER_SLOT_IDS, VANILLA_INDICES, slots);
         assertEquals(new NetworkTakePlan.PutDown(9), move);
+    }
+
+    /**
+     * 模组菜单把快捷栏排在前时仍按权威格号挑：快捷栏空格列表位置靠前，按位置猜会把它当主背包
+     * （实机 239 的现象）；按格号挑，取的东西落回主背包。
+     */
+    @Test
+    void 快捷栏排在前时按背包格号挑主背包空格() {
+        // 快捷栏 9 格全空排在前，主背包位置 9（背包格号 9）也空：不选排最前的快捷栏空格，选主背包那格。
+        List<SlotSnapshot> slots = new ArrayList<>();
+        for (int i = 0; i < 36; i++) {
+            slots.add(i == 9 ? SlotSnapshot.empty() : SlotSnapshot.of(new ItemStack(Items.DIRT, 64)));
+        }
+        NetworkTakePlan.Move move = NetworkTakePlan.next(5, SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 5)),
+                cobbleInNetwork(100), HOTBAR_FIRST_SLOT_IDS, HOTBAR_FIRST_INDICES, slots);
+        assertEquals(new NetworkTakePlan.PutDown(18), move);
     }
 
     @Test
@@ -105,25 +131,25 @@ class NetworkTakePlanTest {
             slots.add(i < 27 ? SlotSnapshot.of(new ItemStack(Items.DIRT, 64)) : SlotSnapshot.empty());
         }
         assertInstanceOf(NetworkTakePlan.NoRoom.class, NetworkTakePlan.next(5, SlotSnapshot.empty(),
-                cobbleInNetwork(200), PLAYER_SLOT_IDS, slots));
+                cobbleInNetwork(200), PLAYER_SLOT_IDS, VANILLA_INDICES, slots));
         assertInstanceOf(NetworkTakePlan.NoRoom.class, NetworkTakePlan.next(5,
                 SlotSnapshot.of(new ItemStack(Items.COBBLESTONE, 2)), cobbleInNetwork(100),
-                PLAYER_SLOT_IDS, slots));
+                PLAYER_SLOT_IDS, VANILLA_INDICES, slots));
     }
 
     @Test
     void 背包满了就停() {
         NetworkTakePlan.Move move = NetworkTakePlan.next(64, SlotSnapshot.empty(), cobbleInNetwork(200),
-                PLAYER_SLOT_IDS, fullOf(new ItemStack(Items.DIRT, 64)));
+                PLAYER_SLOT_IDS, VANILLA_INDICES, fullOf(new ItemStack(Items.DIRT, 64)));
         assertInstanceOf(NetworkTakePlan.NoRoom.class, move);
     }
 
     @Test
     void 够数或网络里没了就算这一条取完() {
         assertInstanceOf(NetworkTakePlan.Done.class, NetworkTakePlan.next(0, SlotSnapshot.empty(),
-                cobbleInNetwork(200), PLAYER_SLOT_IDS, playerSide()));
+                cobbleInNetwork(200), PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide()));
         assertInstanceOf(NetworkTakePlan.Done.class, NetworkTakePlan.next(10, SlotSnapshot.empty(),
-                cobbleInNetwork(0), PLAYER_SLOT_IDS, playerSide()));
+                cobbleInNetwork(0), PLAYER_SLOT_IDS, VANILLA_INDICES, playerSide()));
     }
 
     @Test

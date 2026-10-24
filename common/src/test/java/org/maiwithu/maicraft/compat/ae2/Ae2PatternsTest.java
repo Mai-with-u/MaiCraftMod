@@ -48,6 +48,7 @@ class Ae2PatternsTest {
             @Override public String menuTypeId() { return Ae2PatternProviderLayout.PROVIDER_MENU; }
             @Override public int slotCount() { return 54; }
             @Override public boolean playerBacked(int slot) { return slot >= 18; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 18; }
         };
         List<Integer> player = IntStream.range(18, 54).boxed().toList();
         List<Integer> others = IntStream.range(0, 18).boxed().toList();

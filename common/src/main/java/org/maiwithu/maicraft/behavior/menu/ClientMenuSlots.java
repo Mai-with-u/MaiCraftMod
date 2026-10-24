@@ -50,6 +50,14 @@ public final class ClientMenuSlots implements MenuSlots {
         return menu.slots.get(slot).container instanceof Inventory;
     }
 
+    @Override
+    public int playerInventoryIndex(int slot) {
+        AbstractContainerMenu menu = currentMenu();
+        if (menu == null || slot < 0 || slot >= menu.slots.size()) return -1;
+        // 背包格号取槽位背后物品格自己的格号：快捷栏 0-8、主背包 9-35，不依赖界面把哪些槽排在前。
+        return menu.slots.get(slot).getContainerSlot();
+    }
+
     private AbstractContainerMenu currentMenu() {
         PlayerContext context = contexts.get();
         return context == null ? null : context.localPlayer().containerMenu;

@@ -22,6 +22,7 @@ class MenuLayoutsTest {
             @Override public String menuTypeId() { return typeId; }
             @Override public int slotCount() { return total; }
             @Override public boolean playerBacked(int slot) { return slot >= total - playerCount; }
+            @Override public int playerInventoryIndex(int slot) { return slot - (total - playerCount); }
         };
     }
 

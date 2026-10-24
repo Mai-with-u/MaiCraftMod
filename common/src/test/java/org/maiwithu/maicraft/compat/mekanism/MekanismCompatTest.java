@@ -136,6 +136,7 @@ class MekanismCompatTest {
             @Override public String menuTypeId() { return "mekanism:enrichment_chamber"; }
             @Override public int slotCount() { return 40; }
             @Override public boolean playerBacked(int slot) { return slot >= 4; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 4; }
         };
         List<Integer> player = IntStream.range(4, 40).boxed().toList();
         // 0、1 是输入与输出格，2 是电池格，3 是升级那一页的虚拟格：读写端只认前三格。

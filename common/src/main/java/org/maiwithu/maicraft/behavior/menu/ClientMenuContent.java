@@ -134,12 +134,15 @@ public final class ClientMenuContent implements MenuContent {
             containerSnapshots.add(snapshotAt.apply(slot));
         }
         List<Integer> playerSlotIds = new ArrayList<>();
+        List<Integer> playerInventoryIndices = new ArrayList<>();
         List<SlotSnapshot> playerSnapshots = new ArrayList<>();
         for (int slot : supported.playerSlots()) {
             playerSlotIds.add(slot);
+            // 背包格号跟着槽位走：快捷栏 0-8、主背包 9-35 是物品栏数据结构的事实，模组菜单加槽顺序打乱也不影响。
+            playerInventoryIndices.add(slots.playerInventoryIndex(slot));
             playerSnapshots.add(snapshotAt.apply(slot));
         }
         return Optional.of(new Reading(channel, slots, containerSlotIds, playerSlotIds,
-                containerSnapshots, playerSnapshots));
+                playerInventoryIndices, containerSnapshots, playerSnapshots));
     }
 }

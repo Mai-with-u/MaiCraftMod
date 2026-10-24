@@ -384,6 +384,9 @@ public final class SophisticatedBackpackSource implements ItemSource {
             List<SlotSnapshot> player = new ArrayList<>();
             for (int slot : storageSlots) storage.add(snapshot(opened, slot));
             for (int slot : playerSlots) player.add(snapshot(opened, slot));
+            // 背包格号取槽位背后物品格自己的格号：快捷栏 0-8、主背包 9-35，不依赖界面把哪些槽排在前。
+            List<Integer> playerIndices = new ArrayList<>();
+            for (int slot : playerSlots) playerIndices.add(opened.getSlot(slot).getContainerSlot());
             MenuSlots slots = new MenuSlots() {
                 @Override public String menuTypeId() { return "sophisticatedbackpacks:backpack"; }
                 @Override public int slotCount() { return opened.slots.size(); }
@@ -391,9 +394,13 @@ public final class SophisticatedBackpackSource implements ItemSource {
                     return slot >= 0 && slot < opened.slots.size()
                             && opened.slots.get(slot).container instanceof Inventory;
                 }
+                @Override public int playerInventoryIndex(int slot) {
+                    return slot >= 0 && slot < opened.slots.size()
+                            ? opened.getSlot(slot).getContainerSlot() : -1;
+                }
             };
             return Optional.of(new MenuContent.Reading(menu, slots, List.copyOf(storageSlots), playerSlots,
-                    List.copyOf(storage), List.copyOf(player)));
+                    List.copyOf(playerIndices), List.copyOf(storage), List.copyOf(player)));
         }
 
         private static SlotSnapshot snapshot(AbstractContainerMenu menu, int slot) {

@@ -645,9 +645,12 @@ class DepositTaskTest {
         @Override public Optional<MenuContent.Reading> reading() {
             if (!open) return Optional.empty();
             List<Integer> playerIds = new ArrayList<>();
+            List<Integer> playerIndices = new ArrayList<>();
             List<SlotSnapshot> playerSnapshots = new ArrayList<>();
             for (int i = 0; i < 36; i++) {
+                // 替身背包按原版数据结构的格号摆：快捷栏 0-8 在前、主背包 9-35 在后。
                 playerIds.add(i);
+                playerIndices.add(i);
                 playerSnapshots.add(snapshot(rig.player.get(i)));
             }
             List<Integer> chestIds = new ArrayList<>();
@@ -666,8 +669,8 @@ class DepositTaskTest {
                 @Override public void requestClose() { CHANNEL.requestClose(); }
                 @Override public boolean accepts(int slot, ItemStack stack) { return !refusing.contains(slot - 36); }
             };
-            return Optional.of(new MenuContent.Reading(channel, SLOTS, chestIds, playerIds, chestSnapshots,
-                    playerSnapshots));
+            return Optional.of(new MenuContent.Reading(channel, SLOTS, chestIds, playerIds, playerIndices,
+                    chestSnapshots, playerSnapshots));
         }
 
         private static SlotSnapshot snapshot(ItemStack item) {
@@ -797,5 +800,7 @@ class DepositTaskTest {
         @Override public String menuTypeId() { return "minecraft:generic_9x3"; }
         @Override public int slotCount() { return 63; }
         @Override public boolean playerBacked(int slot) { return slot < 36; }
+        // 替身背包按原版数据结构的格号：快捷栏 0-8 在前、主背包 9-35 在后。
+        @Override public int playerInventoryIndex(int slot) { return slot; }
     };
 }

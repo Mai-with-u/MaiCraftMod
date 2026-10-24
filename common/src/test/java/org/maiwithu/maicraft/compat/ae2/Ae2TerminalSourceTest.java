@@ -116,6 +116,7 @@ class Ae2TerminalSourceTest {
             @Override public String menuTypeId() { return menuType; }
             @Override public int slotCount() { return otherSlots + 36; }
             @Override public boolean playerBacked(int slot) { return slot >= otherSlots; }
+            @Override public int playerInventoryIndex(int slot) { return slot - otherSlots; }
         };
     }
 

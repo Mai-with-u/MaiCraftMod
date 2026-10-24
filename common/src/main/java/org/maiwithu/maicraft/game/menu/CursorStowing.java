@@ -21,13 +21,11 @@ import net.minecraft.world.item.ItemStack;
  */
 public final class CursorStowing {
 
+    private CursorStowing() {}
+
     /** 快捷栏在角色背包里的格号是 0 到 8，主背包是 9 到 35。 */
     private static final int HOTBAR_SIZE = 9;
     private static final int MAIN_INVENTORY_END = 36;
-    /** 主背包有 27 格：只凭读数挑时按列表位置认主背包和快捷栏。 */
-    private static final int MAIN_INVENTORY_SIZE = 27;
-
-    private CursorStowing() {}
 
     /** 一格候选：界面里的槽位号、背包里的格号、现在放着什么、这一格对光标上的东西最多能放几件、这格收不收这种东西。 */
     public record Spot(int slotId, int inventoryIndex, ItemStack current, int capacity, boolean mayPlace) {}
@@ -44,21 +42,23 @@ public final class CursorStowing {
     }
 
     /**
-     * 只有一份角色侧读数（槽位号与每格内容对齐）、拿不到原界面时挑：这格收不收证明不了，按收得上算，
+     * 只有一份角色侧读数、拿不到原界面时挑：这格收不收证明不了，按收得上算，
      * 容量只看物品堆叠上限。不占快捷栏空格，只剩快捷栏放得下也给 -1；同种堆在快捷栏上不占新格，照样能叠。
-     * 槽位号按界面分侧读数的顺序：主背包 27 格在前、快捷栏 9 格在后，按位置还原背包格号。
+     * 三份读数按格对齐：槽位号、背包格号、每格内容。背包格号用权威格号，
+     * 不按列表位置猜主背包在前——模组菜单的加槽顺序不受这个约束。
      */
-    public static int fromSnapshots(List<Integer> slotIds, List<ItemStack> contents, ItemStack carried) {
+    public static int fromSnapshots(List<Integer> slotIds, List<Integer> inventoryIndices,
+            List<ItemStack> contents, ItemStack carried) {
         List<Spot> spots = new ArrayList<>();
         for (int i = 0; i < slotIds.size(); i++) {
+            int inventoryIndex = inventoryIndices.get(i);
+            boolean mainInventory = inventoryIndex >= HOTBAR_SIZE && inventoryIndex < MAIN_INVENTORY_END;
             ItemStack current = contents.get(i);
-            boolean mainInventory = i < MAIN_INVENTORY_SIZE;
             int capacity = current.isEmpty() ? carried.getMaxStackSize()
                     : Math.min(current.getMaxStackSize(), carried.getMaxStackSize());
             // 快捷栏的空格不给读数挑的调用方当垫底；已有的同种堆不占工具位，照样能叠。
             boolean mayPlace = mainInventory || !current.isEmpty();
-            spots.add(new Spot(slotIds.get(i), mainInventory ? HOTBAR_SIZE + i : i - MAIN_INVENTORY_SIZE,
-                    current, capacity, mayPlace));
+            spots.add(new Spot(slotIds.get(i), inventoryIndex, current, capacity, mayPlace));
         }
         return choose(spots, carried);
     }
