@@ -14,7 +14,7 @@ import java.util.function.BiPredicate;
  * 世界替身：一块平整的默认地面，按测试需要在指定格子摆出悬崖、水、岩浆、挡板与禁行区。
  * 默认处处可站、处处看得见，测试只声明与默认不同的部分。
  */
-final class StubWorld implements ApproachWorldView {
+class StubWorld implements ApproachWorldView {
 
     BlockPos feet = new BlockPos(0, 64, 0);
     boolean grounded = true;

@@ -12,6 +12,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 站位判断：按能到、够得着、看得见、站得稳筛候选并排序；被拒的位置记着败在哪一项。 */
@@ -312,6 +313,94 @@ class StandSpotsTest {
         world.fluids.add(new BlockPos(2, 64, 1));
         StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 64, 1)));
+    }
+
+    @Test
+    void 恰好压着方块交互距离的格子要_再远一格就拒() {
+        // 眼到方块边线 4.5 格整：距离判是"超过才拒"，压线算够得着；这一边界错成"大于等于才过"就全盘收紧。
+        ApproachTarget 目标块 = ApproachTarget.ofBlock(new BlockPos(5, 65, 0));
+        StandSpots.Ranking ranking = StandSpots.find(目标块, REACH, world, walking, guarded);
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(0, 64, 0))),
+                "恰好 4.5 格的候选要入选");
+        world.feet = new BlockPos(0, 64, 0);
+        assertEquals(Optional.empty(), StandSpots.checkArrival(目标块, REACH, world, guarded));
+        // 再远一格：5.5 格，够不着。
+        world.feet = new BlockPos(-1, 64, 0);
+        assertEquals(Optional.of("够不着"), StandSpots.checkArrival(目标块, REACH, world, guarded));
+    }
+
+    @Test
+    void 实体恰好压着实体交互距离的格子要_再远一丝就拒() {
+        // 包围盒左缘离眼睛 3.0 格整：压线算够得着；往远处挪一丝（3.0001）就该拒。
+        ApproachTarget 压线 = ApproachTarget.ofEntity(new AABB(3.5, 64, 0, 4.5, 66, 1));
+        StandSpots.Ranking ranking = StandSpots.find(压线, REACH, world, walking, guarded);
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(0, 64, 0))),
+                "恰好 3.0 格的实体候选要入选");
+        ApproachTarget 过线 = ApproachTarget.ofEntity(new AABB(3.5001, 64, 0, 4.5001, 66, 1));
+        assertEquals("够不着", failureAt(StandSpots.find(过线, REACH, world, walking, guarded),
+                new BlockPos(0, 64, 0)));
+    }
+
+    @Test
+    void 没加载的格子不进候选也不进被拒表() {
+        // 既不能当站位、也不算"附近没有站位"的理由：静默跳过，不造一条假败因。
+        world.unloaded.add(new BlockPos(2, 64, 0));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
+        assertTrue(ranking.spots().stream().noneMatch(spot -> spot.feet().equals(new BlockPos(2, 64, 0))));
+        assertTrue(ranking.rejected().stream().noneMatch(spot -> spot.feet().equals(new BlockPos(2, 64, 0))));
+    }
+
+    @Test
+    void 一格同时坏几项只记最先败的那一项() {
+        // 脚下悬空、头顶没空间、落差深、泡水、旁边岩浆全占：顺序里最先的"脚下悬空"一条定案，不堆一串败因。
+        BlockPos 坏格 = new BlockPos(2, 64, 0);
+        world.noFloor.add(坏格);
+        world.lowCeiling.add(坏格);
+        world.deepDrops.add(坏格);
+        world.fluids.add(坏格);
+        world.lavas.add(坏格);
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
+        assertEquals("脚下悬空", failureAt(ranking, 坏格));
+    }
+
+    @Test
+    void 到达核对先报站的这格要挪开() {
+        // 站着的这格本身要放东西或受保护：排在够不着、看不见之前，先挪开再谈别的。
+        world.feet = new BlockPos(2, 64, 0);
+        guarded.add(world.feet);
+        assertEquals(Optional.of("站的这格要放东西或受保护，得挪开"),
+                StandSpots.checkArrival(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)), REACH, world, guarded));
+        // 站的格受保护又够不着：还是先报挪开。
+        world.feet = new BlockPos(20, 64, 0);
+        guarded.add(world.feet);
+        assertEquals(Optional.of("站的这格要放东西或受保护，得挪开"),
+                StandSpots.checkArrival(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)), REACH, world, guarded));
+    }
+
+    @Test
+    void 湿位旁边有岩浆照样拒() {
+        // 湿位岔路只放了落脚粗筛，岩浆这条活命线还在：贴水的载具点击位旁边有岩浆不站。
+        world.fluids.add(new BlockPos(2, 64, 0));
+        world.lavas.add(new BlockPos(2, 64, 0));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1)));
+        assertEquals("旁边有岩浆", failureAt(ranking, new BlockPos(2, 64, 0)));
+    }
+
+    @Test
+    void 要挖的那格下面落差恰好三格能就地挖_再深就看不见底() {
+        BlockPos 目标格 = new BlockPos(3, 64, 0);
+        StubWorld 三格坑 = new StubWorld() {
+            @Override public double dropBelow(BlockPos at) { return 3.0; }
+        };
+        assertNull(StandSpots.underfootFailure(目标格, 三格坑), "落差 3 格摔不坏，可以原地挖");
+        StubWorld 深坑 = new StubWorld() {
+            @Override public double dropBelow(BlockPos at) { return 3.5; }
+        };
+        assertEquals("要挖的那格下面看不见底", StandSpots.underfootFailure(目标格, 深坑));
+        // 正下方是岩浆：无论落差多少都不在它上面挖。
+        StubWorld 岩浆底 = new StubWorld();
+        岩浆底.lavaUnderneath.add(目标格.below());
+        assertEquals("要挖的那格下面是岩浆", StandSpots.underfootFailure(目标格, 岩浆底));
     }
 
     private String failureAt(StandSpots.Ranking ranking, BlockPos feet) {
