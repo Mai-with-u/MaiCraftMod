@@ -9,7 +9,6 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -37,21 +36,5 @@ interface FollowMoves {
     Task crossPortal(String targetDimension, Permissions permissions);
 
     /** 帮他打：名单是离他 6 格内的敌对生物与正在打我的；玩家与中立生物不打。 */
-    HelpFight helpFight(Supplier<Vec3> leader);
-
-    /** 一场帮打：每刻推进战斗引擎一刻，读回这一刻在做什么。 */
-    interface HelpFight {
-        Battle.Moment tick(TickContext context);
-
-        /** 正在撤离：打不过，引擎在跑。 */
-        boolean retreating();
-
-        Interruptibility interruptibility();
-
-        void pause();
-
-        void close();
-
-        String describe();
-    }
+    Battle helpFight(Supplier<Vec3> leader);
 }

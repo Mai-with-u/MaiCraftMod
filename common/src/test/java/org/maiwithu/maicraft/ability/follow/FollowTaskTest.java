@@ -4,9 +4,15 @@ package org.maiwithu.maicraft.ability.follow;
 import org.junit.jupiter.api.Test;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.combat.Battle;
+import org.maiwithu.maicraft.behavior.combat.BattleMoves;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -34,6 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -214,14 +221,13 @@ class FollowTaskTest {
         }
     }
 
-    /** 身体动作替身：记下看向、上车、下车、过门与帮打。 */
+    /** 身体动作替身：记下看向、上车、下车、过门与帮打。帮打走真战斗引擎，仗打到哪由替身感知说了算。 */
     private static final class FakeMoves implements FollowMoves {
         final List<Vec3> looks = new ArrayList<>();
         Action ride;
         String portalTarget;
         Task portalTask;
-        Battle.State fightEnds = Battle.State.FINISHED;
-        int fightTicks;
+        final HelpSenses helpSenses = new HelpSenses();
         int helps;
 
         @Override public void lookAt(TickContext context, Vec3 point) {
@@ -241,24 +247,54 @@ class FollowTaskTest {
             return portalTask;
         }
 
-        @Override public HelpFight helpFight(Supplier<Vec3> leader) {
+        @Override public Battle helpFight(Supplier<Vec3> leader) {
             helps++;
-            return new HelpFight() {
-                int ticks;
-
-                @Override public Battle.Moment tick(TickContext context) {
-                    ticks++;
-                    Battle.State state = ticks > fightTicks ? fightEnds : Battle.State.FIGHTING;
-                    return new Battle.Moment(state, "打僵尸", true, true, false, 3, "血见底", false);
-                }
-
-                @Override public boolean retreating() { return false; }
-                @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-                @Override public void pause() {}
-                @Override public void close() {}
-                @Override public String describe() { return "打僵尸"; }
-            };
+            // 替身感知里放一只贴身僵尸，仗就一直在打；测试把它拿走，下一刻引擎说打完了，任务照真收场走。
+            helpSenses.fighting = true;
+            return new Battle(helpSenses, new HelpMoves(), (threat, attacker, chasing) -> true, 14.0);
         }
+    }
+
+    /** 帮打测试用的战场感知：fighting 为真时看得见一只贴身的僵尸，为假时场上什么都没有。 */
+    private static final class HelpSenses implements CombatSenses {
+        boolean fighting;
+
+        @Override public List<CombatSenses.Threat> threats(TickContext context, double radius) {
+            return fighting ? List.of(new CombatSenses.Threat(3, UUID.randomUUID(), "minecraft:zombie",
+                    2.5, 64, 0, 2.5, ThreatAssessment.Kind.MELEE, false, true, true)) : List.of();
+        }
+
+        @Override public List<CombatSenses.Attacker> recentAttackers(TickContext context) {
+            return List.of();
+        }
+
+        @Override public CombatSenses.CombatProfile profile(TickContext context) {
+            return new CombatSenses.CombatProfile(20, 0, Optional.of(new WeaponChoice.Picked(
+                    "minecraft:iron_sword", WeaponChoice.Weapon.MELEE)), 4);
+        }
+
+        @Override public Entity entityById(TickContext context, int entityId) {
+            return null;
+        }
+    }
+
+    /** 帮打测试用的动手替身：出手一下就成，迈步随便迈，不拉弓。 */
+    private static final class HelpMoves implements BattleMoves {
+        @Override public Action strike(TickContext context, int entityId) { return new Instant(); }
+        @Override public Action shoot(TickContext context, int entityId) { return new Instant(); }
+        @Override public boolean canShoot(TickContext context) { return false; }
+        @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
+        @Override public boolean attackReady(TickContext context) { return true; }
+        @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
+        @Override public void lowerGuard() {}
+        @Override public Footwork.Ground ground(TickContext context) {
+            return (dx, dz) -> Footwork.Footing.FLAT;
+        }
+        @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) {}
+        @Override public Action walk(GoalCompiler.Compiled goal) { return new Instant(); }
+        @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
+        @Override public boolean standable(TickContext context, int x, int y, int z) { return true; }
+        @Override public String mainHand(TickContext context) { return "minecraft:iron_sword"; }
     }
 
     /** 一推进就做完的动作。 */
@@ -630,12 +666,12 @@ class FollowTaskTest {
     void helpsWhenHeFightsUnlessOnlySelfDefense() {
         view.him.gap = 4;
         view.him.inFight = true;
-        moves.fightTicks = 2;
         FollowTask follow = task(3, Permissions.DEFAULT);
         run(follow, 3);
         assertEquals(1, moves.helps, "他在打：上去帮");
         assertTrue(follow.confidentAgainstCurrentThreats(), "正在帮打：自卫让位");
         view.him.inFight = false;
+        moves.helpSenses.fighting = false;
         run(follow, 5);
         assertTrue(events.said("帮他打完了"));
 

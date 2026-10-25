@@ -13,9 +13,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
-import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
-import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -27,7 +25,6 @@ import org.maiwithu.maicraft.behavior.travel.planning.SameDimensionTravel;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -112,49 +109,9 @@ public final class LiveFollowMoves implements FollowMoves {
                 PORTAL_SECONDS, walkOnly), portals, SameDimensionTravel.walkingOnly(portals));
     }
 
-    // 帮打的名单：他身边 6 格内的敌对生物，加上正在打我的；玩家不打（打不打人由 LLM 定）。
+    // 帮打交给战斗引擎：谁算可打的写在帮打名单里（LeaderRoster），这里只定看多大范围的战场。
     @Override
-    public HelpFight helpFight(Supplier<Vec3> leader) {
-        Battle battle = new Battle(senses, battleMoves, new Battlefield.Roster() {
-            @Override public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
-                if (threat.kind() == ThreatAssessment.Kind.PLAYER) return false;
-                Vec3 him = leader.get();
-                boolean nearHim = him != null
-                        && Math.hypot(threat.x() - him.x, threat.z() - him.z) <= LiveFollowView.FIGHT_RADIUS
-                        && Math.abs(threat.y() - him.y) <= 4;
-                return attacker || nearHim;
-            }
-
-            @Override public boolean primary(CombatSenses.Threat threat) {
-                Vec3 him = leader.get();
-                return him != null
-                        && Math.hypot(threat.x() - him.x, threat.z() - him.z) <= LiveFollowView.FIGHT_RADIUS;
-            }
-        }, HELP_FIELD);
-        return new HelpFight() {
-            @Override public Battle.Moment tick(TickContext context) {
-                return battle.tick(context);
-            }
-
-            @Override public boolean retreating() {
-                return battle.retreating();
-            }
-
-            @Override public Interruptibility interruptibility() {
-                return battle.interruptibility();
-            }
-
-            @Override public void pause() {
-                battle.pause();
-            }
-
-            @Override public void close() {
-                battle.close();
-            }
-
-            @Override public String describe() {
-                return battle.describe();
-            }
-        };
+    public Battle helpFight(Supplier<Vec3> leader) {
+        return new Battle(senses, battleMoves, new LeaderRoster(leader), HELP_FIELD);
     }
 }

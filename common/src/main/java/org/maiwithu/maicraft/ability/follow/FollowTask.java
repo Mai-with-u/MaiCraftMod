@@ -157,7 +157,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Integer toldNoSeat;
     private Action gettingOff;
 
-    private FollowMoves.HelpFight help;
+    private Battle help;
     private HelpHand helpHand;
     private long helpEndedTick = Long.MIN_VALUE / 2;
     /** 上一场帮打之后要歇多久才再上（刻）：撤出来了、或一下都没打着时歇一阵，免得来回冲。 */
@@ -178,9 +178,9 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
 
     /** 一场帮打包成动作：战斗引擎每刻读回的是战况不是动作状态，包一层让基类的暂停、先停稳、收尾都够得着它。 */
     private final class HelpHand implements Action {
-        private final FollowMoves.HelpFight fight;
+        private final Battle fight;
 
-        HelpHand(FollowMoves.HelpFight fight) {
+        HelpHand(Battle fight) {
             this.fight = fight;
         }
 
