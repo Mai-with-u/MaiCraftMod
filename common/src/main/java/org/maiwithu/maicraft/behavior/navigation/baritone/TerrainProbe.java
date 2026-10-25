@@ -158,6 +158,7 @@ final class TerrainProbe {
                     + restarts + " 次仍没走起来", problem.suggestion());
         }
         String message = problem.message() + "；只读复算：允许挖开、垫方块就有到目标的完整路线，" + bill(verdict)
+                + (changes == Permissions.BlockChanges.NONE ? "；这次任务的 change_blocks=none，没有动土" : "")
                 + "；这次什么都没动";
         return Problem.of(problem.kind(), message, suggestion(verdict, changes, carriesScaffold));
     }

@@ -16,7 +16,7 @@ import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
-/** 卡坑判断与自动脱困的升降：小坑、走得出的浅坑、水柱游上去、封死的洞穴；只走 → 搭 → 挖，出坑降回。 */
+/** 卡坑判断与自动脱困的升降：小坑、走得出的浅坑、水柱游上去、封死的洞穴；只垫 → 挖，none 不升，出坑降回。 */
 class TrapCheckTest {
 
     /** 平地：63 层及以下是实心，挖掉的格子和放进去的水另记。 */
@@ -115,19 +115,18 @@ class TrapCheckTest {
     }
 
     @Test
-    void escapeClimbsWalkThenBuildThenDigAndStepsBackDown() {
-        TrapEscape escape = new TrapEscape(TerrainPermit.WALK_ONLY);
+    void escapeClimbsBuildThenDigAndStepsBackDown() {
+        // 给过动土余地（只垫不挖）的困局才升：升到挖天然方块为止。
+        TrapEscape escape = new TrapEscape(TerrainPermit.TEMPORARY);
         assertTrue(escape.raise(() -> true, 0));
-        assertEquals(Permissions.BlockChanges.TEMPORARY, escape.effective().changes(), "先搭");
+        assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "只垫升到挖天然方块");
         escape.notePlaced();
-        assertTrue(escape.raise(() -> true, 5));
-        assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "搭不出去再挖");
         assertFalse(escape.raise(() -> true, 9), "最多到挖天然方块");
         Problem stuck = escape.explain(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null));
         assertTrue(stuck.message().contains("还是没出去"), stuck.message());
         escape.noteDug();
         escape.restore();
-        assertEquals(Permissions.BlockChanges.NONE, escape.effective().changes(), "出坑降回任务的许可");
+        assertEquals(Permissions.BlockChanges.TEMPORARY, escape.effective().changes(), "出坑降回任务的许可");
         assertTrue(escape.notes().getFirst().contains("垫了 1 块、挖开 1 格"), escape.notes().getFirst());
     }
 
@@ -136,5 +135,15 @@ class TrapCheckTest {
         assertNull(TrapEscape.next(TerrainPermit.NATURAL));
         assertFalse(new TrapEscape(TerrainPermit.NATURAL).raise(() -> true, 0), "任务许可本来就能挖");
         assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(() -> false, 0), "没困住就不放宽许可");
+    }
+
+    @Test
+    void nonePermitNeverRaisesEvenWhenTrapped() {
+        // change_blocks=none 是"一格都不动"：困在封死的坑里也不挖不垫，
+        // 宁可按走不通收场，由调用方看着"哪里必须动"的说明决定放不放开。
+        assertNull(TrapEscape.next(TerrainPermit.WALK_ONLY));
+        assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(() -> true, 0), "none 困死也不动土");
+        assertEquals(Permissions.BlockChanges.NONE, new TrapEscape(TerrainPermit.WALK_ONLY).effective().changes());
+        assertTrue(new TrapEscape(TerrainPermit.WALK_ONLY).notes().isEmpty(), "没升过就没有脱困经过");
     }
 }

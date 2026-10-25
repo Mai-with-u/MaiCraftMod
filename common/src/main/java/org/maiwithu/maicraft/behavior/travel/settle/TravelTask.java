@@ -291,7 +291,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
                     "垫路用的临时方块，没有自动收回"));
         }
         recordedPlacements = placed.size();
-        // 开路挖掉的方块也进变化：许可是 none 时卡坑脱困也可能挖开几格，挖了哪几格要说清。
+        // 开路挖掉的方块也进变化：挖了哪几格要说清，none 许可下根本不该有这一路。
         List<String> dug = placedBlocks.brokenDuringCurrentWalk();
         for (int i = recordedBreaks; i < dug.size(); i++) {
             recordChange(new Change(Change.Kind.BLOCK_BROKEN, dug.get(i), 1, "开路挖掉的"));

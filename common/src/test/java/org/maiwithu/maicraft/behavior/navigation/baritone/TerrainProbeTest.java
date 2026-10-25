@@ -41,6 +41,7 @@ class TerrainProbeTest {
                 explained.message());
         assertTrue(explained.message().contains("要垫 1 格：(3, 63, 2)"), explained.message());
         assertTrue(explained.message().endsWith("这次什么都没动"), explained.message());
+        assertTrue(explained.message().contains("change_blocks=none，没有动土"), explained.message());
         assertTrue(explained.suggestion().contains("提到 natural"), explained.suggestion());
     }
 
