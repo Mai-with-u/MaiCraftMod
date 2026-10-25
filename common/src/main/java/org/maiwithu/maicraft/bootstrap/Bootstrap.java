@@ -63,6 +63,7 @@ import org.maiwithu.maicraft.behavior.survival.LiveDarkView;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.survival.digout.DigOutNeed;
 import org.maiwithu.maicraft.behavior.survival.fall.FallNeed;
+import org.maiwithu.maicraft.behavior.survival.fall.JetpackFlightFreshness;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.fall.EdgeProximityNeed;
 import org.maiwithu.maicraft.behavior.survival.hunger.EatSoonTask;
@@ -255,8 +256,11 @@ public final class Bootstrap {
                         () -> new NativeBlockBreaking(interactionSender, menuActions)),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 // 走路里的落地救援、喷气背包飞的那一段、寻路"飞上去"那一步自己管着上下时，落地防护让开。
+                // 喷气背包飞的那一段只有还在隔三差五说"我管着"才算在管：被打断、出岔子没收尾时让落地防护兜底。
                 new FallNeed(new SurvivalSituation.FromPlayer(), fallRescues, landingMaterials,
-                        () -> BaritoneInternals.landingInProgress() || ClientHooks.flightControlled()
+                        () -> BaritoneInternals.landingInProgress()
+                                || JetpackFlightFreshness.stillControlling(
+                                        ClientHooks.flightControlledAt(), System.nanoTime())
                                 || BaritoneInternals.flyingUp()),
                 // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
                 // 打完把这一仗掉出来的东西和射出去的箭捡回来（用回去捡尸体的同一套）；撤离往记过的"家"那一侧跑。

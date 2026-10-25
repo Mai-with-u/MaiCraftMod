@@ -34,8 +34,6 @@ public final class ClientHooks {
     private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
     /** 喷气背包飞的那一段最近一次说"我管着上下"的时刻（纳秒）；没在飞为 0。 */
     private static final AtomicLong FLIGHT_CONTROLLED_AT = new AtomicLong();
-    /** 多久没再说就当不在管了：飞的那一段被打断、出岔子没收尾时，落地防护照样兜底。 */
-    private static final long FLIGHT_CONTROL_FRESH_NANOS = 300_000_000L;
 
     private ClientHooks() {}
 
@@ -86,10 +84,9 @@ public final class ClientHooks {
         FLIGHT_CONTROLLED_AT.set(0);
     }
 
-    /** 此刻是不是有飞的那一段在管着上下（最近 0.3 秒内说过）。 */
-    public static boolean flightControlled() {
-        long at = FLIGHT_CONTROLLED_AT.get();
-        return at != 0 && System.nanoTime() - at < FLIGHT_CONTROL_FRESH_NANOS;
+    /** 飞的那一段最近一次说"我管着上下"的时刻（纳秒）；没说过为 0。只透传时刻，还在不在管由消费方判断。 */
+    public static long flightControlledAt() {
+        return FLIGHT_CONTROLLED_AT.get();
     }
 
     public static void noteDeathMessage(String text, long gameTime) {
