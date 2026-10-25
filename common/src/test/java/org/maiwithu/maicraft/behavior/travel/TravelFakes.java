@@ -5,6 +5,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -139,12 +140,20 @@ public final class TravelFakes {
         /** 逐列摆的地表高度（列 x,z → 脚位高度）：摆水边这类有的柱是水、有的柱是岸的地形。 */
         public final Map<String, Integer> columnSurfaces = new HashMap<>();
 
+        /** 逐列摆的顶盖样本（列 x,z → 样本）：摆"这一列已加载、整列是水"这类事实；没摆的列当未加载。 */
+        public final Map<String, ColumnSample> columnSamples = new HashMap<>();
+
         @Override public OptionalInt surfaceFeet(int x, int z) {
             Integer byColumn = columnSurfaces.get(x + "," + z);
             if (byColumn != null) {
                 return OptionalInt.of(byColumn);
             }
             return surface == null ? OptionalInt.empty() : OptionalInt.of(surface);
+        }
+
+        @Override public ColumnSample column(int x, int z) {
+            ColumnSample byColumn = columnSamples.get(x + "," + z);
+            return byColumn != null ? byColumn : ColumnSample.unloaded();
         }
     }
 

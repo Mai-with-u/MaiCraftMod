@@ -53,6 +53,7 @@
     "settings": "要改成的设置（JSON 对象）：键是这台机器认的设置项，值写字符串",
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
     "source": "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同",
+    "strict_arrival": "出行要不要严格到达：true 时目的地落在水里等站不住的地方就失败并给建议落点，false（默认）时自动挪到能站的岸格算到达",
     "structure": "要找的结构 ID（命名空间 id），例如 minecraft:village_plains",
     "target": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天",
     "text": "要发送或书写的文字",

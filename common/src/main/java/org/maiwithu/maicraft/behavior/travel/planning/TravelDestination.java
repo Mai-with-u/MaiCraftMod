@@ -16,23 +16,31 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * @param position        目的地位置；高度没核实时 y 无意义，只为记录调用方给的值
  * @param heightConfirmed 高度是否核实过（给全了 y、地标或观察编号解析出来的）
  * @param radius          到达容差，单位格；0 表示要站进那一格
+ * @param arrivalNote     目的地不是调用方指的那一格时带的一句话（开阔水挪到岸格：目标在水中央、落到了哪、偏差几格），
+ *                        到达结果原样带上；普通目的地为 null
  */
-public record TravelDestination(WorldPosition position, boolean heightConfirmed, double radius) {
+public record TravelDestination(WorldPosition position, boolean heightConfirmed, double radius, String arrivalNote) {
 
     public TravelDestination {
         if (radius < 0) {
             throw new IllegalArgumentException("到达容差不能为负：" + radius);
         }
+        arrivalNote = arrivalNote == null || arrivalNote.isBlank() ? null : arrivalNote;
     }
 
     /** 高度核实过的目的地：给全了 y 的坐标、记得的地点、观察编号指向的东西。 */
     public static TravelDestination confirmed(WorldPosition position, double radius) {
-        return new TravelDestination(position, true, radius);
+        return confirmed(position, radius, null);
+    }
+
+    /** 高度核实过、但不是调用方指的那一格的目的地：带上到达结果里要写的偏差说明。 */
+    public static TravelDestination confirmed(WorldPosition position, double radius, String arrivalNote) {
+        return new TravelDestination(position, true, radius, arrivalNote);
     }
 
     /** 高度没核实的目的地：只有 x/z（或方向走多远算出来的落点），先走到那一柱列。 */
     public static TravelDestination anyHeight(int x, int z, double radius, String dimension) {
-        return new TravelDestination(new WorldPosition(x, 0, z, dimension), false, radius);
+        return new TravelDestination(new WorldPosition(x, 0, z, dimension), false, radius, null);
     }
 
     /** 编译成走到用的导航目标：高度核实过按位置与容差走，没核实过只走到那一柱列；到了要站在干地上才算到。 */

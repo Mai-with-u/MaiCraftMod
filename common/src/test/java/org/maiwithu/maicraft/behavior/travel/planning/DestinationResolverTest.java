@@ -6,6 +6,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakePlaces;
@@ -38,6 +39,10 @@ class DestinationResolverTest {
     private final FakePlaces places = new FakePlaces();
     private final FakeSeen seen = new FakeSeen();
     private final DestinationResolver resolver = new DestinationResolver(world, places, seen);
+
+    /** 已加载、顶盖是水的整列水样本：摆开阔水中央的目标柱。 */
+    private static final ColumnSample WATER_COLUMN =
+            new ColumnSample(true, null, 61, true, false, "minecraft:water");
 
     @Test
     void fullPositionBecomesExactOrNear() {
@@ -81,12 +86,59 @@ class DestinationResolverTest {
     }
 
     @Test
-    void openWaterTargetStillWalksTheColumn() {
-        // 开阔水中央：附近也没有干地，不替玩家挪目的地，照旧先走到那一柱列。
+    void unloadedTargetStillWalksTheColumn() {
+        // 目标那一列还没加载：读不出"整列是水"，谈不上挪不挪，照旧先走到那一柱列，走近了再挑落点。
         var ready = ready(resolver.resolve(new Target.Position(134, null, 32, null), 2));
         NavGoal.Column column = assertInstanceOf(NavGoal.Column.class, inner(ready));
         assertEquals(134, column.x);
         assertEquals(32, column.z);
+    }
+
+    @Test
+    void openWaterLandsOnTheFarShoreAndNotesTheDeviation() {
+        // 实机（goal 818/819/779）：目标列在开阔水中央、8 格内无岸——岸格搜索扩到上限，
+        // 找到就落岸格算到达，结果写明"目标在水中央，落到了哪、偏差几格"，不冒充站在了原目标上。
+        world.columnSamples.put("134,32", WATER_COLUMN);
+        world.columnSurfaces.put("134,52", 62);
+        var ready = ready(resolver.resolve(new Target.Position(134, null, 32, null), 2));
+        assertTrue(ready.navGoal().isAt(new BlockPos(134, 62, 52)), "落到 8 格外的岸上");
+        assertEquals("目标在水中央，落到了 (134, 62, 52)，偏差 20.0 格", ready.arrivalNote());
+    }
+
+    @Test
+    void openWaterWithoutAnyShoreFailsWithASuggestion() {
+        // 已加载的开阔水、上限内也没有岸：如实失败，不再开始一段永远到不了的行程。
+        world.columnSamples.put("134,32", WATER_COLUMN);
+        world.columnSurfaces.put("134,80", 62);
+        var deadEnd = assertInstanceOf(DestinationResolver.Resolution.DeadEnd.class,
+                resolver.resolve(new Target.Position(134, null, 32, null), 2));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, TravelFakes.kindOf(deadEnd.problem()));
+        // 建议落点带坐标与方位距离，搜索上限外的岸不算数。
+        assertTrue(deadEnd.problem().message().contains("(134, 62, 80)"), deadEnd.problem().message());
+        assertTrue(deadEnd.problem().message().contains("南 48.0 格"), deadEnd.problem().message());
+    }
+
+    @Test
+    void strictArrivalRefusesToMoveEvenNearShore() {
+        // 实机对照（goal 818 同位）：严格到达关掉一切自动挪——贴岸 8 格内有岸也不换格，如实失败给建议落点。
+        world.columnSamples.put("134,32", WATER_COLUMN);
+        world.columnSurfaces.put("134,36", 62);
+        var deadEnd = assertInstanceOf(DestinationResolver.Resolution.DeadEnd.class,
+                resolver.resolve(new Target.Position(134, null, 32, null), 2, true));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, TravelFakes.kindOf(deadEnd.problem()));
+        assertTrue(deadEnd.problem().message().contains("严格到达不自动挪"), deadEnd.problem().message());
+        assertTrue(deadEnd.problem().message().contains("(134, 62, 36)"), deadEnd.problem().message());
+        assertTrue(deadEnd.problem().message().contains("南 4.0 格"), deadEnd.problem().message());
+    }
+
+    @Test
+    void strictArrivalReachesDryGroundAsUsual() {
+        // 严格到达只管"不挪去别处"：目标柱本身有干地照常到达。
+        world.columnSamples.put("10,32", WATER_COLUMN);
+        world.columnSurfaces.put("10,30", 64);
+        var ready = ready(resolver.resolve(new Target.Position(10, null, 30, null), 0, true));
+        assertTrue(ready.navGoal().isAt(new BlockPos(10, 64, 30)));
+        assertNull(ready.arrivalNote(), "站在玩家指的那一柱，没有偏差说明");
     }
 
     @Test

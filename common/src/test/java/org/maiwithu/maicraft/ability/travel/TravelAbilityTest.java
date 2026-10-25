@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -98,6 +99,42 @@ class TravelAbilityTest {
         assertEquals("maicraft:travel", ability.spec().id());
         assertEquals(2.0, params("{}").number("radius"), "到达容差默认 2 格");
         assertFalse(params("{}").has("max_seconds"), "不设时限时不给 max_seconds 取值");
+    }
+
+    @Test
+    void strictArrivalDefaultsToOff() {
+        assertFalse(params("{}").bool("strict_arrival"), "不配就不严格：自动挪到能站的岸格算到达");
+    }
+
+    @Test
+    void strictArrivalFailsOnAWaterColumnWithASuggestion() {
+        // strict_arrival=true：目标柱已加载又整列是水就不自动挪去岸格，如实失败并给最近能站的岸格当建议。
+        TravelWorldView waterWorld = new StubWorld() {
+            @Override public ColumnSample column(int x, int z) {
+                return x == 12 && z == -2
+                        ? new ColumnSample(true, null, 61, true, false, "minecraft:water")
+                        : ColumnSample.unloaded();
+            }
+
+            @Override public OptionalInt surfaceFeet(int x, int z) {
+                // 南边 6 格的干地岸格：建议落点从这来。
+                return x == 12 && z == 4 ? OptionalInt.of(65) : OptionalInt.empty();
+            }
+        };
+        TravelAbility strict = new TravelAbility(walks,
+                new DestinationResolver(waterWorld, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null);
+        StepDecision decision = strict.decide(step(goal(
+                new Target.Position(12, null, -2, null), "{\"strict_arrival\":true}")));
+
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decision);
+        assertEquals(TaskResult.Status.FAILED, finish.result().status());
+        assertTrue(finish.result().problem().message().contains("严格到达不自动挪"),
+                finish.result().problem().message());
+        assertTrue(finish.result().problem().message().contains("(12, 65, 4)"),
+                finish.result().problem().message());
+        assertTrue(finish.result().problem().message().contains("南 6.0 格"),
+                finish.result().problem().message());
     }
 
     @Test

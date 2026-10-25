@@ -226,6 +226,11 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         }
         buildSettlement(lastFeet, true, null);
         String water = crossedWater ? "，途中泅渡过水" : "";
+        // 目的地不是玩家指的那一格（开阔水挪到了岸格）时，结果写明落到了哪、偏了几格，不冒充站在了原目标上。
+        String detour = destination.arrivalNote();
+        if (detour != null) {
+            return Next.done(TaskResult.done("出行：" + detour + water));
+        }
         return Next.done(TaskResult.done("出行：走到了目的地，实测位置 " + shortSpot(lastFeet) + water));
     }
 

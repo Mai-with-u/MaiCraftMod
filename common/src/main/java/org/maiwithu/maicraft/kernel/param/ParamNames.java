@@ -24,6 +24,7 @@ public final class ParamNames {
             Map.entry("radius", "工作或搜索范围，单位格"),
             Map.entry("max_distance", "出行或搜索的最远距离，单位格"),
             Map.entry("max_seconds", "最多花多少秒"),
+            Map.entry("strict_arrival", "出行要不要严格到达：true 时目的地落在水里等站不住的地方就失败并给建议落点，false（默认）时自动挪到能站的岸格算到达"),
             Map.entry("operation", "一个能力内部的几种操作选哪一种，例如 enable、disable、status"),
             Map.entry("via", "指定途径，例如拿东西时指定合成、烧炼或采掘"),
             Map.entry("prefer", "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后"),

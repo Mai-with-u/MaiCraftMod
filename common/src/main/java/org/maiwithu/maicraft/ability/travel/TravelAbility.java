@@ -137,6 +137,11 @@ public final class TravelAbility implements AbilityModule {
                 ParamSpec.of("radius", ParamType.NUMBER)
                         .defaultValue(2.0).range(0, 2048)
                         .doc("到达容差，单位格，默认 2；给 0 表示必须站进那一格").build(),
+                ParamSpec.of("strict_arrival", ParamType.BOOLEAN)
+                        .defaultValue(false)
+                        .doc("要不要严格到达：true 时目标落在水里等站不住的地方就如实失败，"
+                                + "并给最近能站的岸格当建议落点，不自动挪；不给或 false 时自动挪到能站的岸格算到达，"
+                                + "结果写明偏差").build(),
                 ParamSpec.of("max_distance", ParamType.NUMBER)
                         .defaultValue(128.0).range(16, 2048)
                         .doc("找传送门的范围，单位格，默认 128；查遍已加载区没有门才建门").build(),
@@ -189,7 +194,9 @@ public final class TravelAbility implements AbilityModule {
         if (goal.target() instanceof Target.Here && world != null) return backToOpenSky(goal, choice.via());
         // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束；
         // 落在别的维度按维度路由认门，认不出的维度对在这里就以走不了结束。
-        var resolution = resolver.resolve(goal.target(), goal.params().number("radius"));
+        // strict_arrival 要严格到达：目标柱整列是水也不自动挪去岸格，如实失败并给建议落点。
+        var resolution = resolver.resolve(goal.target(), goal.params().number("radius"),
+                goal.params().bool("strict_arrival"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
             // 同维度：指定只走路，或没指定方式而这个维度没有用得上的方式（主世界里的折跃门），就是出行任务；
             // 否则交给行程，近处走、远处比报价、隔着虚空只能过折跃门、给了 via 只用它。

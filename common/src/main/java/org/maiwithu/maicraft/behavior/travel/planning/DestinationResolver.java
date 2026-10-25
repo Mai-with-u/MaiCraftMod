@@ -16,7 +16,9 @@ import org.maiwithu.maicraft.behavior.travel.modes.DimensionRoute;
 /**
  * 目的地解析：把目标对象读成一段导航要求，只读现场、给结论，不动角色。
  *
- * <p>解析规矩：坐标给不全 y 也能去——先走到那一柱列；叫得出名字的地点查记过的地方，没记过再认
+ * <p>解析规矩：坐标给不全 y 也能去——先走到那一柱列；整列是水时默认态挑附近能站的岸格算到达（贴岸几格内挑最近，
+ * 开阔水中央把搜索扩到上限，结果写明偏差），严格到达（strict_arrival）则如实失败并给最近岸格当建议落点；
+ * 叫得出名字的地点查记过的地方，没记过再认
  * 附近看得见、写着这个名字的那块告示牌，都落不了就向玩家提问，不拿脚边顶替，也不把名字猜成别的东西；观察编号直接查它指向的位置，
  * 编号失效如实以"东西不在了"收场。"就是去那个维度"与落在别的维度的目的地都按维度路由
  * 认门：主世界与下界走下界门，主世界与末地走末地门，其余维度对如实说走不了。
@@ -64,6 +66,14 @@ public final class DestinationResolver {
 
     /** 解析一个目标对象；radius 是到达容差（单位格，默认 2，0 表示要站进那一格）。 */
     public Resolution resolve(Target target, double radius) {
+        return resolve(target, radius, false);
+    }
+
+    /**
+     * 解析一个目标对象，带严格到达开关；radius 是到达容差（单位格，默认 2，0 表示要站进那一格）。
+     * strictArrival 为 true 时目标柱整列是水不自动挪去岸格，如实失败并给最近能站的岸格当建议落点。
+     */
+    public Resolution resolve(Target target, double radius, boolean strictArrival) {
         if (target instanceof Target.Here) {
             return new Resolution.AlreadyThere(world.currentSpot());
         }
@@ -71,7 +81,7 @@ public final class DestinationResolver {
             return resolveDimension(dimension.name());
         }
         if (target instanceof Target.Position position) {
-            return resolvePosition(position, radius);
+            return resolvePosition(position, radius, strictArrival);
         }
         if (target instanceof Target.Landmark landmark) {
             return resolveLandmark(landmark, radius);
@@ -80,7 +90,7 @@ public final class DestinationResolver {
             return resolveSeen(seen, radius);
         }
         if (target instanceof Target.Direction direction) {
-            return resolveDirection(direction, radius);
+            return resolveDirection(direction, radius, strictArrival);
         }
         // 玩家与前一步的位置不是出行目标：跟着人走归陪伴，前一步的位置只有目标推进记得。
         return new Resolution.DeadEnd(Problem.of(Problem.Kind.UNSUPPORTED,
@@ -105,7 +115,7 @@ public final class DestinationResolver {
         };
     }
 
-    private Resolution resolvePosition(Target.Position position, double radius) {
+    private Resolution resolvePosition(Target.Position position, double radius, boolean strictArrival) {
         String here = world.currentSpot().dimension();
         TravelDestination destination = position.y() == null
                 ? TravelDestination.anyHeight(position.x(), position.z(), radius, position.dimension())
@@ -116,28 +126,62 @@ public final class DestinationResolver {
             return routeAcross(position.dimension(), destination);
         }
         if (position.y() == null) {
-            return resolveColumn(position.x(), position.z(), radius, position.dimension());
+            return resolveColumn(position.x(), position.z(), radius, strictArrival, position.dimension());
         }
         return new Resolution.Ready(destination);
     }
 
     /**
      * 只给 x/z（或方向走多远算出来的落点）：落到这一柱里真能站的干地上（真人说"去那儿"指的是
-     * 站得住的地面，不是水面上方悬空的顶格、也不是封顶建筑的屋顶）。整柱是水（贴岸的水边）时
-     * 往附近找最近的干地落点——到达判据站干地才放行，落点留在水里就永远到不了，人会在水里泡到超时；
-     * 附近也没有干地（开阔水中央）时不替玩家挪目的地，照旧先走到那一柱列。
+     * 站得住的地面，不是水面上方悬空的顶格、也不是封顶建筑的屋顶）。整柱是水时落点挑选全在这一处分支：
+     * 默认态先按贴岸规矩在 8 格内挑最近的干地岸格（到达判据站干地才放行，落点留在水里人会在水里泡到超时），
+     * 8 格内无岸的开阔水把岸格搜索扩到上限，找到就落岸格算到达、结果写明偏差；
+     * 严格到达（strictArrival）关闭一切自动挪——含贴岸换格，目标柱没干地就如实失败并给最近岸格当建议落点；
+     * 默认态搜索范围内也找不到岸时同样失败，建议落点同一个格式。
      */
-    private Resolution resolveColumn(int x, int z, double radius, String dimension) {
+    private Resolution resolveColumn(int x, int z, double radius, boolean strictArrival, String dimension) {
         OptionalInt surface = world.surfaceFeet(x, z);
         if (surface.isPresent()) {
             return new Resolution.Ready(TravelDestination.confirmed(
                     new WorldPosition(x, surface.getAsInt(), z, dimension), Math.max(radius, SURFACE_SLACK)));
         }
-        Optional<WorldPosition> shore = NearestDryLanding.near(x, z, SHORE_SEARCH_RADIUS, world::surfaceFeet, dimension);
-        if (shore.isPresent()) {
-            return new Resolution.Ready(TravelDestination.confirmed(shore.get(), Math.max(radius, SURFACE_SLACK)));
+        if (!strictArrival) {
+            // 贴岸的水边几格内就有岸：沿用现行规矩挑最近的岸格，行为与开阔水语义变更之前逐字一致。
+            Optional<WorldPosition> shore = NearestDryLanding.near(x, z, SHORE_SEARCH_RADIUS, world::surfaceFeet, dimension);
+            if (shore.isPresent()) {
+                return new Resolution.Ready(TravelDestination.confirmed(shore.get(), Math.max(radius, SURFACE_SLACK)));
+            }
+            // 开阔水中央：把岸格搜索扩到上限再找一轮，找到就落岸格算到达，结果写明偏差。
+            Optional<WorldPosition> farShore = NearestDryLanding.near(x, z, openWaterSearchLimit(radius),
+                    world::surfaceFeet, dimension);
+            if (farShore.isPresent()) {
+                return new Resolution.Ready(TravelDestination.confirmed(farShore.get(), Math.max(radius, SURFACE_SLACK),
+                        WaterArrival.detourNote(x, z, farShore.get())));
+            }
         }
-        return new Resolution.Ready(TravelDestination.anyHeight(x, z, radius, dimension));
+        // 目标那一列还没加载时读不出"整列是水"，谈不上挪不挪：照旧先走到那一柱列，走近加载了再挑落点。
+        if (!world.column(x, z).loaded()) {
+            return new Resolution.Ready(TravelDestination.anyHeight(x, z, radius, dimension));
+        }
+        // 已加载又没有能站的干地（整列是水，或严格到达不肯挪）：如实失败，
+        // 最近能站的岸格当建议落点带上，不开始一段永远到不了的行程。
+        Optional<WorldPosition> suggestion = NearestDryLanding.near(x, z, MAX_SHORE_SEARCH, world::surfaceFeet, dimension);
+        return new Resolution.DeadEnd(WaterArrival.waterColumnFailure(x, z, strictArrival, suggestion));
+    }
+
+    /**
+     * 开阔水的岸格搜索上限（格）：radius 没给、或给得不比贴岸圈大时用常量上限——湖心到岸通常十几格，
+     * 32 格盖住常见的湖面，再远属于大海中央。radius 给得更大时按它来，但不超过 {@link #MAX_SHORE_SEARCH}。
+     */
+    static final int OPEN_WATER_SEARCH_LIMIT = 32;
+
+    /** 岸格搜索的最大上限（格）：radius 给得再大也不超过，网格扫描随半径平方涨；失败时的建议落点也只找这么远。 */
+    static final int MAX_SHORE_SEARCH = 64;
+
+    private static int openWaterSearchLimit(double radius) {
+        return radius <= SHORE_SEARCH_RADIUS
+                ? OPEN_WATER_SEARCH_LIMIT
+                : (int) Math.min(Math.floor(radius), MAX_SHORE_SEARCH);
     }
 
     // 地标名：记住的地点优先，没记过再认附近看得见、写着这个名字的那块告示牌，落出来的位置和记住的地点一样走；
@@ -172,13 +216,13 @@ public final class DestinationResolver {
         return resolveRemembered(place.get(), radius);
     }
 
-    private Resolution resolveDirection(Target.Direction direction, double radius) {
+    private Resolution resolveDirection(Target.Direction direction, double radius, boolean strictArrival) {
         WorldPosition spot = world.currentSpot();
         // 相对方向先按此刻朝向换算成东南西北，再算落点；落点的高度没法核实，走柱列。
         int[] vector = vectorOf(direction.toward());
         int x = spot.x() + vector[0] * direction.distance();
         int z = spot.z() + vector[1] * direction.distance();
-        return resolveColumn(x, z, radius, spot.dimension());
+        return resolveColumn(x, z, radius, strictArrival, spot.dimension());
     }
 
     /** 方向变成单位向量（x, z）；相对的前后左右按此刻朝向折算。 */

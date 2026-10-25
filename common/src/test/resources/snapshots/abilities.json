@@ -242,7 +242,7 @@
       {
         "ability": "maicraft:travel",
         "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
-        "parameters": "radius: number = 2.0, max_distance: number = 128.0, max_seconds?: integer, via?: string",
+        "parameters": "radius: number = 2.0, strict_arrival: boolean = false, max_distance: number = 128.0, max_seconds?: integer, via?: string",
         "targets": [
           "dimension",
           "direction",
@@ -1423,6 +1423,13 @@
           "default": 2.0,
           "min": 0,
           "max": 2048
+        },
+        {
+          "name": "strict_arrival",
+          "type": "boolean",
+          "required": false,
+          "doc": "要不要严格到达：true 时目标落在水里等站不住的地方就如实失败，并给最近能站的岸格当建议落点，不自动挪；不给或 false 时自动挪到能站的岸格算到达，结果写明偏差",
+          "default": false
         },
         {
           "name": "max_distance",
