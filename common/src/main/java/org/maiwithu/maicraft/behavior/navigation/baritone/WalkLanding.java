@@ -99,6 +99,15 @@ final class WalkLanding {
         return rescue.steering(context, yaw);
     }
 
+    /**
+     * 收场记账的接缝：把一次进行中的救援挂进来，之后与走路结束、被打断走同一套收场记录。
+     * 离线测试用它挂救援替身，锁"经过怎么写、留在原地的方块怎么算"这两条账。
+     */
+    void attach(CatchesFall rescue) {
+        this.rescue = rescue;
+        this.departureReady = true;
+    }
+
     /** 走路结束、被打断、人接回角色：还在进行的救援收手，经过照记。 */
     void stop(PlayerContext context, String reason) {
         if (rescue == null) return;
