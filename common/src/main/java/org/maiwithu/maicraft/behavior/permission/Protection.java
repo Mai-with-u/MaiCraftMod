@@ -30,6 +30,8 @@ public final class Protection {
     static final String HOME = "家";
     /** "家"的范围：离记住的家这么近就算家里。玩家常识。 */
     public static final double HOME_RADIUS_BLOCKS = 8.0;
+    /** 村庄的范围：一格周围这么近看得见村民，就当它在村里（村民夜里睡在床上、白天在村里转）。玩家常识。 */
+    public static final double VILLAGE_RADIUS_BLOCKS = 32.0;
 
     private final ReadsBlockOwnership ownership;
     private final RemembersRegions regions;
@@ -37,6 +39,7 @@ public final class Protection {
     private final GuessesPlayerMade guesses;
     private final String selfPlayerId;
     private final TrustedPlayers trusted;
+    private final SeesVillagers villagers;
 
     /**
      * @param ownership     方块归属的只读接缝（服务端记录）
@@ -55,12 +58,21 @@ public final class Protection {
      */
     public Protection(ReadsBlockOwnership ownership, RemembersRegions regions,
             ReadsRememberedPlaces places, GuessesPlayerMade guesses, String selfPlayerId, TrustedPlayers trusted) {
+        this(ownership, regions, places, guesses, selfPlayerId, trusted, SeesVillagers.NOBODY);
+    }
+
+    /**
+     * @param villagers 村民读取：认村庄里的床（收回睡过的床时让开）；没接上时传 {@link SeesVillagers#NOBODY}
+     */
+    public Protection(ReadsBlockOwnership ownership, RemembersRegions regions, ReadsRememberedPlaces places,
+            GuessesPlayerMade guesses, String selfPlayerId, TrustedPlayers trusted, SeesVillagers villagers) {
         this.ownership = ownership;
         this.regions = regions;
         this.places = places;
         this.guesses = guesses;
         this.selfPlayerId = selfPlayerId;
         this.trusted = Objects.requireNonNull(trusted, "trusted");
+        this.villagers = Objects.requireNonNull(villagers, "villagers");
     }
 
     /**
@@ -165,9 +177,10 @@ public final class Protection {
 
     /**
      * 角色自己睡过的床受不受保护（收回它的时候问）：亲手睡过是"这是自己用的"的直接证据，
-     * 归属记录没问到、没写着谁放的，都不按受保护算——野外那张自己放下再睡的床，放下记录本就可能不在了；
-     * 玩家放置推断这一路也跳过，同一格床像不像玩家放的说明不了它是不是别人的。
-     * 归属记录写着是别人放的、记住的区域、额外保护的地标，照旧算受保护。
+     * 归属记录没问到、没写着谁放的，都不按受保护算——野外那张自己放下再睡的床，放下记录本就可能不在了。
+     * 归属记录写着是别人放的、记住的区域、额外保护的地标，照旧算受保护；玩家放置推断也照常问一遍，
+     * 和别的方块同一套规矩（2026-10-25 拍板，推断此刻只认门类结构件，对床还说不上话）。
+     * 村庄里的床不在这里挡，收回来源直接让开（{@link #inVillage}）：那是村民的，不该走"点名许可"这条路。
      */
     public boolean sleptBedProtected(WorldPosition position, Set<String> protectedLandmarks) {
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
@@ -176,7 +189,17 @@ public final class Protection {
         for (RememberedRegion region : regions.regions()) {
             if (region.contains(position)) return true;
         }
-        return inProtectedLandmark(position, protectedLandmarks);
+        if (inProtectedLandmark(position, protectedLandmarks)) return true;
+        // 记录、区域、地标都说不清：照别的方块一样靠推断兜底，像玩家放的就当是别人的。
+        return guesses.likelyPlayerMade(position, null);
+    }
+
+    /**
+     * 这一格是不是在村庄里：周围 {@link #VILLAGE_RADIUS_BLOCKS} 格内看得见村民就算。
+     * 村庄的床是村民睡的，角色借住过一晚也不是自己的，收回睡过的床时让开（2026-10-25 拍板）。
+     */
+    public boolean inVillage(WorldPosition position) {
+        return villagers.villagersNear(position, VILLAGE_RADIUS_BLOCKS);
     }
 
     /**

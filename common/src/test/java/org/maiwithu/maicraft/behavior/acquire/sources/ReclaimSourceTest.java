@@ -22,11 +22,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -57,6 +57,10 @@ class ReclaimSourceTest {
     private final Map<WorldPosition, String> owners = new HashMap<>();
     private final Set<WorldPosition> unknownOwnership = new HashSet<>();
     private final Map<String, WorldPosition> places = new HashMap<>();
+    /** 周围看得见村民的格子（村里的床）。 */
+    private final Set<WorldPosition> nearVillagers = new HashSet<>();
+    /** 玩家放置推断猜成玩家放的格子。 */
+    private final Set<WorldPosition> guessedPlayerMade = new HashSet<>();
     private final List<BlockPos> collected = new ArrayList<>();
     private final FakeTags tags = new FakeTags();
     private WorldMemory memory;
@@ -80,7 +84,9 @@ class ReclaimSourceTest {
             }
         };
         Protection protection = new Protection(ownership, () -> List.of(),
-                name -> Optional.ofNullable(places.get(name)), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.ofNullable(places.get(name)),
+                (position, blockType) -> guessedPlayerMade.contains(position), "self", TrustedPlayers.NOBODY,
+                (position, radius) -> nearVillagers.contains(position));
         PermissionCheck check = new PermissionCheck(protection, new ReadsCreatureSituation() {
             @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                 return Optional.empty();
@@ -156,6 +162,27 @@ class ReclaimSourceTest {
         // 睡过一张村民的床不等于床是自己的：记录写明是别人放的就让开。
         placedBed(FIELD_BED, "someone");
         assertInstanceOf(SourceQuote.Unavailable.class, quote(ANY_BED, Permissions.DEFAULT));
+    }
+
+    @Test
+    void 睡过的村里的床_周围看得见村民_不收也不要点名() {
+        // 借住过村庄的床（没有归属记录）：周围看得见村民就当是村民的，收回来源让开；不走"要点名许可"那条路。
+        placedBed(FIELD_BED, "self");
+        owners.remove(FIELD_BED);
+        nearVillagers.add(FIELD_BED);
+        assertInstanceOf(SourceQuote.Unavailable.class, quote(ANY_BED, Permissions.DEFAULT));
+        assertTrue(collected.isEmpty());
+    }
+
+    @Test
+    void 睡过的床_推断像玩家放的_受保护要点名许可() {
+        // 推断这一路照别的方块一样问：没有归属记录、推断说像玩家放的，就按别人的东西挡下，要点名许可。
+        placedBed(FIELD_BED, "self");
+        owners.remove(FIELD_BED);
+        guessedPlayerMade.add(FIELD_BED);
+        SourceQuote.NeedsApproval approval = assertInstanceOf(SourceQuote.NeedsApproval.class,
+                quote(ANY_BED, Permissions.DEFAULT));
+        assertEquals(Problem.Kind.NEED_APPROVAL, approval.problem().kind());
     }
 
     @Test

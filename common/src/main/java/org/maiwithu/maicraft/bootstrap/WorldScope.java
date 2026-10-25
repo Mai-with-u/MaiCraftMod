@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
+import org.maiwithu.maicraft.behavior.permission.ClientVillagers;
 import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
@@ -134,6 +135,19 @@ public final class WorldScope {
         }
     }
 
+    // 全仓唯一的保护判断：归属记录、记住的区域与地标、自家人之外再接两路现场读数，都读当刻的角色上下文。
+    // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待；
+    // 村庄按看得见村民认：收回睡过的床时村里的那张让开。读不到当刻的现场（还没进世界、人接管中）就不猜、按没看见算。
+    private Protection assembleProtection(WorldMemory memory, PlayerControlBoundary playerControl, String selfPlayerId) {
+        return new Protection(ownership, regions, memory,
+                new LivePlayerMadeGuesses(position -> playerControl.activeContext()
+                        .map(context -> context.level() == null ? null
+                                : context.level().getBlockState(new BlockPos(position.x(), position.y(), position.z())))
+                        .orElse(null)),
+                selfPlayerId, trusted,
+                new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)));
+    }
+
     public WorldScope(Minecraft minecraft, PlayerControlBoundary playerControl, BlockScanService blockScans,
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, WalkTo walksOnFoot, BaritoneInternals walks, CombatSenses senses,
@@ -166,14 +180,7 @@ public final class WorldScope {
         // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
         this.trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
                 name -> OnlinePlayers.idByName(minecraft, name));
-        // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待。
-        // 读不到当刻的现场（还没进世界、人接管中）就不猜，保护判断按其余几路走。
-        this.protection = new Protection(ownership, regions, memory,
-                new LivePlayerMadeGuesses(position -> playerControl.activeContext()
-                        .map(context -> context.level() == null ? null
-                                : context.level().getBlockState(new BlockPos(position.x(), position.y(), position.z())))
-                        .orElse(null)),
-                minecraft.player.getUUID().toString(), trusted);
+        this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.dimension = minecraft.level.dimension().location().toString();
         // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
         // 算路跑在后台线程上，碰不了当刻的角色上下文（玩家控制边界只许客户端线程进），所以门类推断不走

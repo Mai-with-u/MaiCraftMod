@@ -38,7 +38,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
  * <p>候选是世界记忆里记着的工作站（睡过的床、用过或看见过的工作台、熔炉），动手前到现场核对：
  * 那一格还是那个方块才算。台子和炉子要归属记录写着自己才收；床放宽一档——自己睡过的床也收
  * （野外睡过一晚的那张床是自己放下再睡的，但放下动作发生在更早的会话时归属记录未必还在），
- * 归属记录写着是别人放的不收。归属还没问到就等它问到，拿不准不动；
+ * 归属记录写着是别人放的不收，周围看得见村民的（村里的床）也不收。归属还没问到就等它问到，拿不准不动；
  * 放在记住的"家"附近的不收——家里的床是重生点，家里的台子、炉子是摆好用的。
  * 挖那一格照许可检查点的规矩来（自己放的东西 temporary 档也能收回）。
  * 收回之后照现场把这一条从世界记忆里划掉：那一格已经不是记着的方块了，记忆留着只会再骗一趟。
@@ -98,7 +98,7 @@ public final class ReclaimSource implements ItemSource {
         }
         return new SourceQuote.Unavailable(describe(), "半径 " + (int) radius(context) + " 格内没有记得的、"
                 + "自己放下或自己睡过的还在原处的" + request.wanted().describe()
-                + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的不收）");
+                + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的、村里睡过的床不收）");
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -163,11 +163,11 @@ public final class ReclaimSource implements ItemSource {
             if (!request.wanted().matches(type, tags.tagsOf(type))) continue;
             WorldPosition at = record.position();
             if (!type.equals(blocks.blockTypeAt(at).orElse(null)) || protection.insideHome(at)) continue;
-            // 记忆里亲手睡过的床是自己的：不用等归属问到、也不看是不是写着自己放的，
-            // 只有记录写明是别人放的才让开（睡过一张村民的床不等于床是自己的）。
+            // 记忆里亲手睡过的床是自己的：不用等归属问到、也不看是不是写着自己放的；
+            // 记录写明是别人放的让开，村里的床也让开（睡过一张村民的床不等于床是自己的，村民还要睡）。
             boolean sleptIn = type.endsWith("_bed") && record.origin() == MemoryOrigin.USED;
             if (sleptIn) {
-                if (protection.placedByAnotherPlayer(at)) continue;
+                if (protection.placedByAnotherPlayer(at) || protection.inVillage(at)) continue;
             } else {
                 if (!protection.ownershipKnown(at)) {
                     pending++;
