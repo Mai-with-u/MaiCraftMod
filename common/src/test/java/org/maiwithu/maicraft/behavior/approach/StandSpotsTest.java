@@ -32,12 +32,40 @@ class StandSpotsTest {
     void 平地上围着目标找出一圈能用的站位并按代价排好序() {
         StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
         assertFalse(ranking.spots().isEmpty());
-        // 排序：前面的代价不比后面的大，同代价的按格子位置排，保证顺序稳定。
+        // 排序：同一可达档里前面的代价不比后面的大，同代价的按格子位置排，保证顺序稳定；
+        // 高出不止一跳的候选整档排在后面，不与同层的比代价（见塔顶候选的排序用例）。
         for (int i = 1; i < ranking.spots().size(); i++) {
-            assertTrue(ranking.spots().get(i - 1).compareTo(ranking.spots().get(i)) <= 0);
+            StandSpot previous = ranking.spots().get(i - 1);
+            StandSpot following = ranking.spots().get(i);
+            if (StandSpots.climbTier(previous.feet(), world.feet)
+                    == StandSpots.climbTier(following.feet(), world.feet)) {
+                assertTrue(previous.compareTo(following) <= 0);
+            }
         }
         // 目标紧邻的位置应该出现：贴着方块才能对它动手。
         assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(2, 64, 0))));
+    }
+
+    @Test
+    void 高出不止一跳的塔顶候选排在同层候选之后() {
+        // 高塔立在目标方块边上，角色在塔脚：塔身半腰的合格候选（脚下实心、头顶开阔、够得着高塔）
+        // 按直线代价比几格外的同层候选便宜，但比角色高出一跳以上，要走过去常常没有梯级——
+        // 可达档把它排到同层候选之后，不按代价抢在前面。
+        world.feet = new BlockPos(3, 68, 0);
+        ApproachTarget 高塔 = ApproachTarget.ofEntity(new AABB(3, 64, 0, 4, 80, 1));
+        StandSpots.Ranking ranking = StandSpots.find(高塔, REACH, world, walking, guarded);
+        BlockPos 塔身半腰 = new BlockPos(3, 70, 0);
+        BlockPos 同层远格 = new BlockPos(6, 69, 0);
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(塔身半腰)),
+                "塔身上脚位实心、头顶开阔，是合格候选");
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(同层远格)));
+        assertEquals(1, StandSpots.climbTier(塔身半腰, world.feet), "塔身半腰比脚底高出两格，在要爬的档");
+        assertEquals(0, StandSpots.climbTier(同层远格, world.feet));
+        assertTrue(ranking.spots().indexOf(ranking.spots().stream()
+                        .filter(spot -> spot.feet().equals(塔身半腰)).findFirst().orElseThrow())
+                > ranking.spots().indexOf(ranking.spots().stream()
+                        .filter(spot -> spot.feet().equals(同层远格)).findFirst().orElseThrow()),
+                "要爬的候选排在同层候选之后，尽管它离脚底更近");
     }
 
     @Test

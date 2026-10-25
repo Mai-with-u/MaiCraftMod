@@ -169,10 +169,30 @@ public final class Approach implements Action {
             case ActionStatus.Failed failed when failed.problem().kind() == Problem.Kind.INTERNAL_ERROR -> failed;
             case ActionStatus.Failed failed -> {
                 recordTried(current.feet(), "这条路走不通：" + failed.problem().message());
+                dropUnclimbableRest(current.feet());
                 stage = Stage.NEXT_SPOT;
                 yield ActionStatus.progressed();
             }
         };
+    }
+
+    /**
+     * 刚走高处的站位没走通：寻路是全域找路，这一格到不了，同一带比角色脚底高出一跳以上的
+     * 其余候选多半也没有梯级——塔顶、屋顶这类「站得上但上不去」的结构顶面，挨个再爬一遍
+     * 只会把整段接近耗在走不到的高处上（实机夜宿回站位在一座塔顶的站位间反复 APPROACH，整夜占体）。
+     * 把它们从待试队列里去掉，去了几个如实记进试过清单；同层与更低的候选照常逐个试，
+     * 横着走通不通与高处爬不爬得上是两回事。
+     */
+    private void dropUnclimbableRest(BlockPos failedFeet) {
+        BlockPos here = world.currentFeet();
+        if (StandSpots.climbTier(failedFeet, here) == 0) return;
+        int dropped = 0;
+        for (StandSpot spot : pending) {
+            if (StandSpots.climbTier(spot.feet(), here) > 0) dropped++;
+        }
+        if (dropped == 0) return;
+        pending.removeIf(spot -> StandSpots.climbTier(spot.feet(), here) > 0);
+        recordTried("高出不止一跳的其余 " + dropped + " 个候选", "刚试过的高处站位没走通，不再挨个爬");
     }
 
     private ActionStatus verifyArrival() {

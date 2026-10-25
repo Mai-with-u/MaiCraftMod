@@ -7,6 +7,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -25,6 +26,13 @@ public final class StandSpots {
 
     /** 脚下落差超过这么多格就不站：再深就是往下跳，不是走过去。类别：玩家常识。 */
     static final double MAX_DROP = 3.0;
+
+    /**
+     * 原地一跳最多上一格：候选脚位比角色此刻的脚底高出一格以上，就不是抬脚能到的。
+     * 这样的候选多半在塔顶、屋顶这类结构顶面上——脚下实心、头顶开阔，四项检查全是合格的，
+     * 真要走过去却常常没有梯级。类别：玩家常识（跳跃高度）。
+     */
+    static final int MAX_STEP_UP = 1;
 
     /** 围着目标扫候选站位的水平半径（格）：盖住交互距离属性被装备撑大后的范围。 */
     private static final int SCAN_RADIUS = 5;
@@ -102,7 +110,33 @@ public final class StandSpots {
             spots.addAll(dry);
             spots.addAll(wet);
         }
+        // 可达性口径收尾：比角色此刻脚底高出一跳以上的候选排到同层与更低的之后。
+        // 稳定排序，同档之内保持代价顺序；不剔除——有楼梯、能垫脚时它们照样能到，只是不先试。
+        // 声明允许湿脚的目标按干、湿两组各排各的：干位整组在湿位前面的规矩不变。
+        if (target.wetFeetAllowed()) {
+            int firstWet = 0;
+            while (firstWet < spots.size() && !world.inFluid(spots.get(firstWet).feet())) {
+                firstWet++;
+            }
+            orderByReachability(spots.subList(0, firstWet), current);
+            orderByReachability(spots.subList(firstWet, spots.size()), current);
+        } else {
+            orderByReachability(spots, current);
+        }
         return new Ranking(spots, rejected);
+    }
+
+    /** 把候选按可达档排好（稳定，档内保持代价顺序）：要爬的整档挪到与角色同层或更低的之后。 */
+    private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet) {
+        spots.sort(Comparator.comparingInt(spot -> climbTier(spot.feet(), currentFeet)));
+    }
+
+    /**
+     * 候选的可达档：与角色同层、更低或只高一跳是 0 档，再往上要爬的是 1 档；角色位置未知时都在 0 档。
+     * 档只用于排序，不是对候选的否决；走不走得到最终由真的走路结算。
+     */
+    static int climbTier(BlockPos feet, BlockPos currentFeet) {
+        return currentFeet != null && feet.getY() - currentFeet.getY() > MAX_STEP_UP ? 1 : 0;
     }
 
     /**

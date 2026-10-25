@@ -125,6 +125,29 @@ class ApproachTest {
     }
 
     @Test
+    void 高处的站位没走通就不再挨个爬同一带的塔顶() {
+        // 夜宿回站位锚在一座塔顶时，待试队列里全是塔顶的合格候选：脚下实心、头顶开阔，
+        // 挨个爬一遍把整段接近耗光。寻路是全域找路，第一个高处站位没走通，同一带的到不了
+        // 就一次说清：剩下的高处候选不再爬，如实按到不了收场，不再挨个上路。
+        world.grounded = false;
+        world.feet = new BlockPos(0, 64, 0);
+        // 低处的候选全被挡板挡成看不见，待试队列里只剩高出不止一跳的塔身候选。
+        world.hidden = (eye, target) -> eye.y() < 70;
+        StubMoves moves = new StubMoves(world,
+                ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "塔身爬不上去")));
+        Approach approach = approach(ApproachTarget.ofEntity(new AABB(3, 64, 0, 4, 80, 1)),
+                moves, null, Permissions.DEFAULT, null);
+        approach.tick(new StubTick(1));
+        approach.tick(new StubTick(2));
+        approach.tick(new StubTick(3));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, approach.tick(new StubTick(4)));
+        assertEquals(Problem.Kind.UNREACHABLE, failed.problem().kind());
+        assertEquals(1, moves.begun.size(), "只走过第一个高处站位");
+        assertTrue(approach.tried().stream().anyMatch(attempt -> attempt.tried().contains("一跳")
+                && attempt.result().contains("不再挨个爬")), approach.tried().toString());
+    }
+
+    @Test
     void 寻路程序出错就不再换站位_照原样交上去() {
         // 实机里算路程序出错时，采集挨个试了 58 个站位，每个都错在同一处；程序出错换站位没用。
         world.grounded = false;
