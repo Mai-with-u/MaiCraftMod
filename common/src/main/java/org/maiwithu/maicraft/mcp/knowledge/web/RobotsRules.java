@@ -13,14 +13,15 @@ final class RobotsRules {
     private record Rule(Pattern pattern, int length, boolean allow) {}
     private record Group(List<String> agents, List<Rule> rules, long delayMillis) {}
     private final List<Rule> rules = new ArrayList<>();
-    private long delayMillis = 1000;
+    // 站点没写 Crawl-delay 时这里是 0：最小间隔由联网客户端自己定，不在规则里写死。
+    private long delayMillis = 0;
 
     RobotsRules(String text) {
         List<Group> groups = new ArrayList<>();
         List<String> agents = new ArrayList<>();
         List<Rule> entries = new ArrayList<>();
         boolean directives = false;
-        long delay = 1000;
+        long delay = 0;
         for (String raw : text.replace("\uFEFF", "").split("\\R")) {
             String line = raw.split("#", 2)[0].strip();
             int colon = line.indexOf(':');
@@ -30,7 +31,7 @@ final class RobotsRules {
             if (key.equals("user-agent")) {
                 if (directives) {
                     groups.add(new Group(agents, entries, delay));
-                    agents = new ArrayList<>(); entries = new ArrayList<>(); delay = 1000; directives = false;
+                    agents = new ArrayList<>(); entries = new ArrayList<>(); delay = 0; directives = false;
                 }
                 agents.add(value.toLowerCase(Locale.ROOT));
             } else if (!agents.isEmpty()) {
@@ -42,8 +43,8 @@ final class RobotsRules {
                     String regex = "^" + String.join(".*", List.of(path.split("\\*", -1)).stream().map(Pattern::quote).toList()) + (end ? "$" : "");
                     entries.add(new Rule(Pattern.compile(regex), path.replace("*", "").length(), key.equals("allow")));
                 } else if (key.equals("crawl-delay")) {
-                    try { delay = Math.max(1000, (long) Math.ceil(Double.parseDouble(value) * 1000)); }
-                    catch (NumberFormatException ignored) { /* 无效延迟保留默认间隔，不让角色密集访问站点。 */ }
+                    try { delay = Math.max(0, (long) Math.ceil(Double.parseDouble(value) * 1000)); }
+                    catch (NumberFormatException ignored) { /* 写坏的延迟当没写，仍按联网客户端的最小间隔访问。 */ }
                 }
             }
         }

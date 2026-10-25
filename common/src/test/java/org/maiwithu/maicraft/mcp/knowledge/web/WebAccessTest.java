@@ -18,6 +18,16 @@ class WebAccessTest {
     }
 
     @Test
+    void encodedChineseSpacesAndAnchorsAllNameTheSameArticle() {
+        // 百分号编码、直接写中文、带章节锚点，读的是同一篇；Wiki 条目名里的空格就是下划线。
+        URI plain = WebAccess.article("https://zh.minecraft.wiki/w/红石比较器");
+        assertEquals(plain, WebAccess.article("https://zh.minecraft.wiki/w/%E7%BA%A2%E7%9F%B3%E6%AF%94%E8%BE%83%E5%99%A8#合成"));
+        assertEquals("https://zh.minecraft.wiki/w/红石比较器", plain.toString(), "写给 LLM 的地址照中文写");
+        assertEquals("https://minecraft.wiki/w/Redstone_Comparator",
+                WebAccess.article(" https://minecraft.wiki/w/Redstone Comparator ").toString());
+    }
+
+    @Test
     void sitemapIndexPathsAreFetchableButApiPathsAreNot() throws Exception {
         WebAccess.requireFetch(URI.create("https://zh.minecraft.wiki/images/sitemaps/NS_0-0.xml"));
         assertThrows(WebKnowledgeException.class,
