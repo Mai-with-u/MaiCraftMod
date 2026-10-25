@@ -55,6 +55,8 @@ public final class BoardsVehicle implements Action {
     private int sneakReleaseWaited;
     /** 最近一下右键没坐上的原因；连点放弃时带在结果里说清。 */
     private String lastClickProblem;
+    /** 被叫先到安全处再停、走过去的路上悬在半空：只推进这一趟走路到落地站稳；暂停时清掉。 */
+    private boolean stopping;
 
     /**
      * @param freeSeat 这辆此刻还有没有给我的空座；没有这项讲究的载具（一个人坐的矿车）给 null
@@ -131,6 +133,11 @@ public final class BoardsVehicle implements Action {
     // 够得着了停下、对准它右键，等服务器把我设成它的乘客。
     @Override
     public ActionStatus tick(TickContext context) {
+        // 收尾途中：只把走过去的这一趟推进到落地站稳，落地后原地等着，不对着它右键、也不另起一趟走。
+        if (stopping) {
+            if (walk != null && !walk.stoppedSafely()) walk.tick(context);
+            return ActionStatus.running();
+        }
         Sighting seen = reads.read(context);
         Next next = decide(new Scene(seen.ridingThis(), seen.vehicleGone(), seen.seatFree(), seen.inReach(),
                 seen.sneakHeld(), sneakReleaseWaited, clicksUsed, click != null));
@@ -223,8 +230,21 @@ public final class BoardsVehicle implements Action {
 
     @Override
     public void pause() {
+        stopping = false;
         if (walk != null) walk.pause();
         if (click != null) click.pause();
+    }
+
+    // 被叫先到安全处再停：走过去的路上转给走路，悬在半空的先落地、落地才算停稳；站着对准右键时现在就能停。
+    @Override
+    public boolean stopSafely() {
+        stopping = walk != null && walk.stopSafely();
+        return stopping;
+    }
+
+    @Override
+    public boolean stoppedSafely() {
+        return !stopping || walk == null || walk.stoppedSafely();
     }
 
     @Override

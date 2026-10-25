@@ -9,13 +9,17 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -160,6 +164,54 @@ class BoardsVehicleTest {
         assertTrue(failed.problem().message().contains("点了 3 次都没坐上"), failed.problem().message());
         assertTrue(failed.problem().message().contains("确认窗口过期"), failed.problem().message());
         assertEquals(2 * BoardsVehicle.MAX_CLICKS + 1, tick, "三下各两刻，第七刻放弃");
+    }
+
+    /**
+     * 走过去的路上悬在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；落地后原地等着，不右键、不另起一趟走；
+     * 暂停过后接着做，按够不够得着重新走过去。站在地上走着、站着右键时现在就能停。
+     */
+    @Test
+    void walkingOverInMidAirLandsBeforeStoppingAndNeitherClicksNorSetsOffAgain() {
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(1, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(2, 65, 0), false),
+                WalkReport.stopped(new BlockPos(2, 64, 0), false));
+        leg.airborne = true;
+        List<TravelFakes.ScriptedWalk> started = new ArrayList<>();
+        WalkTo walks = (target, permit) -> {
+            TravelFakes.ScriptedWalk run = started.isEmpty() ? leg
+                    : new TravelFakes.ScriptedWalk(WalkReport.onTheWay(new BlockPos(3, 64, 0), false));
+            started.add(run);
+            return run;
+        };
+        List<ScriptedClick> clicks = new ArrayList<>();
+        BoardsVehicle boarding = new BoardsVehicle(walks, TerrainPermit.NATURAL, "那条船",
+                context -> new BoardsVehicle.Sighting(false, false, true, false, false, new BlockPos(6, 63, 0)),
+                () -> {
+                    ScriptedClick click = new ScriptedClick(2, null, () -> {});
+                    clicks.add(click);
+                    return click;
+                });
+        assertFalse(boarding.stopSafely(), "还没走起来：现在就能停");
+        boarding.tick(TickContext.of(1, null));
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, boarding.interruptibility(), "走过去的路上悬在半空停不得");
+
+        assertTrue(boarding.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(boarding.stoppedSafely(), "还没落地");
+        for (int tick = 2; tick <= 5; tick++) {
+            assertInstanceOf(ActionStatus.Running.class, boarding.tick(TickContext.of(tick, null)), "收尾途中不收场");
+        }
+        assertTrue(boarding.stoppedSafely(), "落地站稳了");
+        assertEquals(1, started.size(), "收尾途中不另起一趟走");
+        assertEquals(0, leg.closes, "落地停稳的那一趟留着，不当成走到了收掉");
+        assertTrue(clicks.isEmpty(), "收尾途中不右键");
+
+        // 暂停过后接着做：还够不着，重新走过去。
+        boarding.pause();
+        for (int tick = 6; tick <= 8; tick++) boarding.tick(TickContext.of(tick, null));
+        assertEquals(2, started.size(), "暂停过后按够不够得着重新走过去");
+        assertFalse(boarding.stopSafely(), "站在地上走着：现在就能停");
     }
 
     // 够得着、有空座、潜行没按的现场；不该走路，走路入口一被调用就算错。

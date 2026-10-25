@@ -98,8 +98,13 @@ final class PearlCrossingLeg implements TravelLeg {
             return failed(Problem.Kind.STUCK, "人已经不在末地（现在在 " + dimension + "），这扇门不过了", null);
         }
         if (startSide == null) startSide = EndIslands.sideOf(feet);
-        // 被要求停下：只有等传送、落地那两步停不得（见 interruptibility），别的步骤当场停在原地。
+        // 被要求停下：只有等传送、落地那两步停不得（见 interruptibility），别的步骤停在原地；
+        // 手上那一下要先收尾（走向站位、垫柱搭桥悬在半空）就先推进它到落地站稳，再收掉它停下。
         if (stopRequested && step != Step.WAIT && step != Step.SETTLE) {
+            if (current != null && !current.stoppedSafely()) {
+                current.tick(context);
+                return ActionStatus.running();
+            }
             dropCurrent();
             return failed(Problem.Kind.STUCK, "按要求停下，停在 " + feet.toShortString() + "，还没过门", null);
         }
@@ -300,9 +305,11 @@ final class PearlCrossingLeg implements TravelLeg {
         return current == null ? Interruptibility.WORKING : current.interruptibility();
     }
 
-    // 要求先到安全处再停：等传送的这一下等完（过去了就落地站稳），不再扔第二颗；别的步骤下一刻就停。
+    // 要求先到安全处再停：等传送的这一下等完（过去了就落地站稳），不再扔第二颗；手上那一下转给它，
+    // 走在半空的先落地站稳再停；别的步骤下一刻就停。
     @Override public void requestSafeStop() {
         stopRequested = true;
+        if (current != null) current.stopSafely();
     }
 
     // 让给生存需求：手上的动作收掉，回来从这一步重新开始；正在扔、已经交出去的那一下就只等结果，不重扔。

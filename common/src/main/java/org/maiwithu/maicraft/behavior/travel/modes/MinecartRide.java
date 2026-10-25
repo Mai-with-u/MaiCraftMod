@@ -106,8 +106,13 @@ final class MinecartRide implements TravelLeg {
         if (context == null || player == null || feet == null) {
             return failed(Problem.Kind.INTERNAL_ERROR, "角色不在世界里，坐不了矿车", null);
         }
-        // 被要求停下：乘车中先把车刹稳、下车站稳，别的步骤当场停在原地。
+        // 被要求停下：乘车中先把车刹稳、下车站稳，别的步骤停在原地；手上那一下要先收尾
+        // （走到车旁、走过去坐上时悬在半空）就先推进它到落地站稳，再收掉它停下。
         if (stopRequested && step != Step.RIDE && step != Step.ALIGHT && step != Step.SETTLE) {
+            if (current != null && !current.stoppedSafely()) {
+                current.tick(tick);
+                return ActionStatus.running();
+            }
             dropCurrent();
             halt(context);
             return failed(Problem.Kind.STUCK, "按要求停下，停在 " + feet.toShortString() + "，还没坐上矿车", null);
@@ -410,9 +415,10 @@ final class MinecartRide implements TravelLeg {
         return current == null ? Interruptibility.WORKING : current.interruptibility();
     }
 
-    // 要求先到安全处再停：坐着的刹稳下车、站稳，再结束这一段。
+    // 要求先到安全处再停：坐着的刹稳下车、站稳，再结束这一段；手上那一下转给它，走在半空的先落地站稳。
     @Override public void requestSafeStop() {
         stopRequested = true;
+        if (current != null) current.stopSafely();
     }
 
     // 让给生存需求：手上的动作收掉、松开按键；回来从这一步重新开始（车停着等，人挪了按现场再看）。

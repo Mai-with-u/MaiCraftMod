@@ -15,6 +15,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -276,6 +277,54 @@ class PearlCrossingTest {
             tick.nextTick();
         }
         assertEquals(Interruptibility.UNSAFE_TO_STOP, leg.interruptibility());
+    }
+
+    @Test
+    void 走向站位悬在半空被叫先到安全处再停_落地站稳才停_不扔珍珠() {
+        world.feet = new BlockPos(90, 64, 0);
+        carryPearls(1);
+        TravelFakes.ScriptedWalk walk = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(91, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(92, 66, 0), false),
+                WalkReport.onTheWay(new BlockPos(93, 66, 0), false),
+                WalkReport.stopped(new BlockPos(93, 65, 0), false));
+        walk.airborne = true;
+        walks.enqueue(walk);
+        PearlCrossingLeg leg = new PearlCrossingLeg(EAST_GATE, RARE, services);
+        for (int i = 0; i < 3; i++) {
+            leg.tick(tick);
+            tick.nextTick();
+        }
+        assertEquals(1, walks.started.size(), "走向门旁的站位");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, leg.interruptibility(), "垫柱跳到一半停不得");
+
+        // 悬在半空被要求先到安全处再停：转给走路去落地，落地前这一段照常推进、不收掉半空的走路，落地才停下。
+        leg.requestSafeStop();
+        assertEquals(1, walk.safeStops, "先停稳转给了走路");
+        assertInstanceOf(ActionStatus.Running.class, leg.tick(tick), "还在半空，不停");
+        tick.nextTick();
+        assertEquals(0, walk.closes, "还没落地，走路不收掉");
+        ActionStatus.Failed stopped = assertInstanceOf(ActionStatus.Failed.class, run(leg, 10));
+        assertTrue(stopped.problem().message().contains("按要求停下"), stopped.problem().message());
+        assertEquals(WalkReport.State.STOPPED, walk.report().state(), "落地站稳了才停");
+        assertTrue(throwing.aimedAt.isEmpty(), "停下前没扔珍珠");
+    }
+
+    @Test
+    void 走向站位站在地上被叫先停稳_下一刻就停() {
+        world.feet = new BlockPos(90, 64, 0);
+        carryPearls(1);
+        walks.enqueue(new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(91, 64, 0), false),
+                WalkReport.onTheWay(new BlockPos(92, 64, 0), false)));
+        PearlCrossingLeg leg = new PearlCrossingLeg(EAST_GATE, RARE, services);
+        for (int i = 0; i < 3; i++) {
+            leg.tick(tick);
+            tick.nextTick();
+        }
+        leg.requestSafeStop();
+        ActionStatus.Failed stopped = assertInstanceOf(ActionStatus.Failed.class, leg.tick(tick));
+        assertTrue(stopped.problem().message().contains("按要求停下"), stopped.problem().message());
     }
 
     @Test
