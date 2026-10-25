@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -260,6 +261,54 @@ class TravelTaskTest {
         assertTrue(result.problem().suggestion().contains("y≈178"), () -> "建议：" + result.problem().suggestion());
         TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
         assertNotNull(details.remaining(), "没走到要写明还差多远");
+    }
+
+    @Test
+    void backAndForthOscillationSettlesAsUnreachable() {
+        // 水里横跳：身体在近点与远点之间来回摆，来回都能把剩余距离压回上次的水平，
+        // 但再也没比上次记进展时近一格——空转计时不再被重置，满时限按走不通如实收场。
+        List<WalkReport> swings = new ArrayList<>();
+        for (int i = 0; i < 700; i++) {
+            swings.add(WalkReport.onTheWay(i % 2 == 0 ? new BlockPos(4, 64, 0) : new BlockPos(6, 64, -1), false));
+        }
+        walks.enqueue(new ScriptedWalk(swings.toArray(WalkReport[]::new)));
+        TravelTask travel = task(new Target.Position(12, 64, -2, null));
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("没有新进展"), () -> "说明：" + result.problem().message());
+    }
+
+    @Test
+    void oneBlockJitterDoesNotCountAsProgress() {
+        // 干地蹭动：身体在相邻两格之间小幅挪动，剩余距离最多差一格，攒不出一格的净接近，
+        // 也照样按空转收场，不再被每一丝挪动续命。
+        List<WalkReport> jitters = new ArrayList<>();
+        for (int i = 0; i < 700; i++) {
+            jitters.add(WalkReport.onTheWay(i % 2 == 0 ? new BlockPos(4, 64, 0) : new BlockPos(5, 64, 0), false));
+        }
+        walks.enqueue(new ScriptedWalk(jitters.toArray(WalkReport[]::new)));
+        TravelTask travel = task(new Target.Position(12, 64, -2, null));
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+    }
+
+    @Test
+    void steadyApproachKeepsCountingProgressAndArrives() {
+        // 真前进：一路朝目的地走近，每段都真近了一格以上，进展照记，不会半路被当成卡住。
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(4, 64, 0), false),
+                WalkReport.onTheWay(new BlockPos(7, 64, -1), false),
+                WalkReport.onTheWay(new BlockPos(10, 64, -1), false),
+                WalkReport.arrived(new BlockPos(12, 64, -2), false)));
+        TaskResult result = runToFinish(task(new Target.Position(12, 64, -2, null)), 700);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
     }
 
     @Test

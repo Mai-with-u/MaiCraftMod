@@ -290,10 +290,11 @@ public final class TravelFakes {
             }
             WalkReport next = reports.remove();
             last = next;
+            // 真实的走到运行在路上不逐刻自报进展（进展由出行任务按剩余距离记），替身同样只报"还在做"。
             return switch (next.state()) {
                 case ARRIVED, STOPPED -> ActionStatus.done();
                 case FAILED -> ActionStatus.failed(next.problem());
-                default -> ActionStatus.progressed();
+                default -> ActionStatus.running();
             };
         }
 

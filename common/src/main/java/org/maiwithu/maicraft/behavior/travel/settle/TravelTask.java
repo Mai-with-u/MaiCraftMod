@@ -50,6 +50,9 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     /** 连续半分钟离目的地没有更近，就算在原地打转。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
+    /** 剩余距离比上次记进展时至少近这么多（格）才记一次进展：水里来回横跳、干地上厘米级蹭动
+     *  每次都能把最优剩余距离压低一丝丝，一丝丝也算进展就会一直重置空转计时，角色在原地拉锯几小时。 */
+    private static final double PROGRESS_STEP_BLOCKS = 1.0;
 
     private final TravelDestination destination;
     private final TerrainPermit permit;
@@ -255,8 +258,9 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         recordPlacementsSoFar();
         noteBackpack(context);
         RemainingDistance remaining = remainingFromHere();
-        if (remaining != null && progressGap(remaining) < bestRemaining) {
-            // 剩余距离是进展信号：更近了才算前进，站着不动早晚被判卡住。
+        if (remaining != null && progressGap(remaining) < bestRemaining - PROGRESS_STEP_BLOCKS) {
+            // 剩余距离是进展信号：比上次记进展时真近了一格以上才算前进，原地蹭动攒不出来的
+            // 就不再刷新，站着不动或来回横跳早晚被判卡住。
             bestRemaining = progressGap(remaining);
             recordProgress("离目的地还剩 " + remaining.describe());
         }
