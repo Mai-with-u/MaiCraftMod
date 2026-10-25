@@ -38,7 +38,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
  */
 class AcquireScopeTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     /** 替身：问价就给一条固定报价，动手就往背包里放货；记住问到的半径。 */

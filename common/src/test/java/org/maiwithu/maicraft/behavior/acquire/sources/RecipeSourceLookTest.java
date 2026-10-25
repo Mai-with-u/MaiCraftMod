@@ -35,7 +35,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
 /** 几种做法分不出先后（AE 这五分钟没开过，每种木头都报"看一眼"）：先打开看一眼，再按看到的挑。 */
 class RecipeSourceLookTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     @TempDir Path temp;
 

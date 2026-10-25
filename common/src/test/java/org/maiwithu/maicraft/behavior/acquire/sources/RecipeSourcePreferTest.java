@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
 /** LLM 说倾向用哪种材料：几种做法都行时用到它的排前面，备料时沿配方链往下传。 */
 class RecipeSourcePreferTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     @TempDir Path temp;
 

@@ -35,9 +35,9 @@ import org.maiwithu.maicraft.behavior.acquire.FakeTags;
  */
 class HuntSourceTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
-    private static final SourceContext CONTEXT_WITH_DISTANCE = new SourceContext(
+    private static final SourceContext CONTEXT_WITH_DISTANCE = SourceContext.scoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT, null, 96.0);
 
     /** 野外的、谁的都不是。 */
@@ -121,7 +121,7 @@ class HuntSourceTest {
         // kill_animals=none：羊还在，但一只都动不得，来源交许可问题而不是"没有"。
         Permissions none = Permissions.DEFAULT.mergedWith(null, null, null,
                 Permissions.AnimalKilling.NONE, null, null);
-        SourceContext context = new SourceContext(WorldPosition.here(0, 64, 0), none);
+        SourceContext context = SourceContext.unscoped(WorldPosition.here(0, 64, 0), none);
         HuntSource source = source((types, center, radius) -> List.of(sheep(1, 5, "white", false)));
         SourceQuote.NeedsApproval approval = assertInstanceOf(SourceQuote.NeedsApproval.class,
                 source.quote(wool(), context));
@@ -145,7 +145,7 @@ class HuntSourceTest {
         Permissions selfDefense = Permissions.DEFAULT.mergedWith(null, Permissions.Fight.SELF_DEFENSE,
                 null, null, null, null);
         SourceQuote quote = source.quote(gunpowder,
-                new SourceContext(WorldPosition.here(0, 64, 0), selfDefense));
+                SourceContext.unscoped(WorldPosition.here(0, 64, 0), selfDefense));
         assertTrue(quote instanceof SourceQuote.NeedsApproval approval
                 && approval.problem().message().contains("fight"), String.valueOf(quote));
     }

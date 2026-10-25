@@ -53,7 +53,7 @@ class MiningSourceChanceTest {
     }
 
     private static SourceContext context(Permissions permissions) {
-        return new SourceContext(WorldPosition.here(0, 64, 0), permissions);
+        return SourceContext.unscoped(WorldPosition.here(0, 64, 0), permissions);
     }
 
     private MiningSource source(ChanceField field) {

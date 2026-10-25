@@ -13,6 +13,10 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
  * 来源按位置估距离、按许可决定哪些来源根本不参与；愿意走的距离只有要"出去找"的来源用
  * （附近没有时走多远再找一片），报价太远的路仍然由引擎按它挡下。
  *
+ * <p>可选字段按真实出现过的组合用静态工厂表达：问价用不带记账口的两个工厂，
+ * 要往任务结果里记东西、要顺路拿别样时才带全参。新加可选字段时只改全参构造与
+ * 用到它的工厂，其余调用点不动。
+ *
  * @param characterAt  角色此刻所在的位置
  * @param permissions  这次任务的许可
  * @param radiusBlocks 这次任务允许搜索的范围（格）；null 表示用来源自己的默认半径。
@@ -34,24 +38,24 @@ public record SourceContext(WorldPosition characterAt, Permissions permissions, 
     }
 
     /** 不限搜索半径与距离的问询：来源按自己的默认半径找。 */
-    public SourceContext(WorldPosition characterAt, Permissions permissions) {
-        this(characterAt, permissions, null, null, null, List.of());
+    public static SourceContext unscoped(WorldPosition characterAt, Permissions permissions) {
+        return new SourceContext(characterAt, permissions, null, null, null, List.of());
     }
 
-    /** 只限搜索半径的问询。 */
-    public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks) {
-        this(characterAt, permissions, radiusBlocks, null, null, List.of());
+    /** 限定了这次允许搜的范围和愿意走的距离的问询，还不接记账口。 */
+    public static SourceContext scoped(WorldPosition characterAt, Permissions permissions,
+            Integer radiusBlocks, Double maxDistanceBlocks) {
+        return new SourceContext(characterAt, permissions, radiusBlocks, maxDistanceBlocks, null, List.of());
     }
 
-    /** 不记账口的问询：问价，以及不算进任务结果的执行。 */
-    public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
-            Double maxDistanceBlocks) {
-        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, null, List.of());
+    /** 带记账口的问询：来源动作确认做过的事直接记进那次任务的结果。 */
+    public static SourceContext booked(WorldPosition characterAt, Permissions permissions, TaskRecords records) {
+        return new SourceContext(characterAt, permissions, null, null, records, List.of());
     }
 
-    /** 带记账口的问询，没有顺路要拿的东西。 */
-    public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
-            Double maxDistanceBlocks, TaskRecords records) {
-        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, List.of());
+    /** 顺路还要拿几样的问询：开一次箱能一起拿的来源会把这些一起带出来。 */
+    public static SourceContext alsoWanting(WorldPosition characterAt, Permissions permissions,
+            List<ItemRequest> alsoWanted) {
+        return new SourceContext(characterAt, permissions, null, null, null, alsoWanted);
     }
 }

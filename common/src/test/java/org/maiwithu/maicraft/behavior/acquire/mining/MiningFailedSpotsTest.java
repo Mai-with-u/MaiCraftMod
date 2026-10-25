@@ -47,7 +47,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
  */
 class MiningFailedSpotsTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(16, 65, 22), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(16, 65, 22), Permissions.DEFAULT);
     private static final WantedItem LOG = WantedItem.ofItem("minecraft:spruce_log");
     /** 坡上那棵树顶上够不着的原木，和另一棵够得着的树。 */
     private static final BlockPos HIGH_LOG = new BlockPos(13, 70, 24);

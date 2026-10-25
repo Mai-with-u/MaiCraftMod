@@ -54,7 +54,7 @@ class RecipeSourceTest {
 
     private static final Instant NOW = Instant.parse("2026-01-01T12:00:00Z");
     private static final WorldPosition TABLE_AT = new WorldPosition(8, 64, -2, null);
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     @TempDir Path temp;
@@ -210,8 +210,7 @@ class RecipeSourceTest {
         RecipeSource recipeSource = new RecipeSource(wanted -> List.of(plankRecipe()), memory,
                 itemId -> 0, runs, backpack, offhand, tags, new CapturingNeeds());
         CollectedRecords records = new CollectedRecords();
-        SourceContext booked = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, null, null,
-                records);
+        SourceContext booked = SourceContext.booked(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, records);
         ItemRequest planks = new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 8, "施工备料");
         backpack.add("minecraft:oak_log", 2);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(planks, CONTEXT));
@@ -804,7 +803,7 @@ class RecipeSourceTest {
     private ActionStatus makePickaxe(RecipeSource recipeSource, CollectedRecords records) {
         ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:wooden_pickaxe"), 1, "开局");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
-        SourceContext booked = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, null, null, records);
+        SourceContext booked = SourceContext.booked(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, records);
         return runToEnd(recipeSource.begin(request, offer, booked).orElseThrow());
     }
 

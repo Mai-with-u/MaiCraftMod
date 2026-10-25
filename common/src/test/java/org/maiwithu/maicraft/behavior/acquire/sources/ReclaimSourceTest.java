@@ -116,7 +116,7 @@ class ReclaimSourceTest {
     }
 
     private SourceQuote quote(WantedItem wanted, Permissions permissions) {
-        return source().quote(new ItemRequest(wanted, 1, "睡觉"), new SourceContext(HERE, permissions));
+        return source().quote(new ItemRequest(wanted, 1, "睡觉"), SourceContext.unscoped(HERE, permissions));
     }
 
     @Test
@@ -127,7 +127,7 @@ class ReclaimSourceTest {
         assertTrue(offer.cost().distanceBlocks() > 100 && offer.cost().distanceBlocks() < 112, offer.toString());
 
         ItemRequest request = new ItemRequest(ANY_BED, 1, "睡觉");
-        source().begin(request, offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+        source().begin(request, offer, SourceContext.unscoped(HERE, Permissions.DEFAULT)).orElseThrow();
         assertEquals(List.of(new BlockPos(-86, 66, 50)), collected);
     }
 
@@ -152,7 +152,7 @@ class ReclaimSourceTest {
         owners.remove(FIELD_BED);
         unknownOwnership.add(FIELD_BED);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
-        source().begin(new ItemRequest(ANY_BED, 1, "睡觉"), offer, new SourceContext(HERE, Permissions.DEFAULT))
+        source().begin(new ItemRequest(ANY_BED, 1, "睡觉"), offer, SourceContext.unscoped(HERE, Permissions.DEFAULT))
                 .orElseThrow();
         assertEquals(List.of(new BlockPos(-86, 66, 50)), collected);
     }
@@ -252,7 +252,7 @@ class ReclaimSourceTest {
         placedBed(FIELD_BED, "self");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
         Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
-                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+                offer, SourceContext.unscoped(HERE, Permissions.DEFAULT)).orElseThrow();
         world.remove(FIELD_BED);
         assertInstanceOf(ActionStatus.Done.class, collect.tick(null));
         assertTrue(memory().recordsNear(HERE, 128).isEmpty(), "挖掉了，这条记忆划掉");
@@ -264,7 +264,7 @@ class ReclaimSourceTest {
         placedBed(FIELD_BED, "self");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
         Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
-                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+                offer, SourceContext.unscoped(HERE, Permissions.DEFAULT)).orElseThrow();
         assertInstanceOf(ActionStatus.Done.class, collect.tick(null));
         assertEquals(1, memory().recordsNear(HERE, 128).size(), "现场还在，记忆留着");
     }
@@ -276,7 +276,7 @@ class ReclaimSourceTest {
         collectEnds = ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "有 1 件掉出的东西没捡到", null));
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
         Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
-                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+                offer, SourceContext.unscoped(HERE, Permissions.DEFAULT)).orElseThrow();
         world.remove(FIELD_BED);
         assertInstanceOf(ActionStatus.Failed.class, collect.tick(null));
         assertEquals(1, memory().recordsNear(HERE, 128).size(), "没收成，床多半还在原处，记忆留着");

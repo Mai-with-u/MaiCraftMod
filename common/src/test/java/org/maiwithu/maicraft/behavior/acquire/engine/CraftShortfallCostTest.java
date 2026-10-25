@@ -46,7 +46,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
  */
 class CraftShortfallCostTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(20, 63, 26), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(20, 63, 26), Permissions.DEFAULT);
     private static final WantedItem WHITE_BED = WantedItem.ofItem("minecraft:white_bed");
 
     @TempDir Path temp;

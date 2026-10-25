@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 class CompatModuleTest {
 
     private static final ItemRequest REQUEST = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "测试");
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
     private static final AcquireVia BACKPACK_ROUTE = new AcquireVia("backpack", "随身背包里拿");
 
     /** 不交任何接口的联动入口，只用它的调用包装。 */

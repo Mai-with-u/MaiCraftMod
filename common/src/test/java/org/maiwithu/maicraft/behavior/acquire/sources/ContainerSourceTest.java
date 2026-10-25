@@ -50,7 +50,7 @@ class ContainerSourceTest {
 
     private static final Instant NOW = Instant.parse("2026-01-01T12:00:00Z");
     private static final WorldPosition CHEST_AT = new WorldPosition(10, 64, 5, null);
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     /** 谁的箱子都不是：归属问过了、没人放过、也不在谁的地盘里。 */
@@ -261,8 +261,7 @@ class ContainerSourceTest {
         });
         ItemRequest iron = request(1);
         ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "工具准备");
-        SourceContext withAlso = new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT,
-                null, null, null, List.of(coal));
+        SourceContext withAlso = SourceContext.alsoWanting(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, List.of(coal));
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(iron, CONTEXT));
         source.begin(iron, offer, withAlso).orElseThrow();
 

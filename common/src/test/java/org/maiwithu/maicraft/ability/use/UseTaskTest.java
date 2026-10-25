@@ -98,7 +98,7 @@ class UseTaskTest {
         // 收回来源认的就是这条账：现场还是那张床、不在家附近，按路程报价去挖，不再说"没有记得的"。
         ReclaimSource reclaim = reclaimOver(rig);
         SourceQuote quote = reclaim.quote(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"),
-                new SourceContext(WorldPosition.here(3, 64, 3), Permissions.DEFAULT));
+                SourceContext.unscoped(WorldPosition.here(3, 64, 3), Permissions.DEFAULT));
         assertInstanceOf(SourceQuote.Offer.class, quote);
     }
 

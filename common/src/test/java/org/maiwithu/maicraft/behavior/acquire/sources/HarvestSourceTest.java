@@ -38,7 +38,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
  */
 class HarvestSourceTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     /** 替身：固定一批熟了的作物。 */

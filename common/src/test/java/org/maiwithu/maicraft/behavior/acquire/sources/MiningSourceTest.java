@@ -49,7 +49,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
  */
 class MiningSourceTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     private final FakeBackpack backpack = new FakeBackpack(36);
@@ -320,7 +320,7 @@ class MiningSourceTest {
 
     @Test
     void 不许挖天然方块_往下挖楼梯要许可() {
-        SourceContext onlyTemporary = new SourceContext(WorldPosition.here(0, 64, 0),
+        SourceContext onlyTemporary = SourceContext.unscoped(WorldPosition.here(0, 64, 0),
                 Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY, null, null, null, null, null));
         SourceQuote quote = source(new FakeMinables(List.of(), true, true), new FakeDigs())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), onlyTemporary);
@@ -353,7 +353,7 @@ class MiningSourceTest {
 
     @Test
     void 长程挖矿也要许可挖天然方块() {
-        SourceContext onlyTemporary = new SourceContext(WorldPosition.here(0, 64, 0),
+        SourceContext onlyTemporary = SourceContext.unscoped(WorldPosition.here(0, 64, 0),
                 Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY, null, null, null, null, null));
         SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"), onlyTemporary);
@@ -363,7 +363,7 @@ class MiningSourceTest {
 
     @Test
     void 在铁矿生成范围以下_不往上挖() {
-        SourceContext deep = new SourceContext(WorldPosition.here(0, -70, 0), Permissions.DEFAULT);
+        SourceContext deep = SourceContext.unscoped(WorldPosition.here(0, -70, 0), Permissions.DEFAULT);
         SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 3, "铁锭"), deep);
         assertInstanceOf(SourceQuote.Unavailable.class, quote);

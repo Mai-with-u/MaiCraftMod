@@ -39,7 +39,7 @@ import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
  */
 class RecipeSourceChoicesTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(WorldPosition.here(20, 63, 26), Permissions.DEFAULT);
+    private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(20, 63, 26), Permissions.DEFAULT);
     private static final List<String> OTHER_BEDS = List.of("minecraft:black_bed", "minecraft:white_bed", "minecraft:red_bed");
 
     @TempDir Path temp;

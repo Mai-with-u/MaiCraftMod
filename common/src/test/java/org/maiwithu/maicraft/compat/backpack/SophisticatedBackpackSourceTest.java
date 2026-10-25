@@ -42,7 +42,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 class SophisticatedBackpackSourceTest {
 
     private static final Instant NOW = Instant.parse("2026-01-01T12:00:00Z");
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
     private static final ItemRequest TORCHES = new ItemRequest(WantedItem.ofItem("minecraft:torch"), 10, "按需要拿取");
 

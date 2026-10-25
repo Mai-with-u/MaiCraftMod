@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
  */
 class TradeSourceTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
 
     /** 谁的都不是：没有名字、没拴绳、没圈养、没驯服。 */

@@ -223,7 +223,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     static final double UNKNOWN_STOCK_BLOCKS = 32;
 
     @Override public Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
-        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
         for (ItemSource source : sources) {
             if (!Scope.ALL.allows(source.via().name())) continue;
             Optional<Action> look = source.look(request, context);
@@ -233,7 +233,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     }
 
     @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
-        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
         Optional<Double> nearest = Optional.empty();
         for (ItemSource source : sources) {
             if (!Scope.ALL.allows(source.via().name())) continue;
@@ -249,7 +249,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     // 问价不拿：最省的一条路的总代价；不算现做时跳过合成、烧炼。只有点名才做的途径（交易）照旧不参与。
     @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions, boolean includeMaking) {
-        SourceContext context = new SourceContext(position.currentPosition(), permissions);
+        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
         Optional<Double> cheapest = Optional.empty();
         for (ItemSource source : sources) {
             String via = source.via().name();
@@ -434,7 +434,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
         private ActionStatus consult(int carried) {
             int stillNeeded = target - carried;
-            SourceContext context = new SourceContext(position.currentPosition(), permissions,
+            SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
                     scope.radiusBlocks(), scope.maxDistanceBlocks());
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
@@ -604,8 +604,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         }
 
         private ActionStatus startStep() {
-            SourceContext context = new SourceContext(position.currentPosition(), permissions,
-                    scope.radiusBlocks(), scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted());
+            SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
+                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()

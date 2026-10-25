@@ -88,7 +88,7 @@ class FluidTransformSourceTest {
         Rig rig = new Rig();
         rig.pools.add(new BlockPos(1, 64, 0));
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, rig.quote("ae2:fluix_crystal", 2));
-        SourceContext context = new SourceContext(HERE, Permissions.DEFAULT);
+        SourceContext context = SourceContext.unscoped(HERE, Permissions.DEFAULT);
         ItemRequest request = new ItemRequest(WantedItem.ofItem("ae2:fluix_crystal"), 2, "测试");
         assertTrue(rig.source.begin(request, offer, context).isPresent());
         assertEquals(3, rig.asked.size(), "三样料各要一份");
@@ -129,7 +129,7 @@ class FluidTransformSourceTest {
 
         SourceQuote quote(String itemId, int count) {
             return source.quote(new ItemRequest(WantedItem.ofItem(itemId), count, "测试"),
-                    new SourceContext(HERE, Permissions.DEFAULT));
+                    SourceContext.unscoped(HERE, Permissions.DEFAULT));
         }
 
         private PlayerServices services() {

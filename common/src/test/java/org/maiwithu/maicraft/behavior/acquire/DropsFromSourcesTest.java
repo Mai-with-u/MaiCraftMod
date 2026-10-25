@@ -49,7 +49,7 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
  */
 class DropsFromSourcesTest {
 
-    private static final SourceContext CONTEXT = new SourceContext(
+    private static final SourceContext CONTEXT = SourceContext.unscoped(
             WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
     private static final WantedItem RAW_ZINC = WantedItem.ofItem("create:raw_zinc");
     private static final DropsFrom ZINC_ORE = new DropsFrom(List.of("create:zinc_ore"), List.of(), List.of());

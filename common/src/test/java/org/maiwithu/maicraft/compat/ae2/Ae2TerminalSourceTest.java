@@ -145,7 +145,7 @@ class Ae2TerminalSourceTest {
         Ae2TerminalSource source = new Ae2TerminalSource(compat(), offlineServices(),
                 (terminal, dimension, request, permissions, records) -> Optional.empty(), new SeenNetworkStock(), () -> NOW);
         SourceQuote quote = source.quote(torches(8),
-                new SourceContext(WorldPosition.here(0, 64, 0), Permissions.DEFAULT));
+                SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT));
         assertInstanceOf(SourceQuote.Unavailable.class, quote);
     }
 
