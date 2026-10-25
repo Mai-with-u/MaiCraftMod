@@ -140,6 +140,9 @@ public final class LiveHunts implements Hunts {
         /** 打过却没见到想要东西的、停手的、没捡干净的：失败说明里逐条交代。 */
         private final List<String> notes = new ArrayList<>();
         private int carriedAtStart = -1;
+        /** 被叫先到安全处再停、走着的那一下（走近、走出去找、走回倒下的地方、捡掉落）说要先落地：
+         *  只推进它到落地站稳，不出手、不换目标、不开新的一趟；暂停时清掉。 */
+        private boolean stopping;
 
         Hunting(ItemRequest request, Iterator<ScansCreatures.CreatureSpot> candidates, Hunts.SearchPlan plan,
                 Permissions permissions) {
@@ -150,6 +153,12 @@ public final class LiveHunts implements Hunts {
         }
 
         @Override public ActionStatus tick(TickContext tick) {
+            // 收尾途中：只把走着的那一下推进到落地站稳，落地后原地等外层停下，别的都不做。
+            if (stopping) {
+                if (current != null && !current.stoppedSafely()) current.tick(tick);
+                if (loot != null && !loot.stoppedSafely()) loot.tick(tick);
+                return ActionStatus.running();
+            }
             if (carriedAtStart < 0) carriedAtStart = carriedWanted();
             if (enough()) return ActionStatus.done();
             return switch (stage) {
@@ -546,9 +555,23 @@ public final class LiveHunts implements Hunts {
         }
 
         @Override public void pause() {
+            stopping = false;
             if (current != null) current.pause();
             if (alongside != null) alongside.pause();
             if (loot != null) loot.pause();
+        }
+
+        // 被叫先到安全处再停：转给走着的那一下（走近、走出去找、走回去、捡掉落），悬在半空的先落地、落地才算停稳；
+        // 站着出手、站在地上走着时现在就能停。
+        @Override public boolean stopSafely() {
+            boolean byCurrent = current != null && current.stopSafely();
+            boolean byLoot = loot != null && loot.stopSafely();
+            stopping = byCurrent || byLoot;
+            return stopping;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || (current == null || current.stoppedSafely()) && (loot == null || loot.stoppedSafely());
         }
 
         @Override public void close() {
@@ -561,7 +584,13 @@ public final class LiveHunts implements Hunts {
         }
 
         @Override public Interruptibility interruptibility() {
-            return struck ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+            // 收尾做完、站着等外层停下：不再说停不得，等着的需求插得进来。
+            if (stopping && stoppedSafely()) return Interruptibility.WORKING;
+            if (struck) return Interruptibility.UNSAFE_TO_STOP;
+            // 还没出手：走近、走出去找的路上悬在半空时停不得，别的时候是正常干活。
+            Action now = current != null ? current : loot;
+            return now != null && now.interruptibility() == Interruptibility.UNSAFE_TO_STOP
+                    ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
         }
 
         @Override public String describe() {

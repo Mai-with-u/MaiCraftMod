@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -148,6 +149,19 @@ public final class LiveHuntMoves implements HuntMoves {
                 if (walk != null) walk.close();
             }
 
+            // 能不能打断、先到安全处再停都按走路说：悬在半空停不得，先落地再停。
+            @Override public Interruptibility interruptibility() {
+                return walk == null ? Interruptibility.WORKING : walk.interruptibility();
+            }
+
+            @Override public boolean stopSafely() {
+                return walk != null && walk.stopSafely();
+            }
+
+            @Override public boolean stoppedSafely() {
+                return walk == null || walk.stoppedSafely();
+            }
+
             @Override public String describe() {
                 return walk == null ? "走出去找猎物" : walk.describe();
             }
@@ -189,6 +203,19 @@ public final class LiveHuntMoves implements HuntMoves {
 
         @Override public void close() {
             if (walk != null) walk.close();
+        }
+
+        // 能不能打断、先到安全处再停都按走路说：悬在半空停不得，先落地再停。
+        @Override public Interruptibility interruptibility() {
+            return walk == null ? Interruptibility.WORKING : walk.interruptibility();
+        }
+
+        @Override public boolean stopSafely() {
+            return walk != null && walk.stopSafely();
+        }
+
+        @Override public boolean stoppedSafely() {
+            return walk == null || walk.stoppedSafely();
         }
 
         @Override public String describe() {

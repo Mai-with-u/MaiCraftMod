@@ -14,7 +14,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -26,6 +29,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -85,8 +89,16 @@ class LiveHuntsTest {
             return Optional.of(targetAt);
         }
 
+        /** 下一趟走近照这段脚本演（悬在半空、落地）；为 null 时一刻走到。 */
+        Action nextWalk;
+
         @Override public Action walkTo(double x, double y, double z) {
             done.add("走到 " + (int) x);
+            if (nextWalk != null) {
+                Action walk = nextWalk;
+                nextWalk = null;
+                return walk;
+            }
             return instant();
         }
 
@@ -218,6 +230,39 @@ class LiveHuntsTest {
         assertTrue(moves.done.contains("走到 12"), moves.done.toString());
         assertTrue(!moves.done.contains("打"), "够不着不出手：" + moves.done);
         moves.inReach = true;
+        hunting.tick(TICK);
+        assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
+    }
+
+    @Test
+    void 走近的路上悬在半空被叫先停稳_落地才停_收尾途中不出手不另起一趟_暂停后接着打() {
+        FakeMoves moves = new FakeMoves();
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(1, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(2, 65, 0), false),
+                WalkReport.stopped(new BlockPos(2, 64, 0), false));
+        leg.airborne = true;
+        moves.nextWalk = leg;
+        Action hunting = hunts(moves).hunt(List.of(sheep()), wool(), Permissions.DEFAULT).orElseThrow();
+        assertFalse(hunting.stopSafely(), "还没走起来：现在就能停");
+        hunting.tick(TICK); // 挑中这只
+        hunting.tick(TICK); // 朝它走过去，跳在半空
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, hunting.interruptibility(), "走近的路上悬在半空停不得");
+
+        // 悬在半空被叫先到安全处再停：转给走路去落地；这时它凑到了跟前也不出手，落地后原地等着。
+        assertTrue(hunting.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(hunting.stoppedSafely(), "还没落地");
+        moves.inReach = true;
+        for (int i = 0; i < 4; i++) {
+            assertInstanceOf(ActionStatus.Running.class, hunting.tick(TICK), "收尾途中不收场");
+        }
+        assertTrue(hunting.stoppedSafely(), "落地站稳了");
+        assertEquals(List.of("走到 12"), moves.done, "收尾途中不出手、不另起一趟走");
+        assertEquals(Interruptibility.WORKING, hunting.interruptibility(), "停稳了，等着的需求插得进来");
+
+        // 暂停过后接着做：它在跟前了，出手。
+        hunting.pause();
         hunting.tick(TICK);
         assertEquals("打", moves.done.get(moves.done.size() - 1), moves.done.toString());
     }

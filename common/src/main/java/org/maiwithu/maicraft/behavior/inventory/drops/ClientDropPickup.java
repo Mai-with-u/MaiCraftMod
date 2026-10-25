@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -135,6 +136,8 @@ public final class ClientDropPickup implements PicksUpDrops {
         private Long cursor;
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
         private int appearWaited;
+        /** 被叫先到安全处再停、走过去的路上悬在半空：只推进这一趟走路到落地站稳；暂停时清掉。 */
+        private boolean stopping;
 
         PickUp(Set<Integer> before, Integer only) {
             this.skip = new HashSet<>(before);
@@ -143,6 +146,11 @@ public final class ClientDropPickup implements PicksUpDrops {
 
         @Override
         public ActionStatus tick(TickContext tick) {
+            // 收尾途中：只把走过去的这一趟推进到落地站稳，落地后原地等着，不换下一件、不扒树叶、不另起一趟走。
+            if (stopping) {
+                if (walk != null && !walk.stoppedSafely()) walk.tick(tick);
+                return ActionStatus.running();
+            }
             LocalPlayer player = player();
             if (player == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻掌握不到角色，捡不了", null));
@@ -300,11 +308,28 @@ public final class ClientDropPickup implements PicksUpDrops {
         }
 
         @Override public void pause() {
+            stopping = false;
             if (walk != null) walk.pause();
         }
 
         @Override public void close() {
             stopWalking();
+        }
+
+        // 走过去的路上悬在半空停不得；站在旁边等它吸进包、走在地上是正常干活。
+        @Override public Interruptibility interruptibility() {
+            return walk != null && walk.interruptibility() == Interruptibility.UNSAFE_TO_STOP
+                    ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+        }
+
+        // 被叫先到安全处再停：转给走路，悬在半空的先落地、落地才算停稳；站着等、走在地上时现在就能停。
+        @Override public boolean stopSafely() {
+            stopping = walk != null && walk.stopSafely();
+            return stopping;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || walk == null || walk.stoppedSafely();
         }
 
         @Override
