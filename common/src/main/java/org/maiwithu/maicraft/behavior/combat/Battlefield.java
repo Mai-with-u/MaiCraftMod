@@ -140,10 +140,35 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         }
     }
 
+    /** 手上的本事值几分：按威胁评估的武器分口径挑中的那件算，空手 0。战场与我方处境都按它读。 */
+    static int weaponScore(CombatSenses.CombatProfile profile) {
+        return profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
+    }
+
+    /** 威胁评估看的我方处境：血、甲、武器分、口粮从战斗资质折过来；退没退路由调用方给。 */
+    public static ThreatAssessment.MySide mySide(CombatSenses.CombatProfile profile, boolean hasEscapeRoute) {
+        return new ThreatAssessment.MySide(profile.health(), profile.armorPoints(),
+                weaponScore(profile), profile.foodCount(), hasEscapeRoute);
+    }
+
+    /**
+     * 威胁评估看的对面名单：把看见的威胁一只只折过去，谁在追按战斗感观的追击判定
+     * （{@link CombatSenses#threatening}）认，最后按威胁先后排好。开打前的评估与战场逐刻重估都从这里取，
+     * "谁算在追我"全仓只有这一种读法。
+     */
+    public static List<ThreatAssessment.Foe> assessedFoes(List<CombatSenses.Threat> threats, Set<UUID> attackers) {
+        List<UUID> recent = List.copyOf(attackers);
+        List<ThreatAssessment.Foe> foes = new ArrayList<>();
+        for (CombatSenses.Threat threat : threats) {
+            foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(),
+                    CombatSenses.threatening(threat, recent), threat.armed()));
+        }
+        return ThreatAssessment.sortedByThreat(foes);
+    }
+
     /** 读一份战场：给定半径内的追兵与名单上的，按威胁先后排好。 */
     public static Battlefield read(CombatSenses senses, BattleMoves moves, TickContext context,
-                                   double radius, Roster roster) {
-        return read(senses, moves, context, radius, roster, Set.of());
+                                   double radius, Roster roster) {        return read(senses, moves, context, radius, roster, Set.of());
     }
 
     /**
@@ -164,7 +189,7 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
                             double radius, Roster roster, Set<Integer> keep, StillChasing still) {
         CombatSenses.CombatProfile profile = senses.profile(context);
         double[] at = moves.selfPosition(context);
-        int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
+        int weaponScore = weaponScore(profile);
         Me me = new Me(at[0], at[1], at[2], PLAYER_HALF_WIDTH, profile.health(), profile.armorPoints(),
                 profile.reach(), moves.attackReady(context), moves.hasMeleeWeapon(context),
                 moves.canShoot(context), weaponScore, profile.foodCount());

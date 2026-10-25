@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -117,14 +116,6 @@ public interface CombatSenses {
         /** 我此刻够不够得着它。 */
         public boolean withinReach(double myRange) {
             return reachGap <= myRange;
-        }
-
-        /**
-         * 它是不是冲着我来的：十秒内真打过我的、引信点着的、看得见我又亮着攻击标记的。
-         * 原先点名战斗只看引信，正追着砍我的僵尸被当成闲逛的，排序与"打不打得过"都算轻了。
-         */
-        public boolean comingAt(Collection<UUID> attackers) {
-            return attackers.contains(uuid) || armed || aggressive && visible;
         }
     }
 

@@ -22,7 +22,6 @@ import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.DragonArena;
 import org.maiwithu.maicraft.behavior.combat.DragonCombat;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -577,27 +576,25 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 离最后一只倒下的地方这么近就开始捡（格）。 */
     private static final double KILL_SPOT_NEAR = 3.0;
 
+    // 开打前的评估与引擎逐刻重估共用同一套折法：我方处境与对面名单都从战场快照的取景取，
+    // 不再自己手拼一份。开打前先当有退路：真退不掉时引擎会背水一战，评估只管这一仗好不好打。
     private ThreatAssessment.MySide mySide(TickContext context) {
-        CombatSenses.CombatProfile profile = senses.profile(context);
-        int weaponScore = profile.weapon().map(WeaponChoice::scoreOf).orElse(0);
-        return new ThreatAssessment.MySide(profile.health(), profile.armorPoints(),
-                weaponScore, profile.foodCount(), true);
+        return Battlefield.mySide(senses.profile(context), true);
     }
 
     private List<ThreatAssessment.Foe> foesOf(TickContext context) {
-        List<ThreatAssessment.Foe> foes = new ArrayList<>();
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         Set<UUID> attackers = new HashSet<>();
         for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) {
             attackers.add(attacker.uuid());
         }
+        List<CombatSenses.Threat> counted = new ArrayList<>();
         for (CombatSenses.Threat threat : senses.threats(context, radius)) {
             // 区域清扫只评估要清的这一批：看不见的、不是这一种的不算进对面的人数。
             if (named.isEmpty() && !batch.contains(threat.entityId())) continue;
-            // 追着我的按真的在追算（打过我、点着引信、看得见我亮着攻击标记），"打不打得过"才不偏轻。
-            foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.comingAt(attackers), threat.armed()));
+            counted.add(threat);
         }
-        return ThreatAssessment.sortedByThreat(foes);
+        return Battlefield.assessedFoes(counted, attackers);
     }
 
     // 收场：点名目标有跟丢的、够不着的就不算全打完——一个都没确认击败是没做成，打掉一部分是做成一部分。

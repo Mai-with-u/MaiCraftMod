@@ -151,12 +151,13 @@ public final class Tactic {
     }
 
     // 两只以上会还手的追兵、照威胁评估打不过（按人数、种类和自己的血、甲、武器、口粮算）。
+    // 对面名单从战场快照折过去：追兵本来就在追，快照里记好的追击判定直接用，不再手拼一份。
     private static boolean outnumbered(Battlefield field) {
         List<ThreatAssessment.Foe> foes = new ArrayList<>();
         int fighters = 0;
         for (Battlefield.Foe foe : field.chasers()) {
             if (foe.fightsBack()) fighters++;
-            foes.add(new ThreatAssessment.Foe(foe.distance(), foe.threat().kind(), true, foe.threat().armed()));
+            foes.add(foe.assessed());
         }
         return fighters >= 2
                 && ThreatAssessment.assess(field.me().side(true), foes).verdict() == ThreatAssessment.Verdict.OUTMATCHED;
