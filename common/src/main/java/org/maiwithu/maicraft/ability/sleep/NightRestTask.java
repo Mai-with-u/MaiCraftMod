@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
+import org.maiwithu.maicraft.kernel.interrupt.WakesForNewOrders;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -44,8 +45,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 先重新走到床边再挖。实在收不了时如实结束，并交代床留在哪、重生点是不是改到了那里。
  * 睡着就是在做这件事，等多久都不算卡住；夜里被挨打、着火叫醒，处理完还是夜里就回床上接着睡，不收床、不回站位。
  * 觉已经睡成的，醒来后的收尾（收床、回站位）走不完只算没做完的遗留，不把整夜改判成失败。
+ * 睡着时 LLM 换了主任务或取消了旧目标：起身让出身体，这一夜到此为止——时间冻结的夜里天亮永远等不到，
+ * 干等只会把调用方的每一条指令都堵在后面。
  */
-final class NightRestTask extends SleepTask implements AnnouncesFinish {
+final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesForNewOrders {
 
     /**
      * 醒来后留出的同步时间：醒来的实体包与时间包不同刻到达，等它们对齐再走动。游戏事实。
@@ -55,9 +58,16 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     /** "家"区域的范围：床离记住的家这么近就当是家里的床，不收。玩家常识。 */
     private static final double HOME_RADIUS_BLOCKS = 8.0;
 
+    /** 起身动作的接缝：给服务器发"离开床"并确认不在睡了；测试给固定值。 */
+    @FunctionalInterface
+    interface GetsUp {
+        Action rise();
+    }
+
     private final CollectsBlocks collects;
     private final ReadsRememberedPlaces rememberedPlaces;
     private final ReadsSleepState sleepState;
+    private final GetsUp getsUp;
     /** 失败上报的节流：同一夜同一句"没睡成"只报第一次，记忆跨任务活着。 */
     private final NightRestReports reports;
 
@@ -79,6 +89,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     private Problem deferredFailure;
     /** 自己放下的床已经收回来了。 */
     private boolean bedCollected;
+    /** 被新指令叫醒了：起来就交出身体，不回床、不收床、不回站位。 */
+    private boolean wokenByOrders;
     /** 本刻的上下文：收尾钩子要用它读现场，只在同一次推进里有效。 */
     private TickContext now;
 
@@ -87,17 +99,41 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
             Supplier<OverlayMessages.Shown> actionBar, Supplier<Optional<String>> carriedBed,
             CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState,
             SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions, NightRestReports reports) {
+        this(input, permissions, scanner, placer, obtain, approaches, usesBeds, actionBar, carriedBed,
+                collects, rememberedPlaces, sleepState, sleepWindow, sharedExclusions, reports, null);
+    }
+
+    NightRestTask(SleepInput input, Permissions permissions, BedScanner scanner, PlacesBed placer,
+            ItemNeeds obtain, BringsPlayerClose approaches, UsesBeds usesBeds,
+            Supplier<OverlayMessages.Shown> actionBar, Supplier<Optional<String>> carriedBed,
+            CollectsBlocks collects, ReadsRememberedPlaces rememberedPlaces, ReadsSleepState sleepState,
+            SleepTask.ReadsSleepWindow sleepWindow, Set<BlockPos> sharedExclusions, NightRestReports reports,
+            GetsUp getsUp) {
         super(input, permissions, scanner, placer, obtain, approaches, usesBeds, actionBar, carriedBed,
                 sleepWindow, sharedExclusions);
         this.collects = Objects.requireNonNull(collects, "collects");
         this.rememberedPlaces = Objects.requireNonNull(rememberedPlaces, "rememberedPlaces");
         this.sleepState = Objects.requireNonNull(sleepState, "sleepState");
         this.reports = Objects.requireNonNull(reports, "reports");
+        // 起身接缝没接上时被新指令叫醒也照让位：收场里如实说没能主动起身，不干等。
+        this.getsUp = getsUp;
+    }
+
+    /** 控制循环叫起身（LLM 换了主任务或取消旧目标）：只有睡着等天亮在占身体，这时起身让位。 */
+    @Override
+    public boolean wakeForNewOrders() {
+        if (phase() != Phase.WAIT_WAKE) {
+            return false;
+        }
+        wokenByOrders = true;
+        return true;
     }
 
     @Override
     protected Action enter(Phase phase) {
         return switch (phase) {
+            // 被新指令叫醒后的起身：发"离开床"，确认人已经不在睡了。
+            case GET_UP -> getsUp == null ? null : getsUp.rise();
             // 收床：走到床的那一格，挖掉、捡起掉出来的床。
             case COLLECT_BED -> collects.collect(cellsToCollect.getFirst(), permissions).orElse(null);
             // 回站位：走到睡前站的那一格附近。睡前没记下站位（整夜没落地过）：没处可回，就不开走路这段。
@@ -199,6 +235,11 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
     // 等自然醒：睡着时不动；醒来后等实体包与时间包对齐，再起身收床回位。
     @Override
     protected Next<Phase> tickWaitWake(TickContext context) {
+        // 新指令在等身体：起身是几刻的事，起来就交出去，不再等天亮。
+        if (wokenByOrders) {
+            recordProgress("被新指令叫醒，起身");
+            return Next.go(Phase.GET_UP, "被新指令叫醒，起身让出身体");
+        }
         if (sleepState.asleep(context)) {
             // 睡着就是在做这件事：多人服务器上要等别人都躺下才跳夜，一等就是好几分钟，不能睡了三十秒就按"没进展"判卡住。
             recordProgress("睡着了，等天亮");
@@ -223,6 +264,35 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish {
             return getUp(context);
         }
         return Next.stay();
+    }
+
+    // 被新指令叫醒后的起身：起来就把这一夜交出去——不回床接着睡，也不收床、不回站位，
+    // 让新指令马上能动；床留在哪、重生点改没改由收场句交代。
+    @Override
+    protected Next<Phase> tickGetUp(TickContext context) {
+        if (action() == null) {
+            // 起身动作没接上：照让位收场，收场句里如实说没能主动起身。
+            return concludeRoused(Problem.of(Problem.Kind.INTERNAL_ERROR, "起床动作没接上，没能主动离开床", null));
+        }
+        ActionStatus status = runAction(context);
+        if (status instanceof ActionStatus.Running running) {
+            if (running.progressed()) recordProgress("起身中");
+            return Next.stay();
+        }
+        // 没能确认起来（超时、被不确定收尾）也照让位收场：能不能确认是一回事，新指令在等是另一回事。
+        return concludeRoused(status instanceof ActionStatus.Failed failed ? failed.problem() : null);
+    }
+
+    // 被叫醒后的收场：觉是躺下了但夜还没过去，按部分完成交代，剩下的收床回站位写进遗留。
+    private Next<Phase> concludeRoused(Problem wakeProblem) {
+        String left = bedLeftBehind();
+        String summary = "夜里被新指令叫醒，起身让出身体，这一夜到此为止"
+                + (wakeProblem != null ? "；" + wakeProblem.message() : "")
+                + (left == null ? "" : "；" + left);
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary)
+                .remaining("收床、回到原来的站位")
+                .details(new SleepDetails(enteredSleep(), bedSource(), null, nightSkippedBySleep(), false))
+                .build());
     }
 
     // 起身：自己放的床先收回来，再回睡前的站位；没什么可收就直接回去。

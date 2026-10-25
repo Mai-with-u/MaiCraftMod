@@ -9,6 +9,8 @@ import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 
+import org.maiwithu.maicraft.kernel.task.Action;
+
 /**
  * 玩家行为层的交互动作入口：任务按这一刻要做的交互取一个动作，
  * 动作内部自己完成瞄准、核对命中、提交与逐刻确认。确认条件由调用方
@@ -81,6 +83,11 @@ public final class Interactions {
     public AimAndInteract useEntity(Entity target, InteractionConfirmation confirmation) {
         return new AimAndInteract(new InteractionTarget.EntityTarget(target), confirmation,
                 FirstPersonScene::of);
+    }
+
+    /** 从床上起来：给服务器发"离开床"，确认人已经不在睡了；夜里被新指令叫醒时用。 */
+    public Action getOutOfBed() {
+        return new GetsOutOfBed();
     }
 
     /**

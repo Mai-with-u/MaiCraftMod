@@ -674,6 +674,83 @@ class SleepTaskTest {
     }
 
     @Test
+    void newOrdersWakeTheSleepingCharacterAndEndTheNightThere() {
+        // 时间冻结的夜里睡着等天亮，天亮永远等不到：LLM 换活或取消时被叫起，起身让出身体，
+        // 不回床接着睡、也不收床回站位——这一夜到此为止，新指令马上能动（问题 284）。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubApproaches approaches = new StubApproaches();
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        NightRestTask rest = new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner,
+                new StubPlacer(), new StubObtain(), approaches, usesBeds, () -> null, Optional::empty,
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> true,
+                moment -> true, new HashSet<>(), new NightRestReports(() -> 1),
+                () -> new Scripted(ActionStatus.done()));
+        TickContext context = tick();
+        rest.start(context);
+        rest.tick(context); // 选床，走向床边
+        rest.tick(context); // 到床边，去躺下
+        rest.tick(context); // 躺下了，进入等醒
+        // 认下叫起本身就说明此刻在等醒：不在 WAIT_WAKE 时它返回假。
+        assertTrue(rest.wakeForNewOrders(), "睡着占着身体时认下叫起");
+
+        TaskResult result = null;
+        for (int i = 0; i < 5 && result == null; i++) {
+            if (rest.tick(context) instanceof TickResult.Finished finished) {
+                result = finished.result();
+            }
+        }
+        assertInstanceOf(TaskResult.class, result, "被叫起后几刻内收场");
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertTrue(result.summary().contains("被新指令叫醒"), result.summary());
+        // 没有回床再睡、没有第二次走近床：起来就交出身体。
+        assertEquals(List.of(BED_A), approaches.targets);
+        assertEquals(List.of(BED_A), usesBeds.clicked);
+    }
+
+    @Test
+    void wakingRefusesWhileNotWaitingForMorning() {
+        // 不在等醒（走路、收床、还没躺下）的夜休不让位：那些阶段本来就在动，起身语义只对睡着有效。
+        NightRestTask rest = nightRest(new FakeScanner(), new StubApproaches(), new StubUsesBeds(),
+                moment -> true, new HashSet<>());
+        assertFalse(rest.wakeForNewOrders());
+    }
+
+    @Test
+    void theNightEndsEvenWhenGettingUpCannotBeConfirmed() {
+        // 起身发包没能确认（超时、被不确定收尾）也照让位收场：新指令在等是一回事，能不能确认是另一回事，
+        // 收场句里如实带一句起身没确认成功，不无限重发。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubApproaches approaches = new StubApproaches();
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        NightRestTask rest = new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner,
+                new StubPlacer(), new StubObtain(), approaches, usesBeds, () -> null, Optional::empty,
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> true,
+                moment -> true, new HashSet<>(), new NightRestReports(() -> 1),
+                () -> new Scripted(ActionStatus.failed(
+                        Problem.of(Problem.Kind.STUCK, "发了离开床，但没能确认已经起来", null))));
+        TickContext context = tick();
+        rest.start(context);
+        rest.tick(context);
+        rest.tick(context);
+        rest.tick(context);
+        assertTrue(rest.wakeForNewOrders());
+
+        TaskResult result = null;
+        for (int i = 0; i < 5 && result == null; i++) {
+            if (rest.tick(context) instanceof TickResult.Finished finished) {
+                result = finished.result();
+            }
+        }
+        assertInstanceOf(TaskResult.class, result, "起身失败也要收场");
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertTrue(result.summary().contains("没能确认已经起来"), result.summary());
+    }
+
+    @Test
     void sleptNightFinishesEvenWhenThereNowhereToWalkBackTo() {
         // 睡成了就要按睡成收场：醒后回站位这段开不起来（睡前没记下站位）时，结论仍是"睡醒了"，
         // 明细带 entered_sleep，不能因为没有收尾就把整夜报成失败。

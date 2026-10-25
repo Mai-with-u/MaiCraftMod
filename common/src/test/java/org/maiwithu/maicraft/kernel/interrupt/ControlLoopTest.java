@@ -413,6 +413,40 @@ class ControlLoopTest {
         assertEquals(1, main.started);
     }
 
+    @Test
+    void replacingTheMainTaskWakesTheSleepingTemporaryTask() {
+        // 睡着的临时任务占着身体等天亮，LLM 下的新主任务只能排队、再被更新的提交顶掉（冻结夜的死锁样本）。
+        // 换主任务时控制循环叫睡着的临时任务起身，它没做完就收场，需求先缓一阵，新主任务动得起来。
+        SleepingTempTask sleeping = new SleepingTempTask();
+        FakeNeed night = FakeNeed.of("夜晚", () -> sleeping, Urgency.LATER);
+        ControlLoop loop = new ControlLoop(List.of(night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(TICK), "夜晚");
+        assertTrue(loop.occupyingTemporaryTask() == sleeping, "临时任务此刻占着身体");
+
+        FakeTask replacement = new FakeTask("照看熔炉", Interruptibility.WORKING);
+        loop.setMainTask(replacement);
+        assertTrue(sleeping.roused, "换主任务时叫睡着的临时任务起身");
+
+        // 被叫起的临时任务没做完就收场：它的需求先缓一阵，不再每刻重新躺回去。
+        ControlLoop.Decision.Advanced finished = assertAdvanced(loop.tick(TICK));
+        assertEquals(TaskResult.Status.PARTIAL, finished.finished().status());
+        assertFalse(loop.retryWaits().isEmpty(), "被叫起算没做成，夜晚需求先缓一阵");
+        assertSame(replacement, assertAdvanced(loop.tick(TICK)).task());
+    }
+
+    @Test
+    void cancellingTheMainTaskAlsoWakesTheSleepingTemporaryTask() {
+        SleepingTempTask sleeping = new SleepingTempTask();
+        FakeNeed night = FakeNeed.of("夜晚", () -> sleeping, Urgency.LATER);
+        ControlLoop loop = new ControlLoop(List.of(night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(TICK), "夜晚");
+
+        loop.endMainTask(CloseReason.CANCELLED);
+        assertTrue(sleeping.roused, "取消主任务同样叫睡着的临时任务起身");
+    }
+
     private void assertAdvancedIsTempTask(ControlLoop.Decision decision, String needName) {
         ControlLoop.Decision.Advanced advanced = assertAdvanced(decision);
         assertEquals(needName, advanced.interrupting().name());
@@ -702,6 +736,36 @@ class ControlLoopTest {
         loop.tick(TICK);
         loop.tick(TICK);
         assertEquals(0, hunger.created, "自卫没打完不吃");
+    }
+
+    /** 睡着等天亮的临时任务替身：占着身体不动，被新指令叫起时没做完就收场。 */
+    static final class SleepingTempTask implements Task, WakesForNewOrders {
+        boolean roused;
+
+        @Override public TickResult tick(TickContext context) {
+            return roused
+                    ? TickResult.finished(TaskResult.builder(TaskResult.Status.PARTIAL, "被新指令叫醒，起身让出身体").build())
+                    : TickResult.RUNNING;
+        }
+
+        @Override public void pause() {}
+
+        @Override public TaskResult close(CloseReason reason) {
+            return TaskResult.cancelled("睡着时被收尾：" + reason);
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.WORKING;
+        }
+
+        @Override public boolean wakeForNewOrders() {
+            roused = true;
+            return true;
+        }
+
+        @Override public String describe() {
+            return "夜间休息";
+        }
     }
 
     static class FakeTask implements Task {

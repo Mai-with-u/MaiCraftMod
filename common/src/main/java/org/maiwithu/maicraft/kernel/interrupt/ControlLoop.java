@@ -136,6 +136,7 @@ public final class ControlLoop {
     public TaskResult setMainTask(Task task) {
         Objects.requireNonNull(task, "task");
         TaskResult replaced = endMain(CloseReason.REPLACED);
+        rouseOccupying();
         stack.add(0, new Frame(task, null, null));
         return replaced;
     }
@@ -145,7 +146,9 @@ public final class ControlLoop {
      * 已经插进来的临时任务不受影响。
      */
     public TaskResult endMainTask(CloseReason reason) {
-        return endMain(reason);
+        TaskResult ended = endMain(reason);
+        rouseOccupying();
+        return ended;
     }
 
     /**
@@ -163,6 +166,17 @@ public final class ControlLoop {
         brokenNeeds.clear();
         parkedWhere = null;
         waitingRespawn = false;
+    }
+
+    // 换了主任务或取消旧目标：压着的临时任务里若有人声明能被新指令叫起（正睡着等天亮这类），
+    // 叫它起身让出身体。它随后以没做完收场，自己的需求照"没做成"先缓一阵，新主任务才动得起来。
+    private void rouseOccupying() {
+        for (Frame frame : stack) {
+            if (frame.from != null && frame.task instanceof WakesForNewOrders rouse
+                    && rouse.wakeForNewOrders()) {
+                LOG.info("{}被新指令叫醒，起身让出身体", frame.task.describe());
+            }
+        }
     }
 
     // 主任务的许可关掉了生存需求（寻死这类明确的事）：一个生存需求都不插，临时任务也不建。

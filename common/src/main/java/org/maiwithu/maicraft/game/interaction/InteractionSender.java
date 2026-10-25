@@ -99,6 +99,18 @@ public interface InteractionSender {
             InteractionConfirmation confirmation,
             int timeoutTicks);
 
+    /**
+     * 从床上起来：给服务器发"离开床"，起身是几刻的游戏结算（服务器把人传回床边）。
+     * 确认条件核对"已经不在睡"；服务器本来就要叫醒所有睡着的人时（跳夜、床被拆），
+     * 人已经不在睡，确认即刻成立。不接这个入口的读写端按不支持原样抛出。
+     */
+    default PendingInteraction wakeFromBed(
+            PlayerContext context,
+            InteractionConfirmation confirmation,
+            int timeoutTicks) {
+        throw new UnsupportedOperationException("native waking from bed is unavailable");
+    }
+
     /** 这次持续使用是否仍归提交方管理；只有它自己认下的使用才允许继续按住或松开。 */
     default boolean ownsItemUse(PendingInteraction pending) { return false; }
 

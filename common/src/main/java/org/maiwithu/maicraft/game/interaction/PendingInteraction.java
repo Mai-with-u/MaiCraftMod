@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 一次已提交游戏操作的等待记录：何时提交、出自哪位角色、等多久、观察到什么才算结束。 */
 public final class PendingInteraction {
-    public enum Kind { BREAK_BLOCK, USE_BLOCK, USE_ITEM, RELEASE_ITEM, SELECT_HOTBAR, DROP_SELECTED, CREATIVE_SET_SLOT, MOD_PROTOCOL, ATTACK_ENTITY, INTERACT_ENTITY }
+    public enum Kind { BREAK_BLOCK, USE_BLOCK, USE_ITEM, RELEASE_ITEM, SELECT_HOTBAR, DROP_SELECTED, CREATIVE_SET_SLOT, MOD_PROTOCOL, ATTACK_ENTITY, INTERACT_ENTITY, WAKE_FROM_BED }
     public enum Status { PENDING, CONFIRMED_APPLIED, CONFIRMED_NOT_APPLIED, CANCELLED, DIVERGED, UNCERTAIN }
 
     private final UUID id = UUID.randomUUID();

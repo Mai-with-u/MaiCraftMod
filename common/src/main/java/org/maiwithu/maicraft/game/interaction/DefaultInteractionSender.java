@@ -45,8 +45,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     /** 旧任务留下的挖掘还未实际停止时保留此原因，由 {@link #advance} 完成停手。 */
     private String pendingBreakCancellationReason;
     /** 任务已经退出但本刻无交互机会时，端口暂时接住持用，下一刻切槽取消而不是松弓射箭。 */
-    private record HeldCancellation(PendingInteraction pending, ItemStack item) {}
-    private HeldCancellation pendingMainHandCancellation;
+    private final PendingMainHandStop mainHandStop = new PendingMainHandStop();
 
     public DefaultInteractionSender(MenuActions menuActions) {
         this.menuActions = menuActions;
@@ -70,7 +69,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     /** 非紧急生活动作等旧点击、停挖和取消蓄力都结清后接手，不能打断正在收尾的动作。 */
     boolean settledForRoutinePause() { return (active == null || active.terminal())
-            && pendingBreakCancellationReason == null && pendingMainHandCancellation == null; }
+            && pendingBreakCancellationReason == null && !mainHandStop.owed(); }
 
     @Override public PendingInteraction dropSelected(PlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                      InteractionConfirmation confirmation, int timeoutTicks) {
@@ -293,6 +292,22 @@ public final class DefaultInteractionSender implements InteractionSender {
     }
 
     @Override
+    public PendingInteraction wakeFromBed(PlayerContext context, InteractionConfirmation confirmation, int timeoutTicks) {
+        // 原版"离开床"按钮的做法：给服务器发 STOP_SLEEPING，人被传回床边站着；这里照发同一个包并等不在睡了。
+        claimSubmission(context);
+        PendingInteraction pending = oneShot(
+                PendingInteraction.Kind.WAKE_FROM_BED, context, confirmation, timeoutTicks);
+        try {
+            connection(context).send(new ServerboundPlayerCommandPacket(
+                    context.localPlayer(), ServerboundPlayerCommandPacket.Action.STOP_SLEEPING));
+        } catch (RuntimeException failure) {
+            pending.finish(PendingInteraction.Status.UNCERTAIN,
+                    "native wake-from-bed threw before the outcome was confirmed");
+        }
+        return poll(context, pending);
+    }
+
+    @Override
     public PendingInteraction selectHotbar(PlayerContext context, int slot, int timeoutTicks) {
         // 本地切换选中槽并发包通知服务器；随后比较的 selected 字段就是这个本地值。
         claimSubmission(context);
@@ -411,26 +426,8 @@ public final class DefaultInteractionSender implements InteractionSender {
         requireCurrent(context);
         if (!ownsItemUse(pending)
                 || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
-        ItemStack item = context.localPlayer().getUseItem().copy();
-        pendingMainHandCancellation = new HeldCancellation(pending, item);
+        mainHandStop.owe(context, pending);
         return true;
-    }
-
-    private boolean advanceMainHandCancellation(PlayerContext context) {
-        HeldCancellation held = pendingMainHandCancellation;
-        if (held == null) return false;
-        // 起手确认可能已经成功；先处理取消，再走普通终态早退。后来者不继承旧取消。
-        if (!held.pending().fromSamePlayer(context)) {
-            clearMainHandCancellation();
-            return false;
-        }
-        // 只读看一眼本刻还有没有机会；真正发出取消时由取消入口自己占用。
-        if (context.canInteractThisTick()) cancelMainHandUse(context, held.pending());
-        return true;
-    }
-
-    private void clearMainHandCancellation() {
-        pendingMainHandCancellation = null;
     }
 
     @Override
@@ -618,7 +615,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     /** 换角色或交还控制权时结束旧等待：旧结果不再可信，这里只改等待记录，不再次发世界操作。 */
     @Override public void revokeForBoundary(String reason) {
-        clearMainHandCancellation(); // 交还角色后，旧取消不得切换新操作者的槽位。
+        mainHandStop.drop(); // 交还角色后，旧取消不得切换新操作者的槽位。
         if (active != null && !active.terminal()) {
             active.finish(PendingInteraction.Status.UNCERTAIN, reason);
         }
@@ -636,7 +633,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     }
 
     private void install(PendingInteraction pending) {
-        clearMainHandCancellation(); // 新原生动作接管时丢弃旧债，不替后来者松手或换物。
+        mainHandStop.drop(); // 新原生动作接管时丢弃旧欠账，不替后来者松手或换物。
         active = pending;
         // 新的一次点击不继承上一次举盾的持用状态，避免无线终端被当作已经松开的盾牌。
         activeItemUseWasHeld = false;
@@ -709,7 +706,8 @@ public final class DefaultInteractionSender implements InteractionSender {
     public void advance(PlayerContext context) {
         // 副手仅做只读确认；即使主任务已经开始下一块矿，也不能重新提交旧火把。
         if (auxiliary != null && !auxiliary.terminal()) poll(context, auxiliary);
-        if (advanceMainHandCancellation(context)) return;
+        // 主手停用的欠账还没结清时先结清它（起手确认可能已经成功）；后来者不继承旧取消。
+        if (mainHandStop.settle(context, pending -> cancelMainHandUse(context, pending))) return;
         // 每刻先读旧结果；如果有任务已经结束却还没来得及松开挖掘，就先处理这次停止。
         PendingInteraction pending = active;
         if (pending == null || pending.terminal()) {

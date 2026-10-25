@@ -49,8 +49,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 class SleepTask extends PhasedTask<SleepTask.Phase> {
 
-    /** 任务的进度：选床 → 放床 → 拿床 → 走到床边 → 躺下 →（夜休接手：等醒 → 收床 → 回站位）。 */
-    enum Phase { CHOOSE_BED, PLACE_BED, GET_BED, APPROACH, LIE_DOWN, WAIT_WAKE, COLLECT_BED, WALK_BACK }
+    /** 任务的进度：选床 → 放床 → 拿床 → 走到床边 → 躺下 →（夜休接手：等醒 → 被新指令叫起 → 收床 → 回站位）。 */
+    enum Phase { CHOOSE_BED, PLACE_BED, GET_BED, APPROACH, LIE_DOWN, WAIT_WAKE, GET_UP, COLLECT_BED, WALK_BACK }
 
     /** 可睡窗口的读缝：现在还是不是能睡的时间。生产实现读本地玩家的世界，测试给固定值。 */
     @FunctionalInterface
@@ -181,6 +181,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             }
             case LIE_DOWN -> lieDown(context);
             case WAIT_WAKE -> tickWaitWake(context);
+            case GET_UP -> tickGetUp(context);
             case COLLECT_BED -> tickCollectBed(context);
             case WALK_BACK -> tickWalkBack(context);
         };
@@ -400,8 +401,12 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return Next.fail(problem);
     }
 
-    // 以下三个阶段只有夜休走进来；公开能力躺下即完成，不会到达。
+    // 以下四个阶段只有夜休走进来；公开能力躺下即完成，不会到达。
     protected Next<Phase> tickWaitWake(TickContext context) {
+        return Next.done(TaskResult.done("躺下了"));
+    }
+
+    protected Next<Phase> tickGetUp(TickContext context) {
         return Next.done(TaskResult.done("躺下了"));
     }
 

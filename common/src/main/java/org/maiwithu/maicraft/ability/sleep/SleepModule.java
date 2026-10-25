@@ -270,7 +270,7 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
                 interactions::useBlock, actionBar, beds::carriedBed, collects, rememberedPlaces,
                 moment -> moment.player() != null && moment.player().localPlayer() != null
                         && moment.player().localPlayer().isSleeping(),
-                sleepWindow, nightTriedBeds, nightRestReports);
+                sleepWindow, nightTriedBeds, nightRestReports, interactions::getOutOfBed);
     }
 
     /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
