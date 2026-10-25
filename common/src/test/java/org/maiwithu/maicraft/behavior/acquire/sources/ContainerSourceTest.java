@@ -282,6 +282,59 @@ class ContainerSourceTest {
     }
 
     @Test
+    void 快查没对上时重读现场_对上了照样交给开箱接缝() {
+        // 实机（verify-13）：同箱再取被"动手时现场对不上"挡住整路放弃。快查（记忆/索引那一半）没并齐时
+        // 应按报价认的那格重读一遍现场候选，对上了照常去开——箱里实际有什么，开了才算数。
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
+        ContainerChooser.Candidate live = new ContainerChooser.Candidate("chest（10, 64, 5）",
+                "minecraft:chest", CHEST_AT, List.of("minecraft:iron_ingot"), true, 11.18,
+                false, true, ContainerChooser.Lid.CLEAR, false);
+        AtomicReference<KnownContainer> taken = new AtomicReference<>();
+        ContainerSource source = new ContainerSource(new SpotsContainers() {
+            @Override public List<ContainerChooser.Candidate> around(BlockPos center, int radius) {
+                return List.of(live);
+            }
+
+            @Override public boolean scanComplete() {
+                return true;
+            }
+
+            // 快查那一半没并齐：指定位置答不上来。
+            @Override public Optional<ContainerChooser.Candidate> at(WorldPosition position) {
+                return Optional.empty();
+            }
+        }, tags, NOBODY_OWNS, (container, requests, permissions) -> {
+            taken.set(container);
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "开箱取物";
+                }
+            });
+        });
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
+        Action action = source.begin(request(1), offer, CONTEXT).orElseThrow();
+        assertEquals(ActionStatus.done(), action.tick(new StubTick(1)));
+        assertEquals(10, taken.get().at().x());
+        assertEquals(5, taken.get().at().z());
+    }
+
+    @Test
+    void 重读现场也没有报价认的那格_交回空如实划掉() {
+        // 快查与重读都没有：那一格确实什么都没有了，不硬开一格空地，交回空让引擎换路。
+        WorldMemory memory = memory();
+        ContainerSource source = source(memory);
+        SourceQuote.Offer stale = new SourceQuote.Offer("记得的箱子", 3,
+                new AcquisitionCost(5, 4), null, "99,64,99");
+        assertTrue(source.begin(request(1), stale, CONTEXT).isEmpty());
+    }
+
+    @Test
     void 现场扫到记忆里没有的箱子_照样成为候选上门去开() {
         // 实机（verify-12）：命令刚在角色旁摆的箱子装了货，记忆里从没有过，obtain 秒答"一件都没拿到"不上门。
         // 候选来自现场扫描，没开过的报"不知道有多少"，动手时按它认的那格交开箱接缝。

@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -113,9 +114,17 @@ public final class ContainerSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        // 到了跟前再核对该报价认的那只箱子；箱子没了（被拆、记忆过时）就交回空，由引擎换路。
-        Optional<ContainerChooser.Candidate> found = spots.at(parsePosition(offer.hint()));
+        WorldPosition hinted = parsePosition(offer.hint());
+        // 到了跟前再核对该报价认的那只箱子。快查没对上不等于箱子没了：记忆与扫描索引可能一时没并齐，
+        // 重读一遍现场候选（按报价认的那格对），对上了照常去开——记忆只是线索，箱里实际有什么开了才算数。
+        Optional<ContainerChooser.Candidate> found = spots.at(hinted);
         if (found.isEmpty()) {
+            found = spots.around(cellOf(context.characterAt()), searchRadius(context)).stream()
+                    .filter(candidate -> MemoryRecord.sameSpot(candidate.at(), hinted))
+                    .findFirst();
+        }
+        if (found.isEmpty()) {
+            // 重读后那一格确实什么都没有（被拆走、记忆指错）：交回空，由引擎换路。
             return Optional.empty();
         }
         ContainerChooser.Candidate container = found.get();
