@@ -14,8 +14,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelPlanner;
 /**
  * 隔水勘测（纯函数）：人和目的地之间隔着一片连起来的活水吗，水有多宽，两头岸在哪。
  * 沿出发点到目的地连一线，逐柱找地表：顶上是水算水柱，是冰算冻住，别的是实地。
- * 出发点在不在水里不在这里判——按角色身体的干地事实判（与走路到达同一个读法），
- * 这里只管连线上那片水的形状。
+ * 人一开始就站在水里时，脚下往前的这片水也算隔着的水段，出发侧的岸记出发点这一柱；
+ * 这里只管连线上那片水的形状，站在不在水里由勘测沿线自己显出来。
  */
 public final class WaterCrossing {
 
@@ -74,10 +74,13 @@ public final class WaterCrossing {
                 run += step;
                 continue;
             }
-            // 一段水到头了：够宽、两头都是实地才算隔水（出发侧没实地就不算，那是一开始就站在水里）。
+            // 一段水到头了：够宽、对岸是实地才算隔水。出发侧没有实地岸头的（线一开头就是水，
+            // 人站在水里）也算——脚下往前这片水正是隔着的水，出发侧的岸记出发点这一柱；
+            // 只看目的地方向有没有实地，出发侧不回头要求岸，水里下达与岸边下达同一个答法。
             // 读不到的柱（没加载）也算实地：不因为那一片没加载就以为有水。
-            if (run >= MIN_WATER_WIDTH && runStartLand != null && kind == Kind.LAND) {
-                return new Survey(Answer.ACROSS_WATER, new Span(runStartLand, cell, run));
+            if (run >= MIN_WATER_WIDTH && kind == Kind.LAND && (runStartLand != null || previous == null)) {
+                return new Survey(Answer.ACROSS_WATER,
+                        new Span(runStartLand != null ? runStartLand : start, cell, run));
             }
             run = 0;
             runStartLand = null;

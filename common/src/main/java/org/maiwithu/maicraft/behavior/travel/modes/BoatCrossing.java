@@ -98,12 +98,8 @@ public final class BoatCrossing implements TravelMode {
             sink.decline(Problem.Kind.INVALID_PARAMETER, "划船要给 target 说去哪；只想下船给不出方向");
             return;
         }
-        // 出发点在不在水里，按角色身体自己的那份事实判——与走路到达用的是同一个读法，
-        // 不另写"脚下那柱顶上是不是水"的扫描：判出来跟走路到达对不上，同一片岸两边互相矛盾。
-        if (standingInWater()) {
-            sink.decline(Problem.Kind.UNSUPPORTED, "脚下就是水，走路会泅渡，不用放船");
-            return;
-        }
+        // 人泡在水里照样按勘测报价：脚下往前这片水也是隔着的水（勘测把出发柱记成出发侧的岸），
+        // 不预判「走路会泅渡不用放船」——泅渡走不走得通由步行自己结算，这里不替它打包票。
         WaterCrossing.Survey survey = WaterCrossing.between(read, request.from(), request.to());
         switch (survey.answer()) {
             case NO_WATER -> {
@@ -255,13 +251,6 @@ public final class BoatCrossing implements TravelMode {
         PlayerContext context = services.context().get();
         return context != null && context.localPlayer() != null
                 && context.localPlayer().getVehicle() instanceof Boat;
-    }
-
-    /** 人此刻泡在水里吗（泅渡、浅水里站着都算）：读不到角色给假，不凭空拒绝放船。 */
-    private boolean standingInWater() {
-        PlayerContext context = services.context().get();
-        return context != null && context.localPlayer() != null
-                && context.localPlayer().isInWater();
     }
 
     /** 附近没人坐的船：位置最近的先给；读不到现场给空。 */

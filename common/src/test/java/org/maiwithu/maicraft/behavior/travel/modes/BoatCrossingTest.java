@@ -5,11 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.nio.file.Path;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -20,8 +22,17 @@ import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelOffer;
+import org.maiwithu.maicraft.behavior.travel.spi.TravelRequest;
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
-import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
+import org.maiwithu.maicraft.behavior.travel.DimensionFakes;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
  * 划原版船的只读判断（离线）：隔水勘测、放船站位、靠岸点、划船转向、"非它不可"。
@@ -30,6 +41,16 @@ import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
 class BoatCrossingTest {
 
     private final Map<Long, BlockState> cells = new HashMap<>();
+
+    /** 收报价与拒绝的替身。 */
+    private static final class Answers implements OfferSink {
+        final List<TravelOffer> offers = new ArrayList<>();
+        final List<String> declines = new ArrayList<>();
+
+        @Override public void offer(TravelOffer offer) { offers.add(offer); }
+
+        @Override public void decline(Problem.Kind kind, String reason) { declines.add(reason); }
+    }
 
     private Function<BlockPos, Optional<BlockState>> world() {
         return pos -> Optional.ofNullable(cells.get(pos.asLong()));
@@ -72,12 +93,24 @@ class BoatCrossingTest {
     }
 
     @Test
-    void 出发柱泡在水里不由勘测判() {
-        // 出发点在不在水里按角色身体的干地事实判（与走路到达同一个读法），勘测只看连线上那片水的形状：
-        // 出发柱是水、对岸是实地时，出发侧那片水没有实地岸头，隔不出"能划的一片"。
+    void 出发脚下的那片水也算隔的水段() {
+        // 人站在水里下达：脚下往前这片水正是隔着的水，出发侧的岸记出发点这一柱，
+        // 与站在岸边下达同一个答法——水里不再被勘测判成"没隔水"。
         lake(-10, 30, 64, Blocks.WATER.defaultBlockState());
+        WaterCrossing.Survey survey = WaterCrossing.between(world(), new BlockPos(0, 65, 0), new BlockPos(45, 65, 0));
+        assertEquals(WaterCrossing.Answer.ACROSS_WATER, survey.answer());
+        // 水宽数的是出发点前方的水柱（出发点脚下那一柱沿线不重复取点）。
+        assertEquals(30, survey.span().waterWidth());
+        assertEquals(new BlockPos(0, 65, 0), survey.span().nearShore());
+        assertEquals(new BlockPos(31, 65, 0), survey.span().farShore());
+    }
+
+    @Test
+    void 脚下只剩窄窄一线水不算隔水() {
+        // 站在水域东缘、实地就在两格外：这点水踩得过去，不值得放船，照旧答"没隔着连片的活水"。
+        lake(10, 30, 64, Blocks.WATER.defaultBlockState());
         assertEquals(WaterCrossing.Answer.NO_WATER,
-                WaterCrossing.between(world(), new BlockPos(0, 65, 0), new BlockPos(45, 65, 0)).answer());
+                WaterCrossing.between(world(), new BlockPos(29, 65, 0), new BlockPos(45, 65, 0)).answer());
     }
 
     @Test
@@ -248,6 +281,27 @@ class BoatCrossingTest {
         assertTrue(BoatCrossing.claimsFor("minecraft:overworld", true));
         assertFalse(BoatCrossing.claimsFor("minecraft:overworld", false), "没坐船还有的选");
         assertFalse(BoatCrossing.claimsFor("minecraft:the_nether", true), "下界没有能划的水");
+    }
+
+    @Test
+    void 人泡在水里下达也给乘船报价(@TempDir Path temp) {
+        // 水里下达 via=boat：脚下往前这片水就是隔的水，按勘测给报价，
+        // 不再用「走路会泅渡不用放船」提前把乘船方案堵死；身上带着船物品时报价照常成立。
+        DimensionFakes.FakeWorld lake = new DimensionFakes.FakeWorld();
+        for (int x = -6; x <= 45; x++) {
+            lake.blocks.put(new BlockPos(x, 64, 0),
+                    x < 0 || x > 30 ? Blocks.STONE.defaultBlockState() : Blocks.WATER.defaultBlockState());
+        }
+        lake.stacks.add(new BackpackStack("minecraft:oak_boat", 1, 1, false, false, false, false));
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "water-test");
+        DimensionTravelServices services = new DimensionTravelServices(lake, () -> null, null, null, null, null,
+                null, memory, null, null, null, null);
+        Answers answers = new Answers();
+        new BoatCrossing(services).offer(new TravelRequest(new BlockPos(0, 65, 0), new BlockPos(45, 65, 0),
+                "minecraft:overworld", 2, Permissions.DEFAULT, Map.of(), "boat"), answers);
+
+        assertEquals(1, answers.offers.size(), "水里下达要给出报价：" + answers.declines);
+        assertEquals(0, answers.declines.size());
     }
 
     @Test
