@@ -18,10 +18,14 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuReopenCount;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
@@ -51,6 +55,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
  *       多的放回原格；再按下这条配方的按钮，取走产出。关界面时原版会把投入口剩下的还回背包。</li>
  * </ul>
+ * 点格子的搬运（收成品、合成格清回背包）整笔交给搬运执行逐刻点、按标准核对式出结论；
+ * 配方簿与石切台按钮走模组协议的挂起动作，石切台喂料按光标实况逐下点，都不在搬运执行里。
  * 每一下点击都等游戏确认再点下一下；设施到现场不在、点不开、界面认不出都如实失败，引擎换别的路。
  * 做完把这台设施记成"亲手用过的工作站"。
  */
@@ -175,6 +181,9 @@ public final class MenuRecipeRuns implements RecipeRuns {
         ActionStatus settle(PendingMenuAction.Status status, TickContext tick);
     }
 
+    /** 手上这笔搬运在做什么：收成品与清合成格的结论交待不同，按它分流。 */
+    private enum MoveKind { TAKE_OUTPUT, CLEAR_GRID }
+
     /** 在工作台、石切台上动手做一轮：走到跟前点开 → 摆料与收货 → 关上，跨刻推进。 */
     private final class WorkAction implements Action {
 
@@ -204,9 +213,16 @@ public final class MenuRecipeRuns implements RecipeRuns {
         /** 背包里实际多出来的产出件数：每次取货按取货前后背包里的数量差记。 */
         private int produced;
         private Problem failure;
-        /** 正在等游戏确认的那一下点击，以及确认后的结算。 */
+        /** 正在等游戏确认的那一下点击，以及确认后的结算；配方簿与石切台按钮走这里。 */
         private PendingMenuAction pending;
         private Settlement settlement;
+        /** 认领到的那份界面与手上的搬运：收成品与清合成格交给它。 */
+        private OpenedMenu menu;
+        private TransferRun run;
+        private MoveKind moveKind;
+        private String moveWhat = "";
+        /** 取货前背包里有几件产出：结论没直接报差时的对照。 */
+        private int carriedBefore;
         /** 石切台喂料：原料拿在手上时从哪一格拿起来的、还要往投入口放几件；没在喂料时为 -1。 */
         private int feedFrom = -1;
         private int feedLeft;
@@ -257,6 +273,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
             }
             if (status instanceof ActionStatus.Done) {
                 menus = visit.menus();
+                menu = ClientOpenedMenu.claimCurrent(visit.context(), visit.menus());
+                run = menu == null ? null : new TransferRun(menu);
                 closingSession = null;
                 stage = Stage.WORK;
                 return ActionStatus.progressed();
@@ -284,6 +302,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (visit != null) visit.close();
             visit = null;
             menus = null;
+            menu = null;
+            run = null;
             closingSession = null;
         }
 
@@ -303,6 +323,9 @@ public final class MenuRecipeRuns implements RecipeRuns {
             if (filling != null) {
                 return continueFilling(tick);
             }
+            if (run != null && !run.idle()) {
+                return run.tickAction(this::onMoveSettled);
+            }
             if (feedFrom < 0 && produced >= targetItems) {
                 memory.rememberWorkstationUsed(station, workstationBlockType(recipe.kind()), Instant.now());
                 stage = Stage.CLOSE;
@@ -310,7 +333,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             }
             int output = outputIndex();
             if (feedFrom < 0 && !open.containerSnapshots().get(output).isEmpty()) {
-                return takeOutput(tick, open, output);
+                return takeOutput(open, output);
             }
             if (recipe.kind() == WorkstationRecipe.Kind.STONECUTTING) {
                 return feedStonecutter(tick, open);
@@ -329,11 +352,14 @@ public final class MenuRecipeRuns implements RecipeRuns {
             for (int i = 1; i < container.size(); i++) {
                 if (container.get(i).isEmpty()) continue;
                 int slotId = open.containerSlotIds().get(i);
-                ItemStack shown = container.get(i).stack().copy();
-                return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) ->
-                        status == PendingMenuAction.Status.CONFIRMED_APPLIED ? ActionStatus.progressed()
-                                : fail(Problem.Kind.INVENTORY_FULL, "合成格里剩下的"
-                                        + shown.getHoverName().getString() + "收不回背包，背包可能满了"));
+                SlotSnapshot shown = container.get(i);
+                // 上一份留下的东西整堆快速移动回背包，收不回（背包满了）就如实说缺地方。
+                moveWhat = "合成格里剩下的" + shown.stack().getHoverName().getString();
+                run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                        new TransferRun.Check.IntoBackpack(shown::sameIdentity, shown.count()),
+                        moveWhat + "收回背包"));
+                moveKind = MoveKind.CLEAR_GRID;
+                return ActionStatus.progressed();
             }
             int stillToMake = Math.max(1, (targetItems - produced + recipe.resultCount() - 1) / recipe.resultCount());
             Optional<CraftingGridFill> fill = CraftingGridFill.plan(holder, 3,
@@ -363,31 +389,45 @@ public final class MenuRecipeRuns implements RecipeRuns {
             return status;
         }
 
-        // 取货：整堆收进背包；收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜。
-        // 真收进来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
-        /** 连着几下点产出格一件都没收进来。 */
-        private int fruitlessTakes;
-
-        private ActionStatus takeOutput(TickContext tick, MenuContent.Reading open, int output) {
-            int before = carriedResults(open);
+        // 取货：产出格整堆快速移动进背包，交给搬运执行核对——背包里这件东西真多出来才算。
+        // 收到几件按取货前后背包里这件东西的数量差记，不按产出格上写的数猜；真收进来几件就记几件，
+        // 自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
+        private ActionStatus takeOutput(MenuContent.Reading open, int output) {
             int slotId = open.containerSlotIds().get(output);
-            ItemStack shown = open.containerSnapshots().get(output).stack().copy();
-            return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), (status, later) -> {
-                int gained = openReading().map(now -> Math.max(0, carriedResults(now) - before)).orElse(0);
-                produced += gained;
-                if (gained > 0 && records != null) {
-                    records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+            int amount = open.containerSnapshots().get(output).count();
+            carriedBefore = carriedResults(open);
+            run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                    new TransferRun.Check.IntoBackpack(snapshot -> !snapshot.isEmpty()
+                            && itemId(snapshot.stack()).equals(recipe.result().itemId()), amount),
+                    "收" + recipe.result().describe()));
+            moveKind = MoveKind.TAKE_OUTPUT;
+            return ActionStatus.progressed();
+        }
+
+        // 一笔搬运出了结论：清格收不回如实说缺地方；收成品没动就是背包满了，
+        // 对不上按实际多出来的记，界面中途没了照常往下走，下一刻发现界面没了会重开。
+        private ActionStatus onMoveSettled(TransferRun.MoveResult result) {
+            if (moveKind == MoveKind.CLEAR_GRID) {
+                if (result instanceof TransferRun.MoveResult.Confirmed
+                        || result instanceof TransferRun.MoveResult.MenuGone) {
+                    return ActionStatus.progressed();
                 }
-                // 点了产出格却一件没收进来：背包满了时客户端先算好"放不下"，服务器不回包，只会等到超时。
-                // 连着两下这样就按收不进背包收场，让上层先腾地方；原先每五秒点一下一直点，工作台界面也一直开着。
-                fruitlessTakes = gained > 0 ? 0 : fruitlessTakes + 1;
-                if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED
-                        || status != PendingMenuAction.Status.CONFIRMED_APPLIED && fruitlessTakes >= 2) {
-                    return fail(Problem.Kind.INVENTORY_FULL,
-                            "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了");
-                }
+                return fail(Problem.Kind.INVENTORY_FULL, moveWhat + "收不回背包，背包可能满了");
+            }
+            if (result instanceof TransferRun.MoveResult.MenuGone) {
                 return ActionStatus.progressed();
-            });
+            }
+            if (result instanceof TransferRun.MoveResult.NotMoved) {
+                return fail(Problem.Kind.INVENTORY_FULL,
+                        "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了");
+            }
+            int gained = result instanceof TransferRun.MoveResult.Confirmed(int amount) ? amount
+                    : openReading().map(now -> Math.max(0, carriedResults(now) - carriedBefore)).orElse(0);
+            produced += gained;
+            if (gained > 0 && records != null) {
+                records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+            }
+            return ActionStatus.progressed();
         }
 
         // 工作台的原料经配方簿摆：一次一份，等格子里真的出现原料才算摆上。
@@ -612,21 +652,17 @@ public final class MenuRecipeRuns implements RecipeRuns {
         // 点到一半、逐格摆到一半时不宜打断：等这一下的结果出来、这一轮摆完再停，鼠标上可能还拿着料。
         @Override
         public Interruptibility interruptibility() {
-            return pending != null || filling != null ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+            // 手上有一笔搬运、或逐格摆到一半时不宜打断：鼠标上可能还拿着料。
+            if (pending != null || filling != null || (run != null && !run.idle())) {
+                return Interruptibility.UNSAFE_TO_STOP;
+            }
+            return Interruptibility.WORKING;
         }
 
         @Override
         public String describe() {
             return "在" + workstationName() + "上做 " + recipe.result().describe();
         }
-    }
-
-    // 点到的格子变了（变空、变少或换了东西）才算这一下生效。
-    private static MenuConfirmation slotChanged(int slotId, ItemStack before) {
-        return (player, click) -> {
-            ItemStack now = player.localPlayer().containerMenu.getSlot(slotId).getItem();
-            return ItemStack.matches(now, before) ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
-        };
     }
 
     // 这一格比点之前多了才算放进去。
