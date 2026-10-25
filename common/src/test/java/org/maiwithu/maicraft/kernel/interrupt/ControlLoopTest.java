@@ -69,6 +69,20 @@ class ControlLoopTest {
     }
 
     @Test
+    void needThatCannotBuildATaskLeavesTheMainTaskRunning() {
+        // 需求判出要处理、建任务时却给不出（接缝还没接上）：不压一层空任务、不抛错，主任务这一刻照常推进（审计 A50）。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("夜晚", Urgency.SOON, () -> null)));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+        assertSame(main, advanced.task());
+        assertNull(advanced.interrupting());
+        assertEquals(1, main.ticks);
+        assertEquals(0, main.pauses);
+    }
+
+    @Test
     void laterNeedWaitsForGapBetweenActions() {
         // 挖矿挖到一半饿了：忍到两个动作之间再吃。
         FakeTask main = new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS);

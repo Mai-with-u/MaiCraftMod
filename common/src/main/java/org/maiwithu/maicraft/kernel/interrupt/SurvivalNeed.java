@@ -28,7 +28,7 @@ public interface SurvivalNeed {
         return urgency(context);
     }
 
-    /** 需要处理时，创建这一次的临时任务。 */
+    /** 需要处理时，创建这一次的临时任务；给不出（落地的接缝还没接上这类）时回 null，这一刻不占身体，主任务照常推进。 */
     Task createTask(TickContext context);
 
     /**

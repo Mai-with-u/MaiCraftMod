@@ -261,7 +261,7 @@ public final class ControlLoop {
         if (stack.isEmpty()) {
             // 手上没有任务，没有东西要保护：任何生存需求此刻都能插进来，找空当的也不例外。
             Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null, null);
-            return choice.chosen == null ? Decision.IDLE : takeOver(choice, context);
+            return choice.chosen == null ? Decision.IDLE : takeOver(choice, context, null);
         }
         Frame current = top();
         // 主任务被停在了半路：只等生存需求先救命，活不接着干；建不出救命任务就继续停着。
@@ -296,9 +296,7 @@ public final class ControlLoop {
         if (choice.chosen != null) {
             // 能走到这里，说明打断规则已经放行：NOW 本来就不管停不停得下，SOON 与 LATER 只在停下安全时才选得上。
             LOG.info("{}被{}打断（{}），插进临时任务", current.task.describe(), choice.chosen.name(), choice.urgency);
-            current.stopAsked = false;
-            current.pause();
-            return takeOver(choice, context);
+            return takeOver(choice, context, current);
         }
         // 没有人能插进来：忍住，手上的任务继续；被按住的需求交给调用方提醒，也留给面板说清是谁在等。
         if (choice.deferred != null) heldBackNeed = new HeldBackNeed(choice.deferred.name(), choice.deferredUrgency);
@@ -424,8 +422,13 @@ public final class ControlLoop {
         return choice;
     }
 
-    /** 创建这个需求的临时任务压到栈顶并推进它；创建就出错时这个需求先缓一阵，本刻照常推进手上的任务。 */
-    private Decision takeOver(Choice choice, TickContext context) {
+    /**
+     * 创建这个需求的临时任务压到栈顶并推进它；创建就出错时这个需求先缓一阵，本刻照常推进手上的任务。
+     * 临时任务建出来了才让被打断的那一层松手：建不出来（出错、给不出）就不白停它一下。
+     *
+     * @param interrupted 被打断的那一层；手上没有任务时为 null
+     */
+    private Decision takeOver(Choice choice, TickContext context, Frame interrupted) {
         Task task;
         try {
             task = choice.chosen.createTask(context);
@@ -434,6 +437,15 @@ public final class ControlLoop {
             holdBack(choice.chosen, choice.urgency, context,
                     "创建临时任务时程序出错：" + exception.getClass().getSimpleName());
             return stack.isEmpty() ? Decision.IDLE : advance(top(), context, choice.chosen);
+        }
+        if (task == null) {
+            // 判出要处理、建任务时却给不出（落地的接缝还没接上这类）：这一刻不占身体，照常推进手上的任务；
+            // 下一刻需求自己再判，不按出错缓着。
+            return stack.isEmpty() ? Decision.IDLE : advance(top(), context, null);
+        }
+        if (interrupted != null) {
+            interrupted.stopAsked = false;
+            interrupted.pause();
         }
         stack.add(new Frame(task, choice.chosen, choice.urgency));
         return advance(top(), context, null);
