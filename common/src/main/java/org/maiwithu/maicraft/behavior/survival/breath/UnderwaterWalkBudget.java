@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival.breath;
 
+import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.kernel.result.Problem;
+
 /**
  * 水下行走呼吸预算：走路把头潜进水里赶路时，剩下的氧气还允不允许继续走。
  *
@@ -33,5 +36,12 @@ public final class UnderwaterWalkBudget {
             return Verdict.GIVE_UP_AND_SURFACE;
         }
         return Verdict.KEEP_WALKING;
+    }
+
+    /** 放弃上浮时的收场问题：写明氧气还剩多少、停在哪，调用方照原样交给收场结算。 */
+    public static Problem giveUpProblem(DrowningDanger.View situation, BlockPos feet) {
+        return Problem.of(Problem.Kind.UNREACHABLE,
+                "走到目标的路上潜进了水里，氧气只剩 " + situation.airTicks() + " 刻，"
+                        + "不够再走下去：放弃这段路，先浮上水面换气（停在 " + feet.toShortString() + "）");
     }
 }

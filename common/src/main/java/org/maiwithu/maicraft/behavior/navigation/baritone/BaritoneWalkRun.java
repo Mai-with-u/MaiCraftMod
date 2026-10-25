@@ -81,7 +81,6 @@ final class BaritoneWalkRun implements WalkRun {
     private final NavigationCameraCourse course = new NavigationCameraCourse();
     /** 共用的换手：垫料只在主背包时经背包界面挪到快捷栏，引擎才垫得上。 */
     private final ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> this.lastContext);
-    /** 正在把垫料挪到快捷栏的动作；没在挪为 null。 */
     /** 走路途中往快捷栏挪垫料、挪挖路的工具。 */
     private final HotbarStaging staging;
     /** 走路途中收拾随身装备：飞上去前开喷气背包、平常关误开的。 */
@@ -383,35 +382,12 @@ final class BaritoneWalkRun implements WalkRun {
         watchProgress(context, player, engine, routePresent, calculating || probe.waiting(), feet);
         progress.observe(new WalkRunProgress.Observation(
                 feet, onGround, inWater, routePresent, calculating, noPath, calcError));
-        // 引擎连续算路超过上限仍没有可走的路线：不再干等，按走不下去如实收场，把起点身体状态
-        // （在水里、悬空、脚下方块）写进问题——起点体素状态别扭时引擎会一轮轮重算不出结论，
-        // 调用方要能区分「还在算」与「已经死在算路里」。上限只记引擎真在算的刻，挪垫料、等障碍的空档不算。
-        if (!progress.done() && planningCeiling.observe(
-                progress.report().state() != WalkReport.State.PLANNING, calculating)) {
-            progress.fail(PlanningCeiling.timeoutProblem(
-                    context.level(), feet, inWater, onGround, planningCeiling.accruedTicks()), feet);
-        }
+        // 行走段的自我保护闸：算路超上限如实收场、水下按呼吸预算放弃上浮（见 WalkSurvivalGuards）。
+        WalkSurvivalGuards.guard(progress, planningCeiling, context, player, pathing, feet,
+                onGround, inWater, calculating, submergedTravelActive(pathing));
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
-        // 走路把头潜进水里赶路时按呼吸预算收手：氧气够不着上浮、或已落进换气需求要插空的区间，
-        // 再走下去只会跟换气临时任务反复抢身体，深处会把角色憋死。放弃这段路如实走不通，
-        // 松开路线先浮上水面换气；潜泳路线段自己管氧气、会主动上浮换气，坐着船车不走路，都不在这里抢。
-        if (player.isEyeInFluid(FluidTags.WATER) && !player.isPassenger() && !submergedTravelActive(pathing)) {
-            SurvivalSituation situation = SurvivalSituation.read(context);
-            if (UnderwaterWalkBudget.judge(situation) == UnderwaterWalkBudget.Verdict.GIVE_UP_AND_SURFACE) {
-                progress.fail(Problem.of(Problem.Kind.UNREACHABLE,
-                        "走到目标的路上潜进了水里，氧气只剩 " + situation.airTicks() + " 刻，"
-                                + "不够再走下去：放弃这段路，先浮上水面换气（停在 " + feet.toShortString() + "）"), feet);
-            }
-        }
-
-        if (progress.stopRequested() && onGround && pathing.isSafeToCancel()) {
-            // 落地后才真正撤路线：空中撤掉会让执行段把重力全交给身体，摔出可以避免的伤。
-            pathing.forceCancel();
-        }
-
-        // 走不通：把起点那几格、手边的垫料、许可与附近的岩浆补进问题，LLM 据此调整，而不是只拿到一句"没有路"。
-        // 程序出错不补地形现场与垫料建议：那些会把程序问题说成地形问题。
+        // 走不通：把起点几格、垫料、许可与附近岩浆补进问题，LLM 据此调整；程序出错不补现场，免得把程序问题说成地形问题。
         var spare = owner.spareScaffold(player);
         progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
                 : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty())),
@@ -542,6 +518,15 @@ final class BaritoneWalkRun implements WalkRun {
             workBlocks(context, input);
             return;
         }
+        applyEngineInput(context, playerInput, input, pathing, routePresent, calculating);
+        boolean sprint = WalkSprint.sprint(input, pathing, sprintAllowed);
+        course.alongRoute(pathing, playerInput, context, player, routePresent, sprint);
+        workBlocks(context, input);
+    }
+
+    // 引擎按下的方向、跳跃与潜行合成给输入入口；路线在手而引擎本刻没按键时保持站立、按住路线朝向。
+    private void applyEngineInput(PlayerContext context, PlayerInput playerInput, IInputOverrideHandler input,
+                                  PathingBehavior pathing, boolean routePresent, boolean calculating) {
         float forward = (input.isInputForcedDown(Input.MOVE_FORWARD) ? 1F : 0F)
                 - (input.isInputForcedDown(Input.MOVE_BACK) ? 1F : 0F);
         float strafe = (input.isInputForcedDown(Input.MOVE_LEFT) ? 1F : 0F)
@@ -553,11 +538,8 @@ final class BaritoneWalkRun implements WalkRun {
             playerInput.applyNavigationMovement(
                     new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());
         } else if (routePresent && !calculating) {
-            // 路线在手而引擎本刻没按键：保持站立但按住路线朝向，等执行段下一刻的指令。
             playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
         }
-        course.alongRoute(pathing, playerInput, context, player, routePresent, sprint);
-        workBlocks(context, input);
     }
 
     // 落地救援这一刻占不占身体：出发前备料、落地后收回时站定，引擎不推进（这几刻站着不算没进展）；
