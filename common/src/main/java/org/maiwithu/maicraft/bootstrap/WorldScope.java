@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.navigation.PainfulBlocks;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
@@ -135,7 +136,7 @@ public final class WorldScope {
 
     public WorldScope(Minecraft minecraft, PlayerControlBoundary playerControl, BlockScanService blockScans,
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
-            UseKeyProjection useKeyProjection, BaritoneInternals walks, CombatSenses senses,
+            UseKeyProjection useKeyProjection, WalkTo walksOnFoot, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
@@ -190,7 +191,7 @@ public final class WorldScope {
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
         AbilityCatalog.create(new AbilityCatalog.Deps(
-                now, interactions, walks, walks, blockScans, scene, memory,
+                now, interactions, walksOnFoot, walks, blockScans, scene, memory,
                 session, minecraft.player.getUUID().toString(),
                 new ClientCreatureSituations(now), senses,
                 PlayerViews.backpack(now),

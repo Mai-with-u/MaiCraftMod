@@ -34,6 +34,7 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.game.player.RestStatistics;
+import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
@@ -43,6 +44,8 @@ import org.maiwithu.maicraft.behavior.landing.CatchesFall;
 import org.maiwithu.maicraft.behavior.landing.FallRescues;
 import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.DismountsBeforeWalks;
+import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LiveTorchMoves;
@@ -298,6 +301,9 @@ public final class Bootstrap {
         // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的；走路垫脚按它留够数，只垫多出来的。
         private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
         private final BaritoneInternals walks = new BaritoneInternals(itemsInUse);
+        // 先下车再走的走到：走路类目标起步时角色坐在载具上，先按住潜行下来再交内嵌寻路；各路走路请求都用这一份。
+        private final WalkTo walksOnFoot = new DismountsBeforeWalks(walks,
+                new LiveHoldsSneak(new InputDriver(playerControl), () -> playerControl.activeContext().orElse(null)));
         // 掉落物与装备耐久的事实确认：网络包经 Mixin 喂进来，捡掉落物、战斗拾荒、提醒都按它认事实。
         private final DropConfirmations dropConfirmations = new DropConfirmations();
         private EquipmentConfirmations equipmentConfirmations;
@@ -530,7 +536,7 @@ public final class Bootstrap {
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
             controlLoop = withSurvivalNeeds(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walks, foodMoves, foods, new LiveCeilingDigs(diggings, protection),
+                    combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection),
                     survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
                     // 身上没带货时从随身无线终端现取一件（AE2）。
@@ -539,7 +545,7 @@ public final class Bootstrap {
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
                     uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
                     // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
-                    new ClientDropPickup(now, walks, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory());
+                    new ClientDropPickup(now, walksOnFoot, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory());
         }
 
         /**
@@ -637,7 +643,7 @@ public final class Bootstrap {
             if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
-                        subtitles, interactions, useKeyProjection, walks, combatSenses,
+                        subtitles, interactions, useKeyProjection, walksOnFoot, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
                         taskEvents, lightLevels, lightingWorld, followLighting, timers);
