@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.survival.beds;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -65,6 +66,7 @@ public final class BedChooser {
     /**
      * 一次筛选的分类：扫到的床各有几张开不出去、还剩几张能用。
      * 每张床只归一个主因，按"试过 → 被占用 → 床边有怪 → 受保护 → 太远 → 出了床区"的先后归类，各类相加等于扫到的总数。
+     * 试过的床带着躺下时被拒的原因（见 {@link BedRefusal}）的，按原因各归各的，不算"试过"。
      */
     public record Screening(int scanned, int tried, int occupied, int hostileNear, int protectedLand,
             int tooFar, int outOfArea, int usable) {
@@ -98,6 +100,15 @@ public final class BedChooser {
      */
     public static Screening screen(List<BedCandidate> candidates, Set<BlockPos> excluded,
             WorldPosition bedArea, double maxDistance) {
+        return screen(candidates, excluded, Map.of(), bedArea, maxDistance);
+    }
+
+    /**
+     * 同上，试过的床带上躺下被拒的原因：扫描时没看出来的拒绝（怪走近了、床被占了）发生在点床那一刻，
+     * 只有这里把原因接进分类，找床失败的话术才分得清"床边有怪、被占用"和"试过但说不上为什么"。
+     */
+    public static Screening screen(List<BedCandidate> candidates, Set<BlockPos> excluded,
+            Map<BlockPos, BedRefusal> refusedWhy, WorldPosition bedArea, double maxDistance) {
         int tried = 0;
         int occupied = 0;
         int hostileNear = 0;
@@ -107,7 +118,15 @@ public final class BedChooser {
         int usable = 0;
         for (BedCandidate bed : candidates) {
             if (excluded.contains(bed.cell())) {
-                tried++;
+                // 试过的床按躺下时被拒的原因归类：原版认出的占用、有怪各归各的，没记下原因的才算"试过"。
+                BedRefusal why = refusedWhy.get(bed.cell());
+                if (why == BedRefusal.OCCUPIED) {
+                    occupied++;
+                } else if (why == BedRefusal.MONSTERS_NEARBY) {
+                    hostileNear++;
+                } else {
+                    tried++;
+                }
             } else if (bed.occupied()) {
                 occupied++;
             } else if (bed.hostileNear()) {

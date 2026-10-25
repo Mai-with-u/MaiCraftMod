@@ -549,6 +549,32 @@ class SleepTaskTest {
     }
 
     @Test
+    void bedRefusedAtLieDownForMonstersCountsIntoTheFindFailureReasons() {
+        // 实机 10-21（226）：僵尸守在床头，扫描没看出来，床被选中、走近、躺下时被原版以"周围有怪物"拒绝；
+        // 换床重选没有别的床时，收场句要把这张床计成"床边有怪 1 张"，不再只剩"试过睡不上"。
+        FakeScanner scanner = new FakeScanner();
+        // 两轮扫描都只有这一张床：候选标记上没有怪（扫描时没看出来），拒绝发生在点床那一刻。
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        scanner.offer(new BedScanner.BedScan(
+                List.of(new BedCandidate(BED_A, false, false, false, 4)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        NightRestTask rest = new NightRestTask(new SleepInput(null), Permissions.DEFAULT, scanner,
+                new StubPlacer(), new StubObtain(), new StubApproaches(), usesBeds,
+                () -> new OverlayMessages.Shown("你现在不能休息，周围有怪物在游荡", 60),
+                Optional::empty,
+                (cell, permissions) -> Optional.empty(), place -> Optional.empty(), moment -> false,
+                moment -> true, new HashSet<>(), new NightRestReports(() -> 1));
+        TaskResult result = runToCompletion(rest);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        String message = result.problem().message();
+        assertTrue(message.contains("1 张床边有怪"), message);
+        assertFalse(message.contains("试过睡不上"), message);
+    }
+
+    @Test
     void whileAsleepOnlyUrgentNeedsCanWakeTheCharacter() {
         // 实机 10-15：野外躺下 4 秒被"饿了，找空当吃一口"叫醒，没睡过夜。睡着时只让挨打、着火这类急事叫醒。
         FakeScanner scanner = new FakeScanner();

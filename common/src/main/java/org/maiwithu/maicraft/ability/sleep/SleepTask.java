@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -10,6 +12,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.survival.beds.BedCandidate;
 import org.maiwithu.maicraft.behavior.survival.beds.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.beds.BedRefusal;
 import org.maiwithu.maicraft.behavior.survival.beds.BedScanner;
 import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
 import org.maiwithu.maicraft.behavior.survival.beds.SleepRules;
@@ -41,6 +44,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>床的过滤与排序在选床的纯函数里；这里只把结论变成靠近与点击。可睡窗口关了（天亮、雷停）就不往床走了，
  * 按各自的善后语义收口；游戏的拒绝按提示语分流：被占用、床边有怪就换一张床；靠近走不通先退回换一次站位，
  * 再不行换床。睡不上的床记进排除名单，名单由调用方持有——夜休的需求会重插任务，名单要跨任务活着。
+ * 躺下被拒的原因（被占用、床边有怪）跟着床一起记下，回灌进找床失败的分类话术：
+ * 扫描时没看出来的拒绝不能在收场句里只剩一句"试过睡不上"。
  */
 class SleepTask extends PhasedTask<SleepTask.Phase> {
 
@@ -89,6 +94,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     BlockPos chosenBed;
     private SleepDetails.BedSource bedSource = SleepDetails.BedSource.WORLD;
     private final Set<BlockPos> excluded;
+    /** 试过的床在躺下时被拒的原因：找床失败的分类话术按它把"床边有怪、被占用"各计各的。 */
+    private final Map<BlockPos, BedRefusal> refusedWhy = new HashMap<>();
     private int bedTries;
     /** 这张床已经为"太远或被挡"换过一次站位：再被拒就换床。选中或放下新床时清掉。 */
     private boolean repositionedForBed;
@@ -208,7 +215,10 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         scanWaitTicks = 0;
         // 附近没有能用的床：先弄清是"没扫到床"还是"有床都开不出去"，带上分类说明——
         // 只说一句"没有床"，下游会拿去当"这一片根本没床"（实机 10-16 世界里有床，全因床边有怪被筛掉）。
-        String screening = BedChooser.screen(scan.candidates(), excluded, input.bedArea(), bedWalkLimit()).describe();
+        // 试过的床带着躺下被拒的原因进分类：怪是走到床边才出现的、占用是躺下那一刻才判的，
+        // 扫描的候选标记都看不出，只有这里回灌收场话术才说得出"床边有怪几张"。
+        String screening = BedChooser.screen(scan.candidates(), excluded, refusedWhy,
+                input.bedArea(), bedWalkLimit()).describe();
         // 身上有就放自带的，没有就先去弄一张；弄不到时拿床那条路自己给原因。
         if (carriedBed.get().isPresent() && placer.placeCarriedBed().isPresent()) {
             return Next.go(Phase.PLACE_BED, "附近没有能用的床，放自带的");
@@ -292,6 +302,9 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         return switch (kind) {
             case OCCUPIED, MONSTERS_NEARBY -> {
                 // 床被占用、床边有怪：这张床排除掉，换下一张；接连不行到上限就如实结束。
+                // 被拒原因跟着床记下，回灌进找床失败的分类话术（"床边有怪 N 张"），不混进"试过睡不上"。
+                refusedWhy.put(chosenBed, kind == SleepRefusal.OCCUPIED
+                        ? BedRefusal.OCCUPIED : BedRefusal.MONSTERS_NEARBY);
                 excluded.add(chosenBed);
                 yield giveUpAfterTries(Next.go(Phase.CHOOSE_BED, "这张床睡不上，换一张"), text);
             }

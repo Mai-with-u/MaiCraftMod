@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -80,5 +81,29 @@ class BedChooserTest {
                 List.of(bed(130, 0, false, false, false, 130), bed(20, 0, false, false, false, 20)),
                 Set.of(), null, BedChooser.NIGHT_WALK_LIMIT_BLOCKS);
         assertEquals(new BlockPos(20, 64, 0), chosen.orElseThrow().cell());
+    }
+
+    @Test
+    void triedBedsCountByTheReasonTheyWereRefusedAtLieDown() {
+        // 扫描没看出来、躺下那一刻才被原版拒的床（怪走近了、床被占了）：带着原因回灌进分类，
+        // 各归各的；没记下原因的试过床才算"试过睡不上"。
+        BlockPos guarded = new BlockPos(1, 64, 0);
+        BlockPos occupied = new BlockPos(2, 64, 0);
+        BlockPos unknown = new BlockPos(3, 64, 0);
+        BedChooser.Screening screening = BedChooser.screen(
+                List.of(bed(1, 0, false, false, false, 1),
+                        bed(2, 0, false, false, false, 2),
+                        bed(3, 0, false, false, false, 3)),
+                Set.of(guarded, occupied, unknown),
+                Map.of(guarded, BedRefusal.MONSTERS_NEARBY, occupied, BedRefusal.OCCUPIED),
+                null, Double.MAX_VALUE);
+        assertEquals(3, screening.scanned());
+        assertEquals(1, screening.tried());
+        assertEquals(1, screening.occupied());
+        assertEquals(1, screening.hostileNear());
+        assertEquals(0, screening.usable());
+        assertTrue(screening.describe().contains("1 张床边有怪"));
+        assertTrue(screening.describe().contains("1 张被占用"));
+        assertTrue(screening.describe().contains("1 张试过睡不上"));
     }
 }
