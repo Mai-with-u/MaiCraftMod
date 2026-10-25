@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -255,6 +256,19 @@ public final class LiveBattleMoves implements BattleMoves {
                 if (run != null) run.close();
             }
 
+            // 垫高是原地起跳往脚下垫方块：能不能打断、先到安全处再停都按走路说，跳在半空停不得、先落地再停。
+            @Override public Interruptibility interruptibility() {
+                return run == null ? Interruptibility.WORKING : run.interruptibility();
+            }
+
+            @Override public boolean stopSafely() {
+                return run != null && run.stopSafely();
+            }
+
+            @Override public boolean stoppedSafely() {
+                return run == null || run.stoppedSafely();
+            }
+
             @Override public String describe() {
                 return "就地往上垫三格";
             }
@@ -303,6 +317,22 @@ public final class LiveBattleMoves implements BattleMoves {
         @Override
         public void close() {
             if (run != null) run.close();
+        }
+
+        // 能不能打断、先到安全处再停都按走路说：悬在半空停不得，先落地再停。
+        @Override
+        public Interruptibility interruptibility() {
+            return run == null ? Interruptibility.WORKING : run.interruptibility();
+        }
+
+        @Override
+        public boolean stopSafely() {
+            return run != null && run.stopSafely();
+        }
+
+        @Override
+        public boolean stoppedSafely() {
+            return run == null || run.stoppedSafely();
         }
 
         @Override

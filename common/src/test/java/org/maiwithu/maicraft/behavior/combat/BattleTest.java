@@ -12,14 +12,18 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.ApproachAvoiding;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /** 战斗引擎：贴脸退着打、近处走位不寻路、远处绕怪寻路、走不到就换、躲爆炸疾跑、撤离到甩开、退无可退背水一战、能射就射。 */
@@ -142,8 +146,16 @@ class BattleTest {
         @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) { steps.add(step); }
 
+        /** 下一趟寻路照这段脚本演（悬在半空、落地）；为 null 时按 walkStatus 回。 */
+        Action nextWalk;
+
         @Override public Action walk(GoalCompiler.Compiled goal) {
             walks.add(goal);
+            if (nextWalk != null) {
+                Action walk = nextWalk;
+                nextWalk = null;
+                return walk;
+            }
             return new Instant(() -> walkStatus);
         }
 
@@ -208,6 +220,46 @@ class BattleTest {
         battle(far, walking).tick(new Tick(0));
         assertEquals(1, walking.walks.size(), "远处交给寻路");
         assertInstanceOf(ApproachAvoiding.class, walking.walks.get(0).goal(), "寻路要绕开别的怪");
+    }
+
+    /**
+     * 寻路走近的路上悬在半空被叫先到安全处再停（经包成的动作叫）：转给寻路去落地，落地前不报停稳；
+     * 收尾途中它凑到跟前也不出手、不另起一趟走，落地后原地等着；暂停过后照原样接着打。站在地上时现在就能停。
+     */
+    @Test
+    void walkingOverInMidAirLandsBeforeStoppingAndStrikesNothingMeanwhile() {
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 12));
+        Moves moves = new Moves();
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(1, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(2, 65, 0), false),
+                WalkReport.stopped(new BlockPos(2, 64, 0), false));
+        leg.airborne = true;
+        moves.nextWalk = leg;
+        Battle fight = battle(senses, moves);
+        Action held = fight.asAction();
+        assertFalse(held.stopSafely(), "还没走起来：现在就能停");
+        fight.tick(new Tick(0));
+        assertEquals(1, moves.walks.size(), "远处交给寻路");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, held.interruptibility(), "寻路悬在半空停不得");
+
+        assertTrue(held.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了寻路");
+        assertFalse(held.stoppedSafely(), "还没落地");
+        senses.threats.set(0, zombie(1, 1.5));
+        for (int tick = 1; tick <= 4; tick++) {
+            assertEquals(Battle.State.FIGHTING, fight.tick(new Tick(tick)).state(), "收尾途中照旧在打，不报打完了");
+        }
+        assertTrue(held.stoppedSafely(), "落地站稳了");
+        assertEquals(0, moves.strikes, "收尾途中凑到跟前也不出手");
+        assertEquals(1, moves.walks.size(), "收尾途中不另起一趟走");
+        assertEquals(0, leg.closes, "落地停稳的那一趟留着");
+
+        held.pause();
+        fight.tick(new Tick(5));
+        assertEquals(1, moves.strikes, "暂停过后照原样接着打");
+        assertFalse(held.stopSafely(), "站在地上出手：现在就能停");
     }
 
     @Test

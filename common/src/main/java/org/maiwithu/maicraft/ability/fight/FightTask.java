@@ -527,6 +527,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                     if (running.progressed()) recordProgress("回到倒下的地方捡掉落");
                     return Next.stay();
                 }
+                // 收尾途中落地报的"已停下"不是走到了：站着等外层停下，接着做时再看离倒下的地方多远。
+                if (stopping()) return Next.stay();
                 // 走到了或走不到都照样捡：站在原地，够得着的先收，收不到的由捡的动作如实交代。
                 atKillSpot = true;
                 dropCurrent();

@@ -254,6 +254,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
                     .details(details(drift, heartsLost)).build());
         }
         if (walkBack == null) {
+            // 收尾途中不另起一趟走回打点：站着等外层停下。
+            if (stopping()) return Next.stay();
             BlockPos cell = BlockPos.containing(anchor[0], anchor[1], anchor[2]);
             walkBack = moves.walk(GoalCompiler.near(cell, 1.0));
         }
@@ -277,6 +279,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             recordProgress(walkBack.describe());
         }
         if (status instanceof ActionStatus.Done) {
+            // 收尾途中落地报的"已停下"不是走回了：这一趟留着，站着等外层停下，接着做时再看离打点多远。
+            if (stopping()) return Next.stay();
             walkBack.close();
             walkBack = null;
         }
@@ -375,6 +379,21 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             battle.pause();
             if (walkBack != null) walkBack.pause();
             if (pickup != null) pickup.pause();
+        }
+
+        // 被叫先到安全处再停：引擎的走位、走回打点、捡东西逐个转过去，悬在半空的先落地，都停稳了自卫才算停稳。
+        @Override
+        public boolean stopSafely() {
+            boolean byBattle = battle.stopSafely();
+            boolean byWalkBack = walkBack != null && walkBack.stopSafely();
+            boolean byPickup = pickup != null && pickup.stopSafely();
+            return byBattle || byWalkBack || byPickup;
+        }
+
+        @Override
+        public boolean stoppedSafely() {
+            return battle.stoppedSafely() && (walkBack == null || walkBack.stoppedSafely())
+                    && (pickup == null || pickup.stoppedSafely());
         }
 
         @Override

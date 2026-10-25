@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
@@ -22,7 +23,9 @@ import org.maiwithu.maicraft.behavior.combat.Footwork;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
@@ -31,6 +34,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -98,9 +102,17 @@ class SelfDefenseTaskTest {
         }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) {}
 
+        /** 下一趟寻路照这段脚本演（悬在半空、落地）；为 null 时按 walkStatus 回。 */
+        Action nextWalk;
+
         @Override public Action walk(GoalCompiler.Compiled goal) {
             walks++;
             if (firstWalk == null) firstWalk = goal;
+            if (nextWalk != null) {
+                Action walk = nextWalk;
+                nextWalk = null;
+                return walk;
+            }
             return new Fixed(() -> walkStatus);
         }
 
@@ -164,6 +176,47 @@ class SelfDefenseTaskTest {
         // 自己走完的收场当场发过一条，结束时不再补一条重复的。
         assertEquals(1, events.messages.stream().filter(m -> m.contains("自卫结束")).count(), events.messages.toString());
         assertNull(task.finishedNote(finished), "已经发过收场事件，不再补");
+    }
+
+    @Test
+    void walkingBackInMidAirLandsBeforeStoppingAndDoesNotSetOffAgain() {
+        // 打完被击退到十格外，走回打点的路上跳在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；
+        // 落地报的"已停下"不当成走回了、也不另起一趟，站着等；暂停过后从原地重新走回打点。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        senses.threats.clear();
+        moves.at[0] = 10;
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(9, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(8, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(7, 65, 0), false),
+                WalkReport.stopped(new BlockPos(7, 64, 0), false));
+        leg.airborne = true;
+        moves.nextWalk = leg;
+        long tick = 3;
+        while (moves.walks == 0 && tick < 3 + SelfDefenseTask.WATCH_TICKS + 10) task.tick(new Tick(tick++));
+        assertEquals(1, moves.walks, "观察期过了，走回打点");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(new Tick(tick)), "跳在半空停不得");
+
+        assertTrue(task.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走回打点的那一趟");
+        assertFalse(task.stoppedSafely(), "还没落地");
+        for (int i = 0; i < 5; i++) {
+            assertInstanceOf(TickResult.Running.class, task.tick(new Tick(tick++)), "收尾途中不收场");
+        }
+        assertTrue(task.stoppedSafely(), "落地站稳了");
+        assertEquals(1, moves.walks, "收尾途中不另起一趟走回打点");
+        assertEquals(0, leg.closes, "落地停稳的那一趟留着");
+
+        task.pause();
+        task.tick(new Tick(tick++));
+        task.tick(new Tick(tick++));
+        assertEquals(2, moves.walks, "暂停过后从原地重新走回打点");
     }
 
     @Test

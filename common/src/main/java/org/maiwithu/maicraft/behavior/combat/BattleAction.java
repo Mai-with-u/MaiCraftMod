@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 一场仗包成的动作：战斗引擎每刻读回的是战况不是动作状态，包一层登记成分阶段任务手上的一件事，
- * 任务基类被生存需求打断时跟着暂停、结束时跟着收尾、问能不能打断时问到引擎。
+ * 任务基类被生存需求打断时跟着暂停、被叫先到安全处再停时转给引擎、结束时跟着收尾、问能不能打断时问到引擎。
  * 每刻推进仍由任务自己调战斗引擎，读回战况再定下一步，这一层推进时只交还"还在做"。
  */
 final class BattleAction implements Action {
@@ -32,6 +32,14 @@ final class BattleAction implements Action {
 
     @Override public Interruptibility interruptibility() {
         return battle.interruptibility();
+    }
+
+    @Override public boolean stopSafely() {
+        return battle.stopSafely();
+    }
+
+    @Override public boolean stoppedSafely() {
+        return battle.stoppedSafely();
     }
 
     @Override public String describe() {

@@ -149,6 +149,8 @@ public final class Battle {
     private final DragonCombat dragon;
     /** 上一刻是按龙的打法做的：能不能被打断问打龙那边。 */
     private boolean dragonActive;
+    /** 被叫先到安全处再停、走位的寻路或垫高说要先落地：只推进它们到落地站稳；暂停时清掉。 */
+    private boolean stopping;
 
     /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
     public Battle(CombatSenses senses, BattleMoves moves, Battlefield.Roster roster, double radius) {
@@ -160,6 +162,15 @@ public final class Battle {
     }
 
     public Moment tick(TickContext context) {
+        // 收尾途中：走位的寻路、垫高推进到落地站稳，落地后原地等外层停下；换到一半的武器照旧换完，
+        // 出手、换打法、新起一趟走都不做。
+        if (stopping) {
+            swapping = moves.finishArming(context);
+            if (walk != null && !walk.stoppedSafely()) walk.tick(context);
+            if (pillar != null && !pillar.stoppedSafely()) pillar.tick(context);
+            return new Moment(retreating ? State.RETREATING : State.FIGHTING, "先落地站稳再停", false, false, false,
+                    -1, retreating ? retreat.why() : null, cornered);
+        }
         // 撤离时看四十格，这次的追兵一时没在追（隔着坡看不见）也留在场上，甩没甩开才看得准。
         // 开打后追过我、还朝我来的那只照样算追兵（攻击标记一秒一闪也不让这一仗"逼近↔打完了"来回切）。
         Battlefield field = Battlefield.read(senses, moves, context,
@@ -708,10 +719,12 @@ public final class Battle {
         moves.lowerGuard();
     }
 
-    /** 暂停：寻路与出手停在原处，弓取消。 */
+    /** 暂停：寻路、垫高与出手停在原处，弓取消；之后照原样接着打，不用再收尾。 */
     public void pause() {
+        stopping = false;
         if (strike != null) strike.pause();
         if (walk != null) walk.pause();
+        if (pillar != null) pillar.pause();
         bow.close();
         if (dragon != null) dragon.pause();
     }
@@ -747,8 +760,24 @@ public final class Battle {
     public Interruptibility interruptibility() {
         if (dragon != null && dragonActive) return dragon.interruptibility();
         if (walk != null) return walk.interruptibility();
+        if (pillar != null) return pillar.interruptibility();
         if (strike != null) return strike.interruptibility();
         return Interruptibility.WORKING;
+    }
+
+    /**
+     * 先到安全处再停：走位的寻路、垫高正悬在半空就先落地站稳，落地才算停稳；站在地上走位、出手时现在就能停。
+     * 血线破了的本能接管不走这里，照旧直接插进来。
+     */
+    public boolean stopSafely() {
+        boolean byWalk = walk != null && walk.stopSafely();
+        boolean byPillar = pillar != null && pillar.stopSafely();
+        stopping = byWalk || byPillar;
+        return stopping;
+    }
+
+    public boolean stoppedSafely() {
+        return !stopping || (walk == null || walk.stoppedSafely()) && (pillar == null || pillar.stoppedSafely());
     }
 
     public String describe() {
@@ -757,7 +786,7 @@ public final class Battle {
 
     /**
      * 这一仗包成分阶段任务手上的一件事：引擎每刻读回的是战况不是动作状态，包一层让任务基类的暂停、收尾、
-     * 能不能打断都够得着它；每刻推进仍由任务自己调 {@link #tick}，读回战况再定下一步。点名战斗和跟随帮打共用这一份。
+     * 先到安全处再停、能不能打断都够得着它；每刻推进仍由任务自己调 {@link #tick}，读回战况再定下一步。点名战斗和跟随帮打共用这一份。
      */
     public Action asAction() {
         return new BattleAction(this);
