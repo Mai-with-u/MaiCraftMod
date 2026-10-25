@@ -219,6 +219,23 @@ class PhasedTaskTest {
         assertTrue(task.stoppedSafely(), "落地了才算停稳");
     }
 
+    @Test
+    void handTakenUpWhileStoppingIsAskedToStopSafelyToo() {
+        // 收尾途中又接了一件要先落地的（跟随换一趟路刚起跳）：它也得被叫先停稳，落地前任务不报停稳（审计 A48）。
+        Flying drone = new Flying(ActionStatus.running());
+        var task = new Errands(List.of(drone));
+        task.start(new TestTick(0));
+        task.tick(new TestTick(1));
+        assertTrue(task.stopSafely(), "悬着的那件要先落地");
+        Flying jumped = new Flying(ActionStatus.running());
+        task.takeUp(jumped);
+        assertTrue(jumped.asked, "收尾途中新接的一件也被叫先停稳");
+        drone.landed = true;
+        assertFalse(task.stoppedSafely(), "新接的那件还没落地");
+        jumped.landed = true;
+        assertTrue(task.stoppedSafely());
+    }
+
     private static TickResult runUntilFinished(Task task, int maxTicks) {
         TickResult tickResult = TickResult.RUNNING;
         for (int tick = 0; tick < maxTicks && tickResult instanceof TickResult.Running; tick++) {

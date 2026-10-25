@@ -157,6 +157,9 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
      */
     protected final void hold(Action hand) {
         hands.add(Objects.requireNonNull(hand, "hand"));
+        // 收尾途中又接了一件（跟随换一趟路、战斗新起一趟走）：它没被叫过先停稳，不叫的话按默认说"停好了"，
+        // 刚起跳就被暂停在半空。和换阶段时给新动作补叫一样，这里给新接的补叫一次。
+        if (stopping) hand.stopSafely();
     }
 
     /** 手上的一件事由任务自己收尾了：从登记里放下。还在做却没放下的，留给基类在换阶段或结束时收。 */
