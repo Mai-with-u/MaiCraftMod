@@ -372,6 +372,8 @@ public final class Bootstrap {
         // 启动自动接管开关：maicraft.automation.on_join 开启时，进世界逐刻请求控制权直到拿到（默认关）。
         // 它只管"进世界就接管"这一段：拿到之后开关就不再管，之后由目标下达的时机决定何时再请求，人类按 F8 抢回不会被开关立刻夺回；重新进世界（现场重建）时重新生效。
         private final boolean automationOnJoin = Boolean.getBoolean("maicraft.automation.on_join");
+        // 联网查 Wiki 的开关：maicraft.lookup.wiki 默认开，启动时写 -Dmaicraft.lookup.wiki=false 关掉，关着时 lookup(topic=wiki) 照实说关着。
+        private final boolean wikiOnline = Boolean.parseBoolean(System.getProperty("maicraft.lookup.wiki", "true"));
         private boolean startupAutomationPending;
         /** 上一刻自动化是否拿着角色；变了就记一行日志，排查"下了目标却不动"时先看这里。 */
         private boolean automationOwned;
@@ -567,7 +569,8 @@ public final class Bootstrap {
 
         // 查资料与查配方：来源与配方查看器按联动登记表拼，读游戏现场都按当刻的角色。
         private LookupTool lookupTool() {
-            return LookupSources.lookupTool(abilities, compat, () -> playerControl.activeContext().orElse(null), clientWork);
+            return LookupSources.lookupTool(abilities, compat, () -> playerControl.activeContext().orElse(null), clientWork,
+                    wikiOnline, loader.modVersion("minecraft").orElse("unknown"));
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */

@@ -19,13 +19,15 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.mcp.knowledge.IdCatalogPages;
 import org.maiwithu.maicraft.mcp.knowledge.ItemPages;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebHttpClient;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 import org.maiwithu.maicraft.mcp.tool.ClientThread;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
 
 /**
  * lookup 查得到的东西从哪来：配方先问联动登记的配方查看器，都答不了退到游戏配方表；
- * 知识库 = 物品资料页（总入口）+ 本实例的群系与结构目录 + 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目。
- * 启动在联动清单检查完、登记表定下来之后建一次。
+ * 知识库 = 物品资料页（总入口）+ 本实例的群系与结构目录 + 联动模组登记的资料来源，物品资料页列各来源跟这件物品有关的条目；
+ * 联网查 Wiki 按启动开关建，关着就不发任何请求。启动在联动清单检查完、登记表定下来之后建一次。
  */
 final class LookupSources {
 
@@ -36,9 +38,11 @@ final class LookupSources {
      * @param compat     联动登记表：配方查看器、资料来源与这局装上了哪些联动模组
      * @param now        当刻的角色上下文：物品说明、配方表都从角色所在的世界读
      * @param clientWork 读游戏现场的部分交给客户端线程
+     * @param wikiOnline 启动开关：联网查 Wiki 开不开
+     * @param minecraftVersion 本实例的 Minecraft 版本：联网查到的网页随回答带上它，版本对不上时一眼看得出
      */
     static LookupTool lookupTool(AbilityRegistry abilities, CompatRegistry compat, Supplier<PlayerContext> now,
-            ClientThread clientWork) {
+            ClientThread clientWork, boolean wikiOnline, String minecraftVersion) {
         RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
         ReadsItemDescriptions items = new ClientItemDescriptions(now);
         // 群系与结构目录、配方里物品 ID 写错时挑相近的名字，都读这一份：群系从角色当刻所在世界的注册表读。
@@ -49,8 +53,11 @@ final class LookupSources {
         // 群系与结构目录：探索认不出群系时指到这一页。
         sources.add(new IdCatalogPages(registered));
         sources.addAll(modSources);
+        // 联网查 Wiki 在 MCP 请求线程上联网，开关关着时连 HTTP 客户端都不建。
+        WebKnowledgeService wiki = wikiOnline ? new WebKnowledgeService(new WebHttpClient(), true, minecraftVersion)
+                : WebKnowledgeService.off();
         // 列能力时顶上那一行装了哪些联动模组，照登记表此刻的样子给：进没进世界都一样。
         return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork,
-                compat::installedModIds);
+                compat::installedModIds, wiki);
     }
 }

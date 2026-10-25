@@ -186,6 +186,7 @@
     "unknown_id",
     "not_in_world",
     "busy",
+    "unavailable",
     "internal_error"
   ],
   "reply_shapes": {

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeNotReady;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.knowledge.RecipePages;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -43,7 +44,9 @@ import java.util.function.Supplier;
  *
  * <p>topic=recipe 查配方：id 是物品 ID，默认给配方页（怎么做出它），uses=true 给用途页（能拿它做什么、
  * 它当工作站能做什么）；query 按名字找物品 ID。配方要读游戏现场，角色不在世界里时回答 not_in_world。
- * Wiki 还没接上，明确回答还没接上。
+ *
+ * <p>topic=wiki 联网查 Minecraft Wiki 与 MC百科（{@link WikiTopic}）：在 MCP 请求线程上联网，不交给客户端线程；
+ * 启动开关关着时照实说关着。
  */
 public final class LookupTool implements McpTool {
     private static final List<String> TOPICS = List.of("abilities", "knowledge", "wiki", "recipe");
@@ -59,6 +62,7 @@ public final class LookupTool implements McpTool {
     private final ReadsRegisteredIds registered;
     private final ClientThread clientThread;
     private final Supplier<List<String>> installedMods;
+    private final WikiTopic wiki;
 
     /**
      * @param knowledge    知识库：随包常识、物品资料页与联动模组的资料来源
@@ -67,10 +71,11 @@ public final class LookupTool implements McpTool {
      * @param registered   本实例注册了哪些 ID：物品 ID 写错时从这里挑相近的名字
      * @param clientThread 读游戏现场的部分交给客户端线程
      * @param installedMods 这局登记上的联动模组 ID：每次列能力时问一遍，联动中途停用的就不再列
+     * @param web          联网查 Wiki：开关关着时传 {@link WebKnowledgeService#off()}
      */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
                       ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
-                      Supplier<List<String>> installedMods) {
+                      Supplier<List<String>> installedMods, WebKnowledgeService web) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
         this.recipes = Objects.requireNonNull(recipes, "recipes");
@@ -78,12 +83,13 @@ public final class LookupTool implements McpTool {
         this.registered = Objects.requireNonNull(registered, "registered");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
         this.installedMods = Objects.requireNonNull(installedMods, "installedMods");
+        this.wiki = new WikiTopic(web);
     }
 
-    /** 离线的 lookup：角色永远不在世界里，只查得到能力与随包常识，没有联动模组；接口快照与离线测试用。 */
+    /** 离线的 lookup：角色永远不在世界里，只查得到能力与随包常识，没有联动模组，联网查询关着；接口快照与离线测试用。 */
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge) {
         this(registry, knowledge, new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)), NO_ITEMS,
-                NO_IDS, NEVER_IN_WORLD, List::of);
+                NO_IDS, NEVER_IN_WORLD, List::of, WebKnowledgeService.off());
     }
 
     /** 离线时没有注册表可读：写错的 ID 只说不存在。 */
@@ -125,14 +131,17 @@ public final class LookupTool implements McpTool {
 
     @Override public JsonObject call(JsonObject arguments) {
         RequestCheck check = new RequestCheck();
-        check.rejectUnknownFields(arguments, "", List.of("topic", "id", "query", "url", "uses"));
+        check.rejectUnknownFields(arguments, "", List.of("topic", "id", "query", "url", "uses", "offset"));
         String topic = check.choice(arguments, "topic", "topic", TOPICS);
         String id = check.text(arguments, "id", "id", false);
         String query = check.text(arguments, "query", "query", false);
         String url = check.text(arguments, "url", "url", false);
         Boolean uses = check.bool(arguments, "uses", "uses");
+        Integer offset = check.integer(arguments, "offset", "offset", false);
         if (id != null && query != null) check.error("query", "id 和 query 只能给一个", "精确查用 id，搜索用 query");
         if (url != null && !"wiki".equals(topic)) check.error("url", "url 只在 topic=wiki 时用", null);
+        if (offset != null && !"wiki".equals(topic)) check.error("offset", "offset 只在 topic=wiki 读一篇时用", null);
+        if ("wiki".equals(topic)) wiki.check(check, id, query, url, offset);
         if (uses != null && !"recipe".equals(topic)) check.error("uses", "uses 只在 topic=recipe 时用", null);
         if ("recipe".equals(topic) && id == null && query == null) {
             check.error("id", "topic=recipe 要给物品 ID（id）或名字（query）", "例如 id=\"minecraft:furnace\"");
@@ -147,9 +156,8 @@ public final class LookupTool implements McpTool {
         if ("recipe".equals(topic)) {
             return recipeNow(id, query, Boolean.TRUE.equals(uses), check);
         }
-        if (topic != null && !topic.equals("abilities")) {
-            return ToolReply.error(ErrorCode.INVALID_PARAMETER,
-                    "topic=" + topic + " 还没有接上，目前能查 abilities、knowledge 和 recipe");
+        if ("wiki".equals(topic)) {
+            return wiki.answer(query, url, offset, check.notes());
         }
         if (id != null) {
             return ability(id, check);

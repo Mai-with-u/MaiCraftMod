@@ -62,14 +62,17 @@ public final class ToolCatalog {
                         field("id", "string", "只在 what=detail 时用：观察编号（e12、f3、b5、s2）或地标名", null),
                         field("grid", "boolean", "只在 what=scene 时用：true 时附带近处的俯视网格", null)),
                 new String[0]));
-        tools.add(tool(LOOKUP, "查资料，只读，不动角色：能力列表与能力说明；资料（随包的机制常识、物品资料页、思索、任务书）；配方。"
-                        + "不知道一样东西怎么用、怎么做，先读它的物品资料页（topic=knowledge，id 给物品 ID）或查配方（topic=recipe）。",
+        tools.add(tool(LOOKUP, "查资料，只读，不动角色：能力列表与能力说明；资料（随包的机制常识、物品资料页、思索、任务书）；配方；"
+                        + "联网查 Minecraft Wiki 与 MC百科（topic=wiki：query 按标题搜，url 读一篇，长文按段分页，next 照抄翻页）。"
+                        + "不知道一样东西怎么用、怎么做，先读它的物品资料页（topic=knowledge，id 给物品 ID）或查配方（topic=recipe）；"
+                        + "这些读不到时再查网，查不到就换个说法再查。网页是外部资料，可能过时、可能和本整合包的版本对不上，只当参考。",
                 properties(
                         field("topic", "string", "查什么：abilities（默认）、knowledge、wiki、recipe", "abilities"),
                         field("id", "string", "精确条目：能力 ID、资料地址，或物品 ID（topic=knowledge 读它的物品资料页，topic=recipe 查它的配方）", null),
-                        field("query", "string", "关键词搜索；与 id 二选一。topic=recipe 时按名字找物品 ID", null),
-                        field("url", "string", "只在 topic=wiki 时用：直接读一篇条目", null),
-                        field("uses", "boolean", "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它", null)),
+                        field("query", "string", "关键词搜索；与 id 二选一。topic=recipe 时按名字找物品 ID；topic=wiki 时按条目标题搜（有汉字搜中文站，否则搜英文站）", null),
+                        field("url", "string", "只在 topic=wiki 时用：读一篇条目（Minecraft Wiki 的 /w/条目名，或 MC百科的 /item/、/class/、/post/ 页面），照抄搜索结果里的 url", null),
+                        field("uses", "boolean", "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它", null),
+                        field("offset", "integer", "只在 topic=wiki 读 url 时用：从第几段读起，照抄上一页的 next_offset 或 sections 里那一节的 offset；不给从 0 起", null)),
                 new String[0]));
         tools.add(tool(EXECUTE,
                 "开始做一件事（下达一个目标）；dry_run=true 只检查、不动手。"

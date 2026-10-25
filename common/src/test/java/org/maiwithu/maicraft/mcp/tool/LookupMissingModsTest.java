@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
  * 查能力说明时碰到缺模组的能力：回 unknown_ability，但说清缺的是哪个模组，不说"没有这个能力"；
@@ -59,7 +60,7 @@ class LookupMissingModsTest {
         registry.register(ToolTestAbility.sleep());
         LookupTool lookup = new LookupTool(registry, KnowledgeLibrary.offline(),
                 new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty)), NO_ITEMS, NO_IDS, NOT_IN_WORLD,
-                () -> List.of("ae2", "create"));
+                () -> List.of("ae2", "create"), WebKnowledgeService.off());
 
         JsonObject data = lookup.call(new JsonObject()).getAsJsonObject("data");
         assertEquals("[\"ae2\",\"create\"]", data.get("installed_mods").toString());

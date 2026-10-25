@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
  * lookup 查配方与资料：配方页按类别分组、写工作站与原始定义；用途页分"当原料"和"当工作站"两部分，每条一行；
@@ -130,7 +131,7 @@ class LookupRecipeTest {
             }
         };
         LookupTool lookup = new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(slow)),
-                new RecipeLookup(List.of(), new MixingViewer()), new Items(), new Ids(), thread, List::of);
+                new RecipeLookup(List.of(), new MixingViewer()), new Items(), new Ids(), thread, List::of, WebKnowledgeService.off());
 
         JsonObject data = ok(lookup.call(args("knowledge", "maicraft://knowledge/ponder/create/mechanical_mixer/1", null, null)));
 
@@ -165,7 +166,8 @@ class LookupRecipeTest {
             @Override public String status() { return "思索：可用，1 个场景"; }
         };
         return new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(ponder)),
-                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread, List::of);
+                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread, List::of,
+                WebKnowledgeService.off());
     }
 
     /** 替身物品表：安山合金与动力搅拌器。 */

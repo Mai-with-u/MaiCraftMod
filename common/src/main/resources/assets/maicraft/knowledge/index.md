@@ -24,4 +24,4 @@
   - [几种风格怎么起手](maicraft://knowledge/building/styles)：欧式木构、欧式石造、东亚院落、现代、工业，各带一个局部模块例子。
   - [完整例子：带门廊的木构小屋](maicraft://knowledge/building/example-cottage)：从委托到一张完整图纸，以及怎么改成别的房子。
 
-- 查阅外部百科（Minecraft Wiki、MC 百科）与注册表事实的资料来源随能力层接入逐步登记；这里只列已经登记的来源，不预告尚未接入的内容。
+- 外部百科（Minecraft Wiki、MC百科）不在这份目录里，用 `lookup(topic=wiki)` 联网查：这里、思索和配方读不到时再查网；网页是外部资料，可能过时、可能和本整合包的版本对不上，只当参考。
