@@ -90,6 +90,22 @@ public final class ClientDropPickup implements PicksUpDrops {
         return new PickUp(Set.of(), entityId);
     }
 
+    /**
+     * 捡完收场：捡到过（哪怕还差几件，差的由上层按身上的清点后再补）或者压根没有东西要捡，算这一批做完；
+     * 一件都没捡到、又有东西确实没进包，就如实说没捡到，不按做完收——做完却零收获的收场让上层对不上账，
+     * 拆了方块却报「做完了但一件都没拿到」就是这么来的（实机 10-21 收床与采掘的空手结果）。
+     */
+    static ActionStatus conclude(int picked, int missed, int vanished) {
+        if (picked > 0 || missed == 0) return ActionStatus.done();
+        if (missed == vanished) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "有 " + vanished
+                    + " 件掉出的东西不见了，但服务器没有记到是本玩家收的（被别人捡走、烧毁或消失了），没捡到", null));
+        }
+        return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
+                "有 " + (missed - vanished) + " 件掉出的东西没捡到（走不过去，或走到了还在地上）"
+                        + (vanished > 0 ? "，另有 " + vanished + " 件不见了但不是自己收的" : "") + "，先不捡了", null));
+    }
+
     private LocalPlayer player() {
         PlayerContext current = context.get();
         return current == null ? null : current.localPlayer();
@@ -168,10 +184,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                     return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL, "背包满了，掉出的 "
                             + String.join("、", noRoom) + " 装不下，没捡", "腾出几格再捡"));
                 }
-                return missed == vanished || picked > 0 ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "有 " + (missed - vanished) + " 件掉出的东西没捡到（走不过去，或走到了还在地上）"
-                                + (vanished > 0 ? "，" + vanished + " 件不见了但不是自己收的（被别人捡走或消失）" : "")
-                                + "，先不捡了", null));
+                return conclude(picked, missed, vanished);
             }
             return walkToward(player.clientLevel.getEntity(current), tick);
         }
