@@ -36,7 +36,7 @@ import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 /**
  * 存东西能力：把背包里的东西存进箱子、木桶、潜影盒这类容器。
  *
- * <p>取代旧版 manage_container 的存入；从容器拿东西归 obtain。target 点名容器时只用它，
+ * <p>从容器拿东西归 obtain。target 点名容器时只用它，
  * 不点名就在附近挑：已经放着同种东西的优先，一只满了换下一只。别人的箱子不乱塞，
  * 除非点名了它。存进 ME 网络时身上的无线终端和装着的终端都认，和腾地方、取货认终端是同一份。
  */

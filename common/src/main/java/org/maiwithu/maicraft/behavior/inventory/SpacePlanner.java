@@ -206,7 +206,8 @@ final class SpacePlanner {
         if (!containers.isEmpty()) {
             ways.add("记得的容器有 " + String.join("、", containers));
         }
-        ways.add("用 drop_items 丢东西、用 manage_container 存取容器，处置后重新下达这个目标");
+        // 能力名要与能力表一致：调用方照建议下达就能走通，写旧叫法会吃 unknown_ability。
+        ways.add("用 drop 丢东西、用 deposit 存进容器，处置后重新下达这个目标");
         return Problem.of(Problem.Kind.INVENTORY_FULL, message, String.join("；", ways));
     }
 

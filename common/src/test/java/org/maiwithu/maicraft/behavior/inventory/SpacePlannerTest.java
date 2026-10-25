@@ -82,8 +82,8 @@ class SpacePlannerTest {
         SpacePlanner.Plan plan = SpacePlanner.plan(scene(stacks, 0, 1, false, List.of()));
         assertTrue(plan.moves().isEmpty());
         assertEquals(Problem.Kind.INVENTORY_FULL, plan.problem().kind());
-        assertTrue(plan.problem().suggestion().contains("drop_items"), plan.problem().suggestion());
-        assertTrue(plan.problem().suggestion().contains("manage_container"), plan.problem().suggestion());
+        assertTrue(plan.problem().suggestion().contains("drop"), plan.problem().suggestion());
+        assertTrue(plan.problem().suggestion().contains("deposit"), plan.problem().suggestion());
         // 建议照现场列：背包里真有的圆石出现在可丢候选里，丢哪堆由调用方定。
         assertTrue(plan.problem().suggestion().contains("minecraft:cobblestone"), plan.problem().suggestion());
         assertTrue(plan.problem().suggestion().contains("候选"), plan.problem().suggestion());
@@ -196,7 +196,7 @@ class SpacePlannerTest {
         assertEquals(Problem.Kind.INVENTORY_FULL, plan.problem().kind());
         assertTrue(plan.problem().suggestion().contains("门口的箱子")
                 && plan.problem().suggestion().contains("1,64,1"), plan.problem().suggestion());
-        assertTrue(plan.problem().suggestion().contains("drop_items"), plan.problem().suggestion());
+        assertTrue(plan.problem().suggestion().contains("drop"), plan.problem().suggestion());
     }
 
     @Test

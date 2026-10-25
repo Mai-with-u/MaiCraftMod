@@ -175,7 +175,7 @@ public final class InventorySpace {
 
         // 一次腾挪要看的现场：这次做不成的合并、随身背包、容器与东西都从计划里拿掉，免得原地重试。
         // 记得的容器只要记得就进现场：存箱子的部件没接上时计划排的存箱步做不了会自动跳过，
-        // 腾不出时的建议仍能把容器位置报给调用方（它可以用 manage_container 自己去存）。
+        // 腾不出时的建议仍能把容器位置报给调用方（它可以用 deposit 自己去存）。
         private SpacePlanner.Scene scene() {
             List<KnownContainer> containers = knownContainers
                     .map(known -> known.within(NEARBY_CONTAINER_RANGE)).orElse(List.of()).stream()

@@ -347,8 +347,8 @@ class InventorySpaceTest {
                 run(makeRoom(space, 1, Set.of(), records)));
         assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
         assertTrue(failed.problem().message().contains("腾不出 1 格"), failed.problem().message());
-        assertTrue(failed.problem().suggestion().contains("drop_items")
-                && failed.problem().suggestion().contains("manage_container"), failed.problem().suggestion());
+        assertTrue(failed.problem().suggestion().contains("drop")
+                && failed.problem().suggestion().contains("deposit"), failed.problem().suggestion());
         // 没动手：背包没变，也没有账。
         assertTrue(carried.stored.isEmpty());
         assertTrue(records.changes.isEmpty());

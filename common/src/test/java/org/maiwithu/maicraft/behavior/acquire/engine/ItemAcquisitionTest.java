@@ -389,8 +389,8 @@ class ItemAcquisitionTest {
         // 背包满如实失败：不再报 NEED_APPROVAL 问句——那是在为一个没有许可开关的动作征求同意；
         // 建议里给出处置用的能力名，取舍交调用方。
         assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
-        assertTrue(failed.problem().suggestion().contains("drop_items"), failed.problem().suggestion());
-        assertTrue(failed.problem().suggestion().contains("manage_container"), failed.problem().suggestion());
+        assertTrue(failed.problem().suggestion().contains("drop"), failed.problem().suggestion());
+        assertTrue(failed.problem().suggestion().contains("deposit"), failed.problem().suggestion());
     }
 
     @Test
@@ -410,7 +410,7 @@ class ItemAcquisitionTest {
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
         assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
         assertTrue(!failed.problem().message().contains("可以吗"), "不再有征求同意的问句：" + failed.problem().message());
-        assertTrue(failed.problem().suggestion().contains("drop_items"), failed.problem().suggestion());
+        assertTrue(failed.problem().suggestion().contains("drop"), failed.problem().suggestion());
     }
 
     @Test
