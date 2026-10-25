@@ -137,6 +137,28 @@ class CompatRegistryTest {
     }
 
     @Test
+    void 交接中途抛类对不上_交过东西的槽都撤干净() {
+        // 回滚按登记表的槽集合撤：一个槽都不例外。槽集合由槽字段自举，这里把"交了东西的槽"都摆上，
+        // 撤完之后任何一种槽里都不能留下这个模组的半份东西。
+        SupportedMod<CompatModule> halfway = new SupportedMod<>("halfway", "类对不上的模组", TESTED,
+                () -> new Contributing("halfway") {
+                    @Override public void contribute(CompatRegistry registry) {
+                        registry.itemSource(this, source("先交的来源"));
+                        registry.menuLayout(this, terminal("halfway:chest"));
+                        registry.serverRead(this, "halfway.read", 1);
+                        throw new NoSuchMethodError("SomeMod.someMethod");
+                    }
+                });
+        CompatRegistry registry = CompatRegistry.load(List.of(halfway), new FakeLoader().with("halfway", "3.25.69"));
+        assertTrue(registry.modules().isEmpty());
+        assertTrue(registry.itemSources(NO_SERVICES).isEmpty(), "建法槽也要撤");
+        assertTrue(registry.serverReads().isEmpty(), "只读操作声明也要撤");
+        assertInstanceOf(MenuLayout.Unsupported.class, registry.menuLayouts().classify(slots("halfway:chest")),
+                "撤掉的证明不留着：证明还在就会答 Supported，撤干净了就是证明不了");
+        assertTrue(registry.decisions().getFirst().contains("NoSuchMethodError"), registry.decisions().getFirst());
+    }
+
+    @Test
     void 装上了哪些模组只列登记上且还开着的() {
         AtomicInteger created = new AtomicInteger();
         Contributing broken = new Contributing("ae") {

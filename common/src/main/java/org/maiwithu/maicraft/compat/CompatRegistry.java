@@ -8,9 +8,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.Optional;
 
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
@@ -51,6 +51,9 @@ import org.slf4j.LoggerFactory;
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
  * 建出来的都包一层：模组停用、碰到模组接口对不上时如实回答"用不了"，不让它变成任务的内部错误。
  *
+ * <p>每种 spi 能力是一个 {@link Slot}：收东西、包装、回滚都在槽里；下面的槽字段用 {@link #slot} 声明，
+ * 声明即进入槽集合，回滚按槽集合撤——没有第二份要手工同步的槽清单，新加一种槽不会漏。
+ *
  * <p>逐行检查的规矩：没装的跳过；装的版本不在验证过的范围内，不登记；创建或交接时出错，不登记并撤掉它交了一半的东西。
  * 每种情况写一行日志说明原因，一个模组出问题不影响别的模组。确认装了、版本对了之后才调创建，
  * 引用模组类的代码在那之前不会被加载。
@@ -59,40 +62,51 @@ public final class CompatRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(CompatRegistry.class);
 
     private final List<CompatModule> modules = new ArrayList<>();
-    private final List<ToBuild<ItemSource>> itemSources = new ArrayList<>();
-    private final List<ToBuild<MachineType>> machineTypes = new ArrayList<>();
-    private final List<ToBuild<NetworkReader>> networkReaders = new ArrayList<>();
-    private final List<ToBuild<QuestBookOperations>> questBooks = new ArrayList<>();
-    private final List<ToBuild<BreakAccelerator>> breakAccelerators = new ArrayList<>();
-    private final List<ToBuild<DismantleTool>> dismantleTools = new ArrayList<>();
-    private final List<ToBuild<ItemSettings>> itemSettings = new ArrayList<>();
-    private final List<ToBuild<TravelMode>> travelModes = new ArrayList<>();
-    private final List<ToBuild<NetworkStorage>> networkStorages = new ArrayList<>();
-    private final List<MenuLayoutProof> menuLayouts = new ArrayList<>();
-    private final List<CarriedBackpack> carriedBackpacks = new ArrayList<>();
-    private final List<KnowledgeSource> knowledgeSources = new ArrayList<>();
-    private final List<RecipeViewer> recipeViewers = new ArrayList<>();
-    private final List<ClientOperation> serverReads = new ArrayList<>();
-    private final List<PlacementRules> placementRules = new ArrayList<>();
-    private final List<RangedWeapon> rangedWeapons = new ArrayList<>();
-    private final List<ObstacleSource> obstacleSources = new ArrayList<>();
-    private final List<FluidTransforms> fluidTransforms = new ArrayList<>();
-    private final List<FallBrake> fallBrakes = new ArrayList<>();
-    private final List<LandingMaterials> landingMaterials = new ArrayList<>();
-    private final List<StowBeforeWalking> stowsBeforeWalking = new ArrayList<>();
-    private final List<FlyUpGear> flyUpGears = new ArrayList<>();
-    private final List<ModSight> modSights = new ArrayList<>();
-    private final List<ToBuild<VehicleAssembler>> vehicleAssemblers = new ArrayList<>();
-    private final List<ToBuild<VehicleDriver>> vehicleDrivers = new ArrayList<>();
-    private final List<ToBuild<VehicleReader>> vehicleReaders = new ArrayList<>();
-    private final List<ToBuild<TrainScheduler>> trainSchedulers = new ArrayList<>();
-    private final List<ToBuild<RideAlong>> rideAlongs = new ArrayList<>();
-    /** 全部的槽：一个模组交接到一半出错时，按交接前的长度一起撤回。新加槽时把它的列表加进来。 */
-    private final List<List<?>> slots = List.of(itemSources, machineTypes, networkReaders, questBooks,
-            breakAccelerators, dismantleTools, menuLayouts, carriedBackpacks, knowledgeSources, recipeViewers,
-            serverReads, placementRules, rangedWeapons, itemSettings, travelModes, obstacleSources, fallBrakes, landingMaterials, stowsBeforeWalking, flyUpGears, modSights, vehicleAssemblers,
-            vehicleDrivers, vehicleReaders, trainSchedulers, rideAlongs, networkStorages, fluidTransforms);
+
+    /** 全部的槽，按声明顺序：交接到一半出错时，每个槽按交接前的长度一起撤回。 */
+    private final List<Slot<?>> allSlots = new ArrayList<>();
+
+    private final Slot<ItemSource> itemSources = slot("物品来源", CompatItemSource::new);
+    private final Slot<MachineType> machineTypes = slot("机器类型", CompatMachineType::new);
+    private final Slot<NetworkReader> networkReaders = slot("网络读取器", CompatNetworkReader::new);
+    private final Slot<QuestBookOperations> questBooks = slot("任务书操作", CompatQuestBookOperations::new);
+    private final Slot<BreakAccelerator> breakAccelerators = slot("挖掘加速", CompatBreakAccelerator::new);
+    private final Slot<DismantleTool> dismantleTools = slot("拆卸工具", CompatDismantleTool::new);
+    private final Slot<ItemSettings> itemSettings = slot("物品设置", CompatItemSettings::new);
+    private final Slot<TravelMode> travelModes = slot("出行方式", CompatTravelMode::new);
+    private final Slot<NetworkStorage> networkStorages = slot("网络存储", CompatNetworkStorage::new);
+    private final Slot<MenuLayoutProof> menuLayouts = slot("界面布局证明", CompatMenuLayoutProof::new);
+    private final Slot<CarriedBackpack> carriedBackpacks = slot("随身背包");
+    private final Slot<KnowledgeSource> knowledgeSources = slot("知识来源", CompatKnowledgeSource::new);
+    private final Slot<RecipeViewer> recipeViewers = slot("配方查看器", CompatRecipeViewer::new);
+    private final Slot<ClientOperation> serverReads = slot("只读操作声明");
+    private final Slot<PlacementRules> placementRules = slot("放置规则", CompatPlacementRules::new);
+    private final Slot<RangedWeapon> rangedWeapons = slot("远程武器", CompatRangedWeapon::new);
+    private final Slot<ObstacleSource> obstacleSources = slot("障碍来源", CompatObstacleSource::new);
+    private final Slot<FluidTransforms> fluidTransforms = slot("流体转化配方表", CompatFluidTransforms::new);
+    private final Slot<FallBrake> fallBrakes = slot("刹住一掉的办法", CompatFallBrake::new);
+    private final Slot<LandingMaterials> landingMaterials = slot("落地补料来源", CompatLandingMaterials::new);
+    private final Slot<StowBeforeWalking> stowsBeforeWalking = slot("走路前收起来的东西", CompatStowBeforeWalking::new);
+    private final Slot<FlyUpGear> flyUpGears = slot("能飞上高处的装备", CompatFlyUpGear::new);
+    private final Slot<ModSight> modSights = slot("观察", CompatModSight::new);
+    private final Slot<VehicleAssembler> vehicleAssemblers = slot("组装载具的办法", CompatVehicleAssembler::new);
+    private final Slot<VehicleDriver> vehicleDrivers = slot("驾驶载具的办法", CompatVehicleDriver::new);
+    private final Slot<VehicleReader> vehicleReaders = slot("读载具的办法", CompatVehicleReader::new);
+    private final Slot<TrainScheduler> trainSchedulers = slot("定列车时刻表的办法", CompatTrainScheduler::new);
+    private final Slot<RideAlong> rideAlongs = slot("同乘的办法", CompatRideAlong::new);
     private final List<String> decisions = new ArrayList<>();
+
+    /** 声明一种槽：建这个动作同时把它放进槽集合，回滚按槽集合撤，不用另记一份。 */
+    private <T> Slot<T> slot(String what, BiFunction<CompatModule, T, T> wrap) {
+        Slot<T> made = new Slot<>(what, wrap);
+        allSlots.add(made);
+        return made;
+    }
+
+    /** 声明一种不用包装的槽。 */
+    private <T> Slot<T> slot(String what) {
+        return slot(what, null);
+    }
 
     private CompatRegistry() {}
 
@@ -118,14 +132,15 @@ public final class CompatRegistry {
             return;
         }
         // 创建与交接可能抛 LinkageError（读写端一碰模组类就对不上），也一并当作这一行出错，不让它炸掉启动。
-        int[] before = slots.stream().mapToInt(List::size).toArray();
+        // 槽集合由槽字段自举：每个槽都在这里撤，没有哪个槽能漏在回滚外面。
+        int[] before = allSlots.stream().mapToInt(Slot::size).toArray();
         CompatModule module;
         try {
             module = Objects.requireNonNull(mod.create().get(), "创建返回了 null");
             module.contribute(this);
         } catch (RuntimeException | LinkageError failure) {
-            for (int i = 0; i < slots.size(); i++) {
-                slots.get(i).subList(before[i], slots.get(i).size()).clear();
+            for (int i = 0; i < allSlots.size(); i++) {
+                allSlots.get(i).truncate(before[i]);
             }
             decide(mod, "创建时出错，不登记：" + failure);
             return;
@@ -140,14 +155,6 @@ public final class CompatRegistry {
         LOG.info("联动 {}", line);
     }
 
-    /** 一样东西的建法，带上交它的联动入口：建的时候出错算这个模组的，不连累别的。 */
-    private record ToBuild<T>(CompatModule module, Function<PlayerServices, T> build) {
-        ToBuild {
-            Objects.requireNonNull(module, "module");
-            Objects.requireNonNull(build, "build");
-        }
-    }
-
     /** 联动入口交一个不用玩家行为的物品来源：带上自己，登记表包一层，模组停用后这个来源问价回答不支持。 */
     public void itemSource(CompatModule module, ItemSource source) {
         Objects.requireNonNull(source, "source");
@@ -159,47 +166,47 @@ public final class CompatRegistry {
      * 建出来的来源由登记表包一层，模组停用后问价回答不支持。
      */
     public void itemSource(CompatModule module, Function<PlayerServices, ItemSource> build) {
-        itemSources.add(new ToBuild<>(module, build));
+        itemSources.add(module, build);
     }
 
     /** 联动入口交网络存储的建法：腾地方时把东西存进网络（AE2 的无线终端），包一层后交给背包空间。 */
     public void networkStorage(CompatModule module, Function<PlayerServices, NetworkStorage> build) {
-        networkStorages.add(new ToBuild<>(module, build));
+        networkStorages.add(module, build);
     }
 
     /** 联动入口交一种机器的建法：进世界时建，包一层后交给机器能力；模组停用后不再认领方块。 */
     public void machineType(CompatModule module, Function<PlayerServices, MachineType> build) {
-        machineTypes.add(new ToBuild<>(module, build));
+        machineTypes.add(module, build);
     }
 
     /** 联动入口交一种网络读取器的建法：进世界时建，包一层后交给机器能力；模组停用后汇总如实说读不到。 */
     public void networkReader(CompatModule module, Function<PlayerServices, NetworkReader> build) {
-        networkReaders.add(new ToBuild<>(module, build));
+        networkReaders.add(module, build);
     }
 
     /** 联动入口交任务书操作的建法：进世界时建，包一层后交给 quest 能力；模组停用后任务书说用不了。 */
     public void questBook(CompatModule module, Function<PlayerServices, QuestBookOperations> build) {
-        questBooks.add(new ToBuild<>(module, build));
+        questBooks.add(module, build);
     }
 
     /** 联动入口交一种物品设置（过滤器写规则）的建法：进世界时建，包一层后交给机器能力；模组停用后不再认物品。 */
     public void itemSettings(CompatModule module, Function<PlayerServices, ItemSettings> build) {
-        itemSettings.add(new ToBuild<>(module, build));
+        itemSettings.add(module, build);
     }
 
     /** 联动入口交一种出行方式（电梯、喷气背包、火车）的建法：进世界时建，包一层后交给出行；模组停用后报价答用不了。 */
     public void travelMode(CompatModule module, Function<PlayerServices, TravelMode> build) {
-        travelModes.add(new ToBuild<>(module, build));
+        travelModes.add(module, build);
     }
 
     /** 联动入口交一个挖掘加速（连锁挖）的建法：进世界时建，包一层后交给施工的清障；模组停用后给不出批，退回逐格挖。 */
     public void breakAccelerator(CompatModule module, Function<PlayerServices, BreakAccelerator> build) {
-        breakAccelerators.add(new ToBuild<>(module, build));
+        breakAccelerators.add(module, build);
     }
 
     /** 联动入口交一个拆卸工具的建法：进世界时建，包一层后交给施工的清障；模组停用后不再认领方块，照原来的挖。 */
     public void dismantleTool(CompatModule module, Function<PlayerServices, DismantleTool> build) {
-        dismantleTools.add(new ToBuild<>(module, build));
+        dismantleTools.add(module, build);
     }
 
     /**
@@ -207,14 +214,14 @@ public final class CompatRegistry {
      * 同一种界面重复登记、或想改写原版界面时当场出错，这个模组不登记。
      */
     public void menuLayout(CompatModule module, MenuLayoutProof proof) {
-        menuLayouts.add(new CompatMenuLayoutProof(module, proof));
+        menuLayouts.add(module, proof);
         // 当场试建一次：重复或改写原版的登记在启动时就暴露，并按交接出错撤掉这个模组交的东西。
-        new MenuLayouts(menuLayouts);
+        new MenuLayouts(menuLayouts.ready());
     }
 
     /** 联动入口交一个知识来源：带上自己，登记表包一层，模组停用后目录为空、状态写明原因。 */
     public void knowledgeSource(CompatModule module, KnowledgeSource source) {
-        knowledgeSources.add(new CompatKnowledgeSource(module, source));
+        knowledgeSources.add(module, source);
     }
 
     /**
@@ -222,7 +229,7 @@ public final class CompatRegistry {
      * 和知识来源一样不用玩家行为，启动时就交给查资料与查配方；只在客户端线程上读。
      */
     public void recipeViewer(CompatModule module, RecipeViewer viewer) {
-        recipeViewers.add(new CompatRecipeViewer(module, viewer));
+        recipeViewers.add(module, viewer);
     }
 
     /**
@@ -239,7 +246,7 @@ public final class CompatRegistry {
      * 登记表包一层，模组停用后什么都不答，施工按原版默认放。
      */
     public void placementRules(CompatModule module, PlacementRules rules) {
-        placementRules.add(new CompatPlacementRules(module, rules));
+        placementRules.add(module, rules);
     }
 
     /**
@@ -247,72 +254,72 @@ public final class CompatRegistry {
      * 登记表包一层，模组停用后什么都不认，战斗只用弓弩。
      */
     public void rangedWeapon(CompatModule module, RangedWeapon weapon) {
-        rangedWeapons.add(new CompatRangedWeapon(module, weapon));
+        rangedWeapons.add(module, weapon);
     }
 
     /** 联动入口交一种组装载具的办法（物理组装器）的建法：进世界时建，包一层后交给 vehicle_assemble。 */
     public void vehicleAssembler(CompatModule module, Function<PlayerServices, VehicleAssembler> build) {
-        vehicleAssemblers.add(new ToBuild<>(module, build));
+        vehicleAssemblers.add(module, build);
     }
 
     /** 联动入口交一种驾驶载具的办法（无线红石打字机）的建法：进世界时建，包一层后交给 vehicle_drive。 */
     public void vehicleDriver(CompatModule module, Function<PlayerServices, VehicleDriver> build) {
-        vehicleDrivers.add(new ToBuild<>(module, build));
+        vehicleDrivers.add(module, build);
     }
 
     /** 联动入口交一种读载具的办法（物理结构的座位、回路、姿态）的建法：进世界时建，包一层后交给 machine_inspect。 */
     public void vehicleReader(CompatModule module, Function<PlayerServices, VehicleReader> build) {
-        vehicleReaders.add(new ToBuild<>(module, build));
+        vehicleReaders.add(module, build);
     }
 
     /** 联动入口交一种给列车定时刻表的办法（机械动力）的建法：进世界时建，包一层后交给 machine_configure。 */
     public void trainScheduler(CompatModule module, Function<PlayerServices, TrainScheduler> build) {
-        trainSchedulers.add(new ToBuild<>(module, build));
+        trainSchedulers.add(module, build);
     }
 
     /** 联动入口交一种同乘办法（机械动力的列车座位）的建法：进世界时建，包一层后交给跟随。 */
     public void rideAlong(CompatModule module, Function<PlayerServices, RideAlong> build) {
-        rideAlongs.add(new ToBuild<>(module, build));
+        rideAlongs.add(module, build);
     }
 
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
-        modSights.add(new CompatModSight(module, sight));
+        modSights.add(module, sight);
     }
 
     /** 联动入口交一种刹住一掉的办法（喷气背包开悬停）：包一层后交给落地防护；模组停用后刹不住，照原来放水。 */
     public void fallBrake(CompatModule module, FallBrake brake) {
-        fallBrakes.add(new CompatFallBrake(module, brake));
+        fallBrakes.add(module, brake);
     }
 
     /** 联动入口交一样"没带落地料时从哪儿现取"（AE2 无线终端）：包一层后交给落地防护；模组停用后取不到。 */
     public void landingMaterial(CompatModule module, LandingMaterials materials) {
-        landingMaterials.add(new CompatLandingMaterials(module, materials));
+        landingMaterials.add(module, materials);
     }
 
     /** 联动入口交一样走路前要收起来的东西（误开的喷气背包）：包一层后交给寻路；模组停用后不再收。 */
     public void stowBeforeWalking(CompatModule module, StowBeforeWalking stow) {
-        stowsBeforeWalking.add(new CompatStowBeforeWalking(module, stow));
+        stowsBeforeWalking.add(module, stow);
     }
 
     /** 联动入口交一样能直接飞上高处的装备（喷气背包）：包一层后交给寻路；模组停用后当没有。 */
     public void flyUpGear(CompatModule module, FlyUpGear gear) {
-        flyUpGears.add(new CompatFlyUpGear(module, gear));
+        flyUpGears.add(module, gear);
     }
 
     /** 联动入口交一个障碍来源（会动的结构）：包一层后交给寻路；模组停用后不再报障碍。 */
     public void obstacleSource(CompatModule module, ObstacleSource source) {
-        obstacleSources.add(new CompatObstacleSource(module, source));
+        obstacleSources.add(module, source);
     }
 
     /** 联动入口交一份"扔进流体里会变"的配方表（AE2 的转化）：包一层后交给拿东西；模组停用后一条都不给。 */
     public void fluidTransforms(CompatModule module, FluidTransforms transforms) {
-        fluidTransforms.add(new CompatFluidTransforms(module, transforms));
+        fluidTransforms.add(module, transforms);
     }
 
     /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
     public void carriedBackpack(CarriedBackpack backpack) {
-        carriedBackpacks.add(Objects.requireNonNull(backpack, "backpack"));
+        carriedBackpacks.add(backpack);
     }
 
     /**
@@ -335,159 +342,142 @@ public final class CompatRegistry {
      * @param services 这个世界里的玩家行为；不用它的来源不会碰它
      */
     public List<ItemSource> itemSources(PlayerServices services) {
-        return build(itemSources, services, "物品来源", CompatItemSource::new);
+        return itemSources.build(services);
     }
 
     /** 进世界时建联动模组的机器类型；规矩同物品来源。 */
     public List<MachineType> machineTypes(PlayerServices services) {
-        return build(machineTypes, services, "机器类型", CompatMachineType::new);
+        return machineTypes.build(services);
     }
 
     /** 进世界时建联动模组的网络读取器；规矩同物品来源。 */
     public List<NetworkReader> networkReaders(PlayerServices services) {
-        return build(networkReaders, services, "网络读取器", CompatNetworkReader::new);
+        return networkReaders.build(services);
     }
 
     /** 进世界时建联动模组的任务书操作；规矩同物品来源。 */
     public List<QuestBookOperations> questBooks(PlayerServices services) {
-        return build(questBooks, services, "任务书操作", CompatQuestBookOperations::new);
+        return questBooks.build(services);
     }
 
     /** 进世界时建联动模组的物品设置；规矩同物品来源。 */
     public List<ItemSettings> itemSettings(PlayerServices services) {
-        return build(itemSettings, services, "物品设置", CompatItemSettings::new);
+        return itemSettings.build(services);
     }
 
     /** 进世界时建联动模组的网络存储（身上的无线终端存东西）；规矩同物品来源。 */
     public List<NetworkStorage> networkStorages(PlayerServices services) {
-        return build(networkStorages, services, "网络存储", CompatNetworkStorage::new);
+        return networkStorages.build(services);
     }
 
     /** 进世界时建联动模组的出行方式；规矩同物品来源。 */
     public List<TravelMode> travelModes(PlayerServices services) {
-        return build(travelModes, services, "出行方式", CompatTravelMode::new);
+        return travelModes.build(services);
     }
 
     /** 进世界时建联动模组的组装载具办法；规矩同物品来源。 */
     public List<VehicleAssembler> vehicleAssemblers(PlayerServices services) {
-        return build(vehicleAssemblers, services, "组装载具的办法", CompatVehicleAssembler::new);
+        return vehicleAssemblers.build(services);
     }
 
     /** 进世界时建联动模组的驾驶载具办法；规矩同物品来源。 */
     public List<VehicleDriver> vehicleDrivers(PlayerServices services) {
-        return build(vehicleDrivers, services, "驾驶载具的办法", CompatVehicleDriver::new);
+        return vehicleDrivers.build(services);
     }
 
     /** 进世界时建联动模组的读载具办法；规矩同物品来源。 */
     public List<VehicleReader> vehicleReaders(PlayerServices services) {
-        return build(vehicleReaders, services, "读载具的办法", CompatVehicleReader::new);
+        return vehicleReaders.build(services);
     }
 
     /** 进世界时建联动模组的定时刻表办法；规矩同物品来源。 */
     public List<TrainScheduler> trainSchedulers(PlayerServices services) {
-        return build(trainSchedulers, services, "定列车时刻表的办法", CompatTrainScheduler::new);
+        return trainSchedulers.build(services);
     }
 
     /** 进世界时建联动模组的同乘办法；规矩同物品来源。 */
     public List<RideAlong> rideAlongs(PlayerServices services) {
-        return build(rideAlongs, services, "同乘的办法", CompatRideAlong::new);
+        return rideAlongs.build(services);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */
     public List<BreakAccelerator> breakAccelerators(PlayerServices services) {
-        return build(breakAccelerators, services, "挖掘加速", CompatBreakAccelerator::new);
+        return breakAccelerators.build(services);
     }
 
     /** 进世界时建联动模组的拆卸工具；规矩同物品来源。 */
     public List<DismantleTool> dismantleTools(PlayerServices services) {
-        return build(dismantleTools, services, "拆卸工具", CompatDismantleTool::new);
-    }
-
-    // 逐个建：停用了的跳过；建法碰到 LinkageError 由联动入口停用模组，别的错只少这一个，写一行日志。
-    private <T> List<T> build(List<ToBuild<T>> pending, PlayerServices services, String what,
-            BiFunction<CompatModule, T, T> wrap) {
-        List<T> built = new ArrayList<>();
-        for (ToBuild<T> recipe : pending) {
-            CompatModule module = recipe.module();
-            if (!module.active()) continue;
-            try {
-                T made = module.call("建" + what, () -> recipe.build().apply(services));
-                built.add(wrap.apply(module, Objects.requireNonNull(made, "建法返回了 null")));
-            } catch (RuntimeException failure) {
-                LOG.error("联动 {}（{}）的{}建不出来，这次进世界少这一个", module.name(), module.modId(), what, failure);
-            }
-        }
-        return Collections.unmodifiableList(built);
+        return dismantleTools.build(services);
     }
 
     /** 认得出哪些界面：原版加上联动模组证明过的。 */
     public MenuLayouts menuLayouts() {
-        return new MenuLayouts(menuLayouts);
+        return new MenuLayouts(menuLayouts.ready());
     }
 
     /** 联动模组提供的随身背包。 */
     public List<CarriedBackpack> carriedBackpacks() {
-        return Collections.unmodifiableList(carriedBackpacks);
+        return carriedBackpacks.ready();
     }
 
     /** 联动模组提供的知识来源。 */
     public List<KnowledgeSource> knowledgeSources() {
-        return Collections.unmodifiableList(knowledgeSources);
+        return knowledgeSources.ready();
     }
 
     /** 联动模组提供的配方查看器，按联动清单的顺序；配方查询自己决定先问谁。 */
     public List<RecipeViewer> recipeViewers() {
-        return Collections.unmodifiableList(recipeViewers);
+        return recipeViewers.ready();
     }
 
     /** 联动模组的放置规则，按联动清单的顺序；施工取第一个非空的答案。 */
     public List<PlacementRules> placementRules() {
-        return Collections.unmodifiableList(placementRules);
+        return placementRules.ready();
     }
 
     /** 联动模组的观察：场景每次刷新时问一遍。 */
     public List<ModSight> modSights() {
-        return Collections.unmodifiableList(modSights);
+        return modSights.ready();
     }
 
     /** 联动模组刹住一掉的办法，按联动清单的顺序；落地防护先问它们。 */
     public List<FallBrake> fallBrakes() {
-        return Collections.unmodifiableList(fallBrakes);
+        return fallBrakes.ready();
     }
 
     /** 联动模组登记的落地补料来源：身上没带落地料时按顺序问；都没有就当取不到。 */
     public List<LandingMaterials> landingMaterials() {
-        return Collections.unmodifiableList(landingMaterials);
+        return landingMaterials.ready();
     }
 
     /** 联动模组登记的走路前要收起来的东西：走路每刻推进前问一遍。 */
     public List<StowBeforeWalking> stowsBeforeWalking() {
-        return Collections.unmodifiableList(stowsBeforeWalking);
+        return stowsBeforeWalking.ready();
     }
 
     /** 联动模组登记的能直接飞上高处的装备：寻路算路时问它能飞多高。 */
     public List<FlyUpGear> flyUpGears() {
-        return Collections.unmodifiableList(flyUpGears);
+        return flyUpGears.ready();
     }
 
     /** 联动模组的障碍来源：进世界时交给寻路。 */
     public List<ObstacleSource> obstacleSources() {
-        return Collections.unmodifiableList(obstacleSources);
+        return obstacleSources.ready();
     }
 
     /** 联动模组的"扔进流体里会变"的配方表：拿东西为每一份建一条途径。 */
     public List<FluidTransforms> fluidTransforms() {
-        return Collections.unmodifiableList(fluidTransforms);
+        return fluidTransforms.ready();
     }
 
     /** 联动模组的远程武器，按联动清单的顺序。 */
     public List<RangedWeapon> rangedWeapons() {
-        return Collections.unmodifiableList(rangedWeapons);
+        return rangedWeapons.ready();
     }
 
     /** 联动模组声明的只读操作：启动时登记进客户端的请求路由。 */
     public List<ClientOperation> serverReads() {
-        return Collections.unmodifiableList(serverReads);
+        return serverReads.ready();
     }
 
     /** 清单每一行的结论，和日志里写的一样；调试面板与测试看它。 */
