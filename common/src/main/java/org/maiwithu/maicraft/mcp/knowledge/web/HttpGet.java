@@ -27,7 +27,7 @@ interface HttpGet {
 
     /**
      * 用 Java 自带的 HTTP 客户端发请求。时限包住整个响应（连同正文），到点就取消这次下载；
-     * 只在调用它的那个线程上等，不另起线程。不自动跟重定向：去处要由调用方重新过白名单。
+     * 调用它的线程一直等到读完或到时限，不另开工作线程（HTTP 客户端自带的收发线程除外）。不自动跟重定向：去处要由调用方重新过白名单。
      */
     static HttpGet overJavaClient() {
         HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(3))
