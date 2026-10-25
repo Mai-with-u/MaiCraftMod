@@ -14,7 +14,7 @@ import java.util.OptionalDouble;
 /**
  * 站位判断：围着目标找能落脚的格子，按能到、够得着、看得见、站得稳四项筛，再按走过去的代价排好序。
  * 只站正面那一侧的目标（写告示牌）先按正背筛，背面那一侧的候选不进排序。
- * 要骑上去的载具目标声明允许湿脚：浅水站位（脚进水、头在水面上、脚下实心）照常参选，排在干站位之后，
+ * 要骑上去的载具目标声明允许湿脚：脚格泡水、头还在水面外的湿位照常参选，排在干站位之后，
  * 其余目标的泡水位置照旧一票拒。
  * 纯函数：所有世界事实都从只读视图问，所有距离数值都从够得着规则拿，这里只做计算，不动角色。
  *
@@ -205,22 +205,29 @@ public final class StandSpots {
     }
 
     /**
-     * 站得稳检查：脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子。
-     * 声明允许湿脚的目标（骑上载具）把液体否决改为分级：脚格进水但头那一格（脚上一格）还在水面外，
-     * 都算可用的湿位并排到干位之后——浅水湿脚脚下有实地照常站；贴着水面的漂浮位脚下不必有实地、
-     * 下面多深也不要紧，骑上去本来就离开水面，人踩着水凑到船边点一下就走（见 {@link #floatingForVehicle}）。
+     * 站得稳检查：普通落脚位按脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子筛。
+     * 声明允许湿脚的目标（骑上载具）另走一条湿位岔路：脚格泡水的候选只问一条活命底线——
+     * 头那一格还在水面外。脚下没有实地、头顶没有两格空、落差多深，都不再是这里的否决项：
+     * 骑上去本来就离开水面，人踩着水凑到船边点一下就走，能不能点到船由后面的够得着、
+     * 看得见决定，到了之后还有核对兜底。这些粗筛项曾把贴水面的漂浮位提前整片毙掉
+     * （实机贴船 2 格 use 仍报候选全拒，被拒理由里只剩"泡在液体里"，轮不到载具判据），
+     * 所以湿位岔路只认流体读数这一条事实——两轮实机的被拒计数证明它读得准。
      * 头也会没进水的深水位照旧按"泡在液体里"拒（生存安全）。
      * 头那一格进没进水问的还是 {@link ApproachWorldView#inFluid} 这一条事实，只是换个格子问，不添新的世界读数。
      */
     private static String steadyFailure(BlockPos feet, ApproachTarget target, ApproachWorldView world,
                                         ProtectedCells guarded) {
         if (guarded.contains(feet)) return "受保护";
-        // 载具的贴水面湿位：脚下悬空与落差太深都不再看——人漂在水面上，没有"掉下去"这回事。
-        boolean floatingForVehicle = floatingForVehicle(target, world, feet);
-        if (!floatingForVehicle && !world.solidFloor(feet)) return "脚下悬空";
+        // 载具点击位的湿位岔路：脚格进水就按漂浮位裁，不再走干位的落脚粗筛。
+        if (target.wetFeetAllowed() && world.inFluid(feet)) {
+            if (world.inFluid(feet.above())) return "泡在液体里";
+            return world.lavaBeside(feet) ? "旁边有岩浆" : null;
+        }
+        if (!world.solidFloor(feet)) return "脚下悬空";
         if (!world.headroom(feet)) return "头顶没空间";
-        if (!floatingForVehicle && world.dropBelow(feet) > MAX_DROP) return "落差太深";
-        if (world.inFluid(feet) && !floatingForVehicle) return "泡在液体里";
+        if (world.dropBelow(feet) > MAX_DROP) return "落差太深";
+        // 走到这里脚格必然不在液体里：声明湿脚的目标已在岔路里裁过，其余目标泡水照旧一票拒。
+        if (world.inFluid(feet)) return "泡在液体里";
         if (world.lavaBeside(feet)) return "旁边有岩浆";
         return null;
     }

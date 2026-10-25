@@ -234,6 +234,24 @@ class StandSpotsTest {
     }
 
     @Test
+    void 载具点击位的漂浮位不因落脚粗筛被毙() {
+        // 贴水面的漂浮位脚下没有实地、头顶也未必有两格空：这些是干位落脚的粗筛项，
+        // 载具点击位在脚格泡水时只认流体读数，不再被它们整片提前毙掉（实机贴船 2 格 use 候选全拒的教训）。
+        for (int dx = -1; dx <= 1; dx++) {
+            world.fluids.add(new BlockPos(3 + dx, 64, 0));
+            world.noFloor.add(new BlockPos(3 + dx, 64, 0));
+            world.deepDrops.add(new BlockPos(3 + dx, 64, 0));
+            world.lowCeiling.add(new BlockPos(3 + dx, 64, 0));
+        }
+        world.lowCeiling.add(new BlockPos(1, 64, 0));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1)));
+        assertFalse(ranking.spots().stream().noneMatch(spot -> world.fluids.contains(spot.feet())),
+                "头顶封住、脚下悬空的漂浮位照样能当载具点击位");
+        // 干位粗筛不外溢：干地上头顶封住的格子照旧拒。
+        assertEquals("头顶没空间", failureAt(ranking, new BlockPos(1, 64, 0)));
+    }
+
+    @Test
     void 头也会没进水的位置骑载具照样拒() {
         // 深水：脚格和头一格都泡在水里，湿脚的放行救不了它。
         world.fluids.add(new BlockPos(2, 64, 0));
