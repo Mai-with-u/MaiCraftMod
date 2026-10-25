@@ -28,6 +28,14 @@ public interface InteractionConfirmation {
     /** 放置方块后，确认可能还需等待服务端完成本次交互的预测校正。 */
     default boolean requiresBlockAcknowledgement() { return false; }
     default Verdict observeAcknowledged(PlayerContext context) { return observe(context); }
+
+    /**
+     * 确认窗等到过期、生效的证据一样都没出现时，能不能凭「手上、目标格、附近都没有净变化」
+     * 断定这一下没生效。放置类的证据全靠客户端预测与服务端同步（手上少一个、方块变样、实体出现），
+     * 一个窗口过去一样都没变，就能如实按没生效收场，不留「没能确认」；拿不准的手势不声明，
+     * 过期照旧按没能确认交上去。
+     */
+    default boolean expiryMeansNotApplied() { return false; }
     /** 调用方已拥有服务器发来的新实体证据时，不再多等一次稳定刻。 */
     static InteractionConfirmation serverObservedEntity(InteractionConfirmation evidence) {
         return new InteractionConfirmation() {

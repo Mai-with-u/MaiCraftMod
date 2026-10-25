@@ -569,8 +569,14 @@ public final class DefaultInteractionSender implements InteractionSender {
             case PENDING -> pending.resetStable(context.clientTick());
         }
         if (!pending.terminal() && context.clientTick() >= pending.deadlineTick()) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "the bounded read-only confirmation window expired"
+            // 确认窗到期：放置类的证据（手上少一个、方块变样、实体出现）一样都没出现，
+            // 就按「提交了但没生效」如实收场，报文与骑乘确认的「原版拒了 / 接受而效果丢失」同一条线；
+            // 拿不准的手势照旧按没能确认交上去，不冒充知道。射线命中了什么由提交现场的插桩事实随结果带出。
+            PendingInteraction.Status expiry = expiryStatus(pending.confirmation());
+            pending.finish(expiry, expiry == PendingInteraction.Status.CONFIRMED_NOT_APPLIED
+                    ? "the confirmation window expired with no net change in hand item, target block,"
+                            + " menu or nearby entities; the submitted action did not take effect"
+                    : "the bounded read-only confirmation window expired"
                             + ExpiryContext.of(pending.nativeAnswer(), pending.entityUseScene()));
         }
         if (pending.terminal() && (pending.kind() == PendingInteraction.Kind.CREATIVE_SET_SLOT
@@ -660,6 +666,13 @@ public final class DefaultInteractionSender implements InteractionSender {
                 && active.attackTargetId() == targetId
                 && active.fromSamePlayer(context)
                 && context.clientTick() < active.deadlineTick();
+    }
+
+    /** 确认窗到期的结算：放置类的证据一样都没出现就按没生效收场；拿不准的手势按没能确认交上去。 */
+    static PendingInteraction.Status expiryStatus(InteractionConfirmation confirmation) {
+        return confirmation.expiryMeansNotApplied()
+                ? PendingInteraction.Status.CONFIRMED_NOT_APPLIED
+                : PendingInteraction.Status.UNCERTAIN;
     }
 
     private void requireIdle(PlayerContext context) {

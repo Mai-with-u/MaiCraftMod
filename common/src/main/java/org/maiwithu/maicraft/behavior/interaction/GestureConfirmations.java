@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 按手势取确认条件：手上是什么、效果落在哪，决定这次右键怎样算生效。
@@ -64,6 +65,23 @@ public final class GestureConfirmations {
                 checks.add(InteractionConfirmation.heldItemChanged(hand, handBefore));
             }
         }
-        return checks.size() == 1 ? checks.getFirst() : anyOf(checks.toArray(new InteractionConfirmation[0]));
+        // 放置类（放船、放床这类放出去手上少一个或目标格变样的手势）：确认窗过期而证据一样都没出现，
+        // 就能断定没生效；船漂在深水上放不出去、床被两格碰撞挡住这类静默失败由此如实浮出来。
+        boolean placement = confirmation == ItemUseAim.Confirmation.OWN_USE_TAKES_EFFECT
+                || confirmation == ItemUseAim.Confirmation.TARGET_OR_HAND_CHANGES;
+        InteractionConfirmation combined = checks.size() == 1
+                ? checks.getFirst() : anyOf(checks.toArray(new InteractionConfirmation[0]));
+        return placement ? expiresAsNotApplied(combined) : combined;
+    }
+
+    /** 给组合好的确认条件挂上「过期即没生效」的断定；其余核对原样转达。 */
+    private static InteractionConfirmation expiresAsNotApplied(InteractionConfirmation check) {
+        return new InteractionConfirmation() {
+            @Override public InteractionConfirmation.Verdict observe(PlayerContext context) { return check.observe(context); }
+            @Override public int stableTicksRequired() { return check.stableTicksRequired(); }
+            @Override public boolean requiresBlockAcknowledgement() { return check.requiresBlockAcknowledgement(); }
+            @Override public InteractionConfirmation.Verdict observeAcknowledged(PlayerContext context) { return check.observeAcknowledged(context); }
+            @Override public boolean expiryMeansNotApplied() { return true; }
+        };
     }
 }
