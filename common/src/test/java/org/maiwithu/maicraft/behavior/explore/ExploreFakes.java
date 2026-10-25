@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
@@ -140,6 +141,12 @@ public final class ExploreFakes {
         /** 在路上但每刻都没有真实进展：寻路对着走不到的落点空转的演法。 */
         private boolean idle;
         int stopRequests;
+        /** 悬在半空走着：叫它先停稳就答应收尾，落地报"已停下"才算停稳；落地的过程由报告脚本演出来。 */
+        boolean airborne;
+        int safeStops;
+        /** 停稳后续得上：报过"已停下"就停在那里不往下演，续走后接着演后面的报告。为假时照旧续不上。 */
+        boolean resumable;
+        int resumes;
 
         ScriptedWalk(WalkReport... reports) {
             for (WalkReport report : reports) {
@@ -161,6 +168,9 @@ public final class ExploreFakes {
         }
 
         @Override public ActionStatus tick(TickContext context) {
+            if (resumable && last.state() == WalkReport.State.STOPPED) {
+                return ActionStatus.done();
+            }
             if (reports.isEmpty()) {
                 return idle ? ActionStatus.running() : ActionStatus.progressed();
             }
@@ -185,9 +195,37 @@ public final class ExploreFakes {
 
         @Override public void pause() { }
 
-        /** 探索的走行段还没接续走：续不上，按收掉重开一路对待。 */
+        /** 续得上的才续：从停下的地方接着演后面的报告；续不上的按收掉重开一路对待。 */
         @Override public boolean resume() {
-            return false;
+            if (!resumable || last.state() != WalkReport.State.STOPPED) {
+                return false;
+            }
+            resumes++;
+            last = WalkReport.onTheWay(last.feet(), false);
+            return true;
+        }
+
+        @Override public boolean stopSafely() {
+            if (!airborne) {
+                return false;
+            }
+            safeStops++;
+            return true;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return safeStops == 0 || last.state() == WalkReport.State.STOPPED;
+        }
+
+        /** 悬在半空走着时停不得；落地、走到或走不通就不再悬着。不悬空的照旧是正常干活。 */
+        @Override public Interruptibility interruptibility() {
+            if (!airborne) {
+                return Interruptibility.WORKING;
+            }
+            return switch (last.state()) {
+                case STOPPED, ARRIVED, FAILED -> Interruptibility.BETWEEN_ACTIONS;
+                default -> Interruptibility.UNSAFE_TO_STOP;
+            };
         }
 
         @Override public void close() { }

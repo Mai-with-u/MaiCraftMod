@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayDeque;
@@ -253,6 +254,7 @@ public final class TravelFakes {
         /** 悬在半空走着：叫它先停稳就答应收尾，落地报"已停下"才算停稳；落地的过程由报告脚本演出来。 */
         public boolean airborne;
         public int safeStops;
+        public int closes;
 
         /** 被生存需求打断：只记请求；停下的过程由测试用报告脚本演出来。 */
         @Override public void pause() {
@@ -325,6 +327,20 @@ public final class TravelFakes {
 
         @Override public boolean stoppedSafely() {
             return safeStops == 0 || last.state() == WalkReport.State.STOPPED;
+        }
+
+        /** 悬在半空走着时停不得；落地报"已停下"、走到了或走不通就不再悬着。不悬空的照旧是正常干活。 */
+        @Override public Interruptibility interruptibility() {
+            if (!airborne) return Interruptibility.WORKING;
+            return switch (last.state()) {
+                case STOPPED, ARRIVED, FAILED -> Interruptibility.BETWEEN_ACTIONS;
+                default -> Interruptibility.UNSAFE_TO_STOP;
+            };
+        }
+
+        /** 被收掉：先到安全处再停的收尾里，还悬在半空的走路不该被收掉。 */
+        @Override public void close() {
+            closes++;
         }
 
         @Override public String describe() {

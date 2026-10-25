@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.explore.endereye;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -12,6 +13,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 import org.maiwithu.maicraft.behavior.explore.ExploreFakes;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,7 @@ import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -41,6 +44,8 @@ class EnderEyeSearchTest {
         /** 下一段走路走不通、走到一半停在哪：为 null 时走到目的地。 */
         int[] stuckAt;
         int fetches;
+        /** 下一段走路照这段脚本演（悬在半空、落地、续走）；为 null 时一刻走到。 */
+        TravelFakes.ScriptedWalk scripted;
 
         @Override public int eyesCarried() { return carried; }
 
@@ -74,6 +79,11 @@ class EnderEyeSearchTest {
 
         @Override public WalkRun walkToward(int toX, int toZ, TerrainPermit permit) {
             walkedTo.add(new int[] {toX, toZ});
+            if (scripted != null) {
+                WalkRun run = scripted;
+                scripted = null;
+                return run;
+            }
             int[] stop = stuckAt;
             stuckAt = null;
             return new WalkRun() {
@@ -186,6 +196,46 @@ class EnderEyeSearchTest {
                 "碎了的那只记成消耗：" + records.changes);
         assertTrue(search.summary().contains("碎了 1 只"), search.summary());
         assertEquals(2, records.attempts.size(), "每一扔记一条经过：" + records.attempts);
+    }
+
+    @Test
+    void 走在半空被叫先停稳_落地才停_不扔也不续走_暂停后从原地接着走() {
+        eyes.carried = 4;
+        eyes.flies(60, -100, EyeFlight.Landing.SHATTERED);
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(0, 65, -5), false),
+                WalkReport.onTheWay(new BlockPos(1, 65, -6), false),
+                WalkReport.stopped(new BlockPos(1, 64, -7), false),
+                WalkReport.arrived(new BlockPos(5, 64, -20), false));
+        leg.airborne = true;
+        eyes.scripted = leg;
+        assertFalse(search.stopSafely(), "两步之间（还没扔）现在就能停");
+        ExploreFakes.TestTick tick = new ExploreFakes.TestTick();
+        for (int i = 0; i < 20 && eyes.walkedTo.isEmpty(); i++) {
+            tick.nextTick();
+            search.tick(tick);
+        }
+        tick.nextTick();
+        search.tick(tick);
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, search.interruptibility(), "沿飞向走着、悬在半空停不得");
+
+        // 悬在半空被叫先到安全处再停：转给走路去落地；落地后原地等着，不扔下一只、也不自己从原地续走。
+        assertTrue(search.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(search.stoppedSafely(), "还没落地");
+        for (int i = 0; i < 4; i++) {
+            tick.nextTick();
+            assertInstanceOf(ActionStatus.Running.class, search.tick(tick), "收尾途中不收场");
+        }
+        assertTrue(search.stoppedSafely(), "落地站稳了");
+        assertEquals(0, leg.resumes, "收尾途中落地不从原地续走");
+        assertEquals(3, eyes.carried, "收尾途中不扔下一只");
+
+        // 暂停过后接着做：这一段从原地续走。
+        search.pause();
+        tick.nextTick();
+        search.tick(tick);
+        assertEquals(1, leg.resumes, "暂停过后从原地接着走这一段");
     }
 
     @Test

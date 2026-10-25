@@ -292,7 +292,9 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             return Next.stay();
         }
         ActionStatus status = runAction(context);
-        if (status instanceof ActionStatus.Running) {
+        // 走路报"已停下"不是走到了：被叫先到安全处再停、落地了就站着等外层停下；暂停过后这一段从原地接着走。
+        if (status instanceof ActionStatus.Running || leg.walk.report().state() == WalkReport.State.STOPPED
+                && (stopping() || leg.walk.resume())) {
             return Next.stay();
         }
         return settleLeg(status);
@@ -788,7 +790,6 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             this.destination = destination.immutable();
         }
     }
-
 
     /** 本来就在挪地方：被临时任务带离原地后从新地点接着走。 */
     @Override

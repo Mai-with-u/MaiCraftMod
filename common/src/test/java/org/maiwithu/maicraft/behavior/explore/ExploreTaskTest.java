@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /** 探索任务：观察推进、发现落账、半径收尾、换向升级与回露天的竖直上掘，全部按现场如实结算。 */
@@ -160,6 +161,75 @@ class ExploreTaskTest {
                 "核实过的群系按到访落账");
         assertEquals(1, details.legs().total());
         assertEquals(0, details.legs().failures());
+    }
+
+    @Test
+    void 走向候选悬在半空被叫先停稳_落地才停_不当成走到_暂停后这一段从原地接着走到() {
+        WorldMemory memory = memory();
+        world.putBiome(0, -40, "minecraft:jungle");
+        ExploreFakes.ScriptedWalk leg = new ExploreFakes.ScriptedWalk(
+                WalkReport.planning(),
+                WalkReport.onTheWay(new BlockPos(0, 65, -20), false),
+                WalkReport.onTheWay(new BlockPos(0, 65, -21), false),
+                WalkReport.stopped(new BlockPos(0, 64, -22), false),
+                WalkReport.onTheWay(new BlockPos(0, 64, -30), false),
+                WalkReport.arrived(new BlockPos(0, 64, -40), false));
+        leg.airborne = true;
+        leg.resumable = true;
+        walks.enqueue(leg);
+        ExploreTask task = task(memory,
+                new ExploreObjective(ExploreObjective.Kind.BIOME, List.of("minecraft:jungle")),
+                ExploreObjective.Interests.NONE, Target.Toward.NORTH, 90, 16, 256, NATURAL);
+        task.start(tick);
+        for (int i = 0; i < 200 && leg.report().state() != WalkReport.State.ON_THE_WAY; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertEquals(WalkReport.State.ON_THE_WAY, leg.report().state(), "朝候选群系走在半空");
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, task.interruptibility(tick), "悬在半空停不得");
+
+        // 悬在半空被叫先到安全处再停：转给走路去落地，落地前不报停稳；落地停稳后站着等，不当成走到了去复核。
+        assertTrue(task.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(task.stoppedSafely(), "还没落地");
+        for (int i = 0; i < 4; i++) {
+            assertInstanceOf(TickResult.Running.class, task.tick(tick), "收尾途中不收场");
+            tick.nextTick();
+        }
+        assertTrue(task.stoppedSafely(), "落地站稳了");
+        assertEquals(0, leg.resumes, "收尾途中不从原地续走");
+        assertTrue(task.describe().contains("在路上"), "落地报的已停下不当成走到：" + task.describe());
+
+        // 暂停过后接着做：同一段从原地续走，走到候选再复核，不把半路落地的地方记成走过的候选。
+        task.pause();
+        TaskResult result = runToFinish(task);
+        assertEquals(TaskResult.Status.DONE, result.status(), () -> "problem: " + result.problem());
+        assertEquals(1, leg.resumes, "从原地续走同一段");
+        assertEquals(1, walks.started.size(), "不收掉重开一路");
+        ExploreDetails details = assertInstanceOf(ExploreDetails.class, result.details());
+        assertEquals(new WorldPosition(0, 64, -40, "minecraft:overworld"), details.reached());
+        assertEquals(0, details.legs().failures());
+    }
+
+    @Test
+    void 走在地上被叫先停稳_现在就能停() {
+        WorldMemory memory = memory();
+        world.putBiome(0, -40, "minecraft:jungle");
+        ExploreFakes.ScriptedWalk leg = new ExploreFakes.ScriptedWalk(
+                WalkReport.planning(),
+                WalkReport.onTheWay(new BlockPos(0, 64, -20), false));
+        walks.enqueue(leg);
+        ExploreTask task = task(memory,
+                new ExploreObjective(ExploreObjective.Kind.BIOME, List.of("minecraft:jungle")),
+                ExploreObjective.Interests.NONE, Target.Toward.NORTH, 90, 16, 256, NATURAL);
+        task.start(tick);
+        for (int i = 0; i < 200 && leg.report().state() != WalkReport.State.ON_THE_WAY; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        assertEquals(WalkReport.State.ON_THE_WAY, leg.report().state());
+        assertFalse(task.stopSafely(), "站在地上走着：现在就能停，不用收尾");
+        assertTrue(task.stoppedSafely());
     }
 
     @Test

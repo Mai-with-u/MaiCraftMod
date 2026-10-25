@@ -71,6 +71,8 @@ public final class EnderEyeSearch implements Action {
     private int carriedBeforeFetch;
     private WorldPosition conclusion;
     private String summary;
+    /** 被叫先到安全处再停、手上那一步（走一段、走过去捡眼）说要先落地：只推进它到落地站稳；暂停时清掉。 */
+    private boolean stopping;
 
     /**
      * @param permit  走那几段被允许动多少地形，按这次任务的许可
@@ -101,6 +103,12 @@ public final class EnderEyeSearch implements Action {
 
     @Override
     public ActionStatus tick(TickContext context) {
+        // 收尾途中：只把手上的走路推进到落地站稳，落地后原地等外层停下，不扔下一只、也不从原地续走。
+        if (stopping) {
+            Action now = now();
+            if (now != null && !now.stoppedSafely()) now.tick(context);
+            return ActionStatus.running();
+        }
         return switch (stage) {
             case THROW -> throwOne(context);
             case FETCH -> fetchEye(context);
@@ -312,8 +320,23 @@ public final class EnderEyeSearch implements Action {
 
     @Override
     public void pause() {
+        stopping = false;
         Action now = now();
         if (now != null) now.pause();
+    }
+
+    // 被叫先到安全处再停：转给手上那一步，走在半空的先落地、落地才算停稳；在扔、两步之间现在就能停。
+    @Override
+    public boolean stopSafely() {
+        Action now = now();
+        stopping = now != null && now.stopSafely();
+        return stopping;
+    }
+
+    @Override
+    public boolean stoppedSafely() {
+        Action now = now();
+        return !stopping || now == null || now.stoppedSafely();
     }
 
     @Override
