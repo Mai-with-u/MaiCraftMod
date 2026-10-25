@@ -57,6 +57,11 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     private static final int OFFER_WAIT_TICKS = 60;
     /** 身体挪了这么远才算这一段有进展。 */
     private static final double MOVED_BLOCKS = 0.25;
+    /**
+     * 坐着的一段离这一段的终点（下车站、靠岸点、目标楼层）比之前最近时又近了这么多（格），才给整趟记一次进展。
+     * 和走路同一条判据：船顶着岸来回晃、原地打圈每次都能换一格，按"挪了"算进展会把整趟的卡住计时一直重置。
+     */
+    static final double RIDE_PROGRESS_STEP_BLOCKS = 1.0;
     /** 整趟多久没有真实进展算卡住：等车最多两分钟，留出余量；每段自己的进度跟踪先管着。 */
     private static final long STUCK_AFTER_TICKS = 20L * 60 * 3;
 
@@ -310,6 +315,11 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         return destination.heightConfirmed() ? center : new BlockPos(center.getX(), feet.getY(), center.getZ());
     }
 
+    /** 坐着的一段这一刻算不算有进展：离这一段终点比之前最近时又近了 {@link #RIDE_PROGRESS_STEP_BLOCKS} 格以上。纯函数，离线可测。 */
+    static boolean closerToLegEnd(double bestSoFar, double toEndNow) {
+        return toEndNow < bestSoFar - RIDE_PROGRESS_STEP_BLOCKS;
+    }
+
     private BlockPos feetNow() {
         WorldPosition spot = world.currentSpot();
         if (spot != null) lastFeet = new BlockPos(spot.x(), spot.y(), spot.z());
@@ -454,8 +464,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         private final long startTick;
         private long lastTick;
         private boolean settled;
-        /** 上次记进展时人所在的位置：挪出一步就再记一次，坐着的一段不用整趟替它掐表。 */
-        private BlockPos progressAnchor;
+        /** 这一段坐到现在离终点最近的时候有多远（格）：又近了一格以上才再记一次进展。 */
+        private double bestToLegEnd = Double.MAX_VALUE;
 
         RidingLeg(TravelOffer offer, TravelLeg leg, BlockPos from, long startTick) {
             this.offer = offer;
@@ -468,13 +478,17 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         @Override public ActionStatus tick(TickContext context) {
             lastTick = context.gameTick();
             ActionStatus status = leg.tick(context);
-            // 坐着的一段（划船、坐电梯）自己不报进度：身体挪出一步就给整趟记一次进展，
-            // 划得久的船、开得久的车不被整趟的卡住计时误杀；原地不动什么都不记，真卡死了照旧按超时收场。
+            // 坐着的一段（划船、坐电梯）自己不报进度：离这一段的终点真近了一格以上就给整趟记一次进展，
+            // 划得久的船、开得久的车一路在靠近，不被整趟的卡住计时误杀；顶着岸来回晃、原地打圈、停着不动攒不出靠近，
+            // 整趟照旧按超时收场。终点用这一段自己的（火车的下车站），不用整趟的目的地：线路先绕远再回来是常事。
             BlockPos feet = feetNow();
-            if (feet != null
-                    && (progressAnchor == null || Math.sqrt(feet.distSqr(progressAnchor)) >= MOVED_BLOCKS)) {
-                progressAnchor = feet;
-                recordProgress(offer.via().name() + " 载着人挪到了 " + feet.toShortString());
+            if (feet != null) {
+                double toEnd = Math.sqrt(feet.distSqr(offer.to()));
+                if (closerToLegEnd(bestToLegEnd, toEnd)) {
+                    bestToLegEnd = toEnd;
+                    recordProgress(offer.via().name() + " 载着人到了 " + feet.toShortString()
+                            + "，离这一段的终点还有 " + Math.round(toEnd) + " 格");
+                }
             }
             return status;
         }
