@@ -274,7 +274,10 @@ public final class TravelAbility implements AbilityModule {
         for (int extra = 0; extra <= ROOMY_EXTRA; extra++) {
             double radius = Math.max(0, destination.radius()) + extra;
             if (anyStandable(at, radius)) {
-                return extra == 0 ? destination : TravelDestination.confirmed(at, radius);
+                // 放宽容差重建目的地时把偏差说明原样带上：开阔水挪到岸格的目的地也可能被放宽，
+                // 丢了这句话收场就写不出"目标在水中央、偏了几格"。
+                return extra == 0 ? destination
+                        : TravelDestination.confirmed(at, radius, destination.arrivalNote());
             }
         }
         return destination;

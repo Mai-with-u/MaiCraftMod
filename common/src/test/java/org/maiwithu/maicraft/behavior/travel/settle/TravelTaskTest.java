@@ -34,6 +34,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.maiwithu.maicraft.behavior.travel.planning.DestinationResolver;
+import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
+import org.maiwithu.maicraft.behavior.travel.planning.WaterArrival;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 
 /** 出行任务：拿着解析好的目的地上路，到达、中途停下、先到安全处再停、失败与打断后的接续都按现场如实结算。 */
@@ -111,6 +113,22 @@ class TravelTaskTest {
 
         assertEquals(TaskResult.Status.DONE, result.status());
         assertInstanceOf(NavGoal.Column.class, ((StandingDry) TravelFakes.goalOf(walks.started.get(0))).inner);
+    }
+
+    @Test
+    void openWaterDetourArrivalStatesDeviation() {
+        // 开阔水挪到岸格的目的地：到达收场写明"目标在水中央、落到了哪、偏了几格"，
+        // 不冒充站在了玩家指的那一柱；没有偏差说明的目的地照旧写"走到了目的地"。
+        WorldPosition shore = new WorldPosition(147, 63, 65, null);
+        TravelTask travel = new TravelTask(
+                TravelDestination.confirmed(shore, 2, WaterArrival.detourNote(134, 32, shore)),
+                0, permit, walks, placed, progress);
+        walks.enqueue(new ScriptedWalk(WalkReport.arrived(new BlockPos(147, 63, 65), false)));
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("目标在水中央"), result.summary());
+        assertTrue(result.summary().contains("(147, 63, 65)"), result.summary());
     }
 
     @Test

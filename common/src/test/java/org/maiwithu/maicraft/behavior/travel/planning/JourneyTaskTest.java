@@ -153,13 +153,29 @@ class JourneyTaskTest {
     @Test
     void 远处有更快的电梯_坐电梯到了就结束() {
         FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
-                List.of(), List.of(), "1F→5F"), WorldPosition.here(2, 100, 2));
+                List.of(), List.of(), ""), WorldPosition.here(2, 100, 2));
         TaskResult result = run(journey(at(2, 100, 2), null, elevator), 50);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(walks.isEmpty(), "坐到了就不再走路");
         assertEquals(List.of("elevator"), details(result).legs().stream().map(JourneyDetails.Leg::via).toList());
         assertEquals(WorldPosition.here(2, 100, 2), details(result).arrivedAt());
     }
+
+    @Test
+    void 开阔水挪到岸格的目的地_坐到了收场也写明偏差() {
+        // 目的地是开阔水旁挑出来的岸格（带"目标在水中央"的偏差说明），船直接送到那一格：
+        // 行程在"站到了"这里收场、不经过出行任务的结算，偏差说明也得写进收场报文，不冒充站在了玩家指的那一柱。
+        WorldPosition shore = WorldPosition.here(147, 63, 65);
+        TravelDestination detoured = TravelDestination.confirmed(shore, 1, WaterArrival.detourNote(134, 32, shore));
+        FakeMode ferry = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
+                List.of(), List.of(), ""), shore);
+        TaskResult result = run(journey(detoured, null, ferry), 50);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("目标在水中央"), result.summary());
+        assertTrue(result.summary().contains("偏差"), result.summary());
+        assertTrue(result.summary().contains("(147, 63, 65)"), result.summary());
+    }
+
 
     @Test
     void 走不通就从这里比报价_换电梯() {

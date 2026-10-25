@@ -179,6 +179,38 @@ class TravelAbilityTest {
     }
 
     @Test
+    void widenedOpenWaterDestinationKeepsArrivalNote() {
+        // 开阔水挪到岸格的目的地又碰上落点旁一格能站的都没有：放宽到外圈重建目的地时，
+        // "目标在水中央、落到了哪、偏了几格"的说明要原样带过去，收场才写得出偏差。
+        // 场景：目标柱 (0,0) 一带 8 格内全是水，往外一圈一圈扫先碰到的是 (-9,63,0)；
+        // 岸格旁边贴着的一圈站不上去，宽到 3 格才有能站的。
+        StubWorld watery = new StubWorld() {
+            @Override public OptionalInt surfaceFeet(int x, int z) {
+                return Math.max(Math.abs(x), Math.abs(z)) <= 8 ? OptionalInt.empty() : OptionalInt.of(63);
+            }
+
+            @Override public ColumnSample column(int x, int z) {
+                boolean water = Math.max(Math.abs(x), Math.abs(z)) <= 8;
+                return new ColumnSample(true, null, 62, water, !water, null);
+            }
+
+            @Override public boolean standable(int x, int y, int z) {
+                int dx = x + 9, dy = y - 63, dz = z;
+                return dx * dx + dy * dy + dz * dz >= 9;
+            }
+        };
+        TravelAbility roomy = new TravelAbility(walks,
+                new DestinationResolver(watery, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, watery, List.of());
+        Goal request = goal(new Target.Position(0, null, 0, null), "{}");
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, roomy.decide(step(request)));
+        TravelDestination destination = assertInstanceOf(TravelInput.class, run.input()).destination();
+        assertEquals(3.0, destination.radius(), "落点旁一格能站的都没有：放宽到外圈");
+        assertNotNull(destination.arrivalNote(), "放宽后偏差说明还在");
+        assertTrue(destination.arrivalNote().contains("目标在水中央"), destination.arrivalNote());
+    }
+
+    @Test
     void noTerrainPermissionMeansWalkOnly() {
         Goal request = new Goal("maicraft:travel", null, new Target.Position(0, 64, 0, null),
                 params("{}"), Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.NONE,

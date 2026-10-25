@@ -157,7 +157,11 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         // 与走路到达、乘船腿的出发点按同一份干地事实判，不然走路说到到了、船又说脚下是水。
         if (destination != null && destination.navGoal().isAt(feet) && !world.inWater()) {
             arrivedAt = spot;
-            return Next.done(TaskResult.done("出行：到了" + destination.describe() + "，实测位置 "
+            // 目的地不是玩家指的那一格（开阔水挪到了岸格）时，行程在这里直接收场、不再经过出行任务的结算，
+            // 偏差说明从目的地带上：写明目标在水中央、落到了哪、偏了几格，不冒充站在了玩家指的那一格。
+            String detour = destination.arrivalNote();
+            String reached = detour != null ? detour : "到了" + destination.describe();
+            return Next.done(TaskResult.done("出行：" + reached + "，实测位置 "
                     + feet.toShortString()));
         }
         if (destination == null && rodeAlready) {
