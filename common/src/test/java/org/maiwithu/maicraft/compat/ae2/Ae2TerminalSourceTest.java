@@ -244,6 +244,64 @@ class Ae2TerminalSourceTest {
         assertEquals(new BlockPos(6, 65, -8), at.block());
     }
 
+    /** 附近装着的一台记得有货的终端：身上带着绑好的终端时，报价不该是它。 */
+    private static TerminalChooser.Known placedTerminalKnown() {
+        return new TerminalChooser.Known(new TerminalChooser.Candidate(TERMINAL, 12, true,
+                Optional.of(new SeenNetworkStock.Sighting(true, Map.of("minecraft:torch", 200L),
+                        NOW.minusSeconds(90)))), 200);
+    }
+
+    @Test
+    void 身上带着绑好的终端_报价先用它_不去装着的终端() {
+        // 身上有绑好的无线终端，附近也装着记得有货的终端：报价必须是随身那台，不走去装着的。
+        SourceQuote quote = Ae2TerminalSource.quoteGiven(
+                new Ae2TerminalSource.CarriedWireless(Optional.of("ae2:wireless_terminal"), Optional.empty(),
+                        Optional.empty()),
+                placedTerminalKnown(), torches(8), new BlockPos(0, 64, 0), Optional.empty(),
+                "minecraft:torch"::equals, 64, NOW);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals("wireless:ae2:wireless_terminal", offer.hint(), "绑好的随身终端是第一候选");
+        assertEquals(0, offer.cost().distanceBlocks(), "带在身上不用走路");
+    }
+
+    @Test
+    void 终端没绑_附近有访问点_按处境报价先绑定再取() {
+        // 与直接问 bindingQuote 同一结论，但走的是报价整体按处境决定的那条路。
+        SourceQuote quote = Ae2TerminalSource.quoteGiven(
+                new Ae2TerminalSource.CarriedWireless(Optional.empty(), Optional.of("ae2:wireless_terminal"),
+                        Optional.of(new Ae2Terminals.AccessPoint(new BlockPos(6, 65, -8)))),
+                placedTerminalKnown(), torches(8), new BlockPos(0, 64, 0), Optional.empty(),
+                "minecraft:torch"::equals, 64, NOW);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals("bind:ae2:wireless_terminal:6,65,-8", offer.hint());
+    }
+
+    @Test
+    void 终端没绑_附近没有访问点_落到装着的终端并写明身上这台用不上() {
+        // 身上带着终端却报装着的终端时，说明里要写清楚是"没绑上、附近也没法绑"，不是没看见身上这台。
+        SourceQuote quote = Ae2TerminalSource.quoteGiven(
+                new Ae2TerminalSource.CarriedWireless(Optional.empty(), Optional.of("ae2:wireless_terminal"),
+                        Optional.empty()),
+                placedTerminalKnown(), torches(8), new BlockPos(0, 64, 0), Optional.empty(),
+                "minecraft:torch"::equals, 64, NOW);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertEquals("3,64,0,north", offer.hint(), "附近没有访问点能绑：这次落到装着的终端");
+        assertTrue(offer.risk().contains("还没绑定访问点"), offer.risk());
+        assertTrue(offer.risk().contains("没有无线访问点能绑"), offer.risk());
+    }
+
+    @Test
+    void 终端没绑_附近没有访问点_装着的终端也给不了时_给不了的原因带上绑定处境() {
+        SourceQuote quote = Ae2TerminalSource.quoteGiven(
+                new Ae2TerminalSource.CarriedWireless(Optional.empty(), Optional.of("ae2:wireless_terminal"),
+                        Optional.empty()),
+                new TerminalChooser.None("附近 64 格内没有 ME 终端"), torches(8), new BlockPos(0, 64, 0),
+                Optional.empty(), "minecraft:torch"::equals, 64, NOW);
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
+        assertTrue(unavailable.reason().startsWith("附近 64 格内没有 ME 终端"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("还没绑定访问点"), unavailable.reason());
+    }
+
     @Test
     void 访问点界面的布局_只认三格工作格() {
         SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2",

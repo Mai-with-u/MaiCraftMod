@@ -45,6 +45,8 @@ public final class WirelessBinding implements Action {
     private final String terminalItemId;
     private final MenuOpening opening;
     private Stage stage = Stage.OPEN;
+    /** 此刻走到绑定链的哪一环：给进度报文看的一句话，只说观察事实（做成了没有、在等什么），不点槽位号。 */
+    private String doing = "走到访问点跟前打开它的界面";
     private OpenedMenu menu;
     private Action closing;
     private Problem stopReason;
@@ -109,8 +111,9 @@ public final class WirelessBinding implements Action {
                 return ActionStatus.progressed();
             }
             if (++clickQuiet > CLICK_TIMEOUT_TICKS) {
+                // 带上是哪一环没走成：是拿起没拿起、放进没放进，还是取回没取回，报文里分得清。
                 return stopNow(Problem.of(Problem.Kind.STUCK, "在 " + point.describe()
-                        + " 的界面里点了一直没动静，先停手", null));
+                        + " 的界面里" + doing + "，一直没动静，先停手", null));
             }
             return ActionStatus.running();
         }
@@ -127,16 +130,32 @@ public final class WirelessBinding implements Action {
                 compat.linkedWirelessTerminal(raw.getCarried()),
                 outputSlot.map(id -> compat.linkedWirelessTerminal(raw.getSlot(id).getItem())).orElse(false)));
         return switch (step) {
-            case BindingPlan.PickUp pickUp -> click(pickUp.slotId(), raw);
-            case BindingPlan.PutIn putIn -> click(putIn.slotId(), raw);
-            case BindingPlan.TakeCopy takeCopy -> click(takeCopy.slotId(), raw);
-            case BindingPlan.PutDown putDown -> click(putDown.slotId(), raw);
+            case BindingPlan.PickUp pickUp -> {
+                doing = "从背包拿起" + terminalItemId;
+                yield click(pickUp.slotId(), raw);
+            }
+            case BindingPlan.PutIn putIn -> {
+                doing = "把" + terminalItemId + "放进绑定格";
+                yield click(putIn.slotId(), raw);
+            }
+            case BindingPlan.TakeCopy takeCopy -> {
+                doing = "从产出格取回绑定好的副本";
+                yield click(takeCopy.slotId(), raw);
+            }
+            case BindingPlan.PutDown putDown -> {
+                doing = "把绑定好的副本放回背包";
+                yield click(putDown.slotId(), raw);
+            }
             // 绑定格里有、副本还没来：服务端结算只要一两刻，等不到就是绑不上（终端绑不了、访问点没电）。
-            case BindingPlan.WaitCopy waitCopy -> ++copyWaited > COPY_WAIT_TICKS
+            case BindingPlan.WaitCopy waitCopy -> {
+                doing = "终端进了绑定格，等访问点把绑定好的副本放进产出格";
+                yield ++copyWaited > COPY_WAIT_TICKS
                     ? stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "终端放进绑定格后，"
                             + point.describe() + " 的产出格里一直没出现绑定好的副本，绑不上", null))
                     : ActionStatus.running();
+            }
             case BindingPlan.Finished finished -> {
+                doing = "绑定做好了，关上访问点的界面";
                 stage = Stage.CLOSE;
                 yield ActionStatus.progressed();
             }
@@ -188,6 +207,7 @@ public final class WirelessBinding implements Action {
 
     // 绑定做没做成都以身上的物品为准：绑定位置写在物品上，开过界面只是过程。
     private ActionStatus verify() {
+        doing = "按身上的物品核对绑定落上没有";
         PlayerContext player = services.context().get();
         if (player == null) return stopNow(Problem.of(Problem.Kind.STUCK, "角色不在世界里，核对不了绑定", null));
         if (compat.carriedWirelessTerminal(player.localPlayer()).filter(terminalItemId::equals).isEmpty()) {
@@ -231,6 +251,7 @@ public final class WirelessBinding implements Action {
     }
 
     @Override public String describe() {
-        return "在 " + point.describe() + " 绑定身上的" + terminalItemId;
+        // 报文写给看进度的人：绑定链走到哪一环、在等什么，一句话说清；点的哪一格、槽位号这类执行细节不写。
+        return "在 " + point.describe() + " 绑定身上的" + terminalItemId + "：" + doing;
     }
 }

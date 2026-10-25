@@ -82,23 +82,69 @@ public final class Ae2TerminalSource implements ItemSource {
         WorldPosition here = context.characterAt();
         Instant now = clock.get();
         BlockPos feet = new BlockPos(here.x(), here.y(), here.z());
-        // 身上的无线终端：带在身上就能开，比走去任何一台装着的终端都近，先报它。
-        Optional<String> wireless = terminals.carriedWireless();
-        if (wireless.isPresent()) {
-            return wirelessQuote(wireless.get(), request, now);
-        }
-        // 身上的无线终端还没绑定访问点：附近有访问点就报"先绑定再取"，没有就照旧只看装着的终端。
-        Optional<String> unbound = terminals.carriedUnboundWireless();
-        if (unbound.isPresent()) {
-            Optional<Ae2Terminals.AccessPoint> point = terminals.accessPointNear(feet, radius);
-            if (point.isPresent()) {
-                return bindingQuote(unbound.get(), point.get(), feet);
-            }
-        }
+        // 身上的无线终端与附近装着的终端分开读，报价怎么选交给纯函数按处境决定；
+        // 身上这台绑没绑上是一条游戏事实，无论走哪条路都写进报价说明，调用方看得出为什么这么走。
+        Optional<String> bound = terminals.carriedWireless();
+        Optional<String> unbound = bound.isEmpty() ? terminals.carriedUnboundWireless() : Optional.empty();
+        // 没绑的才需要找访问点：绑好的不需要再去绑。
+        Optional<Ae2Terminals.AccessPoint> point = unbound.isPresent()
+                ? terminals.accessPointNear(feet, radius) : Optional.empty();
         Predicate<String> wanted = itemId -> request.wanted().matches(itemId, services.itemTags().tagsOf(itemId));
         List<TerminalChooser.Candidate> candidates = terminals.around(feet, radius, context.permissions());
-        return quoteFrom(TerminalChooser.choose(candidates, wanted, request.wanted().describe(), radius),
-                request, describe(), now);
+        return quoteGiven(new CarriedWireless(bound, unbound, point),
+                TerminalChooser.choose(candidates, wanted, request.wanted().describe(), radius),
+                request, feet, seen.lastSeenWireless(now), wanted, radius, now);
+    }
+
+    /**
+     * 报价时身上的无线终端是什么处境：绑好的直接拿出来开；还没绑的、附近有访问点就先绑定再取；
+     * 还没绑而附近又没有访问点的，落到装着的终端上，说明里写明身上这台为什么这次用不上。
+     * 纯函数，不读世界也不动手；身上的处境从联动入口的绑定读数来，只此一份判定。
+     *
+     * @param carried  身上的无线终端：绑好的物品 ID、还没绑的物品 ID、附近最近的无线访问点
+     * @param placed   附近装着的终端里挑出的结论；身上没带绑好的终端时才用得上
+     */
+    static SourceQuote quoteGiven(CarriedWireless carried, TerminalChooser.Choice placed, ItemRequest request,
+            BlockPos characterAt, Optional<SeenNetworkStock.Sighting> lastTimeWireless, Predicate<String> wanted,
+            int radius, Instant now) {
+        // 绑好的随身终端：不用走路就能开，比走去任何一台装着的终端都近，先报它。
+        if (carried.bound().isPresent()) {
+            return wirelessQuote(carried.bound().get(), request, lastTimeWireless, wanted);
+        }
+        if (carried.unbound().isPresent()) {
+            // 附近有访问点：先走到它跟前把终端绑上，再打开看网络里有没有。
+            if (carried.accessPoint().isPresent()) {
+                return bindingQuote(carried.unbound().get(), carried.accessPoint().get(), characterAt);
+            }
+            // 附近没有访问点能绑：这次只能落到装着的终端上，但要把"身上这台为什么用不上"讲出来，
+            // 免得调用方看着角色带着终端却跑回固定终端，不知道是没绑上还是没带上。
+            return withNote(quoteFrom(placed, request, "ME 终端", now),
+                    "身上的" + carried.unbound().get() + "还没绑定访问点，附近 " + radius
+                            + " 格内也没有无线访问点能绑，这次不从它取");
+        }
+        return quoteFrom(placed, request, "ME 终端", now);
+    }
+
+    // 给报价补一句身上的无线终端的处境：报价照旧，说明变长，不改变给不给、给多少。
+    private static SourceQuote withNote(SourceQuote quote, String note) {
+        if (quote instanceof SourceQuote.Offer offer) {
+            return new SourceQuote.Offer(offer.source(), offer.obtainableCount(), offer.cost(),
+                    offer.risk() + "；" + note, offer.hint());
+        }
+        if (quote instanceof SourceQuote.Unavailable unavailable) {
+            return new SourceQuote.Unavailable(unavailable.source(), unavailable.reason() + "；" + note);
+        }
+        return quote;
+    }
+
+    /** 报价时身上无线终端的处境：绑好的物品 ID、还没绑的物品 ID、附近最近的无线访问点。 */
+    record CarriedWireless(Optional<String> bound, Optional<String> unbound,
+            Optional<Ae2Terminals.AccessPoint> accessPoint) {
+        CarriedWireless {
+            bound = Objects.requireNonNull(bound, "bound");
+            unbound = Objects.requireNonNull(unbound, "unbound");
+            accessPoint = Objects.requireNonNull(accessPoint, "accessPoint");
+        }
     }
 
     /**
