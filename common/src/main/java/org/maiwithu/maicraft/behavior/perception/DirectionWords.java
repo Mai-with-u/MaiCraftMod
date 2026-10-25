@@ -9,7 +9,8 @@ import java.util.List;
  * <p>相对朝向按角色脸的方向分成八个词（前方、右前方、右侧、右后方、后方、左后方、左侧、左前方），
  * 东南西北按世界坐标分成八个词（北、东北、东、东南、南、西南、西、西北）；两者都给，
  * 用的人挑顺口的。距离与高低差也在这里给词：声音之类给不出精确数字的用远近档位，
- * 看得见的直接给格数。
+ * 看得见的直接给格数。要把相对朝向、罗盘方位与距离一起报时，
+ * 用 {@link Bearing} 一次算好，别在调用方里重摆三角函数。
  */
 public final class DirectionWords {
 
@@ -62,6 +63,77 @@ public final class DirectionWords {
             return "同高";
         }
         return dy > 0 ? "高" + dy + "格" : "低" + (-dy) + "格";
+    }
+
+    /**
+     * 方位三元组：相对朝向词、罗盘方位词、距离（格）一次算好。观察整理与详情视图都从这里取，
+     * 不再各自展开同一套三角函数；声音给不出精确格数，拿 {@link #nearness()} 取远近档位。
+     */
+    public static final class Bearing {
+
+        private final String direction;
+        private final String compass;
+        private final double blocks;
+
+        private Bearing(String direction, String compass, double blocks) {
+            this.direction = direction;
+            this.compass = compass;
+            this.blocks = blocks;
+        }
+
+        public String direction() {
+            return direction;
+        }
+
+        public String compass() {
+            return compass;
+        }
+
+        /** 距离（格）：四舍五入取整。 */
+        public int distance() {
+            return (int) Math.round(blocks);
+        }
+
+        /** 远近档位：声音之类给不出精确格数的用，按未取整的距离分档。 */
+        public String nearness() {
+            return distanceWord(blocks);
+        }
+
+        /**
+         * 观察整理的统一入口（多数派口径）：目标与角色都按各自所在方块取整来算偏移——
+         * 观察接缝交来的本来就是方块位置，角色取脚下方块。实体、设施、告示牌都走这条，距离含高低差。
+         */
+        public static Bearing byBlock(double selfX, double selfY, double selfZ, float facingYaw,
+                                      int targetX, int targetY, int targetZ) {
+            return of(targetX - Math.floor(selfX), targetY - Math.floor(selfY), targetZ - Math.floor(selfZ),
+                    facingYaw);
+        }
+
+        /** 水平的一版：地物与声音只按水平距离说，不含高低差，取整口径同 {@link #byBlock}。 */
+        public static Bearing byBlockFlat(double selfX, double selfZ, float facingYaw, int targetX, int targetZ) {
+            return of(targetX - Math.floor(selfX), 0, targetZ - Math.floor(selfZ), facingYaw);
+        }
+
+        /**
+         * 目标按方块中心量（+0.5 修正）的一版：模组的东西与记住的地标实机一直按这个口径报，
+         * 数值已由金样测试钉住。收拢时把这套口径原样落在这里写明，
+         * 不再让两种取整写法在调用方里悄悄分叉；距离含高低差。
+         */
+        public static Bearing byBlockCenter(double selfX, double selfY, double selfZ, float facingYaw,
+                                            int targetX, int targetY, int targetZ) {
+            return of(targetX + 0.5 - selfX, targetY + 0.5 - selfY, targetZ + 0.5 - selfZ, facingYaw);
+        }
+
+        /** 同 {@link #byBlockCenter}，只算水平距离：记住的地标与记忆条目都用它。 */
+        public static Bearing byBlockCenterFlat(double selfX, double selfZ, float facingYaw,
+                                                int targetX, int targetZ) {
+            return of(targetX + 0.5 - selfX, 0, targetZ + 0.5 - selfZ, facingYaw);
+        }
+
+        private static Bearing of(double dx, double dy, double dz, float facingYaw) {
+            return new Bearing(relative(dx, dz, facingYaw), compassOf(dx, dz),
+                    Math.sqrt(dx * dx + dy * dy + dz * dz));
+        }
     }
 
     // 游戏的角色视角角转脸的方向向量：0 朝南（+Z），顺时针增大，90 朝西（-X）。

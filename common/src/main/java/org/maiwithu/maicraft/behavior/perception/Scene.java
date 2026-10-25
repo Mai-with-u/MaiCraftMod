@@ -79,16 +79,16 @@ public final class Scene {
         }
         List<SceneEntity> next = new ArrayList<>();
         for (EntitySight.Observation sighting : sightings) {
-            int dx = sighting.position().x() - (int) Math.floor(self.x());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(self.x(), self.y(), self.z(),
+                    self.facingYaw(), sighting.position().x(), sighting.position().y(), sighting.position().z());
+            // 高低差单独带着：实体条目还要报"高几格、低几格"。
             int dy = sighting.position().y() - (int) Math.floor(self.y());
-            int dz = sighting.position().z() - (int) Math.floor(self.z());
-            double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            String direction = bearing.direction();
             String id = ids.entity(sighting.entityId(),
                     WorldPosition.here(sighting.position().x(), sighting.position().y(), sighting.position().z()),
                     direction, nowTick);
             next.add(new SceneEntity(id, sighting.type(), sighting.name(),
-                    direction, DirectionWords.compassOf(dx, dz), (int) Math.round(distance), dy,
+                    direction, bearing.compass(), bearing.distance(), dy,
                     sighting.visible(), sighting.hostile(), sighting.targetingMe(),
                     sighting.health(), sighting.traits()));
         }
@@ -102,12 +102,9 @@ public final class Scene {
         }
         List<HeardSound> next = new ArrayList<>();
         for (SubtitleEar.Event event : events) {
-            int dx = event.approximatePosition().x() - (int) Math.floor(self.x());
-            int dz = event.approximatePosition().z() - (int) Math.floor(self.z());
-            double distance = Math.sqrt(dx * dx + dz * dz);
-            next.add(new HeardSound(event.kind(),
-                    DirectionWords.relative(dx, dz, self.facingYaw()),
-                    DirectionWords.distanceWord(distance)));
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockFlat(self.x(), self.z(), self.facingYaw(),
+                    event.approximatePosition().x(), event.approximatePosition().z());
+            next.add(new HeardSound(event.kind(), bearing.direction(), bearing.nearness()));
         }
         heard = List.copyOf(next);
     }
@@ -123,13 +120,12 @@ public final class Scene {
         }
         List<TerrainFeature> next = new ArrayList<>();
         for (FeatureSpotter.Marked marked : FeatureSpotter.spot(view)) {
-            int dx = marked.center().x() - (int) Math.floor(self.x());
-            int dz = marked.center().z() - (int) Math.floor(self.z());
-            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockFlat(self.x(), self.z(), self.facingYaw(),
+                    marked.center().x(), marked.center().z());
+            String direction = bearing.direction();
             String id = ids.feature(marked.center(), direction, nowTick);
             next.add(new TerrainFeature(id, marked.kind(), marked.center(),
-                    direction, DirectionWords.compassOf(dx, dz),
-                    (int) Math.round(Math.sqrt((double) dx * dx + (double) dz * dz)),
+                    direction, bearing.compass(), bearing.distance(),
                     "约" + marked.cells() + "格"));
             if ("树林".equals(marked.kind())) {
                 memory.siteSeen(marked.center(), List.of("木头"), when);
@@ -148,14 +144,12 @@ public final class Scene {
         }
         List<FacilitySighting> next = new ArrayList<>();
         for (NearbyBlocksSight.BlockSighting sighting : sightings) {
-            int dx = sighting.position().x() - (int) Math.floor(self.x());
-            int dy = sighting.position().y() - (int) Math.floor(self.y());
-            int dz = sighting.position().z() - (int) Math.floor(self.z());
-            double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(self.x(), self.y(), self.z(),
+                    self.facingYaw(), sighting.position().x(), sighting.position().y(), sighting.position().z());
+            String direction = bearing.direction();
             String id = ids.facility(sighting.position(), direction, nowTick);
             next.add(new FacilitySighting(id, sighting.blockType(), sighting.position(),
-                    direction, DirectionWords.compassOf(dx, dz), (int) Math.round(distance)));
+                    direction, bearing.compass(), bearing.distance()));
             if (kinds.isContainer(sighting.blockType())) {
                 memory.containerSeen(sighting.position(), sighting.blockType(), when);
             } else if (kinds.isWorkstation(sighting.blockType())) {
@@ -175,13 +169,11 @@ public final class Scene {
         }
         List<SceneSign> next = new ArrayList<>();
         for (NearbyBlocksSight.SignSighting sighting : sightings) {
-            int dx = sighting.position().x() - (int) Math.floor(self.x());
-            int dy = sighting.position().y() - (int) Math.floor(self.y());
-            int dz = sighting.position().z() - (int) Math.floor(self.z());
-            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(self.x(), self.y(), self.z(),
+                    self.facingYaw(), sighting.position().x(), sighting.position().y(), sighting.position().z());
+            String direction = bearing.direction();
             next.add(new SceneSign(ids.facility(sighting.position(), direction, nowTick), sighting.blockType(),
-                    sighting.position(), direction, DirectionWords.compassOf(dx, dz),
-                    (int) Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz)), sighting.lines()));
+                    sighting.position(), direction, bearing.compass(), bearing.distance(), sighting.lines()));
         }
         next.sort(Comparator.comparingInt(SceneSign::distance));
         signs = List.copyOf(next);
@@ -197,10 +189,9 @@ public final class Scene {
         }
         List<SceneThing> next = new ArrayList<>();
         for (ModThing thing : sightings) {
-            double dx = thing.position().x() + 0.5 - self.x();
-            double dy = thing.position().y() + 0.5 - self.y();
-            double dz = thing.position().z() + 0.5 - self.z();
-            String direction = DirectionWords.relative(dx, dz, self.facingYaw());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockCenter(self.x(), self.y(), self.z(),
+                    self.facingYaw(), thing.position().x(), thing.position().y(), thing.position().z());
+            String direction = bearing.direction();
             String id = switch (thing.identity()) {
                 case BLOCK -> ids.facility(thing.position(), direction, nowTick);
                 case ENTITY -> entityId(thing.key()) == null ? null
@@ -208,8 +199,8 @@ public final class Scene {
                 case STRUCTURE -> ids.structure(thing.key(), thing.position(), direction, nowTick);
             };
             if (id == null) continue;
-            next.add(new SceneThing(id, thing.category(), thing.position(), direction, DirectionWords.compassOf(dx, dz),
-                    (int) Math.round(Math.sqrt(dx * dx + dy * dy + dz * dz)), thing.summary(), thing.detail()));
+            next.add(new SceneThing(id, thing.category(), thing.position(), direction, bearing.compass(),
+                    bearing.distance(), thing.summary(), thing.detail()));
         }
         next.sort(Comparator.comparingInt(SceneThing::distance));
         things = List.copyOf(next);

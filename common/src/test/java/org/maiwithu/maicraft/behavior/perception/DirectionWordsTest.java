@@ -57,4 +57,46 @@ class DirectionWordsTest {
         assertEquals("高3格", DirectionWords.heightWord(3));
         assertEquals("低2格", DirectionWords.heightWord(-2));
     }
+
+    @Test
+    void bearingTripletComputesAllThreeAtOnce() {
+        // 角色在 (0.5, 64, 0.5) 脸朝北，目标所在方块 (3, 66, -4)：两边按所在方块取整，距离含高低差。
+        DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(
+                0.5, 64, 0.5, 180f, 3, 66, -4);
+        assertEquals("右前方", bearing.direction());
+        assertEquals("东北", bearing.compass());
+        assertEquals(5, bearing.distance());
+    }
+
+    @Test
+    void bearingFlatLeavesHeightOutOfTheDistance() {
+        // 只算水平：目标 (0, -5) 正北 5 格，高低差再大也不进距离。
+        DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockFlat(0.5, 0.5, 180f, 0, -5);
+        assertEquals("前方", bearing.direction());
+        assertEquals("北", bearing.compass());
+        assertEquals(5, bearing.distance());
+    }
+
+    @Test
+    void bearingByBlockCenterMeasuresFromTheBlockCenter() {
+        // 目标按方块中心量（+0.5）：目标方块 (4, 64, -1) 的中心离角色 (0.5, 64, 0.5) 约 4.15 格。
+        DirectionWords.Bearing center = DirectionWords.Bearing.byBlockCenter(
+                0.5, 64, 0.5, 180f, 4, 64, -1);
+        assertEquals("右侧", center.direction());
+        assertEquals("东", center.compass());
+        assertEquals(4, center.distance());
+        // 只算水平的一版同一口径：目标 (2, 64, 5) 的中心在 (2.5, 5.5)。
+        DirectionWords.Bearing flat = DirectionWords.Bearing.byBlockCenterFlat(0.5, 0.5, 180f, 2, 5);
+        assertEquals("后方", flat.direction());
+        assertEquals("南", flat.compass());
+        assertEquals(5, flat.distance());
+    }
+
+    @Test
+    void bearingNearnessBandsTheUnroundedDistance() {
+        // 水平约 4.47 格：取整是 4，但远近档位按未取整的距离分档，落"近处"不落"很近"。
+        DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockFlat(0.5, 0.5, 180f, -4, -2);
+        assertEquals(4, bearing.distance());
+        assertEquals("近处", bearing.nearness());
+    }
 }

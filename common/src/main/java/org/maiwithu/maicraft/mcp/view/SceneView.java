@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.view;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.SceneThing;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.HeardSound;
@@ -190,11 +191,10 @@ public final class SceneView {
         return json;
     }
 
-    /** 两点之间的水平距离（格），取整。 */
+    /** 两点之间的水平距离（格），取整：与地标详情同一套口径，换算收在方位三元组里写一份。 */
     static int distance(SceneSelf self, WorldPosition target) {
-        double dx = target.x() + 0.5 - self.x();
-        double dz = target.z() + 0.5 - self.z();
-        return (int) Math.round(Math.sqrt(dx * dx + dz * dz));
+        return DirectionWords.Bearing.byBlockCenterFlat(self.x(), self.z(), self.facingYaw(),
+                target.x(), target.z()).distance();
     }
 
     static String lower(Enum<?> value) {

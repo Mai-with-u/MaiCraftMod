@@ -92,11 +92,11 @@ public final class DetailView {
         json.addProperty("landmark", name);
         json.add("position", SceneView.position(position));
         if (self != null) {
-            double dx = position.x() + 0.5 - self.x();
-            double dz = position.z() + 0.5 - self.z();
-            json.addProperty("direction", DirectionWords.relative(dx, dz, self.facingYaw()));
-            json.addProperty("compass", DirectionWords.compassOf(dx, dz));
-            json.addProperty("distance", SceneView.distance(self, position));
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockCenterFlat(self.x(), self.z(),
+                    self.facingYaw(), position.x(), position.z());
+            json.addProperty("direction", bearing.direction());
+            json.addProperty("compass", bearing.compass());
+            json.addProperty("distance", bearing.distance());
         }
         return json;
     }
