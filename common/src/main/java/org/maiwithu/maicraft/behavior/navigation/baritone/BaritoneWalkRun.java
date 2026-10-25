@@ -106,6 +106,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final PartialRouteWatch partialRoute = new PartialRouteWatch();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
     private boolean replanWhenSafe;
+    /** 算路时长上限：连续算路太久仍没有可走的路线就如实收场，不让调用方把死掉的算路当成还在算。 */
+    private final PlanningCeiling planningCeiling = new PlanningCeiling();
     /** 引擎本刻请求的按键是否读出来过；用于区分排队与真正在走。 */
     private boolean engineFailedPath;
     private boolean activated;
@@ -281,6 +283,8 @@ final class BaritoneWalkRun implements WalkRun {
         goal = next.goal();
         engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         partialRoute.reset();
+        // 换了目标是一次新的算路：上限重新起算，不把上一个目标耗掉的时间算到新目标头上。
+        planningCeiling.restart();
         progress.retarget(goal);
         probe.cancel();
         probe = new TerrainProbe(engineGoal, permit);
@@ -341,7 +345,7 @@ final class BaritoneWalkRun implements WalkRun {
         if (resumed) {
             // 刚从停稳里续走：这一刻按原目标重新上路，进展计时重新起算，停半路的旧路线与等待作废。
             resumed = false;
-            displacement.restart(context.clientTick());
+            replannedFrom(context.clientTick());
             partialRoute.reset();
             transientRetries = 0;
             replanWhenSafe = false;
@@ -376,6 +380,14 @@ final class BaritoneWalkRun implements WalkRun {
         watchProgress(context, player, engine, routePresent, calculating || probe.waiting(), feet);
         progress.observe(new WalkRunProgress.Observation(
                 feet, onGround, inWater, routePresent, calculating, noPath, calcError));
+        // 引擎连续算路超过上限仍没有可走的路线：不再干等，按走不下去如实收场，把起点身体状态
+        // （在水里、悬空、脚下方块）写进问题——起点体素状态别扭时引擎会一轮轮重算不出结论，
+        // 调用方要能区分「还在算」与「已经死在算路里」。上限只记引擎真在算的刻，挪垫料、等障碍的空档不算。
+        if (!progress.done() && planningCeiling.observe(
+                progress.report().state() != WalkReport.State.PLANNING, calculating)) {
+            progress.fail(PlanningCeiling.timeoutProblem(
+                    context.level(), feet, inWater, onGround, planningCeiling.accruedTicks()), feet);
+        }
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
         if (progress.stopRequested() && onGround && pathing.isSafeToCancel()) {
@@ -481,11 +493,17 @@ final class BaritoneWalkRun implements WalkRun {
         }
     }
 
+    // 一次自我修正的重新算路：位移与算路上限都重新记账；这些路数自己有次数上限，上限不替它们收场。
+    private void replannedFrom(long tick) {
+        displacement.restart(tick);
+        planningCeiling.restart();
+    }
+
     // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
     private void resumeAfterHuman(IBaritone engine, PlayerContext context) {
         if (!routeDropped) return;
         routeDropped = false;
-        displacement.restart(context.clientTick());
+        replannedFrom(context.clientTick());
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
     }
 
@@ -626,7 +644,7 @@ final class BaritoneWalkRun implements WalkRun {
             transientRetries++;
             engineFailedPath = false;
             engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
-            displacement.restart(tick);
+            replannedFrom(tick);
             return false;
         }
         // 卡在坑里：不等复算也不等 LLM 放宽许可，按"搭 → 挖"升一级重新算路；已经升到头还是没路就按走不通收场。
@@ -637,7 +655,7 @@ final class BaritoneWalkRun implements WalkRun {
             case WAITING -> false;
             case RESTART -> {
                 engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
-                displacement.restart(tick);
+                replannedFrom(tick);
                 yield false;
             }
         };
@@ -655,7 +673,7 @@ final class BaritoneWalkRun implements WalkRun {
         owner.applyTerrain(this);
         engineFailedPath = false;
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
-        displacement.restart(tick);
+        replannedFrom(tick);
         return true;
     }
 
