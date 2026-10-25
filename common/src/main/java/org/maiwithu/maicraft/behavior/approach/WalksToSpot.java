@@ -13,8 +13,12 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public interface WalksToSpot {
 
-    /** 开始走向这个站位；换目标前先停掉上一次的走向。 */
-    void begin(BlockPos feet);
+    /**
+     * 开始走向这个站位；换目标前先停掉上一次的走向。
+     * {@code wetSpot} 标记这是浅水湿脚位（骑上载具才有的候选）：水里那一格寻路给不出
+     * 「站进去」的路线，走到够得着它的位置就算到，不要求把身体放进水里。
+     */
+    void begin(BlockPos feet, boolean wetSpot);
 
     /** 推进一刻：站进目标格并落地是做完，还在走是进行中，这条路走不了是失败。 */
     ActionStatus tick(TickContext context);

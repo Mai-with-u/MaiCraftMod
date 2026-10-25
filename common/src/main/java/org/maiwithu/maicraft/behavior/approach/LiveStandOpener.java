@@ -152,7 +152,7 @@ final class LiveStandOpener implements StandOpener {
             last = player;
             if (!arrived) {
                 if (!walkStarted) {
-                    walks.begin(feet);
+                    walks.begin(feet, false);
                     walkStarted = true;
                 }
                 ActionStatus walking = walks.tick(tick);

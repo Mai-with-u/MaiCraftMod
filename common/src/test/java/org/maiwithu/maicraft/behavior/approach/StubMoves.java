@@ -36,7 +36,7 @@ final class StubMoves implements WalksToSpot {
         for (ActionStatus status : steps) script.add(status);
     }
 
-    @Override public void begin(BlockPos feet) {
+    @Override public void begin(BlockPos feet, boolean wetSpot) {
         begun.add(feet);
         heading = feet;
     }

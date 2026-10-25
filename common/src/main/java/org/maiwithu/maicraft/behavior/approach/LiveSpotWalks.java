@@ -28,6 +28,8 @@ public final class LiveSpotWalks implements WalksToSpot {
     private WalkRun walk;
     /** 要站进的那一格：被打断后从原地重新上路时还去这里。 */
     private BlockPos feet;
+    /** 这一格是浅水湿脚位：走到够得着它的位置就算到，寻路不要求站进水里。 */
+    private boolean wetSpot;
     /** 被打断过：走到停稳后报的"已停下"不是到了，要重新上路。 */
     private boolean paused;
     /** 被叫先到安全处再停、走路说要先落地：落地报的"已停下"原地等着，不马上重新上路；暂停时清掉。 */
@@ -40,11 +42,18 @@ public final class LiveSpotWalks implements WalksToSpot {
     }
 
     @Override
-    public void begin(BlockPos feet) {
+    public void begin(BlockPos feet, boolean wetSpot) {
         // 换目标前先把上一次的走向收尾、交出身体，新的一趟才上得了路。
         stop();
         this.feet = feet;
-        walk = walks.start(GoalCompiler.standOn(feet), permit);
+        this.wetSpot = wetSpot;
+        walk = walks.start(goalFor(feet, wetSpot), permit);
+    }
+
+    // 湿脚位是水里的格子，寻路给不出「站进去」的路线：走到够得着这一格的位置就算到；
+    // 干的站位照旧要求站进格子并落地。
+    private static GoalCompiler.Compiled goalFor(BlockPos feet, boolean wetSpot) {
+        return wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet);
     }
 
     @Override
@@ -58,7 +67,7 @@ public final class LiveSpotWalks implements WalksToSpot {
             // 被打断时走到停稳了、报的是"已停下"：不是到了，从原地重新上路去同一格。
             paused = false;
             walk.close();
-            walk = walks.start(GoalCompiler.standOn(feet), permit);
+            walk = walks.start(goalFor(feet, wetSpot), permit);
             return ActionStatus.running();
         }
         if (!(status instanceof ActionStatus.Running)) paused = false;

@@ -152,7 +152,8 @@ public final class Approach implements Action {
     private ActionStatus takeNextSpot() {
         current = pending.poll();
         if (current != null) {
-            moves.begin(current.feet());
+            // 湿脚位不要求站进水里：水里那一格寻路站不进去，走到够得着它的位置就算到。
+            moves.begin(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
             stage = Stage.WALKING;
             return ActionStatus.progressed();
         }

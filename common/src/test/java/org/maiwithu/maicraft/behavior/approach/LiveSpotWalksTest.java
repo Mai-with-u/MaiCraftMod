@@ -66,14 +66,16 @@ class LiveSpotWalksTest {
     void 被打断后重新上路去同一格() {
         List<FakeRun> runs = new ArrayList<>();
         List<TerrainPermit> permits = new ArrayList<>();
+        List<GoalCompiler.Compiled> goals = new ArrayList<>();
         WalkTo walks = (target, permit) -> {
             FakeRun run = new FakeRun();
             runs.add(run);
             permits.add(permit);
+            goals.add(target);
             return run;
         };
         LiveSpotWalks spot = new LiveSpotWalks(walks, TerrainPermit.WALK_ONLY);
-        spot.begin(new BlockPos(3, 64, 3));
+        spot.begin(new BlockPos(3, 64, 3), false);
         assertTrue(spot.tick(null) instanceof ActionStatus.Running);
         spot.pause();
         assertTrue(spot.tick(null) instanceof ActionStatus.Running, "停下不是到了");
@@ -92,7 +94,7 @@ class LiveSpotWalksTest {
             return run;
         };
         LiveSpotWalks spot = new LiveSpotWalks(walks, TerrainPermit.WALK_ONLY);
-        spot.begin(new BlockPos(3, 64, 3));
+        spot.begin(new BlockPos(3, 64, 3), false);
         assertTrue(spot.tick(null) instanceof ActionStatus.Running);
         assertEquals(Interruptibility.UNSAFE_TO_STOP, spot.interruptibility(), "悬空走着停不得");
 
@@ -107,5 +109,27 @@ class LiveSpotWalksTest {
         spot.pause();
         assertTrue(spot.tick(null) instanceof ActionStatus.Running);
         assertEquals(2, runs.size(), "暂停过后从原地重新上路去同一格");
+    }
+
+    @Test
+    void 湿脚位走到够得着就算到_干的站位照旧站进格子() {
+        List<GoalCompiler.Compiled> goals = new ArrayList<>();
+        WalkTo walks = (target, permit) -> {
+            goals.add(target);
+            return new FakeRun();
+        };
+        LiveSpotWalks spot = new LiveSpotWalks(walks, TerrainPermit.WALK_ONLY);
+        BlockPos water = new BlockPos(3, 63, 3);
+
+        // 湿脚位：水里的格子寻路站不进去，走到够得着它的位置就算到（邻格也算到）。
+        spot.begin(water, true);
+        assertTrue(goals.getLast().goal().isAt(water.north()), "邻格就算到：不必站进水里那一格");
+        assertFalse(goals.getLast().goal().getClass().getSimpleName().equals("Exact"),
+                "湿脚位不用「站进指定格」的目标");
+
+        // 干的站位：照旧要求站进那一格。
+        spot.begin(new BlockPos(3, 64, 3), false);
+        assertTrue(goals.getLast().goal().isAt(new BlockPos(3, 64, 3)), "干站位要站进格子");
+        assertFalse(goals.getLast().goal().isAt(new BlockPos(3, 64, 3).north()), "邻格不算到");
     }
 }
