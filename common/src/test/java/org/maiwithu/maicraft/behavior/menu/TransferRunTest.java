@@ -281,6 +281,44 @@ class TransferRunTest {
     }
 
     @Test
+    void 交易结果格按输入扣减与货到光标结算() {
+        FakeMenu menu = new FakeMenu();
+        menu.container.add(new ItemStack(Items.EMERALD, 4));
+        menu.container.add(ItemStack.EMPTY);
+        menu.container.add(new ItemStack(Items.BREAD, 1));
+        for (int i = 0; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(2, false, 0, true)),
+                new Check.TradeResult(2, 1, snapshot -> snapshot.stack().is(Items.BREAD),
+                        List.of(new Check.PaymentSlot(0, 4))),
+                "向村民买一个面包"));
+        assertEquals(Optional.empty(), settleTo(run), "点击发出去了，输入格还没扣：还没到结论");
+        // 付款格扣了 4 个绿宝石、面包到了光标上：结清，报这一笔应得的件数。
+        menu.container.set(0, ItemStack.EMPTY);
+        menu.container.set(2, ItemStack.EMPTY);
+        menu.cursor = new ItemStack(Items.BREAD, 1);
+        assertEquals(new MoveResult.Confirmed(1), settleTo(run).orElseThrow());
+    }
+
+    @Test
+    void 交易结果格没扣输入不冒充成交() {
+        FakeMenu menu = new FakeMenu();
+        menu.container.add(new ItemStack(Items.EMERALD, 4));
+        menu.container.add(ItemStack.EMPTY);
+        menu.container.add(new ItemStack(Items.BREAD, 1));
+        for (int i = 0; i < 36; i++) menu.player.add(ItemStack.EMPTY);
+        TransferRun run = new TransferRun(menu);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(2, false, 0, true)),
+                new Check.TradeResult(2, 1, snapshot -> snapshot.stack().is(Items.BREAD),
+                        List.of(new Check.PaymentSlot(0, 4))),
+                "向村民买一个面包"));
+        settleTo(run);
+        // 付款格一直没扣：宽限到点承认没动，不把点了个空结果格冒充成成交。
+        for (int i = 0; i < 5; i++) assertEquals(Optional.empty(), settleTo(run), "宽限内还没到结论");
+        assertEquals(MoveResult.NotMoved.NOT_MOVED, settleTo(run).orElseThrow());
+    }
+
+    @Test
     void 没能确认的绝不自己重发() {
         FakeMenu menu = new FakeMenu();
         menu.container.add(new ItemStack(Items.COBBLESTONE, 64));

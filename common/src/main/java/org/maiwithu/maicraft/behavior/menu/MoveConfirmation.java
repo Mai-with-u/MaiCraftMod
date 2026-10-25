@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.menu;
 
+import java.util.List;
+import java.util.function.Predicate;
+
 /**
  * 搬运确认：一笔搬运有没有结算的四种核对模式，纯函数。
  *
@@ -16,6 +19,10 @@ package org.maiwithu.maicraft.behavior.menu;
  * <p>存进容器按"容器侧配对总数增长 + 光标空"结算：整堆快速移动落到哪格不定，只看容器那一侧
  * 同种东西的总数；背包侧少了多少不在这里判——放进容器又立刻被下面的溜槽、漏斗抽走时，
  * 容器侧只多出一部分，差额由调用方拿自己冻结的前值对照后照实交代。
+ *
+ * <p>交易结果格按"动手前结果格装着应得的成品 + 输入格按报价扣减 + 货到光标上"结算：点结果格取的是
+ * 游戏现做的一笔，输入格被扣减多少就是这笔成交的凭据，光标上拿到的是货本身；结果格自己不参与
+ * 结算后的核对——成交后服务端可能把界面换成新的一页，按旧页冻结的样子对结果格只会对不上。
  */
 public final class MoveConfirmation {
 
@@ -108,6 +115,37 @@ public final class MoveConfirmation {
         if (!cursorEmpty) return Verdict.WAITING;
         if (out > 0 && in >= 0 && in <= out) return Verdict.CONFIRMED;
         return Verdict.DIVERGED;
+    }
+
+    /**
+     * 交易结果格：动手前结果格装着应得的成品、每个输入格恰好扣减 amount、光标上拿到了货，就算结算。
+     * 输入格的扣减是这笔成交的凭据：只扣一部分说明同步还没到，继续等；动得不对（扣多了、换了东西）
+     * 说明现场出了岔子，宁可承认对不上。输入扣齐了但光标还空着：回显或换页（成交后服务端可能换一份
+     * 菜单，见 PageSwaps）还在路上，等它到；宽限到点仍空着就按没动交回，与点了个空结果格分不开。
+     * 动手前结果格装的不是应得的成品是对不上：这笔的前提就不成立，不冒充成交。
+     *
+     * @param resultBefore   动手前结果格的样子
+     * @param paymentsBefore 动手前各输入格的样子，与 paymentsNow 按位对应
+     * @param paymentsNow    此刻各输入格的样子
+     * @param amounts        每格输入按报价要扣减的件数，与输入格按位对应
+     * @param deserved       结果格装的算不算这条报价应得的成品
+     * @param cursorEmpty    光标上是否已拿到货（光标为空就是还没拿到）
+     */
+    public static Verdict tradeResult(SlotSnapshot resultBefore, List<SlotSnapshot> paymentsBefore,
+                                      List<SlotSnapshot> paymentsNow, List<Integer> amounts,
+                                      Predicate<SlotSnapshot> deserved, boolean cursorEmpty) {
+        if (resultBefore.isEmpty() || !deserved.test(resultBefore)) return Verdict.DIVERGED;
+        boolean allDeducted = true;
+        boolean untouched = true;
+        for (int i = 0; i < amounts.size(); i++) {
+            SlotSnapshot before = paymentsBefore.get(i);
+            SlotSnapshot now = paymentsNow.get(i);
+            if (!decreasedExactly(before, now, amounts.get(i))) allDeducted = false;
+            if (!now.sameIdentity(before) || now.count() != before.count()) untouched = false;
+        }
+        if (allDeducted) return cursorEmpty ? Verdict.WAITING : Verdict.CONFIRMED;
+        // 输入格纹丝不动：同步还没到，再等；动了但没按报价扣齐：承认对不上。
+        return untouched ? Verdict.WAITING : Verdict.DIVERGED;
     }
 
     // 源格结算：同一种物品恰好少了 amount 件；整堆搬空后源格成了空格，也算恰好减少。

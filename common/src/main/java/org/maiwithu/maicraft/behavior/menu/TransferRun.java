@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.menu;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -48,6 +49,20 @@ public final class TransferRun {
         record IntoContainer(Predicate<SlotSnapshot> matched) implements Check {}
         /** 放下光标：光标整个空掉、目标格恰好多了光标上那么多件；源就是光标本身。 */
         record PutDown(int targetSlotId) implements Check {}
+        /**
+         * 交易结果格：点结果格取一笔货——动手前结果格装着应得的成品（deserved 对得上），
+         * 成交按每个输入格恰好扣减报价的件数、货到了光标上结算。服务端在成交后可能把界面换成新的一页
+         * （见 {@link PageSwaps}），换绑之后仍按同一批槽位号核对；换页路上读不到就照常等。
+         */
+        record TradeResult(int resultSlotId, int amount, Predicate<SlotSnapshot> deserved,
+                           List<PaymentSlot> payments) implements Check {
+            public TradeResult {
+                payments = List.copyOf(payments);
+            }
+        }
+
+        /** 交易的一格输入按报价要扣几件：格号与件数。 */
+        record PaymentSlot(int slotId, int amount) {}
     }
 
     /** 本刻推进的进展。 */
@@ -204,6 +219,17 @@ public final class TransferRun {
             case Check.PutDown(int targetSlotId) -> MoveConfirmation.normal(
                     before.cursor, before.slot(targetSlotId), menu.cursor(),
                     snapshot(reading, targetSlotId), before.cursor.count());
+            case Check.TradeResult(int resultSlotId, int ignored, Predicate<SlotSnapshot> deserved,
+                                   List<Check.PaymentSlot> payments) -> {
+                List<SlotSnapshot> paymentsBefore = new ArrayList<>();
+                List<SlotSnapshot> paymentsNow = new ArrayList<>();
+                for (Check.PaymentSlot payment : payments) {
+                    paymentsBefore.add(before.slot(payment.slotId()));
+                    paymentsNow.add(snapshot(reading, payment.slotId()));
+                }
+                yield MoveConfirmation.tradeResult(before.slot(resultSlotId), paymentsBefore, paymentsNow,
+                        payments.stream().map(Check.PaymentSlot::amount).toList(), deserved, menu.cursorEmpty());
+            }
         };
     }
 
@@ -219,6 +245,9 @@ public final class TransferRun {
         if (check instanceof Check.PutDown) return before.cursor.count();
         if (check instanceof Check.Normal(int ignored, int ignoredToo, int amount)) return amount;
         if (check instanceof Check.Machine(int ignored, int amount)) return amount;
+        if (check instanceof Check.TradeResult(int ignored, int amount,
+                                               Predicate<SlotSnapshot> ignoredPredicate,
+                                               List<Check.PaymentSlot> ignoredPayments)) return amount;
         throw new IllegalStateException("核对式到这里都有计划件数");
     }
 

@@ -13,11 +13,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 
+import java.util.List;
+import java.util.function.Predicate;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation.Verdict;
 
-/** 搬运确认：普通槽双侧精确增减；机器槽按源格确切减少加光标空结算；对不上不凑数。 */
+/** 搬运确认：普通槽双侧精确增减；机器槽按源格确切减少加光标空结算；交易结果格按输入扣减加货到光标结算；对不上不凑数。 */
 class MoveConfirmationTest {
 
     @BeforeAll
@@ -96,6 +99,36 @@ class MoveConfirmationTest {
         assertEquals(Verdict.DIVERGED, MoveConfirmation.intoBackpack(20, 15, true, 49));
         // 多出来的比计划还多：多出来的不是这一笔搬的，对不上。
         assertEquals(Verdict.DIVERGED, MoveConfirmation.intoBackpack(20, 100, true, 49));
+    }
+
+    @Test
+    void 交易结果格按输入扣减加货到光标结算() {
+        Predicate<SlotSnapshot> deserved = s -> s.sameIdentity(stone(1));
+        // 一个输入格：绿宝石换石头。动手前结果格装着石头，输入格恰好扣减，货到了光标上：结算。
+        assertEquals(Verdict.CONFIRMED, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(cobble(10)), List.of(2), deserved, false));
+        // 两格输入都按报价扣齐才算。
+        assertEquals(Verdict.CONFIRMED, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12), stone(4)), List.of(cobble(10), stone(3)), List.of(2, 1), deserved, false));
+        // 输入扣齐了光标还空着：回显或换页在路上，等它到。
+        assertEquals(Verdict.WAITING, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(cobble(10)), List.of(2), deserved, true));
+        // 输入格纹丝不动：同步还没到，等。
+        assertEquals(Verdict.WAITING, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(cobble(12)), List.of(2), deserved, true));
+        // 输入格只扣了一部分：动了但没按报价扣齐，对不上。
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(cobble(11)), List.of(2), deserved, false));
+        // 输入格扣得不对（多了、换了东西）：对不上。
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(cobble(5)), List.of(2), deserved, false));
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.tradeResult(
+                stone(1), List.of(cobble(12)), List.of(stone(10)), List.of(2), deserved, false));
+        // 动手前结果格装的不是应得的成品：前提不成立，对不上。
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.tradeResult(
+                cobble(1), List.of(cobble(12)), List.of(cobble(10)), List.of(2), deserved, false));
+        assertEquals(Verdict.DIVERGED, MoveConfirmation.tradeResult(
+                SlotSnapshot.empty(), List.of(cobble(12)), List.of(cobble(10)), List.of(2), deserved, false));
     }
 
     @Test
