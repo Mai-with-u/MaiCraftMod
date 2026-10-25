@@ -63,6 +63,8 @@ final class LiveFinder implements FindsAround {
     private final WorldMemory memory;
     /** 这次要找的方块按维度补登记进扫描索引：没登记的方块索引里查不到。 */
     private final ScanTargets registered;
+    /** 被视线闸挡下的候选账本：配额满不冒充扫完，看不见的位置排除后继续外推。 */
+    private final BlockedCandidates blocked = new BlockedCandidates();
     /** 上一轮所在维度：扫描中换世界，这轮作废，不冒充结论。 */
     private String lastDimension;
 
@@ -89,6 +91,8 @@ final class LiveFinder implements FindsAround {
         boolean changed = lastDimension != null && !lastDimension.equals(dimension);
         lastDimension = dimension;
         if (changed) {
+            // 换了世界旧账本全部作废：那边看不见的位置在这边没有意义。
+            blocked.followQuery(null, List.of(), -1, -1);
             return new Round(List.of(), false, true);
         }
         BlockPos center = player.blockPosition();
@@ -99,7 +103,11 @@ final class LiveFinder implements FindsAround {
         };
     }
 
-    /** 找方块：索引分刻给命中，复核实际状态、过视线闸，最近变化通道补查刚放下的。 */
+    /**
+     * 找方块：索引分刻给命中，复核实际状态、过视线闸，最近变化通道补查刚放下的。
+     * 索引侧先做六面暴露的粗筛再攒配额，埋着的候选不挤占名额；视线闸挡下的位置记进账本、
+     * 下一轮作为排除名单喂回索引继续往外扫——配额被看不见的候选占满时，"没找到"不冒充"扫完"。
+     */
     private Round scanBlocks(FindInput input, ClientLevel level, LocalPlayer player, BlockPos center) {
         Set<Block> targets = LiveWorldTypes.blocksOf(input.selectors());
         if (targets.isEmpty()) {
@@ -107,44 +115,54 @@ final class LiveFinder implements FindsAround {
             return new Round(List.of(), true, false);
         }
         registered.ensure(level, targets);
+        // 账本跟着查询走：位置、目标、数量、半径任一变了就清账重来。
+        blocked.followQuery(center, input.selectors(), input.count(), input.radius());
         var result = scans.query(level, center, targets, input.count(),
-                Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET);
+                Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET,
+                blocked.excluded(), false, true);
         List<Hit> hits = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         // 同一棵树的原木只数一次树冠：键是树干顶。
         Map<BlockPos, Boolean> trunks = new HashMap<>();
+        List<BlockPos> rejected = new ArrayList<>();
         for (BlockPos pos : result.hits()) {
-            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
+            if (!confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks)) {
+                // 过不了视线闸或不在半径里的候选记下：下一轮从配额竞争里排除，让后面的候选有机会入围。
+                rejected.add(pos);
+            }
         }
         // 刚放下的方块可能还没进扫描游标：最近同步的变化优先补查一遍，不能刚放下就找不到。
+        // 最近变化不在索引窗口里，失败不进账本——它下一刻自然会进索引，不该被旧名单提前排除。
         for (BlockPos pos : scans.recentWrites(level)) {
             confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
-        return new Round(List.copyOf(hits), result.complete(), false);
+        boolean complete = blocked.settle(result.complete(), hits.size(), input.count(), rejected);
+        return new Round(List.copyOf(hits), complete, false);
     }
 
-    /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收。 */
-    private void confirmBlock(ClientLevel level, LocalPlayer player, BlockPos pos, Set<Block> targets,
+    /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；没过的返回 false。 */
+    private boolean confirmBlock(ClientLevel level, LocalPlayer player, BlockPos pos, Set<Block> targets,
             BlockPos center, int radius, List<Hit> hits, Set<String> seen, Map<BlockPos, Boolean> trunks) {
         double dx = pos.getX() - center.getX();
         double dy = pos.getY() - center.getY();
         double dz = pos.getZ() - center.getZ();
         if (dx * dx + dy * dy + dz * dz > (double) radius * radius) {
-            return;
+            return false;
         }
         Block state = level.getBlockState(pos).getBlock();
         if (!targets.contains(state)) {
-            return;
+            return false;
         }
         // 视线被挡住的不是找到：等角色走近、看得见了再报。
         if (!ObservationVisibility.block(player, pos)) {
-            return;
+            return false;
         }
         if (seen.add(pos.getX() + "," + pos.getY() + "," + pos.getZ())) {
             String typeId = BuiltInRegistries.BLOCK.getKey(state).toString();
             hits.add(new Hit(FindInput.FindKind.BLOCK, typeId, WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()),
                     -1, false, null, treeTrait(level, pos, trunks)));
         }
+        return true;
     }
 
     // 原木写明长没长在树上：村里木屋的屋顶、地板，玩家搭的木屋、栅栏柱和树上的原木是同一种方块，

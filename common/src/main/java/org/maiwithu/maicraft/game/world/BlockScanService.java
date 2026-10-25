@@ -54,6 +54,13 @@ public final class BlockScanService {
         return index.query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, sourcesOnly);
     }
 
+    /** 同 {@link #query}；{@code exposedOnly} 时六面埋着的格子不参与最近候选竞争，先让有面露出的入围。 */
+    public TargetIndex.Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+                                    int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded,
+                                    boolean sourcesOnly, boolean exposedOnly) {
+        return index.query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, sourcesOnly, exposedOnly);
+    }
+
     /** 同 {@link #query}，不带排除位置与水源过滤。 */
     public TargetIndex.Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                     int want, int maxChunkRadius, int buildBudget) {

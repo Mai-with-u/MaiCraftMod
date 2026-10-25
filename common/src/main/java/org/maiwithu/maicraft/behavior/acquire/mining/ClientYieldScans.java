@@ -15,7 +15,6 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -85,15 +84,15 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         // 掉落线索点名的方块（模组矿这类，原版对照里没有）一并登记去找。
         Set<Block> told = toldBlocks(dropsFrom);
         targets.addAll(told);
-        List<BlockPos> hits = scan(targets, center, radiusBlocks, MINABLE_WANT);
+        List<BlockPos> hits = scan(targets, center, radiusBlocks, MINABLE_WANT, true);
         List<MinableSpot> spots = new ArrayList<>();
         PlayerContext current = context();
         // 同一根树干在一次扫描里只看一次树冠：键是树干顶。
         Map<BlockPos, Boolean> trunksChecked = new HashMap<>();
         for (BlockPos hit : hits) {
-            // 不透视：埋在石头里、六面都被实心方块挡着的先筛掉（便宜），露出来的再按观察同一套遮挡判断
+            // 埋在石头里、六面都被实心方块挡着的已在索引侧筛掉；露出来的再按观察同一套遮挡判断
             // 从眼睛看一眼；看不见的不算候选，要先下矿洞、挖开或走近。
-            if (!exposed(current.level(), hit) || !ObservationVisibility.block(current.localPlayer(), hit)) {
+            if (!ObservationVisibility.block(current.localPlayer(), hit)) {
                 continue;
             }
             // 只挖地图上自然长出来的：天然地形、矿石、长在树上的原木。机器零件、机壳、房子、平台、刷石机的圆石
@@ -194,7 +193,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         for (Block told : toldBlocks(dropsFrom)) {
             if (told instanceof CropBlock) targets.add(told);
         }
-        List<BlockPos> hits = scan(targets, center, radiusBlocks, WANT);
+        List<BlockPos> hits = scan(targets, center, radiusBlocks, WANT, false);
         List<CropSpot> spots = new ArrayList<>();
         for (BlockPos hit : hits) {
             BlockState state = context().level().getBlockState(hit);
@@ -207,7 +206,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     }
 
     // 登记目标并查索引：只留半径内的命中，由近及远；目标认不出或角色不在世界里时给空。
-    private List<BlockPos> scan(Set<Block> targets, WorldPosition center, int radiusBlocks, int want) {
+    // exposedOnly 时埋着六面不露的候选不进配额：它们更多也更近，不先筛会把露出来的挤出窗口。
+    private List<BlockPos> scan(Set<Block> targets, WorldPosition center, int radiusBlocks, int want,
+            boolean exposedOnly) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null || targets.isEmpty()) {
@@ -215,8 +216,12 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         }
         registered.ensure(level, targets);
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
-        var result = scans.query(level, at, targets, want,
-                Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET);
+        var result = exposedOnly
+                ? scans.query(level, at, targets, want,
+                        Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET,
+                        Set.of(), false, true)
+                : scans.query(level, at, targets, want,
+                        Math.max(1, Math.min(MAX_CHUNK_RADIUS, radiusBlocks / 16 + 1)), BUILD_BUDGET);
         // 没扫完时只拿到一部分：来源据此回答"再问"，不把没扫完当成没有。
         lastScanComplete = result.complete();
         List<BlockPos> hits = new ArrayList<>(result.hits());
@@ -224,17 +229,6 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         hits.removeIf(hit -> Math.sqrt(hit.distSqr(at)) > radiusBlocks);
         hits.sort(Comparator.comparingDouble(hit -> hit.distSqr(at)));
         return hits;
-    }
-
-    // 有没有一面露在外面：相邻六格里有一格不是挡光的实心方块（空气、水、玻璃、树叶……），这一格才可能被看见。
-    private static boolean exposed(ClientLevel level, BlockPos at) {
-        for (Direction face : Direction.values()) {
-            BlockPos next = at.relative(face);
-            if (!level.getBlockState(next).isSolidRender(level, next)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     // 要的东西展开成具体的物品 ID：标签按注册表里挂这个标签的物品展开，写法不合法给空。

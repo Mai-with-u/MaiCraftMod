@@ -66,7 +66,7 @@ public final class TargetIndex {
     }
 
     private record QueryKey(BlockPos center, List<Block> targets, int want, int radius,
-                            Set<BlockPos> excluded, boolean sourcesOnly) {
+                            Set<BlockPos> excluded, boolean sourcesOnly, boolean exposedOnly) {
         boolean affectedBy(BlockPos pos, Block before, Block after) {
             return (targets.contains(before) || targets.contains(after)) && !excluded.contains(pos)
                     && Math.abs(SectionPos.blockToSectionCoord(pos.getX())
@@ -245,12 +245,23 @@ public final class TargetIndex {
     // 按起点、目标、数量、半径和排除位置复用扫描进度；一刻最多约两毫秒，未完成时返回当前已找到的部分。
     public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded) {
-        return query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, false);
+        return query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, false, false);
     }
 
     /** 取桶时先筛源流体再比较远近，近处大量流水不能占满候选窗口而遮住稍远的真水源。 */
     public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
                                int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded, boolean sourcesOnly) {
+        return query(level, center, targets, want, maxChunkRadius, buildBudget, excluded, sourcesOnly, false);
+    }
+
+    /**
+     * {@code exposedOnly} 时只有六面里至少一面露在外面的格子参与最近候选竞争：埋在整片
+     * 石头里的候选更近也更多，先放进窗口就会把远处暴露的候选挤出配额，读侧再筛已经晚了。
+     * 暴露判断只读六个邻居，比读侧的视线射线便宜得多。
+     */
+    public Result query(ClientLevel level, BlockPos center, Collection<Block> targets,
+                               int want, int maxChunkRadius, int buildBudget, Set<BlockPos> excluded,
+                               boolean sourcesOnly, boolean exposedOnly) {
         LevelIndex idx = indexes.get(level.dimension());
         if (idx == null || targets.isEmpty() || want <= 0) {
             return new Result(List.of(), true);
@@ -263,7 +274,7 @@ public final class TargetIndex {
         idx.lastUseTick = tick;
         QueryKey key = new QueryKey(center.immutable(), List.copyOf(targets), want,
                 Math.max(0, maxChunkRadius), excluded.stream().map(BlockPos::immutable)
-                        .collect(Collectors.toUnmodifiableSet()), sourcesOnly);
+                        .collect(Collectors.toUnmodifiableSet()), sourcesOnly, exposedOnly);
         QueryProgress progress = idx.queries.get(key);
         if (progress != null && progress.complete
                 && (tick < progress.completedTick || tick - progress.completedTick >= COMPLETED_QUERY_TICKS)) {
@@ -311,7 +322,7 @@ public final class TargetIndex {
                 entry = build(section, idx);
                 idx.sections.put(sectionKey, entry);
             }
-            collect(entry, section, cx, sy, cz, targets, progress.nearest, sourcesOnly);
+            collect(entry, section, level, cx, sy, cz, targets, progress.nearest, sourcesOnly, exposedOnly);
             progress.sectionIndex++;
         }
         return new Result(progress.nearest.sorted(), progress.complete);
@@ -373,9 +384,10 @@ public final class TargetIndex {
 
     /** 把条目中所请求目标的位置追加进 {@code out};饱和目标对该一个 section 现场取位。 */
     // 普通条目直接解码位置；饱和条目当场遍历该段，再交给最近位置容器排序。
-    private void collect(SectionEntry e, LevelChunkSection section,
+    // exposedOnly 时先做六面暴露粗筛再进最近候选：埋着的候选多且更近，不先筛会把暴露的挤出窗口。
+    private void collect(SectionEntry e, LevelChunkSection section, ClientLevel level,
                                 int cx, int sy, int cz, Collection<Block> targets,
-                                SearchGeometry.NearestPositions nearest, boolean sourcesOnly) {
+                                SearchGeometry.NearestPositions nearest, boolean sourcesOnly, boolean exposedOnly) {
         if (e.hits.isEmpty()) {
             return;
         }
@@ -394,18 +406,25 @@ public final class TargetIndex {
                 for (int y = 0; y < 16; y++) {
                     for (int z = 0; z < 16; z++) {
                         for (int x = 0; x < 16; x++) {
-                            if (states.get(x, y, z).getBlock() == b
-                                    && (!sourcesOnly || states.get(x, y, z).getFluidState().isSource())) {
-                                nearest.offer(cell.set(baseX | x, baseY + y, baseZ | z));
+                            if (states.get(x, y, z).getBlock() == b) {
+                                cell.set(baseX | x, baseY + y, baseZ | z);
+                                if ((!sourcesOnly || states.get(x, y, z).getFluidState().isSource())
+                                        && (!exposedOnly || BlockExposure.hasExposedFace(level, cell))) {
+                                    nearest.offer(cell);
+                                }
                             }
                         }
                     }
                 }
                 continue;
             }
+            BlockPos.MutableBlockPos cell = new BlockPos.MutableBlockPos();
             for (short p : arr) {
+                cell.set(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15));
                 if (sourcesOnly && !section.getBlockState(p & 15, p >> 8 & 15, p >> 4 & 15).getFluidState().isSource()) continue;
-                nearest.offer(new BlockPos(baseX | (p & 15), baseY + (p >> 8 & 15), baseZ | (p >> 4 & 15)));
+                // 暴露粗筛在进配额之前：埋着的格子不该挤占最近候选的名额。
+                if (exposedOnly && !BlockExposure.hasExposedFace(level, cell)) continue;
+                nearest.offer(cell);
             }
         }
     }
