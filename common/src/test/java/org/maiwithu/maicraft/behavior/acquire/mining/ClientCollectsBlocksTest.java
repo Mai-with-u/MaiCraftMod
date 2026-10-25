@@ -242,4 +242,38 @@ class ClientCollectsBlocksTest {
         assertEquals(2, log.stream().filter("走"::equals).count(), "回来先重新走到跟前");
         assertTrue(digging.closed, "打断前那一下挖掘先收尾，重新走过去再挖");
     }
+
+    @Test
+    void 收概率掉落的一格一格挖_不连锁_挖的时候换概率掉落的挑法() {
+        // 打树叶要树苗：两格叶子各自走过去挖，挖的入口是"为概率掉落挖"（不拿剪刀），整批挖完捡一次。
+        List<String> how = new ArrayList<>();
+        DigsBlocks digs = new DigsBlocks() {
+            @Override public Optional<Action> dig(BlockPos target) {
+                how.add("普通挖");
+                return Optional.of(new Step("挖", ActionStatus.done()));
+            }
+
+            @Override public Optional<Action> digForChanceDrops(BlockPos target) {
+                how.add("为概率掉落挖");
+                return Optional.of(new Step("挖", ActionStatus.done()));
+            }
+
+            @Override public Optional<Action> digChained(BlockPos trigger, Direction face,
+                    BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak) {
+                how.add("连锁挖");
+                return Optional.of(new Step("挖", ActionStatus.done()));
+            }
+        };
+        PicksUpDrops drops = new PicksUpDrops() {
+            @Override public Set<Integer> nearby() { return Set.of(); }
+            @Override public Action pickUpNewSince(Set<Integer> before) { return new Step("捡", ActionStatus.done()); }
+        };
+        Action collect = new ClientCollectsBlocks((target, permissions) -> new Step("走", ActionStatus.done()), digs,
+                drops).collectForChanceDrops(List.of(ORE, ORE.above()), Permissions.DEFAULT, cell -> {}).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 50 && !(status instanceof ActionStatus.Done); i++) status = collect.tick(null);
+        assertTrue(status instanceof ActionStatus.Done, status.toString());
+        assertEquals(List.of("为概率掉落挖", "为概率掉落挖"), how);
+        assertEquals(List.of("走", "挖", "走", "挖", "捡"), log);
+    }
 }

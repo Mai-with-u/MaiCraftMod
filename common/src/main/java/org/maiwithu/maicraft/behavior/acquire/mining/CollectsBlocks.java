@@ -68,4 +68,14 @@ public interface CollectsBlocks {
             Consumer<BlockPos> givenUp) {
         return collectBatch(cells, permissions, chainable);
     }
+
+    /**
+     * 收概率掉落的方块（砾石出燧石、树叶出树苗、草出种子）：和成批收一样一格一格走到跟前挖掉、整批挖完再捡，
+     * 跳过的格交给 givenUp；挖的时候不拿剪刀和带精准采集的工具（拿了方块只掉它自己），有时运的优先，不连锁。
+     * 没有专门实现的接缝照常成批收。
+     */
+    default Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp) {
+        return collectBatch(cells, permissions, null, givenUp);
+    }
 }

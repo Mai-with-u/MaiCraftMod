@@ -63,7 +63,16 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
             Consumer<BlockPos> givenUp) {
         if (cells.isEmpty()) return Optional.empty();
         return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, chainable,
-                Objects.requireNonNull(givenUp, "givenUp")));
+                Objects.requireNonNull(givenUp, "givenUp"), false));
+    }
+
+    @Override
+    public Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp) {
+        // 要的是概率掉落：一格一格挖（不连锁），挖的时候不拿剪刀和精准采集，其余和成批收一样。
+        if (cells.isEmpty()) return Optional.empty();
+        return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, null,
+                Objects.requireNonNull(givenUp, "givenUp"), true));
     }
 
     /**
@@ -83,6 +92,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private final Predicate<BlockPos> chainable;
         /** 跳过的格交给谁：采掘记一阵、先挑别处。 */
         private final Consumer<BlockPos> givenUp;
+        /** 要的是概率掉落：挖的时候绕开剪刀和精准采集。 */
+        private final boolean chanceDrops;
         private int index;
         private Stage stage = Stage.APPROACH;
         private Action step;
@@ -99,11 +110,12 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private boolean interrupted;
 
         Collect(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
-                Consumer<BlockPos> givenUp) {
+                Consumer<BlockPos> givenUp, boolean chanceDrops) {
             this.cells = cells;
             this.permissions = permissions;
             this.chainable = chainable;
             this.givenUp = givenUp;
+            this.chanceDrops = chanceDrops;
         }
 
         private BlockPos cell() {
@@ -180,6 +192,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 case DIG -> {
                     if (dropsBefore == null) dropsBefore = drops.nearby();
                     // 连锁时整条矿脉、整根树干一起挖掉，掉落物集中在这一格，整批挖完一起捡。
+                    // 收概率掉落的不连锁，挖的时候不拿剪刀和精准采集（拿了只掉方块自己）。
+                    if (chanceDrops) yield digs.digForChanceDrops(cell());
                     yield chainable == null ? digs.dig(cell())
                             : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable);
                 }

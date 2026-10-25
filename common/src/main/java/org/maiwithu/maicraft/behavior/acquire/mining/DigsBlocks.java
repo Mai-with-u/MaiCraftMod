@@ -31,6 +31,14 @@ public interface DigsBlocks {
         return dig(trigger);
     }
 
+    /**
+     * 为概率掉落挖一格（砾石出燧石、树叶出树苗、草出种子）：和 dig 一样挖到这一格没了，
+     * 挑工具时不拿剪刀和带精准采集的（拿了只掉方块自己），有时运的优先。没有专门实现时和 dig 一样。
+     */
+    default Optional<Action> digForChanceDrops(BlockPos target) {
+        return dig(target);
+    }
+
     /** 装了连锁挖的模组：挑格、挑面时值得为连锁凑整片。没装时为假。 */
     default boolean chains() {
         return false;

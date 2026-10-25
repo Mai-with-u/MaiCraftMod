@@ -28,6 +28,13 @@ public interface BlockBreaking extends Action {
     default void beforeFirstSwing(Predicate<BlockHitResult> gate) {
     }
 
+    /**
+     * 这一格要的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和带精准采集的（拿了只掉方块自己），
+     * 时运高的优先。不调用时照旧挑最快的。
+     */
+    default void forChanceDrops() {
+    }
+
     /** 已经挥下去、游戏还没确认的那一下：连锁键要按到它结清才松。 */
     default boolean swingPending() {
         return false;

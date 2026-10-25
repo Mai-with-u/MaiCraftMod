@@ -54,6 +54,9 @@ public final class BlockDigger {
     private int pendingToolSlot = -1;
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
+    /** 挖的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和精准采集，时运高的优先。 */
+    private boolean forChanceDrops;
+    public void forChanceDrops(boolean on) { forChanceDrops = on; }
     private Predicate<BlockHitResult> preparation = hit -> true;
     /** 哪些遮挡格可以顺手挖掉；判断归玩家行为层的许可检查点，没给时一格都不挖。 */
     private Predicate<BlockPos> mayBreakOccluder = occluder -> false;
@@ -326,9 +329,10 @@ public final class BlockDigger {
         }
         reset();
         pos = target.immutable();
-        pendingToolSlot = selectTool && player.level().isLoaded(pos)
-                ? ToolSelect.bestSlot(player, player.level().getBlockState(pos), minimumToolDurability)
-                : -1;
+        // 挖概率掉落时换一套挑法：拿剪刀、精准采集挖树叶和砾石，只会掉它自己，树苗、燧石一件都出不来。
+        pendingToolSlot = !selectTool || !player.level().isLoaded(pos) ? -1
+                : forChanceDrops ? ToolSelect.bestSlotForChanceDrops(player, player.level().getBlockState(pos))
+                : ToolSelect.bestSlot(player, player.level().getBlockState(pos), minimumToolDurability);
         if (Minecraft.getInstance().screen != null || player.containerMenu != player.inventoryMenu) {
             toolClosePending = menuActions.close(context, TOOL_TIMEOUT_TICKS);
         } else {

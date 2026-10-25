@@ -53,6 +53,15 @@ public final class LiveBlockDigging implements DigsBlocks {
     }
 
     @Override
+    public Optional<Action> digForChanceDrops(BlockPos target) {
+        // 要的是概率掉落：挖掘器挑工具时绕开剪刀和精准采集，有时运的先拿；其余和普通地挖一样。
+        BlockBreaking digging = diggings.get();
+        digging.aimAt(target.immutable());
+        digging.forChanceDrops();
+        return Optional.of(new UntilGone(target.immutable(), digging));
+    }
+
+    @Override
     public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
             Predicate<BlockPos> mayBreak) {
         // 没有连锁挖的模组：普通地挖这一格，不挑面（只挖一格时哪面看得见挖哪面）。

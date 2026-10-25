@@ -28,6 +28,8 @@ public final class NativeBlockBreaking implements BlockBreaking {
     private BlockDigger digger;
     private BlockPos cell;
     private Direction face;
+    /** 挖概率掉落：挖掘器挑工具时不拿剪刀和精准采集。 */
+    private boolean forChanceDrops;
     private Predicate<BlockHitResult> gate = hit -> true;
     /** 最近一刻的角色上下文；收尾时还属于本刻就用它停手，过期了就把停手留到下一刻。 */
     private PlayerContext lastContext;
@@ -55,6 +57,12 @@ public final class NativeBlockBreaking implements BlockBreaking {
     }
 
     @Override
+    public void forChanceDrops() {
+        forChanceDrops = true;
+        if (digger != null) digger.forChanceDrops(true);
+    }
+
+    @Override
     public boolean swingPending() {
         return digger != null && digger.hasPendingBreak();
     }
@@ -70,6 +78,7 @@ public final class NativeBlockBreaking implements BlockBreaking {
             digger = new BlockDigger(player.localPlayer(), sender, menuActions, player.input());
             digger.requiredFace(face);
             digger.beforeBreak(gate);
+            digger.forChanceDrops(forChanceDrops);
         }
         // 挥下去的那一下还没确认、方块在客户端已经没了（原版先在本地把方块挖掉）：射线已经打不中它，
         // 只等游戏确认这一下，不再对着空气重新挖。连锁键要按到这里结清才松。
