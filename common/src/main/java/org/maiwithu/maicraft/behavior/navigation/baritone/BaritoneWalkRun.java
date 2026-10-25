@@ -13,6 +13,7 @@ import baritone.pathing.path.PathExecutor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -30,6 +31,8 @@ import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
+import org.maiwithu.maicraft.behavior.survival.breath.UnderwaterWalkBudget;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
@@ -390,6 +393,18 @@ final class BaritoneWalkRun implements WalkRun {
         }
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
+        // 走路把头潜进水里赶路时按呼吸预算收手：氧气够不着上浮、或已落进换气需求要插空的区间，
+        // 再走下去只会跟换气临时任务反复抢身体，深处会把角色憋死。放弃这段路如实走不通，
+        // 松开路线先浮上水面换气；潜泳路线段自己管氧气、会主动上浮换气，坐着船车不走路，都不在这里抢。
+        if (player.isEyeInFluid(FluidTags.WATER) && !player.isPassenger() && !submergedTravelActive(pathing)) {
+            SurvivalSituation situation = SurvivalSituation.read(context);
+            if (UnderwaterWalkBudget.judge(situation) == UnderwaterWalkBudget.Verdict.GIVE_UP_AND_SURFACE) {
+                progress.fail(Problem.of(Problem.Kind.UNREACHABLE,
+                        "走到目标的路上潜进了水里，氧气只剩 " + situation.airTicks() + " 刻，"
+                                + "不够再走下去：放弃这段路，先浮上水面换气（停在 " + feet.toShortString() + "）"), feet);
+            }
+        }
+
         if (progress.stopRequested() && onGround && pathing.isSafeToCancel()) {
             // 落地后才真正撤路线：空中撤掉会让执行段把重力全交给身体，摔出可以避免的伤。
             pathing.forceCancel();
@@ -563,6 +578,12 @@ final class BaritoneWalkRun implements WalkRun {
                 yield true;
             }
         };
+    }
+
+    // 这一刻是不是潜泳路线段在带着身体走：那段路自己按氧气上浮换气，呼吸预算不抢它的活。
+    private static boolean submergedTravelActive(PathingBehavior pathing) {
+        PathExecutor current = pathing.getCurrent();
+        return current != null && current.submergedWaterTravelActive();
     }
 
     // 路线前方 16 格被正在动的东西（转着的风车、开过来的火车）挡着：站稳、能停时原地等它过去，最多 5 秒，
