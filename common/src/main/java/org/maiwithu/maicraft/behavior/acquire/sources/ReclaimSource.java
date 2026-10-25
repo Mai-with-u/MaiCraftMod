@@ -23,6 +23,9 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsBlockTypes;
@@ -38,6 +41,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
  * 归属记录写着是别人放的不收。归属还没问到就等它问到，拿不准不动；
  * 放在记住的"家"附近的不收——家里的床是重生点，家里的台子、炉子是摆好用的。
  * 挖那一格照许可检查点的规矩来（自己放的东西 temporary 档也能收回）。
+ * 收回之后照现场把这一条从世界记忆里划掉：那一格已经不是记着的方块了，记忆留着只会再骗一趟。
  */
 public final class ReclaimSource implements ItemSource {
 
@@ -101,9 +105,43 @@ public final class ReclaimSource implements ItemSource {
         // 动手前重新核对现场：问价到动手之间可能被别人拆了，以现场为准；挑最近的那一处。
         List<Spot> spots = candidates(request, context).spots();
         if (spots.isEmpty()) return Optional.empty();
-        WorldPosition at = spots.getFirst().at();
-        // 走到跟前、挖下来、捡起这一下掉出来的（床挖哪一半都整张掉下来，熔炉里的东西一并掉出来捡起）。
-        return collects.collect(new BlockPos(at.x(), at.y(), at.z()), context.permissions());
+        Spot spot = spots.getFirst();
+        WorldPosition at = spot.at();
+        // 走到跟前、挖下来、捡起这一下掉出来的（床挖哪一半都整张掉下来，熔炉里的东西一并掉出来捡起）；
+        // 挖完收尾时照现场把世界记忆对齐，见 CollectThenForget。
+        return collects.collect(new BlockPos(at.x(), at.y(), at.z()), context.permissions())
+                .map(action -> new CollectThenForget(action, at, spot.blockType()));
+    }
+
+    /**
+     * 挖完收尾对记忆的收账：现场那一格已经不再是记着的方块（挖走了、换成了别的方块），
+     * 就把这条工作站记忆从世界记忆里划掉——收回之后记忆还在，下次会照着空格子再跑一趟、
+     * 「收回→记忆消失」的闭环也收不上。动作没做完（挖不成、掉出的没捡到）不划：东西多半还在原处，下次还收得回。
+     */
+    private final class CollectThenForget implements Action {
+
+        private final Action collect;
+        private final WorldPosition at;
+        private final String blockType;
+
+        CollectThenForget(Action collect, WorldPosition at, String blockType) {
+            this.collect = collect;
+            this.at = at;
+            this.blockType = blockType;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            ActionStatus status = collect.tick(context);
+            if (status instanceof ActionStatus.Done && !blockType.equals(blocks.blockTypeAt(at).orElse(null))) {
+                memory.forget(MemoryKind.WORKSTATION, at);
+            }
+            return status;
+        }
+
+        @Override public void pause() { collect.pause(); }
+        @Override public void close() { collect.close(); }
+        @Override public Interruptibility interruptibility() { return collect.interruptibility(); }
+        @Override public String describe() { return collect.describe(); }
     }
 
     /** 一处收得回的：在哪、是什么、离多远。 */

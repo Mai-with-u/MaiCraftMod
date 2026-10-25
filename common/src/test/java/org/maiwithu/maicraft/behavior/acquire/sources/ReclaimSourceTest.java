@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -59,6 +60,8 @@ class ReclaimSourceTest {
     private final List<BlockPos> collected = new ArrayList<>();
     private final FakeTags tags = new FakeTags();
     private WorldMemory memory;
+    /** 收的那一步怎么收场：默认做完；测「挖不成」的收账时改成失败。 */
+    private ActionStatus collectEnds = ActionStatus.done();
 
     /** 这个世界的记忆：第一次用时建在临时目录里。 */
     private WorldMemory memory() {
@@ -88,7 +91,7 @@ class ReclaimSourceTest {
                 collected.add(cell);
                 return Optional.of(new Action() {
                     @Override public ActionStatus tick(TickContext context) {
-                        return ActionStatus.done();
+                        return collectEnds;
                     }
                     @Override public String describe() {
                         return "收 " + cell.toShortString();
@@ -213,5 +216,42 @@ class ReclaimSourceTest {
         assertInstanceOf(SourceQuote.Offer.class,
                 quote(WantedItem.ofItem("minecraft:crafting_table"), Permissions.DEFAULT));
         assertInstanceOf(SourceQuote.Unavailable.class, quote(WantedItem.ofItem("minecraft:chest"), Permissions.DEFAULT));
+    }
+
+    @Test
+    void 收回挖掉了_这条记忆从世界记忆划掉() {
+        // 挖完收尾照现场核对：那一格不再是记着的方块，记忆划掉——不留给下次照着空格子再跑一趟，
+        // 「收回→记忆消失」的闭环也收在这一笔上。
+        placedBed(FIELD_BED, "self");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
+        Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
+                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+        world.remove(FIELD_BED);
+        assertInstanceOf(ActionStatus.Done.class, collect.tick(null));
+        assertTrue(memory().recordsNear(HERE, 128).isEmpty(), "挖掉了，这条记忆划掉");
+    }
+
+    @Test
+    void 收完了现场还在_记忆留着() {
+        // 动作说做完但现场还是那张床（比如挖完掉了又同格放回）：不冒目划掉，下次还收得回。
+        placedBed(FIELD_BED, "self");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
+        Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
+                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+        assertInstanceOf(ActionStatus.Done.class, collect.tick(null));
+        assertEquals(1, memory().recordsNear(HERE, 128).size(), "现场还在，记忆留着");
+    }
+
+    @Test
+    void 挖不成_记忆留着_下次还收得回() {
+        // 挖不成、掉出的没捡到：床多半还在原处，记忆不划，不把没收成的当成已收回。
+        placedBed(FIELD_BED, "self");
+        collectEnds = ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "有 1 件掉出的东西没捡到", null));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote(ANY_BED, Permissions.DEFAULT));
+        Action collect = source().begin(new ItemRequest(ANY_BED, 1, "睡觉"),
+                offer, new SourceContext(HERE, Permissions.DEFAULT)).orElseThrow();
+        world.remove(FIELD_BED);
+        assertInstanceOf(ActionStatus.Failed.class, collect.tick(null));
+        assertEquals(1, memory().recordsNear(HERE, 128).size(), "没收成，床多半还在原处，记忆留着");
     }
 }
