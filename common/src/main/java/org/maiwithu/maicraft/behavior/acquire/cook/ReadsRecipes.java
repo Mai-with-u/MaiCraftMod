@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire.cook;
 
 import java.util.List;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 读配方的只读接缝：某种东西有哪些做法。数据来自角色所在世界真实的配方管理器（含模组配方），

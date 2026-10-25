@@ -12,8 +12,8 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.HandThenClick;
 import org.maiwithu.maicraft.compat.StepsInOrder;

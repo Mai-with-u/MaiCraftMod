@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.field;
 
 import java.util.List;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 扫成熟作物的只读接缝：以一处为圆心，找熟了可以收的作物。只有熟了的才算——

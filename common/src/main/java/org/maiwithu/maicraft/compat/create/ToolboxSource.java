@@ -15,8 +15,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;

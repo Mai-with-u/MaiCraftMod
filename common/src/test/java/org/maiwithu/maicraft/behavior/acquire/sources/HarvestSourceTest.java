@@ -30,8 +30,8 @@ import org.maiwithu.maicraft.behavior.acquire.field.ScansMatureCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.field.CropSpot;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 采集的来源：只收熟了的作物，收哪几格由许可说了算；挖的动作走挖方块的执行接缝。

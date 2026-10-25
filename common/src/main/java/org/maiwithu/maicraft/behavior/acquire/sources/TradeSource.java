@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradesWithMerchants;
 import org.maiwithu.maicraft.behavior.acquire.trade.ScansMerchants;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 交易的来源：和附近已加载的村民与流浪商人换东西。

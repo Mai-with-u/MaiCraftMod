@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.cook;
 
 import java.util.List;
 import java.util.Set;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 一条工作站配方：角色能自己在合成台、熔炉、石切台上动手做的，从游戏真实配方管理器里读出来的只读快照。含模组配方；

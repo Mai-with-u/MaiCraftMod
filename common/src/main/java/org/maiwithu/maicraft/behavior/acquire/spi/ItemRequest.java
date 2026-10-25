@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.acquire.engine;
+package org.maiwithu.maicraft.behavior.acquire.spi;
 
 import java.util.List;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;

@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.compat;
 import java.util.Objects;
 import java.util.Optional;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;

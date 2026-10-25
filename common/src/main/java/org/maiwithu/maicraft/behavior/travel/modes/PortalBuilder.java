@@ -15,8 +15,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.ConstructionInput;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;

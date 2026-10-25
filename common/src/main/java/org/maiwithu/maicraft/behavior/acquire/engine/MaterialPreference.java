@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 
 import java.util.Comparator;
 import java.util.Set;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
 
 /**

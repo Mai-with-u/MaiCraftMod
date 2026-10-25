@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.kernel.result.Change;

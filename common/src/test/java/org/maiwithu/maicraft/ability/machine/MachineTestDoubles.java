@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;

@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 交易界面的只读读端：现在点开的界面里同步过来的报价与三格现状。

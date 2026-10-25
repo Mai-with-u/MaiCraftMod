@@ -6,7 +6,7 @@ import java.util.Optional;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 开箱取物的执行接缝：走到容器跟前，打开界面，核对现场后把要的物品搬进背包，再关上界面。

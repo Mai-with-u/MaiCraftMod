@@ -14,8 +14,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.EndPortalFrameBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;

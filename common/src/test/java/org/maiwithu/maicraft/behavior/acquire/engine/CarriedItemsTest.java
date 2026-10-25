@@ -9,8 +9,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 

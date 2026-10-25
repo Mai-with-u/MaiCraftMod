@@ -13,8 +13,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;

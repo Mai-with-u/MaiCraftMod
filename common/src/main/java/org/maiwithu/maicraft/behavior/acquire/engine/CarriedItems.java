@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 
 import java.util.Map;
 import java.util.LinkedHashMap;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;

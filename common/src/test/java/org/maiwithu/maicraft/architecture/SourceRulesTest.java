@@ -100,6 +100,31 @@ class SourceRulesTest {
     }
 
     @Test
+    void compatDoesNotImportAcquireEngineInternals() {
+        // 联动模组只认拿东西引擎的 spi 包：要货单、想要的东西与取货动作的类型都在 spi 里；
+        // compat 伸进 engine 内部包的话，引擎内部一改就波及所有模组适配。
+        List<String> problems = new ArrayList<>();
+        for (JavaSource source : mainSources) {
+            if (!isCompatSource(source.path)) continue;
+            for (int i = 0; i < source.lines.size(); i++) {
+                Matcher matcher = IMPORT.matcher(source.lines.get(i).trim());
+                if (matcher.find() && matcher.group(1).startsWith("org.maiwithu.maicraft.behavior.acquire.engine.")) {
+                    problems.add(relative(source.path) + ":" + (i + 1) + " import 了引擎内部包 " + matcher.group(1)
+                            + "；要货单与取货动作的类型在 acquire 的 spi 包里");
+                }
+            }
+        }
+        report("联动模组 import 了拿东西引擎的内部包", problems);
+    }
+
+    private static boolean isCompatSource(Path path) {
+        Path normalized = path.toAbsolutePath().normalize();
+        return MAIN_ROOTS.stream()
+                .map(root -> root.resolve("org/maiwithu/maicraft/compat"))
+                .anyMatch(compatRoot -> normalized.startsWith(compatRoot));
+    }
+
+    @Test
     void everySourceFileStartsWithLicenseHeader() {
         List<String> problems = new ArrayList<>();
         for (JavaSource source : concat(mainSources, testSources)) {

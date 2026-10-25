@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.behavior.survival.beds.BedCandidate;
 import org.maiwithu.maicraft.behavior.survival.beds.BedScanner;
 import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;

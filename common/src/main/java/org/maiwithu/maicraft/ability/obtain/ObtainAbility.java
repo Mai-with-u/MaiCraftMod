@@ -16,12 +16,12 @@ import com.google.gson.JsonObject;
 
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;

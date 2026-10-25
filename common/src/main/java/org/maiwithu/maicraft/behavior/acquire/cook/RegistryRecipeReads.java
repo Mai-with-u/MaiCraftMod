@@ -24,7 +24,7 @@ import net.minecraft.world.item.crafting.RecipeType;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 
 /**

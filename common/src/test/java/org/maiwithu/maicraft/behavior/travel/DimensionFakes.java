@@ -23,7 +23,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;

@@ -38,8 +38,8 @@ import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.field.ScansCreatures;
 import org.maiwithu.maicraft.behavior.acquire.field.Hunts;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 

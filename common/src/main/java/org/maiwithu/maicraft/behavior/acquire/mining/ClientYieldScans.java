@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.VanillaCropProducts;
 import org.maiwithu.maicraft.behavior.acquire.field.ScansMatureCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.field.CropSpot;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 按产出扫方块的读端：要一件东西时，把"挖掉会掉它"或"熟了能收它"的方块登记进

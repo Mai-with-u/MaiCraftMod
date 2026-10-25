@@ -21,7 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.ScansCreatures;
 import org.maiwithu.maicraft.behavior.acquire.field.Hunts;
 import org.maiwithu.maicraft.behavior.acquire.field.HuntCandidates;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 狩猎的来源：打掉会掉出想要东西的动物或生物，捡走掉落。

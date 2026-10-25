@@ -17,7 +17,7 @@ import java.util.function.Supplier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;

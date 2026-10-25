@@ -15,7 +15,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 测试替身：一个按剧本回答的物品来源。问价按排好的答案依次回答；

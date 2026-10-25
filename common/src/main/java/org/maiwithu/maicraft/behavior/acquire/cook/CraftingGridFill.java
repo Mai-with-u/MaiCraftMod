@@ -19,7 +19,7 @@ import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 配方簿点不了时把料逐格点进合成格：左键拿起一堆料，右键往要它的格子各放几件，剩下的放回原格；

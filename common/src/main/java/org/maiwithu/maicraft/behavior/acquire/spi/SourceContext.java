@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.spi;
 
 import java.util.List;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;

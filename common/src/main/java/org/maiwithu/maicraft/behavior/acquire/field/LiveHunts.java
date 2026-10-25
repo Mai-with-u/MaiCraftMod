@@ -27,7 +27,7 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 
 /**

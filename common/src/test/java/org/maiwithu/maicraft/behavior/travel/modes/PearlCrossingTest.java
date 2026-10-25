@@ -18,7 +18,7 @@ import net.minecraft.world.level.block.Blocks;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelOffer;

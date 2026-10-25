@@ -11,7 +11,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.behavior.acquire.engine.StepwiseActions;
+import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
 
 /**
  * 把一格方块收进包：走到够得着的地方 → 挖掉它 → 走过去捡起这一下掉出来的东西。

@@ -11,8 +11,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;

@@ -29,7 +29,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsBlockTypes;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 收回自己放下的东西：角色自己放下的床、工作台、熔炉（服务端归属记录写的是角色自己），

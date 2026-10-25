@@ -41,7 +41,7 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，把这一趟要的几样东西搬进背包

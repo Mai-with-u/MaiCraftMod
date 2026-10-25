@@ -15,7 +15,7 @@ import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemRegistry;
 import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;
 import org.maiwithu.maicraft.game.player.BackpackStack;

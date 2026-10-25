@@ -7,7 +7,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 扫可挖方块的只读接缝：以一处为圆心，找挖掉会掉出想要的东西的方块（矿石、地表的石头这类）。

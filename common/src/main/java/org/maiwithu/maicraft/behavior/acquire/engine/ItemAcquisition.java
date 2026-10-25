@@ -14,6 +14,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;

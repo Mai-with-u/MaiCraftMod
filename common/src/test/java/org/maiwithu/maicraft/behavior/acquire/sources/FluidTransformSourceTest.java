@@ -36,8 +36,8 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.cook.TransformSites;
 
 /** 往水里扔料这条途径的报价：配方对不上、附近没静水、还没扫完、身上缺料各怎么报；动手时按报价那条配方找回来。 */

@@ -8,7 +8,7 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 狩猎的执行接缝：走近、看准、交给战斗域的动作出手，打倒了就地收掉落。

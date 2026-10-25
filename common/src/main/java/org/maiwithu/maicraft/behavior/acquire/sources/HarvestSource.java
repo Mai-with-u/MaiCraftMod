@@ -22,8 +22,8 @@ import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.field.ScansMatureCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.CropSpot;
-import org.maiwithu.maicraft.behavior.acquire.engine.StepwiseActions;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 采集的来源：收成熟作物。只收熟了的（没熟的被踩掉就白长了），收哪几格由许可说了算——

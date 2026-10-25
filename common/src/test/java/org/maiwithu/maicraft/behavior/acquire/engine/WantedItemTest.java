@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /** 想要的东西：具体物品按 ID 匹配，标签按物品挂着的标签匹配；写法与游戏里的注册 ID 一致。 */
 class WantedItemTest {

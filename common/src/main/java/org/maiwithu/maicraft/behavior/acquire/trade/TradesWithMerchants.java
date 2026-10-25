@@ -6,7 +6,7 @@ import java.util.Optional;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /**
  * 交易的执行接缝：逐个走到村民跟前，点开交易界面，按要的量一连买，买够或都试完为止。

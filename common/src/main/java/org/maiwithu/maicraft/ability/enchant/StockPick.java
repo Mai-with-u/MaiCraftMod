@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 选料判据：身上第一件与点名匹配、台子肯收的东西。

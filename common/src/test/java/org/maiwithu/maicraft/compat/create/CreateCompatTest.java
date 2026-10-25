@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;

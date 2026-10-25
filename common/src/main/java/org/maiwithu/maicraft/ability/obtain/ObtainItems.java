@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 

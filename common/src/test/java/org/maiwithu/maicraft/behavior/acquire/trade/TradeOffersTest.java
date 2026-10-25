@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers.Payment;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers.PaymentGap;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers.View;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 
 /**

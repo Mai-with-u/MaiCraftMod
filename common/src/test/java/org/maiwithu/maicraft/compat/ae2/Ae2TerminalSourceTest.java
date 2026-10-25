@@ -22,8 +22,8 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;

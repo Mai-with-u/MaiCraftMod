@@ -37,8 +37,8 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 
 /** 开箱取货按量拿：整堆够用整堆拿，尾数按件拿够就停；点不出去时下一刻再点，不当成背包放不下。 */
 class MenuContainerTakesTest {

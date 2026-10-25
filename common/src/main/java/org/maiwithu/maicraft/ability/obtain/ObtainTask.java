@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;

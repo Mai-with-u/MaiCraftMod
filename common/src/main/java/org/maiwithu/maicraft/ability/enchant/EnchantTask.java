@@ -7,8 +7,8 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;

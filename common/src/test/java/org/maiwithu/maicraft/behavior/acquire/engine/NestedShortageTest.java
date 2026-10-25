@@ -12,6 +12,8 @@ import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;

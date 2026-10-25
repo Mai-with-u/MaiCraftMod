@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 import java.util.List;
 import java.util.function.Consumer;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
