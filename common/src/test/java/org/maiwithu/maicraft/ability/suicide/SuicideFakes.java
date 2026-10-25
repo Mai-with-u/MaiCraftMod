@@ -251,8 +251,16 @@ final class SuicideFakes {
             this.world = world;
         }
 
+        /** 下一趟走过去照这段脚本演（悬在半空、落地）；为 null 时一刻走到站位。 */
+        Action nextWalk;
+
         @Override public Action walkTo(BlockPos stand, Permissions permissions) {
             calls.add("walkTo:" + stand.toShortString());
+            if (nextWalk != null) {
+                Action walk = nextWalk;
+                nextWalk = null;
+                return walk;
+            }
             if (walkFails || unreachable.contains(stand)) {
                 return fails(Problem.of(Problem.Kind.UNREACHABLE, "到不了 " + stand.toShortString() + "，还差 3.2 格"));
             }

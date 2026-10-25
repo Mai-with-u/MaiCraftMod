@@ -122,8 +122,8 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
             return Next.go(Phase.RE_EQUIP, "死过了，重生了");
         }
         if (phase == Phase.RE_EQUIP) return reEquip(context);
-        // 要停下（暂停、取消）且有脱下的护甲：先穿回再停。
-        if (windDown) {
+        // 要停下（暂停、取消）且有脱下的护甲：手上的走路悬在半空就先落地站稳，再穿回护甲再停。
+        if (windDown && super.stoppedSafely()) {
             leaveStow("要停下了");
             return Next.go(Phase.RE_EQUIP, "要停下了，先把护甲穿回");
         }
@@ -241,7 +241,10 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
         if (!finder.stillThere(spot)) return abandon("走到之前那里变了");
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> Next.go(Phase.EXPOSE, "走到" + spot.way().label + "旁边了");
+            // 走路报"已停下"不是走到了：收尾途中落地就站着等外层停下，暂停过后从原地接着走过去，不在半路踏进危险。
+            case ActionStatus.Done done -> player.feet().equals(spot.stand())
+                    ? Next.go(Phase.EXPOSE, "走到" + spot.way().label + "旁边了")
+                    : stopping() ? Next.stay() : Next.go(Phase.APPROACH, "停在半路，从原地接着走过去");
             case ActionStatus.Failed failed -> abandonArea("走不到");
         };
     }

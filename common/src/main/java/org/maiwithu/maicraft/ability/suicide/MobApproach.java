@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -40,6 +41,8 @@ final class MobApproach implements Action {
     private final String mobType;
     private WalkRun walk;
     private int sinceRetarget;
+    /** 被叫先到安全处再停、走过去的路上悬在半空：只推进这一趟走路到落地站稳；暂停时清掉。 */
+    private boolean stopping;
 
     MobApproach(Supplier<PlayerContext> context, WalkTo walks, Permissions permissions, int mobId, String mobType) {
         this.context = Objects.requireNonNull(context, "context");
@@ -50,6 +53,11 @@ final class MobApproach implements Action {
     }
 
     @Override public ActionStatus tick(TickContext tick) {
+        // 收尾途中：只把走过去的这一趟推进到落地站稳，落地后原地等着，不按键靠上去、也不另起一趟走。
+        if (stopping) {
+            if (walk != null && !walk.stoppedSafely()) walk.tick(tick);
+            return ActionStatus.running();
+        }
         PlayerContext current = context.get();
         LocalPlayer player = current == null ? null : current.localPlayer();
         if (player == null || current.input() == null) {
@@ -112,8 +120,25 @@ final class MobApproach implements Action {
     }
 
     @Override public void pause() {
+        stopping = false;
         if (walk != null) walk.pause();
         release();
+    }
+
+    // 走过去的路上悬在半空停不得；近了自己按键靠上去、站着挨打时是正常干活。
+    @Override public Interruptibility interruptibility() {
+        return walk != null && walk.interruptibility() == Interruptibility.UNSAFE_TO_STOP
+                ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
+    }
+
+    // 被叫先到安全处再停：走过去的路上转给走路，悬在半空的先落地、落地才算停稳；按键靠上去、站着时现在就能停。
+    @Override public boolean stopSafely() {
+        stopping = walk != null && walk.stopSafely();
+        return stopping;
+    }
+
+    @Override public boolean stoppedSafely() {
+        return !stopping || walk == null || walk.stoppedSafely();
     }
 
     @Override public void close() {

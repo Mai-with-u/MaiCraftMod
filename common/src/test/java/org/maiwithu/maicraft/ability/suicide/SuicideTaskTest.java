@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.function.BooleanSupplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Cell;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Gear;
@@ -208,6 +210,59 @@ class SuicideTaskTest {
         run(task, 200, () -> moves.calls.contains("stepInto:lava"));
         assertTrue(gear.calls.contains("takeOff:head"), gear.calls.toString());
         assertTrue(task.survivalNeedsOff());
+    }
+
+    @Test
+    void 走过去悬在半空被叫先停稳_落地才停_不在半路踏进危险_暂停后从原地接着走过去() {
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        TravelFakes.ScriptedWalk leg = airborneLeg();
+        moves.nextWalk = leg;
+        SuicideTask task = task(null, 120);
+        run(task, 200, () -> moves.calls.stream().anyMatch(call -> call.startsWith("walkTo")));
+        task.tick(new Tick(tick++));
+
+        assertTrue(task.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(task.stoppedSafely(), "还没落地");
+        run(task, 6, () -> false);
+        assertTrue(task.stoppedSafely(), "落地站稳了");
+        assertFalse(moves.calls.contains("stepInto:lava"), "落地报的已停下不当成走到，不在半路踏进岩浆：" + moves.calls);
+
+        // 暂停过后接着做：没站在站位上，从原地重新走过去，到了再踏进去。
+        task.pause();
+        run(task, 50, () -> moves.calls.contains("stepInto:lava"));
+        assertEquals(2, moves.calls.stream().filter(call -> call.startsWith("walkTo")).count(), moves.calls.toString());
+        assertTrue(moves.calls.contains("stepInto:lava"), moves.calls.toString());
+    }
+
+    @Test
+    void 身上有脱下的护甲_走过去悬在半空被叫停_先落地再穿回() {
+        player.wear(GearSlotName.HEAD, HELMET, "头盔");
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        TravelFakes.ScriptedWalk leg = airborneLeg();
+        moves.nextWalk = leg;
+        SuicideTask task = task(null, 120);
+        run(task, 200, () -> moves.calls.stream().anyMatch(call -> call.startsWith("walkTo")));
+        task.tick(new Tick(tick++));
+
+        assertTrue(task.stopSafely(), "悬在半空、身上有脱下的护甲：先落地再穿回");
+        task.tick(new Tick(tick++));
+        assertEquals(0, leg.closes, "还在半空：走路不收掉，先不去穿回");
+        assertFalse(gear.calls.stream().anyMatch(call -> call.startsWith("wearFrom")), gear.calls.toString());
+        run(task, 60, task::stoppedSafely);
+        assertTrue(task.stoppedSafely(), "落地、穿回了才算停稳");
+        assertEquals("头盔", player.worn.get(GearSlotName.HEAD).original());
+    }
+
+    // 走过去的这一趟跳在半空：叫它先停稳就答应收尾，再演两刻落地停下。
+    private static TravelFakes.ScriptedWalk airborneLeg() {
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(1, 65, 0), false),
+                WalkReport.onTheWay(new BlockPos(1, 66, 0), false),
+                WalkReport.onTheWay(new BlockPos(2, 65, 0), false),
+                WalkReport.stopped(new BlockPos(2, 64, 0), false));
+        leg.airborne = true;
+        return leg;
     }
 
     @Test
