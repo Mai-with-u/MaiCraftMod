@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.game.interaction.ToolSelect;
 import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -41,7 +42,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
  *
  * <p>方块与产出对不上号的部分如实说没有：客户端读不到掉落表，会掉什么按原版常识对照
  * （见 VanillaBlockDrops、VanillaCropProducts），对照没有的物品报"附近没有"，
- * 不冒充找遍了。LLM 给了掉落线索时，线索点名的方块（含方块标签下的）也当作会掉想要的东西去找，
+ * 不冒充找遍了。概率掉落（砾石出燧石、草出种子、树叶出树苗）也报，每格带上挖一块掉它的机会：
+ * 按挖的时候会拿的那件工具（不拿剪刀和精准采集，时运高的优先）读时运算。LLM 给了掉落线索时，线索点名的方块（含方块标签下的）也当作会掉想要的东西去找，
  * 是作物的熟了才收。扫描分刻推进，没扫完时返回已找到的部分，"没扫完"不冒充"没有"。
  *
  * <p>采掘候选不透视：只算从角色眼睛看得见的那几格（与观察、find 同一套遮挡判断），埋在石头里的不算，
@@ -80,6 +82,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             for (String blockTypeId : VanillaBlockDrops.blocksDropping(productId)) {
                 blockOf(blockTypeId).ifPresent(targets::add);
             }
+            // 有机会掉它的方块也去找：要燧石找砾石，要种子找草，要树苗找树叶。
+            for (VanillaBlockDrops.ChanceDrop chance : VanillaBlockDrops.chanceSources(productId)) {
+                blockOf(chance.blockType()).ifPresent(targets::add);
+            }
         }
         // 掉落线索点名的方块（模组矿这类，原版对照里没有）一并登记去找。
         Set<Block> told = toldBlocks(dropsFrom);
@@ -89,6 +95,8 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         PlayerContext current = context();
         // 同一根树干在一次扫描里只看一次树冠：键是树干顶。
         Map<BlockPos, Boolean> trunksChecked = new HashMap<>();
+        // 同一种方块挖的时候拿的是同一件工具：时运一次扫描里每种方块只读一次。
+        Map<Block, Integer> fortunes = new HashMap<>();
         for (BlockPos hit : hits) {
             // 埋在石头里、六面都被实心方块挡着的已在索引侧筛掉；露出来的再按观察同一套遮挡判断
             // 从眼睛看一眼；看不见的不算候选，要先下矿洞、挖开或走近。
@@ -106,18 +114,43 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             // 把机器的进料箱挖了，掉的箱子还没捡回来。
             if (current.level().getBlockState(hit).hasBlockEntity()) continue;
             String blockTypeId = blockTypeIdOf(current, hit);
-            // 线索点名的方块按 LLM 说的算会掉要的东西：挖了掉的是什么，挖完以进包的为准。
-            if (told.contains(current.level().getBlockState(hit).getBlock())) {
-                spots.add(new MinableSpot(hit, blockTypeId, wanted.specifier()));
+            BlockState state = current.level().getBlockState(hit);
+            int fortune = fortunes.computeIfAbsent(state.getBlock(), block -> fortuneFor(current, state));
+            // 线索点名的方块按 LLM 说的算会掉要的东西：挖了掉的是什么，挖完以进包的为准；
+            // 对照里知道它是概率掉落的（点名砾石要燧石）按对照的机会，不知道的说不准、按每块一件估。
+            if (told.contains(state.getBlock())) {
+                spots.add(new MinableSpot(hit, blockTypeId, wanted.specifier(),
+                        toldOdds(blockTypeId, productIds, fortune)));
                 continue;
             }
             String dropped = VanillaBlockDrops.droppedBy(blockTypeId);
             // 同名通例带出的方块未必真的掉想要的东西：掉落对不上这次要的就不报。
             if (productIds.contains(dropped)) {
                 spots.add(new MinableSpot(hit, blockTypeId, dropped));
+                continue;
             }
+            // 概率掉落：挖一块不一定出，带上这一块的机会，取物按期望放大挖的块数。
+            chanceFor(blockTypeId, productIds).ifPresent(chance ->
+                    spots.add(new MinableSpot(hit, blockTypeId, chance.itemId(), chance.odds(fortune))));
         }
         return spots;
+    }
+
+    // 线索点名的方块掉要的东西的机会：对照里是必掉的按必掉，是概率掉落的按它的机会，都没有就说不准。
+    private static DropOdds toldOdds(String blockTypeId, List<String> productIds, int fortune) {
+        if (productIds.contains(VanillaBlockDrops.droppedBy(blockTypeId))) return DropOdds.CERTAIN;
+        return chanceFor(blockTypeId, productIds).map(chance -> chance.odds(fortune)).orElse(DropOdds.GUESSED);
+    }
+
+    // 这种方块有机会掉这次要的哪一样（树叶要树苗：橡木树叶对上橡木树苗）；对不上为空。
+    private static Optional<VanillaBlockDrops.ChanceDrop> chanceFor(String blockTypeId, List<String> productIds) {
+        return VanillaBlockDrops.chanceDropsOf(blockTypeId).stream()
+                .filter(chance -> productIds.contains(chance.itemId())).findFirst();
+    }
+
+    // 挖这种方块时手上会拿的那件工具的时运：和挖的时候同一套挑法（不拿剪刀和精准采集，时运高的优先）。
+    private static int fortuneFor(PlayerContext current, BlockState state) {
+        return ToolSelect.fortuneLevel(ToolSelect.toolForChanceDrops(current.localPlayer(), state));
     }
 
     @Override
@@ -129,6 +162,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
                 if (blockOf(blockTypeId).isPresent()) {
                     return true;
                 }
+            }
+            // 概率掉落也算有方块掉它：燧石问砾石、种子问草，不再说成"它是做出来的"。
+            for (VanillaBlockDrops.ChanceDrop chance : VanillaBlockDrops.chanceSources(productId)) {
+                if (blockOf(chance.blockType()).isPresent()) return true;
             }
         }
         return false;
@@ -162,9 +199,11 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         if (state.isAir() || state.hasBlockEntity()) return Optional.empty();
         if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>())) return Optional.empty();
         String blockTypeId = blockTypeIdOf(current, pos);
-        // 连锁挖逐格核：线索点名的方块与原版对照里掉要的东西的方块都算。
+        // 连锁挖逐格核：线索点名的方块、原版对照里掉要的东西的方块、有机会掉它的方块都算。
+        List<String> productIds = expand(wanted);
         boolean yields = toldBlocks(dropsFrom).contains(state.getBlock())
-                || expand(wanted).contains(VanillaBlockDrops.droppedBy(blockTypeId));
+                || productIds.contains(VanillaBlockDrops.droppedBy(blockTypeId))
+                || chanceFor(blockTypeId, productIds).isPresent();
         return yields ? Optional.of(blockTypeId) : Optional.empty();
     }
 
@@ -176,6 +215,22 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             }
         }
         return Optional.empty();
+    }
+
+    @Override
+    public List<PlaceAndDig> placeAndDig(WantedItem wanted) {
+        if (notInWorld()) return List.of();
+        PlayerContext current = context();
+        List<PlaceAndDig> found = new ArrayList<>();
+        for (String productId : expand(wanted)) {
+            for (VanillaBlockDrops.ChanceDrop chance : VanillaBlockDrops.chanceSources(productId)) {
+                // 只有没出时掉方块自己的（砾石）放下再挖还能接着碰运气；树叶、草挖了不掉自己，放不回去。
+                if (!chance.elseDropsItself()) continue;
+                blockOf(chance.blockType()).ifPresent(block -> found.add(new PlaceAndDig(chance.blockType(),
+                        chance.itemId(), chance.odds(fortuneFor(current, block.defaultBlockState())))));
+            }
+        }
+        return found;
     }
 
     @Override

@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
  * 扫可挖方块的只读接缝：以一处为圆心，找挖掉会掉出想要的东西的方块（矿石、地表的石头这类）。
  * 只报原版对照里真的会掉的：铁矿石掉的是粗铁，问铁锭时它不算。LLM 给了掉落线索（drops_from）时，
  * 线索点名的方块也当作会掉想要的东西——模组矿掉什么客户端读不到，靠线索认；掉没掉以挖完进包的为准。
+ * 概率掉落（砾石出燧石、草出种子、树叶出树苗）也报，每格带上挖一块掉它的机会（按挖的时候会拿的工具算时运）。
  */
 public interface ScansMinables {
 
@@ -26,7 +27,10 @@ public interface ScansMinables {
      */
     List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks);
 
-    /** 世界上有没有任何方块直接掉出想要的东西（含掉落线索点名、本实例注册了的方块）；铁锭这类做出来的物品没有，只能合成或烧炼。 */
+    /**
+     * 世界上有没有任何方块直接掉出想要的东西（含概率掉落、掉落线索点名、本实例注册了的方块）；
+     * 铁锭这类做出来的物品没有，只能合成或烧炼。
+     */
     boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom);
 
     /** 最近一次找可挖方块有没有把附近扫完：方块索引分刻建，没扫完时空结果不等于没有。 */
@@ -50,4 +54,21 @@ public interface ScansMinables {
     default Optional<String> depositOre(WantedItem wanted) {
         return Optional.empty();
     }
+
+    /**
+     * 放下再挖还能接着出想要的东西的方块：砾石没出燧石掉的就是砾石自己，身上的砾石放在脚边再挖，
+     * 用不着满世界找下一块。连同挖一块出它的机会（按挖的时候会拿的工具算时运）；没有为空。
+     */
+    default List<PlaceAndDig> placeAndDig(WantedItem wanted) {
+        return List.of();
+    }
+
+    /**
+     * 一种放下再挖的方块。
+     *
+     * @param blockType   方块的注册 ID，也是身上那件东西的物品 ID，例如 minecraft:gravel
+     * @param droppedItem 碰运气要出的东西，例如 minecraft:flint
+     * @param odds        挖一块出它的机会
+     */
+    record PlaceAndDig(String blockType, String droppedItem, DropOdds odds) {}
 }
