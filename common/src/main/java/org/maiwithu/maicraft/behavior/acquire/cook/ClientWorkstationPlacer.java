@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.PlacesBlockBeside;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsBlockTypes;
 
 /**
@@ -43,8 +44,11 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsBlockTypes;
  * 所以按实际落下的那一格记成"亲眼看到的工作站"，后面到那里动手、下次找设施都用这条记忆。
  *
  * <p>收回用的是把一格方块收进包的那套动作：走到跟前、挖下来、捡起这一下掉出来的，和收回野外自己那张床一样。
+ *
+ * <p>砾石挖出来没出燧石、要放在脚边再挖时也用这一套挑格、换手、点一下，只是不记进世界记忆：它马上就被挖回来，
+ * 不是摆着用的设施。
  */
-public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBlockTypes {
+public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBlockTypes, PlacesBlockBeside {
 
     /** 找放格的范围：身边两格以内，再远放下也不好走过去用。 */
     private static final int REACH_BLOCKS = 2;
@@ -99,7 +103,17 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         // 方块类型在注册表里查不到：这个设施放不了，让来源如实换路。
         return blockOf(blockType).isEmpty()
                 ? Optional.empty()
-                : Optional.of(new PlaceAction(blockType, Objects.requireNonNull(placedAt, "placedAt")));
+                : Optional.of(new PlaceAction(blockType, Objects.requireNonNull(placedAt, "placedAt"), true));
+    }
+
+    @Override
+    public Optional<Action> placeBeside(String blockType, Consumer<BlockPos> placedAt) {
+        // 放回再挖的砾石：和摆台子同一套挑格、换手、点一下，落在哪一格告诉采掘，好接着走过去挖；不记进世界记忆。
+        Objects.requireNonNull(placedAt, "placedAt");
+        return blockOf(blockType).isEmpty()
+                ? Optional.empty()
+                : Optional.of(new PlaceAction(blockType,
+                        at -> placedAt.accept(new BlockPos(at.x(), at.y(), at.z())), false));
     }
 
     // 做完合成收回刚摆的台子：走到跟前挖下来、捡起这一下掉出来的；挖不下来、捡不到由收进包的动作如实失败。
@@ -114,6 +128,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         private final String blockType;
         /** 真放下了才告诉来源落在哪一格：做完合成按这一格收回。 */
         private final Consumer<WorldPosition> placedAt;
+        /** 放的是设施：放下后记进世界记忆。放回再挖的砾石不记。 */
+        private final boolean remember;
         private Action moving;
         private AimAndInteract placing;
         private Problem failure;
@@ -124,9 +140,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         /** 试过、放不下的格子：换格时跳过。 */
         private final Set<BlockPos> tried = new HashSet<>();
 
-        PlaceAction(String blockType, Consumer<WorldPosition> placedAt) {
+        PlaceAction(String blockType, Consumer<WorldPosition> placedAt, boolean remember) {
             this.blockType = blockType;
             this.placedAt = placedAt;
+            this.remember = remember;
         }
 
         @Override
@@ -208,7 +225,7 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             BlockPos landed = now.stream().findFirst().orElse(spot);
             // 记进世界记忆的那一格同时告诉来源：做完合成按同一格收回，不靠回头去记忆里猜哪台是自己刚摆的。
             WorldPosition at = new WorldPosition(landed.getX(), landed.getY(), landed.getZ(), null);
-            memory.workstationSeen(at, blockType, Instant.now());
+            if (remember) memory.workstationSeen(at, blockType, Instant.now());
             placedAt.accept(at);
             return ActionStatus.done();
         }

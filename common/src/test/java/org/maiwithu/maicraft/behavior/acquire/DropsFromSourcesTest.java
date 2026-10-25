@@ -140,7 +140,8 @@ class DropsFromSourcesTest {
 
     private MiningSource mining(Digs digs, Stairs stairs) {
         ItemNeeds needs = (request, permissions) -> done("备" + request.wanted().describe());
-        return new MiningSource(new ZincInSight(), digs, stairs, new NoTools(), PERMISSION, backpack, offhand, needs);
+        return new MiningSource(new ZincInSight(), digs, stairs, new NoTools(), PERMISSION, backpack, offhand,
+                new FakeTags(), needs, null);
     }
 
     private static void runAll(Action action) {

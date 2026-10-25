@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +40,9 @@ import org.maiwithu.maicraft.behavior.acquire.mining.OreHeights;
 import org.maiwithu.maicraft.behavior.acquire.mining.MinableSpot;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.DropOdds;
+import org.maiwithu.maicraft.behavior.acquire.mining.PlacesBlockBeside;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
@@ -59,6 +63,8 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
  * 挖哪几格由许可说了算：别人搭的、玩家放的，一格都不动。
  * 走不到跟前、挖不下来的格记一阵（见 FailedSpots），这一阵里先挑别的格、别的树、别的矿；
  * 一次动手只坏在这几格时告诉引擎换别处还能接着拿，不把整个采掘划掉。
+ * 概率掉落（砾石出燧石、草出种子、树叶出树苗，以及线索点名、掉没掉说不准的方块）交给碰运气挖（见 ChanceDigging）：
+ * 报价按期望算要挖几块，挖一块没出不收场，挖到期望的三倍还不够才如实说；身上的砾石能放在脚边再挖。
  */
 public final class MiningSource implements ItemSource {
 
@@ -87,17 +93,23 @@ public final class MiningSource implements ItemSource {
     private Supplier<List<ItemRequest>> chain = List::of;
     /** 刚试过做不成的格：记一阵，先挑别处。 */
     private final FailedSpots failedSpots;
+    /** 按标签要东西时数身上有几件用。 */
+    private final ReadsItemTags tags;
+    /** 砾石放在脚边再挖；为 null 时不放，只挖天然的。 */
+    private final PlacesBlockBeside placer;
 
+    /** @param placer 把身上的砾石放在脚边再挖；为 null 时不放 */
     public MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
             ReadsToolRequirements tools, PermissionCheck permission, BackpackView backpack, OffhandContents offhand,
-            ItemNeeds needs) {
-        this(minables, collects, stairs, tools, permission, backpack, offhand, needs, System::currentTimeMillis);
+            ReadsItemTags tags, ItemNeeds needs, PlacesBlockBeside placer) {
+        this(minables, collects, stairs, tools, permission, backpack, offhand, tags, needs, placer,
+                System::currentTimeMillis);
     }
 
     /** @param clock 记"刚试过做不成"用的时刻（毫秒）；测试给可拨的钟 */
     public MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
             ReadsToolRequirements tools, PermissionCheck permission, BackpackView backpack, OffhandContents offhand,
-            ItemNeeds needs, LongSupplier clock) {
+            ReadsItemTags tags, ItemNeeds needs, PlacesBlockBeside placer, LongSupplier clock) {
         this.failedSpots = new FailedSpots(clock);
         this.minables = minables;
         this.collects = collects;
@@ -106,7 +118,9 @@ public final class MiningSource implements ItemSource {
         this.permission = permission;
         this.backpack = backpack;
         this.offhand = offhand;
+        this.tags = tags;
         this.needs = needs;
+        this.placer = placer;
     }
 
     /** 接上效率工具的读端与引擎正在推进的请求串：成批砍树、挖石头前先备一把石制工具。 */
@@ -143,6 +157,10 @@ public final class MiningSource implements ItemSource {
         }
         Optional<Deposit> deposit = spots.isEmpty() ? deposit(request, context) : Optional.empty();
         if (deposit.isPresent()) return prospectQuote(request, context, deposit.get());
+        // 附近看不见砾石，但身上带着、许可准放：放在脚边再挖也能碰出燧石。
+        Optional<ChanceDigging.PlaceBack> placeBack = placeBack(request, context);
+        boolean canPlaceNow = placeBack.isPresent() && carried(placeBack.get().what().blockType()) > 0;
+        if (spots.isEmpty() && canPlaceNow) return chanceQuote(request, context, List.of(), placeBack);
         if (spots.isEmpty() && !seen.isEmpty()) {
             // 看得见的都是刚试过做不成的：如实说是这几处够不着、挖不下来，这一阵先不挑它们。
             return new SourceQuote.Unavailable(describe(),
@@ -158,12 +176,17 @@ public final class MiningSource implements ItemSource {
         }
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
+        // 一挖就掉的先挖；只有概率掉落的（砾石、草、树叶）按碰运气挖报价。天然的不许挖但身上的砾石能放下再挖也算。
+        List<MinableSpot> certain = screened.allowed().stream().filter(spot -> !spot.byChance()).toList();
+        if (certain.isEmpty() && (!screened.allowed().isEmpty() || canPlaceNow)) {
+            return chanceQuote(request, context, screened.allowed(), placeBack);
+        }
         if (screened.allowed().isEmpty()) {
             return new SourceQuote.NeedsApproval(describe(), screened.firstRefusal());
         }
-        return new SourceQuote.Offer(describe(), screened.allowed().size(),
-                new AcquisitionCost(distanceToNearest(screened.allowed(), context), screened.allowed().size()),
-                riskNote(screened.allowed().getFirst().blockType()));
+        return new SourceQuote.Offer(describe(), certain.size(),
+                new AcquisitionCost(distanceToNearest(certain, context), certain.size()),
+                riskNote(certain.getFirst().blockType()));
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -182,14 +205,19 @@ public final class MiningSource implements ItemSource {
         if (deposit.isPresent()) return prospect(request, context, deposit.get());
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
-        if (screened.allowed().isEmpty()) {
-            return Optional.empty();
+        // 看得见的只有概率掉落的：碰运气挖，挖一块没出不收场；天然的不许挖、身上有砾石能放下再挖也走这条。
+        List<MinableSpot> certain = screened.allowed().stream().filter(spot -> !spot.byChance()).toList();
+        if (certain.isEmpty()) {
+            Optional<ChanceDigging.PlaceBack> placeBack = placeBack(request, context);
+            boolean canPlaceNow = placeBack.isPresent() && carried(placeBack.get().what().blockType()) > 0;
+            return screened.allowed().isEmpty() && !canPlaceNow ? Optional.empty()
+                    : Optional.of(chanceDig(request, context, screened.allowed(), placeBack));
         }
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
         // 一批：从最近的一格起把相邻的同种方块连成一片，要几件挖几格（一格至少掉一件，不把附近的矿一口气挖光）；
         // 原木只沿竖向连——像真人砍一棵树、挖一片矿，整批挖完再捡，不挖一格捡一格。挖少了引擎清点后会再来。
-        List<MinableSpot> batch = batchOf(screened.allowed(), request.count());
+        List<MinableSpot> batch = batchOf(certain, request.count());
         String blockType = batch.getFirst().blockType();
         Optional<Action> required = toolStep(blockType, request, permissions);
         if (required.isPresent()) {
@@ -202,7 +230,7 @@ public final class MiningSource implements ItemSource {
             if (workTool.isPresent()) {
                 int bootstrap = workTools.bootstrap(blockType);
                 if (bootstrap > 0) {
-                    batch = batchOf(screened.allowed(), Math.min(request.count(), bootstrap));
+                    batch = batchOf(certain, Math.min(request.count(), bootstrap));
                 } else {
                     steps.add(new TriesFirst(needs.actionFor(new ItemRequest(WantedItem.ofItem(workTool.get()), 1,
                             "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions)));
@@ -225,6 +253,102 @@ public final class MiningSource implements ItemSource {
         return Optional.of(work[0]);
     }
 
+    // 放下再挖：没出时掉方块自己的（砾石），接上了放方块的入口、许可准在这里放方块才做。身上有没有砾石每一批再看：
+    // 一开始没有，挖了天然的砾石也就有了。
+    private Optional<ChanceDigging.PlaceBack> placeBack(ItemRequest request, SourceContext context) {
+        if (placer == null) return Optional.empty();
+        for (ScansMinables.PlaceAndDig what : minables.placeAndDig(request.wanted())) {
+            if (permission.blockAllowed(context.permissions(), PermissionCheck.WorldAction.PLACE_BLOCK,
+                    context.characterAt(), what.blockType()).isEmpty()) {
+                return Optional.of(new ChanceDigging.PlaceBack(what, placer));
+            }
+        }
+        return Optional.empty();
+    }
+
+    // 本可以放下再挖、却不许放时说一句为什么，写进没挖够时的说明；用不上放下再挖为空串。
+    private String placeBackNote(ItemRequest request, SourceContext context) {
+        List<ScansMinables.PlaceAndDig> candidates = minables.placeAndDig(request.wanted());
+        if (candidates.isEmpty() || placer == null) return "";
+        String blockType = candidates.getFirst().blockType();
+        return permission.blockAllowed(context.permissions(), PermissionCheck.WorldAction.PLACE_BLOCK,
+                        context.characterAt(), blockType)
+                .map(problem -> "；挖出来的" + blockType + "本可以放在脚边再挖，但" + problem.message())
+                .orElse("");
+    }
+
+    private int carried(String itemId) {
+        return CarriedItems.matching(backpack, offhand, WantedItem.ofItem(itemId), tags);
+    }
+
+    // 概率掉落的报价：按期望要挖几块算动作数（燧石 10% 就是十块），写明每块的机会、最多挖几块、会不会放在脚边再挖。
+    // 放得了就能一直放下再挖，按要的件数报；只挖天然的按看得见的块数乘机会估，至少一件。
+    private SourceQuote chanceQuote(ItemRequest request, SourceContext context, List<MinableSpot> allowed,
+            Optional<ChanceDigging.PlaceBack> placeBack) {
+        DropOdds odds = allowed.isEmpty() ? placeBack.orElseThrow().what().odds() : allowed.getFirst().odds();
+        String blockType = allowed.isEmpty() ? placeBack.orElseThrow().what().blockType() : allowed.getFirst().blockType();
+        int expected = ChanceDigging.expectedDigs(request.count(), odds);
+        int limit = ChanceDigging.digLimit(request.count(), odds);
+        int obtainable = placeBack.isPresent() ? request.count()
+                : (int) Math.max(1, Math.min(request.count(), Math.floor(allowed.size() * odds.perBlock())));
+        double distance = allowed.isEmpty() ? 0 : distanceToNearest(allowed, context);
+        String how = odds.guessed()
+                ? "线索点名的" + blockType + "掉没掉说不准，挖一块看一块，最多挖 " + limit + " 块"
+                : "挖一块不一定出：" + blockType + "出" + request.wanted().describe() + odds.describe() + "，要 "
+                        + request.count() + " 件按期望挖约 " + expected + " 块，最多挖 " + limit + " 块";
+        String placing = placeBack.map(back -> "；挖出来的" + back.what().blockType() + "会放在脚边接着挖").orElse("");
+        return new SourceQuote.Offer(describe(), obtainable, new AcquisitionCost(distance, expected),
+                how + placing + missingToolNote(blockType));
+    }
+
+    // 碰运气挖：从看得见的概率方块（或身上能放下再挖的砾石）挖起，挖一块没出不收场，挖到期望的三倍还不够才如实说。
+    // 线索点名的模组矿要合用的镐时先备好；概率表里的砾石、草、树叶空手就能挖。
+    private Action chanceDig(ItemRequest request, SourceContext context, List<MinableSpot> allowed,
+            Optional<ChanceDigging.PlaceBack> placeBack) {
+        Permissions permissions = context.permissions();
+        WorldPosition center = context.characterAt();
+        String dimension = center.dimension();
+        int radius = searchRadius(context);
+        DropOdds odds = allowed.isEmpty() ? placeBack.orElseThrow().what().odds() : allowed.getFirst().odds();
+        String blockType = allowed.isEmpty() ? placeBack.orElseThrow().what().blockType() : allowed.getFirst().blockType();
+        ChanceDigging.Scene scene = new ChanceDigging.Scene() {
+            // 每一批重新扫：挖掉的没了、刚试过做不成的这一阵不挑、许可不准的不挖，按离刚挖那格远近排。
+            @Override public List<MinableSpot> spots(BlockPos from) {
+                List<MinableSpot> fresh = withoutFailed(
+                        minables.minable(request.wanted(), request.dropsFrom(), center, radius), dimension);
+                return PermittedSpots.screen(fresh, MinableSpot::pos, MinableSpot::blockType, permissions, permission)
+                        .allowed().stream().filter(MinableSpot::byChance)
+                        .sorted(Comparator.comparingDouble(spot -> spot.pos().distSqr(from))).toList();
+            }
+
+            // 概率表里的方块挖的时候不拿剪刀、精准采集；线索点名、说不准的照常挖，装了连锁挖时整条连锁挖。
+            // 走不到、挖不下来的格记一阵，这一阵先挑别处。
+            @Override public Optional<Action> collect(List<BlockPos> cells, boolean guessed, Consumer<BlockPos> givenUp) {
+                Consumer<BlockPos> noting = cell -> {
+                    failedSpots.note(dimension, cell);
+                    givenUp.accept(cell);
+                };
+                return guessed
+                        ? collects.collectBatch(cells, permissions, chainable(request, center, radius, permissions), noting)
+                        : collects.collectForChanceDrops(cells, permissions, noting);
+            }
+
+            @Override public int carriedWanted() {
+                return CarriedItems.matching(backpack, offhand, request, tags);
+            }
+
+            @Override public int carried(String itemId) {
+                return MiningSource.this.carried(itemId);
+            }
+        };
+        ChanceDigging digging = new ChanceDigging(request.wanted().describe(), request.count(), odds, scene,
+                placeBack.orElse(null), placeBackNote(request, context),
+                new BlockPos(center.x(), center.y(), center.z()), context.records());
+        Optional<Action> tool = toolStep(blockType, request, permissions);
+        return tool.isEmpty() ? digging : new SpotWork(new StepwiseActions("碰运气挖" + request.wanted().describe(),
+                tool.get(), digging), digging);
+    }
+
     // 看得见的候选里去掉刚试过做不成的那几格：这一阵先挑别的格、别的树、别的矿。
     private List<MinableSpot> withoutFailed(List<MinableSpot> spots, String dimension) {
         return spots.stream().filter(spot -> !failedSpots.recent(dimension, spot.pos())).toList();
@@ -236,10 +360,17 @@ public final class MiningSource implements ItemSource {
      */
     private final class SpotWork implements Action, FailedOnlyAtSpots {
         private final Action inner;
+        /** 碰运气挖自己判断是不是只坏在几处；为 null 时按记下过几格判断。 */
+        private final FailedOnlyAtSpots judge;
         private int noted;
 
         SpotWork(Action inner) {
+            this(inner, null);
+        }
+
+        SpotWork(Action inner, FailedOnlyAtSpots judge) {
             this.inner = inner;
+            this.judge = judge;
         }
 
         // 一格做不成：记进这一阵不挑的格里，也记在这一串上。
@@ -249,7 +380,7 @@ public final class MiningSource implements ItemSource {
         }
 
         @Override public boolean onlyThoseSpotsFailed() {
-            return noted > 0;
+            return judge != null ? judge.onlyThoseSpotsFailed() : noted > 0;
         }
 
         @Override public ActionStatus tick(TickContext context) {
@@ -490,6 +621,13 @@ public final class MiningSource implements ItemSource {
             return "还缺合用的工具（" + required.get() + "），会先去准备一件；一格不一定掉一件";
         }
         return "一格不一定掉一件，挖完以实际捡到的为准";
+    }
+
+    // 碰运气挖的报价后面补一句：挖这种方块要的工具身上没有，会先去准备一件。
+    private String missingToolNote(String blockType) {
+        Optional<String> required = tools.toolRequired(blockType);
+        if (required.isEmpty() || CarriedItems.hasToolThatSuffices(backpack, offhand, blockType, tools)) return "";
+        return "；还缺合用的工具（" + required.get() + "），会先去准备一件";
     }
 
     private double distanceToNearest(List<MinableSpot> spots, SourceContext context) {

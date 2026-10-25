@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsWorkTools;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.StubTick;
 import org.maiwithu.maicraft.behavior.acquire.FakeOffhand;
+import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
 
 /**
@@ -208,7 +209,8 @@ class MiningSourceTest {
                         return Optional.empty();
                     }
                 });
-        return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, needs);
+        return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, new FakeTags(),
+                needs, null);
     }
 
     @Test
@@ -518,7 +520,7 @@ class MiningSourceTest {
                     }
                 });
         MiningSource source = new MiningSource(new FakeMinables(tree(6), true), digs, stairs, new FakeTools(), check,
-                backpack, offhand, failing);
+                backpack, offhand, new FakeTags(), failing, null);
         source.prepareWorkTools(axeFirst(0), List::of);
         Action action = source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
                 new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow();

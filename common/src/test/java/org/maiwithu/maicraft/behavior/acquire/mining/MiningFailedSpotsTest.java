@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.behavior.acquire.mining.FailedSpots;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.mining.FailedSpots;
 import org.maiwithu.maicraft.behavior.acquire.FakeOffhand;
+import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
 
 /**
@@ -112,8 +113,8 @@ class MiningFailedSpotsTest {
                         return Optional.empty();
                     }
                 });
-        return new MiningSource(minables, collects, new NoStairs(), new NoTools(), check, backpack, offhand, needs,
-                () -> now);
+        return new MiningSource(minables, collects, new NoStairs(), new NoTools(), check, backpack, offhand,
+                new FakeTags(), needs, null, () -> now);
     }
 
     @Test

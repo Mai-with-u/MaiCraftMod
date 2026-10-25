@@ -85,8 +85,9 @@ final class AcquisitionWiring {
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.memory(), recipeReads, recipeRuns,
                 deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+        // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
         MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.toolRequirements(),
-                permission, deps.backpack(), deps.offhand(), innerNeeds);
+                permission, deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
         MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.context(), bringsClose, deps.interactions(),
