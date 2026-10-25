@@ -53,10 +53,9 @@ class ItemWorthTest {
     void 食物_有用的_零碎依次落级() {
         assertEquals(Worth.FOOD,
                 ItemWorth.of(stack("minecraft:cooked_beef", 16, false, true, false, false), Set.of(), Map.of()));
-        // 做出来的链条、桶不是"普通掉落"：有用的，不自作主张丢。
+        // 做出来的链条、桶不是"普通掉落"：有用的，只该在建议里作为候选出现，丢不丢由调用方定。
         assertEquals(Worth.USEFUL,
                 ItemWorth.of(stack("minecraft:chain", 32, false, false, false, false), Set.of(), Map.of()));
-        assertTrue(Worth.USEFUL.tooValuableToDrop());
         // 骨头、蜘蛛眼、生羊肉、树苗、蘑菇是顺手捡的零碎：生肉能吃也不当口粮留着。
         assertEquals(Worth.INCIDENTAL,
                 ItemWorth.of(stack("minecraft:bone", 2, false, false, false, false), Set.of(), Map.of()));

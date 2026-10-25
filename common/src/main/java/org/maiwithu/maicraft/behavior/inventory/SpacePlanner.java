@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
-import org.maiwithu.maicraft.behavior.retry.QuestionEscalation;
 import org.maiwithu.maicraft.game.player.BackpackStack;
-import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 import java.util.ArrayList;
@@ -17,13 +15,17 @@ import org.maiwithu.maicraft.behavior.inventory.drops.IncidentalLoot;
 /**
  * 腾挪计划：看着背包现在有什么、要腾几格，排出"先动哪一堆"的清单。
  *
- * <p>纯判断，不碰游戏。顺序照真人玩家的做法：能合的散堆先合起来；然后从最不值钱的开始
- * 往外挪——身上带着无线终端或附近有能用的 ME 终端就存进网络，随身背包能塞就塞，附近有记得的容器就存进去，
- * 都没有才丢；"有用的"只存不丢，存不了又要动到它就停下来问，不自作主张。任务留用、贵重品与装备永远不在计划里。
+ * <p>纯判断，不碰游戏。腾背包只做可逆的搬动，不替玩家扔东西：能合的散堆先合起来；然后从最不值钱的开始
+ * 往外存——身上带着无线终端或附近有能用的 ME 终端就存进网络，随身背包能塞就塞，附近有记得的容器就存进去。
+ * 装备、贵重品与任务留用的不进计划；能搬的都搬了还腾不出，如实失败，把现场能丢的候选、能存的容器
+ * 列进建议里，丢哪一堆、存到哪由调用方拿主意。
  */
 final class SpacePlanner {
 
     private SpacePlanner() {}
+
+    /** 建议里最多列几个可丢候选与几个容器：列表太长反而盖住重点，数量照实写。 */
+    private static final int MAX_ADVICE_ITEMS = 5;
 
     /**
      * 一次腾挪要看的现场。
@@ -56,10 +58,10 @@ final class SpacePlanner {
     }
 
     /**
-     * 排好的计划：moves 是照顺序执行的腾挪；还差得动贵重品才够时给 question，
-     * 连动贵重品都不够时给 problem。三者至少有一样。
+     * 排好的计划：moves 是照顺序执行的腾挪；搬得动的都搬了还差格子时给 problem，搬得够就是全空。
+     * 两者至多有一样。
      */
-    record Plan(List<SpaceMove> moves, Question question, Problem problem) {
+    record Plan(List<SpaceMove> moves, Problem problem) {
     }
 
     static Plan plan(Scene scene) {
@@ -71,7 +73,7 @@ final class SpacePlanner {
         List<SpaceMove> moves = new ArrayList<>();
         slotsFreed += addMergeMoves(scene, moves);
 
-        // 挪东西从最不值钱的开始：垃圾、零碎、建材、食物、有用的依次往后，贵重、装备、任务留用的不进计划。
+        // 挪东西从最不值钱的开始：垃圾、零碎、建材、食物、有用的依次往后，装备、贵重、任务留用的不动。
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         List<BackpackStack> movable = movableStacksWorthLeastFirst(scene);
         int containerIndex = 0;
@@ -80,10 +82,10 @@ final class SpacePlanner {
         List<BackpackStack> toNetwork = new ArrayList<>();
         for (BackpackStack stack : movable) {
             if (slotsFreed >= scene.slotsNeeded) {
-                return new Plan(withNetwork(moves, toNetwork), null, null);
+                return new Plan(withNetwork(moves, toNetwork), null);
             }
-            // 网络能存就先存进网络（玩家整理背包就是往 AE 里放）；再是随身背包、记得的容器，都不行才丢——
-            // 有地方存就不往地上扔。有用的只存不丢：存不了就跳过，留给后面问。
+            // 网络能存就先存进网络（玩家整理背包就是往 AE 里放）；再是随身背包、记得的容器。
+            // 没有地方可存就跳过：这一堆留在背包里，要不要丢由调用方处置，Mod 不往地上扔。
             if (scene.networkStorage()) {
                 toNetwork.add(stack);
             } else if (carriedRoom > 0) {
@@ -92,18 +94,16 @@ final class SpacePlanner {
             } else if (containerIndex < scene.nearbyContainers().size()) {
                 moves.add(new SpaceMove.ToKnownContainer(scene.nearbyContainers().get(containerIndex), stack));
                 containerIndex++;
-            } else if (!ItemWorth.of(stack, scene.reservedItemIds(), totals).tooValuableToDrop()) {
-                moves.add(new SpaceMove.DropStack(stack));
             } else {
                 continue;
             }
             slotsFreed++;
         }
         if (slotsFreed >= scene.slotsNeeded) {
-            return new Plan(withNetwork(moves, toNetwork), null, null);
+            return new Plan(withNetwork(moves, toNetwork), null);
         }
 
-        return belowPreciousNotEnough(scene, slotsFreed);
+        return new Plan(withNetwork(moves, toNetwork), notEnoughProblem(scene, slotsFreed));
     }
 
     // 攒下的存网络几堆作为一步接在合并之后。
@@ -162,8 +162,8 @@ final class SpacePlanner {
         }
     }
 
-    // 能自动挪的堆：贵重、装备与任务留用的都不动，有用的只在能存时挪；从垃圾排起，垃圾里按先丢后丢
-    // （腐肉、泥土、三废石……圆石最后），零碎按清单先后，其余同级的保持背包里的格子顺序。
+    // 能自动挪去存的堆：装备、贵重与任务留用的不动，从垃圾排起（垃圾里按先存哪堆的既定顺序），
+    // 零碎按清单先后，其余同级的保持背包里的格子顺序。
     private static List<BackpackStack> movableStacksWorthLeastFirst(Scene scene) {
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         record Entry(BackpackStack stack, int worthRank, int junkOrder) {}
@@ -181,42 +181,36 @@ final class SpacePlanner {
         return entries.stream().map(Entry::stack).toList();
     }
 
-    // 自动能动的都动了还不够：动贵重品能补上就问，补不上就只能少拿。
-    private static Plan belowPreciousNotEnough(Scene scene, int slotsFreedAfterMoves) {
-        int shortage = scene.slotsNeeded() - slotsFreedAfterMoves;
-        Map<String, Integer> totals = totalsInBackpack(scene.stacks());
-        int valuables = 0;
-        BackpackStack cheapest = null;
-        Worth cheapestWorth = null;
-        for (BackpackStack stack : scene.stacks()) {
-            Worth worth = ItemWorth.of(stack, scene.reservedItemIds(), totals);
-            if (worth == Worth.TASK_RESERVED || !worth.tooValuableToDrop()) {
-                continue;
-            }
-            valuables++;
-            // 从要问的那几格里挑最便宜的：等级更贱的优先，同级里数量少的优先。
-            if (cheapest == null
-                    || worth.ordinal() > cheapestWorth.ordinal()
-                    || (worth.ordinal() == cheapestWorth.ordinal() && stack.count() < cheapest.count())) {
-                cheapest = stack;
-                cheapestWorth = worth;
-            }
-        }
-        if (valuables >= shortage) {
-            return new Plan(List.of(),
-                    QuestionEscalation.approval(
-                            "背包放不下，丢掉不值钱的也腾不出 " + shortage + " 格",
-                            "把 " + describe(cheapest) + " 丢掉或存起来"),
-                    null);
-        }
-        // 循环正常走完说明能动的全在计划里：最多能腾到 freeSlots 加合并加全部可挪堆。
+    // 能搬的都搬了还腾不出：如实失败，建议照现场列——背包里有什么可丢的候选、附近有什么可存的容器，
+    // 能力名给出来，处置的路怎么走由调用方定，不替它拍板丢哪一堆。
+    private static Problem notEnoughProblem(Scene scene, int slotsFreedAfterMoves) {
         int atMost = slotsFreedAfterMoves;
-        return new Plan(List.of(), null, Problem.of(Problem.Kind.INVENTORY_FULL,
-                "背包塞满了，连贵重品都算上也腾不出 " + scene.slotsNeeded() + " 格，最多腾出 " + atMost + " 格",
-                "这次少拿 " + (scene.slotsNeeded() - atMost) + " 格的东西，或者先把手头的事做完"));
+        String message = "背包塞满了，能搬的都搬了也腾不出 " + scene.slotsNeeded() + " 格，最多腾出 " + atMost + " 格";
+        List<String> ways = new ArrayList<>();
+        // 可丢候选与能搬的是同一份排序：从最不值钱的排起，装备、贵重品不列——丢了难补的东西不该出现在建议里。
+        List<BackpackStack> candidates = movableStacksWorthLeastFirst(scene);
+        if (!candidates.isEmpty()) {
+            List<String> described = candidates.stream().limit(MAX_ADVICE_ITEMS)
+                    .map(candidate -> describe(candidate)).toList();
+            ways.add("可以考虑丢掉一些：候选有 " + String.join("、", described)
+                    + (candidates.size() > MAX_ADVICE_ITEMS ? " 等 " + candidates.size() + " 堆" : "")
+                    + "（只是候选，丢哪堆你来定）");
+        }
+        List<String> containers = scene.nearbyContainers().stream().limit(MAX_ADVICE_ITEMS)
+                .map(container -> container.name() + "（" + container.at().x() + "," + container.at().y()
+                        + "," + container.at().z() + "）")
+                .toList();
+        if (scene.networkStorage()) {
+            ways.add("身上的终端连着存储网络，可以把不重要的存进去");
+        }
+        if (!containers.isEmpty()) {
+            ways.add("记得的容器有 " + String.join("、", containers));
+        }
+        ways.add("用 drop_items 丢东西、用 manage_container 存取容器，处置后重新下达这个目标");
+        return Problem.of(Problem.Kind.INVENTORY_FULL, message, String.join("；", ways));
     }
 
-    // 向 LLM 描述要动的那一堆：数量加物品名，例如"32 个 minecraft:iron_ingot"。
+    // 向 LLM 描述要处置的那一堆：数量加物品名，例如"32 个 minecraft:iron_ingot"。
     private static String describe(BackpackStack stack) {
         return stack.count() + " 个 " + stack.itemId();
     }

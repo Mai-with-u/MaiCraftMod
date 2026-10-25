@@ -395,8 +395,8 @@ public final class AbilityCatalog {
         LiveBlockDigging digging = new LiveBlockDigging(deps.digging(), deps.compat().breakAccelerators(playerServices));
         ClientDropPickup drops = new ClientDropPickup(deps.context(), deps.walks(), deps.dropConfirmations());
         ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
-        // 丢弃落点避让与走开读端：丢弃能力与腾地方的丢弃共用同一份，
-        // 谁丢的都登记进同一本账，走路时一并绕开，不把刚丢出去的又吸回来。
+        // 丢弃落点避让与走开读端：丢弃能力用这一份，谁丢的都登记进同一本账，
+        // 走路时一并绕开，不把刚丢出去的又吸回来。
         DropAvoidance dropAvoidance = new DropAvoidance();
         ClientStepsAside stepsAside = new ClientStepsAside(deps.inputs(), dropAvoidance);
         DropsItems.Parts dropping = new DropsItems.Parts(FirstPersonScene::of, deps.characterPosition(),
@@ -406,16 +406,15 @@ public final class AbilityCatalog {
                 (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
                         bringsClose, deps.interactions(), deps.context()),
                 deps.memory());
-        // 腾地方：合并散堆、记得的容器、存进容器、丢出去四条路都接上了，存进容器与丢出去用的是
-        // 存东西、丢弃能力同一份现场部件；装备与拿东西在背包要满时先按它腾。随身背包的接缝留给随身背包的联动模组。
-        // 身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
+        // 腾地方：合并散堆、存进容器、存网络三条路都接上了，存进容器用的是存东西能力同一份现场部件；
+        // 腾背包不替玩家往地上扔东西，丢弃只有丢弃能力（drop_items）走。装备与拿东西在背包要满时先按它腾。
+        // 随身背包的接缝留给随身背包的联动模组。身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
         List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
         InventorySpace space = new InventorySpace(deps.backpack(),
                 Optional.of(new ClientStackMerger(deps.context())),
                 Optional.empty(),
                 Optional.of(new RememberedContainers(deps.memory(), deps.characterPosition(), deps.protection())),
                 Optional.of(storing),
-                Optional.of(dropping),
                 () -> networks.stream().findFirst());
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
                 permission, playerServices, dropping, storing, space, networks);

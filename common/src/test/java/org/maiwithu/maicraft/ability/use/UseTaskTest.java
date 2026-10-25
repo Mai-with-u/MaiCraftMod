@@ -410,7 +410,7 @@ class UseTaskTest {
             @Override public List<BackpackStack> stacks() { return List.of(); }
             @Override public int usedSlots() { return 35; }
             @Override public int totalSlots() { return 36; }
-        }, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        }, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         rig.interactions.applied("拉杆扳动了");
         TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());

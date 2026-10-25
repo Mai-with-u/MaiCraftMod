@@ -484,8 +484,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return ActionStatus.progressed();
         }
 
-        // 拿东西前先腾一格：要拿的东西本身不往外挪；腾格子要动贵重品时把问题原样交上去，不自己丢东西。
-        // 腾的时候存了丢了什么、点了没能确认的，由腾地方的动作直接记进发起任务的结果。
+        // 拿东西前先腾一格：要拿的东西本身不往外挪。腾的时候存了什么、点了没能确认的，
+        // 由腾地方的动作直接记进发起任务的结果。
         private ActionStatus makeRoom(TickContext tick) {
             if (space.isEmpty()) {
                 return startStep();
@@ -510,11 +510,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 case ActionStatus.Failed failed -> {
                     room.close();
                     room = null;
-                    yield ActionStatus.failed(failed.problem().kind() == Problem.Kind.NEED_APPROVAL
-                            ? Problem.of(Problem.Kind.NEED_APPROVAL, "背包要满，得动贵重品才能腾出地方装「"
-                                    + request.purpose() + "」的东西：" + failed.problem().message(), "同意动贵重品，或少拿一些")
-                            : Problem.of(Problem.Kind.INVENTORY_FULL,
-                                    "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message()));
+                    // 腾背包如实失败：不再向调用方征求"动贵重品"的同意（同意没有通路可送回来），
+                    // 腾地方的现场建议（能丢的候选、能存的容器、处置能力名）原样带上，处置后重新下达。
+                    yield ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
+                            "背包腾不出来，装不下为「" + request.purpose() + "」要拿的东西：" + failed.problem().message(),
+                            failed.problem().suggestion()));
                 }
             };
         }

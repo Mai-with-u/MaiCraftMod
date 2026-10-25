@@ -24,20 +24,19 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
-import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.hands.StackMerger;
 
 /**
  * 背包空间：捡东西、合成取出、交易、开箱取物、卸下装备之前，统一来这里腾格子，任务自己不再各自处理"背包满了"。
  *
  * <p>腾挪照真人玩家的做法一步步来：合并散堆 → 能存网络就存进网络（身上绑好的无线终端拿出来存，没带就走去附近装着的
- * ME 终端存，和存东西能力同一份） → 放进随身背包
- * → 存进附近记得的容器 → 丢最不值钱的；有用的只存不丢，要动到它才停下来问。每一步都是一个真实的动作（并散堆、存箱子用的是存东西能力同一份存放动作，
- * 丢东西用的是丢弃能力同一份丢东西动作），确认的变化与没能确认的交互直接记进发起任务的结果。
+ * ME 终端存，和存东西能力同一份） → 放进随身背包 → 存进附近记得的容器。腾背包只做可逆的搬动，
+ * 不替玩家往地上扔东西；有用的只存不丢。每一步都是一个真实的动作（并散堆、存箱子用的是存东西能力同一份存放动作），
+ * 确认的变化与没能确认的交互直接记进发起任务的结果。
  *
  * <p>腾一次就是一个动作（{@link #makeRoom}）：每做完一步重新看背包、重新排计划，腾够了算做完；
- * 一步做不成就换计划里的下一步，做不成的容器、东西这次不再试。随身背包、已知容器、存放与丢弃的
- * 部件没接上时，对应步骤自动跳过。
+ * 一步做不成就换计划里的下一步，做不成的容器、东西这次不再试。随身背包、已知容器、存放的
+ * 部件没接上时，对应步骤自动跳过；能搬的都搬了还腾不出，如实失败并把现场能处置的出路列进建议，取舍交调用方。
  */
 public final class InventorySpace {
 
@@ -49,7 +48,6 @@ public final class InventorySpace {
     private final Optional<CarriedBackpack> carriedBackpack;
     private final Optional<KnownContainers> knownContainers;
     private final Optional<StoresInContainer.Parts> storing;
-    private final Optional<DropsItems.Parts> dropping;
     /** 网络存储（身上的无线终端、附近装着的终端）；没接上为空。每次腾挪时现取，联动模组在进世界后才登记。 */
     private final Supplier<Optional<NetworkStorage>> network;
 
@@ -59,16 +57,14 @@ public final class InventorySpace {
      * @param carriedBackpack 随身背包接缝；没接上传 {@code Optional.empty()}
      * @param knownContainers 附近已知容器接缝；没接上传 {@code Optional.empty()}
      * @param storing         存放的现场部件（与存东西能力共用）；没接上传 {@code Optional.empty()}
-     * @param dropping        丢东西的现场部件（与丢弃能力共用）；没接上传 {@code Optional.empty()}
      */
     public InventorySpace(
             BackpackView backpack,
             Optional<StackMerger> stackMerger,
             Optional<CarriedBackpack> carriedBackpack,
             Optional<KnownContainers> knownContainers,
-            Optional<StoresInContainer.Parts> storing,
-            Optional<DropsItems.Parts> dropping) {
-        this(backpack, stackMerger, carriedBackpack, knownContainers, storing, dropping, Optional::empty);
+            Optional<StoresInContainer.Parts> storing) {
+        this(backpack, stackMerger, carriedBackpack, knownContainers, storing, Optional::empty);
     }
 
     /** @param network 网络存储（身上的无线终端、附近装着的终端）；没有联动时给空 */
@@ -78,7 +74,6 @@ public final class InventorySpace {
             Optional<CarriedBackpack> carriedBackpack,
             Optional<KnownContainers> knownContainers,
             Optional<StoresInContainer.Parts> storing,
-            Optional<DropsItems.Parts> dropping,
             Supplier<Optional<NetworkStorage>> network) {
         this.network = Objects.requireNonNull(network, "network");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
@@ -86,15 +81,14 @@ public final class InventorySpace {
         this.carriedBackpack = Objects.requireNonNull(carriedBackpack, "carriedBackpack");
         this.knownContainers = Objects.requireNonNull(knownContainers, "knownContainers");
         this.storing = Objects.requireNonNull(storing, "storing");
-        this.dropping = Objects.requireNonNull(dropping, "dropping");
     }
 
     /**
-     * 腾出若干格空位的动作：腾够了算做完；要动贵重品才腾得出时以 NEED_APPROVAL 失败（问题里写明动哪一堆），
-     * 连贵重品都算上也不够、或办法都用不上时以 INVENTORY_FULL 失败。
+     * 腾出若干格空位的动作：腾够了算做完；能搬的都搬了还腾不出时以 INVENTORY_FULL 失败，
+     * 建议里照现场列出能丢的候选、能存的容器与处置用的能力名，丢哪堆、存到哪由调用方定。
      *
      * @param slotsNeeded 要腾出的空格数
-     * @param purpose     拿这些空位做什么，例如"捡起掉落的铁锭"；写进存放、丢弃的变化备注，让 LLM 看到为什么动了它
+     * @param purpose     拿这些空位做什么，例如"捡起掉落的铁锭"；写进存放的变化备注，让 LLM 看到为什么动了它
      * @param keep        这次要留着的物品注册 ID（例如正要拿的东西），不往外挪
      * @param permissions 这次任务的许可：存进容器要走路，走过去能动多少地形按它来
      * @param records     发起任务的记账口
@@ -115,13 +109,13 @@ public final class InventorySpace {
         private final String purpose;
         private final Permissions permissions;
         private final TaskRecords records;
-        /** 不往外挪的东西：任务要留着的，加上这次挪不动的（丢不出去、存哪都存不进）。 */
+        /** 不往外挪的东西：任务要留着的，加上这次挪不动的（存哪都存不进的）。 */
         private final Set<String> unmovable;
         /** 这次存不进去的容器：点不开、放不下的，不再往里塞。 */
         private final Set<WorldPosition> failedContainers = new HashSet<>();
         private boolean mergeBroken;
         private boolean carriedBroken;
-        /** 这次存不进网络了（终端打不开、没连上、网络满了）：不再试，改走箱子或丢。 */
+        /** 这次存不进网络了（终端打不开、没连上、网络满了）：不再试，改走随身背包或箱子。 */
         private boolean networkBroken;
         private SpaceMove doing;
         private Action step;
@@ -170,20 +164,18 @@ public final class InventorySpace {
                 }
                 giveUpOn(move, null);
             }
-            if (plan.question() != null) {
-                // 要动贵重品才腾得出：停下来问，问题原样写明动哪一堆。
-                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_APPROVAL, plan.question().text(),
-                        "同意动贵重品，或先整理背包"));
-            }
-            if (plan.moves().isEmpty()) {
+            if (plan.problem() != null) {
+                // 能搬的都搬不了或搬了也不够：如实说腾不出，建议交回调用方处置。
                 return ActionStatus.failed(plan.problem());
             }
-            // 计划里每一步都做不了（部件没接上、容器不在了……）：如实说腾不出，不悄悄空转。
+            // 计划腾得够但每一步都做不了（部件没接上、容器不在了……）：如实说腾不出，不悄悄空转。
             return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
                     "腾地方的办法都用不上，背包腾不出 " + slotsNeeded + " 格"));
         }
 
         // 一次腾挪要看的现场：这次做不成的合并、随身背包、容器与东西都从计划里拿掉，免得原地重试。
+        // 记得的容器只要记得就进现场：存箱子的部件没接上时计划排的存箱步做不了会自动跳过，
+        // 腾不出时的建议仍能把容器位置报给调用方（它可以用 manage_container 自己去存）。
         private SpacePlanner.Scene scene() {
             List<KnownContainer> containers = knownContainers
                     .map(known -> known.within(NEARBY_CONTAINER_RANGE)).orElse(List.of()).stream()
@@ -196,7 +188,7 @@ public final class InventorySpace {
                     Set.copyOf(unmovable),
                     stackMerger.isPresent() && !mergeBroken,
                     carriedBroken ? 0 : carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
-                    storing.isPresent() ? containers : List.of(),
+                    containers,
                     !networkBroken && network.get().map(storage -> storage.reachable(nearMe())).orElse(false));
         }
 
@@ -222,9 +214,6 @@ public final class InventorySpace {
                     storedThisStep = 0;
                     return storingStep;
                 });
-                case SpaceMove.DropStack(var stack) -> dropping.map(parts -> new DropsItems(stack.itemId(),
-                        stack.count(), () -> carriedInBackpack(stack.itemId()), parts, records,
-                        "腾地方（" + purpose + "）"));
             };
         }
 
@@ -257,14 +246,13 @@ public final class InventorySpace {
             };
         }
 
-        // 一步做不成：这次不再试同一条路——合并坏了不再合，随身背包不再塞，容器不再存，丢不出的东西不再挪。
+        // 一步做不成：这次不再试同一条路——合并坏了不再合，随身背包不再塞，容器不再存，存不进网络不再存。
         private void giveUpOn(SpaceMove move, Problem problem) {
             switch (move) {
                 case SpaceMove.MergeStacks merge -> mergeBroken = true;
                 case SpaceMove.ToCarriedBackpack carried -> carriedBroken = true;
                 case SpaceMove.ToNetwork stored -> networkBroken = true;
                 case SpaceMove.ToKnownContainer(var container, var stack) -> failedContainers.add(container.at());
-                case SpaceMove.DropStack(var stack) -> unmovable.add(stack.itemId());
             }
             // 存箱子自己记了试过什么；其余的做不成在这里记一笔，部件没接上的不算试过。
             if (problem != null && !(move instanceof SpaceMove.ToKnownContainer)) {
@@ -285,11 +273,6 @@ public final class InventorySpace {
             step = null;
             doing = null;
             storingStep = null;
-        }
-
-        private int carriedInBackpack(String itemId) {
-            return backpack.stacks().stream().filter(stack -> stack.itemId().equals(itemId))
-                    .mapToInt(BackpackStack::count).sum();
         }
 
         @Override
@@ -317,7 +300,7 @@ public final class InventorySpace {
         return move instanceof SpaceMove.ToKnownContainer(var container, var stack) ? container.name() : "容器";
     }
 
-    // 一步腾挪给人看的说法，例如"丢掉 64 个 minecraft:cobblestone"。
+    // 一步腾挪给人看的说法，例如"把 64 个 minecraft:cobblestone 存进家门口的箱子"。
     private static String describeMove(SpaceMove move) {
         return switch (move) {
             case SpaceMove.MergeStacks merge -> "合并散着的 " + merge.itemId();
@@ -325,7 +308,6 @@ public final class InventorySpace {
             case SpaceMove.ToNetwork(var stacks) -> stacks.size() == 1 ? "把 " + noteOf(stacks.getFirst()) + " 存进网络"
                     : "把 " + stacks.size() + " 样东西存进网络";
             case SpaceMove.ToKnownContainer(var container, var stack) -> "把 " + noteOf(stack) + " 存进 " + container.name();
-            case SpaceMove.DropStack(var stack) -> "丢掉 " + noteOf(stack);
         };
     }
 

@@ -7,7 +7,8 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 
 /**
- * 腾挪的一步：计划只说"动哪一堆、怎么动"，怎么点击、怎么丢是执行接缝的事。
+ * 腾挪的一步：计划只说"动哪一堆、怎么动"，怎么点击、怎么存是执行接缝的事。
+ * 不再有"丢"这一步：把玩家背包里的东西扔到地上是替玩家做处置决定，腾背包只做可逆的搬动（合并、存放）。
  */
 sealed interface SpaceMove {
 
@@ -28,9 +29,5 @@ sealed interface SpaceMove {
         public ToNetwork {
             stacks = List.copyOf(stacks);
         }
-    }
-
-    /** 把主背包里的一堆丢到地上，从最不值钱的开始；数量是一整格。 */
-    record DropStack(BackpackStack stack) implements SpaceMove {
     }
 }

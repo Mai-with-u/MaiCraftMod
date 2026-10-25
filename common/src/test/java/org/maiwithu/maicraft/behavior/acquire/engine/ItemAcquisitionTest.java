@@ -372,11 +372,11 @@ class ItemAcquisitionTest {
     }
 
     @Test
-    void 背包要动贵重品才腾得出_交许可问题() {
+    void 背包只剩贵重品_如实失败带建议_不再征求同意() {
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:diamond", 1, 64, false, false, true, false));
         InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
         ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
@@ -384,18 +384,20 @@ class ItemAcquisitionTest {
         ActionStatus status = runToSettlement(
                 acquisition.need(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "火把"), PERMISSIONS));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
-        assertEquals(Problem.Kind.NEED_APPROVAL, failed.problem().kind());
-        assertTrue(failed.problem().message().contains("贵重"));
+        // 背包满如实失败：不再报 NEED_APPROVAL 问句——那是在为一个没有许可开关的动作征求同意；
+        // 建议里给出处置用的能力名，取舍交调用方。
+        assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
+        assertTrue(failed.problem().suggestion().contains("drop_items"), failed.problem().suggestion());
+        assertTrue(failed.problem().suggestion().contains("manage_container"), failed.problem().suggestion());
     }
 
     @Test
-    void 一次要几样_腾背包要动贵重品_种类仍是许可() {
-        // 腾背包的结果正文在问"可以吗？"（应答式暂停），宿主按种类路由回答：
-        // 一次要几样的收场把种类压成缺东西，同意就送不回去，角色拿着问句干等到超时（实机 214）。
+    void 一次要几样_背包只剩贵重品_种类是背包腾不出() {
+        // 腾背包如实失败：一次要几样的收场把种类照实传成 INVENTORY_FULL，不再有等着回答的问句。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:diamond", 1, 64, false, false, true, false));
         InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
         ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
@@ -404,8 +406,9 @@ class ItemAcquisitionTest {
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 1, "火把")),
                 PERMISSIONS, ItemAcquisition.Scope.ALL, null, null));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
-        assertEquals(Problem.Kind.NEED_APPROVAL, failed.problem().kind());
-        assertTrue(failed.problem().message().contains("可以吗"), "正文在征求同意：" + failed.problem().message());
+        assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
+        assertTrue(!failed.problem().message().contains("可以吗"), "不再有征求同意的问句：" + failed.problem().message());
+        assertTrue(failed.problem().suggestion().contains("drop_items"), failed.problem().suggestion());
     }
 
     @Test
@@ -414,7 +417,7 @@ class ItemAcquisitionTest {
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:coal", 64, 64, false, false, false, false));
         InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
         ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,
@@ -432,7 +435,7 @@ class ItemAcquisitionTest {
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:cobblestone", 30, 64, false, false, false, true));
         InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
-                Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
         ItemAcquisition acquisition = new ItemAcquisition(List.of(chest), full, offhand, tags,

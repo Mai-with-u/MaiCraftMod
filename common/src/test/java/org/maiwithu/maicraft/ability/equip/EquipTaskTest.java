@@ -193,9 +193,9 @@ class EquipTaskTest {
     void 背包腾不出地方_按背包满结束() {
         FakeEquipment equipment = new FakeEquipment();
         equipment.put(GearSlotName.HEAD, HELMET);
-        // 背包只剩一格且装着贵重品：腾挪动贵重品要先问，任务把"腾不动"按背包满带回。
+        // 背包只剩一格且装着贵重品：腾背包不再动它，任务把"腾不出"按背包满带回。
         InventorySpace space = new InventorySpace(new FullBackpack(1, 1),
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.HEAD, null, null),
                 equipment, Optional.of(space), Optional.of(new StubGearChanges(equipment))), 10);
         assertTrue(result instanceof TickResult.Finished finished

@@ -39,6 +39,8 @@ final class SeveralNeeds implements Action {
     private final List<String> failures = new ArrayList<>();
     /** 各条结论原来的问题种类：合并成整场的问题时按它定种类，不把提问压成缺东西。 */
     private final Set<Problem.Kind> failureKinds = new LinkedHashSet<>();
+    /** 里层失败带建议时收着最后一条（背包腾不出的现场出路）：整场按背包满收场时原样交回。 */
+    private String lastSuggestion;
     private Action current;
     private int index;
     private boolean started;
@@ -76,6 +78,7 @@ final class SeveralNeeds implements Action {
         if (status instanceof ActionStatus.Failed failed) {
             failures.add(requests.get(index).wanted().describe() + "：" + failed.problem().message());
             failureKinds.add(failed.problem().kind());
+            if (failed.problem().suggestion() != null) lastSuggestion = failed.problem().suggestion();
         }
         current.close();
         current = null;
@@ -112,7 +115,9 @@ final class SeveralNeeds implements Action {
         for (String failure : failures) message.append("；").append(failure);
         // 种类跟着里层走：征求同意的报 NEED_APPROVAL（宿主按种类路由回答），背包腾不出报 INVENTORY_FULL；
         // 压成缺东西，同意就送不回去，角色会拿着问句干等到超时。
-        return ActionStatus.failed(Problem.of(Problem.combined(failureKinds), message.toString()));
+        // 按背包满收场时把里层的现场建议（能丢的候选、能存的容器、处置能力名）原样带回去，不在这里截掉。
+        return ActionStatus.failed(Problem.of(Problem.combined(failureKinds), message.toString(),
+                Problem.combined(failureKinds) == Problem.Kind.INVENTORY_FULL ? lastSuggestion : null));
     }
 
     @Override public void pause() {
