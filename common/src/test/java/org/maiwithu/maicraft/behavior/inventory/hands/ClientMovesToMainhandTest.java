@@ -41,4 +41,29 @@ class ClientMovesToMainhandTest {
         assertEquals(HotbarSwapTarget.Holding.MOVABLE,
                 HotbarSwapTarget.holding(new ItemStack(Items.OAK_BOAT), ItemsToKeep.NOTHING));
     }
+
+    @Test
+    void startingOverKeepsTheTargetTheCallerAskedFor() {
+        // 卡住从头再打算（审计 A51）：调用方指定的格（垫料挪到第 3 格）照旧，"换到选中那一格"（-1）也照旧；
+        // 只有原本就是挑格换到手上的，按此刻的背包重挑。
+        Inventory inventory = new Inventory(null);
+        inventory.setItem(12, new ItemStack(Items.OAK_BOAT));
+        inventory.selected = 0;
+        assertEquals(3, ClientMovesToMainhand.restartTarget(3, false, inventory));
+        assertEquals(-1, ClientMovesToMainhand.restartTarget(-1, false, inventory));
+        assertEquals(ClientMovesToMainhand.planSwapTarget(inventory), ClientMovesToMainhand.restartTarget(5, true, inventory));
+    }
+
+    @Test
+    void stowingRelocatesAnEmptyMainSlotNotAnEmptyHotbarSlot() {
+        // 收主手进背包要搬的是"空气"：重找时找主背包里还空着的格（第 10 格），不去快捷栏的空格。
+        Inventory inventory = new Inventory(null);
+        inventory.setItem(0, new ItemStack(Items.STONE_PICKAXE));
+        inventory.setItem(9, new ItemStack(Items.COBBLESTONE, 64));
+        assertEquals(10, ClientMovesToMainhand.relocate(inventory, Items.AIR));
+        // 平常的东西：快捷栏、主背包里先找到的那格，再看副手。
+        inventory.setItem(20, new ItemStack(Items.OAK_BOAT));
+        assertEquals(20, ClientMovesToMainhand.relocate(inventory, Items.OAK_BOAT));
+        assertEquals(null, ClientMovesToMainhand.relocate(inventory, Items.TORCH));
+    }
 }

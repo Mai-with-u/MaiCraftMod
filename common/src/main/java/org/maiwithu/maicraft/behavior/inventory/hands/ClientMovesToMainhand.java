@@ -11,6 +11,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
@@ -95,6 +96,32 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     static int planSwapTarget(Inventory inventory) {
         return HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING),
                 VanillaHotbar.swapTarget(inventory.selected));
+    }
+
+    /**
+     * 卡住从头再打算时，要搬的东西此刻在身上哪一格（快捷栏、主背包或副手）；身上没有、或只在盔甲格里为 null。
+     * 收主手进背包要搬的是"空气"（和主背包一个空格交换）：重找的是主背包里还空着的一格，不去快捷栏找空格。
+     */
+    static Integer relocate(Inventory inventory, Item item) {
+        if (item == null) return null;
+        if (item == Items.AIR) {
+            for (int scan = FIRST_MAIN_SLOT; scan <= LAST_MAIN_SLOT; scan++) {
+                if (inventory.getItem(scan).isEmpty()) return scan;
+            }
+            return null;
+        }
+        for (int scan = 0; scan <= LAST_MAIN_SLOT; scan++) {
+            if (inventory.getItem(scan).is(item)) return scan;
+        }
+        return inventory.getItem(40).is(item) ? 40 : null;
+    }
+
+    /**
+     * 卡住从头再打算、东西还在主背包时换到快捷栏哪一格：原本就是挑格换到手上的（不挤掉手里拿着的）按此刻背包重挑；
+     * 调用方指定的格（垫料挪到第几格）照旧，"换到选中那一格"（-1）也照旧——改成别的格又不选中，东西就到不了手上。
+     */
+    static int restartTarget(int current, boolean selectAfter, Inventory inventory) {
+        return selectAfter ? planSwapTarget(inventory) : current;
     }
 
     /**
@@ -359,7 +386,7 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             if (verdict == StalledStep.Verdict.KEEP_WAITING) return ActionStatus.running();
             stalledSince = Long.MIN_VALUE;
             if (verdict == StalledStep.Verdict.START_OVER) {
-                Integer now = relocate(player);
+                Integer now = relocate(player.localPlayer().getInventory(), item);
                 if (now == null) return fail(giveUp + "，重新打算时身上已经没有这件东西");
                 restarts++;
                 // 旧阶段开着的背包界面交给原版关上（收在 close 的路径里），再按东西此刻在哪一格重定阶段。
@@ -368,7 +395,7 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
                 selectPending = null;
                 slot = now;
                 if (now >= FIRST_MAIN_SLOT && now <= LAST_MAIN_SLOT) {
-                    hotbarTarget = planSwapTarget(player.localPlayer().getInventory());
+                    hotbarTarget = restartTarget(hotbarTarget, selectAfter, player.localPlayer().getInventory());
                 }
                 stage = now == 40 ? Stage.OFFHAND_SWAP
                         : now >= 0 && now <= 8 ? Stage.SELECTING
@@ -378,15 +405,6 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             return fail(giveUp);
         }
 
-        // 东西此刻在身上哪一格（快捷栏、主背包或副手）；身上没有，或只在盔甲格里（那是穿卸装备的事）为 null。
-        private Integer relocate(PlayerContext player) {
-            if (item == null) return null;
-            var inventory = player.localPlayer().getInventory();
-            for (int scan = 0; scan <= 35; scan++) {
-                if (inventory.getItem(scan).is(item)) return scan;
-            }
-            return inventory.getItem(40).is(item) ? 40 : null;
-        }
 
         private ActionStatus fail(String message) {
             failure = Problem.of(Problem.Kind.STUCK, message, null);
