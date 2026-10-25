@@ -56,6 +56,7 @@ public final class BindingPlan {
      * @param cursor            光标上的东西（空就是空手）
      * @param playerSlotIds     角色侧的槽位号，与快照一一对应
      * @param playerSnapshots   角色侧此刻的样子
+     * @param playerLinked      角色侧每格上的东西是不是绑定好的副本，与快照一一对应；绑定落上没有由调用方按绑定读数判
      * @param bindingInputSlot  绑定格的槽位号；认不出为空
      * @param bindingInput      绑定格此刻的样子；读不到为空
      * @param bindingOutputSlot 产出格的槽位号；认不出为空
@@ -65,12 +66,14 @@ public final class BindingPlan {
      * @param outputIsLinkedCopy 产出格上的东西是不是绑定好的副本
      */
     public record Input(SlotSnapshot cursor, List<Integer> playerSlotIds, List<SlotSnapshot> playerSnapshots,
+                        List<Boolean> playerLinked,
                         Optional<Integer> bindingInputSlot, Optional<SlotSnapshot> bindingInput,
                         Optional<Integer> bindingOutputSlot, Optional<SlotSnapshot> bindingOutput,
                         String terminalItemId, boolean cursorIsLinkedCopy, boolean outputIsLinkedCopy) {
         public Input {
             playerSlotIds = List.copyOf(playerSlotIds);
             playerSnapshots = List.copyOf(playerSnapshots);
+            playerLinked = List.copyOf(playerLinked);
         }
     }
 
@@ -94,6 +97,9 @@ public final class BindingPlan {
         // 终端已在绑定格里：等服务端把绑定副本放进产出格。
         Optional<SlotSnapshot> boundInput = input.bindingInput();
         if (boundInput.isPresent() && !boundInput.get().isEmpty()) return new WaitCopy();
+        // 身上已经有绑定好的副本：绑定落上了，去做完（去关界面、按身上的物品核对），不再碰它。
+        // 不看这一条，放回背包的副本会被当成还没绑的原料再拿起来放进绑定格，一遍遍重绑到超时。
+        if (input.playerLinked().stream().anyMatch(linked -> linked)) return new Finished();
         // 身上找终端：空手拿起它。
         Optional<Integer> held = slotWithItem(input.playerSlotIds(), input.playerSnapshots(),
                 input.terminalItemId());

@@ -37,7 +37,9 @@ class BindingPlanTest {
             Optional<SlotSnapshot> bindingInput, Optional<SlotSnapshot> bindingOutput,
             boolean cursorIsLinkedCopy, boolean outputIsLinkedCopy) {
         List<Integer> playerSlotIds = List.of(3, 4, 5);
+        // 角色侧每格按物品认：这里的替身没有真的绑定读数，一律当没绑；要验"副本在身上就算做完"的用例自己给。
         return new BindingPlan.Input(cursor, playerSlotIds, playerSnapshots,
+                List.of(false, false, false),
                 Optional.of(1), bindingInput, Optional.of(2), bindingOutput,
                 TERMINAL, cursorIsLinkedCopy, outputIsLinkedCopy);
     }
@@ -110,9 +112,22 @@ class BindingPlanTest {
     void 认不出绑定格_点不下去() {
         BindingPlan.Input noSlots = new BindingPlan.Input(terminal(), List.of(3, 4, 5),
                 List.of(SlotSnapshot.empty(), SlotSnapshot.empty(), SlotSnapshot.empty()),
+                List.of(false, false, false),
                 Optional.empty(), Optional.empty(), Optional.of(2), Optional.empty(),
                 TERMINAL, false, false);
         assertInstanceOf(BindingPlan.Blocked.class, BindingPlan.next(noSlots));
+    }
+
+    @Test
+    void 身上已有绑定好的副本_宣告做完_不再拿起来重绑() {
+        // 放回背包的副本带着绑定位置：到这一步绑定就算落上了。不认它的话，副本会被当成
+        // 原料再拿起来放进绑定格，一遍遍重绑到超时——复演全链时抓到的第二处断点。
+        BindingPlan.Input input = new BindingPlan.Input(SlotSnapshot.empty(), List.of(3, 4, 5),
+                List.of(SlotSnapshot.of(new ItemStack(Items.GLOWSTONE_DUST)), SlotSnapshot.empty(), SlotSnapshot.empty()),
+                List.of(true, false, false),
+                Optional.of(1), Optional.empty(), Optional.of(2), Optional.empty(),
+                TERMINAL, false, false);
+        assertInstanceOf(BindingPlan.Finished.class, BindingPlan.next(input));
     }
 
     @Test

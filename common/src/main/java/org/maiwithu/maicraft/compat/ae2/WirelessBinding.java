@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -124,6 +126,7 @@ public final class WirelessBinding implements Action {
                 SlotSnapshot.of(raw.getCarried()),
                 menu.reading().orElseThrow().playerSlotIds(),
                 menu.reading().orElseThrow().playerSnapshots(),
+                linkedPerSlot(menu.reading().orElseThrow().playerSnapshots()),
                 inputSlot, inputSlot.map(id -> SlotSnapshot.of(raw.getSlot(id).getItem())),
                 outputSlot, outputSlot.map(id -> SlotSnapshot.of(raw.getSlot(id).getItem())),
                 terminalItemId,
@@ -164,6 +167,15 @@ public final class WirelessBinding implements Action {
         };
     }
 
+    // 角色侧每一格上的东西是不是绑定好的副本：绑定落上没有是物品上的事实，交给联动入口的绑定读数一格一格判。
+    private List<Boolean> linkedPerSlot(List<SlotSnapshot> snapshots) {
+        List<Boolean> linked = new ArrayList<>(snapshots.size());
+        for (SlotSnapshot snapshot : snapshots) {
+            linked.add(!snapshot.isEmpty() && compat.linkedWirelessTerminal(snapshot.stack()));
+        }
+        return linked;
+    }
+
     // 点之前记下那一格和光标各自的样子，生效判定按"点完现场该是什么样"来；本刻点不出去就下一刻再点。
     private ActionStatus click(int slotId, AbstractContainerMenu raw) {
         SlotSnapshot before = SlotSnapshot.of(raw.getSlot(slotId).getItem());
@@ -178,22 +190,27 @@ public final class WirelessBinding implements Action {
     }
 
     // 这一下点击生效了没有：现场交给纯函数判，那里写清拿起与放进各自"该是什么样"。
+    // 放进绑定格的那一下要看产出格：AE2 收下终端的同一刻就把它结成绑定副本，绑定格随即又空了。
     private boolean clickApplied(AbstractContainerMenu raw) {
+        Optional<Integer> outputSlot = compat.bindingOutputSlot(raw);
+        boolean settledToCopy = outputSlot.map(id -> compat.linkedWirelessTerminal(raw.getSlot(id).getItem()))
+                .orElse(false);
         return clickApplied(slotBefore, cursorBefore,
-                SlotSnapshot.of(raw.getSlot(clickedSlot).getItem()), SlotSnapshot.of(raw.getCarried()));
+                SlotSnapshot.of(raw.getSlot(clickedSlot).getItem()), SlotSnapshot.of(raw.getCarried()), settledToCopy);
     }
 
     /**
      * 一下点击生效了没有：点之前那格有东西的是拿起——那格空了、光标上拿起的正是原来那份；
-     * 点之前那格是空的是放进——光标空了、东西落进了那一格。判定只认物品身份：带电的终端
-     * 电量一路上会变，组件对不上不等于没生效。
+     * 点之前那格是空的是放进——光标空了，东西落进了那一格，或者服务端已经把它就地结成了产出格里的
+     * 绑定副本（AE2 收下可绑定物品的同一刻就结算，绑定格随即又空了，只看绑定格会把结成的生效
+     * 误判成没动静）。判定只认物品身份：带电的终端电量一路上会变，组件对不上不等于没生效。
      */
     static boolean clickApplied(SlotSnapshot slotBefore, SlotSnapshot cursorBefore,
-            SlotSnapshot slotAfter, SlotSnapshot cursorAfter) {
+            SlotSnapshot slotAfter, SlotSnapshot cursorAfter, boolean putInSettledToCopy) {
         if (!slotBefore.isEmpty()) {
             return slotAfter.isEmpty() && cursorAfter.sameIdentity(slotBefore);
         }
-        return cursorAfter.isEmpty() && !slotAfter.sameIdentity(slotBefore);
+        return cursorAfter.isEmpty() && (!slotAfter.sameIdentity(slotBefore) || putInSettledToCopy);
     }
 
     // 关界面：打开者负责关闭。关不上不冒充没绑过，照常收场。
