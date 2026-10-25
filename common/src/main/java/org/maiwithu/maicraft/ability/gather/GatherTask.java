@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
@@ -37,6 +38,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 工具不够格不自己去做一把，如实说缺什么等级的工具——备工具是拿东西的事，两件事分开才都看得清。
  * 拿没拿到按背包里数量的变化确认：冷却中的掉落物照常等，不误报"附近没有"。
  * 点名的是展示框：走到够得着的地方左键打一下，框里的东西弹出来再捡；框空着不打（再打会把框本身打下来）。
+ * 挖的是概率掉落的方块（草出种子、树叶出树苗、砾石出燧石）：挖开捡完就算这一下做完，没掉要的东西是常态，
+ * 结果如实写掉了什么、没掉什么，不当成缺东西；点名要它掉的东西时挖的时候不拿剪刀和精准采集（拿了只掉方块自己）。
  */
 final class GatherTask extends PhasedTask<GatherTask.Phase> {
 
@@ -66,6 +69,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private String liveType;
     /** 看现场时确认是熟了的作物：收完要不要补种按它，挖开后格子空了就再也看不出来。 */
     private boolean matureCrop;
+    /** 看现场时这格方块有机会掉的东西（草出种子、树叶出树苗）；不是概率掉落的方块为空。 */
+    private List<VanillaBlockDrops.ChanceDrop> chanceDrops = List.of();
     /** 动手前脚边已经躺着的掉落物：捡东西只捡这一下新冒出来的。 */
     private Set<Integer> dropsBefore = Set.of();
     /** 下一阶段的动作：上一刻按现场备好，进入阶段时交给基类持有。 */
@@ -147,6 +152,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
             matureCrop = true;
             return permissionOr("是熟了的作物，收");
         }
+        // 草、树叶、砾石这类：挖一下不一定掉要的东西，结算时按"挖开了就算做完"如实写掉了什么。
+        chanceDrops = VanillaBlockDrops.chanceDropsOf(liveType);
         Optional<String> required = tools.toolRequired(liveType);
         if (required.isPresent() && !CarriedItems.hasToolThatSuffices(backpack, offhand, liveType, tools)) {
             // 工具不足不自动备：备一把镐可能是采矿石加合成的一大串，采集悄悄做完会让结果难读。
@@ -168,7 +175,9 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                     PermissionCheck.WorldAction.DIG_BLOCK, spot.at(), liveType);
             if (refusal.isPresent()) return Next.fail(refusal.get());
         }
-        Optional<Action> dig = digs.dig(asBlock(spot.at()));
+        // 点名要的是这格的概率掉落（打草要种子、打树叶要树苗）：挖的时候不拿剪刀和精准采集，拿了只掉方块自己。
+        Optional<Action> dig = expectedChanceDrop().isPresent() ? digs.digForChanceDrops(asBlock(spot.at()))
+                : digs.dig(asBlock(spot.at()));
         if (dig.isEmpty()) {
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));
         }
@@ -255,11 +264,15 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
             recordChange(Change.of(Change.Kind.ITEM_GAINED, entry.getKey(), entry.getValue()));
         }
         if (!gained.isEmpty()) {
-            return Next.done(TaskResult.done("采集完成：" + gainedText(gained) + " 进了背包"));
+            return Next.done(TaskResult.done("采集完成：" + gainedText(gained) + " 进了背包" + missedChance(gained)));
         }
         if (spot.frame()) {
             return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, frameItem
                     + " 从展示框里打出来了，但没进背包（掉在够不着的地方，或被别人捡走）", "看看附近地上，用 gather 点名那个掉落物再捡"));
+        }
+        // 概率掉落的方块挖开了：这一下没掉是常态，算做完，写明没掉什么、原版每块的机会。
+        if (!chanceDrops.isEmpty() && (spot.expectedItem() == null || expectedChanceDrop().isPresent())) {
+            return Next.done(TaskResult.done("采集完成：挖开了 " + liveType + "，这一下什么都没掉" + chanceText()));
         }
         if (spot.expectedItem() != null) {
             return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
@@ -267,6 +280,26 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                             + "或掉在够不着的地方）"));
         }
         return Next.done(TaskResult.done("采集完成：没有东西掉落入包，按现场如实记录"));
+    }
+
+    // 点名要的东西正好是这格的概率掉落（草出种子、树叶出树苗）；不是为空。
+    private Optional<VanillaBlockDrops.ChanceDrop> expectedChanceDrop() {
+        if (spot.expectedItem() == null) return Optional.empty();
+        return chanceDrops.stream().filter(drop -> drop.itemId().equals(spot.expectedItem())).findFirst();
+    }
+
+    // 进了别的、点名要的概率掉落却没掉（打树叶掉了木棍、没掉树苗）：补一句没掉什么、原版每块的机会。
+    private String missedChance(Map<String, Integer> gained) {
+        return expectedChanceDrop().filter(drop -> !gained.containsKey(drop.itemId()))
+                .map(drop -> "；这一下没掉 " + drop.itemId() + "（原版" + drop.odds(0).describe() + "，没掉是常态）")
+                .orElse("");
+    }
+
+    // 什么都没掉时说清它本来有机会掉什么：点名的那样，没点名就列这格方块的全部概率掉落。
+    private String chanceText() {
+        List<VanillaBlockDrops.ChanceDrop> named = expectedChanceDrop().map(List::of).orElse(chanceDrops);
+        List<String> parts = named.stream().map(drop -> drop.itemId() + " 原版" + drop.odds(0).describe()).toList();
+        return "（有机会掉 " + String.join("、", parts) + "，没掉是常态）";
     }
 
     /** 动手以来背包里每样东西多了几件。 */

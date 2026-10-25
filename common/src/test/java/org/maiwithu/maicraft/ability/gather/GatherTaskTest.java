@@ -518,4 +518,71 @@ class GatherTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertTrue(result.problem().message().contains("没弹出来"), result.problem().message());
     }
+
+    /** 替身：挖概率掉落的方块，挖开后掉什么由场景定；记下走的是哪个挖的入口。 */
+    private static FakeActions chanceDigs(FakeBackpack backpack, String dropItem, int dropCount) {
+        return new FakeActions(backpack, dropItem, dropCount) {
+            @Override public Optional<Action> dig(BlockPos target) {
+                log.add("普通挖");
+                return Optional.of(dropping());
+            }
+
+            @Override public Optional<Action> digForChanceDrops(BlockPos target) {
+                log.add("为概率掉落挖");
+                return Optional.of(dropping());
+            }
+
+            private Action dropping() {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        if (dropCount > 0) backpack.add(dropItem, dropCount);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "挖一格";
+                    }
+                };
+            }
+        };
+    }
+
+    @Test
+    void 打草没掉种子也算这一下做完_如实写没掉() {
+        // 要种子去打草：12.5% 才出一颗，这一下什么都没掉是常态，不当成缺东西报 NEED_ITEM。
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = chanceDigs(backpack, "minecraft:wheat_seeds", 0);
+        GatherTask task = new GatherTask(blockSpot("minecraft:wheat_seeds"), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:short_grass", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("什么都没掉"), result.summary());
+        assertTrue(result.summary().contains("minecraft:wheat_seeds 原版每块 12.5%"), result.summary());
+        assertTrue(actions.log.contains("为概率掉落挖"), "点名要种子：挖的时候不拿剪刀");
+        assertEquals(Change.Kind.BLOCK_BROKEN, result.changes().getFirst().kind());
+    }
+
+    @Test
+    void 打树叶掉了木棍没掉树苗_写清掉了什么没掉什么() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = chanceDigs(backpack, "minecraft:stick", 1);
+        GatherTask task = new GatherTask(blockSpot("minecraft:oak_sapling"), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:oak_leaves", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("1 个 minecraft:stick 进了背包"), result.summary());
+        assertTrue(result.summary().contains("没掉 minecraft:oak_sapling（原版每块 5%"), result.summary());
+    }
+
+    @Test
+    void 没点名要什么时打草照常挖_什么都没掉也算做完() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = chanceDigs(backpack, "minecraft:wheat_seeds", 0);
+        GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:short_grass", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(actions.log.contains("普通挖"), "没点名要掉什么：照常挑工具");
+        assertTrue(result.summary().contains("有机会掉 minecraft:wheat_seeds"), result.summary());
+    }
 }
