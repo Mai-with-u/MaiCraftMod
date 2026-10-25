@@ -19,6 +19,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
@@ -32,20 +33,42 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ReadsBlockTags;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsBlockTypes;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.WantedItem;
+import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.sources.ReclaimSource;
+import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+
+import java.nio.file.Path;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -54,6 +77,122 @@ class UseTaskTest {
 
     private static final BlockPos LEVER = new BlockPos(1, 64, 1);
     private static final String OVERWORLD = "minecraft:overworld";
+
+    /** 世界记忆存盘用的临时目录：只有补账的测试真正用到。 */
+    @TempDir
+    Path temp;
+
+    @Test
+    void 放下一张床_世界记忆补上自己放下的账_收回来源认得领() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        // 与实机现场一致：床放在被点草地上面的那格，确认生效靠手上少了一张。
+        rig.interactions.placed("minecraft:white_bed", "床放下了",
+                () -> rig.world.blocks.put(LEVER.above(), "minecraft:white_bed"));
+        rig.memory = new WorldMemory(new DocumentStore(temp.resolve("state")), "world-1");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:white_bed", "minecraft:grass_block", null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        WorldPosition at = new WorldPosition(LEVER.above().getX(), LEVER.above().getY(), LEVER.above().getZ(),
+                OVERWORLD);
+        assertTrue(rig.memory.recordAt(MemoryKind.WORKSTATION, at).isPresent(), "放下的床该记成自己放下的账");
+        // 收回来源认的就是这条账：现场还是那张床、不在家附近，按路程报价去挖，不再说"没有记得的"。
+        ReclaimSource reclaim = reclaimOver(rig);
+        SourceQuote quote = reclaim.quote(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "睡觉"),
+                new SourceContext(WorldPosition.here(3, 64, 3), Permissions.DEFAULT));
+        assertInstanceOf(SourceQuote.Offer.class, quote);
+    }
+
+    @Test
+    void 放下火把这类不补账() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.interactions.placed("minecraft:torch", "火把插上了",
+                () -> rig.world.blocks.put(LEVER.above(), "minecraft:torch"));
+        rig.memory = new WorldMemory(new DocumentStore(temp.resolve("state-torch")), "world-1");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:torch", "minecraft:grass_block", null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.memory.allRecords().isEmpty(), "火把不是放下来用的设施，不往世界记忆补账");
+    }
+
+    @Test
+    void 判断_放下的床落在被点面的邻居格() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.world.blocks.put(LEVER.above(), "minecraft:white_bed");
+        var ready = readyHolding(new UseSeams.ReadsWorld.Held("minecraft:white_bed", 1));
+        var placed = PlacedFacility.judge(rig.world, ready,
+                ResolvedTarget.block(LEVER, "minecraft:grass_block", "草地"), rig.facilities);
+        assertEquals(LEVER.above(), placed.orElseThrow().cell());
+    }
+
+    @Test
+    void 判断_放进可替换的目标格就落在目标格本身() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:white_bed");
+        var ready = readyHolding(new UseSeams.ReadsWorld.Held("minecraft:white_bed", 1));
+        var placed = PlacedFacility.judge(rig.world, ready,
+                ResolvedTarget.block(LEVER, "minecraft:short_grass", "草"), rig.facilities);
+        assertEquals(LEVER, placed.orElseThrow().cell());
+    }
+
+    @Test
+    void 判断_现场找不到放下的方块就不记() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        var ready = readyHolding(new UseSeams.ReadsWorld.Held("minecraft:white_bed", 1));
+        assertTrue(PlacedFacility.judge(rig.world, ready,
+                ResolvedTarget.block(LEVER, "minecraft:grass_block", "草地"), rig.facilities).isEmpty());
+    }
+
+    @Test
+    void 判断_手上不是设施不找落格() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.world.blocks.put(LEVER.above(), "minecraft:dirt");
+        var ready = readyHolding(new UseSeams.ReadsWorld.Held("minecraft:bone_meal", 1));
+        assertTrue(PlacedFacility.judge(rig.world, ready,
+                ResolvedTarget.block(LEVER, "minecraft:grass_block", "草地"), rig.facilities).isEmpty());
+    }
+
+    /** 只带出手前那只手的交互结论，给判断与放置测试用。 */
+    private static UseSeams.Built.Ready readyHolding(UseSeams.ReadsWorld.Held heldBefore) {
+        return new UseSeams.Built.Ready(
+                new Scripted(1, ActionStatus.done(), () -> { }), () -> null, ItemUseAim.Gesture.EMPTY_HAND,
+                heldBefore, 0, null);
+    }
+
+    /** 在替身世界那张床的位置上拼一个收回来源：归属记录空着（睡过的床这条路不看归属）。 */
+    private ReclaimSource reclaimOver(Rig rig) {
+        ReadsBlockTypes blocks = at -> {
+            String type = rig.world.blocks.get(new BlockPos(at.x(), at.y(), at.z()));
+            return type == null || type.equals("minecraft:air") ? Optional.empty() : Optional.of(type);
+        };
+        ReadsBlockOwnership ownership = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.empty();
+            }
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return true;
+            }
+        };
+        Protection protection = new Protection(ownership, () -> List.of(), name -> Optional.empty(),
+                GuessesPlayerMade.NOTHING, "self");
+        PermissionCheck check = new PermissionCheck(protection, new ReadsCreatureSituation() {
+            @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
+                return Optional.empty();
+            }
+        });
+        CollectsBlocks collects = (cell, permissions) -> Optional.of(new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.done();
+            }
+            @Override public String describe() {
+                return "收 " + cell.toShortString();
+            }
+        });
+        ReadsItemTags tags = item -> item.endsWith("_bed") ? Set.of("minecraft:beds") : Set.of();
+        return new ReclaimSource(rig.memory, blocks, protection, check, collects, tags);
+    }
 
     @Test
     void 对拉杆用一下_确认生效记变化后完成() {
@@ -435,6 +574,17 @@ class UseTaskTest {
         final FakeTravel travel = new FakeTravel();
         final FakeMenus menus = new FakeMenus();
         final FakeOthers others = new FakeOthers();
+        /** 世界记忆：默认没接；补账的测试自己摆一份。 */
+        WorldMemory memory;
+        /** 设施分类：默认空标签的一套（床按种类认，原版工作台按 ID 表认）。 */
+        FacilityKinds facilities = new FacilityKinds(new ReadsBlockTags() {
+            @Override public Set<String> tagsOf(String blockType) {
+                return Set.of();
+            }
+            @Override public Set<String> blocksIn(String tag) {
+                return Set.of();
+            }
+        });
         /** 附近搜索按由近到远给出的方块格子。 */
         final List<BlockPos> nearestBlocks = new ArrayList<>();
         private long tick;
@@ -457,7 +607,7 @@ class UseTaskTest {
             };
             UseServices services = new UseServices(world, interactions, close, hand, needs,
                     id -> Optional.ofNullable(seen.get(id)), search, refusal, FakeSignEditor::open,
-                    drops, travel, menus, null, others, space);
+                    drops, travel, menus, memory, others, space, facilities);
             UseTask task = new UseTask(input, services);
             task.start(tick());
             return task;
@@ -568,8 +718,17 @@ class UseTaskTest {
             outcome(InteractionResult.applied(scene), () -> { });
         }
 
+        /** 一次放东西的生效：出手前手上拿着它，动作收场时世界出现放下的方块。 */
+        void placed(String itemId, String scene, Runnable onWorldChanged) {
+            script(InteractionResult.applied(scene), onWorldChanged, new UseSeams.ReadsWorld.Held(itemId, 1));
+        }
+
         // 动作结束时给出结论；没生效、没能确认的按交互动作的惯例报失败，结论照样读得到。
         void outcome(InteractionResult result, Runnable onEnd) {
+            script(result, onEnd, null);
+        }
+
+        private void script(InteractionResult result, Runnable onEnd, UseSeams.ReadsWorld.Held heldBefore) {
             ActionStatus end = result.verdict() == InteractionVerdict.APPLIED
                     ? ActionStatus.done() : ActionStatus.failed(Problem.of(Problem.Kind.STUCK, result.scene(), null));
             InteractionResult[] settled = {null};
@@ -578,7 +737,7 @@ class UseTaskTest {
                 onEnd.run();
             });
             script.add(new UseSeams.Built.Ready(action, () -> settled[0], ItemUseAim.Gesture.EMPTY_HAND,
-                    null, 0, null));
+                    heldBefore, 0, null));
         }
 
         void aimFails(Problem problem) {

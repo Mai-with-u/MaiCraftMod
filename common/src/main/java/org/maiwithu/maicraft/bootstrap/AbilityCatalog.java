@@ -664,7 +664,7 @@ public final class AbilityCatalog {
         // 要空手却腾不出格子时，用和拿东西同一份背包空间先腾一格。
         return UseModule.live(deps.context(), deps.interactions(), bringsClose, toMainhand, needs,
                 deps::scene, deps.blockScans(), refusals, deps.walks(), deps.dropConfirmations(), deps.memory(), deps::protection,
-                deps.creatures(), space);
+                deps.creatures(), space, deps.facilities());
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */

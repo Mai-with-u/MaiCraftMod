@@ -107,7 +107,8 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         upsert(new MemoryRecord(MemoryKind.CONTAINER, position, blockType, contents, MemoryOrigin.USED, when));
     }
 
-    /** 记下一个亲手用过的工作站：工作台、熔炉这类，用过一次就知道它在这里、能用。 */
+    /** 记下一个亲手放下或亲手用过的工作站：床、工作台、熔炉这类，放下或用过一次就知道它在这里、能用；
+     *  「收回自己放下的东西」认的也是这条账。 */
     public void rememberWorkstationUsed(WorldPosition position, String blockType, Instant when) {
         upsert(new MemoryRecord(MemoryKind.WORKSTATION, position, blockType, null, MemoryOrigin.USED, when));
     }

@@ -344,6 +344,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 if (!input.writesText()) {
                     appliedTimes++;
                     UseChanges.recordApplied(this::recordChange, services.world(), target, interaction, result);
+                    rememberPlacedFacility();
                 }
                 yield afterApplied();
             }
@@ -422,6 +423,18 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             recordAttempt("关上界面", failed.problem().message());
         }
         return collectOrNext();
+    }
+
+    // 放下来的是床、工作台、熔炉这类设施：生效确认一过就往世界记忆补一条「自己放下」的账，
+    // 「收回自己放下的东西」认的就是这条；睡过的账由夜休睡下时再记。
+    // 现场找不到放下的方块落在哪格（没同步过来、放出去的其实是别的）就不记，不瞎猜位置。
+    private void rememberPlacedFacility() {
+        if (services.memory() == null || services.facilities() == null) return;
+        PlacedFacility.judge(services.world(), interaction, target, services.facilities()).ifPresent(placed -> {
+            BlockPos cell = placed.cell();
+            services.memory().rememberWorkstationUsed(new WorldPosition(cell.getX(), cell.getY(), cell.getZ(),
+                    services.world().dimension()), placed.blockType(), Instant.now());
+        });
     }
 
     // 世界记忆按物品记"里面有什么"（取东西时按它找箱子），件数以到场再开为准。

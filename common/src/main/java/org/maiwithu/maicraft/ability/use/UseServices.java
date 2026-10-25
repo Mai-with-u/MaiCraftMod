@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 
 /**
@@ -26,6 +27,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
  * @param travel       走到没加载的坐标；没接上时按到不了说
  * @param menus        看看点开的界面；没接上时点开的界面列不出内容，也由它关上
  * @param memory       世界记忆；记得的地点从这里查，看过的容器记进去
+ * @param facilities   设施分类：放下的床、工作台这类记不记进世界记忆问它；没接上时放下的不补账
  * @param others       别人的东西认不认得出；没接上时会改动世界的用法一律不碰自己挑的目标（宁可不做，不越权）
  * @param space        背包空间：要空手却腾不出格子时先腾一格（存进网络、箱子或丢零碎）；没接上时如实说腾不出
  */
@@ -44,7 +46,8 @@ record UseServices(
         UseSeams.LooksInMenus menus,
         WorldMemory memory,
         UseSeams.OthersThings others,
-        InventorySpace space) {
+        InventorySpace space,
+        FacilityKinds facilities) {
 
     /** 没接背包空间。 */
     UseServices(UseSeams.ReadsWorld world, UseSeams.BuildsInteraction interactions, BringsPlayerClose close,
@@ -52,7 +55,7 @@ record UseServices(
             UseSeams.ReadsGameRefusal refusal, UseSeams.ReadsSignEditor signEditors, PicksUpDrops drops,
             UseSeams.TravelsTo travel, UseSeams.LooksInMenus menus, WorldMemory memory, UseSeams.OthersThings others) {
         this(world, interactions, close, hand, needs, seen, search, refusal, signEditors, drops, travel, menus, memory,
-                others, null);
+                others, null, null);
     }
 
     UseServices {
