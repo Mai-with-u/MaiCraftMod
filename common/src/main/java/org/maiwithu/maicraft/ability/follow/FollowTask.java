@@ -158,7 +158,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Action gettingOff;
 
     private Battle help;
-    private HelpHand helpHand;
+    /** 这一场帮打包成的手上的事：基类的暂停、收尾、能不能打断经它够得着战斗引擎。 */
+    private Action helpHand;
     private long helpEndedTick = Long.MIN_VALUE / 2;
     /** 上一场帮打之后要歇多久才再上（刻）：撤出来了、或一下都没打着时歇一阵，免得来回冲。 */
     private long helpCooldown;
@@ -174,35 +175,6 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         this.events = Objects.requireNonNull(events, "events");
         // 跟随的走到许可直接沿用任务许可的档位：只垫不挖时跟人开路也只垫不拆；落地办法随动土一起放开。
         this.permit = TerrainPermit.of(input.permissions());
-    }
-
-    /** 一场帮打包成动作：战斗引擎每刻读回的是战况不是动作状态，包一层让基类的暂停、先停稳、收尾都够得着它。 */
-    private final class HelpHand implements Action {
-        private final Battle fight;
-
-        HelpHand(Battle fight) {
-            this.fight = fight;
-        }
-
-        @Override public ActionStatus tick(TickContext context) {
-            return ActionStatus.running();
-        }
-
-        @Override public void pause() {
-            fight.pause();
-        }
-
-        @Override public void close() {
-            fight.close();
-        }
-
-        @Override public Interruptibility interruptibility() {
-            return fight.interruptibility();
-        }
-
-        @Override public String describe() {
-            return fight.describe();
-        }
     }
 
     @Override protected Action enter(Phase phase) { return null; }
@@ -653,7 +625,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         FollowView.Sighting him = see(context);
         if (help == null) {
             help = moves.helpFight(() -> last == null ? null : last.feet());
-            helpHand = new HelpHand(help);
+            helpHand = help.asAction();
             hold(helpHand);
             helpLanded = false;
             tell("他在跟敌对生物打（" + spot(last) + "），上去帮他");

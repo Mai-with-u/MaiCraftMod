@@ -129,25 +129,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         this.consent = Objects.requireNonNull(consent, "consent");
     }
 
-    /** 战斗引擎包成动作：引擎每刻读回的是战况不是动作状态，包一层让基类的暂停、收尾、换阶段保留都够得着它。 */
-    private final class BattleHand implements Action {
-        @Override public ActionStatus tick(TickContext context) {
-            return ActionStatus.running();
-        }
-
-        @Override public void pause() {
-            battle.pause();
-        }
-
-        @Override public void close() {
-            battle.close();
-        }
-
-        @Override public String describe() {
-            return battle.describe();
-        }
-    }
-
     @Override protected Action enter(Phase phase) { return null; }
 
     // 换阶段去开打时引擎留着不关：它是刚为这一仗建好的，开打第一刻就能出手、走位；去别的阶段照常收尾。
@@ -238,7 +219,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
         double radius = named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS;
         battle = new Battle(senses, moves, new Roster(), radius);
-        battleHand = new BattleHand();
+        battleHand = battle.asAction();
         hold(battleHand);
         fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, switch (verdict) {
@@ -281,7 +262,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         experienceBefore = moves.experience(context);
         battle = new Battle(senses, moves, new Roster(),
                 named.isEmpty() ? input.radius() : ThreatAssessment.VIGILANCE_RADIUS);
-        battleHand = new BattleHand();
+        battleHand = battle.asAction();
         hold(battleHand);
         fightCursor = moves.dropCursor(context);
         return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");

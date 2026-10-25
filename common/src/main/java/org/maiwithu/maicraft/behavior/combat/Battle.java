@@ -754,4 +754,32 @@ public final class Battle {
     public String describe() {
         return doing;
     }
+
+    /**
+     * 这一仗包成分阶段任务手上的一件事：引擎每刻读回的是战况不是动作状态，包一层让任务基类的暂停、收尾、
+     * 能不能打断都够得着它；每刻推进仍由任务自己调 {@link #tick}，读回战况再定下一步。点名战斗和跟随帮打共用这一份。
+     */
+    public Action asAction() {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.running();
+            }
+
+            @Override public void pause() {
+                Battle.this.pause();
+            }
+
+            @Override public void close() {
+                Battle.this.close();
+            }
+
+            @Override public Interruptibility interruptibility() {
+                return Battle.this.interruptibility();
+            }
+
+            @Override public String describe() {
+                return Battle.this.describe();
+            }
+        };
+    }
 }
