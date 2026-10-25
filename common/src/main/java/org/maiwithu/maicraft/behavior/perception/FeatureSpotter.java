@@ -19,8 +19,18 @@ public final class FeatureSpotter {
     /** 网格里可聚类的符号与它对应的地形特征名。 */
     private FeatureSpotter() {}
 
-    /** 一处聚出来的特征：大致中心、特征名与格数。 */
-    public record Marked(WorldPosition center, String kind, int cells) {}
+    /**
+     * 一处聚出来的特征：大致中心、特征名与格数。
+     *
+     * <p>{@code resources} 是标注好的产地证据：这种特征成片出现时顺带证明这里大概产什么
+     * （树林证明有木头）；不是产地证据的特征为空列表。证据与产物的对应关系只有标注表这一份，
+     * 整理观察的一方只看标注结果，不自己认特征种类。
+     */
+    public record Marked(WorldPosition center, String kind, int cells, List<String> resources) {
+        public Marked {
+            resources = List.copyOf(resources);
+        }
+    }
 
     /** 从一张俯视网格里聚出地形特征；格子太少或没有成片的就什么都不报。 */
     public static List<Marked> spot(OverheadGrid.View view) {
@@ -30,7 +40,7 @@ public final class FeatureSpotter {
         List<Marked> found = new ArrayList<>();
         for (int row = 0; row < size; row++) {
             for (int col = 0; col < size; col++) {
-                String kind = kindOf(cells[row][col]);
+                Kind kind = kindOf(cells[row][col]);
                 if (kind == null || taken[row][col]) {
                     continue;
                 }
@@ -51,7 +61,7 @@ public final class FeatureSpotter {
                 int cx = center.getX() + (int) Math.round((double) sumCol / cluster.size()) - radius;
                 int cz = center.getZ() + (int) Math.round((double) sumRow / cluster.size()) - radius;
                 found.add(new Marked(WorldPosition.here(cx, center.getY(), cz),
-                        kind, cluster.size()));
+                        kind.name(), cluster.size(), kind.resources()));
             }
         }
         return found;
@@ -83,12 +93,16 @@ public final class FeatureSpotter {
         }
     }
 
-    /** 网格符号到特征名的对照：只有值得报成一处特征的三种。 */
-    private static String kindOf(char cell) {
+    /** 一种可聚类的符号对应的特征：特征名，以及成片出现时它证明的产地产物。 */
+    private record Kind(String name, List<String> resources) {}
+
+    // 网格符号到特征的对照：只有值得报成一处特征的三种。
+    // 产地证据也在这里一并声明（树林证明有木头）：新添产地知识只改这张表，别处不再认种类字符串。
+    private static Kind kindOf(char cell) {
         return switch (cell) {
-            case OverheadGrid.WATER -> "水体";
-            case OverheadGrid.TREE -> "树林";
-            case OverheadGrid.DROP -> "落差";
+            case OverheadGrid.WATER -> new Kind("水体", List.of());
+            case OverheadGrid.TREE -> new Kind("树林", List.of("木头"));
+            case OverheadGrid.DROP -> new Kind("落差", List.of());
             default -> null;
         };
     }

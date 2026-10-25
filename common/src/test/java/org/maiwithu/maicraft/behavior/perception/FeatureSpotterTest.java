@@ -27,8 +27,11 @@ class FeatureSpotterTest {
                 {'.', '.', '.', '.', '.'}};
         List<FeatureSpotter.Marked> found = FeatureSpotter.spot(view(cells));
         assertEquals(2, found.size());
-        assertTrue(found.stream().anyMatch(m -> "水体".equals(m.kind()) && m.cells() == 3));
-        assertTrue(found.stream().anyMatch(m -> "树林".equals(m.kind()) && m.cells() == 3));
+        // 产地证据在标注时就带着：树林证明有木头，水体不是产地证据，产物为空。
+        assertTrue(found.stream().anyMatch(m -> "水体".equals(m.kind()) && m.cells() == 3
+                && m.resources().isEmpty()));
+        assertTrue(found.stream().anyMatch(m -> "树林".equals(m.kind()) && m.cells() == 3
+                && List.of("木头").equals(m.resources())));
     }
 
     @Test

@@ -111,7 +111,8 @@ public final class Scene {
 
     /**
      * 更新俯视网格，并从网格里聚出地形特征：成片的水、树、落差各领一个观察编号；
-     * 成片的树林顺路记一条产地线索——路过看见一片树，"这里大概有木头"就成立。
+     * 聚类时已标注为产地证据的特征（如树林证明有木头）统一照标注结果写一条产地线索，
+     * 这里不认特征种类——证据与产物的对应关系在聚类的标注表里。
      */
     public void updateGrid(OverheadGrid.View view, long nowTick, Instant when) {
         grid = view;
@@ -127,8 +128,9 @@ public final class Scene {
             next.add(new TerrainFeature(id, marked.kind(), marked.center(),
                     direction, bearing.compass(), bearing.distance(),
                     "约" + marked.cells() + "格"));
-            if ("树林".equals(marked.kind())) {
-                memory.siteSeen(marked.center(), List.of("木头"), when);
+            // 标注即写：只有聚类声明过产地证据的特征才进世界记忆，不是产地证据的不写。
+            if (!marked.resources().isEmpty()) {
+                memory.siteSeen(marked.center(), marked.resources(), when);
             }
         }
         features = List.copyOf(next);

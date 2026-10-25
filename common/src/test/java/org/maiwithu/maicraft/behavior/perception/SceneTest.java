@@ -142,6 +142,18 @@ class SceneTest {
     }
 
     @Test
+    void featuresWithoutSiteAnnotationAreNotWrittenToMemory() {
+        // 一片水不是产地证据（聚类没标注产物）：照常领观察编号，但不往世界记忆里写。
+        char[][] cells = {
+                {'~', '~', '~'},
+                {'.', '.', '.'},
+                {'.', '.', '.'}};
+        scene.updateGrid(new OverheadGrid.View(new BlockPos(0, 64, -4), 1, cells), 10, NOW);
+        assertEquals("水体", scene.features().getFirst().kind());
+        assertTrue(memory.calls.isEmpty(), "没有标注成产地证据的特征不写产地线索");
+    }
+
+    @Test
     void summaryCountsWithoutRepeatingTheLists() {
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null, null,
