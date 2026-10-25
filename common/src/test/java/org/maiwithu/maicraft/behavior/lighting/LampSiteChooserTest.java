@@ -175,6 +175,34 @@ class LampSiteChooserTest {
     }
 
     @Test
+    void 玩家放的门格不选为灯位_更不会为腾位去动它() {
+        // 门格不是空气也不是可替换的草丛：资格闸头一个就拦下——灯位挑选取不了玩家放的东西，
+        // 补光也没有"拆了腾位"这一步；周围有别格可插时照常选，暗格不受门牵连。
+        LightingFakes.FakeWorld world = openGround();
+        world.put(at(1, 64, 1), Blocks.OAK_DOOR.defaultBlockState());
+        LampSiteChooser.Selection selection = LampSiteChooser.choose(List.of(at(0, 64, 0)), world,
+                Set.of(), NOTHING_PROTECTED, at(0, 64, 0), TORCH, 8);
+        assertTrue(!selection.chosen().isEmpty(), "周围还有别格能插");
+        for (LampSiteChooser.LampSite site : selection.chosen()) {
+            assertTrue(!site.pos().equals(at(1, 64, 1)), "灯位不落在门格上：" + site.pos());
+        }
+        assertTrue(selection.uncovered().isEmpty(), "门格不碍着暗格照亮");
+    }
+
+    @Test
+    void 玩家地盘的格让位_无主的照选_混合如实() {
+        // 正中间那格圈成玩家放的（许可挡下）：两格暗不硬插它，换旁边无主的格照样一支盖两格；
+        // 有格可插就不是一个要提问的局面，"插不得"名单为空。
+        LightingFakes.FakeWorld world = openGround();
+        Predicate<BlockPos> onlyMiddle = pos -> pos.equals(at(1, 64, 1));
+        LampSiteChooser.Selection selection = LampSiteChooser.choose(
+                List.of(at(0, 64, 0), at(2, 64, 0)), world, Set.of(), onlyMiddle, at(0, 64, 0), TORCH, 8);
+        assertEquals(1, selection.chosen().size(), "无主的格一支盖两格");
+        assertTrue(!selection.chosen().getFirst().pos().equals(at(1, 64, 1)), "玩家地盘的格不入选");
+        assertTrue(selection.onlyProtected().isEmpty(), "有别的格可插，不用提问");
+    }
+
+    @Test
     void 没有资格的暗格_如实留在未覆盖里() {
         // 暗格四周一整片都是敏感面：围绕它的候选全被资格闸拦下。
         LightingFakes.FakeWorld world = openGround();

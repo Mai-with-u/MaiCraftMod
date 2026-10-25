@@ -53,7 +53,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /** 区域补光的任务：开始时已满足零动作、量光选灯放灯复测达标、农田档只验收庄稼、缺灯不采购如实报缺口、
- * 没处插的暗格如实收场、走不到的样本不算进分母。 */
+ * 玩家放的格挡灯位时提问而不动手、无主格照插、没处插的暗格如实收场、走不到的样本不算进分母。 */
 class LightTaskTest {
 
     private static final String DIM = "minecraft:overworld";
@@ -88,6 +88,10 @@ class LightTaskTest {
         Action approach;
         /** 天光直照的格：这些格的天空光是 15（头顶没遮），其余格都当头顶遮着。 */
         final Set<BlockPos> skyOpen = new HashSet<>();
+        /** 许可挡下的格：当它们是玩家放的或在玩家地盘里，放不进去。 */
+        final Set<BlockPos> guarded = new HashSet<>();
+        /** 整片候选都挡下：满眼都是玩家地盘的场景。 */
+        boolean guardEverything;
 
         Fake ground(int from, int to) {
             for (int x = from; x <= to; x++) {
@@ -153,8 +157,13 @@ class LightTaskTest {
             return new Click(new Effect(() -> { }), () -> InteractionResult.applied("替身确认"));
         }
 
-        // 许可、备料、记账、走到：没有保护、没有走法（走不到就如实记没加载）。
+        // 许可、备料、记账、走到：挡下的格按保护答，其余没有走法（走不到就如实记没加载）。
         @Override public Optional<Problem> allows(PermissionCheck.WorldAction action, BlockPos pos, String blockType) {
+            if (action == PermissionCheck.WorldAction.PLACE_BLOCK
+                    && (guardEverything || guarded.contains(pos))) {
+                return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
+                        "替身：" + pos.toShortString() + " 是玩家放的或在玩家地盘里", null));
+            }
             return Optional.empty();
         }
         @Override public ConstructionSeams.HoldPlan hold(String itemId) { return new ConstructionSeams.HoldPlan.Ready(); }
@@ -491,6 +500,43 @@ class LightTaskTest {
         TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertTrue(result.summary().contains("没加载"), result.summary());
+    }
+
+    @Test
+    void 灯位全在玩家放的格上_一格不插_提问要许可() {
+        // 满眼都是玩家放的或在玩家地盘里的格（许可逐格挡下）：一支灯都不插、一格都不动，
+        // 把 NEED_APPROVAL 交给 LLM 拿主意，绝不先动了再认。
+        Fake fake = new Fake().ground(-2, 2);
+        fake.carried.put("minecraft:torch", 4);
+        fake.guardEverything = true;
+        TaskResult result = run(task(input(2, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind(), "要许可，不是没地方插");
+        assertTrue(result.summary().contains("受保护"), result.summary());
+        assertTrue(result.changes().isEmpty(), "一格都没动");
+        for (Map.Entry<BlockPos, BlockState> entry : fake.world.entrySet()) {
+            assertFalse(entry.getValue().is(Blocks.TORCH), "玩家地盘里不该出现灯：" + entry.getKey());
+        }
+        LightDetails details = (LightDetails) result.details();
+        assertEquals(LightDetails.PROTECTED, details.unlit().getFirst().reason(), "暗格按插不得列出");
+    }
+
+    @Test
+    void 玩家地盘与无主格混着_玩家格不插_无主格照插_门格不动() {
+        // 暗格里有一格圈在玩家地盘、旁边还立着一扇玩家放的门：灯只插无主的格，
+        // 玩家格与门格原样留下，也不用整体停下来提问（有别的格可插）。
+        Fake fake = new Fake().ground(-4, 4);
+        fake.carried.put("minecraft:torch", 64);
+        fake.world.put(new BlockPos(1, 64, 1), Blocks.OAK_DOOR.defaultBlockState());
+        fake.guarded.add(new BlockPos(0, 64, 1));
+        TaskResult result = run(task(input(3, LightInput.Coverage.ALL, 8), fake));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(Blocks.OAK_DOOR, fake.world.get(new BlockPos(1, 64, 1)).getBlock(),
+                "门格原样：没被拆、没被顶掉");
+        assertFalse(isTorch(fake, new BlockPos(0, 64, 1)), "玩家地盘那格不落灯");
+        LightDetails details = (LightDetails) result.details();
+        assertTrue(details.placed() > 0, "无主的格照常插灯");
+        assertEquals(details.samples(), details.lit(), "剩下的暗格用无主的格照亮");
     }
 
     @Test
