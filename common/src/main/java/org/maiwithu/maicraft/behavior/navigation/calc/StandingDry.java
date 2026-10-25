@@ -27,6 +27,16 @@ public final class StandingDry implements NavGoal {
         return false;
     }
 
+    /**
+     * 这个目标到达时要不要站在干地上（脚格、头格都不沾液体）：只有套着这一层的出行目的地要，
+     * 绕着怪去目的地时外面再包一层避让也照样要。其余要站实的目标（采矿站位、交互站位、挖矿顺路捡的掉落物）
+     * 落地就算到，水底落地、浅水里站着也算——能干活就行，站在哪一格不必那么讲究（2026-10-25 拍板）。
+     */
+    public static boolean requiredBy(NavGoal goal) {
+        if (goal instanceof StandingDry) return true;
+        return goal instanceof ApproachAvoiding avoiding && requiredBy(avoiding.approach());
+    }
+
     @Override public double heuristic(BlockPos from) {
         return inner.heuristic(from);
     }
