@@ -640,8 +640,9 @@ public final class AbilityCatalog {
         return new VehicleControls(deps.worldDocuments(), deps.worldKey());
     }
 
-    /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。 */
-    private static ChatAbility chatModule(Deps deps) {
+    /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。
+     *  包私有是给总装测试的接缝：测试从这里取组装好的能力，钉住实例配置接进了逐字打字开关。 */
+    static ChatAbility chatModule(Deps deps) {
         ChatChannel chat = deps.chat();
         ReadsChatEcho echo = new ReadsChatEcho() {
             @Override public boolean appearsInChat(String message) { return chat.appearsInChat(message); }
@@ -652,8 +653,9 @@ public final class AbilityCatalog {
         // 逐字打字开的是真实聊天框，框里放的是草稿；提交仍走聊天通道。
         // 管理员命令认不认得出，单人时问内置服务器的命令树；连远程服务器时只按名单认。
         ClientCommandTree commandTree = new ClientCommandTree();
+        // 逐字打字开关必须从实例配置接进来：它决定发话任务一开始是逐字打草稿，还是整句直接提交。
         return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.allowGameCommands(),
-                commandTree::adminOnly);
+                deps.chatTypewriter(), commandTree::adminOnly);
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */

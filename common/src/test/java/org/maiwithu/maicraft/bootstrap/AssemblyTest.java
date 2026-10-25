@@ -11,20 +11,27 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.google.gson.JsonParser;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
+import org.maiwithu.maicraft.kernel.goal.StepContext;
+import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
+import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -103,6 +110,46 @@ class AssemblyTest {
         assertNotNull(finished, "零秒等待在几刻内就该走完");
         assertEquals(TaskResult.Status.DONE, finished.status(),
                 "等待完成的结算要如实写清：" + finished.summary());
+    }
+
+    @Test
+    void chatTypewriterConfigReachesTheAssembledChatTask() {
+        // 实例配置的逐字打字开关要在组装层接进说话能力：这里钉住「配置 → 造出的发话任务初始相位」这一跳，
+        // 防止配置收进依赖后被丢弃、开关恒被当成开着的。
+        // 关掉逐字：任务一开始就在提交阶段，整句第一刻交给聊天输入，不再逐字打草稿。
+        Task closedTask = assembledChatTask(OfflineCatalog.deps(tempDir, false));
+        assertEquals("正在说话", closedTask.currentProgress().orElseThrow().phase(),
+                "逐字打字关掉时，发话任务要一开始就在提交阶段");
+
+        // 开着逐字（默认）：任务一开始在逐字打字阶段，逐字行为保持不变。
+        Task openTask = assembledChatTask(OfflineCatalog.deps(tempDir, true));
+        assertEquals("逐字打字", openTask.currentProgress().orElseThrow().phase(),
+                "逐字打字开着时，发话任务要一开始就在逐字打字阶段");
+    }
+
+    /** 从组装层取一份说话能力，照真实路径开出一条发话任务：能力登记任务工厂，决定阶段产出输入，工厂造任务。 */
+    private static Task assembledChatTask(AbilityCatalog.Deps deps) {
+        ChatAbility chat = AbilityCatalog.chatModule(deps);
+        TaskFactories factories = new TaskFactories();
+        chat.registerTasks(factories);
+        ParseResult parsed = chat.spec().paramSpecs()
+                .parse(JsonParser.parseString("{\"message\":\"大家好\"}").getAsJsonObject());
+        assertTrue(parsed.ok(), "一句话的参数应能解析：" + parsed.errors());
+        Goal goal = new Goal("maicraft:chat", null, null, parsed.params(), null, List.of(), null);
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, chat.decide(new StepContext() {
+            @Override public Goal goal() {
+                return goal;
+            }
+
+            @Override public int stepIndex() {
+                return 0;
+            }
+
+            @Override public TickContext tick() {
+                throw new IllegalStateException("决定阶段不应碰到每刻上下文");
+            }
+        }));
+        return factories.create(run.input());
     }
 
     /** 离线的一刻：只有游戏刻号，没有角色；等待任务按"角色不在"如实处理。 */

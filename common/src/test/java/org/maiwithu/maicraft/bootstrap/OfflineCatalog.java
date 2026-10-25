@@ -101,8 +101,13 @@ final class OfflineCatalog {
         }
     }
 
-    /** 一份依赖；世界记忆的库文件放在给定的临时目录里。 */
+    /** 一份依赖，聊天逐字打字按默认开着：离线替身测的是逐字路径。 */
     static AbilityCatalog.Deps deps(Path tempDir) {
+        return deps(tempDir, true);
+    }
+
+    /** 一份依赖；世界记忆的库文件放在给定的临时目录里，聊天逐字打字开关由测试摆。 */
+    static AbilityCatalog.Deps deps(Path tempDir, boolean chatTypewriter) {
         Supplier<PlayerContext> nobody = () -> null;
         WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY);
         ClientHooks.registerChatLog(new ChatLog());
@@ -139,7 +144,7 @@ final class OfflineCatalog {
                 () -> 0,
                 new InputDriver(new PlayerControlBoundary()),
                 false,
-                true, // 聊天逐字打字照默认开着，离线替身测的是逐字路径。
+                chatTypewriter, // 聊天逐字打字开关由测试摆，组装层要把它原样接进说话能力。
                 new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
                         SELF_ID),
                 stack -> 0,

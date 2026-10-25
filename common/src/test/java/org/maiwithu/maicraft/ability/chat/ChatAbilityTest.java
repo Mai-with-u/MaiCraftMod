@@ -108,11 +108,11 @@ class ChatAbilityTest {
         // 名单里没有的模组命令，单人时问内置服务器的命令树：它说普通玩家用不了，就当管理员命令拒绝。
         KnowsAdminCommands tree = name -> name.equals("ftbteams");
         StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
-                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, tree)
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, true, tree)
                         .decide(step(goal("/ftbteams create 队"))));
         assertEquals(Problem.Kind.REFUSED_BY_GAME, finish.result().problem().kind());
         assertInstanceOf(StepDecision.Run.class,
-                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, tree).decide(step(goal("/home"))));
+                new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false, true, tree).decide(step(goal("/home"))));
     }
 
     @Test

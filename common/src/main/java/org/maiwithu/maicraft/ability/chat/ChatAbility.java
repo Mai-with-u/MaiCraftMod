@@ -42,16 +42,13 @@ public final class ChatAbility implements AbilityModule {
     /** 服务器的命令树：单人时认得出模组自带的管理员命令；拿不到时只按名单认。 */
     private final KnowsAdminCommands adminCommands;
 
-    /** 没有命令树可问的一份：只按名单认管理员命令（离线测试、连远程服务器）。 */
+    /** 没有命令树可问的一份：只按名单认管理员命令（离线测试、连远程服务器）。逐字打字按开着处理。 */
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands) {
         this(sender, echo, drafts, allowGameCommands, true, KnowsAdminCommands.NONE);
     }
 
-    public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
-            KnowsAdminCommands adminCommands) {
-        this(sender, echo, drafts, allowGameCommands, true, adminCommands);
-    }
-
+    // 不提供省略逐字打字开关的构造：实例配置接到能力是组装层的活，漏接曾经让配置恒被当成开着的，
+    // 关不掉逐字打字。开关必须显式给，忘了接在编译期就报错，而不是运行时静默逐字。
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
             boolean chatTypewriter, KnowsAdminCommands adminCommands) {
         this.sender = sender;
