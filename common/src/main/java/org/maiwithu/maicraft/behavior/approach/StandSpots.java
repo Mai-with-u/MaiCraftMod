@@ -122,7 +122,9 @@ public final class StandSpots {
                                                  ApproachWorldView world, ProtectedCells guarded,
                                                  boolean mayStandOnTarget) {
         BlockPos feet = world.currentFeet();
-        if (!world.onGround()) return Optional.of("还没落地");
+        // 骑载具踩着水凑到船边算到了：人在贴水面的湿位漂着、头还在水面外时不要求落地，
+        // 落地这一项只有站在干地上的目标才核对（与挑站位共用的同一条判据，见 floatingForVehicle）。
+        if (!world.onGround() && !floatingForVehicle(target, world, feet)) return Optional.of("还没落地");
         // 站的这格不能站（要往这里放东西、或受保护）：先挪开。实机让它就地放工作台，人站在要放的那格里，
         // 原版放不下去，原地试了八千多次。
         if (guarded.contains(feet)) return Optional.of("站的这格要放东西或受保护，得挪开");
@@ -204,22 +206,31 @@ public final class StandSpots {
 
     /**
      * 站得稳检查：脚下实心、头顶两格空、落差不大、不在液体里、旁边没岩浆、不踩受保护的格子。
-     * 声明允许湿脚的目标（骑上载具）把液体否决改为分级：脚格进水但头那一格（脚上一格）还在水面外、
-     * 脚下实心能站，算浅水湿脚，可用并排到干位之后；头也进了水的深水位照旧按"泡在液体里"拒。
+     * 声明允许湿脚的目标（骑上载具）把液体否决改为分级：脚格进水但头那一格（脚上一格）还在水面外，
+     * 都算可用的湿位并排到干位之后——浅水湿脚脚下有实地照常站；贴着水面的漂浮位脚下不必有实地、
+     * 下面多深也不要紧，骑上去本来就离开水面，人踩着水凑到船边点一下就走（见 {@link #floatingForVehicle}）。
+     * 头也会没进水的深水位照旧按"泡在液体里"拒（生存安全）。
      * 头那一格进没进水问的还是 {@link ApproachWorldView#inFluid} 这一条事实，只是换个格子问，不添新的世界读数。
      */
     private static String steadyFailure(BlockPos feet, ApproachTarget target, ApproachWorldView world,
                                         ProtectedCells guarded) {
         if (guarded.contains(feet)) return "受保护";
-        if (!world.solidFloor(feet)) return "脚下悬空";
+        // 载具的贴水面湿位：脚下悬空与落差太深都不再看——人漂在水面上，没有"掉下去"这回事。
+        boolean floatingForVehicle = floatingForVehicle(target, world, feet);
+        if (!floatingForVehicle && !world.solidFloor(feet)) return "脚下悬空";
         if (!world.headroom(feet)) return "头顶没空间";
-        if (world.dropBelow(feet) > MAX_DROP) return "落差太深";
-        if (world.inFluid(feet)) {
-            if (target.wetFeetAllowed() && !world.inFluid(feet.above())) return null;
-            return "泡在液体里";
-        }
+        if (!floatingForVehicle && world.dropBelow(feet) > MAX_DROP) return "落差太深";
+        if (world.inFluid(feet) && !floatingForVehicle) return "泡在液体里";
         if (world.lavaBeside(feet)) return "旁边有岩浆";
         return null;
+    }
+
+    /**
+     * 载具的贴水面湿位：脚格泡在水里、头那一格还在水面外。挑站位与到了之后的核对共用这一条判据，
+     * 骑上载具本来就要求角色到达"能点中船"的位置而不是能落脚的位置，踩着水凑到船边算到了。
+     */
+    private static boolean floatingForVehicle(ApproachTarget target, ApproachWorldView world, BlockPos feet) {
+        return target.wetFeetAllowed() && feet != null && world.inFluid(feet) && !world.inFluid(feet.above());
     }
 
     /**

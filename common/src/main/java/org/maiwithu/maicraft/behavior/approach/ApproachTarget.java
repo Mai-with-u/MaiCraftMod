@@ -21,7 +21,8 @@ import net.minecraft.world.phys.Vec3;
  * @param removesBlock 这次动手会把这一格拆掉（采集与挖掘）：要挖的正好是脚下那格时，
  *                     先看它下面是什么，岩浆或看不见底的洞不站在它上面，换旁边一格站着挖
  * @param wetFeetAllowed 允许湿脚（成为载具的乘客才有）：站得稳检查里的「泡在液体里」改为分级——
- *                       脚格进水但头还在水面上、脚下实心的浅水位可用，排序时排到干站位之后；
+ *                       脚格进水但头还在水面外的湿位都可用，排序时排到干站位之后：脚下实心的浅水位
+ *                       照常站，贴着水面的漂浮位不必有实地；到了之后的核对也放行踩着水漂着的到达。
  *                       头也进了水的深水位照旧拒。其余目标不声明，泡水照旧一票拒
  */
 public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face,

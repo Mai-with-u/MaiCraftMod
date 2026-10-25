@@ -244,6 +244,51 @@ class StandSpotsTest {
     }
 
     @Test
+    void 船漂进深水时贴水面的漂浮位也登得上去() {
+        // 湖心没有一寸干地：水面格脚格进水、头一格在水面上，脚下没有实地、下面深不见底。
+        // 骑上去本来就离开水面，踩着水凑到船边点一下就走，这样的位置该放行。
+        for (int dx = -5; dx <= 5; dx++) {
+            for (int dz = -5; dz <= 5; dz++) {
+                for (int y = 59; y <= 67; y++) {
+                    BlockPos cell = new BlockPos(4 + dx, y, dz);
+                    if (y == 64) {
+                        // 水面那一格：脚下悬空、落差深不见底，头一格露在水面上。
+                        world.fluids.add(cell);
+                        world.noFloor.add(cell);
+                        world.deepDrops.add(cell);
+                    } else if (y < 64) {
+                        // 水面以下：脚格和头一格都泡在水里。
+                        world.fluids.add(cell);
+                    } else {
+                        // 水面上方的空气：没有实地可站。
+                        world.noFloor.add(cell);
+                    }
+                }
+            }
+        }
+        ApproachTarget boat = ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1));
+        StandSpots.Ranking ranking = find(boat);
+        assertFalse(ranking.spots().isEmpty(), "湖心全水也该挑得出登船的位置");
+        // 能用的全是贴水面的漂浮位；头会没进水的深水位照旧被拒。
+        assertTrue(ranking.spots().stream().allMatch(spot -> world.fluids.contains(spot.feet())));
+        assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 63, 0)));
+        assertEquals("脚下悬空", failureAt(ranking, new BlockPos(2, 65, 0)));
+    }
+
+    @Test
+    void 骑载具踩着水漂在船边算到了() {
+        // 到了之后的核对：人在贴水面的湿位漂着、还没落地，头露在水面上，够得着船就算到。
+        world.grounded = false;
+        world.feet = new BlockPos(2, 64, 0);
+        world.fluids.add(world.feet);
+        ApproachTarget boat = ApproachTarget.ofVehicle(new AABB(4, 64, 0, 5, 66, 1));
+        assertEquals(Optional.empty(), StandSpots.checkArrival(boat, REACH, world, guarded));
+        // 没有湿脚许可的目标（放箱这类）漂在水里照旧不算到：口子不外溢。
+        assertEquals(Optional.of("还没落地"),
+                StandSpots.checkArrival(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)), REACH, world, guarded));
+    }
+
+    @Test
     void 没声明湿脚的目标浅水位照旧不站() {
         // 放箱、靠墙、施工这些目标没有湿脚的许可：脚格进水一票拒，口子不外溢。
         world.fluids.add(new BlockPos(2, 64, 1));
