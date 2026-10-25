@@ -116,6 +116,7 @@ import org.maiwithu.maicraft.behavior.inventory.drops.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
+import org.maiwithu.maicraft.behavior.inventory.containers.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.RememberedContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -315,8 +316,12 @@ public final class AbilityCatalog {
         // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形，脚下空着垫一块。
         ClientStairsDown stairs = new ClientStairsDown(new LiveStairsSite(deps.walks(), deps.interactions(),
                 shared.toMainhand()), shared.digging(), shared.drops(), shared.permission());
-        // 从记得的箱子与现场容器拿东西的来源：拿到物品的引擎与附魔的受限补齐共用同一份。
-        ContainerSource containerSource = new ContainerSource(deps.memory(), deps.itemTags(), deps.protection(),
+        // 从记得的箱子与现场容器拿东西的来源：候选由找容器的读端给出（现场扫描与世界记忆并成一份），
+        // 刚摆下、记忆里还没有的箱子也接得住；拿到物品的引擎与附魔的受限补齐共用同一份。
+        ContainerSource containerSource = new ContainerSource(
+                new ClientSpotsContainers(deps.blockScans(), deps.context(), deps.memory(), deps.protection(),
+                        deps.facilities()),
+                deps.itemTags(), deps.protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.interactions(), deps.itemTags(),
                         deps.memory(), deps.context(), deps.compat().menuLayouts()));
         registry.register(AcquisitionWiring.obtainModule(deps, shared.playerServices(), shared.bringClose(), shared.toMainhand(),

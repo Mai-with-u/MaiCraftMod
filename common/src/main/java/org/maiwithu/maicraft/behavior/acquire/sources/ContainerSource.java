@@ -5,15 +5,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import net.minecraft.core.BlockPos;
+
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
-import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
-import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -21,10 +22,10 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemRequest;
 
 /**
- * 容器的来源：角色记得的箱子（世界记忆里记过的），加上只看见过、没开过的。
- * 记忆只是线索：开过且记了内容的箱子报明确的数；没开过的报"不知道有多少"，
- * 排在明确够数的后面——有确定的货就不赌运气。到了跟前以现场为准，开了才算数。
- * 用哪只箱子、里面实际有多少，由开箱取物的执行接缝到现场核对并如实回报。
+ * 容器的来源：眼前这一片找得到的容器（现场扫描与世界记忆并成一份候选），按开没开过分三路报价。
+ * 开过、记了内容的报明确的数；只看见过、没开过的报"不知道有多少"；开过、记得里面没有的，
+ * 就在跟前时也再给一次机会——记忆只是线索，刚装进去的货、别人顺手放的东西都要到现场开了才算数。
+ * 到了跟前以现场为准，开了才算数；用哪只箱子、里面实际有多少，由开箱取物的执行接缝到现场核对并如实回报。
  *
  * <p>别人的箱子不碰：别人放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
  * 记得里面有货也不去翻——默认绝不碰玩家的箱子。自己放的、自家人（所有者信任的玩家）放的照常翻。
@@ -34,13 +35,13 @@ public final class ContainerSource implements ItemSource {
     /** 找容器的半径：再远就不算"顺手能拿"，宁可自己去做。 */
     public static final int SEARCH_RADIUS_BLOCKS = 64;
 
-    private final WorldMemory memory;
+    private final SpotsContainers spots;
     private final ReadsItemTags tags;
     private final Protection protection;
     private final ContainerTakes takes;
 
-    public ContainerSource(WorldMemory memory, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
-        this.memory = memory;
+    public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
+        this.spots = spots;
         this.tags = tags;
         this.protection = protection;
         this.takes = takes;
@@ -58,47 +59,53 @@ public final class ContainerSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<MemoryRecord> records = memory.recordsNear(context.characterAt(), searchRadius(context));
-        MemoryRecord known = null;
-        MemoryRecord maybe = null;
-        MemoryRecord stale = null;
+        // 候选由找容器的读端给出：现场扫到的（刚摆下、记忆里还没有的箱子也在内）与记过的并成一份，近的在前。
+        List<ContainerChooser.Candidate> candidates =
+                spots.around(cellOf(context.characterAt()), searchRadius(context));
+        ContainerChooser.Candidate known = null;
+        ContainerChooser.Candidate maybe = null;
+        ContainerChooser.Candidate stale = null;
         boolean skippedProtected = false;
-        for (MemoryRecord record : records) {
-            if (record.kind() != MemoryKind.CONTAINER) continue;
+        for (ContainerChooser.Candidate candidate : candidates) {
             // 别人的箱子不翻：记得里面有货也跳过，只在说明里交代一句；自家人的照常翻。
-            if (protectedContainer(record, context)) {
+            // 这次任务额外保护的地标读端不知道，在这里按任务许可再问一遍保护判断。
+            if (protectedContainer(candidate, context)) {
                 skippedProtected = true;
                 continue;
             }
-            if (known == null && record.openedBefore() && holdsWanted(record, request)) {
-                known = record;
+            if (known == null && candidate.knownContents() != null && holdsWanted(candidate, request)) {
+                known = candidate;
             }
-            if (maybe == null && !record.openedBefore()) {
-                maybe = record;
+            if (maybe == null && candidate.knownContents() == null) {
+                maybe = candidate;
             }
             // 开过、记得里面没有，但就在跟前：记忆可能过时（主播刚往里放了东西），真人会顺手再开一眼。
-            if (stale == null && record.openedBefore() && !holdsWanted(record, request)
-                    && distance(record, context) <= RECHECK_NEAR_BLOCKS) {
-                stale = record;
+            if (stale == null && candidate.knownContents() != null && !holdsWanted(candidate, request)
+                    && candidate.walkCost() <= RECHECK_NEAR_BLOCKS) {
+                stale = candidate;
             }
         }
         if (known != null) {
             int count = countWanted(known, request);
             if (count > 0) {
                 return new SourceQuote.Offer(describe(), Math.min(count, request.count()),
-                        new AcquisitionCost(distance(known, context), 4),
+                        new AcquisitionCost(known.walkCost(), 4),
                         "开箱时以现场为准", positionHint(known));
             }
         }
         if (maybe != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                    new AcquisitionCost(distance(maybe, context), 4),
+                    new AcquisitionCost(maybe.walkCost(), 4),
                     "这只箱子只是看见过，没开过，不确定里面有什么", positionHint(maybe));
         }
         if (stale != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                    new AcquisitionCost(distance(stale, context) + RECHECK_NEAR_BLOCKS, 4),
+                    new AcquisitionCost(stale.walkCost() + RECHECK_NEAR_BLOCKS, 4),
                     "上回开的时候没有，就在跟前，再开一眼看看有没有新放进去的", positionHint(stale));
+        }
+        // 附近的容器还没扫完时不冒充没有：交回"再问"，引擎等一会儿重新问价，等太久才如实收场。
+        if (!spots.scanComplete()) {
+            return new SourceQuote.NotYet(describe(), "附近的容器还没扫完，扫完再答有没有");
         }
         return new SourceQuote.Unavailable(describe(),
                 "记得的容器里没有装着" + request.wanted().describe() + "的"
@@ -107,18 +114,17 @@ public final class ContainerSource implements ItemSource {
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 到了跟前再核对该报价认的那只箱子；箱子没了（被拆、记忆过时）就交回空，由引擎换路。
-        Optional<MemoryRecord> record = memory.recordAt(MemoryKind.CONTAINER, parsePosition(offer.hint()));
-
-        if (record.isEmpty()) {
+        Optional<ContainerChooser.Candidate> found = spots.at(parsePosition(offer.hint()));
+        if (found.isEmpty()) {
             return Optional.empty();
         }
-        MemoryRecord container = record.get();
+        ContainerChooser.Candidate container = found.get();
         // 报价之后才知道它是玩家的（归属刚问到）：同样不翻，交回空让引擎换路。
         if (protectedContainer(container, context)) {
             return Optional.empty();
         }
         KnownContainer known = new KnownContainer(
-                container.blockType() + " " + offer.hint(), container.position(), container.blockType());
+                container.name(), container.at(), container.blockTypeId());
         // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
         List<ItemRequest> wants = new ArrayList<>();
         wants.add(request);
@@ -129,8 +135,8 @@ public final class ContainerSource implements ItemSource {
     }
 
     /** 这只箱子能不能翻：自己或自家人放的、野外无主的能翻；别人的、在玩家地盘里的、额外保护的、拿不准的不翻。 */
-    private boolean protectedContainer(MemoryRecord record, SourceContext context) {
-        return !protection.mayUseStorage(record.position(), record.blockType(),
+    private boolean protectedContainer(ContainerChooser.Candidate candidate, SourceContext context) {
+        return !protection.mayUseStorage(candidate.at(), candidate.blockTypeId(),
                 context.permissions().protectedLandmarks());
     }
 
@@ -140,13 +146,13 @@ public final class ContainerSource implements ItemSource {
     }
 
     /** 开过、且记下的内容里有想要的东西的容器。 */
-    private boolean holdsWanted(MemoryRecord record, ItemRequest request) {
-        return countWanted(record, request) > 0;
+    private boolean holdsWanted(ContainerChooser.Candidate candidate, ItemRequest request) {
+        return countWanted(candidate, request) > 0;
     }
 
-    private int countWanted(MemoryRecord record, ItemRequest request) {
+    private int countWanted(ContainerChooser.Candidate candidate, ItemRequest request) {
         int total = 0;
-        for (String itemId : record.contents()) {
+        for (String itemId : candidate.knownContents()) {
             if (request.wanted().matches(itemId, tags.tagsOf(itemId))) {
                 total++;
             }
@@ -154,22 +160,17 @@ public final class ContainerSource implements ItemSource {
         return total;
     }
 
-    private double distance(MemoryRecord record, SourceContext context) {
-        var at = record.position();
-        var here = context.characterAt();
-        double dx = at.x() - here.x();
-        double dy = at.y() - here.y();
-        double dz = at.z() - here.z();
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    private static BlockPos cellOf(WorldPosition at) {
+        return new BlockPos(at.x(), at.y(), at.z());
     }
 
-    /** 报价认位置的写法：引擎不解读，动手时原样带回来查记忆。 */
-    private String positionHint(MemoryRecord record) {
-        var at = record.position();
+    /** 报价认位置的写法：引擎不解读，动手时原样带回去查现场与记忆。 */
+    private static String positionHint(ContainerChooser.Candidate candidate) {
+        WorldPosition at = candidate.at();
         return at.x() + "," + at.y() + "," + at.z() + (at.dimension() == null ? "" : "@" + at.dimension());
     }
 
-    private WorldPosition parsePosition(String hint) {
+    private static WorldPosition parsePosition(String hint) {
         String[] parts = hint.split("@")[0].split(",");
         String dimension = hint.contains("@") ? hint.split("@")[1] : null;
         return new WorldPosition(

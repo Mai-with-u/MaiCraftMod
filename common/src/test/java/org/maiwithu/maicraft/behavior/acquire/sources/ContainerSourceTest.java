@@ -6,18 +6,26 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Optional;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
+import net.minecraft.core.BlockPos;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
@@ -35,8 +43,8 @@ import org.maiwithu.maicraft.behavior.acquire.StubTick;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 
 /**
- * 容器的来源：开过、记了内容的箱子报明确的数；只看见过的报"不知道有多少"；
- * 动手时按报价认的那只箱子交开箱取物的接缝，记忆过时就交回空。
+ * 容器的来源：开过、记了内容的箱子报明确的数；只看见过、现场扫到的报"不知道有多少"；
+ * 动手时按报价认的那只箱子交开箱取物的接缝，箱子没了就交回空。
  */
 class ContainerSourceTest {
 
@@ -57,6 +65,72 @@ class ContainerSourceTest {
         return new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
     }
 
+    /**
+     * 找容器读端的替身：只做世界记忆那一半的合并（现场扫到的候选由用例直接摆），
+     * 开过没开过、离多远、归属都按接缝的能力说明读好，替 ContainerSource 挡住真扫描。
+     */
+    private SpotsContainers memorySpots(WorldMemory memory) {
+        return new SpotsContainers() {
+            @Override public List<ContainerChooser.Candidate> around(BlockPos center, int radius) {
+                List<ContainerChooser.Candidate> found = new ArrayList<>();
+                for (MemoryRecord record : memory.recordsNear(
+                        WorldPosition.here(center.getX(), center.getY(), center.getZ()), radius)) {
+                    if (record.kind() != MemoryKind.CONTAINER) continue;
+                    BlockPos at = new BlockPos(record.position().x(), record.position().y(), record.position().z());
+                    found.add(new ContainerChooser.Candidate("chest（" + at.getX() + ", "
+                            + at.getY() + ", " + at.getZ() + "）", record.blockType(), record.position(),
+                            record.openedBefore() ? record.contents() : null, true,
+                            Math.sqrt(at.distSqr(center)), false, true, ContainerChooser.Lid.CLEAR, false));
+                }
+                found.sort(Comparator.comparingDouble(ContainerChooser.Candidate::walkCost));
+                return found;
+            }
+
+            @Override public boolean scanComplete() {
+                return true;
+            }
+
+            @Override public Optional<ContainerChooser.Candidate> at(WorldPosition position) {
+                return memory.recordAt(MemoryKind.CONTAINER, position)
+                        .map(record -> new ContainerChooser.Candidate("chest（" + position.x() + ", "
+                                + position.y() + ", " + position.z() + "）", record.blockType(), record.position(),
+                                record.openedBefore() ? record.contents() : null, true, 0,
+                                false, true, ContainerChooser.Lid.CLEAR, false));
+            }
+        };
+    }
+
+    /** 现场扫描摆出的一只箱子：记忆里没有，开没开过、装没装东西由用例说了算。 */
+    private static ContainerChooser.Candidate liveChest(WorldPosition at, List<String> contents) {
+        return new ContainerChooser.Candidate("chest（" + at.x() + ", " + at.y() + ", " + at.z() + "）",
+                "minecraft:chest", at, contents, true,
+                Math.sqrt((long) (at.x() - 0) * (at.x() - 0) + (long) (at.y() - 64) * (at.y() - 64)
+                        + (long) (at.z() - 0) * (at.z() - 0)),
+                false, true, ContainerChooser.Lid.CLEAR, false);
+    }
+
+    /** 只有一只现场候选的读端替身；scanIncomplete 控制扫描完没完。 */
+    private SpotsContainers liveSpots(List<ContainerChooser.Candidate> candidates, boolean scanIncomplete) {
+        return new SpotsContainers() {
+            @Override public List<ContainerChooser.Candidate> around(BlockPos center, int radius) {
+                return candidates;
+            }
+
+            @Override public boolean scanComplete() {
+                return !scanIncomplete;
+            }
+
+            @Override public Optional<ContainerChooser.Candidate> at(WorldPosition position) {
+                return candidates.stream().filter(c -> MemoryRecord.sameSpot(c.at(), position)).findFirst();
+            }
+        };
+    }
+
+    private ContainerSource source(WorldMemory memory) {
+        return new ContainerSource(memorySpots(memory), tags, NOBODY_OWNS,
+                (container, request, permissions) -> Optional.empty());
+    }
+
     private ItemRequest request(int count) {
         return new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备");
     }
@@ -66,7 +140,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest",
                 List.of("minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = source(memory);
 
         SourceQuote quote = source.quote(request(2), CONTEXT);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
@@ -79,7 +153,7 @@ class ContainerSourceTest {
     void 只看见过的箱子报不知道有多少_排在后面由选择器决定() {
         WorldMemory memory = memory();
         memory.rememberContainerSeen(CHEST_AT, "minecraft:chest", NOW);
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = source(memory);
 
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
                 source.quote(request(1), CONTEXT));
@@ -91,7 +165,7 @@ class ContainerSourceTest {
     void 记忆里没有装着它的箱子_如实回答给不了() {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = source(memory);
 
         SourceQuote quote = source.quote(request(1), CONTEXT);
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
@@ -104,7 +178,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(new WorldPosition(3, 64, 0, null), "minecraft:chest",
                 List.of("minecraft:bread"), NOW);
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = source(memory);
 
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
         assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
@@ -119,7 +193,7 @@ class ContainerSourceTest {
         Protection bobsChest = new Protection((dimension, x, y, z) -> x == 10 && y == 64 && z == 5
                 ? Optional.of(new ReadsBlockOwnership.PlacedBy("bob")) : Optional.empty(),
                 List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
-        ContainerSource source = new ContainerSource(memory, tags, bobsChest,
+        ContainerSource source = new ContainerSource(memorySpots(memory), tags, bobsChest,
                 (container, request, permissions) -> Optional.empty());
 
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
@@ -137,7 +211,7 @@ class ContainerSourceTest {
                 ? Optional.of(new ReadsBlockOwnership.PlacedBy(bob)) : Optional.empty(),
                 List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self",
                 new TrustedPlayers(List.of(bob), name -> Optional.empty()));
-        ContainerSource source = new ContainerSource(memory, tags, family,
+        ContainerSource source = new ContainerSource(memorySpots(memory), tags, family,
                 (container, request, permissions) -> Optional.empty());
 
         assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
@@ -148,7 +222,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
         AtomicReference<KnownContainer> taken = new AtomicReference<>();
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> {
+        ContainerSource source = new ContainerSource(memorySpots(memory), tags, NOBODY_OWNS, (container, request, permissions) -> {
             taken.set(container);
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
@@ -173,7 +247,7 @@ class ContainerSourceTest {
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
         AtomicReference<List<ItemRequest>> wants = new AtomicReference<>();
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, requests, permissions) -> {
+        ContainerSource source = new ContainerSource(memorySpots(memory), tags, NOBODY_OWNS, (container, requests, permissions) -> {
             wants.set(requests);
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
@@ -201,9 +275,42 @@ class ContainerSourceTest {
     @Test
     void 报价认的箱子从记忆里没了_交回空由引擎换路() {
         WorldMemory memory = memory();
-        ContainerSource source = new ContainerSource(memory, tags, NOBODY_OWNS, (container, request, permissions) -> Optional.empty());
+        ContainerSource source = source(memory);
         SourceQuote.Offer stale = new SourceQuote.Offer("记得的箱子", 3,
                 new AcquisitionCost(5, 4), null, "99,64,99");
         assertTrue(source.begin(request(1), stale, CONTEXT).isEmpty());
+    }
+
+    @Test
+    void 现场扫到记忆里没有的箱子_照样成为候选上门去开() {
+        // 实机（verify-12）：命令刚在角色旁摆的箱子装了货，记忆里从没有过，obtain 秒答"一件都没拿到"不上门。
+        // 候选来自现场扫描，没开过的报"不知道有多少"，动手时按它认的那格交开箱接缝。
+        WorldMemory memory = memory();
+        ContainerChooser.Candidate fresh = liveChest(new WorldPosition(6, 65, -3, null), null);
+        AtomicReference<KnownContainer> taken = new AtomicReference<>();
+        ContainerSource source = new ContainerSource(liveSpots(List.of(fresh), false), tags, NOBODY_OWNS,
+                (container, request, permissions) -> {
+                    taken.set(container);
+                    return Optional.empty();
+                });
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                source.quote(request(1), CONTEXT));
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
+        source.begin(request(1), offer, CONTEXT);
+        assertEquals(6, taken.get().at().x());
+        assertEquals(-3, taken.get().at().z());
+        assertEquals("minecraft:chest", taken.get().blockTypeId());
+    }
+
+    @Test
+    void 附近的容器还没扫完_交回再问不冒充没有() {
+        // 扫描没扫完时不把"还没看完"当成"没有"：交回 NotYet 让引擎等一会儿重新问价。
+        ContainerSource source = new ContainerSource(liveSpots(List.of(), true), tags, NOBODY_OWNS,
+                (container, request, permissions) -> Optional.empty());
+
+        SourceQuote.NotYet notYet = assertInstanceOf(SourceQuote.NotYet.class,
+                source.quote(request(1), CONTEXT));
+        assertTrue(notYet.reason().contains("还没扫完"));
     }
 }
