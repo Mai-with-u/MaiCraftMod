@@ -162,7 +162,7 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     @Override
     public boolean bedReady(TickContext tick) {
         // 今晚有床 = 身上带着一张，或夜里肯走过去的那么近（32 格）有能用的。身上有床夜休会放下来睡；
-        // 远处的床（自己睡过的家里那张也一样）夜里不去，不算今晚有床，夜晚改按挖坑、找掩体熬夜。
+        // 远处的床（自己睡过的家里那张也一样）夜里不去，不算今晚有床，夜晚改按处境走：露天又打不过才去备一张。
         if (carriedBed().isPresent()) {
             return true;
         }
