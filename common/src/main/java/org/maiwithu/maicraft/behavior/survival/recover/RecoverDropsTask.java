@@ -100,6 +100,8 @@ public final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
         if (close(context)) return Next.go(Phase.PICK_UP, "到了死的地方，捡地上的东西");
+        // 被叫先到安全处再停、落地报的"已停下"不是跑到了，也不算一次没跑到：站着等外层停下。
+        if (stopping()) return Next.stay();
         if (status instanceof ActionStatus.Failed failed) recordAttempt("跑回死的地方", failed.problem().message());
         if (++runs < RUN_TRIES) return Next.go(Phase.RUN_BACK, "还没到死的地方，再起步");
         if (events != null) {

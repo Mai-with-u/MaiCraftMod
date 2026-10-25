@@ -73,8 +73,9 @@ public final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
         }
         // 路走完了人却还没到落点（落点就在脚下边沿、走不过去）：算没退成，让控制循环缓一阵再说，
         // 不当成"退到了"——实机里每刻插一次、立刻"退到了"、下一刻又插，一秒刷二十条。
-        return runActionThen(context, () -> Next.fail(walkProblem(Problem.of(Problem.Kind.STUCK,
-                "走完了还差 " + String.format(Locale.ROOT, "%.1f", remaining) + " 格才到安全处"))));
+        // 被叫先到安全处再停、落地报的"已停下"不是走完了：站着等外层停下，不算没退成。
+        return runActionThen(context, () -> stopping() ? Next.stay() : Next.fail(walkProblem(Problem.of(
+                Problem.Kind.STUCK, "走完了还差 " + String.format(Locale.ROOT, "%.1f", remaining) + " 格才到安全处"))));
     }
 
     @Override

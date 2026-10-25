@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -151,6 +152,22 @@ public final class LiveNightAndEdgeMoves {
         @Override
         public void close() {
             if (walk != null) walk.close();
+        }
+
+        // 能不能打断、先到安全处再停都按走路说：退离边沿、跑回去的路上悬在半空停不得，先落地再停。
+        @Override
+        public Interruptibility interruptibility() {
+            return walk == null ? Interruptibility.WORKING : walk.interruptibility();
+        }
+
+        @Override
+        public boolean stopSafely() {
+            return walk != null && walk.stopSafely();
+        }
+
+        @Override
+        public boolean stoppedSafely() {
+            return walk == null || walk.stoppedSafely();
         }
 
         @Override
