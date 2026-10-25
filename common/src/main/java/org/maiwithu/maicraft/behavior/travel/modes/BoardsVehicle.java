@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.travel.modes;
 
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -28,6 +29,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 各路载具自己的事（认哪条船、矿车推没推起来、火车选哪个座位）由调用方先做好。
  * 右键前先把潜行键松开：游泳下潜、贴边站位这些前一件事按住的潜行还留在角色身上时，
  * 原版把按住潜行的载具右键当成"想下来"当场拒收。
+ *
+ * <p>一下右键要先平滑转头对准、再提交、再等服务器把角色设成乘客，前后要好几刻：
+ * 这一下还没出结论时接着等它，不另点一下——每刻重点一次，转头还没到位就把三次机会烧光了。
  */
 public final class BoardsVehicle implements Action {
 
@@ -39,15 +43,14 @@ public final class BoardsVehicle implements Action {
     private static final double RETARGET = 2.0;
 
     private final WalkTo walks;
-    private final UsesEntities uses;
-    private final Entity vehicle;
     private final TerrainPermit permit;
-    private final Predicate<Entity> freeSeat;
     private final String label;
+    private final ReadsBoarding reads;
+    private final Supplier<Action> clicks;
     private WalkRun walk;
     private BlockPos walkAnchor;
     private Action click;
-    private int clicks;
+    private int clicksUsed;
     /** 已经为松开潜行等了多少个刻；超过宽限就不干等，照常点。 */
     private int sneakReleaseWaited;
     /** 最近一下右键没坐上的原因；连点放弃时带在结果里说清。 */
@@ -59,25 +62,64 @@ public final class BoardsVehicle implements Action {
      */
     public BoardsVehicle(WalkTo walks, UsesEntities uses, Entity vehicle, TerrainPermit permit,
                          Predicate<Entity> freeSeat, String label) {
-        this.walks = walks;
-        this.uses = uses;
-        this.vehicle = vehicle;
-        this.permit = permit;
-        this.freeSeat = freeSeat;
-        this.label = label;
+        this(walks, permit, label, liveReads(vehicle, freeSeat),
+                () -> uses.useEntity(vehicle, InteractionConfirmation.ridingOn(vehicle)));
     }
 
-    /** 这一刻坐上载具要做的决定：坐上了就完，出事如实失败，够不着走过去，潜行按着先松，够得着才右键。判断是纯函数，离线可测。 */
+    /**
+     * 包内可见：读现场与右键都换成替身，离线推多刻。
+     *
+     * @param reads  每刻读一眼载具与自己
+     * @param clicks 起一下"对准它右键、等它把我设成乘客"的动作
+     */
+    BoardsVehicle(WalkTo walks, TerrainPermit permit, String label, ReadsBoarding reads, Supplier<Action> clicks) {
+        this.walks = walks;
+        this.permit = permit;
+        this.label = label;
+        this.reads = reads;
+        this.clicks = clicks;
+    }
+
+    /** 这一刻看到的载具与自己：坐上这辆没有、它还在不在、有没有给我的空座、够不够得着、潜行按着没有、它在哪一格。 */
+    record Sighting(boolean ridingThis, boolean vehicleGone, boolean seatFree, boolean inReach,
+                    boolean sneakHeld, BlockPos vehicleAt) {}
+
+    /** 每刻读一眼载具与自己的只读接缝：生产实现读客户端角色与这只实体，离线测试换替身。 */
+    @FunctionalInterface
+    interface ReadsBoarding {
+        Sighting read(TickContext context);
+    }
+
+    // 生产读端：坐的是不是这一只实体、它被移除没有、座位由调用方的条件判、
+    // 够不够得着按眼睛到它碰撞箱的距离在实体交互距离以内（留半格余量）。
+    private static ReadsBoarding liveReads(Entity vehicle, Predicate<Entity> freeSeat) {
+        return context -> {
+            LocalPlayer me = context.player().localPlayer();
+            double reach = me.entityInteractionRange() - 0.5;
+            return new Sighting(me.getVehicle() == vehicle, vehicle.isRemoved(),
+                    freeSeat == null || freeSeat.test(vehicle),
+                    vehicle.getBoundingBox().distanceToSqr(me.getEyePosition()) <= reach * reach,
+                    me.isShiftKeyDown(), vehicle.blockPosition());
+        };
+    }
+
+    /** 这一刻坐上载具要做的决定：坐上了就完，出事如实失败，上一下还在等就接着等，够不着走过去，潜行按着先松，够得着才右键。判断是纯函数，离线可测。 */
     enum Next { DONE, GONE, NO_SEAT, WALK, RELEASE_SNEAK, CLICK, GIVE_UP, KEEP_CLICKING }
 
-    /** 坐上载具的现场：坐没坐上这辆、它还在不在、有没有我的座、够不够得着、潜行按着没有、为松潜行等了几刻、已经点了几下。 */
+    /**
+     * 坐上载具的现场：坐没坐上这辆、它还在不在、有没有我的座、够不够得着、潜行按着没有、为松潜行等了几刻、
+     * 已经点了几下、上一下右键还在不在等结论（转头、提交、等服务器设乘客）。
+     */
     record Scene(boolean ridingThis, boolean vehicleGone, boolean seatFree, boolean inReach,
-                 boolean sneakHeld, int sneakReleaseWaited, int clicksUsed) {}
+                 boolean sneakHeld, int sneakReleaseWaited, int clicksUsed, boolean clickInFlight) {}
 
     static Next decide(Scene s) {
         if (s.ridingThis) return Next.DONE;
         if (s.vehicleGone) return Next.GONE;
         if (!s.seatFree) return Next.NO_SEAT;
+        // 上一下右键还没出结论（还在转头对准、或已提交在等服务器把我设成乘客）：接着等它，不另点一下。
+        // 它漂开了一点也由这一下自己判（够不着会如实失败），失败了下一刻再按够不够得着重新走或重新点。
+        if (s.clickInFlight) return Next.KEEP_CLICKING;
         if (!s.inReach) return Next.WALK;
         // 潜行还按在角色身上：原版把按住潜行的载具右键当成"想下来"当场拒收，点击前先松开并等它真的离开；
         // 宽限内等不到也照常点，收场报文会带着当时的按键现场，不在这一步干等。
@@ -85,13 +127,13 @@ public final class BoardsVehicle implements Action {
         return s.clicksUsed >= MAX_CLICKS ? Next.GIVE_UP : Next.CLICK;
     }
 
-    // 每刻：坐上了就完；它没了、座满了如实失败；够不着就走过去；够得着了停下、对准它右键，等服务器把我设成它的乘客。
+    // 每刻：坐上了就完；它没了、座满了如实失败；上一下右键还在等就接着推进它；够不着就走过去；
+    // 够得着了停下、对准它右键，等服务器把我设成它的乘客。
     @Override
     public ActionStatus tick(TickContext context) {
-        LocalPlayer me = context.player().localPlayer();
-        Next next = decide(new Scene(me.getVehicle() == vehicle, vehicle.isRemoved(),
-                freeSeat == null || freeSeat.test(vehicle), inReach(me),
-                me.isShiftKeyDown(), sneakReleaseWaited, clicks));
+        Sighting seen = reads.read(context);
+        Next next = decide(new Scene(seen.ridingThis(), seen.vehicleGone(), seen.seatFree(), seen.inReach(),
+                seen.sneakHeld(), sneakReleaseWaited, clicksUsed, click != null));
         return switch (next) {
             case DONE -> {
                 closeWalk();
@@ -106,12 +148,12 @@ public final class BoardsVehicle implements Action {
                 closeWalk();
                 yield ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, label + "上已经没有空座了"));
             }
-            case WALK -> walkCloser(context);
+            case WALK -> walkCloser(context, seen.vehicleAt());
             case GIVE_UP -> {
                 closeWalk();
                 // 上一下右键的结论还在：连点这么多次都没坐上，说明这辆坐不成，不再点。
                 yield ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "对着" + label + "点了 " + clicks + " 次都没坐上"
+                        "对着" + label + "点了 " + clicksUsed + " 次都没坐上"
                                 + (lastClickProblem == null ? "" : "：" + lastClickProblem)));
             }
             case CLICK -> {
@@ -130,14 +172,15 @@ public final class BoardsVehicle implements Action {
         };
     }
 
-    // 对着它右键一下：生效与否按"真成了这辆的乘客"核对；点失败了记一笔，下一刻重新点。
+    // 对着它右键一下：数一次机会，起一下新的右键并推进它一刻；生效与否按"真成了这辆的乘客"核对。
     private ActionStatus submitClick(TickContext context) {
-        clicks++;
-        click = uses.useEntity(vehicle, InteractionConfirmation.ridingOn(vehicle));
+        clicksUsed++;
+        click = clicks.get();
         return tickClick(context);
     }
 
-    // 推进手上的那一下右键：点失败了记一笔，下一刻重新点；点成了下一刻坐上了就完。
+    // 推进手上的那一下右键：还在转头或等确认就接着等；点失败了记下原因、放下这一下，下一刻再按现场决定重点还是放弃；
+    // 这一下出了结论（失败或确认）都看一眼坐上没有，坐上了就完。
     private ActionStatus tickClick(TickContext context) {
         ActionStatus status = click.tick(context);
         if (status instanceof ActionStatus.Failed failed) {
@@ -146,22 +189,11 @@ public final class BoardsVehicle implements Action {
         } else if (status instanceof ActionStatus.Done) {
             click = null;
         }
-        return me(context).getVehicle() == vehicle ? ActionStatus.done() : ActionStatus.running();
-    }
-
-    private LocalPlayer me(TickContext context) {
-        return context.player().localPlayer();
-    }
-
-    // 够不够得着它：眼睛到它碰撞箱的距离在实体交互距离以内。
-    private boolean inReach(LocalPlayer me) {
-        double reach = me.entityInteractionRange() - 0.5;
-        return vehicle.getBoundingBox().distanceToSqr(me.getEyePosition()) <= reach * reach;
+        return reads.read(context).ridingThis() ? ActionStatus.done() : ActionStatus.running();
     }
 
     // 走到它旁边：它挪开两格就换目标点；走不过去如实失败。
-    private ActionStatus walkCloser(TickContext context) {
-        BlockPos at = vehicle.blockPosition();
+    private ActionStatus walkCloser(TickContext context, BlockPos at) {
         if (walk == null) {
             walk = walks.start(GoalCompiler.near(at, 1.5), permit);
             walkAnchor = at;
