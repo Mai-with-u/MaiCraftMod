@@ -105,6 +105,34 @@ class MeNetworkReaderTest {
         assertFalse(fresh.note().contains("正在重问"));
     }
 
+    @Test
+    void 这一问还在路上时上一答要标明数据时刻_不当成当拍实况() {
+        long[] clock = {1_000_000};
+        ScriptedServerReads reads = new ScriptedServerReads();
+        MeNetworkReader reader = new MeNetworkReader(compat(), services(reads), () -> clock[0]);
+        reader.seen(NETWORK_ID, DRIVE);
+
+        // 上一问答上了：104。
+        reader.summary(NETWORK_ID);
+        reads.replies.put(reads.asked.getFirst(), answered(reads.asked.getFirst(), 104, 3));
+        assertFalse(reader.summaryPending(NETWORK_ID));
+
+        // 过了保质期再读：重新问出去，这一问还没收回（服务端回答要过真实时间才到）。
+        clock[0] += 6_000;
+        reader.summary(NETWORK_ID);
+        assertTrue(reader.summaryPending(NETWORK_ID));
+        assertEquals(2, reads.asked.size());
+
+        // 收场时按已经看到的现整理，会再读一遍 summary：手里的 104 是上一答，
+        // 要写明数据时刻、说明这一次的读数还在路上，不能冒充当拍实况；也不重复问出去。
+        NetworkSummary stale = reader.summary(NETWORK_ID);
+        assertTrue(stale.readable());
+        assertEquals(104.0, stale.readings().get("stored_amount"));
+        assertTrue(stale.note().contains("秒前收到的读数"), stale.note());
+        assertTrue(stale.note().contains("还在路上"), stale.note());
+        assertEquals(2, reads.asked.size());
+    }
+
     /** 记下问出去的请求、按编号给回答的替身：回答没登记的当"还在等"。 */
     private static final class ScriptedServerReads implements ServerReads {
         final List<UUID> asked = new ArrayList<>();

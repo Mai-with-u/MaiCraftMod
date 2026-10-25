@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
@@ -28,6 +29,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -124,6 +126,34 @@ class MachineInspectTaskTest {
     }
 
     @Test
+    void 读数还在路上时被取消_结论交代这一问没答上_不冒充当拍实况() {
+        // 旁路目标只推这几刻就要出结果：整网读数要过真实时间才到，等不到是常态。
+        // 收场结论要说清差的是读数，数据块里的读数是上一次收到的，调用方不能当成当拍的看。
+        MachineTestDoubles.FakeNetworkReader me = new MachineTestDoubles.FakeNetworkReader("me", "测试网");
+        me.put(PRESS, "net1");
+        me.holdAnswer();
+        Rig rig = new Rig(List.of(me));
+        rig.area.offer(new ReadsMachineArea.Round(List.of(
+                new ReadsMachineArea.Cell(PRESS, Blocks.FURNACE.defaultBlockState(), true)), 0, true, false));
+        MachineInspectTask task = new MachineInspectTask(new MachineInspectInput(positionOf(PRESS), 8, null),
+                rig.services);
+        task.start(rig.tick());
+        for (int i = 0; i < 20 && !task.currentProgress().isEmpty(); i++) {
+            if (task.tick(rig.tick()) instanceof TickResult.Finished) {
+                throw new AssertionError("读数一直在路上，任务不该自己走出结果");
+            }
+        }
+        TaskResult result = task.close(CloseReason.CANCELLED);
+        assertEquals(TaskResult.Status.CANCELLED, result.status());
+        assertTrue(result.summary().contains("被取消"), result.summary());
+        assertTrue(result.remaining().stream().anyMatch(line -> line.contains("读数")), result.remaining().toString());
+        // 范围读完了：取消收场时数据块如实带 scan_complete，结论里交代的是差在读数。
+        MachineDetails details = (MachineDetails) result.details();
+        assertTrue(details.scanComplete());
+        assertEquals(1, details.networks().size());
+    }
+
+    @Test
     void 指档案名时和档案整机比对_没对上的格列出来_机器带上档案名() {
         Rig rig = new Rig();
         BlockPos anchor = new BlockPos(10, 64, 10);
@@ -183,6 +213,10 @@ class MachineInspectTaskTest {
         final MachineServices services;
 
         Rig() {
+            this(List.of());
+        }
+
+        Rig(List<NetworkReader> networkReaders) {
             RecipeLookup recipes = new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty));
             services = new MachineServices(() -> null, new MachineWorldView() {
                 @Override public Optional<Spot> playerSpot() {
@@ -192,7 +226,7 @@ class MachineInspectTaskTest {
                 @Override public Optional<BlockState> stateAt(BlockPos at) {
                     return Optional.of(blocks.getOrDefault(at, Blocks.AIR.defaultBlockState()));
                 }
-            }, List.of(type), List.of(), area, recipes, new MachineTestDoubles.FakeNeeds(),
+            }, List.of(type), networkReaders, area, recipes, new MachineTestDoubles.FakeNeeds(),
                     new MachineTestDoubles.FakeClose(), new MachineTestDoubles.FakeClicks(),
                     new MachineTestDoubles.FakeSeen(), new MachineTestDoubles.FakePlaces());
         }

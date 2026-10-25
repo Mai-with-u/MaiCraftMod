@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.LongSupplier;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -38,6 +39,8 @@ final class MeNetworkReader implements NetworkReader {
 
     private final Ae2Compat compat;
     private final PlayerServices services;
+    /** 时刻从外面给：离线测试拨钟用，生产就是系统时钟。 */
+    private final LongSupplier now;
     private final Map<BlockPos, MeComponents.Component> components = new LinkedHashMap<>();
     private long componentsAt;
     /** 每张网的代表格：问服务端时报这一格。 */
@@ -49,8 +52,13 @@ final class MeNetworkReader implements NetworkReader {
     private static final int MAX_RETRIES = 2;
 
     MeNetworkReader(Ae2Compat compat, PlayerServices services) {
+        this(compat, services, System::currentTimeMillis);
+    }
+
+    MeNetworkReader(Ae2Compat compat, PlayerServices services, LongSupplier now) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");
+        this.now = Objects.requireNonNull(now, "now");
     }
 
     @Override public NetworkKind kind() {
@@ -60,7 +68,7 @@ final class MeNetworkReader implements NetworkReader {
     @Override public Optional<String> membership(BlockPos at) {
         ClientLevel level = level();
         if (level == null) return Optional.empty();
-        long now = System.currentTimeMillis();
+        long now = this.now.getAsLong();
         if (now - componentsAt > COMPONENT_MILLIS) {
             components.clear();
             componentsAt = now;
@@ -85,26 +93,33 @@ final class MeNetworkReader implements NetworkReader {
                     "读不到：服务器没装 MaiCraft 的 AE2 读数（或所有者关了），只给看得见的");
         }
         settle(networkId);
-        long now = System.currentTimeMillis();
+        long now = this.now.getAsLong();
         AskLedger.Answer answer = asks.answer(networkId);
-        boolean refreshing = asks.needsAsk(networkId, now, FRESH_MILLIS);
-        if (refreshing) ask(networkId, at);
+        // 这一问还在路上时，手里的上一答就是过时的：照"正在重读"的口径标明数据时刻再交，
+        // 不当成本刻的实况——收场时按已经看到的现整理，走的就是这条路。
+        boolean inFlight = asks.pending(networkId);
+        boolean refreshing = inFlight || asks.needsAsk(networkId, now, FRESH_MILLIS);
+        if (refreshing && !inFlight) ask(networkId, at);
         if (answer == null) return new NetworkSummary(networkId, false, seen, "正在向服务端要这张网的读数，稍后再看");
         NetworkSummary served = MeSummaries.of(networkId, answer.reply(), seen);
         if (!refreshing) return served;
-        // 这一答是本轮重问之前收的：读数照给，但写明数据时刻，不当成此刻的实况；等本轮答案到了再读就是新值。
+        // 这一答不是当拍的：读数照给，但写明数据时刻，等这一问到账再读就是新值。
         String when = answer.failed() ? "，正在重问"
-                : "；这是 " + Math.max(1, (now - answer.at()) / 1000) + " 秒前的读数，正在重读";
+                : inFlight ? "；这是 " + secondsOld(answer, now) + " 秒前收到的读数，这一次的读数还在路上"
+                : "；这是 " + secondsOld(answer, now) + " 秒前的读数，正在重读";
         return new NetworkSummary(networkId, served.readable(), served.readings(), served.note() + when);
+    }
+
+    /** 手里这份回答离现在几秒：至少算 1 秒，不当成刚答的。 */
+    private static long secondsOld(AskLedger.Answer answer, long now) {
+        return Math.max(1, (now - answer.at()) / 1000);
     }
 
     @Override public boolean summaryPending(String networkId) {
         settle(networkId);
         // 手里留着上一轮的旧答案不算答了：这一轮的问话没收回，读数就在路上，交付方要等本轮答案。
         return asks.pending(networkId);
-    }
-
-    @Override public Optional<LineMaterials> lineMaterials() {
+    }    @Override public Optional<LineMaterials> lineMaterials() {
         return Optional.of(new MeLines());
     }
 
@@ -141,7 +156,7 @@ final class MeNetworkReader implements NetworkReader {
         UUID request = asks.inFlight(networkId);
         if (request == null) return;
         Optional<ClientRequest.Snapshot> snapshot = services.serverReads().answer(request);
-        if (asks.settled(networkId, snapshot, System.currentTimeMillis(), MAX_RETRIES)) {
+        if (asks.settled(networkId, snapshot, now.getAsLong(), MAX_RETRIES)) {
             ask(networkId, representative.get(networkId));
         }
     }

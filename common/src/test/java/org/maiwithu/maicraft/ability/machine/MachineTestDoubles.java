@@ -313,6 +313,8 @@ final class MachineTestDoubles {
         private final NetworkKind kind;
         private final Map<BlockPos, String> members = new HashMap<>();
         private NetworkSummary summary = null;
+        /** 回答悬在路上：摆了就 summaryPending 一直为真，模拟要过真实时间才到的服务端读数。 */
+        private boolean pending = false;
         /** 这种网怎么用方块接线；没给就是不会接线的网。 */
         LineMaterials lines;
 
@@ -328,8 +330,17 @@ final class MachineTestDoubles {
             summary = NetworkSummary.unreadable("net1", why);
         }
 
+        /** 让回答悬在路上。 */
+        void holdAnswer() {
+            pending = true;
+        }
+
         @Override public NetworkKind kind() {
             return kind;
+        }
+
+        @Override public boolean summaryPending(String networkId) {
+            return pending;
         }
 
         @Override public Optional<String> membership(BlockPos at) {

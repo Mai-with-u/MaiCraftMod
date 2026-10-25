@@ -383,6 +383,15 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return "";
     }
 
+    // 没走到结局就收场（被取消、被替换）时，把差的部分说进结论：整网读数还在路上最要紧——
+    // 数据块里的读数是上一次收到的，调用方要按"这一问没答上"理解，不能当成当拍实况。
+    @Override protected List<String> remaining() {
+        if (!scanComplete) {
+            return List.of("范围没有读完，列出的只是已经看到的部分");
+        }
+        return summariesPending() ? List.of("整网的读数还没答上，交付的读数是上一次收到的，这是几秒前的数据") : List.of();
+    }
+
     // 把这一眼整理成网、设备与连接：看的是档案时，有格落在档案里的设备与网带上档案名，LLM 用名字指它。
     private MachineAreaReport.Result reportNow() {
         MachineArchive archive = input.archive();
