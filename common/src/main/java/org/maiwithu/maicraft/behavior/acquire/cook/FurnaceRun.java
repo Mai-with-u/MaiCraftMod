@@ -12,7 +12,6 @@ import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.AbstractFurnaceMenu;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.AbstractCookingRecipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
@@ -20,13 +19,15 @@ import net.minecraft.world.level.block.AbstractFurnaceBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.inventory.hands.StackSplit;
+import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
+import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuReopenCount;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.game.menu.MenuConfirmation;
-import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -50,8 +51,6 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class FurnaceRun implements Action {
 
-    /** 一下点击等游戏确认的期限（刻）。 */
-    private static final int CLICK_TIMEOUT_TICKS = 100;
     /** 原版熔炉烧一件的刻数；配方自己写了烧多久时按配方。 */
     private static final int DEFAULT_COOK_TICKS = 200;
     /** 估摸烧好的时刻再多等一会儿：宁可晚回来一点，也别回来看见还差一件又得再等。 */
@@ -80,14 +79,8 @@ final class FurnaceRun implements Action {
     /** 走过去点开、照看、收拾、关界面、关着界面等。 */
     private enum Stage { VISIT, TEND, TIDY, CLOSE, AWAY }
 
-    /** 一下点击确认之后要做的结算。 */
-    @FunctionalInterface
-    private interface Settlement {
-        ActionStatus settle(PendingMenuAction.Status status);
-    }
-
-    /** 分堆装料的一下：点哪一格、哪个键，点完原格、炉格、鼠标上各几件。 */
-    private record SplitClick(int slot, int button, int sourceAfter, int destinationAfter, int cursorAfter) {}
+    /** 手上这一笔搬运在做什么：结论不同各家交待不同，按它分流。 */
+    private enum MoveKind { TAKE_OUTPUT, TIDY, LOAD }
 
     /** 身上的一堆燃料：角色侧第几格、几件、一件烧多少刻。 */
     record FuelStack(int index, int count, int burnTicks) {}
@@ -125,6 +118,8 @@ final class FurnaceRun implements Action {
     private int waited;
     /** 背包里实际多出来的成品件数：每次收货按收货前后背包里的数量差记。 */
     private int produced;
+    /** 收货前背包里有几件成品：结论没直接报差时的对照。 */
+    private int carriedBefore;
     /** 发起任务的记账口：每收一次货记一笔烧出来的东西，结果里的变化能和背包净变化对得上；null 不记。 */
     private final TaskRecords records;
     private final MenuReopenCount reopens = new MenuReopenCount();
@@ -138,15 +133,11 @@ final class FurnaceRun implements Action {
     /** 收场的原因（缺料、缺燃料、炉子正忙、背包满了）；一件没收到时按它失败。 */
     private Problem ending;
     private Problem failure;
-    private PendingMenuAction pending;
-    private Settlement settlement;
-    /** 正在分堆装料：一串左右键，点完才算装好。 */
-    private List<SplitClick> splitting;
-    private int splitIndex;
-    private int splitSource;
-    private int splitDestination;
-    private ItemStack splitKind = ItemStack.EMPTY;
-    private String splitWhat = "";
+    /** 认领到的那份界面与手上的搬运：逐刻点、按核对式出结论都交给它。 */
+    private OpenedMenu menu;
+    private TransferRun run;
+    private MoveKind moveKind;
+    private String moveWhat = "";
 
     /**
      * @param stations 记得的同种炉子，近的在前，第一台是挑中的那台；正忙时按次序换下一台
@@ -183,9 +174,6 @@ final class FurnaceRun implements Action {
             return fail(Problem.Kind.STUCK, "用" + stove() + "烧" + recipe.result().describe() + "超时，先收手"
                     + (inputLoaded ? "；" + stove() + "里可能还有这次放进去的原料或烧好的成品" : ""));
         }
-        if (pending != null) {
-            return awaitClick(tick);
-        }
         return switch (stage) {
             case VISIT -> visit(tick);
             case TEND -> tend(tick);
@@ -212,6 +200,8 @@ final class FurnaceRun implements Action {
         }
         if (status instanceof ActionStatus.Done) {
             menus = visit.menus();
+            menu = ClientOpenedMenu.claimCurrent(visit.context(), visit.menus());
+            run = menu == null ? null : new TransferRun(menu);
             closingSession = null;
             stage = Stage.TEND;
             return ActionStatus.progressed();
@@ -225,8 +215,8 @@ final class FurnaceRun implements Action {
         if (reading.isEmpty()) {
             return reopen();
         }
-        if (splitting != null) {
-            return nextSplitClick(tick);
+        if (run != null && !run.idle()) {
+            return run.tickAction(this::onMoveSettled);
         }
         MenuContent.Reading open = reading.get();
         SlotSnapshot input = open.containerSnapshots().get(INPUT);
@@ -239,7 +229,7 @@ final class FurnaceRun implements Action {
             return busy("投入口里在烧" + input.stack().getHoverName().getString());
         }
         if (!output.isEmpty()) {
-            return takeOutput(tick, open);
+            return takeOutput(open);
         }
         if (produced >= targetItems) {
             return finish(null);
@@ -263,7 +253,7 @@ final class FurnaceRun implements Action {
         ItemStack kind = open.playerSnapshots().get(source).stack();
         int amount = Math.min(Math.min(stillToSmelt(), kind.getCount()), Math.min(kind.getMaxStackSize(), STACK));
         inputLoaded = true;
-        return startSplit(tick, open.playerSlotIds().get(source), open.containerSlotIds().get(INPUT), kind, amount,
+        return load(open.playerSlotIds().get(source), open.containerSlotIds().get(INPUT), kind, amount,
                 "往投入口装" + kind.getHoverName().getString());
     }
 
@@ -286,7 +276,7 @@ final class FurnaceRun implements Action {
         }
         ItemStack kind = open.playerSnapshots().get(pick.index()).stack();
         fuelPlaced = itemId(kind);
-        return startSplit(tick, open.playerSlotIds().get(pick.index()), open.containerSlotIds().get(FUEL), kind,
+        return load(open.playerSlotIds().get(pick.index()), open.containerSlotIds().get(FUEL), kind,
                 pick.count(), "往燃料槽添" + kind.getHoverName().getString());
     }
 
@@ -354,24 +344,19 @@ final class FurnaceRun implements Action {
         return ActionStatus.running();
     }
 
-    // 收成品：产出格整堆收进背包，收到几件按收货前后背包里这件东西的数量差记，不按产出格上写的数猜。
-    // 真烧出来几件就记几件：自制的东西逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
-    private ActionStatus takeOutput(TickContext tick, MenuContent.Reading open) {
-        int before = carriedResults(open);
+    // 收成品：产出格整堆快速移动进背包，交给搬运执行核对——背包里这件东西真多出来才算。
+    // 收到几件按背包侧的实际差算，不按产出格上写的数猜；真烧出来几件就记几件，
+    // 逐笔记进发起任务的结果，结果里的变化能和背包净变化对得上。
+    private ActionStatus takeOutput(MenuContent.Reading open) {
         int slotId = open.containerSlotIds().get(OUTPUT);
-        return click(tick, slotId, 0, ClickType.QUICK_MOVE, resultTaken(before), status -> {
-            int gained = openReading().map(now -> carriedResults(now) - before).orElse(0);
-            gained = Math.max(0, gained);
-            produced += gained;
-            if (gained > 0 && records != null) {
-                records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
-            }
-            if (gained <= 0 && status != PendingMenuAction.Status.CONFIRMED_APPLIED) {
-                return finish(Problem.of(Problem.Kind.INVENTORY_FULL,
-                        "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了"));
-            }
-            return ActionStatus.progressed();
-        });
+        int amount = open.containerSnapshots().get(OUTPUT).count();
+        carriedBefore = carriedResults(open);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                new TransferRun.Check.IntoBackpack(
+                        snapshot -> !snapshot.isEmpty() && isResult(snapshot.stack()), amount),
+                "收" + recipe.result().describe()));
+        moveKind = MoveKind.TAKE_OUTPUT;
+        return ActionStatus.progressed();
     }
 
     // 收拾：只收回自己放进去的——这次添的那种燃料、这次装的原料；炉子里原有的燃料不拿走。收不回（背包满了）就留着。
@@ -401,8 +386,13 @@ final class FurnaceRun implements Action {
             return ActionStatus.progressed();
         }
         int slotId = open.containerSlotIds().get(index);
-        ItemStack shown = open.containerSnapshots().get(index).stack().copy();
-        return click(tick, slotId, 0, ClickType.QUICK_MOVE, slotChanged(slotId, shown), status -> ActionStatus.progressed());
+        SlotSnapshot shown = open.containerSnapshots().get(index);
+        // 收回自己放进去的：整堆快速移动进背包，收不回（背包满了）就留着，照常往下走。
+        run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                new TransferRun.Check.IntoBackpack(shown::sameIdentity, shown.count()),
+                "收回" + shown.stack().getHoverName().getString()));
+        moveKind = MoveKind.TIDY;
+        return ActionStatus.progressed();
     }
 
     // 关界面：打开者负责关；关上以后要么去旁边等，要么收场。关不上也照常往下走，不冒充没开过。
@@ -508,7 +498,6 @@ final class FurnaceRun implements Action {
             return fail(Problem.Kind.STUCK, "熔炉的界面一再被关掉，烧" + recipe.result().describe() + "烧不下去");
         }
         closedByPause = false;
-        splitting = null;
         dropVisit();
         stage = Stage.VISIT;
         return ActionStatus.progressed();
@@ -518,95 +507,59 @@ final class FurnaceRun implements Action {
         if (visit != null) visit.close();
         visit = null;
         menus = null;
+        menu = null;
+        run = null;
         closingSession = null;
     }
 
-    // 分堆：从角色侧一格分出 amount 件放进炉子一格，点得最少的左右键串；每一下等原格、炉格、鼠标上件数对上再点下一下。
-    private ActionStatus startSplit(TickContext tick, int sourceSlot, int destinationSlot, ItemStack kind, int amount,
-            String what) {
-        List<SplitClick> clicks = new ArrayList<>();
+    // 分堆装料：从角色侧一格分出 amount 件放进炉子一格的左右键串整笔交给搬运执行，
+    // 每刻至多发一下；结清按"源格恰好减了这么多、光标放空"核对——炉格可能刚被炉子吃掉一件，不核对它。
+    private ActionStatus load(int sourceSlotId, int destinationSlotId, ItemStack kind, int amount, String what) {
+        List<MenuClick> clicks = new ArrayList<>();
         for (StackSplit.Step step : StackSplit.plan(kind.getCount(), amount, kind.getMaxStackSize())) {
-            clicks.add(new SplitClick(step.side() == StackSplit.Side.SOURCE ? sourceSlot : destinationSlot,
-                    step.button(), step.after().source(), step.after().deposited(), step.after().cursor()));
+            boolean takesToCursor = step.side() == StackSplit.Side.SOURCE
+                    && step.after().cursor() > step.before().cursor();
+            int slot = step.side() == StackSplit.Side.SOURCE ? sourceSlotId : destinationSlotId;
+            clicks.add(new MenuClick(slot, false, step.button(), takesToCursor));
         }
-        splitting = clicks;
-        splitIndex = 0;
-        splitSource = sourceSlot;
-        splitDestination = destinationSlot;
-        splitKind = kind.copy();
-        splitWhat = what;
-        return nextSplitClick(tick);
-    }
-
-    private ActionStatus nextSplitClick(TickContext tick) {
-        if (splitIndex >= splitting.size()) {
-            splitting = null;
-            return ActionStatus.progressed();
-        }
-        SplitClick next = splitting.get(splitIndex);
-        return click(tick, next.slot(), next.button(), ClickType.PICKUP, splitLanded(next), status -> {
-            if (status != PendingMenuAction.Status.CONFIRMED_APPLIED) {
-                splitting = null;
-                return fail(Problem.Kind.REFUSED_BY_GAME, splitWhat + "时第 " + (splitIndex + 1) + " 下没得到游戏确认");
-            }
-            splitIndex++;
-            return ActionStatus.progressed();
-        });
-    }
-
-    // 这一下点完：原格、鼠标上的件数要正好对上；炉格可能刚被炉子吃掉一件（点着火、烧完一件），少一件也算。
-    // 炉子自己在动不算对不上，没对上就接着等，到期限还没对上才算这一下没成。
-    private MenuConfirmation splitLanded(SplitClick click) {
-        return (player, pendingClick) -> {
-            var menu = player.localPlayer().containerMenu;
-            int destination = countOf(menu.getSlot(splitDestination).getItem());
-            boolean source = countOf(menu.getSlot(splitSource).getItem()) == click.sourceAfter();
-            boolean cursor = countOf(menu.getCarried()) == click.cursorAfter();
-            boolean placed = destination == click.destinationAfter() || destination == click.destinationAfter() - 1;
-            return source && cursor && placed ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING;
-        };
-    }
-
-    private int countOf(ItemStack stack) {
-        return stack.isEmpty() || !ItemStack.isSameItemSameComponents(stack, splitKind) ? 0 : stack.getCount();
-    }
-
-    // 收货确认：背包里这件东西变多了，或产出格空了。
-    private MenuConfirmation resultTaken(int before) {
-        return (player, click) -> openReading()
-                .map(now -> carriedResults(now) > before || now.containerSnapshots().get(OUTPUT).isEmpty())
-                .orElse(false) ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING;
-    }
-
-    // 点到的格子变了（变空、变少或换了东西）才算这一下生效。
-    private static MenuConfirmation slotChanged(int slotId, ItemStack before) {
-        return (player, click) -> ItemStack.matches(player.localPlayer().containerMenu.getSlot(slotId).getItem(), before)
-                ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
-    }
-
-    // 点一下格子：别的界面操作没结清或界面还没真正显示时不点，下一刻再看。
-    private ActionStatus click(TickContext tick, int slotId, int button, ClickType type,
-            MenuConfirmation confirmation, Settlement after) {
-        PlayerContext player = tick.player();
-        if (player.menuActions().hasPendingTransaction() || !player.menuActions().ensureVisible(player)) {
-            return ActionStatus.running();
-        }
-        pending = player.menuActions().click(player, slotId, button, type, confirmation, CLICK_TIMEOUT_TICKS);
-        settlement = after;
+        run.begin(new TransferRun.Move(clicks, new TransferRun.Check.Machine(sourceSlotId, amount), what));
+        moveKind = MoveKind.LOAD;
+        moveWhat = what;
         return ActionStatus.progressed();
     }
 
-    // 等这一下点击的结果；有了结果交给它的结算决定下一步。
-    private ActionStatus awaitClick(TickContext tick) {
-        pending = tick.player().menuActions().poll(tick.player(), pending);
-        if (!pending.terminal()) {
-            return ActionStatus.running();
+    // 一笔搬运出了结论：按它在做什么分流。没动与对不上都按游戏没让这件事发生交待；
+    // 界面中途没了照常往下走，下一刻照看时发现界面没了会回到炉子跟前重开。
+    private ActionStatus onMoveSettled(TransferRun.MoveResult result) {
+        if (result instanceof TransferRun.MoveResult.MenuGone) {
+            return ActionStatus.progressed();
         }
-        PendingMenuAction.Status status = pending.status();
-        Settlement after = settlement;
-        pending = null;
-        settlement = null;
-        return after.settle(status);
+        switch (moveKind) {
+            case TAKE_OUTPUT -> {
+                int gained = result instanceof TransferRun.MoveResult.Confirmed(int amount) ? amount
+                        : openReading().map(now -> Math.max(0, carriedResults(now) - carriedBefore)).orElse(0);
+                if (gained <= 0) {
+                    return finish(Problem.of(Problem.Kind.INVENTORY_FULL,
+                            "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了"));
+                }
+                produced += gained;
+                if (records != null) {
+                    records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
+                }
+                return ActionStatus.progressed();
+            }
+            case TIDY -> {
+                // 收不回就留着：照常往下走，收场时界面上剩什么照实说。
+                return ActionStatus.progressed();
+            }
+            case LOAD -> {
+                if (result instanceof TransferRun.MoveResult.Confirmed) {
+                    return ActionStatus.progressed();
+                }
+                return fail(Problem.Kind.REFUSED_BY_GAME, moveWhat + "没能得到游戏确认");
+            }
+        }
+        return ActionStatus.progressed();
     }
 
     // 还在的界面才读：点开的那份已经关了（就算又开了别的界面）都按界面没了算。
@@ -697,7 +650,8 @@ final class FurnaceRun implements Action {
     // 饿了吃一口、天黑去睡这类不急的事也能插进来，炉子照烧，回来走到跟前点开接着收。
     @Override
     public Interruptibility interruptibility() {
-        if (pending != null || splitting != null) return Interruptibility.UNSAFE_TO_STOP;
+        // 手上有一笔搬运就不宜打断：一笔没点完，鼠标上可能还拿着东西。
+        if (run != null && !run.idle()) return Interruptibility.UNSAFE_TO_STOP;
         return stage == Stage.AWAY ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
     }
 

@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>打开者声明过服务端换页的换法（{@link PageSwaps}）时，认领的那一页被服务端换成声明认的一页，
  * 每次用之前先把通道与读端换绑过去，会话也跟着接管；请游戏关过以后不再跟，免得关的路上又认领一页。
  */
-final class ClientOpenedMenu implements OpenedMenu {
+public final class ClientOpenedMenu implements OpenedMenu {
 
     /** 一下快速移动等确认的期限（刻）；到点由菜单入口按没能确认收场，调用方按两侧内容核对。 */
     private static final int QUICK_MOVE_TIMEOUT_TICKS = 40;
@@ -36,6 +36,15 @@ final class ClientOpenedMenu implements OpenedMenu {
     private PageSwaps swaps = PageSwaps.NONE;
     /** 已经请游戏关过：之后服务端再换上来什么都不跟。 */
     private boolean closeAsked;
+
+    /**
+     * 认领此刻已经开着的界面：界面由别人点开（工作站界面由到设施跟前点开的那一趟交出），
+     * 读写与关闭都对着它；没有开着的容器界面时为 null。
+     */
+    public static OpenedMenu claimCurrent(Supplier<PlayerContext> contexts, ClientMenuContent content) {
+        ClientMenuChannel channel = ClientMenuChannel.claimCurrent(contexts);
+        return channel == null ? null : new ClientOpenedMenu(channel, content, contexts);
+    }
 
     ClientOpenedMenu(ClientMenuChannel channel, ClientMenuContent content, Supplier<PlayerContext> contexts) {
         this.channel = Objects.requireNonNull(channel, "channel");

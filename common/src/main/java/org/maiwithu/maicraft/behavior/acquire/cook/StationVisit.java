@@ -57,7 +57,7 @@ final class StationVisit {
     /** 点的时候看不到、够不着的站位：再靠近时不站这些格。 */
     private final Set<BlockPos> poorSpots = new HashSet<>();
     /** 界面打开后才建的读端：绑的就是点开的那份界面。 */
-    private MenuContent menus;
+    private ClientMenuContent menus;
     private int menuWaited;
 
     StationVisit(BringsPlayerClose close, Interactions interactions, Supplier<PlayerContext> context,
@@ -84,8 +84,13 @@ final class StationVisit {
     }
 
     /** 点开的那份界面的读端；还没点开时为空。 */
-    MenuContent menus() {
+    ClientMenuContent menus() {
         return menus;
+    }
+
+    /** 建读端用的上下文来源：认领这份界面时要用它。 */
+    Supplier<PlayerContext> context() {
+        return context;
     }
 
     // 走到设施跟前：够不着就如实失败，不隔空点开。
