@@ -106,6 +106,8 @@ class NavigationCameraCourseTest {
         assertEquals(Vec3.atBottomCenterOf(new BlockPos(0, 70, 0)), NavigationCameraCourse.lookAhead(pillar, 1, body));
         assertEquals(Vec3.atBottomCenterOf(new BlockPos(6, 64, 3)), NavigationCameraCourse.lookAhead(staircase, 9, body),
                 "past the end the last point is used");
+        // 空路线没处可看：给空，镜头保持朝向，不越界出错（审计 A49）。
+        assertEquals(null, NavigationCameraCourse.lookAhead(List.of(), 1, body), "empty route has nothing to look at");
     }
 
     @Test

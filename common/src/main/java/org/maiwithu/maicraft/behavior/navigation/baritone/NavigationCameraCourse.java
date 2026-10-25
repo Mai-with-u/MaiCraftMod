@@ -137,7 +137,9 @@ final class NavigationCameraCourse {
     static final int LOOK_AHEAD_NODES = 6;
 
     // 从下一个路点起往前数，取第一个水平离身体够四格的路点；都不够远就取数到的最后一个。
+    // 路线是空的（一格路点都没有）就没处可看：给空，镜头保持现在的朝向，不让钳位越界把这一刻的走路弄出错。
     static Vec3 lookAhead(List<? extends BlockPos> positions, int next, Vec3 body) {
+        if (positions.isEmpty()) return null;
         int index = Math.clamp(next, 0, positions.size() - 1);
         int last = Math.min(positions.size() - 1, index + LOOK_AHEAD_NODES - 1);
         for (; index < last; index++) {
