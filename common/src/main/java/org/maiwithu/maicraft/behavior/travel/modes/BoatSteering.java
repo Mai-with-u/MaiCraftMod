@@ -26,6 +26,10 @@ public final class BoatSteering {
     public static final int WINDOW_TICKS = 20;
     /** 连着几个观察窗没前进就换靠岸点。 */
     public static final int MAX_STALLED_WINDOWS = 3;
+    /** 离靠岸点这么近（格）就开始贴岸冲滩：船要蹭上岸边才够得着下船点，靠岸前的岸不算障碍。 */
+    public static final double BEACH_DISTANCE = 4.0;
+    /** 一个观察窗里离靠岸点真近了这么多格才算前进：倒退再划回来的来回蹭动攒不出新纪录。 */
+    public static final double PROGRESS_BLOCKS = 0.75;
 
     private BoatSteering() {}
 
@@ -63,6 +67,30 @@ public final class BoatSteering {
         // 对准了直划；差得多就边划边转。船头向右转是平移键右（-1）：船头向右转朝向角变大。
         if (Math.abs(yawError) <= AIMED_DEGREES) return new Decision(1, 0, false);
         return new Decision(1, yawError > 0 ? -1 : 1, false);
+    }
+
+    /**
+     * 前方挡路的算不算障碍：离靠岸点比冲滩距离近时不算——最后这几格是故意往岸上蹭的，
+     * 原版船顶上岸就停住、蹭得进冲滩距离以内就下船；把靠岸前的岸当障碍，
+     * 船会在三格开外倒退避让与前进互相抵消，在出发位置附近打转永远靠不了岸。
+     *
+     * @param read               读一格方块；没加载的格给空（没加载不当成挡路）
+     * @param position           船此刻的位置
+     * @param yaw                船头朝向
+     * @param distanceToLanding  船到靠岸点的水平距离（格）
+     */
+    public static boolean obstacleAhead(Function<BlockPos, Optional<BlockState>> read, Vec3 position, float yaw,
+            double distanceToLanding) {
+        return distanceToLanding > BEACH_DISTANCE && blockedAhead(read, position, yaw);
+    }
+
+    /**
+     * 观察窗的进展账：离靠岸点比记过的最好成绩真近了这么多格才算前进；
+     * 还没有纪录（bestSoFar 为负，比如刚换靠岸点）时这一窗先立账。
+     * 倒退避让再划回来的来回蹭动离岸忽远忽近，攒不出新纪录，早晚判成没前进换靠岸点。
+     */
+    public static boolean approachingLanding(double distanceToLanding, double bestSoFar) {
+        return bestSoFar < 0 || distanceToLanding < bestSoFar - PROGRESS_BLOCKS;
     }
 
     /**

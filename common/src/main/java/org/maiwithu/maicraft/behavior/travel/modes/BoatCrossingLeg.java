@@ -41,7 +41,8 @@ import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
 /**
  * 划一段船：备船（身上有船换到主手，岸边停着的船直接走过去用）→ 走到岸边能放船的站位 →
  * 对着水面放船、确认附近真的出现一条新船 → 右键坐上去、确认坐的正是它 → 按住前进、左右转向朝靠岸点划，
- * 每刻看前方避障（顶到岸、搁浅、睡莲、冰先倒退再转向，连着几个观察窗没前进换靠岸点）→
+ * 每刻看前方避障（顶到岸、搁浅、睡莲、冰先倒退再转向，连着几个观察窗没真近靠岸点换下一个；
+ * 到冲滩距离以内岸不算障碍，故意往岸上蹭到够得着下船的地方）→
  * 贴岸按住潜行下船、确认人不在船上、脚下站得住 → 船留在岸边不收，位置记进世界记忆，站稳交还行程。
  *
  * <p>路上饿了、被打照常让生存需求打断：松开按键、船停在原地，回来接着划。
@@ -76,7 +77,8 @@ final class BoatCrossingLeg implements TravelLeg {
     private PendingInteraction pending;
     private long lastTick = Long.MIN_VALUE;
     private int afterDismountTicks;
-    private BlockPos windowAnchor;
+    /** 这一窗的进展账：离靠岸点记过的最好成绩；刚开划或刚换靠岸点为负，第一个观察窗先立账。 */
+    private double bestDistance = -1;
     private long windowStart;
     private int stalledWindows;
     private int reverseTicksLeft;
@@ -271,11 +273,11 @@ final class BoatCrossingLeg implements TravelLeg {
         return ActionStatus.running();
     }
 
-    // 坐稳开划：从当前位置朝靠岸点划，每刻看前方避障、每个观察窗看前进没前进。
+    // 坐稳开划：从当前位置朝靠岸点划，每刻看前方避障、每个观察窗看离靠岸点近没近。
     private ActionStatus startRowing() {
         step = Step.ROW;
         PlayerContext live = services.context().get();
-        windowAnchor = live == null ? null : live.localPlayer().blockPosition();
+        bestDistance = -1;
         windowStart = lastTick;
         return ActionStatus.progressed();
     }
@@ -302,19 +304,24 @@ final class BoatCrossingLeg implements TravelLeg {
         }
         Vec3 boatPos = boat.position();
         Vec3 target = Vec3.atCenterOf(landing());
-        if (Math.sqrt(boatPos.distanceToSqr(target.x, boatPos.y, target.z)) <= ARRIVAL_DISTANCE) {
+        double distance = Math.sqrt(boatPos.distanceToSqr(target.x, boatPos.y, target.z));
+        if (distance <= ARRIVAL_DISTANCE) {
             releaseKeys(live);
             step = Step.DISMOUNT;
             return ActionStatus.progressed();
         }
         float error = BoatSteering.yawError(boat.getYRot(), boatPos, target);
-        boolean blocked = BoatSteering.blockedAhead(reader(), boatPos, boat.getYRot());
-        // 观察窗结算：这一窗没挪出四分之三格算没前进，连着几个窗没前进就换靠岸点。
-        if (windowAnchor != null && live.clientTick() - windowStart >= BoatSteering.WINDOW_TICKS) {
-            double moved = Math.sqrt(boatPos.distanceToSqr(windowAnchor.getX() + 0.5, windowAnchor.getY(),
-                    windowAnchor.getZ() + 0.5));
-            stalledWindows = moved >= 0.75 ? 0 : stalledWindows + 1;
-            windowAnchor = boat.blockPosition();
+        // 靠岸点近在眼前（冲滩距离以内）时岸不算障碍：最后几格是故意往岸上蹭的，蹭上去才够得着下船。
+        boolean blocked = BoatSteering.obstacleAhead(reader(), boatPos, boat.getYRot(), distance);
+        // 观察窗结算：这一窗离靠岸点没比记过的最好成绩真近四分之三格算没前进，
+        // 倒退再划回来的来回蹭动攒不出新纪录，连着几个窗没前进就换靠岸点。
+        if (live.clientTick() - windowStart >= BoatSteering.WINDOW_TICKS) {
+            if (BoatSteering.approachingLanding(distance, bestDistance)) {
+                bestDistance = distance;
+                stalledWindows = 0;
+            } else {
+                stalledWindows++;
+            }
             windowStart = live.clientTick();
         }
         BoatSteering.Decision decision = BoatSteering.decide(error, blocked,
@@ -328,7 +335,7 @@ final class BoatCrossingLeg implements TravelLeg {
             landingIndex++;
             stalledWindows = 0;
             reverseTicksLeft = 0;
-            windowAnchor = boat.blockPosition();
+            bestDistance = -1;
             windowStart = live.clientTick();
             return ActionStatus.progressed();
         }

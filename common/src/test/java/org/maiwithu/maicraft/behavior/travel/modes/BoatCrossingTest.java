@@ -312,4 +312,28 @@ class BoatCrossingTest {
         assertFalse(BoatCrossing.isBoatItem("minecraft:stone"));
         assertFalse(BoatCrossing.isBoatItem("minecraft:boat_hook"));
     }
+
+    @Test
+    void 靠岸点近在眼前时岸不算障碍_远处照样算() {
+        BlockState water = Blocks.WATER.defaultBlockState();
+        for (int x = 0; x <= 30; x++) {
+            put(x, 63, 0, Blocks.STONE.defaultBlockState());
+            put(x, 64, 0, water);
+        }
+        // 船头前方三格就是岸。
+        put(13, 64, 0, Blocks.STONE.defaultBlockState());
+        Vec3 boat = new Vec3(10.5, 64.0, 0.5);
+        float facingEast = -90.0F;
+        assertTrue(BoatSteering.obstacleAhead(world(), boat, facingEast, 9.5), "离靠岸点还远时岸照样算障碍");
+        assertFalse(BoatSteering.obstacleAhead(world(), boat, facingEast, 3.0), "冲滩距离以内故意往岸上蹭，不再倒退避让");
+    }
+
+    @Test
+    void 真近靠岸点才算前进_来回蹭动攔不出() {
+        assertTrue(BoatSteering.approachingLanding(9.0, -1), "刚换靠岸点的第一窗先立账");
+        assertTrue(BoatSteering.approachingLanding(8.0, 9.0), "真近了一格以上算前进");
+        assertFalse(BoatSteering.approachingLanding(8.5, 8.0), "倒退再划回来的来回蹭动不算前进");
+        assertFalse(BoatSteering.approachingLanding(7.8, 8.0), "近了不到四分之三格不算前进");
+        assertTrue(BoatSteering.approachingLanding(7.2, 8.0), "真近了四分之三格以上算前进");
+    }
 }
