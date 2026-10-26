@@ -24,6 +24,8 @@ public final class CombatGeometry {
     public static final double CREEPER_IGNITE = 3.0;
     /** 苦力怕引信熄灭：目标中心距出了 7 格（原版 {@code distanceToSqr > 49} 才倒退膨胀）。 */
     public static final double CREEPER_DEFUSE = 7.0;
+    /** 上下差这么多以内算同一层：看得见、又在同一层，就直接走过去打，不交给寻路。 */
+    public static final double LEVEL_GAP = 1.5;
     /** 普通苦力怕的爆炸威力；闪电劈过的翻倍。 */
     public static final float CREEPER_POWER = 3.0f;
 

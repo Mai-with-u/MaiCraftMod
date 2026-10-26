@@ -61,8 +61,6 @@ public final class Battle {
 
     /** 带子外沿再远这么多以内、看得见、差不多同一层：直接走位，不寻路。 */
     static final double NEAR_MARGIN = 3.0;
-    /** 上下差这么多以内算同一层。 */
-    static final double LEVEL_GAP = 1.5;
     /** 别的怪的危险半径外再留这么多。 */
     static final double SIDE_MARGIN = 0.35;
     /** 冷却中退到它够不着外最多这么远。 */
@@ -535,7 +533,8 @@ public final class Battle {
 
     // 近处：看得见、差不多同一层、离带子外沿不远。
     private static boolean near(Battlefield.Me me, CombatSenses.Threat threat, double outer) {
-        return threat.visible() && Math.abs(threat.y() - me.y()) <= LEVEL_GAP && threat.distance() <= outer + NEAR_MARGIN;
+        return threat.visible() && Math.abs(threat.y() - me.y()) <= CombatGeometry.LEVEL_GAP
+                && threat.distance() <= outer + NEAR_MARGIN;
     }
 
     // 走位要躲的别的怪：除了要打的那只，每只追兵在它危险半径外再留一点；点着引信的按爆炸范围。
