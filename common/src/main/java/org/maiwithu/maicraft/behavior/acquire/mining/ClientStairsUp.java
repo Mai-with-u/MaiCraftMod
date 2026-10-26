@@ -119,6 +119,8 @@ public final class ClientStairsUp implements DigsStairsUp {
         /** 挖掉的方块按种类计数：一段楼梯几十格石头，结果里合成一条，不一格一条。 */
         private final Map<String, Integer> dug = new LinkedHashMap<>();
         private boolean booked;
+        /** 被叫先到安全处再停、手上那一下（走上一级、挖）说要先收尾：只推进它到停稳；暂停时清掉。 */
+        private boolean stopping;
 
         Climbing(Predicate<BlockPos> outside, Permissions permissions, TaskRecords records) {
             this.outside = Objects.requireNonNull(outside, "outside");
@@ -128,6 +130,12 @@ public final class ClientStairsUp implements DigsStairsUp {
 
         @Override public ActionStatus tick(TickContext context) {
             if (ended != null) return ended;
+            // 收尾途中：只把手上那一下推进到停稳（走上一级跳在半空的先落地），落地后原地等外层停下，
+            // 不把落地当成走上了这一级，也不挖下一格。
+            if (stopping) {
+                if (step != null && !step.stoppedSafely()) step.tick(context);
+                return ActionStatus.running();
+            }
             // 被打断后回来：手上挖到一半、走到一半的都收掉，按此刻站的位置重新看这一级。
             if (paused) {
                 paused = false;
@@ -314,8 +322,19 @@ public final class ClientStairsUp implements DigsStairsUp {
         }
 
         @Override public void pause() {
+            stopping = false;
             if (step != null) step.pause();
             paused = true;
+        }
+
+        // 被叫先到安全处再停：转给手上那一下，走上一级悬在半空的先落地、落地才算停稳；站着挖、两步之间现在就能停。
+        @Override public boolean stopSafely() {
+            stopping = step != null && step.stopSafely();
+            return stopping;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || step == null || step.stoppedSafely();
         }
 
         // 整段被收掉（取消、换办法）：手上的挖掘、走路收掉，挖掉的方块照样记账。

@@ -223,6 +223,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         private final Set<Direction> refusedHere = EnumSet.noneOf(Direction.class);
         /** 这一级第一个挖不了的原因：几个方向都不行时照它说。 */
         private Problem firstRefusal;
+        /** 被叫先到安全处再停、手上那一下（走下一级、挖、垫、捡）说要先收尾：只推进它到停稳；暂停时清掉。 */
+        private boolean stopping;
 
         Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel) {
             this.yields = yields;
@@ -233,6 +235,12 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         @Override public ActionStatus tick(TickContext context) {
             if (ended != null) return ended;
+            // 收尾途中：只把手上那一下推进到停稳（走下一级跳在半空的先落地），落地后原地等外层停下，
+            // 不把落地当成走下了这一级，也不挖下一格。
+            if (stopping) {
+                if (step != null && !step.stoppedSafely()) step.tick(context);
+                return ActionStatus.running();
+            }
             // 被打断后回来：手上挖到一半、走到一半的都收掉，按此刻站的位置重新看下一级，
             // 不对着原来那几格接着挖（人可能被带走了，够不着也看不见）。
             if (paused) {
@@ -581,8 +589,19 @@ public final class ClientStairsDown implements DigsStairsDown {
         }
 
         @Override public void pause() {
+            stopping = false;
             if (step != null) step.pause();
             paused = true;
+        }
+
+        // 被叫先到安全处再停：转给手上那一下，走下一级悬在半空的先落地、落地才算停稳；站着挖、两步之间现在就能停。
+        @Override public boolean stopSafely() {
+            stopping = step != null && step.stopSafely();
+            return stopping;
+        }
+
+        @Override public boolean stoppedSafely() {
+            return !stopping || step == null || step.stoppedSafely();
         }
 
         @Override public void close() {

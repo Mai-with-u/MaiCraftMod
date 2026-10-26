@@ -20,6 +20,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
@@ -32,6 +34,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -100,7 +103,15 @@ class ClientStairsDownTest {
                 placed.put(cell, filler);
             }));
         }
+        /** 下一次走下一级照这段脚本演（跳在半空、落地）；为 null 时一刻走到。 */
+        Action nextStep;
+
         @Override public Action stepTo(BlockPos target) {
+            if (nextStep != null) {
+                Action step = nextStep;
+                nextStep = null;
+                return step;
+            }
             return done("走下一级", () -> {
                 walkedTo.add(target);
                 feet = target;
@@ -216,6 +227,41 @@ class ClientStairsDownTest {
                 assertTrue(now.getY() < before.getY(), "同一级要从上往下挖：" + digs.dug);
             }
         }
+    }
+
+    @Test
+    void 走下一级跳在半空被叫先停稳_落地才停_不挖下一格_暂停后按站的位置接着挖() {
+        TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(0, 64, -1), false),
+                WalkReport.onTheWay(new BlockPos(0, 63, -1), false),
+                WalkReport.stopped(new BlockPos(0, 63, -1), false));
+        leg.airborne = true;
+        world.nextStep = leg;
+        Action action = stairs().digDown(type -> type.equals("minecraft:stone"), 3, Permissions.DEFAULT);
+        assertFalse(action.stopSafely(), "还没动手：现在就能停");
+        long t = 0;
+        while (world.nextStep != null && t < 200) action.tick(new Tick(t++));
+        action.tick(new Tick(t++));
+        assertEquals(Interruptibility.UNSAFE_TO_STOP, action.interruptibility(), "走下一级跳在半空停不得");
+
+        // 跳在半空被叫先到安全处再停：转给走路去落地；落地后原地等着，不当成走下了这一级、不挖下一格。
+        assertTrue(action.stopSafely(), "悬在半空，要先落地");
+        assertEquals(1, leg.safeStops, "先停稳转给了走路");
+        assertFalse(action.stoppedSafely(), "还没落地");
+        int dugBefore = digs.dug.size();
+        for (int i = 0; i < 4; i++) {
+            assertInstanceOf(ActionStatus.Running.class, action.tick(new Tick(t++)), "收尾途中不收场");
+        }
+        assertTrue(action.stoppedSafely(), "落地站稳了");
+        assertEquals(dugBefore, digs.dug.size(), "收尾途中不挖下一格");
+        assertEquals(0, leg.closes, "落地停稳的那一趟留着");
+
+        // 暂停过后接着做：按此刻站的位置重新看下一级，照常挖够三格。
+        action.pause();
+        ActionStatus status = ActionStatus.running();
+        while (status instanceof ActionStatus.Running && t < 5000) status = action.tick(new Tick(t++));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(3, digs.types.stream().filter("minecraft:stone"::equals).count());
     }
 
     @Test
