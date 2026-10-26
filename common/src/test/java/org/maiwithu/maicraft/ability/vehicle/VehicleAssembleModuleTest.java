@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -12,6 +13,8 @@ import com.google.gson.JsonParser;
 import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -20,20 +23,26 @@ import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /** 组装能力的决定：没接上组装联动如实说不支持；s# 落成结构身份；坐标没给 y 按脚下。 */
 class VehicleAssembleModuleTest {
 
+    @TempDir
+    Path folder;
+
     private static final VehicleAssembler NONE = request -> Optional.empty();
 
-    private static VehicleAssembleModule module(List<VehicleAssembler> assemblers) {
+    private VehicleAssembleModule module(List<VehicleAssembler> assemblers) {
+        DocumentStore documents = new DocumentStore(folder.resolve("world.db"));
         return new VehicleAssembleModule(assemblers, id -> Optional.of(WorldPosition.here(5, 70, 5)),
                 id -> id.equals("s3") ? Optional.of("ship-uuid") : Optional.empty(), name -> Optional.empty(),
-                () -> new BlockPos(0, 64, 0));
+                () -> new BlockPos(0, 64, 0), new VehicleArchives(new VehicleControls(documents, "w"), documents, "w",
+                        List.of(), () -> "minecraft:overworld", id -> Optional.empty()));
     }
 
-    private static StepContext step(Target target, String params) {
+    private StepContext step(Target target, String params) {
         Goal goal = new Goal("maicraft:vehicle_assemble", null, target,
                 module(List.of(NONE)).spec().paramSpecs().parse(JsonParser.parseString(params).getAsJsonObject()).params(),
                 Permissions.DEFAULT, List.of(), null);

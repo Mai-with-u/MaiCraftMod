@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
@@ -50,6 +51,7 @@ import org.maiwithu.maicraft.ability.gather.GatherAbility;
 import org.maiwithu.maicraft.ability.gather.LiveSceneTargets;
 import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.light.LightModule;
+import org.maiwithu.maicraft.ability.vehicle.VehicleArchives;
 import org.maiwithu.maicraft.ability.vehicle.VehicleAssembleModule;
 import org.maiwithu.maicraft.ability.vehicle.VehicleDriveModule;
 import org.maiwithu.maicraft.ability.vehicle.VehicleTravelMode;
@@ -574,20 +576,30 @@ public final class AbilityCatalog {
 
         // 任务书：提交、勾选、领奖经登记表交来的任务书操作做；FTB 任务没装时能力不登记。
         registry.register(new QuestModule(deps.compat().questBooks(services)));
-        // 组装载具：物理组装器拉一次杆组装或拆回；观察编号 s# 从场景的编号表换成结构身份。
+        registerVehicles(registry, deps, services);
+    }
+
+    /** 组装载具与驾驶载具：联动登记的组装、驾驶、读载具办法，观察编号 s# 从场景的编号表换成结构身份。 */
+    private static void registerVehicles(AbilityRegistry registry, Deps deps, PlayerServices services) {
+        Supplier<BlockPos> feet = () -> deps.character().context().get() == null
+                || deps.character().context().get().localPlayer() == null
+                ? BlockPos.ZERO : deps.character().context().get().localPlayer().blockPosition();
+        // 组装载具：物理组装器拉一次杆组装或拆回。
+        // 档案跟着走：拆回记到世界里组装器那一格（按维度分），再组装跟到新结构，新结构的 s# 从同一张编号表反查。
         registry.register(new VehicleAssembleModule(deps.compat().vehicleAssemblers(services),
                 new SceneSeenTargets(deps.world()::scene), id -> deps.world().scene().seen().structureOf(id),
-                deps.world().memory(),
-                () -> deps.character().context().get() == null || deps.character().context().get().localPlayer() == null
-                        ? BlockPos.ZERO : deps.character().context().get().localPlayer().blockPosition()));
-        // 驾驶载具：坐上驾驶座接管控制件试按或开到某处；不在车上先经出行上车，观察编号 s# 同样从场景的编号表换成结构身份，
+                deps.world().memory(), feet,
+                new VehicleArchives(vehicleControls(deps), deps.stores().worldDocuments(), deps.stores().worldKey(),
+                        deps.compat().vehicleReaders(services),
+                        () -> deps.character().context().get() == null || deps.character().context().get().level() == null
+                                ? "" : deps.character().context().get().level().dimension().location().toString(),
+                        identity -> deps.world().scene().seen().idOfStructure(identity))));
+        // 驾驶载具：坐上驾驶座接管控制件试按或开到某处；不在车上先经出行上车，
         // 去记过的地点按世界记忆找，坐标没给 y、按方向开多远从角色脚下算。
         registry.register(new VehicleDriveModule(deps.compat().vehicleDrivers(services),
                 deps.compat().vehicleReaders(services), vehicleControls(deps),
                 new SceneSeenTargets(deps.world()::scene), id -> deps.world().scene().seen().structureOf(id),
-                deps.world().memory(),
-                () -> deps.character().context().get() == null || deps.character().context().get().localPlayer() == null
-                        ? BlockPos.ZERO : deps.character().context().get().localPlayer().blockPosition()));
+                deps.world().memory(), feet));
     }
 
     /**

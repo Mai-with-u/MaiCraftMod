@@ -14,7 +14,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
-/** 操纵表：推出来的打底、试过的盖上、LLM 定的为准；试按不盖 LLM 定的；必需角色按种类查；按结构身份存取与搬家。 */
+/** 操纵表：推出来的打底、试过的盖上、LLM 定的为准；试按不盖 LLM 定的；必需角色按种类查；按结构身份存取、整份记到新身份、删旧身份。 */
 class VehicleControlsTest {
 
     @TempDir
@@ -54,11 +54,14 @@ class VehicleControlsTest {
     }
 
     @Test
-    void 换了身份搬过去() {
+    void 新身份整份记上_旧身份删掉() {
         VehicleControls controls = new VehicleControls(new DocumentStore(folder.resolve("world.db")), "w");
         controls.assign("old", Map.of("打字机:W", "power"), "+z");
-        assertTrue(controls.move("old", "new"));
+        VehicleControls.Stored old = VehicleControls.fromJson(VehicleControls.toJson(controls.stored("old")));
+        assertTrue(controls.adopt("new", old));
         assertEquals("+z", controls.stored("new").forward());
+        assertTrue(controls.forget("old"));
+        assertEquals(VehicleControls.Stored.EMPTY, controls.stored("old"));
         assertEquals(VehicleControls.Stored.EMPTY, controls.stored("nothing"));
     }
 }

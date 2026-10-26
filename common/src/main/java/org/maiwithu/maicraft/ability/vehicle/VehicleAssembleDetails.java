@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param converted   拉了之后真的转换了
  * @param blocks      组装进结构的方块数；拆回或不知道为 -1
  * @param note        经过一句话
+ * @param archive     档案这次怎么走的（改记在世界里、跟到新结构、当新载具、留在原身份下）；车站组车、没转换为 null
  */
-record VehicleAssembleDetails(String structure, boolean alreadyDone, boolean converted, int blocks, String note)
-        implements ResultDetails {}
+record VehicleAssembleDetails(String structure, boolean alreadyDone, boolean converted, int blocks, String note,
+        VehicleArchives.Handover archive) implements ResultDetails {}

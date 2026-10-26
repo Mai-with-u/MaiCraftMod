@@ -131,10 +131,19 @@ public final class VehicleControls {
                 keepForward ? before.forwardSource() : TESTED));
     }
 
-    /** 结构换了身份（拆回再组装）：把存下来的部分搬到新身份上。 */
-    public boolean move(String fromId, String toId) {
-        Stored before = stored(fromId);
-        return before == Stored.EMPTY || save(toId, before);
+    /** 重新组装后档案跟过来：把一份存下来的部分整份记到新的结构身份上（旧的同名行被换掉）。存不进去返回假。 */
+    public boolean adopt(String structureId, Stored stored) {
+        return save(structureId, stored);
+    }
+
+    /** 结构拆回成方块后它的身份就作废了：档案已经改记到世界里，删掉按旧身份存的这一份。删不掉不要紧，返回假。 */
+    public boolean forget(String structureId) {
+        try {
+            documents.delete(SCOPE, worldKey, structureId);
+            return true;
+        } catch (IOException | RuntimeException failure) {
+            return false;
+        }
     }
 
     /**
@@ -206,6 +215,11 @@ public final class VehicleControls {
     }
 
     private static String encode(Stored stored) {
+        return toJson(stored).toString();
+    }
+
+    /** 存下来的部分写成 JSON：拆回后档案改记到世界里时，操纵表照这个样子存进拆回记录。 */
+    public static JsonObject toJson(Stored stored) {
         JsonObject root = new JsonObject();
         JsonArray rows = new JsonArray();
         for (Entry entry : stored.entries()) {
@@ -219,11 +233,15 @@ public final class VehicleControls {
         root.add("entries", rows);
         root.addProperty("forward", stored.forward());
         root.addProperty("forward_source", stored.forwardSource());
-        return root.toString();
+        return root;
     }
 
     private static Stored decode(String json) {
-        JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+        return fromJson(JsonParser.parseString(json).getAsJsonObject());
+    }
+
+    /** 从 JSON 读回存下来的部分（{@link #toJson} 的反面）；写法不对抛运行时异常，由调用方当作没存过。 */
+    public static Stored fromJson(JsonObject root) {
         List<Entry> entries = new ArrayList<>();
         for (JsonElement element : root.getAsJsonArray("entries")) {
             JsonObject row = element.getAsJsonObject();

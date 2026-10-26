@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * vehicle_assemble：把建好、胶好的方块组装成会动的结构（物理组装器拉一次杆），或者拆回方块。
  * 能力只落实"指的是哪一个"——组装器的坐标、记过的地点、看到的东西（b#），或结构的观察编号（s#）——
  * 怎么走过去、拉、确认转换没有由联动模组的组装办法做。拉过一次就不再拉（再拉会拆回去），没转换照实说。
+ * 转换了档案跟着走：拆回改记到世界里组装器落回的那一格，再组装认出是同一艘就跟到新结构。
  */
 public final class VehicleAssembleModule implements AbilityModule {
 
@@ -48,18 +49,22 @@ public final class VehicleAssembleModule implements AbilityModule {
     private final Function<String, Optional<String>> structures;
     private final ReadsRememberedPlaces places;
     private final Supplier<BlockPos> feet;
+    private final VehicleArchives archives;
 
     /**
      * @param structures 观察编号 s# 换成结构身份
      * @param feet       角色此刻脚下（坐标没给 y 时按它）
+     * @param archives   载具档案：拆回改记到世界里、再组装跟到新结构
      */
     public VehicleAssembleModule(List<VehicleAssembler> assemblers, ReadsSeenTargets seen,
-            Function<String, Optional<String>> structures, ReadsRememberedPlaces places, Supplier<BlockPos> feet) {
+            Function<String, Optional<String>> structures, ReadsRememberedPlaces places, Supplier<BlockPos> feet,
+            VehicleArchives archives) {
         this.assemblers = List.copyOf(assemblers);
         this.seen = Objects.requireNonNull(seen, "seen");
         this.structures = Objects.requireNonNull(structures, "structures");
         this.places = Objects.requireNonNull(places, "places");
         this.feet = Objects.requireNonNull(feet, "feet");
+        this.archives = Objects.requireNonNull(archives, "archives");
     }
 
     @Override public AbilitySpec spec() {
@@ -116,7 +121,7 @@ public final class VehicleAssembleModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers));
+        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers, archives));
     }
 
     private static StepDecision invalid(String why) {
