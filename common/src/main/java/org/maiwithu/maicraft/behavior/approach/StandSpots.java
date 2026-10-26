@@ -6,6 +6,8 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -38,13 +40,12 @@ public final class StandSpots {
     private static final int SCAN_RADIUS = 5;
 
     /**
-     * 候选脚位比目标低多少格还要扫：眼睛比脚高一格半，低于目标五格的脚位仍可能够到天花板上的矿。
+     * 交给内核盒扫的竖直半径：候选带比目标低五格（眼睛比脚高一格半，低于目标五格的脚位
+     * 仍可能够到天花板上的矿）、高三格（站在高处往下够坑里的东西），带不对称——
+     * 把扫描中心比目标沉一格，上下各看四格恰好盖住整条带。
      * 类别：游戏事实（眼高与方块触及距离）。
      */
-    private static final int SCAN_BELOW = 5;
-
-    /** 候选脚位比目标高多少格还要扫：站在高处往下够坑里的东西。 */
-    private static final int SCAN_ABOVE = 3;
+    private static final int SCAN_VERTICAL_REACH = 4;
 
     /** 床距离的高度差上限：服务端对床横向卡三格、高度只允许差两格。类别：游戏事实。 */
     private static final int BED_VERTICAL_LIMIT = 2;
@@ -90,13 +91,17 @@ public final class StandSpots {
         List<RejectedSpot> rejected = new ArrayList<>();
         BlockPos anchor = target.anchorBlock();
         BlockPos current = world.currentFeet();
-        for (int dx = -SCAN_RADIUS; dx <= SCAN_RADIUS; dx++) {
-            for (int dy = -SCAN_BELOW; dy <= SCAN_ABOVE; dy++) {
-                for (int dz = -SCAN_RADIUS; dz <= SCAN_RADIUS; dz++) {
-                    review(new BlockPos(anchor.getX() + dx, anchor.getY() + dy, anchor.getZ() + dz),
-                            target, reach, world, walking, guarded, current, spots, rejected);
-                }
-            }
+        // 盒扫交给内核：中心比目标沉一格、竖直半径四格，恰好是低五格上三格的候选带；
+        // 没加载的格子折进谓词里跳过，既不进候选也不进被拒表。
+        List<BlockPos> candidates = SpotScan.collect(anchor.below(), SCAN_RADIUS, SCAN_VERTICAL_REACH,
+                world::isLoaded);
+        // 内核按先低层再水平扫，被拒表要按西到东、低到高、北到南的次序呈现——
+        // 换站位补救从被拒表里按先后挑对象，次序是看得见的行为。原三层循环的先后
+        // 就是格子坐标从西到东、从低到高、从北到南的次序，收齐后照这个次序排回去再逐格核对。
+        candidates.sort(Comparator.<BlockPos>comparingInt(BlockPos::getX).thenComparingInt(BlockPos::getY)
+                .thenComparingInt(BlockPos::getZ));
+        for (BlockPos feet : candidates) {
+            review(feet, target, reach, world, walking, guarded, current, spots, rejected);
         }
         spots.sort(null);
         // 声明允许湿脚的目标（骑上载具）：干站位排前面，浅水站位按代价排在所有干位之后——
@@ -203,7 +208,6 @@ public final class StandSpots {
     private static void review(BlockPos feet, ApproachTarget target, ReachRules reach,
                                ApproachWorldView world, WalkCost walking, ProtectedCells guarded,
                                BlockPos current, List<StandSpot> spots, List<RejectedSpot> rejected) {
-        if (!world.isLoaded(feet)) return;
         String steady = steadyFailure(feet, target, world, guarded);
         if (steady != null) {
             rejected.add(new RejectedSpot(feet, steady));
