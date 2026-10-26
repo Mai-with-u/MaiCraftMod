@@ -25,5 +25,7 @@ class ProblemAdviceTest {
         // 小模型最容易卡的两种：卡住了要换办法，不支持要说清不是 MCP 坏了。
         assertTrue(ProblemAdvice.suggestionFor(Problem.of(Problem.Kind.STUCK, "一分钟没进展")).contains("换"));
         assertTrue(ProblemAdvice.suggestionFor(Problem.of(Problem.Kind.UNSUPPORTED, "没装")).contains("不是 MCP 坏了"));
+        // 时机没到指到不占身体的计时，不让角色站着干等。
+        assertTrue(ProblemAdvice.suggestionFor(Problem.of(Problem.Kind.WRONG_TIME, "白天睡不了")).contains("timer"));
     }
 }

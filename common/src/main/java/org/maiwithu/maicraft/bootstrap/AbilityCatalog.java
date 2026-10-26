@@ -65,7 +65,6 @@ import org.maiwithu.maicraft.ability.suicide.SuicideModule;
 import org.maiwithu.maicraft.ability.timer.TimerAbility;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
-import org.maiwithu.maicraft.ability.wait.WaitModule;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCropReplanting;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsDown;
@@ -539,8 +538,7 @@ public final class AbilityCatalog {
                         new LiveHoldsSneak(deps.hands().inputs(), deps.character().context())),
                 deps.channels().events()));
 
-        // 等待占着身体站在原地等；不占身体的"过 N 秒叫我"归计时，往启动侧每刻看钟的那份计时表里挂。
-        registry.register(new WaitModule());
+        // 计时：不占身体的"过 N 秒叫我"，往启动侧每刻看钟的那份计时表里挂；想过一会儿回来看都走它，角色这期间照常干活。
         registry.register(new TimerAbility(deps.channels().timers()));
 
         // 钓鱼：钓位几何与咬钩收竿都接上了；缺竿回到拿到物品的内需入口，捡钓获用顺手捡起同一套。

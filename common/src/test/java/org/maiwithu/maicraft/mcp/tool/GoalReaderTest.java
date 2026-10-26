@@ -105,6 +105,19 @@ class GoalReaderTest {
     }
 
     @Test
+    void removedWaitAbilitySaysWhatToUseInstead() {
+        // 小模型顺手写了已经删掉的 wait：报没有这个能力，提示直接指到 timer 与 sleep，不按字母相近去猜。
+        for (String ability : List.of("wait", "maicraft:wait", "WAIT")) {
+            GoalReader.Reading reading = read("{\"ability\": \"" + ability + "\"}");
+
+            assertEquals(ErrorCode.UNKNOWN_ABILITY, reading.code());
+            String expected = reading.errors().getFirst().expected();
+            assertTrue(expected.contains("已经删了") && expected.contains("timer") && expected.contains("sleep"), expected);
+            assertFalse(expected.contains("相近的能力"), expected);
+        }
+    }
+
+    @Test
     void parametersWrittenOneLevelTooHighAreMovedIn() {
         GoalReader.Reading reading = read("""
                 {"ability": "maicraft:use", "count": 3}""");

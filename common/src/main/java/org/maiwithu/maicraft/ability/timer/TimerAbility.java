@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * 计时能力：LLM 想"炉子烧十分钟再回来看"时，设一个"过 N 秒叫我"，附一句备注；不占身体，execute 当场返回，
  * 手上的主任务照常做，角色这期间可以干别的。到点在任务事件流里发一条 timer_due，events 等得到。
  *
- * <p>和 wait 分开：wait 是站在原地等一个条件，占着身体；这里只把一个时刻记进计时表，不成为主任务、不打断手上的事，
+ * <p>要等的事都走它，角色不站着干等：只把一个时刻记进计时表，不成为主任务、不打断手上的事，
  * 放进按顺序做事的目标里，轮到它才设。秒数按游戏时间算，换世界、断线时没到点的清掉。
  */
 public final class TimerAbility implements AbilityModule {

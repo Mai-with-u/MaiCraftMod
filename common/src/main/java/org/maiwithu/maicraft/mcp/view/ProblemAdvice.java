@@ -31,7 +31,8 @@ public final class ProblemAdvice {
             case TARGET_GONE -> "目标已经不在了：重新 observe，用新的观察编号点名";
             case DANGER -> "先处理危险（fight 打掉，或 travel 退开），再回来做";
             case REFUSED_BY_GAME -> "游戏不让这么做：换个目标或换个方式，原样重发不会变";
-            case WRONG_TIME -> "用 wait 等到时间合适再做，期间可以先干别的";
+            // 时机没到不站着干等：先去干别的，要回来再做就挂个不占身体的计时。
+            case WRONG_TIME -> "时机还没到：先去干别的，要回来再做就用 timer 设个点叫你";
             case NOT_POSSIBLE_HERE -> "在这里按游戏规则做不到：换个地方或换个做法";
             case INVENTORY_FULL -> "先 deposit 存一些进箱子，或 drop 丢掉不要的，再来";
             case STUCK -> "换个办法或换个目标再下达（换目标点、换途径、放宽许可）；原样重发多半还是卡";

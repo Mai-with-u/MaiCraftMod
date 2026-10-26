@@ -67,15 +67,6 @@ public final class WorldTime {
         return Phase.NIGHT;
     }
 
-    public static boolean isDaytime(Level level) {
-        // 对“等天亮”的判断，凌晨和傍晚也算非夜间；只有 NIGHT 返回 false。
-        return phase(level) != Phase.NIGHT;
-    }
-
-    public static boolean isNighttime(Level level) {
-        return phase(level) == Phase.NIGHT;
-    }
-
     /** 现在是否到了能睡的时间；维度安全、怪物与床被占用仍由后续检查与原版判断。 */
     public static boolean canAttemptSleep(Level level) {
         return canSleepAt(

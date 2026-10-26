@@ -219,13 +219,6 @@
         "mode": "controls_player"
       },
       {
-        "ability": "maicraft:wait",
-        "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
-        "parameters": "condition: string = elapsed, after_seconds: integer = 0",
-        "targets": [],
-        "mode": "controls_player"
-      },
-      {
         "ability": "maicraft:timer",
         "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
         "parameters": "operation: string = set, after_seconds?: integer, note?: string, timer_id?: integer",
@@ -1304,40 +1297,6 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/follow.md"
-    },
-    {
-      "ability": "maicraft:wait",
-      "summary": "站在原地等一个条件：等一段时间、等天黑天亮、等血回满或不再饥饿；不想占着身体等用 timer",
-      "parameters": [
-        {
-          "name": "condition",
-          "type": "string",
-          "required": false,
-          "doc": "等什么：elapsed（只等时间，默认）/ day / night / health_full / not_hungry",
-          "default": "elapsed",
-          "choices": [
-            "elapsed",
-            "day",
-            "night",
-            "health_full",
-            "not_hungry"
-          ]
-        },
-        {
-          "name": "after_seconds",
-          "type": "integer",
-          "required": false,
-          "doc": "最短先等多少秒再开始查条件（elapsed 条件下过了这段时间即完成）",
-          "default": 0,
-          "min": 0,
-          "max": 3600
-        }
-      ],
-      "targets": [],
-      "mode": "controls_player",
-      "required_mods": [],
-      "knowledge": [],
-      "doc_resource": "assets/maicraft/abilities/wait.md"
     },
     {
       "ability": "maicraft:timer",

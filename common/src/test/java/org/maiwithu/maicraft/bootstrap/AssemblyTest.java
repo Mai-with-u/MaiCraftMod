@@ -27,7 +27,6 @@ import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
-import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -73,7 +72,7 @@ class AssemblyTest {
         assertEquals(Set.of("use", "eat", "equip", "drop", "suicide", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect", "light",
-                "fight", "follow", "wait", "timer", "travel", "find", "explore", "chat", "remember", "sequence", "quest", "vehicle_assemble",
+                "fight", "follow", "timer", "travel", "find", "explore", "chat", "remember", "sequence", "quest", "vehicle_assemble",
                 "vehicle_drive", "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");
     }
@@ -84,7 +83,8 @@ class AssemblyTest {
         // 手上没有生存需求（替身清单为空），控制循环只推进主任务。
         ControlLoop controlLoop = new ControlLoop(List.of());
         // 下达经目标运行表：LLM 用 execute 派的活走同一条路，目标成为控制循环的主任务。
-        // 等待目标：条件是"过了 0 秒"，开工即完成——推进路径走的是真实的任务与控制循环。
+        // 列出挂着的计时：一刻就做完的真实能力。生产里 execute 把不占身体的能力当场做完，放进 sequence 时才由控制循环推进；
+        // 这里借它把目标运行表、任务工厂与控制循环这条推进路径完整走一遍。
         // 目标写能力的完整 ID：目标推进器按 ID 查清单。
         // 控制权交接给空实现：总装测试不接输入层，只验证目标推得动。
         GoalRunTable goals = new GoalRunTable(registry, new InMemoryGoalRunStore(),
@@ -96,7 +96,11 @@ class AssemblyTest {
                     @Override public void requestControl() {
                     }
                 });
-        GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:wait", null, ParamValues.EMPTY), null);
+        var timer = registry.find("maicraft:timer").orElseThrow();
+        ParseResult parsed = timer.spec().paramSpecs()
+                .parse(JsonParser.parseString("{\"operation\":\"list\"}").getAsJsonObject());
+        assertTrue(parsed.ok(), "列出计时的参数应能解析：" + parsed.errors());
+        GoalRunTable.Launch launch = goals.launch(Goal.of("maicraft:timer", null, parsed.params()), null);
         assertTrue(!launch.repeated(), "第一次下达要新开一个目标运行");
 
         // 下达后的第一刻能力做决定、开出任务，随后一刻任务走完：两刻内给结果。
@@ -107,9 +111,9 @@ class AssemblyTest {
                     assertInstanceOf(ControlLoop.Decision.Advanced.class, decision);
             finished = advanced.finished();
         }
-        assertNotNull(finished, "零秒等待在几刻内就该走完");
+        assertNotNull(finished, "列出计时在几刻内就该走完");
         assertEquals(TaskResult.Status.DONE, finished.status(),
-                "等待完成的结算要如实写清：" + finished.summary());
+                "列出计时的结算要如实写清：" + finished.summary());
     }
 
     @Test
@@ -152,7 +156,7 @@ class AssemblyTest {
         return factories.create(run.input());
     }
 
-    /** 离线的一刻：只有游戏刻号，没有角色；等待任务按"角色不在"如实处理。 */
+    /** 离线的一刻：只有游戏刻号，没有角色；计时只看刻号，不需要角色。 */
     private record OfflineTick() implements TickContext {
         @Override public long gameTick() {
             return 0;

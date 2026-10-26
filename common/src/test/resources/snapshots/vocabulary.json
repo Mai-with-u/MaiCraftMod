@@ -1,6 +1,6 @@
 {
   "parameter_names": {
-    "after_seconds": "从现在起过多少秒（游戏时间）：wait 先至少等这么久再开始查条件，timer 过了这么久叫你",
+    "after_seconds": "从现在起过多少秒（游戏时间）：timer 过了这么久叫你",
     "anchor": "蓝图原点落在哪一格 {x,y,z}：target 指的是别的东西（例如蓝图加农炮）时另给",
     "angle_degrees": "扇形开口角（度），1..360；配 direction 使用，有方向默认 90",
     "balance": "看载具时要不要受力：forces 两种情况往哪边倒 / ballast 再给配重建议",
@@ -10,7 +10,6 @@
     "cells": "逐格蓝图（JSON 数组）：每项 offset [x,y,z]、block、可选 properties；block 为 minecraft:air 表示清空",
     "choice": "领选择奖励时选哪个候选（能力提问时列出的候选编号）",
     "collect": "做完要不要把出口的东西拿进背包",
-    "condition": "要等到的条件：elapsed / day / night / health_full / not_hungry",
     "count": "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次",
     "coverage": "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）",
     "cruise_altitude": "飞艇巡航高度（船底的世界 y）",
