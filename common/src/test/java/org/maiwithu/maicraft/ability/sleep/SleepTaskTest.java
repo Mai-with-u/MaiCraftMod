@@ -806,6 +806,17 @@ class SleepTaskTest {
     }
 
     @Test
+    void theHomeSpotIsOnlyMemorizedStandingOnDryGround() {
+        // 实机夜宿：睡前站位记在水里的格子上，睡醒回站位就是往水里走，整夜沉浮。
+        // 水里的格不是能站的位：站上干地才记，半空与水里都不记；载具的湿位是上船用的，
+        // 回站位没有这个用途。夜里始终没落地就不记，收尾按"没处可回"处理。
+        assertTrue(NightRestTask.spotWorthMemorizing(true, false), "干地记");
+        assertFalse(NightRestTask.spotWorthMemorizing(false, false), "半空不记");
+        assertFalse(NightRestTask.spotWorthMemorizing(true, true), "水里不记");
+        assertFalse(NightRestTask.spotWorthMemorizing(false, true), "半空又带水不记");
+    }
+
+    @Test
     void walkingBackStallsConcludeWithWhereItStoppedAndWhereHomeIs() {
         // 实机夜宿：回站位的路百刻一步没挪（原地沉浮、卡在够不着的岸边）就该收场，
         // 收场问题带此刻停在哪、睡前的站位在哪，不再只有一句"六百刻没有新进展"。

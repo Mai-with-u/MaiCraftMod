@@ -159,14 +159,25 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         this.now = context;
-        // 第一次站在地上（或水里）时记住站位：夜休从哪儿出发，干完活回哪儿去。人在半空（刚交回时开着喷气背包
+        // 第一次站在干地上时记住站位：夜休从哪儿出发，干完活回哪儿去。人在半空（刚交回时开着喷气背包
         // 飘在上面、正往下掉）不记——实机记成半空一格，睡醒回不去，附近一千多个候选全是"脚下悬空"，人留在了床边。
+        // 在水里也不记：水里的格不是能站的位，记成站位睡醒就得往水里走（载具的湿位是上船用的，
+        // 回站位没有这个用途）；等角色站上干地再记，整夜没落地就当没处可回。
         if (homeSpot == null && context.player() != null && context.player().localPlayer() != null
-                && (context.player().localPlayer().onGround() || context.player().localPlayer().isInWater())) {
+                && spotWorthMemorizing(context.player().localPlayer().onGround(),
+                        context.player().localPlayer().isInWater())) {
             var at = context.player().localPlayer().blockPosition();
             homeSpot = WorldPosition.here(at.getX(), at.getY(), at.getZ());
         }
         return super.tick(phase, context);
+    }
+
+    /**
+     * 此刻的脚下算不算值得记住的站位：站上干地才算。半空不记（落点未定），
+     * 水里不记（水里的格站不住，回站位不是上船，没有湿位的用途）。
+     */
+    static boolean spotWorthMemorizing(boolean onGround, boolean inWater) {
+        return onGround && !inWater;
     }
 
     /**

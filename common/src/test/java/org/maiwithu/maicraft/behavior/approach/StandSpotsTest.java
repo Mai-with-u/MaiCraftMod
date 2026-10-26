@@ -116,6 +116,19 @@ class StandSpotsTest {
     }
 
     @Test
+    void 人泡在水里不算到了床边_别的目标不沾这条() {
+        // 实机夜宿：回站位带角色下水后反复沉浮。床边没有湿位的用途——
+        // 载具的湿位是上船用的，躺床不沾：人还在水里就不算到位，先上岸。
+        ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(2, 60, 0));
+        world.feet = new BlockPos(2, 60, 2);
+        world.fluids.add(world.feet);
+        assertEquals(Optional.of("泡在水里"), StandSpots.checkArrival(bed, REACH, world, guarded));
+        // 同样的位置对普通方块目标不生效：那类目标该不该沾水由各自的现场判断，不在床边这一条里。
+        ApproachTarget block = ApproachTarget.ofBlock(new BlockPos(2, 61, 0));
+        assertEquals(Optional.empty(), StandSpots.checkArrival(block, REACH, world, guarded));
+    }
+
+    @Test
     void 离床三格的那一圈不当候选_走进去停在外沿就点不着床() {
         // 实机 10-15：从远处走来，站进离床三格的那一格就停在进格子那一侧的边上，离床底面中心三格多，
         // 点床被原版以"床太远了"拒绝。挑候选时这一圈不要，横向两格以内的才要。

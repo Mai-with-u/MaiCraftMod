@@ -159,6 +159,9 @@ public final class StandSpots {
         // 骑载具踩着水凑到船边算到了：人在贴水面的湿位漂着、头还在水面外时不要求落地，
         // 落地这一项只有站在干地上的目标才核对（与挑站位共用的同一条判据，见 floatingForVehicle）。
         if (!world.onGround() && !floatingForVehicle(target, world, feet)) return Optional.of("还没落地");
+        // 床边没有湿位的用途：人还泡在水里就不算到了床边，先上岸再点——挑站位时水里的格子
+        // 本来就当不了床边的站位（载具的湿位是上船用的，水下挖矿是就地动手的特例，躺床不沾）。
+        if (target.kind() == InteractionKind.BED && world.inFluid(feet)) return Optional.of("泡在水里");
         // 站的这格不能站（要往这里放东西、或受保护）：先挪开。实机让它就地放工作台，人站在要放的那格里，
         // 原版放不下去，原地试了八千多次。
         if (guarded.contains(feet)) return Optional.of("站的这格要放东西或受保护，得挪开");
