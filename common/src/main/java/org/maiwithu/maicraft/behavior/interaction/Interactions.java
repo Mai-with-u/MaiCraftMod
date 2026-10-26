@@ -8,6 +8,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.UseKeyPress;
 
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -83,6 +84,14 @@ public final class Interactions {
     public AimAndInteract useEntity(Entity target, InteractionConfirmation confirmation) {
         return new AimAndInteract(new InteractionTarget.EntityTarget(target), confirmation,
                 FirstPersonScene::of);
+    }
+
+    /**
+     * 对着空处真按一下使用键（和玩家按右键同一条路，模组挂在按键上的处理收得到）：准星先转到够不着东西的方向，
+     * 按完照给的条件等游戏回话；确认窗到期没回按没生效交代。只想让模组收到按键时用，例如清掉链条输送机接线记着的起点。
+     */
+    public Action pressUseKeyIntoAir(InteractionConfirmation confirmation) {
+        return new PressUseKeyIntoAir(confirmation, new UseKeyPress());
     }
 
     /** 从床上起来：给服务器发"离开床"，确认人已经不在睡了；夜里被新指令叫醒时用。 */

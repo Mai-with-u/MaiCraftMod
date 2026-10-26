@@ -19,6 +19,7 @@
     "MouseHandlerControlMixin",
     "BlockUseAcknowledgementMixin",
     "UseKeyHoldMixin",
+    "MinecraftUseKeyInvoker",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
     "MinecraftLevelSubtitleMixin",
