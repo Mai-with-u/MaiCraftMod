@@ -24,16 +24,15 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
-import org.maiwithu.maicraft.behavior.menu.ContainerTakePlan;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuClose;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.behavior.menu.MenuSessionSource;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.behavior.menu.MenuTakeRound;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
-import org.maiwithu.maicraft.behavior.menu.TransferRun;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
@@ -53,8 +52,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 不知道有多少"，排在数量明确的来源后面；读不到（联动停用、版本对不上）由登记表那一层如实回答。
  * 执行用模组自己的打开请求按格开包（对应玩家在背包里对着那只包按 B 键），身上几只包一只一只开，
  * 只看主存储（升级槽与幽灵槽不算货），按要的量搬进主背包，每笔以身上真的多了为准；
- * 带无限格升级的背包读数对不上，按"未证实"处理。主背包放不下就停，已取的照算；
- * 往包里塞是腾地方的事，不在这里。
+ * 开出界面之后的一轮取货走共用的取货一轮，这里只给差异点：打开是模组自己的请求（对着包按 B 键），
+ * 关箱前把这次看到的主存储存货记下来给问价用。带无限格升级的背包读数对不上，按"未证实"处理。
+ * 主背包放不下就停，已取的照算；往包里塞是腾地方的事，不在这里。
  */
 public final class SophisticatedBackpackSource implements ItemSource {
 
@@ -135,18 +135,12 @@ public final class SophisticatedBackpackSource implements ItemSource {
      */
     private final class TakeAction implements Action, ReportsUnconfirmed {
 
-        private enum Stage { OPEN, TAKE, CLOSE }
-
         private final ItemRequest request;
         private final Permissions permissions;
-        private Stage stage = Stage.OPEN;
         /** 认领到的那只包的界面：读数、点击与关闭都经它。 */
         private ClaimedMenu menu;
-        /** 手上的一笔交给它逐刻点、等结清；界面认领后才有。 */
-        private TransferRun run;
-        private Action closing;
-        /** 正在点的那一笔要搬几件：交回"没能确认"时说得清是多大的笔。 */
-        private int moveAmount;
+        /** 界面认下来之后的一轮取货：逐样盘、记账、关箱都走它。 */
+        private MenuTakeRound round;
         private int waited;
         private int totalTicks;
         private int quietTicks;
@@ -159,8 +153,6 @@ public final class SophisticatedBackpackSource implements ItemSource {
         private boolean openRequested;
         /** 每只包卡住的原因：都试完还不够时一起交代。 */
         private final List<String> deadEnds = new ArrayList<>();
-        /** 点出去了却没能确认结果的交互，一句一笔，经交回接缝交给引擎。 */
-        private final List<String> unconfirmed = new ArrayList<>();
         private int carriedAtStart = -1;
 
         TakeAction(ItemRequest request, Permissions permissions) {
@@ -181,21 +173,30 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 openingSlot = toOpen.poll();
             }
             // 手上的笔先跑完：够没够等它结清再说。
-            if (run != null && !run.idle()) return run.tickAction(this::onSettled);
-            if (enough() && stage != Stage.CLOSE) {
-                // 已经够了：界面还开着就记一笔存货、关上；还没开包就直接完成。
-                return stage == Stage.OPEN && menu == null ? ActionStatus.done() : toClose();
+            if (round != null && round.movePending()) return round.tick(tick, Optional.empty());
+            // 已经够了：界面还开着就记一笔存货、关上；还没开包就直接完成。
+            if (enough()) {
+                if (menu == null) return ActionStatus.done();
+                return round.tick(tick, menu.reading());
             }
             // 总期限按还要开几只包放宽：一只包一份期限。
             if (++totalTicks > GIVE_UP_TICKS * (toOpen.size() + 1)) {
-                noteAbandoned("总期限到了");
+                if (round != null) round.abandonAndNote("总期限到了");
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开包取货超时", null));
             }
-            return switch (stage) {
-                case OPEN -> open();
-                case TAKE -> take();
-                case CLOSE -> closeMenu(tick);
-            };
+            if (menu == null) return open();
+            Optional<MenuContent.Reading> reading = menu.reading();
+            if (reading.isEmpty()) {
+                // 界面被合上了（打断、模组自己关的）：照界面没了收场，搬走多少由引擎清点；
+                // 还开着只是没同步完的，等宽限。
+                if (!menu.stillOpen()) return round.tick(tick, Optional.empty());
+                if (++quietTicks > SETTLE_TICKS * 4) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "背包界面的内容一直没同步完", null));
+                }
+                return ActionStatus.running();
+            }
+            quietTicks = 0;
+            return round.tick(tick, reading);
         }
 
         // 按格开这一只（对应玩家在背包里对着它按 B 键），请求只发一次，等背包界面真的打开并认领它。
@@ -222,16 +223,12 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 }
                 Optional<List<Integer>> slots = menus.mainStorageSlotIds(opened);
                 if (slots.isEmpty()) {
-                    // 带无限格升级的背包读数对不上：这只取不了货，按未证实处理，关上换下一只。
+                    // 带无限格升级的背包读数对不上：这只取不了货，按未证实处理，收场换下一只。
                     deadEnds.add(whichBackpack() + "读数对不上（多半带着无限格升级），取不了货");
-                    stage = Stage.CLOSE;
-                    waited = 0;
-                    return ActionStatus.progressed();
+                    return afterClosed();
                 }
                 menu = new ClaimedMenu(channel, slots.get());
-                run = new TransferRun(menu);
-                stage = Stage.TAKE;
-                waited = 0;
+                round = new MenuTakeRound(menu, List.of(new BackpackWant()), new BackpackEndings());
                 return ActionStatus.progressed();
             }
             if (++waited > OPEN_WAIT_TICKS) {
@@ -255,14 +252,11 @@ public final class SophisticatedBackpackSource implements ItemSource {
         /** 换下一只包：界面与这一只的进度清掉，从发打开请求开始。 */
         private void startNextBackpack() {
             menu = null;
-            run = null;
-            closing = null;
-            moveAmount = 0;
+            round = null;
             quietTicks = 0;
             waited = 0;
             openRequested = false;
             openingSlot = toOpen.poll();
-            stage = Stage.OPEN;
         }
 
         /** 关上一只之后：够了收工；不够还有没开的就开下一只；都开过了交给引擎清点。 */
@@ -282,72 +276,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
             return carriedWanted() - carriedAtStart >= request.count();
         }
 
-        // 按量搬：手上的笔交给搬运执行逐刻点、等结清；空手时盘下一笔要点的几下。
-        private ActionStatus take() {
-            if (menu == null || !menu.stillOpen()) {
-                // 界面被合上了（打断、模组自己关的）：搬走多少由引擎清点。
-                return toClose();
-            }
-            Optional<MenuContent.Reading> reading = menu.reading();
-            if (reading.isEmpty()) {
-                if (++quietTicks > SETTLE_TICKS * 4) {
-                    return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "背包界面的内容一直没同步完", null));
-                }
-                return ActionStatus.running();
-            }
-            quietTicks = 0;
-            int stillNeeded = request.count() - (carriedWanted() - carriedAtStart);
-            Optional<ContainerTakePlan.Move> next = stillNeeded < 1 ? Optional.empty()
-                    : ContainerTakePlan.next(reading.get(), this::matches, stillNeeded);
-            if (next.isEmpty()) {
-                // 要的都拿到了、包里没有了，或主背包放不下尾数：收场，已取的照算。
-                return toClose();
-            }
-            moveAmount = next.get().amount();
-            run.begin(new TransferRun.Move(next.get().clicks(),
-                    new TransferRun.Check.IntoBackpack(this::matches, moveAmount),
-                    "从随身背包拿" + request.wanted().describe()));
-            return run.tickAction(this::onSettled);
-        }
-
-        // 一笔出了结论：结清接着盘；点出去了身上一直没多、或对不上账的，如实交回后收场，
-        // 换下一只包或让引擎清点；界面中途没了的同样收场。
-        private ActionStatus onSettled(TransferRun.MoveResult result) {
-            if (result instanceof TransferRun.MoveResult.NotMoved) {
-                unconfirmed.add("从随身背包拿" + request.wanted().describe()
-                        + "：搬的那几下都点出去了，身上一直没多，没能确认结果");
-                return toClose();
-            }
-            if (result instanceof TransferRun.MoveResult.Diverged) {
-                unconfirmed.add("从随身背包拿" + request.wanted().describe()
-                        + "：这一笔点完对不上账，搬走多少没能确认");
-                return toClose();
-            }
-            if (result instanceof TransferRun.MoveResult.MenuGone(int submitted) && submitted > 0) {
-                unconfirmed.add("从随身背包拿" + request.wanted().describe()
-                        + "：界面关上时，点了 " + submitted + " 下的最后一笔没能确认");
-            }
-            return ActionStatus.progressed();
-        }
-
-        /** 关上之前记下这次开包看到的主存储存货：下次问价不用再开一遍。 */
-        private ActionStatus toClose() {
-            recordStock();
-            stage = Stage.CLOSE;
-            waited = 0;
-            return ActionStatus.progressed();
-        }
-
-        private ActionStatus closeMenu(TickContext tick) {
-            if (closing == null) closing = menu.closing();
-            ActionStatus status = closing.tick(tick);
-            if (status instanceof ActionStatus.Running) return status;
-            if (status instanceof ActionStatus.Failed) {
-                unconfirmed.add("关随身背包的界面没能确认，光标上的东西交给游戏的关闭流程还回");
-            }
-            return afterClosed();
-        }
-
+        /** 关上之前记下这次开包看到的主存储存货：下次问价不用再开一遍；读数没了就把这只的旧存货忘掉。 */
         private void recordStock() {
             Optional<MenuContent.Reading> reading = menu == null ? Optional.empty() : menu.reading();
             if (reading.isEmpty()) {
@@ -361,16 +290,6 @@ public final class SophisticatedBackpackSource implements ItemSource {
                 stock.merge(stack.itemId(), snapshot.count(), Integer::sum);
             }
             seen.saw(openingSlot, stock, clock.get());
-        }
-
-        // 中途收手（总期限到、被收尾）：手上还有一笔的，点出去没等到结果的那几下原样交回。
-        private void noteAbandoned(String circumstance) {
-            if (run == null || run.idle()) return;
-            int submitted = run.abandon();
-            if (submitted > 0) {
-                unconfirmed.add("从随身背包拿" + request.wanted().describe() + "：" + circumstance
-                        + "，最后一笔没能确认");
-            }
         }
 
         // 这一格是不是想要的东西：按物品 ID 与它挂着的标签匹配。
@@ -396,7 +315,7 @@ public final class SophisticatedBackpackSource implements ItemSource {
         }
 
         @Override public void close() {
-            if (run != null && !run.idle()) run.abandon();
+            if (round != null) round.close(false);
             if (menu != null && menu.stillOpen()) menu.abandon();
             menu = null;
         }
@@ -406,15 +325,64 @@ public final class SophisticatedBackpackSource implements ItemSource {
         }
 
         @Override public List<String> unconfirmedFacts() {
-            return List.copyOf(unconfirmed);
+            return round == null ? List.of() : round.unconfirmedFacts();
         }
 
         @Override public String describe() {
-            return switch (stage) {
-                case OPEN -> "打开随身背包";
-                case TAKE -> "从随身背包搬" + request.wanted().describe() + "进主背包";
-                case CLOSE -> "关上随身背包";
-            };
+            if (menu == null) return "打开随身背包";
+            return round.atClosing() ? "关上随身背包"
+                    : "从随身背包搬" + request.wanted().describe() + "进主背包";
+        }
+
+        /** 一轮取货的收场：关箱前记下这次看到的主存储存货；关上后够了或没有下一只就收工。 */
+        private final class BackpackEndings implements MenuTakeRound.Endings {
+
+            @Override
+            public void rememberBeforeClose(Optional<MenuContent.Reading> lastReading) {
+                recordStock();
+            }
+
+            @Override
+            public ActionStatus finishAfterClosed(boolean tookAnything) {
+                return afterClosed();
+            }
+
+            // 界面中途没了：搬走多少由引擎清点，这只照常算完，不够再开下一只。
+            @Override
+            public ActionStatus finishAfterMenuGone(boolean tookAnything) {
+                return afterClosed();
+            }
+
+            // 关不上不冒充关上了：光标上的东西交给游戏的关闭流程还回。
+            @Override
+            public Optional<String> closeUnconfirmedNote() {
+                return Optional.of("关随身背包的界面没能确认，光标上的东西交给游戏的关闭流程还回");
+            }
+        }
+
+        /** 要货单里的一样（随身背包一次只要一样）：按包里的东西认，缺几件按身上真多了多少算。 */
+        private final class BackpackWant implements MenuTakeRound.Want {
+
+            @Override
+            public String label() {
+                return "从随身背包拿" + request.wanted().describe();
+            }
+
+            @Override
+            public Predicate<SlotSnapshot> matcher() {
+                return TakeAction.this::matches;
+            }
+
+            @Override
+            public int stillNeeded(MenuContent.Reading reading) {
+                return request.count() - (carriedWanted() - carriedAtStart);
+            }
+
+            // 对不上账的一笔说不清搬走多少：这一只收场，已取的照算，交给引擎清点后再说。
+            @Override
+            public boolean settleAfterDiverge() {
+                return true;
+            }
         }
     }
 
