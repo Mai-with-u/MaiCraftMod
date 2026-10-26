@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
@@ -45,6 +46,7 @@ public final class MachineAbilities {
      * @param placementRules 联动的放置规则，审蓝图算材料用，和施工拿的是同一张表
      * @param itemSettings   联动的物品设置（过滤器写规则）
      * @param vehicles       看载具用的读载具办法与 s# 查法
+     * @param menuLayouts    认得出哪些界面：用机器做东西时点开机器界面看出口要它
      */
     public static List<AbilityModule> all(Supplier<PlayerContext> context, List<MachineType> machineTypes,
             List<NetworkReader> networkReaders, RecipeLookup recipes, ItemNeeds needs,
@@ -52,7 +54,8 @@ public final class MachineAbilities {
             ReadsRememberedPlaces places, WorldMemory memory, DocumentStore worldDocuments, String worldKey,
             AnchorResolver anchors, Optional<DesignStore> designs,
             Function<Permissions, ConstructionServices> construction, Map<String, Integer> blockLimits,
-            List<PlacementRules> placementRules, List<ItemSettings> itemSettings, MachineVehicles vehicles) {
+            List<PlacementRules> placementRules, List<ItemSettings> itemSettings, MachineVehicles vehicles,
+            MenuLayouts menuLayouts) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(recipes, "recipes");
         Objects.requireNonNull(needs, "needs");
@@ -68,7 +71,8 @@ public final class MachineAbilities {
         Objects.requireNonNull(construction, "construction");
         MachineServices services = new MachineServices(context, new LiveMachineWorld(context), machineTypes,
                 networkReaders, new LiveMachineArea(context), recipes, needs, close,
-                new LiveMachineInteractions(interactions), seenTargets, places, blockLimits, placementRules, itemSettings);
+                new LiveMachineInteractions(interactions, close, menuLayouts, context), seenTargets, places,
+                blockLimits, placementRules, itemSettings);
         MachineArchives archives = new MachineArchives(worldDocuments, worldKey);
         return List.of(new MachineInspectModule(services, archives, memory, vehicles), new MachineReviewModule(services, designs),
                 new MachineConfigureModule(services, vehicles), new MachineRunModule(services),

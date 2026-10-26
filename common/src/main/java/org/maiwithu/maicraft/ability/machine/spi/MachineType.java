@@ -116,9 +116,8 @@ public interface MachineType {
     List<MachineState.Shown> output(BlockPos at);
 
     /**
-     * 出口读不读得到：置物台、工作盆上的东西画出来了读得到；格子在界面里的（通用机械的机器）、
-     * 东西留在机器肚子里或做好后掉在地上的（石磨、锯、粉碎轮）读不到，做没做好要打开看或到出口那边找。
-     * 读不到时 machine_run 投料开机后就收手，不对着读不到的出口干等。
+     * 出口站在外面读不读得到：置物台、工作盆上画出来的东西读得到；格子在界面里的（通用机械的机器）读不到。
+     * 读不到时 machine_run 投完料隔一个加工周期走过去点开界面看一眼，看到了就收，几回都没出才按部分完成收场。
      */
     default boolean outputVisible(BlockPos at) {
         return true;

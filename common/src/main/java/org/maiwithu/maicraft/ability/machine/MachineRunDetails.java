@@ -7,7 +7,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
 /**
- * 用机器做东西的结果细节：用的哪条配方、投了什么、出口新增多少、拿回多少，结束时机器什么状态。
+ * 用机器做东西的结果细节：用的哪条配方、投了什么、出口新增多少、拿回多少、等了多久回去看了几回，结束时机器什么状态。
  *
  * <p>机器内部还留着什么原料这里读不到（不透视机器内部）：要看就 use 打开界面。
  *
@@ -16,11 +16,13 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param fed       投进去的东西与数量
  * @param produced  出口里这次新增几件目标物品
  * @param collected 拿进背包几件；collect 为 false 时为 0，东西留在出口
+ * @param waitedSeconds 投完料等产物等了几秒（出口在界面里的含回去看的那几趟）
+ * @param looks     出口在界面里的机器，投完料回去点开看了几回；别的出口站在旁边一直看着，为 0
  * @param machine   结束时机器的运行状态一句话，例如"在转""过载""转速 0"
  * @param notes     过程中值得知道的事，例如配方要的流体带不进机器
  */
 record MachineRunDetails(Recipe recipe, int batches, List<Fed> fed, int produced, int collected,
-                         String machine, List<String> notes) implements ResultDetails {
+                         int waitedSeconds, int looks, String machine, List<String> notes) implements ResultDetails {
 
     MachineRunDetails {
         fed = List.copyOf(fed);

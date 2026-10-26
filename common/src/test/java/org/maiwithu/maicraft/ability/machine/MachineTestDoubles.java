@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -491,14 +492,72 @@ final class MachineTestDoubles {
         }
     }
 
-    /** 交互替身：记下右键了哪格，动作两刻做完。 */
+    /**
+     * 交互替身：记下右键了哪格，动作两刻做完；给了 menu 就能点开机器界面看出口（两刻看完，要收就把那样东西全拿走）。
+     * 每次点开记下是第几刻、收不收。
+     */
     static final class FakeClicks implements MachineInteractions {
         final List<BlockPos> clicked = new ArrayList<>();
         Runnable onDone = () -> { };
+        /** 机器界面里的东西：物品 → 件数；为 null 时点不开界面。 */
+        Map<String, Integer> menu;
+        LongSupplier now = () -> 0;
+        final List<Long> lookTicks = new ArrayList<>();
+        final List<Boolean> lookCollects = new ArrayList<>();
 
         @Override public Action useBlock(BlockPos target, InteractionConfirmation confirmation) {
             clicked.add(target);
             return new Scripted(2, onDone);
+        }
+
+        @Override public Optional<OutputLook> lookIntoMenu(BlockPos machine, String itemId, boolean collect,
+                Permissions permissions) {
+            if (menu == null) return Optional.empty();
+            lookTicks.add(now.getAsLong());
+            lookCollects.add(collect);
+            return Optional.of(new ScriptedLook(menu, itemId, collect));
+        }
+    }
+
+    /** 看一眼出口的替身：第二刻读那一份表里有几件，要收就整样拿走。 */
+    static final class ScriptedLook implements OutputLook {
+        private final Map<String, Integer> where;
+        private final String itemId;
+        private final boolean collect;
+        private int ran;
+        private int seen;
+        private int taken;
+
+        ScriptedLook(Map<String, Integer> where, String itemId, boolean collect) {
+            this.where = where;
+            this.itemId = itemId;
+            this.collect = collect;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            if (++ran < 2) return ActionStatus.progressed();
+            seen = where.getOrDefault(itemId, 0);
+            if (collect) {
+                taken = seen;
+                where.remove(itemId);
+            }
+            return ActionStatus.done();
+        }
+
+        @Override public int seen() {
+            return seen;
+        }
+
+        @Override public int taken() {
+            return taken;
+        }
+
+        @Override public List<String> notes() {
+            return List.of();
+        }
+
+        @Override public String describe() {
+            return "看一眼出口的替身";
         }
     }
 }

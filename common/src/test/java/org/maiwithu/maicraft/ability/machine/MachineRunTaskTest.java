@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -33,13 +34,17 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 用机器做东西的任务：选工序、备料、投料、开机只拨一次、出口只算新增、收产物按 collect。 */
+/**
+ * 用机器做东西的任务：选工序、备料、投料、开机只拨一次、出口只算新增、收产物按 collect；
+ * 出口在界面里的投完料隔一个周期点开看、几回没出收手、被叫走回来接着等。
+ */
 class MachineRunTaskTest {
 
     private static final BlockPos CELL = new BlockPos(6, 64, 6);
@@ -191,10 +196,11 @@ class MachineRunTaskTest {
     }
 
     @Test
-    void 出口在界面里看不见_投料后就收手_不说做好了() {
+    void 出口在界面里_这里点不开界面_投料后就收手_不说做好了() {
         Rig rig = new Rig();
         rig.machineRunsAtFullSpeed();
         rig.type.outputVisible = false;
+        // 替身没接界面：开工前看不了、回头也看不了，投完料照实收手。
         TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
                 Permissions.DEFAULT));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
@@ -291,6 +297,82 @@ class MachineRunTaskTest {
         assertTrue(details.notes().stream().anyMatch(note -> note.contains("test:carbon") && note.contains("带不进机器")),
                 details.notes().toString());
         assertEquals(List.of(INGOT), rig.type.fedItems);
+    }
+
+    @Test
+    void 出口在界面里_投完料等一个周期再点开看_出了就收() {
+        Rig rig = new Rig();
+        long[] fedAt = rig.menuMachineMakes(2);
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 300,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.produced());
+        assertEquals(2, details.collected());
+        assertEquals(1, details.looks(), "出了就收，一回就够");
+        assertEquals(List.of(false, true), rig.clicks.lookCollects, "开工前看一眼不收，回头看的那一眼收");
+        assertTrue(rig.clicks.lookTicks.get(1) - fedAt[0] >= LookBackSchedule.DEFAULT_CYCLE_TICKS,
+                "投完料至少等一个加工周期才回去看：" + rig.clicks.lookTicks + "，投料在第 " + fedAt[0] + " 刻");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && PLATE.equals(change.what()) && change.count() == 2));
+    }
+
+    @Test
+    void 出口在界面里_开工前就有的不算这次做的() {
+        Rig rig = new Rig();
+        rig.menuMachineMakes(2);
+        rig.clicks.menu.put(PLATE, 3);
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 300,
+                Permissions.DEFAULT));
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.produced(), "开工前看到的三件是旧货");
+        assertEquals(5, details.collected(), "收的时候连旧货一起拿走了");
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("开工前就在出口里")),
+                details.notes().toString());
+    }
+
+    @Test
+    void 出口在界面里_连着三回都没出_按部分完成收场附读数() {
+        Rig rig = new Rig();
+        rig.menuMachineMakes(0);
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 300,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertTrue(result.problem().message().contains("连着 " + LookBackSchedule.EMPTY_LOOKS_LIMIT + " 回"),
+                result.problem().message());
+        assertTrue(result.problem().message().contains("机器读数"), result.problem().message());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(LookBackSchedule.EMPTY_LOOKS_LIMIT, details.looks());
+        assertTrue(details.waitedSeconds()
+                        >= LookBackSchedule.EMPTY_LOOKS_LIMIT * LookBackSchedule.DEFAULT_CYCLE_TICKS / 20,
+                "等了 " + details.waitedSeconds() + " 秒");
+        assertEquals(1, rig.needs.requests.size(), "料只备一回、投一回");
+        assertTrue(result.summary().contains("看了 3 回"), result.summary());
+    }
+
+    @Test
+    void 出口在界面里_等的时候被叫走_回来接着等同一批() {
+        Rig rig = new Rig();
+        rig.menuMachineMakes(2);
+        MachineRunTask task = rig.start(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 300,
+                Permissions.DEFAULT));
+        for (int i = 0; i < 50; i++) {
+            rig.step(task);
+        }
+        // 投完料在等：手上没有动作，饿了吃一口、天黑去睡都插得进来。
+        assertEquals(Interruptibility.BETWEEN_ACTIONS, task.interruptibility(rig.tick()));
+        assertEquals(1, rig.clicks.lookTicks.size(), "还没到回头看的时候，只有开工前那一眼");
+        task.pause();
+        // 去吃饭、睡觉的这段时间游戏照走，机器照做。
+        rig.ticks += 400;
+        TaskResult result = rig.finish(task);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.collected());
+        assertEquals(1, details.looks(), "回来到点了直接看一眼");
+        assertEquals(1, details.fed().size(), "接着等同一批，不重投料");
+        assertEquals(1, rig.needs.requests.size());
     }
 
     /** 机器自己从头做到尾的替身：一刻做完，报做出几件、做全没有与说明。 */
@@ -409,15 +491,46 @@ class MachineRunTaskTest {
             type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
         }
 
+        /**
+         * 出口在界面里的机器：开工前界面里是空的，投料一完成输出格就有 made 件（要回去点开才看得见）。
+         *
+         * @return 第几刻投的料（投完才写进去）
+         */
+        long[] menuMachineMakes(int made) {
+            machineRunsAtFullSpeed();
+            type.outputVisible = false;
+            clicks.menu = new HashMap<>();
+            clicks.now = () -> ticks;
+            long[] fedAt = {-1};
+            type.feedActions.clear();
+            type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> {
+                fedAt[0] = ticks;
+                if (made > 0) clicks.menu.merge(PLATE, made, Integer::sum);
+            }));
+            return fedAt;
+        }
+
         TaskResult run(MachineRunInput input) {
+            return finish(start(input));
+        }
+
+        MachineRunTask start(MachineRunInput input) {
             MachineRunTask task = new MachineRunTask(input, services);
             task.start(tick());
-            for (int i = 0; i < 600; i++) {
-                if (task.tick(tick()) instanceof TickResult.Finished finished) {
+            return task;
+        }
+
+        TickResult step(MachineRunTask task) {
+            return task.tick(tick());
+        }
+
+        TaskResult finish(MachineRunTask task) {
+            for (int i = 0; i < 3000; i++) {
+                if (step(task) instanceof TickResult.Finished finished) {
                     return finished.result();
                 }
             }
-            throw new AssertionError("六百刻都没做完");
+            throw new AssertionError("三千刻都没做完");
         }
 
         TickContext tick() {
@@ -433,6 +546,6 @@ class MachineRunTaskTest {
             };
         }
 
-        private long ticks;
+        long ticks;
     }
 }

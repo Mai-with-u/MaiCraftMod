@@ -45,11 +45,17 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>出口只算这次新增：投料前先记下出口里已有什么。动力不够这类事不预判——
  * 照常投料开机，等不到产物时把机器读数（转速 0、过载）写进结果。投料与开机的交互
  * 在等确认时停下不安全，等产物时可以插生存需求，回来接着等。
+ *
+ * <p>出口有两种看法：画出来看得见的（置物台、工作盆）站在旁边一直盯着；
+ * 格子在界面里的（通用机械）投料前先点开看一眼原有几件，投完料隔一个加工周期回去点开看、出了就收。
  */
 final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
 
-    /** 认机器 → 选工序 → 备料 → 投料 → 开机 → 等产物 → 收产物；机器自己从头做到尾的（蓝图桌、蓝图加农炮）认完直接交给它。 */
-    enum Phase { RESOLVE, RECIPE, GATHER, FEED, SWITCH, WAIT, COLLECT, FULL }
+    /**
+     * 认机器 → 选工序 →（出口在界面里的先看一眼）→ 备料 → 投料 → 开机 → 等产物 → 收产物；
+     * 机器自己从头做到尾的（蓝图桌、蓝图加农炮）认完直接交给它。
+     */
+    enum Phase { RESOLVE, RECIPE, PEEK, GATHER, FEED, SWITCH, WAIT, COLLECT, FULL }
 
     /** 等产物时多久看一眼出口。 */
     private static final int POLL_INTERVAL_TICKS = 20;
@@ -82,6 +88,12 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private FullRun fullRun;
     /** 这次是往发电机这类烧燃料的机器里投燃料：item 就是燃料，投完就收场，不拨开关、不等产物。 */
     private boolean fuelRun;
+    /** 出口在界面里、站在外面看不见：投料前先点开看一眼，投完料隔一个周期回去点开看。 */
+    private boolean menuExit;
+    /** 开工前点开界面看出口的那一眼；接不上界面时为 null，等产物时就照读不到收手。 */
+    private OutputLook peeking;
+    /** 出口在界面里的回头看产物；别的出口为 null。 */
+    private MenuOutputLookBack lookBack;
 
     MachineRunTask(MachineRunInput input, MachineServices services) {
         super("用机器做东西", Phase.RESOLVE,
@@ -101,6 +113,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return switch (phase) {
             case RESOLVE -> resolve(context);
             case RECIPE -> pickRecipe(context);
+            case PEEK -> peek(context);
             case GATHER -> gather(context);
             case FEED -> feed(context);
             case SWITCH -> flipSwitch(context);
@@ -126,9 +139,11 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (type == null) {
             return Next.fail(services.unclaimedHere(found.state(), "用机器做东西"));
         }
-        watch.baseline = outputCount(input.item());
-        recordProgress("认出了" + describeMachine() + "；出口里现在有 " + watch.baseline + " 件"
-                + (input.item() == null ? "" : " " + input.item()));
+        // 出口怎么看在这里定：界面里的投料前点开看，别的站在旁边读。
+        menuExit = !type.outputVisible(cell);
+        watch.baseline = menuExit ? 0 : outputCount(input.item());
+        recordProgress("认出了" + describeMachine() + (menuExit ? "；出口在界面里，投料前点开看一眼原有几件"
+                : "；出口里现在有 " + watch.baseline + " 件" + (input.item() == null ? "" : " " + input.item())));
         // 蓝图桌写蓝图、蓝图加农炮照蓝图施工：不按配方投料，整段交给机器类型；给了蓝图却不是这种机器就当场说。
         Optional<FullRun> whole = type.fullRun(cell, new RunRequest(input.item(), input.count(), input.file(),
                 input.anchor(), input.rotation(), input.maxSeconds()), input.permissions());
@@ -180,8 +195,37 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         batches = batchesNeeded(recipe);
         queueIngredients(recipe);
         recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
+        if (menuExit) {
+            peeking = services.interactions().lookIntoMenu(cell, input.item(), false, input.permissions())
+                    .orElse(null);
+            if (peeking != null) {
+                prepared = peeking;
+                return Next.go(Phase.PEEK, "开工前点开" + describeMachine() + "看一眼出口");
+            }
+        }
+        return afterPeek();
+    }
+
+    private Next<Phase> afterPeek() {
         return Next.go(toGather.isEmpty() ? Phase.SWITCH : Phase.GATHER,
                 toGather.isEmpty() ? "配方的东西带不进机器，先开机试一次" : "备投料要的东西");
+    }
+
+    // 开工前看一眼界面里的出口：原有几件记成起点，回头看时只算新出的；看不成就说不清原有几件，照常开工。
+    private Next<Phase> peek(TickContext context) {
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> {
+                watch.baseline = peeking.seen();
+                notes.addAll(peeking.notes());
+                recordProgress("开工前出口里有 " + watch.baseline + " 件 " + input.item());
+                yield afterPeek();
+            }
+            case ActionStatus.Failed failed -> {
+                notes.add("开工前没看成出口（" + failed.problem().message() + "），出口里原有几件说不清，回头看到的都算这次的");
+                yield afterPeek();
+            }
+        };
     }
 
     // 配方原料按批次放大：物品的备料去拿。背包带不进去的化学品，机器能从附加格吃物品换的（灌注物从煤、红石换），
@@ -327,10 +371,11 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (input.item() == null) {
             return finishRun(true);
         }
-        if (!type.outputVisible(cell)) {
-            return unseenOutput();
+        if (menuExit) {
+            return peeking == null ? unseenOutput() : lookBack(context);
         }
         long tick = context.gameTick();
+        watch.lastTick = tick;
         if (watch.startTick < 0) {
             watch.startTick = tick;
             watch.lastGrowthTick = tick;
@@ -359,6 +404,55 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             return Next.go(Phase.COLLECT, "到了等待上限，收手");
         }
         return Next.stay();
+    }
+
+    // 出口在界面里：交给回头看产物——等一个周期、点开看、出了就收；收手后按它交回的账结算。
+    private Next<Phase> lookBack(TickContext context) {
+        if (lookBack == null) {
+            LookBackSchedule schedule = new LookBackSchedule(
+                    LookBackSchedule.cycleTicks(recipe == null ? null : recipe.definition()), watch.baseline);
+            lookBack = new MenuOutputLookBack(services.interactions(), cell, input.item(), input.count(),
+                    input.collect(), input.permissions(), (long) input.maxSeconds() * 20, schedule);
+            prepared = lookBack;
+            return Next.go(Phase.WAIT, "隔一个加工周期回去点开" + describeMachine() + "看产物");
+        }
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> settleLookBack(null);
+            case ActionStatus.Failed failed -> settleLookBack(failed.problem());
+        };
+    }
+
+    // 回头看收手：出了几件、收进背包几件、等了多久看了几回照它的账写；够数算完成，
+    // 几回都没出、到了上限、看不成都按部分完成，附机器读数，交给 LLM 看是没电、没转还是配方不对。
+    private Next<Phase> settleLookBack(Problem problem) {
+        watch.produced = lookBack.produced();
+        watch.collected = lookBack.collected();
+        notes.addAll(lookBack.notes());
+        if (watch.collected > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, input.item(), watch.collected));
+        }
+        if (watch.collected > watch.produced) {
+            notes.add("收进背包的 " + watch.collected + " 件里有 " + (watch.collected - watch.produced)
+                    + " 件是开工前就在出口里的");
+        }
+        if (lookBack.leftInExit() > 0) {
+            notes.add(lookBack.leftInExit() + " 件 " + input.item() + " 留在出口"
+                    + (input.collect() ? "（背包放不下，或没搬成）" : "（按要求不收）"));
+        }
+        String looked = "，投完料等了 " + lookBack.waitedTicks() / 20 + " 秒、回去点开看了 " + lookBack.looks() + " 回";
+        String machine = describeState(type.state(cell)) + describeNetworks();
+        if (problem == null && lookBack.ending() == MenuOutputLookBack.Ending.ENOUGH) {
+            return Next.done(TaskResult.done(describeMachine() + "做出了 " + watch.produced + " 件 " + input.item()
+                    + (input.collect() ? "，已收进背包" : "，留在出口") + looked));
+        }
+        Problem why = problem != null ? problem
+                : lookBack.ending() == MenuOutputLookBack.Ending.NOTHING_NEW
+                ? Problem.of(Problem.Kind.STUCK, "连着 " + LookBackSchedule.EMPTY_LOOKS_LIMIT
+                        + " 回点开看都没出新的 " + input.item() + "；机器读数：" + machine)
+                : Problem.of(Problem.Kind.STUCK, "到了等待上限 " + input.maxSeconds() + " 秒还没出够；机器读数：" + machine);
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, describeMachine() + "出了 " + watch.produced
+                + " / " + input.count() + " 件 " + input.item() + looked).problem(why).build());
     }
 
     // 收产物：拿得进背包就拿回，拿不进或不要了就留在出口，都如实写。
@@ -425,12 +519,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 .problem(Problem.of(Problem.Kind.STUCK, "没做完；机器读数：" + describeState(type.state(cell)))).build());
     }
 
-    // 收尾：出了要的量算完成，差一点按部分完成，机器读数与网络读数一起给。
-    // 出口读不到（东西在机器里、或掉在别处）：投料开机到此为止，不对着读不到的出口干等，也不说做好了；
-    // 做没做好交给 LLM 之后打开界面看、或到出口那边找。
+    // 出口在界面里、这一处却点不开界面看（没接上界面）：投料开机到此为止，不对着读不到的出口干等，也不说做好了；
+    // 做没做好交给 LLM 之后打开界面看。
     private Next<Phase> unseenOutput() {
-        notes.add(describeMachine() + "的出口这里读不到（东西在机器里，或做好后掉在了别处）：料投进去了，"
-                + "做没做好之后用 use 打开它看，或到出口那边找");
+        notes.add(describeMachine() + "的出口在界面里，这里点不开界面看：料投进去了，做没做好之后用 use 打开它看");
         if (input.collect()) notes.add("出口读不到，这次没收产物");
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                         "料投进了" + describeMachine() + "，出口读不到，没等产物")
@@ -458,6 +550,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return fed.stream().mapToInt(MachineRunDetails.Fed::count).sum();
     }
 
+    // 收尾：出了要的量算完成，差一点按部分完成，机器读数与网络读数一起给。
     private Next<Phase> finishRun(boolean justSwitchedOn) {
         String machine = describeState(type.state(cell)) + describeNetworks();
         if (justSwitchedOn) {
@@ -569,11 +662,20 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     @Override protected ResultDetails details() {
         if (type == null) {
             // 没认出机器就结束的（目标没落实）：没有机器读数可给。
-            return new MachineRunDetails(null, 0, fed, watch.produced, watch.collected, "", notes);
+            return new MachineRunDetails(null, 0, fed, watch.produced, watch.collected, 0, 0, "", notes);
         }
         return new MachineRunDetails(recipe == null ? null
                         : new MachineRunDetails.Recipe(recipe.category(), recipe.recipeId()),
-                batches, fed, watch.produced, watch.collected, describeState(type.state(cell)), notes);
+                batches, fed, watch.produced, watch.collected, waitedSeconds(),
+                lookBack == null ? 0 : lookBack.looks(), describeState(type.state(cell)), notes);
+    }
+
+    // 等产物等了多久：回头看的按它的账，站在旁边盯着的按开始等到最后一次看出口。
+    private int waitedSeconds() {
+        if (lookBack != null) {
+            return (int) (lookBack.waitedTicks() / 20);
+        }
+        return watch.startTick < 0 ? 0 : (int) ((watch.lastTick - watch.startTick) / 20);
     }
 
     @Override protected List<String> remaining() {
@@ -592,6 +694,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return switch (value) {
             case RESOLVE -> "认机器";
             case RECIPE -> "选工序";
+            case PEEK -> "开工前看一眼出口";
             case GATHER -> "备料";
             case FEED -> "投料";
             case SWITCH -> "开机";
@@ -607,6 +710,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         int produced;
         int collected;
         long startTick = -1;
+        long lastTick;
         long lastGrowthTick;
         long nextPollTick;
     }
