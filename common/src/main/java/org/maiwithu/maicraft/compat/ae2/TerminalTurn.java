@@ -36,8 +36,4 @@ sealed interface TerminalTurn {
     /** 核对过了、网络读数同步齐了，这一段做完了。 */
     record Synced() implements TerminalTurn {
     }
-
-    /** 不用放光标了，直接去关界面：放回网络没能确认，或光标一直放不下去。 */
-    record CloseOnly() implements TerminalTurn {
-    }
 }
