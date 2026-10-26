@@ -74,14 +74,17 @@ public final class TransferPlan {
     /**
      * 精确数量的尾数搬运：从源格拿走正好 amount 件，放进目标格。
      *
+     * <p>数量等于源格件数（整格拿走）也走这份计划：源格只有一件、要搬的也是这一件时，
+     * 拿半堆恰好拿空源格、整份放进目标格，与「整堆够用整堆拿」是同一件事，不再拦下。
+     *
      * @param sourceCount    动手前源格里的件数
-     * @param amount         要搬的件数，必须少于源格里的件数（等于或更多时用整堆计划）
+     * @param amount         要搬的件数，不超过源格里的件数（更多时搬不了，超出源格装着的东西）
      * @param sourceCapacity 源格的容量（这种物品一格最多堆多少），退回多拿的件数时不得超过
      */
     public static TransferPlan exactAmount(int sourceCount, int amount, int sourceCapacity) {
-        if (sourceCount < 1 || amount < 1 || amount >= sourceCount) {
+        if (sourceCount < 1 || amount < 1 || amount > sourceCount) {
             throw new IllegalArgumentException(
-                    "尾数搬运要求 1 ≤ 数量 < 源格件数：源格 " + sourceCount + " 件，要搬 " + amount + " 件");
+                    "尾数搬运要求 1 ≤ 数量 ≤ 源格件数：源格 " + sourceCount + " 件，要搬 " + amount + " 件");
         }
         if (sourceCapacity < sourceCount) {
             throw new IllegalArgumentException("源格容量 " + sourceCapacity + " 装不下现有 " + sourceCount + " 件");

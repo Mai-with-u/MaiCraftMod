@@ -86,8 +86,30 @@ class TransferPlanTest {
     }
 
     @Test
-    void 整堆与非法数量不走尾数计划() {
-        assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 64, 64));
+    void 源格一件搬一件是合法的整格搬运() {
+        // 附魔装料：身上唯一一把剑（源格 1 件）整格搬进附魔输入格——右键拿走这半堆（恰好拿空源格），
+        // 整份放进目标格，不再被当成非法。
+        TransferPlan plan = TransferPlan.exactAmount(1, 1, 1);
+        assertEquals(2, plan.steps().size());
+        assertEquals(Kind.TAKE_HALF, plan.steps().get(0).kind());
+        assertEquals(Kind.GIVE_ALL, plan.steps().get(1).kind());
+        assertFalse(plan.maySwapTarget(), "指定数量的搬运不许交换目标格");
+    }
+
+    @Test
+    void 源格两件搬两件整格走尾数计划() {
+        // 源格 2 件、要搬 2 件：拿半堆（1 件）放进目标格，再拿剩下那件放下，源格正好拿空。
+        TransferPlan plan = TransferPlan.exactAmount(2, 2, 64);
+        List<Integer> given = plan.steps().stream()
+                .filter(step -> step.where() == Where.TARGET)
+                .map(TransferPlan.Step::items)
+                .toList();
+        assertEquals(List.of(1, 1), given, "两件各走一次半堆放进目标格");
+    }
+
+    @Test
+    void 数量超过源格件数仍被拒绝() {
+        assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(0, 1, 64));
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 0, 64));
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(8, 9, 8));
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 10, 32),
