@@ -27,6 +27,7 @@ out
 eclipse
 run
 runs
+runB
 logs/
 
 # 本地 AI 工作文件
