@@ -22,7 +22,6 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
-import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.game.player.NetworkDelay;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -167,7 +166,7 @@ public final class LandingRescue implements CatchesFall {
         }
         if (Float.isNaN(previousHealth)) rememberHealth(player);
         refreshWaterAim(context, player);
-        if (!survivesHay(player)) return failNow("落在干草上也会摔死，这一跳不跳");
+        if (!ReleaseWindow.survivesHay(LandingScene.of(context), plan)) return failNow("落在干草上也会摔死，这一跳不跳");
         if (!context.level().isLoaded(plan.cell()) || !context.level().isLoaded(plan.clicked())) return false;
         if (!safe(context, player, plan)) {
             if (item != null) item.abandon(context, "落点变了");
@@ -383,31 +382,30 @@ public final class LandingRescue implements CatchesFall {
         return true;
     }
 
-    // 只放一次：在空中、本刻能出手、东西在手上、方块类已按住潜行、落点还放得下、射线正对着要点的那一面，才提交。
+    // 只放一次：在空中、本刻能出手才提交；能不能活、东西在不在手上、按没按潜行、落点放不放得下、
+    // 射线点没点对，这些读现场的判断由出手窗口一次给结论，这里只按结论推进与计数。
     private void trySubmit(PlayerContext context, LocalPlayer player) {
         if (plan.existing() || submitted || player.onGround() || !context.canInteractThisTick()) return;
-        if (!survivesHay(player)) {
-            fail("掉得太高，落在干草上也会摔死");
-            return;
+        var verdict = ReleaseWindow.judge(LandingScene.of(context), plan, item != null && item.ready(), protectedCell);
+        switch (verdict.step()) {
+            case SURVIVAL_REFUSED -> fail("掉得太高，落在干草上也会摔死");
+            case ITEM_NOT_IN_HAND -> fail(name(plan.aid()) + "没能在出手前拿到手上");
+            case CELL_LOST -> fail("掉的途中落点变了，放不下" + name(plan.aid()) + "，不再放");
+            case WAIT_FOR_SNEAK, OUT_OF_REACH -> { }
+            case MISALIGNED -> {
+                if (++mismatchTicks >= MISMATCH_TICKS_BEFORE_NEXT) switchToNext(context);
+            }
+            case RELEASE -> released(context, player, verdict.hit());
         }
-        if (item == null || !item.ready()) {
-            fail(name(plan.aid()) + "没能在出手前拿到手上");
-            return;
-        }
-        if (plan.aid() != LandingAid.WATER && !player.isShiftKeyDown()) return;
-        if (protectedCell.test(plan.cell()) || !LandingOptions.canPlace(plan.aid(), context.level(), plan.cell())) {
-            fail("掉的途中落点变了，放不下" + name(plan.aid()) + "，不再放");
-            return;
-        }
-        BlockHitResult hit = trace(context, player, false);
-        boolean onTarget = plan.aid() == LandingAid.WATER ? acceptWaterHit(context, player, hit)
-                : hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(plan.clicked())
-                && hit.getDirection() == plan.face();
-        if (!onTarget) {
-            // 只在落点已经够得着时才算对不准：还在高处够不着时射线本来就点不到，不能因此换办法。
-            boolean inReach = player.getEyePosition().y - plan.placementHeight(context.level())
-                    <= player.blockInteractionRange();
-            if (inReach && ++mismatchTicks >= MISMATCH_TICKS_BEFORE_NEXT) switchToNext(context);
+    }
+
+    // 窗口开了：水桶当场按原版规则认真实落进哪一格（认上会把计划改成那一格）；认不上与点偏一样，够得着才算对不准。
+    private void released(PlayerContext context, LocalPlayer player, BlockHitResult hit) {
+        if (plan.aid() == LandingAid.WATER && !acceptWaterHit(context, player, hit)) {
+            if (ReleaseWindow.inReach(LandingScene.of(context), plan)
+                    && ++mismatchTicks >= MISMATCH_TICKS_BEFORE_NEXT) {
+                switchToNext(context);
+            }
             return;
         }
         mismatchTicks = 0;
@@ -479,20 +477,17 @@ public final class LandingRescue implements CatchesFall {
 
     // 对准连续对不上：按先后换下一个现成的或身上带着的办法；接触证据属于旧办法，新办法要自己再证明。
     private boolean switchToNext(PlayerContext context) {
-        LocalPlayer player = context.localPlayer();
-        for (int index = cursor + 1; index < candidates.size(); index++) {
-            LandingPlan next = candidates.get(index);
-            if (!next.existing() && !carries(player, next.aid())) continue;
-            if (item != null) item.abandon(context, "换下一个落地办法");
-            bindTo(index);
-            waterContact = false;
-            hayContact = false;
-            stableTicks = 0;
-            mismatchTicks = 0;
-            detail = "对不准，换成" + name(plan.aid());
-            return true;
-        }
-        return false;
+        LandingScene scene = LandingScene.of(context);
+        int index = PlanRotation.nextIndex(candidates, cursor, aid -> scene.carries(aid.item()));
+        if (index < 0) return false;
+        if (item != null) item.abandon(context, "换下一个落地办法");
+        bindTo(index);
+        waterContact = false;
+        hayContact = false;
+        stableTicks = 0;
+        mismatchTicks = 0;
+        detail = "对不准，换成" + name(plan.aid());
+        return true;
     }
 
     // 水桶的落点以原版规则为准：射线点到哪一面、水实际会进哪一格；在落点那一柱、没受保护、放下后人还落得下才接受，
@@ -589,18 +584,6 @@ public final class LandingRescue implements CatchesFall {
 
     private boolean nearLanding(LocalPlayer player) {
         return player.position().distanceToSqr(Vec3.atBottomCenterOf(plan.feet())) < 4;
-    }
-
-    private boolean survivesHay(LocalPlayer player) {
-        return plan.aid() != LandingAid.HAY || plan.survives(FallDamage.capture(player), player.getY(), true);
-    }
-
-    private static boolean carries(LocalPlayer player, LandingAid aid) {
-        if (player.getOffhandItem().is(aid.item())) return true;
-        for (int slot = 0; slot < 36; slot++) {
-            if (player.getInventory().getItem(slot).is(aid.item())) return true;
-        }
-        return false;
     }
 
     // 落地后等几刻再认定：按网络延迟算，延迟越高血量同步越晚。

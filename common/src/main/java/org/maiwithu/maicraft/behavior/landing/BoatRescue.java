@@ -9,14 +9,11 @@ import java.util.UUID;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.vehicle.Boat;
-import net.minecraft.world.level.ClipContext;
-import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -213,17 +210,14 @@ public final class BoatRescue implements CatchesFall {
             fail("放船的那一面被挡住了或放不下了");
             return;
         }
-        var hit = context.level().clip(new ClipContext(eye, eye.add(player.getViewVector(1)
-                .scale(player.blockInteractionRange())), ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, player));
-        BlockPos floor = plan.landing().below();
-        if (hit.getType() != HitResult.Type.BLOCK || hit.getDirection() != Direction.UP || !hit.getBlockPos().equals(floor)
-                || Math.abs(hit.getLocation().y - plan.spawn().y) > .01
-                || hit.getLocation().x < plan.landing().getX() || hit.getLocation().x > plan.landing().getX() + 1
-                || hit.getLocation().z < plan.landing().getZ() || hit.getLocation().z > plan.landing().getZ() + 1) return;
-        if (!BoatSpace.clear(context.level(), context.level()::isLoaded, BoatSpace.boatBox(hit.getLocation()))
-                || !BoatSpace.hasExit(context.level(), context.level()::isLoaded, hit.getLocation(), player.getBbWidth(),
+        // 射线指没指到放船的那一点由瞄准核对给结论；没指对就不放，下一刻再瞄。
+        var aimCheck = BoatAimCheck.judge(LandingScene.of(context), plan);
+        if (!aimCheck.aimed()) return;
+        Vec3 at = aimCheck.at();
+        if (!BoatSpace.clear(context.level(), context.level()::isLoaded, BoatSpace.boatBox(at))
+                || !BoatSpace.hasExit(context.level(), context.level()::isLoaded, at, player.getBbWidth(),
                 player.getBbHeight(), player.getYRot())) return;
-        plan = plan.at(hit.getLocation());
+        plan = plan.at(at);
         if (!context.level().noCollision(null, BoatSpace.boatBox(plan.spawn())) || !context.canInteractThisTick()) return;
         boatsBefore = new HashSet<>();
         for (Boat boat : context.level().getEntitiesOfClass(Boat.class, BoatSpace.boatBox(plan.spawn()).inflate(2))) {
