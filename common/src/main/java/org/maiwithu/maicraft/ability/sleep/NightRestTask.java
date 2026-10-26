@@ -57,6 +57,13 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
     private static final int WAKE_SYNC_TICKS = 40;
     /** "家"区域的范围：床离记住的家这么近就当是家里的床，不收。玩家常识。 */
     private static final double HOME_RADIUS_BLOCKS = 8.0;
+    /**
+     * 回站位的路连续这么多刻没有位移就算走不动，当场收场：走路每刻有位移就报进展，
+     * 五秒一步都挪不动是原地沉浮、卡在够不着的岸边这类真走不动的现场，不必等全任务的
+     * 卡住判定（三十秒）慢慢熬——实机一整夜回站位在水里沉浮，收场来得太晚，占着身体。
+     * 类别：玩家常识（走路节奏）。
+     */
+    static final int WALK_BACK_NO_PROGRESS_TICKS = 100;
 
     /** 起身动作的接缝：给服务器发"离开床"并确认不在睡了；测试给固定值。 */
     @FunctionalInterface
@@ -89,6 +96,8 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
     private Problem deferredFailure;
     /** 自己放下的床已经收回来了。 */
     private boolean bedCollected;
+    /** 回站位的路连续多少刻没有位移了：进回站位这段时清零，走一步清一次。 */
+    private int walkBackIdleTicks;
     /** 被新指令叫醒了：起来就交出身体，不回床、不收床、不回站位。 */
     private boolean wokenByOrders;
     /** 本刻的上下文：收尾钩子要用它读现场，只在同一次推进里有效。 */
@@ -137,9 +146,12 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
             // 收床：走到床的那一格，挖掉、捡起掉出来的床。
             case COLLECT_BED -> collects.collect(cellsToCollect.getFirst(), permissions).orElse(null);
             // 回站位：走到睡前站的那一格附近。睡前没记下站位（整夜没落地过）：没处可回，就不开走路这段。
-            case WALK_BACK -> homeSpot == null ? null
-                    : approaches.toward(ApproachTarget.ofBlock(
-                            new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())), permissions);
+            case WALK_BACK -> {
+                walkBackIdleTicks = 0;
+                yield homeSpot == null ? null
+                        : approaches.toward(ApproachTarget.ofBlock(
+                                new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z())), permissions);
+            }
             default -> super.enter(phase);
         };
     }
@@ -354,7 +366,13 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
                             : "睡醒了，回到原来的位置"));
         }
         ActionStatus status = runAction(context);
-        if (status instanceof ActionStatus.Running) {
+        if (status instanceof ActionStatus.Running running) {
+            // 走一步算进展；连续百刻一步都没挪（原地沉浮、卡在岸这头）就是走不动了，
+            // 当场按"睡成了、收尾没做完"收场，报文带此刻停在哪、睡前的站位在哪。
+            walkBackIdleTicks = running.progressed() ? 0 : walkBackIdleTicks + 1;
+            if (walkBackIdleTicks >= WALK_BACK_NO_PROGRESS_TICKS) {
+                return concludeSlept(stuckWalkingBack(currentFeet(context), homeSpot));
+            }
             return Next.stay();
         }
         if (status instanceof ActionStatus.Failed failed) {
@@ -399,6 +417,27 @@ final class NightRestTask extends SleepTask implements AnnouncesFinish, WakesFor
         double dy = home.get().y() - bed.getY();
         double dz = home.get().z() - bed.getZ();
         return Math.sqrt(dx * dx + dy * dy + dz * dz) <= HOME_RADIUS_BLOCKS;
+    }
+
+    // 角色此刻脚底在哪一格；读不到角色时为 null。
+    private static BlockPos currentFeet(TickContext context) {
+        if (context.player() == null || context.player().localPlayer() == null) {
+            return null;
+        }
+        return context.player().localPlayer().blockPosition().immutable();
+    }
+
+    /**
+     * 回站位的路走不动了的收场问题：带着此刻停在哪、睡前的站位在哪两样现场事实，
+     * 收尾的话有处可对，不再只有一句"六百刻没有新进展"。读不到现场时只说走不动。
+     */
+    static Problem stuckWalkingBack(BlockPos nowFeet, WorldPosition homeSpot) {
+        if (nowFeet == null || homeSpot == null) {
+            return Problem.of(Problem.Kind.STUCK, "回站位的路走不动了", null);
+        }
+        return Problem.of(Problem.Kind.STUCK, "回站位的路走不动了：现在停在 "
+                + nowFeet.toShortString() + "，睡前的站位在 "
+                + new BlockPos(homeSpot.x(), homeSpot.y(), homeSpot.z()).toShortString(), null);
     }
 
     // 现在是不是已经站在睡前的位置附近：差一两格都算回来了。

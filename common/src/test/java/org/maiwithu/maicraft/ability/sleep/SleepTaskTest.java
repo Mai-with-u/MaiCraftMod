@@ -806,6 +806,21 @@ class SleepTaskTest {
     }
 
     @Test
+    void walkingBackStallsConcludeWithWhereItStoppedAndWhereHomeIs() {
+        // 实机夜宿：回站位的路百刻一步没挪（原地沉浮、卡在够不着的岸边）就该收场，
+        // 收场问题带此刻停在哪、睡前的站位在哪，不再只有一句"六百刻没有新进展"。
+        Problem problem = NightRestTask.stuckWalkingBack(
+                new BlockPos(98, 67, -49), WorldPosition.here(64, 63, -43));
+        assertEquals(Problem.Kind.STUCK, problem.kind());
+        assertTrue(problem.message().contains("98, 67, -49"), problem.message());
+        assertTrue(problem.message().contains("64, 63, -43"), problem.message());
+        // 现场读不到时如实只说走不动，不编坐标。
+        Problem bare = NightRestTask.stuckWalkingBack(null, WorldPosition.here(64, 63, -43));
+        assertEquals(Problem.Kind.STUCK, bare.kind());
+        assertTrue(bare.message().contains("回站位的路走不动了"), bare.message());
+    }
+
+    @Test
     void givingUpAfterSleepingReportsTheNightAsSlept() {
         // 实机 10-21：睡是睡成了（夜里时间跳到次日），卡住判定却把整夜改判成
         // "睡觉没有完成：走向站位 600 刻无进展"，调用方误以为没睡成。收尾途中卡住时，
