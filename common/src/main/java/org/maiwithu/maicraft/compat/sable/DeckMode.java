@@ -15,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
@@ -111,13 +112,13 @@ final class DeckMode implements TravelMode {
         Pair best = null;
         for (StructureGeometry.Deck cell : deck(level, ship)) {
             for (BlockPos ground : beside(cell.world())) {
-                for (int drop = 0; drop <= MAX_DROP; drop++) {
-                    BlockPos landing = ground.below(drop);
-                    if (!BlockPassability.isDryStandable(level, landing) || touches(hull, landing)) continue;
-                    double cost = cell.world().distanceTo(player.position()) + drop;
-                    if (best == null || cost < best.cost()) best = new Pair(cell, landing, cost);
-                    break;
-                }
+                // 往下三格以内找第一个站得住、又不撞船体的地上格，交给环扫内核；一处只有一个落脚，不往深里翻。
+                Optional<BlockPos> found = SpotScan.downward(ground, MAX_DROP,
+                        landing -> BlockPassability.isDryStandable(level, landing) && !touches(hull, landing));
+                if (found.isEmpty()) continue;
+                BlockPos landing = found.get();
+                double cost = cell.world().distanceTo(player.position()) + (ground.getY() - landing.getY());
+                if (best == null || cost < best.cost()) best = new Pair(cell, landing, cost);
             }
         }
         if (best == null) {
@@ -157,16 +158,17 @@ final class DeckMode implements TravelMode {
         double lowest = Double.MAX_VALUE;
         for (StructureGeometry.Deck cell : deck(reads, level, ship)) {
             for (BlockPos ground : beside(cell.world())) {
-                for (int down = 0; down <= 2; down++) {
-                    BlockPos stand = ground.below(down);
-                    if (!BlockPassability.isDryStandable(level, stand) || touches(hull, stand)) continue;
-                    double rise = cell.world().y - stand.getY();
-                    lowest = Math.min(lowest, rise);
-                    if (rise > 1.05) break;
-                    double cost = Math.sqrt(stand.distSqr(player.blockPosition())) + cell.world().distanceTo(toward) * weight;
-                    if (best == null || cost < best.cost()) best = new Pair(cell, stand, cost);
-                    break;
-                }
+                // 往下两格以内找第一个站得住、又不撞船体的地上格，交给环扫内核；同一处只有这一个落脚，
+                // 高过一格走不上去时不往深里翻，但高差照记——上不去的原因要说成"甲板高了几格"，不是"没有地"。
+                Optional<BlockPos> found = SpotScan.downward(ground, 2,
+                        stand -> BlockPassability.isDryStandable(level, stand) && !touches(hull, stand));
+                if (found.isEmpty()) continue;
+                BlockPos stand = found.get();
+                double rise = cell.world().y - stand.getY();
+                lowest = Math.min(lowest, rise);
+                if (rise > 1.05) continue;
+                double cost = Math.sqrt(stand.distSqr(player.blockPosition())) + cell.world().distanceTo(toward) * weight;
+                if (best == null || cost < best.cost()) best = new Pair(cell, stand, cost);
             }
         }
         if (best != null) return new Boarding(best, null);

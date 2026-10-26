@@ -51,6 +51,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
+
 /**
  * 出行能力：走到一个地方，包括去别的维度。能力只做薄皮——做决定时用玩家行为层的目的地解析器
  * 把目标对象落成目的地（说不清就向 LLM 提问，已经站在那里就直接结束）：同维度的目的地交给
@@ -284,16 +288,16 @@ public final class TravelAbility implements AbilityModule {
     }
 
     private boolean anyStandable(WorldPosition at, double radius) {
+        // 立方体存在性扫描交给环扫内核：圆球范围折进谓词里卡，找到一格能站就放行。
+        BlockPos center = new BlockPos(at.x(), at.y(), at.z());
         int span = (int) Math.floor(radius);
-        for (int dx = -span; dx <= span; dx++) {
-            for (int dy = -span; dy <= span; dy++) {
-                for (int dz = -span; dz <= span; dz++) {
-                    if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
-                    if (world.standable(at.x() + dx, at.y() + dy, at.z() + dz)) return true;
-                }
-            }
-        }
-        return false;
+        return SpotScan.exists(center, span, span, cell -> {
+            int dx = cell.getX() - at.x();
+            int dy = cell.getY() - at.y();
+            int dz = cell.getZ() - at.z();
+            return dx * dx + dy * dy + dz * dz <= radius * radius
+                    && world.standable(cell.getX(), cell.getY(), cell.getZ());
+        });
     }
 
     // via 与各方式自己的参数凑一起：给了哪种方式的参数就是那种方式，via 给了别的就说清对不上。

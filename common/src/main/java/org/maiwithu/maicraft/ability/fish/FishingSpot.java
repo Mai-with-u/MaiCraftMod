@@ -10,6 +10,8 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
+
 /**
  * 钓位判断：一个干站位加一个能抛到的开阔水面的组合，纯函数、离线可测。
  *
@@ -84,6 +86,8 @@ final class FishingSpot {
                     ? new Search.NoLandingFromHere(feet, LANDING_RADIUS, LANDING_VERTICAL)
                     : new Search.NoVisibleWater(STANCE_RADIUS, WATER_PROBE_VERTICAL);
         }
+        // 这一段不走环扫内核：候选个数有预算（数满就停），同一次扫还要顺手记下"圈内有没有水"这个旁证，
+        // 两个结论必须出自同一次扫描，单谓词的整圈扫描表达不了。
         List<BlockPos> stances = new ArrayList<>();
         int checked = 0;
         boolean sawWater = false;
@@ -118,18 +122,17 @@ final class FishingSpot {
      */
     static Optional<BlockPos> landingFrom(World world, BlockPos stance, Set<BlockPos> excludedLandings) {
         Vec3 eye = new Vec3(stance.getX() + 0.5, stance.getY() + STAND_EYE_HEIGHT, stance.getZ() + 0.5);
-        List<BlockPos> candidates = new ArrayList<>();
-        for (int dy = -LANDING_VERTICAL; dy <= LANDING_VERTICAL; dy++) {
-            for (int dx = -LANDING_RADIUS; dx <= LANDING_RADIUS; dx++) {
-                for (int dz = -LANDING_RADIUS; dz <= LANDING_RADIUS; dz++) {
-                    double horizontal = Math.sqrt(dx * dx + dz * dz);
-                    if (horizontal < MIN_LANDING_DISTANCE || horizontal > LANDING_RADIUS) continue;
-                    BlockPos candidate = stance.offset(dx, dy, dz);
-                    if (excludedLandings.contains(candidate)) continue;
-                    if (waterCandidate(world, candidate, excludedLandings)) candidates.add(candidate.immutable());
-                }
-            }
-        }
+        // 环扫交给内核收候选：能抛的距离圈（近处抛不开、远处抛不着）与排除集折进谓词；收齐后按落点分自己排。
+        List<BlockPos> candidates = new ArrayList<>(SpotScan.collect(stance, LANDING_RADIUS, LANDING_VERTICAL,
+                candidate -> {
+                    // 能抛的距离只看水平：高低差不算在抛距里。
+                    double horizontal = Math.sqrt((double) (candidate.getX() - stance.getX())
+                            * (candidate.getX() - stance.getX())
+                            + (candidate.getZ() - stance.getZ()) * (candidate.getZ() - stance.getZ()));
+                    return horizontal >= MIN_LANDING_DISTANCE && horizontal <= LANDING_RADIUS
+                            && !excludedLandings.contains(candidate)
+                            && waterCandidate(world, candidate, excludedLandings);
+                }));
         candidates.sort(Comparator.comparingDouble(candidate -> landingScore(world, stance, candidate)));
         for (BlockPos candidate : candidates) {
             if (!CastTrajectory.clearsTerrain(eye, candidate, world::terrainBlocked)) continue;
@@ -143,17 +146,10 @@ final class FishingSpot {
         return world.isLoaded(pos) && !excludedLandings.contains(pos) && world.castableWater(pos);
     }
 
-    /** 站位搜索圈（垂直探得更深）里还有没有一处客观存在的水面：区分"原地抛不出去"与"圈里没水"。 */
+    /** 站位搜索圈（垂直探得更深）里还有没有一处客观存在的水面：区分"原地抛不出去"与"圈里没水"，存在性扫描交给内核。 */
     private static boolean anyVisibleWater(World world, BlockPos from) {
-        for (int dy = -WATER_PROBE_VERTICAL; dy <= WATER_PROBE_VERTICAL; dy++) {
-            for (int dx = -STANCE_RADIUS; dx <= STANCE_RADIUS; dx++) {
-                for (int dz = -STANCE_RADIUS; dz <= STANCE_RADIUS; dz++) {
-                    BlockPos at = from.offset(dx, dy, dz);
-                    if (world.isLoaded(at) && world.castableWater(at)) return true;
-                }
-            }
-        }
-        return false;
+        return SpotScan.exists(from, STANCE_RADIUS, WATER_PROBE_VERTICAL,
+                at -> world.isLoaded(at) && world.castableWater(at));
     }
 
     /** 找不到钓位的三种说法各自分开，都带扫描范围；原地无落点不能说成附近没有水。 */

@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.settle;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.explore.OpenSky;
@@ -52,24 +54,23 @@ public final class OpenSkySpots {
         return scan(world, feet, FAR_RADIUS, FAR_STEP, Integer.MAX_VALUE, skip);
     }
 
-    // 以脚下为中心按格网看列：顶盖是实心、不是液体，顶上那一格站得下人，高低差在范围内就收；按直线远近排，留最近的那些。
+    // 以脚下为中心按格网看列：顶盖是实心、不是液体，顶上那一格站得下人，高低差在范围内就收；
+    // 隔几列看一列、圆圈外的列不看这些范围条件折进列函数，收下的按直线远近排，留最近的那些。
     private static List<BlockPos> scan(TravelWorldView world, BlockPos feet, int radius, int step, int maxRise,
             Set<BlockPos> skip) {
-        List<BlockPos> spots = new ArrayList<>();
-        for (int dx = -radius; dx <= radius; dx += step) {
-            for (int dz = -radius; dz <= radius; dz += step) {
-                if (dx * dx + dz * dz > radius * radius) continue;
-                int x = feet.getX() + dx;
-                int z = feet.getZ() + dz;
-                ColumnSample column = world.column(x, z);
-                if (!column.loaded() || column.topFluid() || !column.topBlocksMotion()) continue;
-                BlockPos spot = new BlockPos(x, column.topY() + 1, z);
-                if (Math.abs(spot.getY() - feet.getY()) > maxRise || skip.contains(spot)) continue;
-                if (!world.standable(x, spot.getY(), z)) continue;
-                spots.add(spot);
-            }
-        }
-        spots.sort(Comparator.comparingDouble(spot -> spot.distSqr(feet)));
-        return List.copyOf(spots.subList(0, Math.min(MAX_SPOTS, spots.size())));
+        return SpotScan.columns(feet.getX() - radius, feet.getZ() - radius,
+                feet.getX() + radius, feet.getZ() + radius, step,
+                (x, z) -> {
+                    int dx = x - feet.getX();
+                    int dz = z - feet.getZ();
+                    if (dx * dx + dz * dz > radius * radius) return Optional.empty();
+                    ColumnSample column = world.column(x, z);
+                    if (!column.loaded() || column.topFluid() || !column.topBlocksMotion()) return Optional.empty();
+                    BlockPos spot = new BlockPos(x, column.topY() + 1, z);
+                    if (Math.abs(spot.getY() - feet.getY()) > maxRise || skip.contains(spot)) return Optional.empty();
+                    if (!world.standable(x, spot.getY(), z)) return Optional.empty();
+                    return Optional.of(spot);
+                },
+                Comparator.comparingDouble(spot -> spot.distSqr(feet)), MAX_SPOTS);
     }
 }

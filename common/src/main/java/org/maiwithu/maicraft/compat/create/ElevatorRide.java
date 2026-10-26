@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.navigation.StraightWalk;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.compat.StepsInOrder;
@@ -342,17 +343,17 @@ final class ElevatorRide implements TravelLeg {
 
     /** 到的那层轿厢外面能站的固定格：和脚下同高、在轿厢范围外两格以内，按离角色从近到远。 */
     static List<BlockPos> landings(BlockGetter level, AABB cabin, BlockPos feet) {
-        List<BlockPos> cells = new ArrayList<>();
+        // 环扫交给内核：边界按轿厢外两格给，脚下这一层里站得下的格都收（范围不是方形，边界单独给）；
+        // 轿厢里那一格不算出口，折进列函数里排除。
         int y = feet.getY();
-        for (int x = (int) Math.floor(cabin.minX) - 2; x <= (int) Math.ceil(cabin.maxX) + 1; x++) {
-            for (int z = (int) Math.floor(cabin.minZ) - 2; z <= (int) Math.ceil(cabin.maxZ) + 1; z++) {
-                BlockPos cell = new BlockPos(x, y, z);
-                if (cabin.contains(Vec3.atBottomCenterOf(cell).add(0, 0.5, 0))) continue;
-                if (BlockPassability.isDryStandable(level, cell)) cells.add(cell);
-            }
-        }
-        cells.sort(Comparator.comparingDouble(cell -> cell.distSqr(feet)));
-        return cells;
+        return SpotScan.columns((int) Math.floor(cabin.minX) - 2, (int) Math.floor(cabin.minZ) - 2,
+                (int) Math.ceil(cabin.maxX) + 1, (int) Math.ceil(cabin.maxZ) + 1, 1,
+                (x, z) -> {
+                    BlockPos cell = new BlockPos(x, y, z);
+                    if (cabin.contains(Vec3.atBottomCenterOf(cell).add(0, 0.5, 0))) return Optional.empty();
+                    return BlockPassability.isDryStandable(level, cell) ? Optional.of(cell) : Optional.empty();
+                },
+                Comparator.comparingDouble(cell -> cell.distSqr(feet)));
     }
 
     private static boolean inside(LocalPlayer player, CreateElevators.Elevator elevator) {

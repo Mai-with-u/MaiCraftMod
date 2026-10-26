@@ -4,10 +4,13 @@ package org.maiwithu.maicraft.ability.follow;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 /**
  * 让路：停着时挡了他的道就让开，像人一样往旁边一站，不在他面前杵着。纯函数，格子站不站得住由调用方答。
@@ -33,11 +36,6 @@ final class AsideSpot {
     static final double SAME_LEVEL = 2.0;
 
     private AsideSpot() {}
-
-    /** 读格子的接缝：这一格能不能站人（脚下踩得住、身子和头都穿得过、不是液体）。 */
-    interface Standable {
-        boolean at(BlockPos feet);
-    }
 
     /**
      * 我挡没挡他的道。
@@ -74,9 +72,10 @@ final class AsideSpot {
      * @param headingX 他前进方向的 x 分量（不必归一）
      * @param headingZ 他前进方向的 z 分量
      * @param distance 跟随要保持的距离
+     * @param standable 这一格能不能站人（脚下踩得住、身子和头都穿得过、不是液体）
      */
     static Optional<BlockPos> choose(Vec3 me, Vec3 him, double headingX, double headingZ, int distance,
-                                     Standable standable) {
+                                     Predicate<BlockPos> standable) {
         double length = Math.hypot(headingX, headingZ);
         if (length < 1.0E-6) {
             // 说不出他往哪走：当他朝我走来。
@@ -114,11 +113,9 @@ final class AsideSpot {
         for (double[] offset : offsets) {
             int x = Mth.floor(him.x + offset[0]);
             int z = Mth.floor(him.z + offset[1]);
-            // 同一层优先，其次高一格、低一格：台阶上让路也找得到落脚处。
-            for (int dy : new int[] {0, 1, -1}) {
-                BlockPos cell = new BlockPos(x, baseY + dy, z);
-                if (standable.at(cell)) return Optional.of(cell);
-            }
+            // 同一层优先，其次高一格、低一格：台阶上让路也找得到落脚处；列内挑选交给环扫内核。
+            Optional<BlockPos> aside = SpotScan.inColumn(new BlockPos(x, baseY, z), 1, standable);
+            if (aside.isPresent()) return aside;
         }
         return Optional.empty();
     }

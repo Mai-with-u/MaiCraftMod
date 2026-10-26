@@ -82,7 +82,12 @@ final class DeathSpotFinder {
         return cursor >= volume;
     }
 
-    /** 扫一刻的地形：最多看 {@link #STANDS_PER_TICK} 个站位。 */
+    /**
+     * 扫一刻的地形：最多看 {@link #STANDS_PER_TICK} 个站位。
+     *
+     * <p>这里不走环扫内核：半径 64 的体扫有四十多万格，靠游标分刻推进、每刻只花一份预算，
+     * 内核的一次性整圈扫描会把整片压进一刻把游戏卡住；扫描次序（y 最慢）与预算由这里自己管。
+     */
     void scan() {
         fallNow = player.fall();
         int width = radius * 2 + 1;
