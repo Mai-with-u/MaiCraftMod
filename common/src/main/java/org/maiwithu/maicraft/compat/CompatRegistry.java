@@ -31,7 +31,6 @@ import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
-import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -45,7 +44,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 联动登记表：启动时按联动清单逐行检查，收集登记了的联动入口交来的 spi 接口实现，
- * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、腾背包的随身背包、
+ * 再由启动交给玩家行为层与能力（拿到物品的来源、机器类型、网络读取器、任务书操作、
  * 查资料的知识来源、查配方的配方查看器、认得出的模组界面、施工的放置规则、战斗的远程武器、出行方式、寻路的障碍来源、落地防护的刹车、场景里模组的东西、组装载具的办法）。不是 Minecraft 的注册表。
  *
  * <p>要用进了世界才有的玩家行为（走过去、点开、保护判断）的，存的是建法，进世界时带着联动能用的玩家行为再建；
@@ -76,7 +75,6 @@ public final class CompatRegistry {
     private final Slot<TravelMode> travelModes = slot("出行方式", CompatTravelMode::new);
     private final Slot<NetworkStorage> networkStorages = slot("网络存储", CompatNetworkStorage::new);
     private final Slot<MenuLayoutProof> menuLayouts = slot("界面布局证明", CompatMenuLayoutProof::new);
-    private final Slot<CarriedBackpack> carriedBackpacks = slot("随身背包");
     private final Slot<KnowledgeSource> knowledgeSources = slot("知识来源", CompatKnowledgeSource::new);
     private final Slot<RecipeViewer> recipeViewers = slot("配方查看器", CompatRecipeViewer::new);
     private final Slot<ClientOperation> serverReads = slot("只读操作声明");
@@ -317,11 +315,6 @@ public final class CompatRegistry {
         fluidTransforms.add(module, transforms);
     }
 
-    /** 联动入口交一个随身背包。腾背包还没有接上调用方，接上时要像物品来源一样包一层，停用后回答放不下。 */
-    public void carriedBackpack(CarriedBackpack backpack) {
-        carriedBackpacks.add(backpack);
-    }
-
     /**
      * 这局真正登记上、此刻还开着的联动模组 ID，按字母排：没装的、版本不对没登记的、用着用着接口对不上停用了的都不在里面。
      * lookup 列能力时把它放在顶上，宿主据此决定哪些靠模组的技能进目录。
@@ -413,11 +406,6 @@ public final class CompatRegistry {
     /** 认得出哪些界面：原版加上联动模组证明过的。 */
     public MenuLayouts menuLayouts() {
         return new MenuLayouts(menuLayouts.ready());
-    }
-
-    /** 联动模组提供的随身背包。 */
-    public List<CarriedBackpack> carriedBackpacks() {
-        return carriedBackpacks.ready();
     }
 
     /** 联动模组提供的知识来源。 */

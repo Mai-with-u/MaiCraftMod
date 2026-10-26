@@ -183,7 +183,6 @@ class CompatRegistryTest {
         CompatRegistry registry = CompatRegistry.empty();
         assertTrue(registry.modules().isEmpty());
         assertTrue(registry.itemSources(NO_SERVICES).isEmpty());
-        assertTrue(registry.carriedBackpacks().isEmpty());
         assertTrue(registry.knowledgeSources().isEmpty());
         assertTrue(registry.decisions().isEmpty());
         assertTrue(registry.installedModIds().isEmpty());
