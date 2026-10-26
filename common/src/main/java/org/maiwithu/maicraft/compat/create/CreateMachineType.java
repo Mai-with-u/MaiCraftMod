@@ -13,6 +13,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
@@ -32,7 +33,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
  * 机械动力的一种机器：按目录里的那一行认方块、给进出口、读运行状态，
- * 置物台与以置物台为加工处的机器（压机、机械手、鼓风机）能投料、取货，传送带与链条输送机会装自己的安装段。
+ * 置物台与以置物台为加工处的机器（压机、机械手、鼓风机）能投料、取货，传送带与链条输送机会装自己的安装段；
+ * 石磨的产物读它肚子里的产物格，锯与粉碎轮的产物掉在地上，给出落在哪一块。
  *
  * <p>读数都在当刻的客户端世界里读；角色不在世界里时状态如实说读不到。
  * 投料、取货、安装返回的动作和自带能力一样：走过去、换手、对准那一面右键、等游戏确认。
@@ -195,9 +197,11 @@ final class CreateMachineType implements MachineType {
         return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, count, permissions);
     }
 
-    // 石磨的产物留在肚子里、锯与粉碎轮做好的东西掉在地上：这里都读不到，投完料就收手。
-    @Override public boolean outputVisible(BlockPos at) {
-        return kind.work() != CreateMachineCatalog.Work.SAW && kind.work() != CreateMachineCatalog.Work.GRINDER;
+    // 锯与粉碎轮做好的东西掉在地上：给出落在哪一块，machine_run 数那一块地上新多出来的、走过去捡。
+    @Override public Optional<AABB> dropArea(BlockPos at) {
+        ClientLevel level = level();
+        if (level == null || !level.isLoaded(at)) return Optional.empty();
+        return StationHandling.dropAreaFor(kind.work(), level.getBlockState(at), at, level::getBlockState);
     }
 
     @Override public List<MachineState.Shown> output(BlockPos at) {

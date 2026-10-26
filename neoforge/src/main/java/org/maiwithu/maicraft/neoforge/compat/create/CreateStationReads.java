@@ -14,6 +14,7 @@ import com.simibubi.create.content.decoration.placard.PlacardBlockEntity;
 import com.simibubi.create.content.fluids.drain.ItemDrainBlockEntity;
 import com.simibubi.create.content.kinetics.crafter.CrafterHelper;
 import com.simibubi.create.content.kinetics.mechanicalArm.ArmBlockEntity;
+import com.simibubi.create.content.kinetics.millstone.MillstoneBlockEntity;
 import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlock;
 import com.simibubi.create.content.kinetics.crafter.MechanicalCrafterBlockEntity;
 import com.simibubi.create.content.fluids.tank.FluidTankBlockEntity;
@@ -277,6 +278,14 @@ public final class CreateStationReads implements CreateStations {
         }
         ItemStack held = drain.getHeldItemStack();
         return Optional.of(held.isEmpty() ? List.of() : List.of(held.copy()));
+    }
+
+    // 石磨产物格：公开字段 outputInv（九格），随方块实体同步到客户端。
+    @Override public Optional<List<ItemStack>> millstoneOutput(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at) || !(level.getBlockEntity(at) instanceof MillstoneBlockEntity millstone)) {
+            return Optional.empty();
+        }
+        return Optional.of(stacksOf(millstone.outputInv));
     }
 
     @Override public Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at) {

@@ -10,6 +10,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
@@ -46,7 +47,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 照常投料开机，等不到产物时把机器读数（转速 0、过载）写进结果。投料与开机的交互
  * 在等确认时停下不安全，等产物时可以插生存需求，回来接着等。
  *
- * <p>出口有两种看法：画出来看得见的（置物台、工作盆）站在旁边一直盯着；
+ * <p>出口有三种看法：画出来、同步过来看得见的（置物台、工作盆、石磨的产物格）站在旁边一直盯着；
+ * 产物弹到地上的（锯、粉碎轮）数那一块地上新多出来的掉落物，收的时候走过去捡；
  * 格子在界面里的（通用机械）投料前先点开看一眼原有几件，投完料隔一个加工周期回去点开看、出了就收。
  */
 final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
@@ -88,12 +90,16 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private FullRun fullRun;
     /** 这次是往发电机这类烧燃料的机器里投燃料：item 就是燃料，投完就收场，不拨开关、不等产物。 */
     private boolean fuelRun;
+    /** 产物掉在地上的机器，产物落在哪一块；不掉地上的为 null。 */
+    private AABB dropArea;
     /** 出口在界面里、站在外面看不见：投料前先点开看一眼，投完料隔一个周期回去点开看。 */
     private boolean menuExit;
     /** 开工前点开界面看出口的那一眼；接不上界面时为 null，等产物时就照读不到收手。 */
     private OutputLook peeking;
     /** 出口在界面里的回头看产物；别的出口为 null。 */
     private MenuOutputLookBack lookBack;
+    /** 收产物的那一下：捡地上的交得出收了几件，别的按出口里出的件数算。 */
+    private Action collecting;
 
     MachineRunTask(MachineRunInput input, MachineServices services) {
         super("用机器做东西", Phase.RESOLVE,
@@ -139,8 +145,9 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (type == null) {
             return Next.fail(services.unclaimedHere(found.state(), "用机器做东西"));
         }
-        // 出口怎么看在这里定：界面里的投料前点开看，别的站在旁边读。
-        menuExit = !type.outputVisible(cell);
+        // 出口怎么看在这里定：掉地上的看那一块地，界面里的投料前点开看，别的站在旁边读。
+        dropArea = type.dropArea(cell).orElse(null);
+        menuExit = dropArea == null && !type.outputVisible(cell);
         watch.baseline = menuExit ? 0 : outputCount(input.item());
         recordProgress("认出了" + describeMachine() + (menuExit ? "；出口在界面里，投料前点开看一眼原有几件"
                 : "；出口里现在有 " + watch.baseline + " 件" + (input.item() == null ? "" : " " + input.item())));
@@ -467,8 +474,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             return switch (runAction(context)) {
                 case ActionStatus.Running running -> Next.stay();
                 case ActionStatus.Done done -> {
-                    watch.collected = watch.produced;
-                    recordChange(Change.of(Change.Kind.ITEM_GAINED, input.item(), watch.produced));
+                    settleCollected();
                     yield finishRun(false);
                 }
                 case ActionStatus.Failed failed -> {
@@ -477,15 +483,37 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 }
             };
         }
-        return type.take(cell, input.item(), watch.produced, input.permissions())
+        // 掉在地上的走过去一件件捡，别的照机器类型的拿法（置物台空手右键、石磨空手右键收产物格）。
+        Optional<Action> taking = dropArea != null
+                ? services.interactions().pickUpFrom(dropArea, input.item()).map(look -> (Action) look)
+                : type.take(cell, input.item(), watch.produced, input.permissions());
+        return taking
                 .map(action -> {
                     prepared = action;
-                    return Next.go(Phase.COLLECT, "从出口拿回 " + watch.produced + " 件");
+                    collecting = action;
+                    return Next.go(Phase.COLLECT, dropArea != null ? "去捡机器旁边地上的 " + input.item()
+                            : "从出口拿回 " + watch.produced + " 件");
                 })
                 .orElseGet(() -> {
                     notes.add("这台机器的出口拿不进背包，东西留在出口");
                     return finishRun(false);
                 });
+    }
+
+    // 收到了几件：捡地上的按背包清点交回的件数算（地上原有的同种东西也会一起捡起来），别的按出口里出的件数算。
+    private void settleCollected() {
+        int got = watch.produced;
+        if (collecting instanceof OutputLook look) {
+            got = look.taken();
+            notes.addAll(look.notes());
+            if (got < watch.produced) {
+                notes.add("出了 " + watch.produced + " 件，捡进背包 " + got + " 件，其余还在机器旁边地上");
+            }
+        }
+        watch.collected = got;
+        if (got > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, input.item(), got));
+        }
     }
 
     // 机器自己从头做到尾：动作跑完按它交回的件数、做全没有与说明结算；半路失败时做出过的照实算数。
@@ -584,10 +612,13 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return String.join("、", parts);
     }
 
-    /** 出口里目标物品现在有几件；没给目标物品或读不到按 0 算：等的是增长，基线之下不会误报。 */
+    /** 出口里目标物品现在有几件（掉地上的数那一块地）；没给目标物品或读不到按 0 算：等的是增长，基线之下不会误报。 */
     private int outputCount(String itemId) {
         if (itemId == null) {
             return 0;
+        }
+        if (dropArea != null) {
+            return services.world().itemsOnGround(dropArea, itemId);
         }
         return type.output(cell).stream()
                 .filter(shown -> shown.itemId().equals(itemId))

@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -116,11 +117,21 @@ public interface MachineType {
     List<MachineState.Shown> output(BlockPos at);
 
     /**
-     * 出口站在外面读不读得到：置物台、工作盆上画出来的东西读得到；格子在界面里的（通用机械的机器）读不到。
-     * 读不到时 machine_run 投完料隔一个加工周期走过去点开界面看一眼，看到了就收，几回都没出才按部分完成收场。
+     * 出口站在外面读不读得到：置物台、工作盆上画出来的东西，石磨同步过来的产物格，都读得到；
+     * 格子在界面里的（通用机械的机器）读不到。读不到时 machine_run 投完料隔一个加工周期走过去点开界面看一眼，
+     * 看到了就收，几回都没出才按部分完成收场；产物掉在地上的机器改给 {@link #dropArea}。
      */
     default boolean outputVisible(BlockPos at) {
         return true;
+    }
+
+    /**
+     * 做好的东西掉在旁边地上的机器（朝上的锯往前弹、粉碎轮从中间那格往下漏）：产物落在哪一块，世界坐标。
+     * 给了它，machine_run 就数这一块地上新多出来的掉落物、走过去捡，不再问 {@link #output} 与 {@link #take}；
+     * 产物不落地的机器给空。
+     */
+    default Optional<AABB> dropArea(BlockPos at) {
+        return Optional.empty();
     }
 
     /** 从出口把东西拿进背包；出口没有这种东西或这种机器不出东西时给空。 */

@@ -407,7 +407,7 @@ public final class AbilityCatalog {
                         id -> deps.world().scene().seen().structureOf(id),
                         deps.compat().trainSchedulers(shared.playerServices()),
                         id -> deps.world().scene().seen().gameEntityOf(id)),
-                deps.compat().menuLayouts())) {
+                deps.compat().menuLayouts(), shared.drops())) {
             registry.register(module);
         }
     }

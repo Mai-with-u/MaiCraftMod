@@ -72,9 +72,40 @@ final class StationHandling {
         };
     }
 
-    /** 出口现在有什么：置物台与工作盆就是自己，加工机器是加工处的置物台、工作盆或传送带。 */
+    /**
+     * 出口现在有什么：置物台与工作盆就是自己，加工机器是加工处的置物台、工作盆或传送带；
+     * 石磨没有画出来的台面，产物留在肚子里的产物格，读同步过来的那一份。
+     */
     List<ItemStack> outputAt(CreateMachineCatalog.Work work, ClientLevel level, BlockState state, BlockPos at) {
+        if (work == CreateMachineCatalog.Work.GRINDER && idOf(state).equals(MILLSTONE)) {
+            return compat.millstoneOutput(level, at).orElse(List.of());
+        }
         return shownAt(work, level, state, at);
+    }
+
+    /** 朝上的锯弹出产物的范围（格）：沿锯条往前弹半格、带一点初速，落地滚不出两格。类别：游戏事实（SawBlockEntity 出料）。 */
+    static final int SAW_DROP_REACH = 2;
+    /** 粉碎轮漏下产物最多落几格：下面一般是两三格深的坑或接着漏斗，落四格还没到底的不算这台的出口。 */
+    static final int CRUSHER_DROP_DEPTH = 4;
+
+    /**
+     * 产物掉在哪一块（世界坐标）：朝上的锯把锯好的东西沿锯条方向弹出去，落在锯四周两格内；
+     * 粉碎轮把碾好的东西从朝下送料的中间那格往下漏，落在它正下方的坑里。石磨的产物留在肚子里，不落地；
+     * 锯不朝上、粉碎轮旁边没有朝下送料的中间格时，它们也不加工扔上去的东西，给空。
+     */
+    static Optional<AABB> dropAreaFor(CreateMachineCatalog.Work work, BlockState state, BlockPos at,
+            Function<BlockPos, BlockState> blockAt) {
+        return switch (work) {
+            case SAW -> facing(state).filter(face -> face == Direction.UP)
+                    .map(face -> new AABB(at.getX() - SAW_DROP_REACH, at.getY() - 1, at.getZ() - SAW_DROP_REACH,
+                            at.getX() + 1 + SAW_DROP_REACH, at.getY() + 2, at.getZ() + 1 + SAW_DROP_REACH));
+            case GRINDER -> idOf(state).equals(CRUSHING_WHEEL) ? crushingGap(at, blockAt).map(spot -> {
+                BlockPos gap = spot.cell();
+                return new AABB(gap.getX() - 1, gap.getY() - CRUSHER_DROP_DEPTH, gap.getZ() - 1,
+                        gap.getX() + 2, gap.getY(), gap.getZ() + 2);
+            }) : Optional.empty();
+            default -> Optional.empty();
+        };
     }
 
     /**
@@ -104,6 +135,7 @@ final class StationHandling {
     /** 粉碎轮两只轮子中间那一格的方块。 */
     static final String CRUSHING_GAP = "create:crushing_wheel_controller";
     private static final String CRUSHING_WHEEL = "create:crushing_wheel";
+    private static final String MILLSTONE = "create:millstone";
 
     // 这台机器的扔料落点；工作盆读不读得到、方块长什么样从现场问。
     private Optional<TossSpot> tossSpot(CreateMachineCatalog.Work work, ClientLevel level, BlockState state,
@@ -152,7 +184,7 @@ final class StationHandling {
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
     }
 
-    /** 从出口取东西的动作：置物台空手右键顶面；工作盆（搅拌器下方那个也算）空手右键；别的给不出。 */
+    /** 从出口取东西的动作：置物台空手右键顶面；工作盆（搅拌器下方那个也算）、石磨空手右键；别的给不出。 */
     Optional<Action> take(CreateMachineCatalog.Work work, ClientLevel level, BlockState state, BlockPos at,
             Permissions permissions) {
         Optional<BlockPos> depot = depotFor(work, level, state, at);
@@ -164,6 +196,12 @@ final class StationHandling {
         if (work == CreateMachineCatalog.Work.DRAIN && compat.drainItems(level, at).isPresent()) {
             return Optional.of(emptyHandTake(level, at, "从分液池取回东西",
                     () -> compat.drainItems(level, at).orElse(List.of()), permissions));
+        }
+        // 石磨：产物格里有东西时空手右键把它们全拿出来；产物格空着时空手右键会把还没磨的原料退出来，所以出了东西才点。
+        if (work == CreateMachineCatalog.Work.GRINDER && idOf(state).equals(MILLSTONE)
+                && !compat.millstoneOutput(level, at).orElse(List.of()).isEmpty()) {
+            return Optional.of(emptyHandTake(level, at, "从石磨里拿出磨好的东西",
+                    () -> compat.millstoneOutput(level, at).orElse(List.of()), permissions));
         }
         Optional<BlockPos> basin = basinFor(work, state, at).filter(cell -> compat.basinItems(level, cell).isPresent());
         return basin.map(cell -> emptyHandTake(level, cell, "从工作盆取出东西",

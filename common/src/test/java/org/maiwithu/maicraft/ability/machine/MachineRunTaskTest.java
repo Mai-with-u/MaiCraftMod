@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.SharedConstants;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -43,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 用机器做东西的任务：选工序、备料、投料、开机只拨一次、出口只算新增、收产物按 collect；
- * 出口在界面里的投完料隔一个周期点开看、几回没出收手、被叫走回来接着等。
+ * 出口在界面里的投完料隔一个周期点开看、几回没出收手、被叫走回来接着等；产物掉地上的数那一块地、走过去捡。
  */
 class MachineRunTaskTest {
 
@@ -373,6 +374,26 @@ class MachineRunTaskTest {
         assertEquals(1, details.looks(), "回来到点了直接看一眼");
         assertEquals(1, details.fed().size(), "接着等同一批，不重投料");
         assertEquals(1, rig.needs.requests.size());
+    }
+
+    @Test
+    void 产物掉在地上_数那一块地新多出来的_走过去捡() {
+        Rig rig = new Rig();
+        rig.machineRunsAtFullSpeed();
+        rig.type.dropArea = new AABB(4, 63, 4, 9, 66, 9);
+        rig.clicks.ground = rig.world.onGround;
+        rig.world.onGround.put(PLATE, 1);
+        rig.type.feedActions.clear();
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1,
+                () -> rig.world.onGround.merge(PLATE, 2, Integer::sum)));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.produced(), "地上原有的那件不算");
+        assertEquals(3, details.collected(), "捡的时候原有的那件一起捡起来了");
+        assertEquals(1, rig.type.takeActions.size(), "掉地上的不走机器类型的拿法");
+        assertTrue(rig.world.onGround.isEmpty());
     }
 
     /** 机器自己从头做到尾的替身：一刻做完，报做出几件、做全没有与说明。 */

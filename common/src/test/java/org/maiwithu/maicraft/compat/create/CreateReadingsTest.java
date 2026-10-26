@@ -203,6 +203,23 @@ class CreateReadingsTest {
     }
 
     @Test
+    void 产物掉在哪一块_朝上的锯四周两格_石磨不落地() {
+        BlockPos at = new BlockPos(0, 64, 0);
+        var stone = Blocks.STONE.defaultBlockState();
+        var up = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.UP);
+        var east = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.EAST);
+        // 朝上的锯把锯好的东西沿锯条弹出去：锯这一格四周两格、从下面一格到上面一格都算。
+        var area = StationHandling.dropAreaFor(CreateMachineCatalog.Work.SAW, up, at, cell -> stone).orElseThrow();
+        assertTrue(area.contains(2.5, 64.2, 0.5), "弹到东边两格外的那件也在里面");
+        assertTrue(area.contains(0.5, 63.2, -1.5), "落到下面一层、北边一格的也在里面");
+        assertTrue(!area.contains(3.5, 64.2, 0.5), "三格外的不算这台锯的");
+        // 锯不朝上不加工扔上去的东西；石磨的产物留在肚子里，都不给落地的范围。
+        assertTrue(StationHandling.dropAreaFor(CreateMachineCatalog.Work.SAW, east, at, cell -> stone).isEmpty());
+        assertTrue(StationHandling.dropAreaFor(CreateMachineCatalog.Work.GRINDER, stone, at, cell -> stone).isEmpty());
+        assertTrue(StationHandling.dropAreaFor(CreateMachineCatalog.Work.DEPOT, stone, at, cell -> stone).isEmpty());
+    }
+
+    @Test
     void 蓝图加农炮的读数_开着算干活_放了几格与缺什么() {
         MachineState base = CreateReadings.still(List.of(), "");
         MachineState cannon = CreateReadouts.schematic(base, Optional.of(new CreateSchematics.CannonReading(true, false,

@@ -26,6 +26,14 @@ public interface CreateStations {
     /** 分液池上正在倒的（或倒空了还留着的）那一件；不是分液池、没加载给空。 */
     Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at);
 
+    /**
+     * 石磨产物格里磨好的东西：石磨没有界面，产物留在肚子里，Create 把它同步给了客户端，
+     * 玩家走到跟前空手右键就能全拿出来；读它当作走到跟前看一眼。不是石磨、没加载给空。
+     */
+    default Optional<List<ItemStack>> millstoneOutput(ClientLevel level, BlockPos at) {
+        return Optional.empty();
+    }
+
     /** 这一格所在的整条传送带上正在送的东西；不是传送带、没加载给空。 */
     Optional<List<ItemStack>> beltItems(ClientLevel level, BlockPos at);
 

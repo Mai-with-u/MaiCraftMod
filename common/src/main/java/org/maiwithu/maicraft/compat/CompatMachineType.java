@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
@@ -124,6 +125,11 @@ public final class CompatMachineType implements MachineType {
 
     @Override public boolean outputVisible(BlockPos at) {
         return ask(() -> type.outputVisible(at), true);
+    }
+
+    // 模组停用或对不上时不说产物掉在哪：machine_run 照出口读不读得到那一条走，读不到的如实说。
+    @Override public Optional<AABB> dropArea(BlockPos at) {
+        return ask(() -> type.dropArea(at), Optional.empty());
     }
 
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {

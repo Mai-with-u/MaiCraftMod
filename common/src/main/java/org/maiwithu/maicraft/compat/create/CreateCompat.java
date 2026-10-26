@@ -519,6 +519,11 @@ public final class CreateCompat extends CompatModule {
         return call("读装置", () -> stations.moving(level, at));
     }
 
+    /** 石磨产物格里磨好的东西；见 {@link CreateStations#millstoneOutput}。 */
+    public Optional<List<ItemStack>> millstoneOutput(ClientLevel level, BlockPos at) {
+        return call("读石磨的产物格", () -> stations.millstoneOutput(level, at));
+    }
+
     /** 分液池上的那一件；见 {@link CreateStations#drainItems}。 */
     public Optional<List<ItemStack>> drainItems(ClientLevel level, BlockPos at) {
         return call("读分液池", () -> stations.drainItems(level, at));

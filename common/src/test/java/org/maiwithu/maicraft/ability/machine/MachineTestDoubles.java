@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
@@ -165,6 +166,8 @@ final class MachineTestDoubles {
         final Map<String, Integer> output = new LinkedHashMap<>();
         /** 出口站在外面看不看得见；格子在界面里的机器看不见。 */
         boolean outputVisible = true;
+        /** 产物掉在地上时落在哪一块；不掉地上为 null。 */
+        AABB dropArea;
         Supplier<MachineState> state = () -> MachineState.unknown("读不到");
         Predicate<Installation> installationOk = installation -> false;
         Predicate<PartCell> partOk = part -> false;
@@ -305,6 +308,10 @@ final class MachineTestDoubles {
             return outputVisible;
         }
 
+        @Override public Optional<AABB> dropArea(BlockPos at) {
+            return Optional.ofNullable(dropArea);
+        }
+
         @Override public List<MachineState.Shown> output(BlockPos at) {
             List<MachineState.Shown> out = new ArrayList<>();
             output.forEach((itemId, count) -> out.add(new MachineState.Shown(itemId, count)));
@@ -401,6 +408,8 @@ final class MachineTestDoubles {
         BlockPos playerAt = BlockPos.ZERO;
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
         boolean inWorld = true;
+        /** 地上躺着的掉落物：物品 → 件数，不分在哪一块。 */
+        final Map<String, Integer> onGround = new HashMap<>();
 
         @Override public Optional<Spot> playerSpot() {
             return inWorld ? Optional.of(new Spot(playerAt, dimension)) : Optional.empty();
@@ -408,6 +417,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<BlockState> stateAt(BlockPos at) {
             return Optional.ofNullable(blocks.get(at));
+        }
+
+        @Override public int itemsOnGround(AABB area, String itemId) {
+            return onGround.getOrDefault(itemId, 0);
         }
     }
 
@@ -493,14 +506,16 @@ final class MachineTestDoubles {
     }
 
     /**
-     * 交互替身：记下右键了哪格，动作两刻做完；给了 menu 就能点开机器界面看出口（两刻看完，要收就把那样东西全拿走）。
-     * 每次点开记下是第几刻、收不收。
+     * 交互替身：记下右键了哪格，动作两刻做完；给了 menu 就能点开机器界面看出口（两刻看完，要收就把那样东西全拿走），
+     * 给了 ground 就能捡地上的（两刻捡完）。每次点开记下是第几刻、收不收。
      */
     static final class FakeClicks implements MachineInteractions {
         final List<BlockPos> clicked = new ArrayList<>();
         Runnable onDone = () -> { };
         /** 机器界面里的东西：物品 → 件数；为 null 时点不开界面。 */
         Map<String, Integer> menu;
+        /** 地上的掉落物，和现场替身的同一份；为 null 时捡不了。 */
+        Map<String, Integer> ground;
         LongSupplier now = () -> 0;
         final List<Long> lookTicks = new ArrayList<>();
         final List<Boolean> lookCollects = new ArrayList<>();
@@ -516,6 +531,10 @@ final class MachineTestDoubles {
             lookTicks.add(now.getAsLong());
             lookCollects.add(collect);
             return Optional.of(new ScriptedLook(menu, itemId, collect));
+        }
+
+        @Override public Optional<OutputLook> pickUpFrom(AABB area, String itemId) {
+            return ground == null ? Optional.empty() : Optional.of(new ScriptedLook(ground, itemId, true));
         }
     }
 
