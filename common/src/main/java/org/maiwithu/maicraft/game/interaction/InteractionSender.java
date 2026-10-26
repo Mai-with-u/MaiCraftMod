@@ -6,13 +6,15 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.BlockHitResult;
 
+import org.maiwithu.maicraft.game.player.BoundaryLifecycle;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 提交真实玩家操作并逐刻确认：提交一次动作与确认它做成了是两个阶段。
  * 同一时刻只允许一项动作在等确认；确认前不能提交下一次。
+ * 边界时刻（换身体、控制权换手、停机、每刻开头）的收尾走 {@link BoundaryLifecycle}。
  */
-public interface InteractionSender {
+public interface InteractionSender extends BoundaryLifecycle {
 
     /**
      * 副手放置只借用本刻空闲的交互机会；确认独立等待，不占住主任务下一刻的挖掘或交互。
@@ -140,16 +142,4 @@ public interface InteractionSender {
 
     /** 逐刻结算：先核对上下文仍是本刻、动作仍是本角色的，再运行只读确认条件。 */
     PendingInteraction poll(PlayerContext context, PendingInteraction pending);
-
-    /**
-     * 每刻开始时由控制权边界调一次：推进没人再管的收尾。任务结束时挂下的停挖、没确认完的副手动作，
-     * 原任务对象已经没了，只能由这里接着做完；新任务开始之前先结清，占掉本刻交互机会时新任务等下一刻。
-     */
-    default void advance(PlayerContext context) {}
-
-    /**
-     * 换了身体、控制权换手或客户端停机时由控制权边界调：旧的等待按效果不确定结清，不再发任何世界操作。
-     * 旧结果不能算到新操作者头上，也不能让一条没人推进的等待挡住后面的提交。
-     */
-    default void revokeForBoundary(String reason) {}
 }

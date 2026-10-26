@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.player;
 
 import java.util.Optional;
+import java.util.function.Consumer;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -69,6 +70,16 @@ public final class PlayerControlBoundary {
         this.menuActions = menuActions;
     }
 
+    /**
+     * 对称的边界时刻（每刻开头、换身体、停机）对两个入口做同一件事：只依赖边界生命周期协议，
+     * 新增一种这样的时刻只写一处分发，不再在交互与菜单两个接口里成对加方法。
+     * 控制权换手时刻两个入口的做法不同（人接手时只有界面要按原版关掉），保持各自的调用。
+     */
+    private void forBoundaryEntry(Consumer<BoundaryLifecycle> action) {
+        if (interactionSender != null) action.accept(interactionSender);
+        if (menuActions != null) action.accept(menuActions);
+    }
+
     /** 开始一个客户端刻：核对玩家与控制权，返回只在本刻有效的角色上下文。 */
     public Optional<PlayerContext> beginTick() {
         requireClientThread();
@@ -91,8 +102,7 @@ public final class PlayerControlBoundary {
             input.playerReplaced(player, preserveControl);
             // 换了身体（重生、过门、换世界、退出）：旧身体上还在等确认的点击与菜单操作按不确定结清，
             // 不让旧结果落到新身体上，也不让一条没人推进的等待挡住新身体的第一次出手。
-            if (interactionSender != null) interactionSender.revokeForBoundary("the local player was replaced");
-            if (menuActions != null) menuActions.revokeForBoundary("the local player was replaced");
+            forBoundaryEntry(entry -> entry.revokeForBoundary("the local player was replaced"));
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
         }
@@ -146,8 +156,7 @@ public final class PlayerControlBoundary {
         activeContext = context;
         // 新任务之前先推进上一个任务留下的收尾：挂着的停挖、请游戏关的界面。原任务对象已经没了，
         // 没有这一步，关界面推迟到下一刻后就再没人推进，界面一直开着、光标上的东西一直挂着，后面的界面操作也被挡住。
-        if (interactionSender != null) interactionSender.advance(context);
-        if (menuActions != null) menuActions.advance(context);
+        forBoundaryEntry(entry -> entry.advance(context));
         return Optional.of(context);
     }
 
@@ -290,8 +299,7 @@ public final class PlayerControlBoundary {
     public void shutdown() {
         requireClientThread();
         // 客户端停机：还在等确认的点击与菜单操作一并按不确定结清，停机后没人再推进它们。
-        if (interactionSender != null) interactionSender.revokeForBoundary("the client is stopping");
-        if (menuActions != null) menuActions.revokeForBoundary("the client is stopping");
+        forBoundaryEntry(entry -> entry.revokeForBoundary("the client is stopping"));
         input.shutdown();
         restoreMouseOnRelease = false;
         updateWindowControl(false);
