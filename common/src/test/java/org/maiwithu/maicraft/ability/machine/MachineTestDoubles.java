@@ -345,6 +345,8 @@ final class MachineTestDoubles {
         private boolean pending = false;
         /** 这种网怎么用方块接线；没给就是不会接线的网。 */
         LineMaterials lines;
+        /** 问过几次整网读数。 */
+        int asked;
 
         FakeNetworkReader(String id, String description) {
             this.kind = new NetworkKind(id, description);
@@ -361,6 +363,12 @@ final class MachineTestDoubles {
         /** 让回答悬在路上。 */
         void holdAnswer() {
             pending = true;
+        }
+
+        /** 回答到了：之后的汇总就是它，不再在路上。 */
+        void answer(NetworkSummary arrived) {
+            summary = arrived;
+            pending = false;
         }
 
         @Override public NetworkKind kind() {
@@ -380,6 +388,7 @@ final class MachineTestDoubles {
         }
 
         @Override public NetworkSummary summary(String networkId) {
+            asked++;
             if (summary != null) {
                 return summary;
             }

@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -49,7 +50,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
 /**
  * 接网络的任务与核对判断：已接着不再动、转速为零照实说、不同网如实说差一段、没给来源扫一片找；
- * 铺线路那一段跟着接网络暂停、先到安全处再停、收尾。
+ * 铺线路那一段跟着接网络暂停、先到安全处再停、收尾；接上后整网读数在路上时等一会儿再交。
  */
 class MachineConnectTaskTest {
 
@@ -250,6 +251,58 @@ class MachineConnectTaskTest {
         assertNotNull(result);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(((MachineConnectDetails) result.details()).joined());
+    }
+
+    @Test
+    void 接上后整网读数还在路上_等到回答再交结果() {
+        Rig rig = new Rig(tempDir);
+        rig.reader.put(TARGET, "net1");
+        rig.reader.put(SOURCE, "net1");
+        rig.machineRuns();
+        rig.reader.unreadable("正在向服务端要这张网的读数，稍后再看");
+        rig.reader.holdAnswer();
+        MachineConnectTask task = rig.task(input("kinetic", positionOf(TARGET), positionOf(SOURCE)));
+        task.start(rig.tick());
+        TaskResult result = null;
+        for (int i = 0; i < 200 && result == null; i++) {
+            // 服务端过 10 刻才答：这之前接网络不该自己交结果，答了就带着这份读数收场。
+            if (i == 10) {
+                assertTrue(rig.reader.asked > 0, "接上后要先问一遍整网读数");
+                rig.reader.answer(new NetworkSummary("net1", true, Map.of("energy_stored", 6400L), ""));
+            }
+            if (task.tick(rig.tick()) instanceof TickResult.Finished finished) {
+                assertTrue(i >= 10, "回答到之前就交了结果");
+                result = finished.result();
+            }
+        }
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("energy_stored=6400"), result.summary());
+        assertTrue(((MachineConnectDetails) result.details()).joined());
+    }
+
+    @Test
+    void 整网读数一直不来_等满六十刻照实交正在要() {
+        Rig rig = new Rig(tempDir);
+        rig.reader.put(TARGET, "net1");
+        rig.reader.put(SOURCE, "net1");
+        rig.machineRuns();
+        rig.reader.unreadable("正在向服务端要这张网的读数，稍后再看");
+        rig.reader.holdAnswer();
+        MachineConnectTask task = rig.task(input("kinetic", positionOf(TARGET), positionOf(SOURCE)));
+        task.start(rig.tick());
+        TaskResult result = null;
+        int ticks = 0;
+        while (result == null && ticks < 200) {
+            ticks++;
+            if (task.tick(rig.tick()) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertNotNull(result);
+        // 等够 60 刻就收场：接线的结论照交，读数写明还在要，不拖成卡住。
+        assertTrue(ticks > MachineConnectTask.SUMMARY_WAIT_TICKS && ticks < MachineConnectTask.SUMMARY_WAIT_TICKS + 5,
+                "等了 " + ticks + " 刻");
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("正在向服务端要"), result.summary());
     }
 
     /** 一刻铺完的那段施工：铺完时跑一下给的效果（让网络读数跟着变）。 */

@@ -34,18 +34,24 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 把机器接进网络的任务：认两端 → 已经接着就不再动（转速为零、过载也照实说接上了）→
  * 没接上就规划一条线路（直线优先、少拐弯、远处用链条这类跨越）→ 写成机器蓝图交给施工铺好 →
- * 再核对两端是不是同一张网、机器转不转。线材由那种网的联动给；不会接线的网如实说铺不了。
+ * 再核对两端是不是同一张网、机器转不转 → 接上了先问一遍整网读数，要问服务端的（ME 网、通用机械管网的存量）
+ * 等它一会儿再交结果。线材由那种网的联动给；不会接线的网如实说铺不了。
  *
  * <p>线路只铺在空格里，挨着别的机器会被一起接上的格不放；铺好了两端还不同网就照实说，
  * 已经放下的线材不拆。接上了但过载、转速为零不是接线的失败，读数原样交给 LLM。
  */
 final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
 
-    /** 认两端 → 没给来源就扫一片找 → 核对 → 规划线路 → 施工 → 再核对。 */
-    enum Phase { RESOLVE, FIND_SOURCE, VERDICT, PLAN, BUILD, CHECK }
+    /** 认两端 → 没给来源就扫一片找 → 核对 → 规划线路 → 施工 → 再核对 → 接上了等整网读数。 */
+    enum Phase { RESOLVE, FIND_SOURCE, VERDICT, PLAN, BUILD, CHECK, READ }
 
     /** 铺完再核对时最多等几刻：新放的线材要过几刻服务器才算好连接、同步给客户端，读早了会把接上的读成没接上。 */
     static final int SETTLE_TICKS = 60;
+    /**
+     * 接上后整网读数还在路上时最多等几刻：ME 网、通用机械管网的读数要问服务端，问出去过几刻才答；
+     * 等够了还没答就照实交"正在要"，不为一份读数拖住接线的结论。
+     */
+    static final int SUMMARY_WAIT_TICKS = 60;
 
     private final MachineConnectInput input;
     private final MachineServices services;
@@ -69,6 +75,10 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private ChildTaskAction child;
     /** 铺完开始再核对的那一刻；还没开始为 -1。 */
     private long checkingSince = -1;
+    /** 接上那一刻的核对结论：等整网读数时照它交结果；还没接上为 null。 */
+    private MachineJoined.Verdict joined;
+    /** 等整网读数已经等了几刻。 */
+    private int summaryWaits;
 
     /** @param lineBuilding 线路写成的机器施工输入怎么建成任务：平时是按蓝图施工的同一套任务，离线测试换成替身 */
     MachineConnectTask(MachineConnectInput input, MachineServices services, MachineArchives archives,
@@ -107,6 +117,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
             case PLAN -> plan();
             case BUILD -> build(context);
             case CHECK -> check(context);
+            case READ -> awaitSummary();
         };
     }
 
@@ -245,7 +256,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private Next<Phase> verdict() {
         MachineJoined.Verdict outcome = judge();
         if (outcome.joined()) {
-            return finishJoined(outcome);
+            return askSummary(outcome);
         }
         if (reader.lineMaterials().isEmpty()) {
             recordProgress(outcome.note());
@@ -313,7 +324,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private Next<Phase> check(TickContext context) {
         MachineJoined.Verdict outcome = judge();
         if (outcome.joined()) {
-            return finishJoined(outcome);
+            return askSummary(outcome);
         }
         if (checkingSince < 0) {
             checkingSince = context.gameTick();
@@ -328,6 +339,23 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
 
     private MachineJoined.Verdict judge() {
         return MachineJoined.judge(reader.membership(targetCell), reader.membership(sourceCell), machineState());
+    }
+
+    // 接上了（本来就接着，或铺完核对接上）：先问一遍整网读数，要问服务端的此刻把问话发出去，再去等它。
+    private Next<Phase> askSummary(MachineJoined.Verdict outcome) {
+        joined = outcome;
+        reader.membership(targetCell).ifPresent(reader::summary);
+        return Next.go(Phase.READ, "接上了，读一遍整网读数");
+    }
+
+    // 等整网读数：问服务端的那一问还没答就站着等，最多 SUMMARY_WAIT_TICKS 刻；答了或等够了就交结果，
+    // 客户端直接读得到的网（应力网）不在路上，下一刻就交。
+    private Next<Phase> awaitSummary() {
+        Optional<String> network = reader.membership(targetCell);
+        if (network.isPresent() && reader.summaryPending(network.get()) && ++summaryWaits <= SUMMARY_WAIT_TICKS) {
+            return Next.stay();
+        }
+        return finishJoined(joined);
     }
 
     private Next<Phase> finishJoined(MachineJoined.Verdict outcome) {
@@ -404,6 +432,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
             case PLAN -> "规划线路";
             case BUILD -> "按线路施工";
             case CHECK -> "铺完再核对";
+            case READ -> "等整网读数";
         };
     }
 }
