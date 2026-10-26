@@ -150,8 +150,14 @@ public final class SustainedUse implements Action {
         }
         // 转到位且准星点在目标格上：冻结手上的东西，右键这一面开始按住；原版随即进入使用状态。
         heldAtSubmission = scene.heldItem(hand);
-        pending = player.interactionSender().useBlock(player, hand, (BlockHitResult) hit,
+        PendingInteraction submitted = player.interactionSender().useBlock(player, hand, (BlockHitResult) hit,
                 startConfirmation(), START_TIMEOUT_TICKS);
+        // 提交入口这一刻不收：下一刻原样再按住，瞄准与现场冻结都重来了才不串。
+        if (submitted == null) {
+            heldAtSubmission = null;
+            return ActionStatus.running();
+        }
+        pending = submitted;
         holdWhileStarting(player);
         stage = Stage.STARTING;
         return ActionStatus.progressed();
@@ -162,7 +168,13 @@ public final class SustainedUse implements Action {
         if (pending == null) {
             FirstPersonScene scene = scenes.apply(player);
             heldAtSubmission = scene.heldItem(hand);
-            pending = player.interactionSender().useItem(player, hand, startConfirmation(), START_TIMEOUT_TICKS);
+            PendingInteraction submitted = player.interactionSender().useItem(player, hand, startConfirmation(), START_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：下一刻原样再按住，现场冻结随下一次提交重来。
+            if (submitted == null) {
+                heldAtSubmission = null;
+                return ActionStatus.running();
+            }
+            pending = submitted;
             holdWhileStarting(player);
             return ActionStatus.running();
         }
@@ -281,7 +293,10 @@ public final class SustainedUse implements Action {
 
     // 松开使用并等松开确认；松开之后再看一次做成没有，没等到就按没能确认收尾。
     private ActionStatus release(PlayerContext player, String why) {
-        pending = player.interactionSender().releaseUsingItem(player, pending);
+        PendingInteraction released = player.interactionSender().releaseUsingItem(player, pending);
+        // 本刻没有交互机会就先不松：继续按住，下一刻再发松开。
+        if (released == null) return ActionStatus.running();
+        pending = released;
         stage = Stage.RELEASING;
         releaseReason = why;
         return ActionStatus.running();
@@ -328,9 +343,13 @@ public final class SustainedUse implements Action {
         // 本刻已经没有交互机会时发不了松开：投影已经交还，原版两刻内就看到松键，不硬发第二下。
         if (stage == Stage.HOLDING && lastContext != null && lastContext.interactionSender() != null
                 && pending != null && lastContext.canInteractThisTick()) {
-            pending = lastContext.interactionSender().releaseUsingItem(lastContext, pending);
-            result = InteractionResult.unconfirmed(
-                    "任务结束时松开了手持" + describeHeld() + "的持续使用，没能等到做成它的确认");
+            PendingInteraction released = lastContext.interactionSender().releaseUsingItem(lastContext, pending);
+            // 松开没发出去（本刻不收）就不改结果：投影已交还，原版两刻内看到松键。
+            if (released != null) {
+                pending = released;
+                result = InteractionResult.unconfirmed(
+                        "任务结束时松开了手持" + describeHeld() + "的持续使用，没能等到做成它的确认");
+            }
         }
     }
 

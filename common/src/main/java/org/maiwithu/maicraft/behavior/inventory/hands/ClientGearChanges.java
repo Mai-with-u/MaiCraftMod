@@ -195,11 +195,14 @@ public final class ClientGearChanges implements GearChanges {
                 // 生效的两个标志任取其一：主手换持了别的，或护甲格里出现了手里这件。
                 var handBefore = player.localPlayer().getMainHandItem().copy();
                 int armorSlot = armorInventorySlot(slot);
-                usePending = sender.useItem(player, InteractionHand.MAIN_HAND,
+                PendingInteraction submitted = sender.useItem(player, InteractionHand.MAIN_HAND,
                         InteractionConfirmation.anyOf(
                                 InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, handBefore),
                                 InteractionConfirmation.inventorySlot(armorSlot, handBefore)),
                         STEP_TIMEOUT_TICKS);
+                // 提交入口这一刻不收：下一刻原样再穿，护甲还在手上。
+                if (submitted == null) return ActionStatus.running();
+                usePending = submitted;
             } else if (!usePending.terminal()) {
                 usePending = sender.poll(player, usePending);
                 if (!usePending.terminal()) return ActionStatus.running();

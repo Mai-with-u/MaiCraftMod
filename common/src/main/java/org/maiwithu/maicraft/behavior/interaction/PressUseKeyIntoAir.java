@@ -87,13 +87,11 @@ public final class PressUseKeyIntoAir implements Action {
             }
             return ActionStatus.running();
         }
-        try {
-            pending = player.interactionSender().submitControlProtocol(player, "按一下使用键", keys::press,
-                    confirmation, CONFIRM_TIMEOUT_TICKS);
-        } catch (IllegalStateException busy) {
-            // 本刻交互机会刚被占、或上一下还在等确认：下一刻再按，不算按过。
-            return ActionStatus.running();
-        }
+        PendingInteraction submitted = player.interactionSender().submitControlProtocol(player, "按一下使用键", keys::press,
+                confirmation, CONFIRM_TIMEOUT_TICKS);
+        // 本刻交互机会刚被占、或上一下还在等确认：下一刻再按，不算按过。
+        if (submitted == null) return ActionStatus.running();
+        pending = submitted;
         return ActionStatus.progressed();
     }
 

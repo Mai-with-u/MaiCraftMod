@@ -224,10 +224,13 @@ public final class BoatRescue implements CatchesFall {
         for (Boat boat : context.level().getEntitiesOfClass(Boat.class, BoatSpace.boatBox(plan.spawn()).inflate(2))) {
             boatsBefore.add(boat.getUUID());
         }
+        PendingInteraction submitted = context.interactionSender().useItem(context, item.hand(),
+                InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS);
+        // 提交入口这一刻不收：船下一刻再放，落点与现场记账随真的提交重新来。
+        if (submitted == null) return;
         itemsBefore = count(player);
         detail = "船放出去了，等服务器那边出现这条船";
-        pending = context.interactionSender().useItem(context, item.hand(),
-                InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS);
+        pending = submitted;
     }
 
     // 落点附近恰好新出现一条普通船就是它；同时冒出两条说不清是哪条，按对不上收场。
@@ -266,13 +269,16 @@ public final class BoatRescue implements CatchesFall {
         else look(context, player, aim, plan.airborne());
         if (!player.canInteractWithEntity(boat, 0) || !BoatSpace.aimedAt(context, boat) || !context.canInteractThisTick()
                 || player.isShiftKeyDown()) return;
-        mountSubmitted = true;
-        detail = "对准船坐上去，等服务器确认";
         UUID target = boatId;
-        pending = context.interactionSender().interact(context, boat, item == null ? InteractionHand.MAIN_HAND : item.hand(),
+        PendingInteraction submitted = context.interactionSender().interact(context, boat, item == null ? InteractionHand.MAIN_HAND : item.hand(),
                 InteractionConfirmation.serverObservedEntity(live -> target.equals(vehicleId(live.localPlayer()))
                         ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING),
                 CONFIRM_TIMEOUT_TICKS);
+        // 提交入口这一刻不收：下一刻原样再点，人还没坐上去就还有机会。
+        if (submitted == null) return;
+        mountSubmitted = true;
+        detail = "对准船坐上去，等服务器确认";
+        pending = submitted;
     }
 
     // 坐稳：船停住、上船后过了一刻、摔落清零了，才找下船的那一边；四周都下不去就转头找，等一个能站住的方向。

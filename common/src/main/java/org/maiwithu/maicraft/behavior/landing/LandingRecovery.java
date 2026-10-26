@@ -10,6 +10,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.world.BucketWater;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
@@ -72,7 +73,9 @@ final class LandingRecovery {
         InteractionConfirmation scooped = c -> c.localPlayer().getItemInHand(hand).is(Items.WATER_BUCKET)
                 && c.level().getFluidState(cell).isEmpty()
                 ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
-        rescue.beginCleaning(context.interactionSender().useItem(context, hand, scooped, 12));
+        PendingInteraction scoopedSubmission = context.interactionSender().useItem(context, hand, scooped, 12);
+        // 提交入口这一刻不收：水留在这格里，下一刻再收。
+        if (scoopedSubmission != null) rescue.beginCleaning(scoopedSubmission);
     }
 
     // 挖掉：按这一格的挖掘速度给期限，挖不动（基岩一类、速度为零）就留着。
@@ -86,6 +89,8 @@ final class LandingRecovery {
             return;
         }
         int timeout = (int) Math.clamp(Math.ceil(1D / progress) + BREAK_MARGIN_TICKS, 20, 1200);
-        rescue.beginCleaning(context.interactionSender().startBreaking(context, hit, timeout));
+        PendingInteraction breakingSubmission = context.interactionSender().startBreaking(context, hit, timeout);
+        // 提交入口这一刻不收：下一刻再开挖，期限按真的开了挖再算。
+        if (breakingSubmission != null) rescue.beginCleaning(breakingSubmission);
     }
 }

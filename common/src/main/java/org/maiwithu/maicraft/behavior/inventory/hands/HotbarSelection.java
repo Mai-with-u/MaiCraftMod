@@ -42,7 +42,10 @@ public final class HotbarSelection implements Action {
         var sender = player.interactionSender();
         if (sender == null || !player.canInteractThisTick()) return ActionStatus.running();
         if (pending == null) {
-            pending = sender.selectHotbar(player, slot, CONFIRM_TIMEOUT_TICKS);
+            PendingInteraction submitted = sender.selectHotbar(player, slot, CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：选格下一刻再发，格子保持原样。
+            if (submitted == null) return ActionStatus.running();
+            pending = submitted;
         } else if (!pending.terminal()) {
             pending = sender.poll(player, pending);
         }

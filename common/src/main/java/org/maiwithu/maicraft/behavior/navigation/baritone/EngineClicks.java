@@ -176,13 +176,18 @@ final class EngineClicks {
                 InteractionConfirmation.blockChanged(clicked, clickedBefore),
                 InteractionConfirmation.blockChanged(adjacent, adjacentBefore),
                 InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, heldBefore));
-        try {
-            use = context.interactionSender().useBlock(context, InteractionHand.MAIN_HAND, hit, changed,
-                    USE_CONFIRM_TICKS);
-        } catch (IllegalStateException busy) {
-            // 另一个原生动作还在等确认，这一刻点不了；引擎下一刻还按着就再试。
+        PendingInteraction submitted = context.interactionSender().useBlock(context, InteractionHand.MAIN_HAND, hit, changed,
+                USE_CONFIRM_TICKS);
+        // 另一个原生动作还在等确认、或本刻机会刚被占，这一刻点不了：点前记下的现场先清掉，
+        // 引擎下一刻还按着就重新记一遍再试，不能拿没点过的一刻去对确认。
+        if (submitted == null) {
+            clicked = null;
+            adjacent = null;
+            clickedBefore = null;
+            adjacentBefore = null;
             return Doing.NOTHING;
         }
+        use = submitted;
         return settleUse(context);
     }
 

@@ -129,9 +129,12 @@ public final class ThrowsItems implements Action {
         }
         plannedThisThrow = held.getCount() <= remaining ? held.getCount() : 1;
         ItemStack before = held.copy();
-        pending = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,
+        PendingInteraction submitted = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,
                 InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before),
                 CONFIRM_TIMEOUT_TICKS);
+        // 提交入口这一刻不收：东西留在手上，下一刻再丢。
+        if (submitted == null) return ActionStatus.running();
+        pending = submitted;
         return ActionStatus.progressed();
     }
 

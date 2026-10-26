@@ -184,20 +184,27 @@ public final class AimAndInteract implements Action {
     // 冻结提交现场（目标格状态、射线命中者）再交出本刻的交互；之后进入逐刻确认。
     private ActionStatus submit(PlayerContext player, FirstPersonScene scene, HitResult hit) {
         submittedHitDescription = AimCheck.describeHit(hit);
+        PendingInteraction submitted;
         if (gesture == Gesture.USE_HELD_ITEM) {
             // 物品按自己的射线作用：发的是"使用手里的物品"，不是右键准星指着的方块。
             targetStateAtSubmission = scene.blockAt(((InteractionTarget.BlockTarget) target).pos());
-            pending = player.interactionSender().useItem(player, hand, confirmation, confirmTicks);
+            submitted = player.interactionSender().useItem(player, hand, confirmation, confirmTicks);
         } else if (target instanceof InteractionTarget.BlockTarget block) {
             targetStateAtSubmission = scene.blockAt(block.pos());
-            pending = player.interactionSender().useBlock(
+            submitted = player.interactionSender().useBlock(
                     player, hand, (BlockHitResult) hit, confirmation, confirmTicks);
         } else {
             // 实体目标走右键实体的原生入口：剪毛、挤奶、骑乘、交易都是这一下。
-            pending = player.interactionSender().interact(
+            submitted = player.interactionSender().interact(
                     player, ((InteractionTarget.EntityTarget) target).entity(), hand,
                     confirmation, confirmTicks);
         }
+        // 提交入口这一刻不收（上一次动作还没结清）：下一刻原样再点，现场冻结随下一次提交重来。
+        if (submitted == null) {
+            targetStateAtSubmission = null;
+            return ActionStatus.running();
+        }
+        pending = submitted;
         stage = Stage.CONFIRMING;
         return ActionStatus.progressed();
     }

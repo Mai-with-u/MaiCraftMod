@@ -42,7 +42,10 @@ public final class GetsOutOfBed implements Action {
             if (player.interactionSender() == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.INTERNAL_ERROR, "提交不起起床：交互入口没接上", null));
             }
-            pending = player.interactionSender().wakeFromBed(player, NOT_SLEEPING, CONFIRM_TIMEOUT_TICKS);
+            PendingInteraction submitted = player.interactionSender().wakeFromBed(player, NOT_SLEEPING, CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：还在床上多躺一刻，下一刻再发离开床。
+            if (submitted == null) return ActionStatus.running();
+            pending = submitted;
             return ActionStatus.running();
         }
         pending = player.interactionSender().poll(player, pending);

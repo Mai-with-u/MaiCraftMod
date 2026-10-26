@@ -73,6 +73,29 @@ class AimAndInteractTest {
     }
 
     @Test
+    void aBusyInteractionEntranceWaitsInsteadOfFailing() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.ray = hitAt(TARGET);
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.APPLIED);
+        // 提交那一刻交互入口不收（本刻不交回等待记录）：动作留在原地等待，不算失败，也不记提交。
+        sender.busyThisTick = true;
+        assertTrue(runUntilSubmitted(action, context) instanceof ActionStatus.Running);
+        assertTrue(sender.submissions.isEmpty(), "没被收下的提交不留现场");
+        assertNull(action.result());
+
+        // 下一刻入口空出来了：原样再提交一次，按确认走完，全程没有异常把任务掀翻。
+        sender.busyThisTick = false;
+        assertTrue(action.tick(context.asTickContext()) instanceof ActionStatus.Running);
+        assertEquals(1, sender.submissions.size(), "入口空出来后重新提交");
+        sender.nextStatus = PendingInteraction.Status.CONFIRMED_APPLIED;
+        context.advance();
+        assertTrue(action.tick(context.asTickContext()) instanceof ActionStatus.Done);
+        assertEquals(InteractionVerdict.APPLIED, action.result().verdict());
+    }
+
+    @Test
     void aSettledAimThatHitsTheTargetSubmitsAndConfirms() {
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);

@@ -94,7 +94,10 @@ final class BoatRecovery {
             return target == null || target.getDamage() > damage
                     ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
         };
-        pending = context.interactionSender().attack(context, boat, hurt, 20);
+        PendingInteraction submitted = context.interactionSender().attack(context, boat, hurt, 20);
+        // 提交入口这一刻不收（别的动作没结清）：这一刀下一刻再挥，站位与瞄准都在。
+        if (submitted == null) return false;
+        pending = submitted;
         return false;
     }
 

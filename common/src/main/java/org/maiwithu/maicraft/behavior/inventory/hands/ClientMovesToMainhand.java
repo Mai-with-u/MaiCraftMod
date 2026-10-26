@@ -364,7 +364,10 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             }
             // 选中在等确认时只推进，不重复提交新的选中。
             if (selectPending == null) {
-                selectPending = sender.selectHotbar(player, slot, STEP_TIMEOUT_TICKS);
+                PendingInteraction submitted = sender.selectHotbar(player, slot, STEP_TIMEOUT_TICKS);
+                // 提交入口这一刻不收（别的动作没结清）：选格下一刻再发，卡顿计时不清。
+                if (submitted == null) return stalled(player, "一直轮不到出手，选中快捷栏提交不出去");
+                selectPending = submitted;
                 stalledSince = Long.MIN_VALUE;
             } else if (!selectPending.terminal()) {
                 selectPending = sender.poll(player, selectPending);

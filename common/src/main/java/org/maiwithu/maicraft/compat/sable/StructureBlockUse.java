@@ -95,8 +95,11 @@ final class StructureBlockUse implements Action {
         Direction face = Direction.getNearest((float) (localEye.x - center.x), (float) (localEye.y - center.y),
                 (float) (localEye.z - center.z));
         Vec3 hitAt = center.add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-        pending = context.interactionSender().useBlock(context, InteractionHand.MAIN_HAND,
+        PendingInteraction submitted = context.interactionSender().useBlock(context, InteractionHand.MAIN_HAND,
                 new BlockHitResult(hitAt, face, local, false), confirmation, confirmTicks);
+        // 提交入口这一刻不收：下一刻原样再点，站位与瞄准都还在。
+        if (submitted == null) return ActionStatus.running();
+        pending = submitted;
         return ActionStatus.progressed();
     }
 

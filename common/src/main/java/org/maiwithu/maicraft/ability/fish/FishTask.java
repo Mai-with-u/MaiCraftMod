@@ -234,8 +234,11 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         if (cast.castPending == null) {
             if (!landingStillClear(context)) return scrapCast(context, "选中的水面被挡住了", true);
             if (!context.player().canInteractThisTick()) return Next.stay();
-            cast.castPending = context.player().interactionSender().useItem(context.player(), InteractionHand.MAIN_HAND,
+            PendingInteraction submitted = context.player().interactionSender().useItem(context.player(), InteractionHand.MAIN_HAND,
                     new HookConfirmation(services.hooks()::hasHook), CONFIRM_TICKS);
+            // 提交入口这一刻不收：竿下一刻再抛，选好的水面与瞄准都还在。
+            if (submitted == null) return Next.stay();
+            cast.castPending = submitted;
             return Next.stay();
         }
         cast.castPending = context.player().interactionSender().poll(context.player(), cast.castPending);
@@ -280,8 +283,11 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private Next<Phase> reel(TickContext context) {
         if (cast.reelPending == null) {
             if (!context.player().canInteractThisTick()) return Next.stay();
-            cast.reelPending = context.player().interactionSender().useItem(context.player(), InteractionHand.MAIN_HAND,
+            PendingInteraction submitted = context.player().interactionSender().useItem(context.player(), InteractionHand.MAIN_HAND,
                     new HookConfirmation(() -> !services.hooks().hasHook()), CONFIRM_TICKS);
+            // 提交入口这一刻不收：收竿下一刻再发，钩还在水里就还收得回来。
+            if (submitted == null) return Next.stay();
+            cast.reelPending = submitted;
             return Next.stay();
         }
         cast.reelPending = context.player().interactionSender().poll(context.player(), cast.reelPending);

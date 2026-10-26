@@ -233,9 +233,12 @@ final class BoatCrossingLeg implements TravelLeg {
         for (Boat boat : live.level().getEntitiesOfClass(Boat.class, new AABB(plan.launchWater()).inflate(2))) {
             boatsBefore.add(boat.getUUID());
         }
-        boatItemsBefore = countBoatItems(live);
-        pending = live.interactionSender().useItem(live, InteractionHand.MAIN_HAND,
+        PendingInteraction submitted = live.interactionSender().useItem(live, InteractionHand.MAIN_HAND,
                 InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS);
+        // 提交入口这一刻不收：船下一刻再放，现场记账下一刻随真的提交重新来。
+        if (submitted == null) return ActionStatus.running();
+        boatItemsBefore = countBoatItems(live);
+        pending = submitted;
         return ActionStatus.progressed();
     }
 

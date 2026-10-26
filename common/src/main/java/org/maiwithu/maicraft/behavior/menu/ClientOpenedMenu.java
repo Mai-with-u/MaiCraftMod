@@ -118,7 +118,9 @@ public final class ClientOpenedMenu implements OpenedMenu {
         PlayerContext context = contexts.get();
         // 和点格子同一条规矩：本刻没有交互机会、上一下没结清、界面没画好都不发，按"下一刻再试"返回空。
         if (!channel.readyForAction(context)) return Optional.empty();
-        return Optional.of(context.menuActions().submitModAction(context, what, send, confirmation, timeoutTicks));
+        // 提交入口本刻不收时交回 null，同样按"下一刻再试"给空，不把没轮到当成发送失败。
+        return Optional.ofNullable(
+                context.menuActions().submitModAction(context, what, send, confirmation, timeoutTicks));
     }
 
     // 点界面上的按钮（交易界面里点选一条报价）：与模组协议的一下同一条就绪判断，发的是选择报价的包。

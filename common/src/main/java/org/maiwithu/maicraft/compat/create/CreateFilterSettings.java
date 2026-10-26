@@ -233,9 +233,12 @@ final class CreateFilterSettings implements ItemSettings {
         // 原先按持续使用等"开始使用"，界面明明开了也判没打开，还把界面留着没关，人卡在界面里走不动。
         private ActionStatus open(PlayerContext player) {
             if (opening == null) {
-                opening = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
+                PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
                         c -> compat.filterMenuOpen(c.localPlayer()) ? InteractionConfirmation.Verdict.APPLIED
                                 : InteractionConfirmation.Verdict.PENDING, OPEN_TIMEOUT_TICKS);
+                // 提交入口这一刻不收：下一刻原样再点，过滤器还在手上。
+                if (submitted == null) return ActionStatus.running();
+                opening = submitted;
                 return ActionStatus.running();
             }
             if (!opening.terminal()) opening = player.interactionSender().poll(player, opening);

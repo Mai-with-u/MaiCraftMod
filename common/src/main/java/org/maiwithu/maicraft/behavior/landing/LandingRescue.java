@@ -427,14 +427,17 @@ public final class LandingRescue implements CatchesFall {
             return target.aid().cushions(c.level().getBlockState(target.cell())) && consumed
                     ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
         };
-        beforePlacement = context.level().getBlockState(plan.cell());
-        submitted = true;
-        detail = name(plan.aid()) + "放出去了，等游戏确认";
         try {
             var sender = context.interactionSender();
-            pending = plan.aid() == LandingAid.WATER
+            PendingInteraction placed = plan.aid() == LandingAid.WATER
                     ? sender.useItem(context, hand, confirmation, CONFIRM_TIMEOUT_TICKS)
                     : sender.useBlock(context, hand, hit, confirmation, CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：窗口下一刻还开着就原样再放，不算放不出去。
+            if (placed == null) return;
+            beforePlacement = context.level().getBlockState(plan.cell());
+            submitted = true;
+            detail = name(plan.aid()) + "放出去了，等游戏确认";
+            pending = placed;
         } catch (RuntimeException unavailable) {
             fail("放" + name(plan.aid()) + "这一下提交不出去：" + unavailable.getMessage());
         }
