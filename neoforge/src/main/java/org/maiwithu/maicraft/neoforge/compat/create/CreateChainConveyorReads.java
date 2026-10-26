@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.simibubi.create.content.kinetics.chainConveyor.ChainConveyorBlockEntity;
+import com.simibubi.create.foundation.utility.CreateLang;
 import com.simibubi.create.infrastructure.config.AllConfigs;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -13,7 +14,8 @@ import org.maiwithu.maicraft.compat.create.CreateChainConveyors;
 
 /**
  * 读机械动力链条输送机的读写端：已连着的那几台在方块实体的公开字段 connections 上（相对位置，客户端同步过来的），
- * 一条链要几根锁链按方块实体自己的静态算法，最长与最多几条读 Create 的服务器配置。只翻译，不判断。
+ * 一条链要几根锁链按方块实体自己的静态算法，最长与最多几条读 Create 的服务器配置，
+ * 清掉接线起点时说的话取 Create 自己的语言条目。只翻译，不判断。
  */
 public final class CreateChainConveyorReads implements CreateChainConveyors {
 
@@ -34,5 +36,10 @@ public final class CreateChainConveyorReads implements CreateChainConveyors {
 
     @Override public int maxConnections() {
         return AllConfigs.server().kinetics.maxChainConveyorConnections.get();
+    }
+
+    // 手持锁链潜行按右键清掉起点时，ChainConveyorConnectionHandler 发到动作栏的就是这一条。
+    @Override public String selectionClearedText() {
+        return CreateLang.translateDirect("chain_conveyor.selection_cleared").getString();
     }
 }

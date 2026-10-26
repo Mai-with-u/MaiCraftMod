@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
@@ -101,6 +102,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private final List<MachineBuildDetails.SettingResult> settingResults = new ArrayList<>();
     /** 正在装的一段、一个部件或正在改的一条：动作与子任务收场后按它核对记账。 */
     private MachineBlueprint.Segment installing;
+    /** 装这一段的动作：收场时把它顺手做成的事（清掉手上记着的接线起点）并进变化。 */
+    private Action laying;
     private MachineBlueprint.Part mounting;
     private MachineBlueprint.Setting configuring;
     private BlueprintCheck.Result check;
@@ -211,18 +214,24 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         }
         // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。
         for (MachineType type : services.machineTypes()) {
-            Optional<Action> laying = type.install(installation, input.permissions());
-            if (laying.isEmpty()) {
+            Optional<Action> offered = type.install(installation, input.permissions());
+            if (offered.isEmpty()) {
                 continue;
             }
-            prepared = laying.get();
+            prepared = offered.get();
+            laying = prepared;
             return Next.go(Phase.INSTALL, "装 " + next.kind() + " 这一段");
         }
         return segmentFinished(noTypeFor(installation.kind()));
     }
 
-    // 一段收场：装没装成以机器类型按最终结构核对的结论为准，动作的失败原因带在说明里。
+    // 一段收场：装没装成以机器类型按最终结构核对的结论为准，动作的失败原因带在说明里；
+    // 装的动作顺手做成的事（清掉手上记着的接线起点）照实记进变化。
     private Next<Phase> segmentFinished(String why) {
+        if (laying instanceof InstallReport report) {
+            report.changes().forEach(this::recordChange);
+        }
+        laying = null;
         Installation installation = absolute(installing);
         boolean done = typeInstalled(installation).isPresent();
         segmentResults.add(new MachineBuildDetails.SegmentResult(installing.kind(),

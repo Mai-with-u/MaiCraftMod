@@ -27,4 +27,12 @@ public interface CreateChainConveyors {
 
     /** 服务器配置里一台链条输送机最多连几条。 */
     int maxConnections();
+
+    /**
+     * 手上锁链记着的接线起点被清掉时，Create 在动作栏说的那句话（当前语言，例如"选区已清除"）。
+     * 起点只记在客户端、读不到，清没清掉只能看它说没说这句；读写端没接上给空串。
+     */
+    default String selectionClearedText() {
+        return "";
+    }
 }

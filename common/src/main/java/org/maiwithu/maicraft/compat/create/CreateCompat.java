@@ -284,6 +284,11 @@ public final class CreateCompat extends CompatModule {
         return call("读链条输送机最多连几条", chains::maxConnections);
     }
 
+    /** 清掉接线起点时 Create 说的那句话；见 {@link CreateChainConveyors#selectionClearedText}。 */
+    public String chainSelectionClearedText() {
+        return call("读清掉接线起点时的提示", chains::selectionClearedText);
+    }
+
     /** 置物台上的东西；见 {@link CreateStations#depotItems}。 */
     public Optional<List<ItemStack>> depotItems(ClientLevel level, BlockPos at) {
         return call("读置物台上的东西", () -> stations.depotItems(level, at));

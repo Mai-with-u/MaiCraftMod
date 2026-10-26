@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -36,8 +37,9 @@ import org.maiwithu.maicraft.compat.StepsInOrder;
  *
  * <p>形状规则按 Create 自己的：两台距离小于服务器配置的最长长度、不近于两格半，不能竖直连，坡度不超过一比一。
  * 第一下没有看得见的痕迹，只有第二下之后两台上都出现这条连接才算装上；第二下没出现就如实交回，不再重点。
- * Create 记着的起点不会因为角色放下锁链而清掉：上一回点了第一台没点第二台，这一回的第一下就成了第二下。
- * 所以第一下前后比一比第一台的连接，多出一条就是连上了残留的起点，如实交回连错了哪两台，不接着点第二台。
+ * Create 记着的起点不会因为角色放下锁链、空手、换手而清掉：上一回点了第一台没点第二台，这一回的第一下就成了第二下。
+ * 所以点第一台之前先清一次起点（手持锁链潜行对空处真按一下使用键），点过第一台没连成再清一次；
+ * 清不掉的也有兜底：第一下前后比一比第一台的连接，多出一条就是连上了残留的起点，如实交回连错了哪两台，不接着点第二台。
  */
 final class ChainConveyorInstallation implements CreateInstallation {
 
@@ -98,20 +100,68 @@ final class ChainConveyorInstallation implements CreateInstallation {
         BlockPos from = installation.cells().get(0);
         BlockPos to = installation.cells().get(1);
         int chains = compat.chainCost(to.subtract(from));
+        String label = "连链条 " + from.toShortString() + " → " + to.toShortString();
         // 第一下之前第一台已有的连接：第一下之后多出来的就是连上了上一回残留的起点。
         Set<BlockPos> before = new HashSet<>();
-        // 拿够锁链（创造模式也要手里有一根）→ 点第一台 → 核对第一下没连上别的 → 点第二台；
-        // 第二下之后两台都记下这条连接才算装上。
-        return new StepsInOrder("连链条 " + from.toShortString() + " → " + to.toShortString(), List.of(
-                new StepsInOrder.Step("拿 " + chains + " 根锁链", () -> services.needs().actionFor(
-                        new ItemRequest(WantedItem.ofItem(CHAIN), chains, "连链条输送机"), permissions)),
-                new StepsInOrder.Step("点第一台", () -> {
-                    before.clear();
-                    before.addAll(linksOf(from));
-                    return clickFirst(from, permissions);
-                }),
-                new StepsInOrder.Step("核对第一下没连上别的", () -> new StaleLinkCheck(from, before)),
-                new StepsInOrder.Step("点第二台", () -> clickSecond(installation, permissions))));
+        // 拿够锁链（创造模式也要手里有一根）→ 先清掉上一回残留的起点 → 点第一台 → 核对第一下没连上别的 → 点第二台；
+        // 第二下之后两台都记下这条连接才算装上；点过第一台没连成，再清一次起点。
+        return new ChainLinkRun(label, from,
+                () -> services.needs().actionFor(new ItemRequest(WantedItem.ofItem(CHAIN), chains, "连链条输送机"),
+                        permissions),
+                this::clearStart,
+                firstClicked -> new StepsInOrder(label, List.of(
+                        new StepsInOrder.Step("点第一台", () -> {
+                            before.clear();
+                            before.addAll(linksOf(from));
+                            return clickFirst(from, permissions);
+                        }),
+                        new StepsInOrder.Step("核对第一下没连上别的", () -> {
+                            firstClicked.run();
+                            return new StaleLinkCheck(from, before);
+                        }),
+                        new StepsInOrder.Step("点第二台", () -> clickSecond(installation, permissions)))));
+    }
+
+    /**
+     * 清掉手上锁链记着的接线起点：锁链换到主手 → 潜行着对空处真按一下使用键。Create 只在手持锁链、按的是使用键时
+     * 清起点（直接提交的右键不经按键事件，清不掉），潜行时对着哪都清；对空处按，起点本来没有也不会把锁链放下去。
+     * 身上一根锁链都没有就清不了。
+     */
+    private Action clearStart() {
+        String cleared = compat.chainSelectionClearedText();
+        if (cleared.isEmpty()) {
+            return SchematicTableRun.failing(Problem.of(Problem.Kind.UNSUPPORTED, "读不到 Create 清掉起点时说的话，看不出清没清掉"));
+        }
+        return new StepsInOrder("清掉手上锁链记着的接线起点", List.of(
+                new StepsInOrder.Step("把锁链换到主手", () -> holdingChain() ? null
+                        : services.toMainhand().moveToMainhand(CHAIN).orElseGet(() -> SchematicTableRun.failing(
+                                Problem.of(Problem.Kind.NEED_ITEM, "身上没有锁链：Create 只认手持锁链按使用键清起点")))),
+                new StepsInOrder.Step("潜行对空处按一下使用键", () -> services.sneak().sneaking(
+                        services.interactions().pressUseKeyIntoAir(clearedSaid(cleared))))));
+    }
+
+    /**
+     * Create 在动作栏说"选区已清除"才算清掉：按之前先记下动作栏上那一条，按后冒出更新的、正是这句才算；
+     * 半秒没说就是手上本来没记着起点，确认窗到期按没生效交代。
+     */
+    private static InteractionConfirmation clearedSaid(String cleared) {
+        OverlayMessages overlay = new OverlayMessages();
+        OverlayMessages.Shown before = overlay.shown();
+        return new InteractionConfirmation() {
+            @Override public Verdict observe(PlayerContext context) {
+                OverlayMessages.Shown now = overlay.shown();
+                return now != null && now.text().equals(cleared) && now.newerThan(before)
+                        ? Verdict.APPLIED : Verdict.PENDING;
+            }
+
+            @Override public int stableTicksRequired() {
+                return 1;
+            }
+
+            @Override public boolean expiryMeansNotApplied() {
+                return true;
+            }
+        };
     }
 
     @Override public boolean installed(ClientLevel level, Installation installation) {
@@ -179,7 +229,7 @@ final class ChainConveyorInstallation implements CreateInstallation {
             if (!extra.isEmpty()) {
                 String others = String.join("、", extra.stream().map(BlockPos::toShortString).toList());
                 return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "点第一台 " + from.toShortString()
-                        + " 时它和 " + others + " 连上了：Create 还记着上一回没连完的起点，这一下成了第二下",
+                        + " 时它和 " + others + " 连上了：Create 还记着上一回没连完的起点（连之前没清掉），这一下成了第二下",
                         "多出来的那条链用扳手潜行右键拆掉，再重新连"));
             }
             return ++waited >= LINK_SYNC_TICKS ? ActionStatus.done() : ActionStatus.running();
@@ -191,13 +241,13 @@ final class ChainConveyorInstallation implements CreateInstallation {
     }
 
     private Optional<Action> chainToHand() {
+        return holdingChain() ? Optional.empty() : services.toMainhand().moveToMainhand(CHAIN);
+    }
+
+    private boolean holdingChain() {
         PlayerContext current = services.context().get();
-        if (current != null && current.localPlayer() != null) {
-            ItemStack held = current.localPlayer().getMainHandItem();
-            if (!held.isEmpty() && BuiltInRegistries.ITEM.getKey(held.getItem()).toString().equals(CHAIN)) {
-                return Optional.empty();
-            }
-        }
-        return services.toMainhand().moveToMainhand(CHAIN);
+        if (current == null || current.localPlayer() == null) return false;
+        ItemStack held = current.localPlayer().getMainHandItem();
+        return !held.isEmpty() && BuiltInRegistries.ITEM.getKey(held.getItem()).toString().equals(CHAIN);
     }
 }

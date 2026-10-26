@@ -6,6 +6,8 @@ import java.util.Objects;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
+import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -26,10 +28,29 @@ class CompatAction implements Action {
         this.action = Objects.requireNonNull(action, "action");
     }
 
-    /** 包一层；投料动作带着投料实情（扔进去几件、没进去的在哪）的，包出来的这一层照样交得出实情。 */
+    /**
+     * 包一层；投料动作带着投料实情（扔进去几件、没进去的在哪）的、装安装段的动作带着附带变化的，
+     * 包出来的这一层照样交得出来。
+     */
     static CompatAction of(CompatModule module, Action action) {
-        return action instanceof FeedReport report ? new Reporting(module, action, report)
-                : new CompatAction(module, action);
+        if (action instanceof FeedReport report) return new Reporting(module, action, report);
+        if (action instanceof InstallReport report) return new Installing(module, action, report);
+        return new CompatAction(module, action);
+    }
+
+    /** 带附带变化的安装段动作：变化照转；读的是动作自己记下的，不碰模组。 */
+    private static final class Installing extends CompatAction implements InstallReport {
+
+        private final InstallReport report;
+
+        Installing(CompatModule module, Action action, InstallReport report) {
+            super(module, action);
+            this.report = report;
+        }
+
+        @Override public List<Change> changes() {
+            return report.changes();
+        }
     }
 
     /** 机器从头做到尾的一次运行包一层：做出几件、做全没有、说明照转。 */

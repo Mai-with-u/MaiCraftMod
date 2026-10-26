@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
@@ -50,6 +51,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -337,6 +339,35 @@ Rig rig = new Rig(tempDir);
         MachineBuildDetails details = (MachineBuildDetails) result.details();
         assertFalse(details.installations().get(0).installed());
         assertTrue(details.installations().get(0).note().contains("没有机器类型认"), result.summary());
+    }
+
+    @Test
+    void 装安装段顺手做成的事_没装成也照实记进变化() {
+        // 连链条没连成，但清掉了手上锁链记着的接线起点：这笔变化随施工结果交出去。
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment segment = new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(0, 1, 0)));
+        MachineBlueprint plan = blueprint(null, segment, null);
+        rig.type.installationOk = installation -> true;
+        Change cleared = new Change(Change.Kind.OTHER, "test:belt", 1, "清掉了手上记着的接线起点");
+        rig.type.installActions.add(new ReportingInstall(cleared));
+        TaskResult result = rig.run(buildInput(plan, null, "压机"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(result.changes().contains(cleared), result.changes().toString());
+    }
+
+    /** 一刻失败、交得出附带变化的安装段动作替身。 */
+    private record ReportingInstall(Change change) implements Action, InstallReport {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "第二下没连上"));
+        }
+
+        @Override public List<Change> changes() {
+            return List.of(change);
+        }
+
+        @Override public String describe() {
+            return "交得出附带变化的安装段替身";
+        }
     }
 
     @Test
