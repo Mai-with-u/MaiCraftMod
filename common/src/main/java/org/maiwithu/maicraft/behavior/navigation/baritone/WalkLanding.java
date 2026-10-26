@@ -10,6 +10,8 @@ import java.util.function.Predicate;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.landing.BoatPlan;
 import org.maiwithu.maicraft.behavior.landing.BoatRescue;
@@ -17,6 +19,7 @@ import org.maiwithu.maicraft.behavior.landing.CatchesFall;
 import org.maiwithu.maicraft.behavior.landing.EmergencyLanding;
 import org.maiwithu.maicraft.behavior.landing.LandingPlan;
 import org.maiwithu.maicraft.behavior.landing.LandingRescue;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 
@@ -120,11 +123,21 @@ final class WalkLanding {
         return cell -> NavigationProtection.protects(cell, player.level().getBlockState(cell));
     }
 
+    /**
+     * 人此刻站在这一格上：按寻路的脚位算，和引擎判这一步从哪出发是同一个口径。站在灵魂沙、耕地、土径、下半砖、
+     * 楼梯低的一级上时人的 y 比这一格低一点，向下取整会读成下面那块方块，于是站在出发点上也认不出来。
+     */
+    static boolean standsAt(BlockGetter level, Vec3 position, BlockPos cell) {
+        return BlockPassability.playerFeet(level, position.x, position.y, position.z).equals(cell);
+    }
+
     // 有计划的一跳：路线当前这一步是下落、人站在出发点上、这一跳会摔伤又有落地办法。
+    // 出发点按寻路脚位认：灵魂沙、半砖边上起跳也先站定备好水桶、船或喷气背包，不直接跳下去等半空再救。
     // 走着走着意外掉下去、会掉血：就地找落点，空中边掉边备。
     private boolean start(PlayerContext context, LocalPlayer player, PathingBehavior pathing) {
         MovementFall fall = currentFall(pathing);
-        if (fall != null && fall != checkedFall && player.onGround() && player.blockPosition().equals(fall.getSrc())) {
+        if (fall != null && fall != checkedFall && player.onGround()
+                && standsAt(player.level(), player.position(), fall.getSrc())) {
             checkedFall = fall;
             // 穿着有气的喷气背包：这一跳开悬停刹住落下去，不从背包里翻水桶。翻水桶要开背包，
             // 实机 10-14 换水桶时被僵尸打断，背包开了又关、自卫和走路来回抢，最后站在崖边被打死。
