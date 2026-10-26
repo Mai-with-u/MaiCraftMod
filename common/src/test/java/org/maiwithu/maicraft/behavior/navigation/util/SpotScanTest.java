@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -42,7 +43,7 @@ class SpotScanTest {
     @Test
     void columnScanStepsOverColumns() {
         // 隔两列看一列：只有 x 是偶数的柱被看，大片落脚处不用每柱都跑。
-        List<Integer> seenX = new java.util.ArrayList<>();
+        List<Integer> seenX = new ArrayList<>();
         SpotScan.columns(-4, 0, 4, 0, 2,
                 (x, z) -> {
                     seenX.add(x);
@@ -71,7 +72,7 @@ class SpotScanTest {
     @Test
     void inColumnStopsAtTheFirstStandable() {
         // 同高就能站时不再往下翻：先到先停。
-        List<BlockPos> tried = new java.util.ArrayList<>();
+        List<BlockPos> tried = new ArrayList<>();
         Optional<BlockPos> hit = SpotScan.inColumn(new BlockPos(0, 64, 0), 4, pos -> {
             tried.add(pos);
             return pos.getY() == 64;

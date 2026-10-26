@@ -86,7 +86,7 @@ final class FishingSpot {
                     ? new Search.NoLandingFromHere(feet, LANDING_RADIUS, LANDING_VERTICAL)
                     : new Search.NoVisibleWater(STANCE_RADIUS, WATER_PROBE_VERTICAL);
         }
-        // 这一段不走环扫内核：候选个数有预算（数满就停），同一次扫还要顺手记下"圈内有没有水"这个旁证，
+        // 这一段不走环扫内核：候选个数有预算（数满就停），同一次扫还要顺手记下"圈内有没有水"这个结论，
         // 两个结论必须出自同一次扫描，单谓词的整圈扫描表达不了。
         List<BlockPos> stances = new ArrayList<>();
         int checked = 0;
