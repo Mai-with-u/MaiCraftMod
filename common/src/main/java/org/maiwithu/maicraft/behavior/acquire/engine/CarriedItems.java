@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 
 /**
  * 身上清点：主背包加副手里，有多少件是这次要的东西。
- * "身上有多少"这一条游戏事实全仓只有这一处数法，引擎重新清点与身上来源报价都用它。
+ * "身上有多少"这一条游戏事实全仓只有这一处数法，引擎重新清点与各能力看身上够不够都用它。
  */
 public final class CarriedItems {
 
