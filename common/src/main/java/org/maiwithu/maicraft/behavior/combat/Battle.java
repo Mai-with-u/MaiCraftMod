@@ -39,8 +39,6 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public final class Battle {
 
-    /** 有弓时走近到射程边上再往里留这么多格，到了就射。 */
-    private static final double BOW_APPROACH_MARGIN = 3.0;
     private static final Logger LOG = LoggerFactory.getLogger(Battle.class);
 
     /** 这一刻在做什么。 */
@@ -194,7 +192,7 @@ public final class Battle {
             case Tactic.EvadeBlast evade -> evade(context, field, evade.bomb());
             case Tactic.Withdraw withdraw -> withdraw(context, field, withdraw.why());
             case Tactic.PillarUp pillarUp -> pillarUp(context, field, pillarUp.why());
-            case Tactic.Melee melee -> melee(context, field, melee.target());
+            case Tactic.Melee melee -> melee(context, field, melee.target(), melee.approach());
             case Tactic.Shoot shoot -> shoot(context, field, shoot.target());
             case Tactic.KeepClear keep -> keepClear(context, field, keep.why());
             case Tactic.Finished finished -> finish();
@@ -377,7 +375,8 @@ public final class Battle {
     }
 
     // 近身打：手够得着就挥；脚近处按距离带挑步，远处交给寻路（带子 + 绕开每只怪）。
-    private Moment melee(TickContext context, Battlefield field, Battlefield.Foe target) {
+    // 苦力怕怎么走近打法定了（approach），这里只照着带走、守在点火距离外。
+    private Moment melee(TickContext context, Battlefield field, Battlefield.Foe target, Tactic.Approach approach) {
         if (bow.shooting()) bow.close();
         retarget(target.id());
         Battlefield.Me me = field.me();
@@ -430,7 +429,7 @@ public final class Battle {
             else moves.step(context, target.id(), step);
             moved = !step.standing() || jumpNow;
         } else if (threat.kind() == ThreatAssessment.Kind.EXPLOSIVE) {
-            moved = creeperFootwork(context, field, me, target, threat);
+            moved = creeperFootwork(context, field, me, target, threat, approach);
         } else {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
@@ -561,26 +560,20 @@ public final class Battle {
         return threats;
     }
 
-    // 苦力怕的走位：有弓、看得见、在射程外就走近到射程里；否则不寻路凑过去，守在点火距离外等它走过来。
-    // 返回这一刻脚动了没有。
+    // 苦力怕的走位，怎么接近打法定了：走到射程带里再射，或守在点火距离外等它走过来。返回这一刻脚动了没有。
     private boolean creeperFootwork(TickContext context, Battlefield field, Battlefield.Me me, Battlefield.Foe target,
-                                    CombatSenses.Threat threat) {
+                                    CombatSenses.Threat threat, Tactic.Approach approach) {
         boolean moved;
-        if (me.canShoot() && threat.visible()
-                && threat.distance() > RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN) {
-            // 有弓、看得见、在射程外的苦力怕：走近到射程里再射，不当成够不着。走近只到射程边上，离它点火距离远着呢。
-            // 实机 10-14 点名一只三十多格外、高两三格的苦力怕，身上有弓有箭，原地就以"走不到跟前也射不到"收场。
+        if (approach instanceof Tactic.WalkIntoRange walk) {
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
             moved = limbs.follow(context, "走近射 " + target.id(), threat.x(), threat.z(),
-                    () -> GoalCompiler.approachAvoiding(
-                            GoalCompiler.band(focus, RangedCombat.ENGAGE_RANGE - 2 * BOW_APPROACH_MARGIN,
-                                    RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN), threats));
+                    () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, walk.band().inner(),
+                            walk.band().outer()), threats));
             if (limbs.lastWalkFailed()) cannotWalkTo(target.id());
         } else {
-            // 苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）：不寻路凑过去——绕路、搭桥时人慢，
-            // 它一贴近就点火，实机就是潜行着往苦力怕那边挪被炸。原地守在它的点火距离外，等它走到平地跟前再砍；
-            // 看不见或不在同一层的记成够不着，它真贴上来自卫会再接手。
+            // 守在它的点火距离外：苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）不寻路凑过去——
+            // 绕路、搭桥时人慢，它一贴近就点火。原地守着等它走到平地跟前再砍。
             limbs.dropWalk();
             List<Footwork.Hazard> hazards = sideHazards(field, target.id(), SIDE_MARGIN);
             hazards.add(new Footwork.Hazard(threat.x(), threat.z(), CombatGeometry.CREEPER_IGNITE + SIDE_MARGIN));
@@ -588,7 +581,7 @@ public final class Battle {
                     moves.ground(context));
             moves.step(context, target.id(), step);
             moved = !step.standing();
-            if (!threat.visible() || Math.abs(threat.y() - me.y()) > LEVEL_GAP) cannotWalkTo(target.id());
+            if (approach instanceof Tactic.HoldOutsideIgnite hold && hold.unreachable()) cannotWalkTo(target.id());
         }
         return moved;
     }

@@ -48,6 +48,10 @@ class BattleTest {
             return attackers;
         }
 
+        @Override public Optional<Threat> living(TickContext context, int entityId) {
+            return threats.stream().filter(threat -> threat.entityId() == entityId).findFirst();
+        }
+
         @Override public CombatProfile profile(TickContext context) {
             return new CombatProfile(health, 0, Optional.of(new WeaponChoice.Picked("minecraft:iron_sword",
                     WeaponChoice.Weapon.MELEE)), 4);
@@ -187,6 +191,17 @@ class BattleTest {
 
     /** 自卫的名单：追我的都打。 */
     private static final Battlefield.Roster ANYONE_AFTER_ME = (threat, attacker, chasing) -> chasing;
+
+    /** 点名的名单：编号 9 那只要打，哪怕不在敌对列表、不在追。 */
+    private static final Battlefield.Roster NAMED_ID_NINE = new Battlefield.Roster() {
+        @Override public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
+            return false;
+        }
+
+        @Override public List<Integer> namedIds() {
+            return List.of(9);
+        }
+    };
 
     private static Battle battle(Senses senses, Moves moves) {
         return new Battle(senses, moves, ANYONE_AFTER_ME, ThreatAssessment.VIGILANCE_RADIUS);
@@ -492,6 +507,21 @@ class BattleTest {
         senses.threats.clear();
         assertEquals(Battle.State.FINISHED, fight.tick(new Tick(1)).state());
         assertFalse(fight.retreating());
+    }
+
+    @Test
+    void walksIntoTheShootingBandForANamedFarCreeper() {
+        // 点名一只三十格外、看得见的苦力怕，身上有弓有箭：走近到射程带里再射，不原地以"走不到跟前也射不到"收场。
+        Senses senses = new Senses();
+        senses.threats.add(creeper(30, false));
+        Moves moves = new Moves();
+        moves.bow = true;
+        Battle fight = new Battle(senses, moves, NAMED_ID_NINE, ThreatAssessment.VIGILANCE_RADIUS);
+        Battle.Moment moment = fight.tick(new Tick(0));
+        assertEquals(Battle.State.FIGHTING, moment.state());
+        assertEquals(1, moves.walks.size(), "走近去射，不当走不到");
+        assertEquals(30, moves.walks.get(0).goal().center().getX(), "寻路跟着那只苦力怕走");
+        assertFalse(fight.unreachable().contains(9), "还没走就别记走不到");
     }
 
     /** 在东边 x 格处的僵尸：看不看得见、亮没亮攻击标记由调用方定。 */

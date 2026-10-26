@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.util.List;
@@ -22,7 +25,14 @@ class TacticTest {
     }
 
     private static Battlefield.Foe creeper(int id, double distance, boolean armed) {
-        return foe(id, distance, ThreatAssessment.Kind.EXPLOSIVE, armed, true);
+        return creeper(id, distance, armed, true, 64);
+    }
+
+    /** 苦力怕：看不看得见、站多高由调用方定（差着一层以上就是隔着坑、在高处）。 */
+    private static Battlefield.Foe creeper(int id, double distance, boolean armed, boolean visible, double y) {
+        CombatSenses.Threat threat = new CombatSenses.Threat(id, UUID.randomUUID(), "x", distance, y, 0,
+                distance, ThreatAssessment.Kind.EXPLOSIVE, armed, visible, true);
+        return new Battlefield.Foe(threat, true, false, true, false);
     }
 
     private static Battlefield.Foe foe(int id, double distance, ThreatAssessment.Kind kind, boolean armed,
@@ -148,6 +158,32 @@ class TacticTest {
     @Test
     void finishedWhenNothingLeft() {
         assertInstanceOf(Tactic.Finished.class, decide(me(20, true, false), Tactic.Memory.FRESH));
+    }
+
+    @Test
+    void decidesHowToApproachACreeper() {
+        // 有弓、看得见、在射程外：寻路走到射程带里再射，带子内沿 14、外沿 17（射程 20 往里留三格）。
+        Tactic.Melee far = assertInstanceOf(Tactic.Melee.class,
+                decide(me(20, true, true), Tactic.Memory.FRESH, creeper(1, 25, false)));
+        Tactic.WalkIntoRange walk = assertInstanceOf(Tactic.WalkIntoRange.class, far.approach());
+        assertEquals(RangedCombat.ENGAGE_RANGE - 2 * Tactic.BOW_APPROACH_MARGIN, walk.band().inner(), 1e-9);
+        assertEquals(RangedCombat.ENGAGE_RANGE - Tactic.BOW_APPROACH_MARGIN, walk.band().outer(), 1e-9);
+        // 没弓、看得见、同一层：守在点火距离外等它走过来，不当走不到。
+        Tactic.Melee hold = assertInstanceOf(Tactic.Melee.class,
+                decide(me(20, true, false), Tactic.Memory.FRESH, creeper(1, 5, false)));
+        assertFalse(assertInstanceOf(Tactic.HoldOutsideIgnite.class, hold.approach()).unreachable(),
+                "看得见、同一层：守着，不记走不到");
+        // 隔着坑（差着一层以上）或看不见：守在外头，当场记成走不到。
+        Tactic.Melee pit = assertInstanceOf(Tactic.Melee.class,
+                decide(me(20, true, false), Tactic.Memory.FRESH, creeper(1, 5, false, true, 66)));
+        assertTrue(assertInstanceOf(Tactic.HoldOutsideIgnite.class, pit.approach()).unreachable(),
+                "差着高凑不过去：记走不到");
+        Tactic.Melee blind = assertInstanceOf(Tactic.Melee.class,
+                decide(me(20, true, false), Tactic.Memory.FRESH, creeper(1, 5, false, false, 64)));
+        assertTrue(assertInstanceOf(Tactic.HoldOutsideIgnite.class, blind.approach()).unreachable(),
+                "看不见：记走不到");
+        // 不是苦力怕：脚怎么走仍由引擎按近身的距离带定，打法不带接近方式。
+        assertNull(((Tactic.Melee) decide(me(20, true, false), Tactic.Memory.FRESH, zombie(1, 5))).approach());
     }
 
     private static int target(Tactic.Plan plan) {

@@ -28,6 +28,8 @@ public final class Tactic {
 
     /** 这么近、看得见的没点引信的苦力怕最急：等它膨胀再反应就来不及躲。 */
     static final double URGENT_CREEPER = ThreatAssessment.CREEPER_ALERT_RADIUS;
+    /** 有弓时走近到射程边上再往里留这么多格：走近只到这条射程带里，离苦力怕的点火距离还远着。 */
+    static final double BOW_APPROACH_MARGIN = 3.0;
 
     private Tactic() {}
 
@@ -46,8 +48,23 @@ public final class Tactic {
     /** 就地垫高三格自保，附上为什么。 */
     public record PillarUp(String why) implements Plan {}
 
-    /** 近身打这只。 */
-    public record Melee(Battlefield.Foe target) implements Plan {}
+    /**
+     * 近身打这只。会炸的（苦力怕）脚怎么走近也由打法说定（approach）：走近到哪条带、守在点火距离外还是当场
+     * 记成走不到，都由它回答，引擎只照着做；其余对手 approach 为空，按引擎的近身距离带走。
+     */
+    public record Melee(Battlefield.Foe target, Approach approach) implements Plan {}
+
+    /** 苦力怕怎么接近：打法定，引擎照做。 */
+    public sealed interface Approach permits WalkIntoRange, HoldOutsideIgnite {}
+
+    /** 有弓、看得见、在射程外：寻路走到这条射程带里再射，不当成够不着。 */
+    public record WalkIntoRange(Footwork.Band band) implements Approach {}
+
+    /**
+     * 凑不过去（没弓、已经进了射程带、隔坑差高）：守在它的点火距离外等它走到平地跟前；
+     * 看不见或不在同一层的当场记成走不到，它真贴上来自卫会再接手。
+     */
+    public record HoldOutsideIgnite(boolean unreachable) implements Approach {}
 
     /** 射这只。 */
     public record Shoot(Battlefield.Foe target) implements Plan {}
@@ -147,7 +164,23 @@ public final class Tactic {
             return pressed ? new KeepClear("没有能打的，先避开追兵") : new Finished();
         }
         // 5 打法。
-        return shoots(me, memory, target) ? new Shoot(target) : new Melee(target);
+        return shoots(me, memory, target) ? new Shoot(target) : new Melee(target, approach(me, target));
+    }
+
+    // 苦力怕怎么接近（其余对手返回 null，走引擎的近身距离带）：有弓、看得见、在射程带外就寻路走到带里再射——
+    // 走近只到射程边上，离它的点火距离远着；凑不过去（没弓、已经进了射程带、隔坑差高看不见）就守在点火距离外
+    // 等它走到平地跟前，看不见或不在同一层的当场记成走不到，它真贴上来自卫会再接手。
+    private static Approach approach(Battlefield.Me me, Battlefield.Foe target) {
+        if (target.threat().kind() != ThreatAssessment.Kind.EXPLOSIVE) return null;
+        CombatSenses.Threat threat = target.threat();
+        if (me.canShoot() && threat.visible()
+                && threat.distance() > RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN) {
+            // 点名一只三十多格外的苦力怕时也在射程带里留着走，不原地以"走不到跟前也射不到"收场。
+            return new WalkIntoRange(new Footwork.Band(threat.x(), threat.z(),
+                    RangedCombat.ENGAGE_RANGE - 2 * BOW_APPROACH_MARGIN,
+                    RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN));
+        }
+        return new HoldOutsideIgnite(!threat.visible() || Math.abs(threat.y() - me.y()) > CombatGeometry.LEVEL_GAP);
     }
 
     // 两只以上会还手的追兵、照威胁评估打不过（按人数、种类和自己的血、甲、武器、口粮算）。
