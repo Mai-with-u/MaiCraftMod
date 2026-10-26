@@ -68,11 +68,14 @@ final class SideSettings {
         };
     }
 
-    /** 侧面配置换成进出口：每一面每种介质不是 none 的都算一个，模式名写进说明。 */
+    /**
+     * 侧面配置换成进出口：每一面每种介质不是 none 的都算一个，模式名写进说明。
+     * 热不算：热是导热管传的，线缆接到热的那一面送不进电，不能当能量面去接线；热的侧面配置照样写在运行读数里。
+     */
     static List<ExchangePoint> points(MekanismReads.SideConfig config, BlockPos at) {
         List<ExchangePoint> points = new ArrayList<>();
         config.sides().forEach((medium, sides) -> sides.forEach((side, mode) -> {
-            if (mode.equals("none")) return;
+            if (mode.equals("none") || medium.equals("heat")) return;
             points.add(new ExchangePoint(at, side, mediumOf(medium), flowOf(mode),
                     "侧面配置：" + mediumName(medium) + " " + mode));
         }));

@@ -10,6 +10,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
@@ -43,6 +44,9 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     /** 认两端 → 没给来源就扫一片找 → 核对 → 规划线路 → 施工 → 再核对。 */
     enum Phase { RESOLVE, FIND_SOURCE, VERDICT, PLAN, BUILD, CHECK }
 
+    /** 铺完再核对时最多等几刻：新放的线材要过几刻服务器才算好连接、同步给客户端，读早了会把接上的读成没接上。 */
+    static final int SETTLE_TICKS = 60;
+
     private final MachineConnectInput input;
     private final MachineServices services;
     private final MachineArchives archives;
@@ -63,6 +67,8 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     private RoutePlanner.Plan route;
     /** 铺线路那一段交给的施工子任务，包成动作推进；没走到施工为 null。 */
     private ChildTaskAction child;
+    /** 铺完开始再核对的那一刻；还没开始为 -1。 */
+    private long checkingSince = -1;
 
     /** @param lineBuilding 线路写成的机器施工输入怎么建成任务：平时是按蓝图施工的同一套任务，离线测试换成替身 */
     MachineConnectTask(MachineConnectInput input, MachineServices services, MachineArchives archives,
@@ -100,7 +106,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
             case VERDICT -> verdict();
             case PLAN -> plan();
             case BUILD -> build(context);
-            case CHECK -> check();
+            case CHECK -> check(context);
         };
     }
 
@@ -159,7 +165,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         Optional<LineMaterials> materials = reader.lineMaterials();
         if (materials.isPresent()) {
             for (BlockPos cell : cells) {
-                if (!routes.attaches(List.of(cell), materials.get()).isEmpty()) return cell;
+                if (!routes.attaches(List.of(cell), materials.get(), ExchangePoint.Flow.INPUT).isEmpty()) return cell;
             }
         }
         return input.archive().anchor();
@@ -251,12 +257,14 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
     }
 
     // 规划：来源网里同网的格都能当起点，已有的链条输送机这类能当跨越的一头；目标的接线面是终点。
+    // 来源挑往外送的面、目标挑往里收的面：电从能量立方的出口面出来、送进机器收电的那一面。
     private Next<Phase> plan() {
         LineMaterials materials = reader.lineMaterials().orElseThrow();
         List<BlockPos> sourceCells = sourceNetworkCells();
         List<BlockPos> targetCells = input.archive() != null ? LineRoutes.cellsOf(input.archive()) : List.of(targetCell);
-        RoutePlanner.Result result = RoutePlanner.plan(routes.attaches(sourceCells, materials),
-                routes.spanEnds(sourceCells, materials), routes.attaches(targetCells, materials), materials,
+        RoutePlanner.Result result = RoutePlanner.plan(routes.attaches(sourceCells, materials, ExchangePoint.Flow.OUTPUT),
+                routes.spanEnds(sourceCells, materials),
+                routes.attaches(targetCells, materials, ExchangePoint.Flow.INPUT), materials,
                 routes.ground(), routes.spanAllowed(materials, input.archive()));
         if (result instanceof RoutePlanner.NotFound notFound) {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, notFound.why() + "（" + where() + "）",
@@ -300,11 +308,18 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         return Next.go(Phase.CHECK, "线路铺完，核对两端");
     }
 
-    // 再核对：同一张网了就算接上（转不转照实说）；铺完还不同网就按部分完成交代，已放的线材不拆。
-    private Next<Phase> check() {
+    // 再核对：同一张网了就算接上（转不转照实说）。还不同网时等一小会儿再看：新放的线材要过几刻服务器才算好连接、
+    // 同步给客户端；等够了还不同网就按部分完成交代，已放的线材不拆。
+    private Next<Phase> check(TickContext context) {
         MachineJoined.Verdict outcome = judge();
         if (outcome.joined()) {
             return finishJoined(outcome);
+        }
+        if (checkingSince < 0) {
+            checkingSince = context.gameTick();
+        }
+        if (context.gameTick() - checkingSince < SETTLE_TICKS) {
+            return Next.stay();
         }
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "线路铺了，" + outcome.note())
                 .problem(Problem.of(Problem.Kind.STUCK, outcome.note() + "（" + where() + "）",

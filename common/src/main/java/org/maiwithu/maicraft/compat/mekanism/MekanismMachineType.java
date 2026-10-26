@@ -91,10 +91,11 @@ final class MekanismMachineType implements MachineType {
         return List.of();
     }
 
-    // 管道每一面都能接：连着的面写清连着什么，空着的面能再接一段。
+    // 管道每一面都能接：连着的面写清连着什么，空着的面能再接一段。导热管传的是热，不当能量线接。
     private static List<ExchangePoint> pipePoints(MekanismReads.Transmitter pipe, BlockPos at) {
         List<ExchangePoint> points = new ArrayList<>();
         for (String medium : pipe.media()) {
+            if (medium.equals("heat")) continue;
             for (Direction side : Direction.values()) {
                 String note = pipe.pipes().contains(side) ? "这一面连着别的管道"
                         : pipe.machines().contains(side) ? "这一面连着机器" : "这一面能再接";
@@ -113,7 +114,7 @@ final class MekanismMachineType implements MachineType {
             readings.put("pipes", (long) pipe.get().pipes().size());
             readings.put("machines", (long) pipe.get().machines().size());
             return new MachineState(MachineState.Activity.UNKNOWN, null, null, List.of(), readings,
-                    "管道里流着多少要服务端读数，这里只看得出连着几面");
+                    "读不到存量：管道里存着多少电、多少流体客户端看不到，这里只看得出连着几面");
         }
         Optional<MekanismReads.SideConfig> config = compat.sideConfig(level, at);
         if (config.isEmpty() && kind.role() == MachineRole.POWER_SOURCE) return generatorState(level, at);

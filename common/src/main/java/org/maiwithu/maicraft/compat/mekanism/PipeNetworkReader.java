@@ -30,7 +30,8 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * Mekanism 一种管网的读法（能量、流体、物品、化学品各一个）：管道之间连着的面是 Mekanism 画出来的，沿着它数出一片；
- * 机器算在连着它的那一片里（管道朝它的那一面连着机器）。网里流着多少要服务端读数，客户端只给几段管道、连着几台机器。
+ * 机器算在连着它的那一片里（管道朝它的那一面连着机器）。网里存着多少电、多少流体（存量）客户端读不到，
+ * 这里只给几段管道、连着几台机器，结果里写明读不到存量。
  * 能量、流体、物品三种会接线：线缆、管道、导管都是能直接放的方块，基础那一级；化学品只读不接。
  */
 final class PipeNetworkReader implements NetworkReader {
@@ -90,7 +91,8 @@ final class PipeNetworkReader implements NetworkReader {
         Map<String, Object> readings = new LinkedHashMap<>();
         readings.put("pipes", (long) found.cells().size());
         readings.put("machines", (long) found.machines());
-        return new NetworkSummary(networkId, true, readings, "网里流着多少要服务端读数，这里只数得出几段管道、连着几台机器");
+        return new NetworkSummary(networkId, true, readings,
+                "读不到存量：网里存着多少电、多少流体客户端看不到，这里只数得出几段管道、连着几台机器");
     }
 
     @Override public Optional<LineMaterials> lineMaterials() {
@@ -103,7 +105,30 @@ final class PipeNetworkReader implements NetworkReader {
         if (pipe == null) return Optional.empty();
         ResourceLocation id = ResourceLocation.tryParse(pipe);
         return id == null ? Optional.empty() : BuiltInRegistries.BLOCK.getOptional(id)
-                .map(block -> new Pipes(block.defaultBlockState(), SideSettings.mediumOf(medium)));
+                .map(block -> new Pipes(block.defaultBlockState(), SideSettings.mediumOf(medium), medium));
+    }
+
+    /** 管道方块（去掉等级前缀）传的是哪种介质：同种的挨着就连成一张网，不分等级。 */
+    private static final Map<String, String> PIPE_MEDIA = Map.of(
+            "universal_cable", "energy", "mechanical_pipe", "fluid", "pressurized_tube", "chemical",
+            "logistical_transporter", "item", "restrictive_transporter", "item", "diversion_transporter", "item",
+            "thermodynamic_conductor", "heat");
+
+    /**
+     * 往 medium 这种网铺线时，挨着 blockId 这一格会不会被一起连上：同种介质的 Mekanism 管道会（不分等级连成一张网），
+     * Mekanism 与发电机的机器会（能收能出这种介质的面会接上，宁可绕开）；别种介质的管道不会（线缆贴着物流管道走不相连），
+     * 别的模组的方块不管。
+     */
+    static boolean joins(String blockId, String medium) {
+        int colon = blockId.indexOf(':');
+        if (colon < 0) return false;
+        String namespace = blockId.substring(0, colon);
+        if (!namespace.equals(MekanismCompat.MOD_ID) && !namespace.equals(MekanismMachineCatalog.GENERATORS_MOD_ID)) {
+            return false;
+        }
+        String path = blockId.substring(colon + 1).replaceFirst("^(basic|advanced|elite|ultimate)_", "");
+        String pipeMedium = PIPE_MEDIA.get(path);
+        return pipeMedium == null || pipeMedium.equals(medium);
     }
 
     /** 一片管道：编号、格子、连着几台机器。 */
@@ -151,8 +176,8 @@ final class PipeNetworkReader implements NetworkReader {
         return current == null ? null : current.level();
     }
 
-    /** 能直接放的管道方块：不分方向、六面都接；挨着 Mekanism 的方块会被连上，不在那一格放。 */
-    private record Pipes(BlockState pipe, ExchangePoint.Medium medium) implements LineMaterials {
+    /** 能直接放的管道方块：不分方向、六面都接；挨着会被一起连上的（同种管道、Mekanism 的机器）不在那一格放。 */
+    private record Pipes(BlockState pipe, ExchangePoint.Medium medium, String mediumName) implements LineMaterials {
 
         @Override public BlockState straight(Direction.Axis axis) {
             return pipe;
@@ -164,7 +189,7 @@ final class PipeNetworkReader implements NetworkReader {
 
         @Override public boolean joins(BlockState neighbor) {
             return !neighbor.is(Blocks.AIR)
-                    && BuiltInRegistries.BLOCK.getKey(neighbor.getBlock()).getNamespace().equals(MekanismCompat.MOD_ID);
+                    && PipeNetworkReader.joins(BuiltInRegistries.BLOCK.getKey(neighbor.getBlock()).toString(), mediumName);
         }
 
         @Override public Set<Direction> connectedFaces(BlockState piece) {

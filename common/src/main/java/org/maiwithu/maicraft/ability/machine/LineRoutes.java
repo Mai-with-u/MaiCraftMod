@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.state.BlockState;
@@ -35,20 +36,42 @@ final class LineRoutes {
         this.archives = archives;
     }
 
-    /** 这些格上能接这种线的面：机器类型给的进出口里介质对得上、分面的那几面。 */
-    List<RoutePlanner.Attach> attaches(Collection<BlockPos> cells, LineMaterials materials) {
-        List<RoutePlanner.Attach> attaches = new ArrayList<>();
+    /**
+     * 这些格上能接这种线的面：机器类型给的进出口里介质对得上、分面的那几面。
+     * 按这一头该往哪边送挑面：来源那头挑往外送的面（能量立方的出口面、发电机出电的面），要接的机器挑往里收的面；
+     * 这些格里一个这样的面都没有，才退回介质对得上的全部面——接上总比接不上强，读数会说明白。
+     *
+     * @param flow 这一头东西该往哪边走：来源给 OUTPUT，要接的机器给 INPUT
+     */
+    List<RoutePlanner.Attach> attaches(Collection<BlockPos> cells, LineMaterials materials, ExchangePoint.Flow flow) {
+        List<Face> faces = new ArrayList<>();
         for (BlockPos cell : cells) {
             Optional<BlockState> state = services.world().stateAt(cell);
             if (state.isEmpty()) continue;
             MachineType type = services.claiming(state.get());
             if (type == null) continue;
             for (ExchangePoint point : type.exchangePoints(state.get(), cell)) {
-                if (point.side() == null || point.medium() != materials.medium()) continue;
-                attaches.add(new RoutePlanner.Attach(cell.relative(point.side()), point.side().getAxis(), cell));
+                if (point.side() != null && point.medium() == materials.medium()) {
+                    faces.add(new Face(cell, point.side(), point.flow()));
+                }
             }
         }
+        List<RoutePlanner.Attach> attaches = new ArrayList<>();
+        for (Face face : facing(faces, flow)) {
+            attaches.add(new RoutePlanner.Attach(face.cell().relative(face.side()), face.side().getAxis(), face.cell()));
+        }
         return attaches;
+    }
+
+    /** 一格机器上能接这种线的一面，和东西从这一面往哪边走。 */
+    record Face(BlockPos cell, Direction side, ExchangePoint.Flow flow) {
+    }
+
+    /** 挑往 flow 那边走的面（两样都行的也算）；一个都没有时原样全给。 */
+    static List<Face> facing(List<Face> faces, ExchangePoint.Flow flow) {
+        List<Face> matching = faces.stream()
+                .filter(face -> face.flow() == flow || face.flow() == ExchangePoint.Flow.BOTH).toList();
+        return matching.isEmpty() ? faces : matching;
     }
 
     /** 这些格里能当跨越一头的（已有的链条输送机这类）。 */

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -172,6 +173,135 @@ class MachineConnectTaskTest {
         assertEquals(1, laying.closes, "接网络收尾，铺线路按取消收尾");
         assertTrue(closed.attempts().stream().anyMatch(attempt -> attempt.tried().equals("铺线路")),
                 "铺线路收尾交代的事实并进接网络的结果：" + closed.attempts());
+    }
+
+    /** 一面能量进出口：替身机器的面都写在 BlockPos.ZERO，接线面按认领它的那一格算。 */
+    private static ExchangePoint energy(Direction side, ExchangePoint.Flow flow) {
+        return new ExchangePoint(BlockPos.ZERO, side, ExchangePoint.Medium.ENERGY, flow, "");
+    }
+
+    /** 两台机器摆在 z=6 一行、四周一圈空气：线路只能铺在这一片里。 */
+    private static void openGround(Rig rig, BlockPos source) {
+        rig.world.blocks.put(source, Blocks.FURNACE.defaultBlockState());
+        for (int x = 0; x <= 8; x++) {
+            for (int z = 3; z <= 9; z++) {
+                BlockPos cell = new BlockPos(x, 64, z);
+                if (!cell.equals(source) && !cell.equals(TARGET)) rig.world.blocks.put(cell, Blocks.AIR.defaultBlockState());
+            }
+        }
+    }
+
+    @Test
+    void 来源挑往外送的面_目标挑往里收的面() {
+        Rig rig = new Rig(tempDir);
+        BlockPos source = new BlockPos(2, 64, 6);
+        openGround(rig, source);
+        rig.reader.put(TARGET, "net2");
+        rig.reader.put(source, "net1");
+        rig.reader.lines = new CableLines();
+        // 来源东面往外送、西面往里收；目标西面往外送、北面往里收：线从来源东面出来，接到目标北面，不走最近的目标西面。
+        rig.type.portsAt = at -> at.equals(source)
+                ? List.of(energy(Direction.EAST, ExchangePoint.Flow.OUTPUT), energy(Direction.WEST, ExchangePoint.Flow.INPUT))
+                : List.of(energy(Direction.WEST, ExchangePoint.Flow.OUTPUT), energy(Direction.NORTH, ExchangePoint.Flow.INPUT));
+        List<MachineBuildInput> laid = new ArrayList<>();
+        rig.lineBuilding = line -> {
+            laid.add(line);
+            return new LaidAtOnce(() -> rig.reader.put(TARGET, "net1"));
+        };
+        TaskResult result = rig.run(input("kinetic", positionOf(TARGET), positionOf(source)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        List<BlockPos> cells = laid.getFirst().blueprint().cells().stream().map(cell -> cell.pos()).toList();
+        assertEquals(new BlockPos(0, 0, -1), cells.getLast(), "最后一格接在目标北面（往里收的面）：" + cells);
+        assertEquals(new BlockPos(-3, 0, 0), cells.getFirst(), "从来源东面（往外送的面）那一格起：" + cells);
+    }
+
+    @Test
+    void 挑不到对得上流向的面_退回介质对得上的全部面() {
+        BlockPos cell = new BlockPos(1, 2, 3);
+        List<LineRoutes.Face> onlyOut = List.of(new LineRoutes.Face(cell, Direction.EAST, ExchangePoint.Flow.OUTPUT));
+        assertEquals(onlyOut, LineRoutes.facing(onlyOut, ExchangePoint.Flow.INPUT), "目标只有往外送的面：照样接它");
+        List<LineRoutes.Face> mixed = List.of(new LineRoutes.Face(cell, Direction.EAST, ExchangePoint.Flow.OUTPUT),
+                new LineRoutes.Face(cell, Direction.UP, ExchangePoint.Flow.BOTH),
+                new LineRoutes.Face(cell, Direction.WEST, ExchangePoint.Flow.INPUT));
+        assertEquals(List.of(mixed.get(1), mixed.get(2)), LineRoutes.facing(mixed, ExchangePoint.Flow.INPUT));
+        assertEquals(List.of(mixed.get(0), mixed.get(1)), LineRoutes.facing(mixed, ExchangePoint.Flow.OUTPUT));
+    }
+
+    @Test
+    void 铺完连接晚几刻才同步过来_等到了算接上() {
+        Rig rig = new Rig(tempDir);
+        BlockPos source = new BlockPos(2, 64, 6);
+        openGround(rig, source);
+        rig.reader.put(TARGET, "net2");
+        rig.reader.put(source, "net1");
+        rig.reader.lines = new CableLines();
+        rig.type.ports = List.of(energy(Direction.EAST, ExchangePoint.Flow.BOTH), energy(Direction.WEST, ExchangePoint.Flow.BOTH));
+        boolean[] laidDone = {false};
+        rig.lineBuilding = line -> new LaidAtOnce(() -> laidDone[0] = true);
+        MachineConnectTask task = rig.task(input("kinetic", positionOf(TARGET), positionOf(source)));
+        task.start(rig.tick());
+        TaskResult result = null;
+        int afterLaid = 0;
+        for (int i = 0; i < 2000 && result == null; i++) {
+            // 线铺好后过 20 刻服务器才把连接同步过来：核对要等得到，不能铺完一看没连上就收场。
+            if (laidDone[0] && ++afterLaid == 20) rig.reader.put(TARGET, "net1");
+            if (task.tick(rig.tick()) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(((MachineConnectDetails) result.details()).joined());
+    }
+
+    /** 一刻铺完的那段施工：铺完时跑一下给的效果（让网络读数跟着变）。 */
+    private static final class LaidAtOnce implements Task {
+        private final Runnable onLaid;
+
+        LaidAtOnce(Runnable onLaid) {
+            this.onLaid = onLaid;
+        }
+
+        @Override public TickResult tick(TickContext context) {
+            onLaid.run();
+            return TickResult.finished(TaskResult.done("线路铺好了"));
+        }
+
+        @Override public void pause() {
+        }
+
+        @Override public TaskResult close(CloseReason reason) {
+            return TaskResult.done("线路铺好了");
+        }
+
+        @Override public String describe() {
+            return "一刻铺完的线路";
+        }
+    }
+
+    /** 测试用的线缆：不分方向、六面都接，接的是能量；不会把旁边的方块一起接上。 */
+    private static final class CableLines implements LineMaterials {
+        @Override public ExchangePoint.Medium medium() {
+            return ExchangePoint.Medium.ENERGY;
+        }
+
+        @Override public BlockState straight(Direction.Axis axis) {
+            return Blocks.STONE.defaultBlockState();
+        }
+
+        @Override public Optional<BlockState> turn(Direction.Axis in, Direction.Axis out) {
+            return Optional.of(Blocks.STONE.defaultBlockState());
+        }
+
+        @Override public boolean joins(BlockState neighbor) {
+            return false;
+        }
+
+        @Override public Set<Direction> connectedFaces(BlockState piece) {
+            return EnumSet.allOf(Direction.class);
+        }
+
+        @Override public Optional<Span> span() {
+            return Optional.empty();
+        }
     }
 
     /** 测试线材：原木沿轴向接两面，拐弯用石头；不会把旁边的方块一起接上，也没有远距离跨越。 */

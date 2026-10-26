@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.mekanism;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -265,6 +266,29 @@ class MekanismCompatTest {
         assertTrue(feed.note().contains("也能用 minecraft:coal_block"), feed.note());
         ShownIngredient water = ShownIngredient.of(new ShownStack(ShownStack.Kind.OTHER, "mekanism:steam", "蒸汽", 10, 1));
         assertTrue(type.ingredientFeed(BlockPos.ZERO, water, 10).isEmpty());
+    }
+
+    @Test
+    void 铺线时挨着同种管道与机器不放_别种管道照走_热面不当能量面() {
+        assertTrue(PipeNetworkReader.joins("mekanism:basic_universal_cable", "energy"));
+        assertTrue(PipeNetworkReader.joins("mekanism:elite_universal_cable", "energy"), "不分等级连成一张网");
+        assertFalse(PipeNetworkReader.joins("mekanism:basic_logistical_transporter", "energy"), "线缆和物流管道不相连");
+        assertTrue(PipeNetworkReader.joins("mekanism:diversion_transporter", "item"));
+        assertFalse(PipeNetworkReader.joins("mekanism:basic_mechanical_pipe", "item"));
+        assertTrue(PipeNetworkReader.joins("mekanism:metallurgic_infuser", "energy"), "Mekanism 的机器会被接上");
+        assertTrue(PipeNetworkReader.joins("mekanismgenerators:heat_generator", "energy"));
+        assertFalse(PipeNetworkReader.joins("minecraft:stone", "energy"));
+        Map<Direction, String> heat = new EnumMap<>(Direction.class);
+        Map<Direction, String> energy = new EnumMap<>(Direction.class);
+        for (Direction side : Direction.values()) {
+            heat.put(side, "input");
+            energy.put(side, side == Direction.UP ? "input" : "none");
+        }
+        MekanismReads.SideConfig config = new MekanismReads.SideConfig(Direction.NORTH,
+                Map.of("heat", heat, "energy", energy), Map.of());
+        List<ExchangePoint> points = SideSettings.points(config, BlockPos.ZERO);
+        assertEquals(1, points.size(), "六面热进口都不算能量面，只剩上面那一个能量进口：" + points);
+        assertEquals(Direction.UP, points.getFirst().side());
     }
 
     @Test
