@@ -131,9 +131,11 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
             if (record.kind() != MemoryKind.WORKSTATION || !record.blockType().endsWith("_bed")) continue;
             BlockPos cell = new BlockPos(record.position().x(), record.position().y(), record.position().z());
             if (!level.isLoaded(cell)) {
+                // 区块没加载：占用、怪物、床还在不在都没核对过，标记成未核对的候选——
+                // 只在扫到并核对过的床全部开不出去时才轮到它（实机身边有床却睡到几十格外的记忆床上）。
                 if (seen.add(cell)) {
                     candidates.add(new BedCandidate(cell, false, false, false,
-                            Math.sqrt(current.localPlayer().blockPosition().distSqr(cell))));
+                            Math.sqrt(current.localPlayer().blockPosition().distSqr(cell)), true));
                 }
                 continue;
             }

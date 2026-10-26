@@ -84,6 +84,31 @@ class BedChooserTest {
     }
 
     @Test
+    void unverifiedRememberedBedsNeverOutrankScannedOnes() {
+        // 实机三夜样本：身边明明有床，选床却落到几十格外一张区块没加载、
+        // 占用怪物都没核对过的记忆床上。没核对过的记忆床整批排在核对过的床后面：
+        // 哪怕它离得近，也轮不到它抢在扫到的床前面。
+        BlockPos remembered = new BlockPos(93, 64, -68);
+        List<BedCandidate> usable = BedChooser.usable(
+                List.of(new BedCandidate(remembered, false, false, false, 5, true),
+                        bed(10, 0, false, false, false, 40)),
+                Set.of(), null);
+        assertEquals(new BlockPos(10, 64, 0), usable.getFirst().cell(), "核对过的床在前");
+        // 核对过的全被筛掉（此处被占用）时，记忆床照样召回：人离家很远、附近没床，回家睡靠它。
+        List<BedCandidate> memoryOnly = BedChooser.usable(
+                List.of(new BedCandidate(remembered, false, false, false, 5, true),
+                        bed(10, 0, true, false, false, 40)),
+                Set.of(), null);
+        assertEquals(remembered, memoryOnly.getFirst().cell());
+        // 只有记忆床时按近到远挑。
+        Optional<BedCandidate> chosen = BedChooser.choose(
+                List.of(new BedCandidate(remembered, false, false, false, 5, true),
+                        new BedCandidate(new BlockPos(268, 75, -332), false, false, false, 300, true)),
+                Set.of(), null);
+        assertEquals(remembered, chosen.orElseThrow().cell());
+    }
+
+    @Test
     void triedBedsCountByTheReasonTheyWereRefusedAtLieDown() {
         // 扫描没看出来、躺下那一刻才被原版拒的床（怪走近了、床被占了）：带着原因回灌进分类，
         // 各归各的；没记下原因的试过床才算"试过睡不上"。

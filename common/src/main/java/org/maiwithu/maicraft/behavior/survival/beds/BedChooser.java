@@ -51,7 +51,13 @@ public final class BedChooser {
         return usable.isEmpty() ? Optional.empty() : Optional.of(usable.getFirst());
     }
 
-    /** 能用的床按近到远排好；一张都没有时返回空列表。 */
+    /**
+     * 能用的床排好：核对过的在前、没核对过的记忆床整批在后，各自再按近到远排。
+     * 没核对过的床（所在区块没加载，占用、怪物、床还在不在都没读过）只是指路的话，
+     * 不能因为它离得近就抢在扫到并核对过的床前面——实机三夜都是身边有床、
+     * 角色却睡到几十格外一张谁也没看过的记忆床上。
+     * 一张核对过的都没有时（人离家很远、附近没床），没核对的记忆床照样召回：回家睡靠它。
+     */
     public static List<BedCandidate> usable(List<BedCandidate> candidates, Set<BlockPos> excluded,
             WorldPosition bedArea) {
         return candidates.stream()
@@ -59,7 +65,8 @@ public final class BedChooser {
                 .filter(bed -> !bed.occupied() && !bed.protectedLand() && !bed.hostileNear())
                 .filter(bed -> bedArea == null
                         || withinArea(bed.cell(), bedArea, BED_AREA_RADIUS_BLOCKS))
-                .sorted(Comparator.comparingDouble(BedCandidate::distance))
+                .sorted(Comparator.comparingInt((BedCandidate bed) -> bed.unverified() ? 1 : 0)
+                        .thenComparingDouble(BedCandidate::distance))
                 .collect(Collectors.toList());
     }
 

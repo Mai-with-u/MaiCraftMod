@@ -19,9 +19,17 @@ import net.minecraft.world.level.block.state.properties.BedPart;
  * @param protectedLand 是不是落在这次任务点名保护的地标里
  * @param hostileNear   周围（水平八格、垂直五格）有没有敌对生物——原版不让在怪边睡
  * @param distance      角色到这一格的直线距离（格），近似路径代价
+ * @param unverified    这张床没经现场核对（记忆里召回、所在区块没加载，占用、怪物、
+ *                      床还在不在都不知道）：只当指路的话，不与扫到并核对过的床抢首选
  */
 public record BedCandidate(BlockPos cell, boolean occupied, boolean protectedLand,
-        boolean hostileNear, double distance) {
+        boolean hostileNear, double distance, boolean unverified) {
+
+    /** 现场扫到（或记忆召回后已核对）的床：五项检查的结论都是当刻读的。 */
+    public BedCandidate(BlockPos cell, boolean occupied, boolean protectedLand,
+            boolean hostileNear, double distance) {
+        this(cell, occupied, protectedLand, hostileNear, distance, false);
+    }
 
     /**
      * 把扫描命中的一半床折成要对着点的那一格：命中床头就是床头；命中床尾且床头在，折到床头
