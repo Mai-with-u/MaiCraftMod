@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.sable;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -27,6 +28,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 用物理组装器组装或拆回：组装器在世界里（贴着要组装的方块）就组装，在结构上就拆回。
  * 走到组装器跟前 →（拆回先等结构停稳）→ 看着它拉一次杆 → 看转换了没有：组装看组装器所在格空了、旁边出现带组装器的结构；
  * 拆回看结构没了。只拉一次——再拉会拆回去；三秒没转换就照实交代，不再拉第二次。
+ * 结局带上组装器转换后在世界里的格与方块清单（拆回是拆之前的），档案按它们跟到重新组装出来的结构上。
  */
 final class PhysicsAssembly implements VehicleAssembler {
 
@@ -37,6 +39,8 @@ final class PhysicsAssembly implements VehicleAssembler {
     /** 拆回前等结构停稳最多多少刻、要停多少刻。 */
     static final int MAX_WAIT_TICKS = 600;
     static final int STILL_TICKS = 10;
+    /** 拆回后在拉杆时组装器所在格周围多远找它落在哪（格）。 */
+    static final int LANDING_SEARCH = 2;
 
     private final SimulatedCompat compat;
     private final PlayerServices services;
@@ -56,7 +60,7 @@ final class PhysicsAssembly implements VehicleAssembler {
         Optional<BlockPos> inWorld = worldAssembler(level, request.near());
         List<SableStructures.Structure> near = compat.structures(level, player, new AABB(request.near()).inflate(SEARCH));
         if (request.assemble()) {
-            if (inWorld.isPresent()) return Optional.of(new Pull(request, inWorld.get(), inWorld.get(), null));
+            if (inWorld.isPresent()) return Optional.of(new Pull(request, inWorld.get(), inWorld.get(), null, Map.of()));
             return near.stream().filter(ship -> !compat.scan(level, ship).assemblers().isEmpty()).findFirst()
                     .map(ship -> done(ship.id(), compat.scan(level, ship).blocks(), "附近的结构上已经有这台组装器"));
         }
@@ -71,12 +75,17 @@ final class PhysicsAssembly implements VehicleAssembler {
         if (assemblers.isEmpty()) return Optional.empty();
         BlockPos local = assemblers.getFirst();
         BlockPos world = BlockPos.containing(ship.get().pose().toWorld(Vec3.atCenterOf(local)));
-        return Optional.of(new Pull(request, world, local, ship.get().id()));
+        // 拆回前记下方块清单：拆完结构就没了，再组装时拿它认是不是同一艘。
+        return Optional.of(new Pull(request, world, local, ship.get().id(), compat.scan(level, ship.get()).makeup()));
     }
 
     // 指的地方周围最近的世界里的物理组装器。
     private static Optional<BlockPos> worldAssembler(ClientLevel level, BlockPos near) {
-        return BlockPos.betweenClosedStream(near.offset(-SEARCH, -SEARCH, -SEARCH), near.offset(SEARCH, SEARCH, SEARCH))
+        return worldAssembler(level, near, SEARCH);
+    }
+
+    private static Optional<BlockPos> worldAssembler(ClientLevel level, BlockPos near, int range) {
+        return BlockPos.betweenClosedStream(near.offset(-range, -range, -range), near.offset(range, range, range))
                 .filter(level::isLoaded)
                 .filter(pos -> StructureGeometry.ASSEMBLER.equals(
                         BuiltInRegistries.BLOCK.getKey(level.getBlockState(pos).getBlock()).toString()))
@@ -106,6 +115,7 @@ final class PhysicsAssembly implements VehicleAssembler {
         private final BlockPos world;
         private final BlockPos packet;
         private final String structureId;
+        private final Map<String, Integer> before;
         private Action current;
         private int step;
         private long stepStart = Long.MIN_VALUE;
@@ -116,12 +126,18 @@ final class PhysicsAssembly implements VehicleAssembler {
          * @param world       组装器此刻在世界里的格
          * @param packet      拉杆时交给 Simulated 的格（世界里的就是世界坐标，结构上的是地块坐标）
          * @param structureId 拆回的那个结构；组装为 null
+         * @param before      拆回前的方块清单；组装为空
          */
-        Pull(Request request, BlockPos world, BlockPos packet, String structureId) {
+        Pull(Request request, BlockPos world, BlockPos packet, String structureId, Map<String, Integer> before) {
             this.request = request;
             this.world = world;
             this.packet = packet;
             this.structureId = structureId;
+            this.before = Map.copyOf(before);
+        }
+
+        @Override public Optional<String> structure() {
+            return Optional.ofNullable(structureId);
         }
 
         @Override public ActionStatus tick(TickContext tick) {
@@ -162,7 +178,9 @@ final class PhysicsAssembly implements VehicleAssembler {
         // 拆回先等结构停稳：在动的结构拆回会落得乱七八糟，真人也等它停。
         private ActionStatus waitStill(ClientLevel level, LocalPlayer player, long now) {
             Optional<SableStructures.Structure> ship = ship(level, player);
-            if (ship.isEmpty()) return finish(new Conversion(false, true, structureId, -1, "走过去时结构已经没了"));
+            if (ship.isEmpty()) {
+                return finish(new Conversion(false, true, structureId, -1, "走过去时结构已经没了", landed(level), before));
+            }
             if (StructureGeometry.moving(ship.get())) {
                 stillSince = Long.MIN_VALUE;
                 if (now - stepStart >= MAX_WAIT_TICKS) {
@@ -198,12 +216,13 @@ final class PhysicsAssembly implements VehicleAssembler {
                         compat.forget(ship.id());
                         StructureGeometry.Scan scan = compat.scan(level, ship);
                         if (!scan.assemblers().isEmpty()) {
-                            return finish(new Conversion(false, true, ship.id(), scan.blocks(), "拉了一次杆，组装成一个结构"));
+                            return finish(new Conversion(false, true, ship.id(), scan.blocks(), "拉了一次杆，组装成一个结构",
+                                    world, scan.makeup()));
                         }
                     }
                 }
             } else if (ship(level, player).isEmpty()) {
-                return finish(new Conversion(false, true, structureId, -1, "拉了一次杆，结构拆回成方块"));
+                return finish(new Conversion(false, true, structureId, -1, "拉了一次杆，结构拆回成方块", landed(level), before));
             }
             if (now - stepStart >= CONFIRM_TICKS) {
                 return finish(new Conversion(false, false, structureId == null ? "" : structureId, -1,
@@ -211,6 +230,11 @@ final class PhysicsAssembly implements VehicleAssembler {
                                 + "或结构太大都会这样；没再拉第二次，再拉会反过来）"));
             }
             return ActionStatus.running();
+        }
+
+        // 拆回后组装器落在世界里哪一格：结构先摆正到最近的整 90° 再落下，会挪一两格，在拉杆时的位置附近找最近的那台。
+        private BlockPos landed(ClientLevel level) {
+            return worldAssembler(level, world, LANDING_SEARCH).orElse(null);
         }
 
         private Optional<SableStructures.Structure> ship(ClientLevel level, LocalPlayer player) {

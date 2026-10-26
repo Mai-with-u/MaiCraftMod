@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.vehicle.spi;
 
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -40,6 +41,14 @@ public interface VehicleAssembler {
 
         /** 做完后的结局；还没做完时为 null。 */
         Conversion conversion();
+
+        /**
+         * 这次要拆回的是哪个结构（开始前就认出来的）：拆回后结构就没了，档案要在拉杆之前按它读下来。
+         * 组装、或说不清是哪个时为空。
+         */
+        default Optional<String> structure() {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -50,6 +59,20 @@ public interface VehicleAssembler {
      * @param structureId 组装出来（或拆回前）的结构身份；没有为空串
      * @param blocks      组装进结构的方块数；拆回或不知道为 -1
      * @param note        一句经过：拉了几次、等了多久、没转换时看到的原因
+     * @param assembler   转换后组装器在世界里的哪一格：组装是拉杆时它所在的格，拆回是它落回世界的格；
+     *                    重新组装时按它认是不是拆回过的那一艘。不知道为 null
+     * @param makeup      结构的方块清单（方块 ID → 格数）：组装是组装出来的，拆回是拆之前的；不知道为空
      */
-    record Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note) {}
+    record Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note,
+                      BlockPos assembler, Map<String, Integer> makeup) {
+
+        public Conversion {
+            makeup = Map.copyOf(makeup);
+        }
+
+        /** 只说结局、不带组装器落点与方块清单（车站组车这类没有物理组装器的）。 */
+        public Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note) {
+            this(alreadyDone, converted, structureId, blocks, note, null, Map.of());
+        }
+    }
 }

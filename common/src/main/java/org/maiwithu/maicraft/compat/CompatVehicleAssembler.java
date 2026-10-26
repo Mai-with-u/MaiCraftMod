@@ -41,5 +41,10 @@ final class CompatVehicleAssembler implements VehicleAssembler {
         @Override public Conversion conversion() {
             return run.conversion();
         }
+
+        // 拆回前认出的结构照转：组装能力要在拉杆前按它读档案。
+        @Override public Optional<String> structure() {
+            return run.structure();
+        }
     }
 }

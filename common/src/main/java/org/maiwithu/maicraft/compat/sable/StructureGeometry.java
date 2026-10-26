@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.compat.sable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
@@ -44,9 +46,14 @@ final class StructureGeometry {
      * @param seats    座位所在的格
      * @param parts    认得的部件（控制件、收端、执行件、浮力源）：所在的格与方块 ID
      * @param assemblers 物理组装器所在的格（拆回时拉它）
+     * @param makeup   方块清单：方块 ID → 格数；拆回再组装时按它认是不是同一艘、哪里改过
      */
     record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<Part> parts,
-                List<BlockPos> assemblers) {
+                List<BlockPos> assemblers, Map<String, Integer> makeup) {
+
+        Scan {
+            makeup = Map.copyOf(makeup);
+        }
 
         /** 控制件（无线红石打字机、舵轮、油门拉杆）。 */
         List<Part> controls() {
@@ -68,7 +75,8 @@ final class StructureGeometry {
         List<BlockPos> seats = new ArrayList<>();
         List<Part> parts = new ArrayList<>();
         List<BlockPos> assemblers = new ArrayList<>();
-        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, parts, assemblers);
+        Map<String, Integer> makeup = new TreeMap<>();
+        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, parts, assemblers, makeup);
         boolean complete = true;
         int blocks = 0;
         for (BlockPos local : BlockPos.betweenClosed(structure.localMin(), structure.localMax())) {
@@ -80,13 +88,15 @@ final class StructureGeometry {
             if (state.isAir()) continue;
             blocks++;
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            // 每种方块数一下：拆回改完再组装时，拿这份清单认是不是同一艘、多了少了什么。
+            makeup.merge(id, 1, Integer::sum);
             if (id.endsWith("_seat")) seats.add(local.immutable());
             if (VehicleParts.known(id)) parts.add(new Part(local.immutable(), id));
             if (ASSEMBLER.equals(id)) assemblers.add(local.immutable());
             VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, local);
             for (AABB part : shape.toAabbs()) boxes.add(part.move(local));
         }
-        return new Scan(complete, boxes, blocks, seats, parts, assemblers);
+        return new Scan(complete, boxes, blocks, seats, parts, assemblers, makeup);
     }
 
     /**
