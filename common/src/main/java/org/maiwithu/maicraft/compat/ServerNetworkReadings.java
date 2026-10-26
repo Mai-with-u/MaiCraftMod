@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -18,8 +18,9 @@ import org.maiwithu.maicraft.game.serverlink.ServerReads;
  * 网络读取器向服务端要整网读数的那一段：到点才问，问出去没收回时不重复问，一答没答上在限额内马上重问；
  * 手里的回答过了保质期、或这一问还在路上时，照样交回，同时给出"这是几秒前的数据"那半句。
  * 回答怎么翻成网络汇总、服务端不答这个操作时怎么说，由各网络读取器自己定；这里只管问与收。
+ * 要经服务端读整网读数的联动模组（AE2 的 ME 网络、通用机械的管网）各建一份，不各写一套。
  */
-final class ServerNetworkReadings {
+public final class ServerNetworkReadings {
 
     /** 一份服务端回答用多久（毫秒）：过了重新问，网络状态会变。 */
     static final long FRESH_MILLIS = 5_000;
@@ -41,17 +42,17 @@ final class ServerNetworkReadings {
      * @param reply     服务端的回答；没答上的一问写成带 failed 原因的回答；从来没收到过回答为空
      * @param staleness 这一答不是当拍的时候接在说明后面的那半句（几秒前的、正在重读、正在重问）；当拍的为空字符串
      */
-    record Latest(JsonObject reply, String staleness) {
+    public record Latest(JsonObject reply, String staleness) {
     }
 
-    ServerNetworkReadings(String operationId, ServerReads reads, LongSupplier now) {
+    public ServerNetworkReadings(String operationId, ServerReads reads, LongSupplier now) {
         this.operationId = Objects.requireNonNull(operationId, "operationId");
         this.reads = Objects.requireNonNull(reads, "reads");
         this.now = Objects.requireNonNull(now, "now");
     }
 
     /** 服务端此刻答不答这个操作：握手协商到了、所有者没在策略里关掉。 */
-    boolean available() {
+    public boolean available() {
         return reads.available(operationId);
     }
 
@@ -60,7 +61,7 @@ final class ServerNetworkReadings {
      * 这一问还在路上时手里的上一答就是过时的：照"正在重读"的口径标明数据时刻再交，不当成本刻的实况——
      * 收场时按已经看到的现整理，走的就是这条路。
      */
-    Latest latest(String networkId, BlockPos at) {
+    public Latest latest(String networkId, BlockPos at) {
         askedAt.put(networkId, at.immutable());
         settle(networkId);
         long now = this.now.getAsLong();
@@ -77,7 +78,7 @@ final class ServerNetworkReadings {
     }
 
     /** 这张网这一轮的问话还没收回：手里留着上一轮的旧答案不算答了，交付方要等本轮答案。 */
-    boolean pending(String networkId) {
+    public boolean pending(String networkId) {
         settle(networkId);
         return asks.pending(networkId);
     }
