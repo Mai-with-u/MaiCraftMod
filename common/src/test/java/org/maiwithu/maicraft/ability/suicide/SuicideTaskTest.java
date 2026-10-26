@@ -254,6 +254,36 @@ class SuicideTaskTest {
         assertEquals("头盔", player.worn.get(GearSlotName.HEAD).original());
     }
 
+    @Test
+    void 站在矮方块上脚位读低一格_照样接触危险_不原地反复起步() {
+        // 走到站位时人陷在灵魂沙里 0.125 格，读出来的脚位比站位低一格：第一趟挪过来了，再起步两趟都没挪动，
+        // 离站位一格以内按走到算，踏进岩浆。
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        moves.sinksAtStand = 0.125;
+        SuicideTask task = task(null, 120);
+        run(task, 200, () -> moves.calls.contains("stepInto:lava"));
+
+        assertTrue(moves.calls.contains("stepInto:lava"), moves.calls.toString());
+        assertEquals(1 + SuicideTask.UNMOVED_TRIPS, moves.calls.stream().filter(call -> call.startsWith("walkTo")).count(),
+                moves.calls.toString());
+    }
+
+    @Test
+    void 走路一出发就报完成人没挪动_不会无限起步_远了按走不到放弃() {
+        // 每趟走路都是一出发就报完成、人还在原地，离站位两格以上：每个站位起步两趟就放弃，最后如实说走不到。
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        moves.walkStaysPut = true;
+        SuicideTask task = task(WayToDie.LAVA, 120);
+        TaskResult result = finished(run(task, 2000, () -> false));
+
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertTrue(result.problem().message().contains("走不到"), result.problem().message());
+        assertFalse(moves.calls.contains("stepInto:lava"), "人没走到，不在原地踏进危险：" + moves.calls);
+        long walks = moves.calls.stream().filter(call -> call.startsWith("walkTo")).count();
+        long stands = moves.calls.stream().filter(call -> call.startsWith("walkTo")).distinct().count();
+        assertEquals(stands * SuicideTask.UNMOVED_TRIPS, walks, moves.calls.toString());
+    }
+
     // 走过去的这一趟跳在半空：叫它先停稳就答应收尾，再演两刻落地停下。
     private static TravelFakes.ScriptedWalk airborneLeg() {
         TravelFakes.ScriptedWalk leg = new TravelFakes.ScriptedWalk(

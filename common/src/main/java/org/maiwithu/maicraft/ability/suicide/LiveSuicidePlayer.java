@@ -12,6 +12,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.ClientEquipmentView;
 import org.maiwithu.maicraft.game.player.FallDamage;
 import org.maiwithu.maicraft.game.player.GearSlotName;
@@ -83,7 +84,15 @@ final class LiveSuicidePlayer implements SuicidePlayer {
 
     @Override public BlockPos feet() {
         LocalPlayer player = player();
-        return player == null ? BlockPos.ZERO : player.blockPosition();
+        return player == null ? BlockPos.ZERO : feetOf(player);
+    }
+
+    /**
+     * 寻死认的脚位：和寻路同一套算法。站在灵魂沙上人的 y 比上面那一格低 0.125，向下取整会读成灵魂沙本身，
+     * 寻路早认为到了站位、这里却判没到，于是原地反复起步；走到站位、站进格子、被挤出格子都按这一格判断。
+     */
+    static BlockPos feetOf(LocalPlayer player) {
+        return BlockPassability.playerFeet(player.level(), player.getX(), player.getY(), player.getZ());
     }
 
     @Override public boolean onGround() {

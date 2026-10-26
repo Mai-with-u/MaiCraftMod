@@ -59,7 +59,9 @@ final class HazardStep implements Action {
         }
         PlayerInput input = current.input();
         double distance = horizontal(player.position());
-        if (way == null && distance <= CENTERED && player.blockPosition().equals(entry)) {
+        // 站进格子：走到正中、脚位就是这一格才站好。脚位按寻路的算法认，站在灵魂沙上点火也算站进去了，
+        // 不会因为向下取整读成灵魂沙那一格而一直原地推到判被挡住。
+        if (way == null && distance <= CENTERED && LiveSuicidePlayer.feetOf(player).equals(entry)) {
             input.halt(player);
             return ActionStatus.done();
         }

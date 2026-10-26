@@ -253,6 +253,10 @@ final class SuicideFakes {
 
         /** 下一趟走过去照这段脚本演（悬在半空、落地）；为 null 时一刻走到站位。 */
         Action nextWalk;
+        /** 走到站位时人比站位那一格低这么多（格）：站在灵魂沙上读出来的脚位低一格的情形。 */
+        double sinksAtStand;
+        /** 每趟走过去一出发就报完成，人原地不动。 */
+        boolean walkStaysPut;
 
         @Override public Action walkTo(BlockPos stand, Permissions permissions) {
             calls.add("walkTo:" + stand.toShortString());
@@ -264,7 +268,11 @@ final class SuicideFakes {
             if (walkFails || unreachable.contains(stand)) {
                 return fails(Problem.of(Problem.Kind.UNREACHABLE, "到不了 " + stand.toShortString() + "，还差 3.2 格"));
             }
-            return done(() -> player.stand(stand));
+            if (walkStaysPut) return done(() -> {});
+            return done(() -> {
+                player.stand(stand);
+                player.position = player.position.subtract(0, sinksAtStand, 0);
+            });
         }
 
         @Override public Action stepInto(DeathSpot spot) {

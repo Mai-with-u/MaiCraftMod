@@ -122,6 +122,23 @@ class BlockPassabilityTest {
                 "地毯不到半格：人还在地毯这一格");
     }
 
+    @Test
+    void standingOnSoulSandFarmlandOrBottomSlabCountsTheCellAbove() {
+        // 站在灵魂沙、泥（14/16 高）、耕地、土径（15/16 高）、下半砖上：人的 y 比上面那一格低一点，
+        // 脚位仍是上面那一格；寻死判走到站位、站进格子都按这个脚位，和寻路判已经到了同一个口径。
+        Grid world = new Grid();
+        world.put(new BlockPos(0, 64, 0), Blocks.SOUL_SAND.defaultBlockState());
+        world.put(new BlockPos(2, 64, 0), Blocks.MUD.defaultBlockState());
+        world.put(new BlockPos(4, 64, 0), Blocks.FARMLAND.defaultBlockState());
+        world.put(new BlockPos(6, 64, 0), Blocks.DIRT_PATH.defaultBlockState());
+        world.put(new BlockPos(8, 64, 0), Blocks.STONE_SLAB.defaultBlockState());
+        assertEquals(new BlockPos(0, 65, 0), BlockPassability.playerFeet(world, 0.5, 64.875, 0.5), "灵魂沙");
+        assertEquals(new BlockPos(2, 65, 0), BlockPassability.playerFeet(world, 2.5, 64.875, 0.5), "泥");
+        assertEquals(new BlockPos(4, 65, 0), BlockPassability.playerFeet(world, 4.5, 64.9375, 0.5), "耕地");
+        assertEquals(new BlockPos(6, 65, 0), BlockPassability.playerFeet(world, 6.5, 64.9375, 0.5), "土径");
+        assertEquals(new BlockPos(8, 65, 0), BlockPassability.playerFeet(world, 8.5, 64.5, 0.5), "下半砖");
+    }
+
     private static final class Grid implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
 

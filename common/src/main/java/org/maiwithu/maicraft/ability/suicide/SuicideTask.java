@@ -51,6 +51,8 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     static final double SAME_AREA = 4;
     /** 寻死用完了时限也要留出穿回护甲的工夫：进度跟踪的上限多给这么多刻。 */
     static final long RE_EQUIP_ALLOWANCE = 20L * 60;
+    /** 类别 C：同一个站位连着这么多趟走路都是人没挪一格就报完成，再起步也是原地打转，不再起步。 */
+    static final int UNMOVED_TRIPS = 2;
 
     private final SuicideInput input;
     private final SuicidePlayer player;
@@ -87,6 +89,10 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     private float lastHealth;
     /** 这一回要拿到手上的点火物或岩浆桶；身上没有了为 null。 */
     private String holding;
+    /** 这一趟走过去出发时的脚位：报完成时人还在这一格，就是这一趟没挪动。 */
+    private BlockPos tripFrom;
+    /** 走向这个站位连着几趟没挪动就报完成。 */
+    private int unmovedTrips;
 
     SuicideTask(SuicideInput input, SuicidePlayer player, SuicideWorld world, SuicideMoves moves, GearChanges gear) {
         super("寻死", Phase.STOW, new ProgressTracker(input.maxSeconds() * 20 + RE_EQUIP_ALLOWANCE,
@@ -101,7 +107,7 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     @Override protected Action enter(Phase phase) {
         return switch (phase) {
             case STOW -> enterStow();
-            case APPROACH -> moves.walkTo(spot.stand(), input.permissions());
+            case APPROACH -> enterApproach();
             case EXPOSE -> spot.way() == WayToDie.HOSTILE_MOB
                     ? moves.keepNear(spot.mobId(), spot.mobType(), input.permissions()) : moves.stepInto(spot);
             case STAND_IN -> moves.standIn(spot.entry());
@@ -231,22 +237,41 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
         exposedTicks = 0;
         lastHurtAt = 0;
         lastHealth = player.health();
+        unmovedTrips = 0;
         recordProgress("挑中" + chosen.describe());
         Phase next = chosen.way().carried() ? Phase.STAND_IN
                 : chosen.way() == WayToDie.HOSTILE_MOB ? Phase.EXPOSE : Phase.APPROACH;
         return Next.go(next, "挑中" + chosen.describe());
     }
 
+    // 每趟走过去先记下出发时站的格，报完成时拿来比这一趟挪没挪动。
+    private Action enterApproach() {
+        tripFrom = player.feet();
+        return moves.walkTo(spot.stand(), input.permissions());
+    }
+
     private Next<Phase> approach(TickContext context) {
         if (!finder.stillThere(spot)) return abandon("走到之前那里变了");
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            // 走路报"已停下"不是走到了：收尾途中落地就站着等外层停下，暂停过后从原地接着走过去，不在半路踏进危险。
-            case ActionStatus.Done done -> player.feet().equals(spot.stand())
-                    ? Next.go(Phase.EXPOSE, "走到" + spot.way().label + "旁边了")
-                    : stopping() ? Next.stay() : Next.go(Phase.APPROACH, "停在半路，从原地接着走过去");
+            case ActionStatus.Done done -> walked();
             case ActionStatus.Failed failed -> abandonArea("走不到");
         };
+    }
+
+    // 走路报完成：站在站位那一格上（灵魂沙、耕地、半砖上也认，和寻路同一个脚位）就去接触危险。
+    // 报"已停下"不是走到了：收尾途中落地就站着等外层停下，暂停过后从原地接着走过去，不在半路踏进危险。
+    // 连着两趟都是人没挪一格就报完成：再起步也是原地打转，离站位一格以内按走到算，远了按走不到放弃这一处。
+    private Next<Phase> walked() {
+        BlockPos feet = player.feet();
+        BlockPos stand = spot.stand();
+        if (feet.equals(stand)) return Next.go(Phase.EXPOSE, "走到" + spot.way().label + "旁边了");
+        if (stopping()) return Next.stay();
+        unmovedTrips = feet.equals(tripFrom) ? unmovedTrips + 1 : 0;
+        if (unmovedTrips < UNMOVED_TRIPS) return Next.go(Phase.APPROACH, "停在半路，从原地接着走过去");
+        boolean nextToStand = Math.abs(feet.getX() - stand.getX()) <= 1 && Math.abs(feet.getY() - stand.getY()) <= 1
+                && Math.abs(feet.getZ() - stand.getZ()) <= 1;
+        return nextToStand ? Next.go(Phase.EXPOSE, "走到" + spot.way().label + "旁边了") : abandon("走不到");
     }
 
     private Next<Phase> expose(TickContext context) {
