@@ -115,6 +115,8 @@ public final class LightRegion {
         }
 
         /** 一格能不能站住：脚与头能占，脚下那面结实。 */
+        // 不转调寻路共用的干地判断：泛洪的"能占"按照明的敏感面规则算（带方块实体的机器、信号源、外来方块都拦），
+        // 门也不当连通口——照明的连通空间是"屋里那片"，穿过门就量到别人家去了；这与寻路"能走进去"不是一条事实。
         private boolean standable(BlockPos feet) {
             if (!SampleRules.passable(world.state(feet)) || !SampleRules.passable(world.state(feet.above()))) {
                 return false;

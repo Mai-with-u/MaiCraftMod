@@ -311,6 +311,8 @@ public record BuildingLayout(List<Floor> floors, List<Door> doors, List<Opening>
 
         // 能站在这一格上：它是地面（整块或半砖），上面两格读到了而且不挡路、没有液体。
         // 床、箱子、楼梯也挡路，但站上去不是一层地面，不算。
+        // 不转调寻路共用的干地判断：勘查要的是"这一层真正的地面"，地面只认整块与半砖——
+        // 箱子、楼梯、农田在寻路里能踩，但站上去不构成建筑的一层楼面，两条口径各管各的验收。
         private boolean standable(BlockPos floor) {
             BlockState ground = state(floor);
             BlockState feet = state(floor.above());

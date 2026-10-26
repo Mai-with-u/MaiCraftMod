@@ -88,6 +88,25 @@ class BlockPassabilityTest {
                 "流动水面不构成干地");
     }
 
+    @Test
+    void functionBackedStandableMatchesDryStandable() {
+        BlockPos feet = new BlockPos(3, 65, 3);
+        Map<BlockPos, BlockState> overWater = Map.of(
+                feet, Blocks.AIR.defaultBlockState(),
+                feet.above(), Blocks.AIR.defaultBlockState(),
+                feet.below(), flowingWater());
+        Map<BlockPos, BlockState> overStone = Map.of(
+                feet, Blocks.AIR.defaultBlockState(),
+                feet.above(), Blocks.AIR.defaultBlockState(),
+                feet.below(), Blocks.STONE.defaultBlockState());
+        assertFalse(BlockPassability.standable(overWater::get, feet), "流动水面不是干燥可站的脚位");
+        assertTrue(BlockPassability.standable(overStone::get, feet), "石头地上的脚位干燥可站");
+        // 脚、头、地面有一格没读到（null）时按不能站处理：不凭空给出能站的结论。
+        assertFalse(BlockPassability.standable(
+                        cell -> cell.equals(feet.below()) ? Blocks.STONE.defaultBlockState() : null, feet),
+                "脚和头没读到时按不能站处理");
+    }
+
     /** 小片世界替身：按坐标记方块，没记的当空气。 */
     @Test
     void standingOnTopOfALowBlockCountsTheCellAbove() {

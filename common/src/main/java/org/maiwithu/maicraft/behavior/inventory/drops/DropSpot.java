@@ -6,6 +6,7 @@ import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 
 /**
  * 往哪个方向丢：丢出去的东西别落在必经的走廊上——一格宽的隧道、楼梯、门口落了一地，回头路过又被吸回包里。
@@ -70,11 +71,9 @@ final class DropSpot {
         return open;
     }
 
-    // 能站人：脚下这格和头那格都穿得过、不是液体，下面一格是实心的。
+    // 能站人交给寻路共用的干地判断：脚下是稳定的干地、身体两格可通行；没加载的格按不能站处理。
     private static boolean standable(Function<BlockPos, BlockState> blocks, BlockPos at) {
-        BlockState below = blocks.apply(at.below());
-        return passable(blocks, at) && passable(blocks, at.above())
-                && below != null && below.getFluidState().isEmpty() && below.isSolid();
+        return BlockPassability.standable(blocks, at);
     }
 
     // 会收东西的方块：带方块实体的（置物台、传送带、箱子、漏斗、工作盆）。

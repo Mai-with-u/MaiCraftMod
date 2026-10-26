@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.behavior.navigation.util;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import java.util.function.Function;
+
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.BlockGetter;
@@ -28,6 +30,7 @@ import net.minecraft.world.level.block.StainedGlassBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.piston.MovingPistonBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
@@ -256,6 +259,45 @@ public final class BlockPassability {
                 && canWalkThrough(level, feet)
                 && canWalkThrough(level, head)
                 && canWalkOn(level, support);
+    }
+
+    /**
+     * 判断是否为干燥可站的脚位，按方块读取函数工作：手头只有逐格读取（快照、扫描窗口）而拿不到整个世界时用它。
+     * 语义与 {@link #isDryStandable(BlockGetter, BlockPos)} 一致：脚部和头部无液体且可通行，支撑面是稳定的干地。
+     * 读取不到的格（没加载、在窗口外）按不能站处理：不凭空给出能站的结论。
+     */
+    public static boolean standable(Function<BlockPos, BlockState> read, BlockPos feet) {
+        // 三个关键格都读到才往下判；任何一个缺（null）就当不能站，与勘测"读不到的柱按实地算"的口径分开。
+        if (read.apply(feet) == null || read.apply(feet.above()) == null || read.apply(feet.below()) == null) {
+            return false;
+        }
+        return isDryStandable(asBlockGetter(read), feet);
+    }
+
+    /** 把逐格读取包成世界视图：除方块状态外的查询（方块实体、高度范围）都不掺进判断，没读到的格按空处理。 */
+    private static BlockGetter asBlockGetter(Function<BlockPos, BlockState> read) {
+        return new BlockGetter() {
+            @Override public BlockState getBlockState(BlockPos pos) {
+                BlockState state = read.apply(pos);
+                return state == null ? Blocks.VOID_AIR.defaultBlockState() : state;
+            }
+
+            @Override public FluidState getFluidState(BlockPos pos) {
+                return getBlockState(pos).getFluidState();
+            }
+
+            @Override public BlockEntity getBlockEntity(BlockPos pos) {
+                return null;
+            }
+
+            @Override public int getHeight() {
+                return 0;
+            }
+
+            @Override public int getMinBuildHeight() {
+                return 0;
+            }
+        };
     }
 
     /**

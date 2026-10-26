@@ -71,6 +71,8 @@ public final class LiveEdgeView implements EdgeProximityNeed.ReadsEdge {
     }
 
     // 站得住：脚下那格有碰撞、脚和头两格空着、而且不是深落差的边外。
+    // 不转调寻路共用的干地判断：这里要求身体碰撞盒当场放得进去（门、地毯也放不进），且脚下必须一格格碰得着——
+    // 半砖、箱子这类能"站"的支撑面按碰撞盒扫不出来；退一步的落点本来就是踩着实体地面挪一格，这是崖边处境自己的事实。
     private static boolean standable(ClientLevel level, BlockPos cell) {
         if (!level.getBlockState(cell).getCollisionShape(level, cell).isEmpty()) return false;
         if (!level.getBlockState(cell.above()).getCollisionShape(level, cell.above()).isEmpty()) return false;
