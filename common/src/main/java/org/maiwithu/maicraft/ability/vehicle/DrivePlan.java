@@ -4,12 +4,17 @@ package org.maiwithu.maicraft.ability.vehicle;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.ability.vehicle.api.StabilizedPlan;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
+import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
@@ -21,6 +26,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 开到某处之前要落实的两件事（纯函数）：去哪——坐标、记过的地点、往东南西北哪边开多远；
  * 能不能开——操纵表缺必需角色就开不了（如实说缺哪个，这是事实，不是猜设计好不好），车头没定也开不了；
  * 能开就把操纵表收成"角色 → 输入"，同一角色有几个输入时按 LLM 定的、试过的、推出来的先后挑一个。
+ * 装了能用的飞行稳定器时改用它开（设目标高度 + 给方向），这时不查升力、转向和车头。
  */
 final class DrivePlan {
 
@@ -89,6 +95,35 @@ final class DrivePlan {
                     "试按一下动力键（平着挪的那个方向就当车头），或 machine_configure 写 forward");
         }
         return null;
+    }
+
+    /**
+     * 用不用飞行稳定器开。
+     *
+     * @param stabilized 能用就是开法；照旧按键开为 null
+     * @param why        装着稳定器却用不上时为什么；没装、能用都是空串
+     */
+    record Steering(VehicleDriver.Stabilized stabilized, String why) {}
+
+    /** 第一个读得到这辆稳定器的办法来读，计划说能走就给开法；没装、读不到照旧按键，装了用不上带上为什么。 */
+    static Steering steering(List<FlightStabilizers> stabilizers, String structureId, VehicleReader.View view) {
+        for (FlightStabilizers reader : stabilizers) {
+            Optional<FlightStabilizers.Setup> setup = reader.read(structureId);
+            if (setup.isEmpty()) continue;
+            StabilizedPlan.Plan plan = StabilizedPlan.of(view.kind(), view.controls(), setup.get());
+            if (!plan.ready()) return new Steering(null, setup.get().stabilizers().isEmpty() ? "" : plan.why());
+            return new Steering(new VehicleDriver.Stabilized(reader, plan.directions(), plan.altitudeHolds(),
+                    plan.switchOn(), plan.slowCouplers()), "");
+        }
+        return new Steering(null, "");
+    }
+
+    /** 开不了的原因：用飞行稳定器开时没有；照旧按键开时查操纵表，装着稳定器却用不上的也一并说。 */
+    static Problem notReady(VehicleControls.ControlMap map, Steering steering) {
+        if (steering.stabilized() != null) return null;
+        Problem problem = notReady(map);
+        if (problem == null || steering.why().isEmpty()) return problem;
+        return Problem.of(problem.kind(), problem.message() + "；飞行稳定器也用不上：" + steering.why(), problem.suggestion());
     }
 
     /** 操纵表收成"角色 → 输入"：同一角色按 LLM 定的、试过的、推出来的先后挑第一个。 */

@@ -600,7 +600,7 @@ public final class AbilityCatalog {
         registry.register(new VehicleDriveModule(deps.compat().vehicleDrivers(services),
                 deps.compat().vehicleReaders(services), vehicleControls(deps),
                 new SceneSeenTargets(deps.world()::scene), id -> deps.world().scene().seen().structureOf(id),
-                deps.world().memory(), feet));
+                deps.world().memory(), feet, deps.compat().flightStabilizers(services)));
     }
 
     /**
@@ -614,7 +614,7 @@ public final class AbilityCatalog {
         List<VehicleDriver> drivers = deps.compat().vehicleDrivers(services);
         if (!drivers.isEmpty()) {
             modes.add(new VehicleTravelMode(drivers, deps.compat().vehicleReaders(services), vehicleControls(deps),
-                    id -> deps.world().scene().seen().structureOf(id)));
+                    id -> deps.world().scene().seen().structureOf(id), deps.compat().flightStabilizers(services)));
         }
         modes.add(new PearlCrossing(portals));
         // 原版船（via=boat）也是原版自带：隔水时放船划过去，用跨维度那一份现场部件读格、走到、换主手。

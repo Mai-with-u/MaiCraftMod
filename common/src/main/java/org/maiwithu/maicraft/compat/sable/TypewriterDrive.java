@@ -35,6 +35,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 被叫先到安全的地方再停（暂停、取消、不急的需求）：飞艇就近找落点快降、车船就地刹住，停稳后松开键坐在驾驶位上等；
  * 再接着开时从停下的地方重新定一趟去原来的目的地。
  * 飞艇沿途每 5 刻看前方 48 格的地形，地面比巡航高度近 6 格以内就把巡航高度抬上去；只按地形抬高，不绕。
+ * 装了能用的飞行稳定器时改走"设目标高度 + 给方向"：开之前打开没开的稳定器、给耦合器设上速度，飞控只给船底高度与水平速度，
+ * 高度设进高度稳定器、方向按线速度耦合器的四个键；坐着够不着稳定器、读回不对时，按键开的角色齐就照旧按键开，不齐照实停。
  */
 final class TypewriterDrive implements VehicleDriver.Run {
 
@@ -58,7 +60,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
     /** 近到这么远还找不到落点，就落在目的地本身（格）。 */
     static final double SITE_GIVE_UP = 48;
 
-    private enum Step { PREPARE, PLAN, MOVE, PARK, HOLD, DISCONNECT }
+    private enum Step { PREPARE, PLAN, PRIME, MOVE, PARK, HOLD, DISCONNECT }
 
     private final SimulatedCompat compat;
     private final PlayerServices services;
@@ -75,6 +77,12 @@ final class TypewriterDrive implements VehicleDriver.Run {
     private Set<Integer> bound;
     private AirshipPilot flying;
     private GroundPilot driving;
+    /** 用飞行稳定器开：手上那一半与飞控；照旧按键开时为 null。改成按键开过就不再回头。 */
+    private StabilizedFlight flight;
+    private StabilizedPilot steady;
+    private boolean keysOnly;
+    /** 没绑频率的那个输入（角色或方向 用的 键）。 */
+    private String unbound = "";
     private AirshipPilot.Course course;
     private Vec3 target;
     private boolean siteChosen;
@@ -102,7 +110,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
         this.services = Objects.requireNonNull(services, "services");
         this.request = Objects.requireNonNull(request, "request");
         this.cockpit = new TypewriterCockpit(compat, services, request.structureId(), station);
-        this.airship = request.kind().equals("airship");
+        // 装了能用的飞行稳定器就按飞行器开（推进器不在认得的名单里时种类可能说不清）。
+        this.airship = request.kind().equals("airship") || request.stabilized() != null;
         this.car = request.kind().equals("car");
     }
 
@@ -121,7 +130,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
             ActionStatus prepared = cockpit.prepare(tick);
             if (prepared instanceof ActionStatus.Failed failed) return stop(level, failed.problem());
             if (!(prepared instanceof ActionStatus.Done)) return prepared;
-            return go(last == null || replan ? Step.PLAN : Step.MOVE, now);
+            // 稳定器还没准备好就被叫停过：回来重新定一趟、再准备一遍，不带着没打开的稳定器直接飞。
+            return go(last == null || replan || (flight != null && !flight.primed()) ? Step.PLAN : Step.MOVE, now);
         }
         PilotSample sample = sample(level, ship.get(), now);
         if (step != Step.DISCONNECT) {
@@ -129,7 +139,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
             if (lost != null) return stop(level, Problem.of(Problem.Kind.STUCK, lost));
         }
         return switch (step) {
-            case PLAN -> plan(level, ship.get(), sample, now);
+            case PLAN -> plan(level, player, ship.get(), sample, now);
+            case PRIME -> prime(level, now);
             case MOVE -> move(level, ship.get(), sample, now);
             case PARK -> park(sample, now);
             case HOLD -> hold();
@@ -138,24 +149,29 @@ final class TypewriterDrive implements VehicleDriver.Run {
         };
     }
 
-    // 定这一趟：操纵表的输入换成键码、核对都绑着频率；飞艇找落点、定巡航高度；按路程给时间。
-    private ActionStatus plan(ClientLevel level, SableStructures.Structure ship, PilotSample sample, long now) {
-        Map<String, Integer> keys = new HashMap<>();
+    // 定这一趟：用飞行稳定器开就把四个方向换成键码，不然把操纵表的输入换成键码，都核对绑着频率；
+    // 飞艇找落点、定巡航高度；按路程给时间。
+    private ActionStatus plan(ClientLevel level, LocalPlayer player, SableStructures.Structure ship, PilotSample sample,
+            long now) {
         bound = cockpit.bound(level);
-        for (Map.Entry<String, String> role : request.roles().entrySet()) {
-            int key = TypewriterKeys.key(role.getValue());
-            if (key == TypewriterKeys.UNKNOWN) continue;
-            if (bound != null && !bound.contains(key)) {
-                return stop(level, Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "操纵表里 " + role.getKey() + " 用的 "
-                        + role.getValue() + " 没绑频率", "用 machine_inspect 看这辆现在的 controls，再用 machine_configure 改操纵表"));
-            }
-            keys.put(role.getKey(), key);
+        if (request.stabilized() != null && !keysOnly && flight == null) {
+            String far = StabilizedFlight.outOfReach(request.stabilized(), ship, player.getEyePosition());
+            if (far != null) return fallBack(level, far, now);
+            Map<String, Integer> directions = keys(request.stabilized().directions());
+            if (directions == null) return fallBack(level, "线速度耦合器 " + unbound + " 没绑频率", now);
+            flight = new StabilizedFlight(request.structureId(), request.stabilized(), directions);
         }
-        mixer = new KeyMixer(keys);
+        if (flight == null) {
+            Map<String, Integer> keys = keys(request.roles());
+            if (keys == null) {
+                return stop(level, Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "操纵表里 " + unbound + " 没绑频率",
+                        "用 machine_inspect 看这辆现在的 controls，再用 machine_configure 改操纵表"));
+            }
+            mixer = new KeyMixer(keys);
+        }
         // 停下过再接着开：之前那一趟的阶段留着，时间、落点、就地降落都按这一趟重新算。
         if (replan) {
-            if (flying != null) earlierPhases.addAll(flying.transitions());
-            if (driving != null) earlierPhases.addAll(driving.transitions());
+            earlierPhases.addAll(transitions());
             replan = false;
             overtime = false;
             siteChosen = false;
@@ -175,7 +191,9 @@ final class TypewriterDrive implements VehicleDriver.Run {
         deadline = now + Math.min(12_000, Math.max(1_200, Math.round((60 + distance / 2) * 20)));
         if (airship) {
             // 接着开时人还在空中（落地前叫停又放回来）：已经离地了，不再先垂直爬 8 格，姿态稳了就走。
-            flying = new AirshipPilot(sample.grounded() ? sample.position().y : sample.position().y - AirshipPilot.CLEARANCE);
+            double startY = sample.grounded() ? sample.position().y : sample.position().y - AirshipPilot.CLEARANCE;
+            if (flight != null) steady = new StabilizedPilot(startY);
+            else flying = new AirshipPilot(startY);
             double ground = request.heightKnown() ? request.destination().y : surface(level, request.destination());
             Vec3 touchdown = new Vec3(request.destination().x, ground, request.destination().z);
             Optional<Vec3> site = LandingSites.find(touchdown, halfWidth(ship), ground(level));
@@ -194,7 +212,46 @@ final class TypewriterDrive implements VehicleDriver.Run {
             target = request.destination();
             landing = "目标 " + shortText(target) + (car ? "（车只开直线，路上的障碍不绕）" : "（船只在水面上开直线）");
         }
-        return go(Step.MOVE, now);
+        return go(flight != null ? Step.PRIME : Step.MOVE, now);
+    }
+
+    // 输入换成键码：认不出的跳过，有一个没绑频率就整张不能用（null），哪个没绑记在 unbound 里。
+    private Map<String, Integer> keys(Map<String, String> inputs) {
+        Map<String, Integer> keys = new HashMap<>();
+        for (Map.Entry<String, String> input : inputs.entrySet()) {
+            int key = TypewriterKeys.key(input.getValue());
+            if (key == TypewriterKeys.UNKNOWN) continue;
+            if (bound != null && !bound.contains(key)) {
+                unbound = input.getKey() + " 用的 " + input.getValue();
+                return null;
+            }
+            keys.put(input.getKey(), key);
+        }
+        return keys;
+    }
+
+    // 开之前把稳定器准备好：打开没开的、给耦合器设速度，读回对了才走；不对就照旧按键开（角色齐的话）。
+    private ActionStatus prime(ClientLevel level, long now) {
+        String result = flight.prime(now);
+        if (result == null) return ActionStatus.running();
+        if (result.isEmpty()) return go(Step.MOVE, now);
+        return fallBack(level, result, now);
+    }
+
+    // 稳定器用不上：按键开飞艇要的角色（动力、升力、偏航）和车头都齐就改成按键重新定一趟，不齐照实停下。
+    private ActionStatus fallBack(ClientLevel level, String why, long now) {
+        Map<String, String> roles = request.roles();
+        boolean keysReady = roles.containsKey("power") && roles.containsKey("lift")
+                && (roles.containsKey("yaw_left") || roles.containsKey("yaw_right")) && !request.forward().isEmpty();
+        if (!keysReady) {
+            return stop(level, Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "飞行稳定器用不上：" + why
+                    + "；按键开又缺动力、升力、偏航或车头", "把稳定器挪到驾驶位 8 格内，或试按认出按键开要的角色"));
+        }
+        notes.add("飞行稳定器用不上：" + why + "，照旧按键开");
+        keysOnly = true;
+        flight = null;
+        steady = null;
+        return go(Step.PLAN, now);
     }
 
     // 开：每刻把样本交给飞控或开车，输出调成键；到了松键去停稳确认，做不下去松键停。
@@ -229,6 +286,20 @@ final class TypewriterDrive implements VehicleDriver.Run {
             }
         }
         PilotCommand command;
+        if (steady != null) {
+            // 用飞行稳定器开：飞控给船底高度与水平速度，高度设进高度稳定器，方向按耦合器的四个键。
+            steerCourse(level, ship, sample, now);
+            StabilizedPilot.Command wanted = steady.tick(sample, course);
+            if (steady.phase() == StabilizedPilot.Phase.FAILED) return stop(level, Problem.of(Problem.Kind.STUCK, steady.failure()));
+            if (steady.phase() == StabilizedPilot.Phase.LANDED) {
+                cockpit.releaseAll();
+                return go(Step.PARK, now);
+            }
+            Set<Integer> held = flight.fly(now, wanted, ship);
+            if (flight.problem() != null) return stop(level, Problem.of(Problem.Kind.STUCK, flight.problem()));
+            cockpit.hold(held);
+            return ActionStatus.running();
+        }
         if (airship) {
             steerCourse(level, ship, sample, now);
             command = flying.tick(sample, course);
@@ -269,7 +340,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
             OptionalDouble highest = LandingSites.highestAhead(sample.position(), course.touchdown(), halfWidth(ship),
                     LOOK_AHEAD, ground(level));
             if (highest.isPresent() && highest.getAsDouble() + TERRAIN_GAP > course.cruiseAltitude()
-                    && flying.phase() != AirshipPilot.Phase.DESCENT && distance > LOOK_AHEAD / 2) {
+                    && !descending() && distance > LOOK_AHEAD / 2) {
                 course = new AirshipPilot.Course(course.touchdown(), highest.getAsDouble() + TERRAIN_GAP);
                 if (!raised) notes.add("前方地形高，巡航高度抬到 " + Math.round(course.cruiseAltitude()));
                 raised = true;
@@ -376,11 +447,14 @@ final class TypewriterDrive implements VehicleDriver.Run {
         return ActionStatus.progressed();
     }
 
-    // 停：先松开按着的键，接管着就交还，经过照写。
+    // 停：先松开按着的键，接管着就交还，经过照写；用稳定器开时船会悬在最后设的高度，也写明。
     private ActionStatus stop(ClientLevel level, Problem problem) {
         cockpit.releaseAll();
         cockpit.disconnect(level);
         notes.add(problem.message());
+        if (flight != null && last != null && !last.grounded() && !Double.isNaN(flight.target())) {
+            notes.add("高度稳定器还保持着 y=" + Math.round(flight.target()) + "，船会悬在那里");
+        }
         writeReport();
         return ActionStatus.failed(problem);
     }
@@ -392,19 +466,34 @@ final class TypewriterDrive implements VehicleDriver.Run {
 
     private void writeReport() {
         List<String> phases = new ArrayList<>(earlierPhases);
-        if (flying != null) phases.addAll(flying.transitions());
-        if (driving != null) phases.addAll(driving.transitions());
+        phases.addAll(transitions());
         double left = last == null ? -1 : TypewriterTrial.round(last.flatDistance(request.destination()), 10);
         boolean arrived = left >= 0 && left <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
-        if (flying != null && flying.unplannedTouchdown()) notes.add("不是按进近落的：还没到落点就碰到了地面");
+        if ((flying != null && flying.unplannedTouchdown()) || (steady != null && steady.unplannedTouchdown())) {
+            notes.add("不是按进近落的：还没到落点就碰到了地面");
+        }
+        if (flight != null) notes.addAll(0, flight.notes());
         VehicleDriver.Drove drove = new VehicleDriver.Drove(phases, landing, TypewriterTrial.round(traveled, 10),
-                TypewriterTrial.round(maxTilt, 10), arrived, left, parked, parkedCount);
+                TypewriterTrial.round(maxTilt, 10), arrived, left, parked, parkedCount, flight != null ? "stabilizers" : "keys");
         report = new VehicleDriver.Report(request.structureId(), cockpit.seat(), List.of(), cockpit.released(),
                 disconnected, String.join("；", notes), drove);
     }
 
     @Override public VehicleDriver.Report report() {
         return report;
+    }
+
+    // 这一趟飞控（或开车）的阶段变化；还没定一趟为空。
+    private List<String> transitions() {
+        if (steady != null) return steady.transitions();
+        if (flying != null) return flying.transitions();
+        return driving != null ? driving.transitions() : List.of();
+    }
+
+    // 飞艇在垂直下降：这时不再按前方地形抬巡航高度。
+    private boolean descending() {
+        return steady != null ? steady.phase() == StabilizedPilot.Phase.DESCENT
+                : flying != null && flying.phase() == AirshipPilot.Phase.DESCENT;
     }
 
     // 被打断：松开所有键（飞艇会慢慢往下沉，不会悬着加速），回来先核对还接管着，再按现在的样子接着开。
@@ -414,7 +503,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
         if (stopping || step == Step.HOLD) replan = true;
         stopping = false;
         stopAimed = false;
-        if (step == Step.MOVE || step == Step.PARK || step == Step.HOLD) {
+        if (step == Step.MOVE || step == Step.PARK || step == Step.HOLD || step == Step.PRIME) {
             step = Step.PREPARE;
             stepStart = Long.MIN_VALUE;
         }
@@ -455,8 +544,10 @@ final class TypewriterDrive implements VehicleDriver.Run {
         return switch (step) {
             case PREPARE -> cockpit.describe();
             case PLAN -> "定航线";
-            case MOVE -> (stopping ? "就近停下：" : "") + (airship ? "飞（" + flying.phase().name().toLowerCase(Locale.ROOT) + "）"
-                    : stopping ? "刹住" : "开过去");
+            case PRIME -> "打开飞行稳定器、设速度";
+            case MOVE -> (stopping ? "就近停下：" : "") + (steady != null ? "用飞行稳定器飞（"
+                    + steady.phase().name().toLowerCase(Locale.ROOT) + "）"
+                    : airship ? "飞（" + flying.phase().name().toLowerCase(Locale.ROOT) + "）" : stopping ? "刹住" : "开过去");
             case PARK -> "停稳确认";
             case HOLD -> "按要求停稳了，坐在驾驶位上等";
             case DISCONNECT -> "交还无线红石打字机";

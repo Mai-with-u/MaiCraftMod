@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.travel.api.TravelSteps;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
@@ -41,6 +42,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * vehicle_drive：坐到驾驶座上开载具。test 逐条按住控制件看载具怎么动，再松开交还；drive 开到一个地方停稳。
  * 能力只落实"开哪辆、按什么、去哪"：drive 先查操纵表齐不齐（缺必需角色就开不了，如实说缺哪个）、车头定了没有；
  * 角色不在车上时先用出行把人送上去（上船那一段出行方式接手），跑完回来再决定。
+ * 飞艇装了能用的飞行稳定器（Create: Flight Control）时，请求带上稳定器的开法：设目标高度 + 给方向，不查升力、转向和车头。
  * 怎么坐、怎么接管、怎么按、飞控怎么飞由联动模组的驾驶办法做。
  */
 public final class VehicleDriveModule implements AbilityModule {
@@ -59,6 +61,7 @@ public final class VehicleDriveModule implements AbilityModule {
     private final Function<String, Optional<String>> structures;
     private final ReadsRememberedPlaces places;
     private final Supplier<BlockPos> feet;
+    private final List<FlightStabilizers> stabilizers;
 
     /**
      * @param readers    读载具的办法：试按后认角色、开之前查操纵表要知道种类与回路
@@ -66,10 +69,11 @@ public final class VehicleDriveModule implements AbilityModule {
      * @param structures 观察编号 s# 换成结构身份
      * @param places     记过的地点：drive 的 target 给地点名时用
      * @param feet       角色此刻脚下：坐标没给 y、按方向开多远时用
+     * @param stabilizers 读写飞行稳定器的办法：装了能用的就改用它开（模组没装时为空）
      */
     public VehicleDriveModule(List<VehicleDriver> drivers, List<VehicleReader> readers, VehicleControls controls,
             ReadsSeenTargets seen, Function<String, Optional<String>> structures, ReadsRememberedPlaces places,
-            Supplier<BlockPos> feet) {
+            Supplier<BlockPos> feet, List<FlightStabilizers> stabilizers) {
         this.drivers = List.copyOf(drivers);
         this.readers = List.copyOf(readers);
         this.controls = Objects.requireNonNull(controls, "controls");
@@ -77,6 +81,7 @@ public final class VehicleDriveModule implements AbilityModule {
         this.structures = Objects.requireNonNull(structures, "structures");
         this.places = Objects.requireNonNull(places, "places");
         this.feet = Objects.requireNonNull(feet, "feet");
+        this.stabilizers = List.copyOf(stabilizers);
     }
 
     @Override public AbilitySpec spec() {
@@ -148,12 +153,14 @@ public final class VehicleDriveModule implements AbilityModule {
             }
             VehicleControls.ControlMap map = VehicleControls.merge(view.get().kind(), view.get().controls(),
                     controls.stored(structure.get()));
-            Problem notReady = DrivePlan.notReady(map);
+            // 装了能用的飞行稳定器就用它开，不查升力、转向和车头；不然照旧查操纵表，装着却用不上的一并说为什么。
+            DrivePlan.Steering steering = DrivePlan.steering(stabilizers, structure.get(), view.get());
+            Problem notReady = DrivePlan.notReady(map, steering);
             if (notReady != null) return new StepDecision.Finish(TaskResult.failed("开不了这辆", notReady));
             Integer cruise = goal.params().has("cruise_altitude") ? (int) goal.params().integer("cruise_altitude") : null;
             input = new VehicleDriveInput(null, new VehicleDriver.DriveRequest(structure.get(), destination.at(),
                     destination.heightKnown(), cruise, view.get().kind(), map.forward(), DrivePlan.roles(map),
-                    goal.permissions()));
+                    goal.permissions(), steering.stabilized()));
         }
         // 人必须在车上：不在就先把人送到驾驶座旁（目的地在船上，上船那一段由出行方式接手），跑完回来再决定。
         for (VehicleDriver driver : drivers) {

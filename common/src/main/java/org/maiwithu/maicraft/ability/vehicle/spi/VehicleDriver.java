@@ -76,9 +76,10 @@ public interface VehicleDriver {
      * @param forward        车头朝结构自己的哪根水平轴（+x / -x / +z / -z）
      * @param roles          操纵表：角色 → 输入（power → 打字机:W）
      * @param permissions    这次的许可
+     * @param stabilized     装了能用的飞行稳定器时怎么用它开（设目标高度 + 给方向）；照旧按键开为 null
      */
     record DriveRequest(String structureId, Vec3 destination, boolean heightKnown, Integer cruiseAltitude, String kind,
-                        String forward, Map<String, String> roles, Permissions permissions) {
+                        String forward, Map<String, String> roles, Permissions permissions, Stabilized stabilized) {
         public DriveRequest {
             Objects.requireNonNull(structureId, "structureId");
             Objects.requireNonNull(destination, "destination");
@@ -86,6 +87,32 @@ public interface VehicleDriver {
             Objects.requireNonNull(forward, "forward");
             roles = Map.copyOf(roles);
             Objects.requireNonNull(permissions, "permissions");
+        }
+
+        /** 照旧按键开的请求。 */
+        public DriveRequest(String structureId, Vec3 destination, boolean heightKnown, Integer cruiseAltitude, String kind,
+                String forward, Map<String, String> roles, Permissions permissions) {
+            this(structureId, destination, heightKnown, cruiseAltitude, kind, forward, roles, permissions, null);
+        }
+    }
+
+    /**
+     * 用飞行稳定器开：高度交给高度稳定器（设它的目标高度），水平往哪走按键经飞控红石代理告诉线速度耦合器。
+     *
+     * @param stabilizers   读写这些稳定器的办法（设目标高度、打开、设速度、读回核对）
+     * @param directions    沿机体的方向（+x / -x / +z / -z）→ 按哪个键（打字机:D）
+     * @param altitudeHolds 要设目标高度的高度稳定器（地块格）
+     * @param switchOn      开之前要打开的智能姿态稳定器、线速度耦合器
+     * @param slowCouplers  最大水平目标速度还是 0、开之前要设速度的线速度耦合器
+     */
+    record Stabilized(FlightStabilizers stabilizers, Map<String, String> directions, List<BlockPos> altitudeHolds,
+                      List<BlockPos> switchOn, List<BlockPos> slowCouplers) {
+        public Stabilized {
+            Objects.requireNonNull(stabilizers, "stabilizers");
+            directions = Map.copyOf(directions);
+            altitudeHolds = List.copyOf(altitudeHolds);
+            switchOn = List.copyOf(switchOn);
+            slowCouplers = List.copyOf(slowCouplers);
         }
     }
 
@@ -151,11 +178,18 @@ public interface VehicleDriver {
      * @param distanceLeft  停下时离目的地还差多远（水平，格）
      * @param parked        停稳了：松开所有键后接地（船是浮着）、每秒挪不到 0.35 格、倾斜 &lt; 8°，连着 20 个样本
      * @param parkedSamples 停稳确认连着满足了几个样本
+     * @param drivenBy      怎么开的：stabilizers 设目标高度 + 给方向 / keys 按键
      */
     record Drove(List<String> phases, String landing, double traveled, double maxTilt, boolean arrived,
-                 double distanceLeft, boolean parked, int parkedSamples) {
+                 double distanceLeft, boolean parked, int parkedSamples, String drivenBy) {
         public Drove {
             phases = List.copyOf(phases);
+        }
+
+        /** 按键开的经过。 */
+        public Drove(List<String> phases, String landing, double traveled, double maxTilt, boolean arrived,
+                double distanceLeft, boolean parked, int parkedSamples) {
+            this(phases, landing, traveled, maxTilt, arrived, distanceLeft, parked, parkedSamples, "keys");
         }
     }
 

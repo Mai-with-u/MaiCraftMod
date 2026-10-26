@@ -91,7 +91,7 @@ class VehicleTravelModeTest {
 
     @Test
     void 没指定开载具不出报价_操纵表不齐答不出() {
-        VehicleTravelMode mode = new VehicleTravelMode(List.of(driver(true)), List.of(ABOARD), controls(), id -> Optional.empty());
+        VehicleTravelMode mode = new VehicleTravelMode(List.of(driver(true)), List.of(ABOARD), controls(), id -> Optional.empty(), List.of());
         Answers quiet = new Answers();
         mode.offer(request(null, Map.of()), quiet);
         assertTrue(quiet.offers.isEmpty());
@@ -108,7 +108,7 @@ class VehicleTravelModeTest {
     void 齐了给报价_开到了这一段做完_半路停下以卡住结束() {
         VehicleControls controls = controls();
         controls.assign("ship-uuid", Map.of("打字机:A", "yaw_left"), "+z");
-        VehicleTravelMode mode = new VehicleTravelMode(List.of(driver(true)), List.of(ABOARD), controls, id -> Optional.empty());
+        VehicleTravelMode mode = new VehicleTravelMode(List.of(driver(true)), List.of(ABOARD), controls, id -> Optional.empty(), List.of());
         Answers answers = new Answers();
         TravelRequest request = request("vehicle", Map.of());
         mode.offer(request, answers);
@@ -119,7 +119,7 @@ class VehicleTravelModeTest {
         assertInstanceOf(ActionStatus.Done.class, leg.tick(null), "够得着驾驶位就直接开，开到了算做完");
         assertTrue(leg.summary().contains("开到了"), leg.summary());
 
-        VehicleTravelMode stopsShort = new VehicleTravelMode(List.of(driver(false)), List.of(ABOARD), controls, id -> Optional.empty());
+        VehicleTravelMode stopsShort = new VehicleTravelMode(List.of(driver(false)), List.of(ABOARD), controls, id -> Optional.empty(), List.of());
         TravelLeg stopped = stopsShort.start(request, offer);
         ActionStatus status = stopped.tick(null);
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);

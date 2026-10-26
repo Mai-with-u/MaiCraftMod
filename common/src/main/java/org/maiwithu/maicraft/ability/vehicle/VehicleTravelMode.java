@@ -9,6 +9,7 @@ import java.util.function.Function;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.travel.spi.OfferSink;
@@ -41,14 +42,19 @@ public final class VehicleTravelMode implements TravelMode {
     private final List<VehicleReader> readers;
     private final VehicleControls controls;
     private final Function<String, Optional<String>> structures;
+    private final List<FlightStabilizers> stabilizers;
 
-    /** @param structures 观察编号 s# 换成结构身份 */
+    /**
+     * @param structures  观察编号 s# 换成结构身份
+     * @param stabilizers 读写飞行稳定器的办法：装了能用的就改用它开（模组没装时为空）
+     */
     public VehicleTravelMode(List<VehicleDriver> drivers, List<VehicleReader> readers, VehicleControls controls,
-            Function<String, Optional<String>> structures) {
+            Function<String, Optional<String>> structures, List<FlightStabilizers> stabilizers) {
         this.drivers = List.copyOf(drivers);
         this.readers = List.copyOf(readers);
         this.controls = Objects.requireNonNull(controls, "controls");
         this.structures = Objects.requireNonNull(structures, "structures");
+        this.stabilizers = List.copyOf(stabilizers);
     }
 
     @Override public TravelVia via() {
@@ -86,7 +92,7 @@ public final class VehicleTravelMode implements TravelMode {
         }
         VehicleControls.ControlMap map = VehicleControls.merge(view.get().kind(), view.get().controls(),
                 controls.stored(structure.get()));
-        Problem notReady = DrivePlan.notReady(map);
+        Problem notReady = DrivePlan.notReady(map, DrivePlan.steering(stabilizers, structure.get(), view.get()));
         if (notReady != null) {
             sink.decline(notReady.kind(), notReady.message() + "（" + notReady.suggestion() + "）");
             return;
@@ -109,9 +115,12 @@ public final class VehicleTravelMode implements TravelMode {
                 .flatMap(Optional::stream).findFirst();
         VehicleControls.ControlMap map = VehicleControls.merge(hint[1],
                 view.map(VehicleReader.View::controls).orElse(List.of()), controls.stored(structure));
+        // 装了能用的飞行稳定器就用它开（设目标高度 + 给方向）。
+        VehicleDriver.Stabilized stabilized = view.map(found -> DrivePlan.steering(stabilizers, structure, found).stabilized())
+                .orElse(null);
         VehicleDriver.DriveRequest drive = new VehicleDriver.DriveRequest(structure,
                 Vec3.atBottomCenterOf(offer.to()), false, null, hint[1], map.forward(), DrivePlan.roles(map),
-                request.permissions());
+                request.permissions(), stabilized);
         return new VehicleLeg(drivers, drive);
     }
 }
