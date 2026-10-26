@@ -234,15 +234,33 @@ class MenuTakeRoundTest {
         }
     }
 
-    /** 收场记忆与收场结论的接住处：记录关箱前最后的读数，收场结论固定为完成。 */
+    /** 收场记忆与收场结论的接住处：记录关箱前最后的读数，收场结论固定为完成；可选用例给接缝塞剧本。 */
     private static final class TestEndings implements MenuTakeRound.Endings {
         Optional<MenuContent.Reading> remembered = Optional.empty();
         boolean finishedAfterClosed;
         boolean finishedAfterMenuGone;
         boolean tookAnythingAtFinish;
+        /** 关界面前那一步的剧本：先回这么多次"还在做"，再回做完。 */
+        int beforeCloseWaits;
+        Optional<MenuContent.Reading> beforeCloseReading = Optional.empty();
+        /** 全盘完不关界面直接交回。 */
+        boolean handBack;
 
         @Override public void rememberBeforeClose(Optional<MenuContent.Reading> lastReading) {
             remembered = lastReading;
+        }
+
+        @Override public ActionStatus beforeClose(TickContext tick, MenuContent.Reading reading) {
+            beforeCloseReading = Optional.of(reading);
+            if (beforeCloseWaits > 0) {
+                beforeCloseWaits--;
+                return ActionStatus.running();
+            }
+            return ActionStatus.done();
+        }
+
+        @Override public boolean finishWithoutClosing() {
+            return handBack;
         }
 
         @Override public ActionStatus finishAfterClosed(boolean tookAnything) {
