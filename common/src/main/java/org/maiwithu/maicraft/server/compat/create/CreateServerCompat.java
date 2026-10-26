@@ -15,8 +15,8 @@ import org.maiwithu.maicraft.server.compat.ServerCompatRegistry;
 
 /**
  * 机械动力（Create）的服务端联动入口：登记只读操作 create.trains——客户端问各趟车时刻表上的站序，
- * 回答每趟车的编号、车名、循环不循环、走到第几项、每一站的站名过滤。没装铁路导航时，坐火车靠它查哪趟车去哪
- * （所有者 10-11 定）。只答角色所在维度的世界里的车，不改时刻表、不动车。
+ * 回答每趟车的编号、车名、循环不循环、走到第几项、每一站的站名过滤。没装铁路导航时，坐火车靠它查哪趟车去哪。
+ * 只答角色所在维度的世界里的车，不改时刻表、不动车。
  */
 public final class CreateServerCompat extends ServerCompatModule {
 

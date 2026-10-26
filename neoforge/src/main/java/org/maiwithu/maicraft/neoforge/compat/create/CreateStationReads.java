@@ -66,7 +66,7 @@ import org.slf4j.LoggerFactory;
  * 只翻译，不判断。
  *
  * <p>机械手手里拿着的东西：Create 同步给客户端画在手上，但只存在非公开字段 DeployerBlockEntity.heldItem 里，
- * 客户端的更新包里没有（客户端没有假玩家）。所有者 2026-10-11 批准的例外，只在这里反射读这一个字段；
+ * 客户端的更新包里没有（客户端没有假玩家）。这是"不用反射"的例外，只在这里反射读这一个字段；
  * 字段在创建读写端时取一次，取不到（Create 改了名）就给空物品，模式照读。字段名登记在机器联动模组事实清单里。
  */
 public final class CreateStationReads implements CreateStations {

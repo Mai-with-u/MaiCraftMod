@@ -17,7 +17,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 
 /**
- * 土豆加农炮当远程武器的事实（所有者定 C5）：点一下就发，弹药是弹药类型注册表里认的东西（多是能吃的），
+ * 土豆加农炮当远程武器的事实：点一下就发，弹药是弹药类型注册表里认的东西（多是能吃的），
  * 原版挑弹药先副手、再背包从前往后；出膛速度每刻 2 格乘弹药的倍数，重力每刻 0.05 乘倍数、先加重力再减速，
  * 从枪口出膛（右手朝前 0.75、下 0.15、前 1.5），方向加一点修正（右手朝前 -0.05）。打完冷却按弹药的 reloadTicks。
  * 依据 Create 6.0.11 的 PotatoCannonItem.use、PotatoProjectileEntity.tick、ShootableGadgetItemMethods.getGunBarrelVec。

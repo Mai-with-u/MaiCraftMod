@@ -75,11 +75,11 @@ public final class CreateCompat extends CompatModule {
         // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
         registry.dismantleTool(this, services -> new CreateWrench(this, services));
         registry.itemSource(this, services -> new SandpaperSource(this, services));
-        // 附近的工具箱：不用走过去，照轮盘那样把一格挂到快捷栏上（所有者定 C5）。
+        // 附近的工具箱：不用走过去，照轮盘那样把一格挂到快捷栏上。
         registry.itemSource(this, services -> new ToolboxSource(this, services));
-        // 土豆加农炮当远程武器（所有者定 C5）：只交事实，挑、换手、瞄、出手由战斗做。
+        // 土豆加农炮当远程武器：只交事实，挑、换手、瞄、出手由战斗做。
         registry.rangedWeapon(this, new CreatePotatoCannon(this));
-        // 过滤器、属性过滤器写规则：machine_configure 对手上物品设置（所有者定 C5）。
+        // 过滤器、属性过滤器写规则：machine_configure 对手上物品设置。
         registry.itemSettings(this, services -> new CreateFilterSettings(this, services));
         // 库存请求器下单取包裹：拿东西的一条途径，取货口的界面要先证明两侧怎么分。
         registry.itemSource(this, services -> new StockTickerSource(this, services));
@@ -93,12 +93,12 @@ public final class CreateCompat extends CompatModule {
         // 移动装置当障碍交给寻路：转着的风车整个扫盘、开着的列车与活塞的前方、电梯井都绕开，挡路时先等它过去。
         registry.obstacleSource(this, (level, viewer, region, sink) ->
                 movingContraptions(level, viewer, region).forEach(sink::add));
-        // 坐电梯当一种出行方式（via=elevator，所有者 10-11 批）：呼梯、进轿厢选层、到了出来，要走过去、按按钮。
+        // 坐电梯当一种出行方式（via=elevator）：呼梯、进轿厢选层、到了出来，要走过去、按按钮。
         registry.travelMode(this, services -> new CreateElevatorMode(this, services));
-        // 坐火车当一种出行方式（via=train，所有者 10-11 批）：时刻表只在服务端，经只读操作 create.trains 问。
+        // 坐火车当一种出行方式（via=train）：时刻表只在服务端，经只读操作 create.trains 问。
         registry.serverRead(this, TRAINS_OPERATION, 1);
         registry.travelMode(this, services -> new TrainMode(this, services));
-        // 车站组车、拆车当组装载具的一种办法；给列车写时刻表交给列车长（载具规格，所有者 10-11 批）。
+        // 车站组车、拆车当组装载具的一种办法；给列车写时刻表交给列车长。
         registry.vehicleAssembler(this, services -> new StationAssembly(this, services));
         registry.trainScheduler(this, services -> new TrainTimetable(this, services));
         // 跟着的人坐上列车：他那节车厢有空座位就走过去坐上（跟随的同乘）。

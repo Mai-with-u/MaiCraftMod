@@ -43,7 +43,7 @@ public final class InstanceConfig {
     /** 配置文件名，放在加载器给的配置目录（config）下。 */
     private static final String FILE_NAME = "maicraft.json";
 
-    /** 每台机器的方块上限的默认值：链条输送机一台机器最多一个（所有者要求，免得到处都是链条）。 */
+    /** 每台机器的方块上限的默认值：链条输送机一台机器最多一个（免得到处都是链条）。 */
     private static final Map<String, Integer> DEFAULT_BLOCK_LIMITS = Map.of("create:chain_conveyor", 1);
 
     private final boolean allowGameCommands;

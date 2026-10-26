@@ -149,7 +149,7 @@ public final class ItemUseAim {
      * <p>给不出有了几类原因：空桶对着的既不是源格也不需要找源格；锄和锹要的上方敞开不满足；
      * 倒流体、点火对着空气或流体、旁边又没有实心方块当支撑面。效果格正是自己站的地方不算给不出：
      * 往脚下倒水、往脚下倒岩浆都是玩家本来就会做的事，照给瞄准、说明里写清，由 LLM 自己担后果
-     * （所有者 10-16："岩浆会流到脚下就不能放"这类预测门不能有，只会多绕一轮、让小模型以为 MCP 坏了）。
+     * （预测会失败不是拒绝原生操作的理由："岩浆会流到脚下就不能放"这类预测门只会多绕一轮、让小模型以为 MCP 坏了）。
      */
     public static Optional<Aim> aim(Gesture gesture, BlockPos target, CellNature nature, Around around) {
         return aim(gesture, target, nature, around, null);

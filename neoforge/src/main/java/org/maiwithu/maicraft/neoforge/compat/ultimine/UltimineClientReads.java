@@ -30,7 +30,7 @@ import org.maiwithu.maicraft.compat.ultimine.UltimineControls;
  * FTB Ultimine 2101.1.15 的读写端：连锁键是 FTB 客户端登记的那个按键，按下去 FTB 每刻开头自己发按键包；
  * 切形状发 FTB 自己的切形状包（和按住 Shift 滚轮发的是同一个）；选区读 FTB 客户端收到、画轮廓用的那一份。只翻译，不判断。
  *
- * <p>当前形状只记在 FTB 客户端的非公开字段 shapeIdx 里，FTB 没有公开读法：这是"不用反射"的例外（所有者 2026-10-13 批），
+ * <p>当前形状只记在 FTB 客户端的非公开字段 shapeIdx 里，FTB 没有公开读法：这是"不用反射"的例外，
  * 字段在创建读写端时取一次，名字登记在事实清单，版本范围锁在 [2101.1.15, 2101.2)；取不到时创建出错，这个联动不登记。
  */
 public final class UltimineClientReads implements UltimineControls {

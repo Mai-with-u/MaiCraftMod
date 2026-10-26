@@ -102,7 +102,7 @@ class InstanceConfigTest {
 
     @Test
     void machineBlockLimitsDefaultToOneChainConveyorAndReadFromFile() throws IOException {
-        // 没写这一项：链条输送机每台机器最多一个（所有者定的默认）。
+        // 没写这一项：按默认值，链条输送机每台机器最多一个。
         Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
         assertEquals(Map.of("create:chain_conveyor", 1), InstanceConfig.read(configDir).machineBlockLimits());
 

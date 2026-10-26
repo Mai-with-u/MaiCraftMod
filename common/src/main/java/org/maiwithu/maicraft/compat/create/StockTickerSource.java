@@ -25,7 +25,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
- * 机械动力物流网络的库存请求器当拿东西的一条途径（via=stock_ticker，所有者 2026-10-11 批）：
+ * 机械动力物流网络的库存请求器当拿东西的一条途径（via=stock_ticker）：
  * 找附近旁边坐着库存管理员、自家的请求器，定取货口（请求器 32 格内写了地址、开着收包裹、自家的包裹端口，
  * 上次用过的地址优先，否则最近的），按同步过来的现货报价（五秒内算数，过时报不知道有多少）；
  * 动手：右键管理员开请求界面、下单寄到取货口、到取货口等包裹、取出来拆开（见 {@link StockOrdering}）。只要现货。

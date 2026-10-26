@@ -27,7 +27,7 @@ public final class BedChooser {
     /**
      * 夜里自己去睡最远走多远（格，直线）：天黑了路上刷怪，走一百多格去睡上一晚野外那张床，半路被僵尸打掉大半血，
      * 睡完还要再走回来。更远的床夜里不去：身上带着床就就地放下睡，没有就按夜晚的老办法挖坑或找掩体熬夜。
-     * 所有者定的数。类别：玩家常识。
+     * 类别：玩家常识。
      */
     public static final double NIGHT_WALK_LIMIT_BLOCKS = 32;
 

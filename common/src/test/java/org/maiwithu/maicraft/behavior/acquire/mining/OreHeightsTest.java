@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 class OreHeightsTest {
 
     @Test
-    void 所有者给的几种矿最多的那一层() {
+    void 几种矿最多的那一层() {
         assertEquals(16, OreHeights.of("minecraft:iron_ore").orElseThrow().peakY());
         assertEquals(16, OreHeights.of("minecraft:deepslate_iron_ore").orElseThrow().peakY(), "深层矿同一份");
         assertEquals(-16, OreHeights.of("minecraft:gold_ore").orElseThrow().peakY());

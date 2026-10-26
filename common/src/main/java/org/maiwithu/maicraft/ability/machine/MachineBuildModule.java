@@ -197,7 +197,7 @@ final class MachineBuildModule implements AbilityModule {
 
     /**
      * 整台机器（合并后的蓝图，含档案里已有的）里某种方块超过实例配置的上限时，在计划阶段报出来：
-     * 链条输送机默认每台一个，是所有者定的，近处用传动杆接得上的就别用链条。拆除不受限。
+     * 链条输送机默认每台一个，免得机器上到处都是链条；近处用传动杆接得上的就别用链条。拆除不受限。
      */
     private Optional<StepDecision> overLimit(MachineBlueprint merged) {
         List<String> over = new ArrayList<>();

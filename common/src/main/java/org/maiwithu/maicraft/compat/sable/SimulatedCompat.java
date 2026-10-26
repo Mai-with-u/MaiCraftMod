@@ -40,9 +40,9 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
     }
 
     @Override public void contribute(CompatRegistry registry) {
-        // 物理组装器拉一次杆组装或拆回（所有者 10-11 批的载具规格）：要走过去、拉、确认，进世界时带着玩家行为建。
+        // 物理组装器拉一次杆组装或拆回：要走过去、拉、确认，进世界时带着玩家行为建。
         registry.vehicleAssembler(this, services -> new PhysicsAssembly(this, services));
-        // 坐上驾驶座接管无线红石打字机试按（同一份规格）：要坐下、右键接管、逐条按住再松开，同样进世界时建。
+        // 坐上驾驶座接管无线红石打字机试按：要坐下、右键接管、逐条按住再松开，同样进世界时建。
         registry.vehicleDriver(this, services -> new TypewriterDriver(this, services));
         // 读载具（machine_inspect 指 s# 时的 vehicle 一节）：座位、无线红石打字机每个键接到谁、种类、姿态与接地。
         registry.vehicleReader(this, services -> new VehicleReading(this, services));

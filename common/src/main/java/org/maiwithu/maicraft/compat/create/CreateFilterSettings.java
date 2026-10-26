@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 机械动力过滤器与属性过滤器写规则（所有者定 C5，归 machine_configure 对手上物品设置）。
+ * 机械动力过滤器与属性过滤器写规则（归 machine_configure 对手上物品设置）。
  * 列表过滤器的键：filter.1 ~ filter.18 写物品 ID（empty 清空），filter.mode 写 allow / deny，
  * filter.match_components 写 true / false（连物品组件一起比）。属性过滤器的键：attribute.mode 写 any / all / deny，
  * attributes 写"样本物品 属性文字片段"，几条用分号隔开，片段前加 ! 是取反，写 clear 是清空；
