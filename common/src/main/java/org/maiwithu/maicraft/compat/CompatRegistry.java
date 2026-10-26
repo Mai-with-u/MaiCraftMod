@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
@@ -92,6 +93,7 @@ public final class CompatRegistry {
     private final Slot<VehicleReader> vehicleReaders = slot("读载具的办法", CompatVehicleReader::new);
     private final Slot<TrainScheduler> trainSchedulers = slot("定列车时刻表的办法", CompatTrainScheduler::new);
     private final Slot<RideAlong> rideAlongs = slot("同乘的办法", CompatRideAlong::new);
+    private final Slot<FlightStabilizers> flightStabilizers = slot("飞行稳定器", CompatFlightStabilizers::new);
     private final List<String> decisions = new ArrayList<>();
 
     /** 声明一种槽：建这个动作同时把它放进槽集合，回滚按槽集合撤，不用另记一份。 */
@@ -280,6 +282,11 @@ public final class CompatRegistry {
         rideAlongs.add(module, build);
     }
 
+    /** 联动入口交一种读写飞行稳定器的办法（Flight Control）的建法：进世界时建，包一层后交给看载具与驾驶。 */
+    public void flightStabilizers(CompatModule module, Function<PlayerServices, FlightStabilizers> build) {
+        flightStabilizers.add(module, build);
+    }
+
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
         modSights.add(module, sight);
@@ -391,6 +398,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的同乘办法；规矩同物品来源。 */
     public List<RideAlong> rideAlongs(PlayerServices services) {
         return rideAlongs.build(services);
+    }
+
+    /** 进世界时建联动模组的飞行稳定器读写办法；规矩同物品来源。 */
+    public List<FlightStabilizers> flightStabilizers(PlayerServices services) {
+        return flightStabilizers.build(services);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
 import org.maiwithu.maicraft.compat.sable.SableCompat;
 import org.maiwithu.maicraft.compat.sable.SimulatedCompat;
+import org.maiwithu.maicraft.compat.flightcontrol.FlightControlCompat;
 import org.maiwithu.maicraft.compat.createjetpack.CreateJetpackCompat;
 import org.maiwithu.maicraft.compat.create.CreateCompat;
 import org.maiwithu.maicraft.compat.emi.EmiCompat;
@@ -31,6 +32,7 @@ import org.maiwithu.maicraft.neoforge.compat.create.CreateChainConveyorReads;
 import org.maiwithu.maicraft.neoforge.compat.createjetpack.JetpackReads;
 import org.maiwithu.maicraft.neoforge.compat.sable.SableStructureReads;
 import org.maiwithu.maicraft.neoforge.compat.sable.SimulatedPartReads;
+import org.maiwithu.maicraft.neoforge.compat.flightcontrol.FlightControlPartReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateContraptionReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateElevatorReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateRailwayReads;
@@ -100,6 +102,10 @@ public final class ClientCompatCatalog {
                 // Sable（物理结构）：按 2.0.3 编译，实测实例装的就是它；装了 2.1 及以上不登记。
                 new SupportedMod<>(SableCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),
                         () -> new SableCompat(new SableStructureReads())),
+                // Create: Flight Control（飞行稳定器）：作者只在 Modrinth 发，那里最早是 0.5.1，按它编译；用到的字段与设置包
+                // 和实测实例装的 0.5.0 一致；装了 0.6 及以上不登记。
+                new SupportedMod<>(FlightControlCompat.MOD_ID, "Create: Flight Control", new VerifiedVersions("0.5.0", "0.6"),
+                        () -> new FlightControlCompat(new FlightControlPartReads())),
                 // Simulated（载具部件）：按 1.3.0 编译，实测实例的 Create Aeronautics 一套里打着它；装了 1.4 及以上不登记。
                 new SupportedMod<>(SimulatedCompat.MOD_ID, "Simulated 载具部件", new VerifiedVersions("1.3.0", "1.4"),
                         () -> new SimulatedCompat(new SimulatedPartReads(), new SableStructureReads())),

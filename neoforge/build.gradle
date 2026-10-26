@@ -192,6 +192,8 @@ dependencies {
     compileOnly("dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_companion_version}") { transitive = false }
     // Simulated（Create Aeronautics 一套里的载具部件）：拉物理组装器的杆发它自己的组装包。
     compileOnly("dev.simulated_team.simulated:simulated-neoforge-${minecraft_version}:${simulated_version}") { transitive = false }
+    // Create: Flight Control（飞行稳定器）：读高度稳定器、姿态稳定器、线速度耦合器与飞控红石代理，发它们界面保存时的包。
+    compileOnly("maven.modrinth:create-flight-control:${createflightcontrol_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }
