@@ -77,7 +77,7 @@ public final class EnchantModule implements AbilityModule {
                          BlockScanService scans, ReadsItemTags tags, ReadsItemRegistry registry) {
         this.context = Objects.requireNonNull(context, "context");
         this.services = new EnchantServices(obtain, space, openings, new LiveEnchantReads(context),
-                seen, places, scans, tags);
+                seen, places, new LiveTableScans(scans, context), tags);
         this.registry = Objects.requireNonNull(registry, "registry");
     }
 

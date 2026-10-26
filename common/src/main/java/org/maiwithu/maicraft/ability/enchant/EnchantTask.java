@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -125,12 +124,11 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
             Next<Phase> resolved = resolveTarget(context);
             if (resolved != null) return resolved;
         }
-        // 那格现在不是附魔台：TARGET_GONE，附上它现在的样子。
-        var level = context.player().level();
-        if (!level.getBlockState(prepare.table).is(Blocks.ENCHANTING_TABLE)) {
+        // 那格现在不是附魔台：TARGET_GONE，附上它现在的样子。核对只看现场，选台时的结论不作数。
+        var now = services.tables().inspect(prepare.table);
+        if (!now.table()) {
             return Next.fail(Problem.of(Problem.Kind.TARGET_GONE, prepare.table.toShortString()
-                    + " 那格现在是 " + level.getBlockState(prepare.table).getBlock().getName().getString()
-                    + "，不是附魔台"));
+                    + " 那格现在是 " + now.actual() + "，不是附魔台"));
         }
         return pickStock(context);
     }
@@ -139,12 +137,10 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
     private Next<Phase> resolveTarget(TickContext context) {
         var target = input.target();
         if (target == null) {
-            // 不给 target：按 radius 换算成区块半径扫已加载的地方，找最近的；没扫完下一刻再问。
-            // 扫完没有时写实际扫过的范围：radius 超过一次能扫的就照实说只扫了多远，不把没扫过的说成扫过了。
+            // 不给 target：按 radius 换算成区块半径，找台读端在已加载的现场里分刻找最近的；
+            // 没扫完下一刻再问。读端自己补登记目标方块，索引认不出没登记的格子。
             int chunks = Math.max(1, Math.min(MAX_SCAN_CHUNK_RADIUS, input.radius() / 16 + 1));
-            var found = services.scans().query(context.player().level(),
-                    context.player().localPlayer().blockPosition(), Set.of(Blocks.ENCHANTING_TABLE),
-                    1, chunks, QUERY_BUDGET);
+            var found = services.tables().nearest(chunks, QUERY_BUDGET);
             if (!found.complete()) return Next.stay();
             if (found.hits().isEmpty()) {
                 String range = input.radius() <= chunks * 16 ? "半径 " + input.radius() + " 格内"
@@ -186,8 +182,8 @@ final class EnchantTask extends PhasedTask<EnchantTask.Phase> {
 
     private Next<Phase> fromPosition(WorldPosition at, TickContext context) {
         // 维度是角色此刻所在的维度；一次附魔不跨维度，跨维度出行是另一件事。
-        String here = currentDimension(context);
-        if (at.dimension() != null && !at.dimension().equals(here)) {
+        // 目标没写维度就不必读角色所在的维度：跨不跨都认角色此刻这一层。
+        if (at.dimension() != null && !at.dimension().equals(currentDimension(context))) {
             return Next.fail(Problem.of(Problem.Kind.UNREACHABLE,
                     "那张附魔台在 " + at.dimension() + "，跟角色不在一个维度"));
         }

@@ -12,18 +12,17 @@ import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.planning.SceneSeenTargets;
-import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /**
  * 附魔任务组合的玩家行为：缺料走受限的拿到物品引擎（身上与记得的容器，不为一次附魔下矿）、
- * 腾一格接成品、走到并点开台子、读附魔事实、解析观察编号与记得的地点、分刻扫描找台子。
+ * 腾一格接成品、走到并点开台子、读附魔事实、解析观察编号与记得的地点、分刻扫描找台子（找台与核对走同一份扫描索引）。
  * 服务从构造函数传入；测试换成各自的替身。
  */
 record EnchantServices(ItemNeeds obtain, InventorySpace space,
                        BiFunction<BlockPos, Permissions, MenuOpening> openings,
                        EnchantMenuFacts reads, SceneSeenTargets seen,
-                       ReadsRememberedPlaces places, BlockScanService scans,
+                       ReadsRememberedPlaces places, TableScans tables,
                        ReadsItemTags tags) {
 
     EnchantServices {
@@ -33,7 +32,7 @@ record EnchantServices(ItemNeeds obtain, InventorySpace space,
         Objects.requireNonNull(reads, "reads");
         Objects.requireNonNull(seen, "seen");
         Objects.requireNonNull(places, "places");
-        Objects.requireNonNull(scans, "scans");
+        Objects.requireNonNull(tables, "tables");
         Objects.requireNonNull(tags, "tags");
     }
 }
