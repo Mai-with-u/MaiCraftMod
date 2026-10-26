@@ -151,7 +151,13 @@ public final class TargetIndex {
     /** 任务开始时登记其目标方块(计数式,可重入)。 */
     // 登记任务关心的方块类型并增加引用数；加入新类型时让旧段索引过期，下一次访问再补建。
     public void register(ClientLevel level, Collection<Block> blocks) {
-        LevelIndex idx = indexes.computeIfAbsent(level.dimension(), k -> new LevelIndex());
+        register(level.dimension(), blocks);
+        indexes.get(level.dimension()).lastUseTick = level.getGameTime();
+    }
+
+    /** 按维度登记目标方块：读端核对补登记用的入口，索引刚清空后由它重建这个维度的账。 */
+    public void register(ResourceKey<Level> dimension, Collection<Block> blocks) {
+        LevelIndex idx = indexes.computeIfAbsent(dimension, k -> new LevelIndex());
         boolean changed = false;
         for (Block b : blocks) {
             if (!idx.targetRefs.containsKey(b)) changed = true;
@@ -162,8 +168,13 @@ public final class TargetIndex {
             idx.version++;
             idx.queries.clear();
         }
-        idx.lastUseTick = level.getGameTime();
         anyActive = true;
+    }
+
+    /** 这个维度现在还登记着这个方块吗：清空之后索引不认得任何方块，读端按它核对补登记。 */
+    public boolean registered(ResourceKey<Level> dimension, Block block) {
+        LevelIndex idx = indexes.get(dimension);
+        return idx != null && idx.targetRefs.containsKey(block);
     }
 
     /** 释放所有权；下一次清除扫描会回收连续 200 tick 未使用的缓存。 */

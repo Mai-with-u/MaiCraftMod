@@ -11,6 +11,8 @@ import java.util.function.Consumer;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -23,7 +25,7 @@ import net.minecraft.world.level.block.state.BlockState;
  * 以及最近同步方块变化的位置（供读侧优先核查刚发生的事实）。
  * 实例在启动时创建并传给使用者；服务自身不认识任何任务或能力。
  */
-public final class BlockScanService {
+public final class BlockScanService implements RegistersScanTargets {
     /** 目标索引：缓存已加载方块里登记种类的位置，查询跨刻续进。 */
     private final TargetIndex index = new TargetIndex();
     /** 大范围扫描共享的每刻预算。 */
@@ -37,6 +39,18 @@ public final class BlockScanService {
     /** 任务开始时登记它关心的目标方块（计数式，可重入）。 */
     public void register(ClientLevel level, Collection<Block> blocks) {
         index.register(level, blocks);
+    }
+
+    /** 按维度登记目标方块：读端核对补登记用的入口，索引清空后由它重建这个维度的账。 */
+    @Override
+    public void register(ResourceKey<Level> dimension, Collection<Block> blocks) {
+        index.register(dimension, blocks);
+    }
+
+    /** 这个维度现在还登记着这个方块吗：整体清空后索引不认得任何方块，读端按它核对补登记。 */
+    @Override
+    public boolean registered(ResourceKey<Level> dimension, Block block) {
+        return index.registered(dimension, block);
     }
 
     /** 释放登记；索引暂留热缓存，整个维度闲置后按清扫周期回收。 */
