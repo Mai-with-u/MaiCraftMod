@@ -7,10 +7,12 @@ import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGridReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateTrainScheduleReads;
+import org.maiwithu.maicraft.neoforge.compat.mekanism.MekanismNetworkServerReads;
 import org.maiwithu.maicraft.neoforge.compat.sable.SableForceServerReads;
 import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 import org.maiwithu.maicraft.server.compat.ae2.Ae2ServerCompat;
 import org.maiwithu.maicraft.server.compat.create.CreateServerCompat;
+import org.maiwithu.maicraft.server.compat.mekanism.MekanismServerCompat;
 import org.maiwithu.maicraft.server.compat.sable.SableServerCompat;
 
 /**
@@ -32,6 +34,9 @@ public final class ServerCompatCatalog {
                 // 机械动力：列车时刻表只在服务端，没装铁路导航时坐火车经只读操作 create.trains 查哪趟车去哪。
                 new SupportedMod<>(CreateServerCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
                         () -> new CreateServerCompat(new CreateTrainScheduleReads())),
+                // 通用机械：管网里存着多少电、多少流体只在服务端的网络对象里，经只读操作 mekanism.network 回答。
+                new SupportedMod<>(MekanismServerCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
+                        () -> new MekanismServerCompat(new MekanismNetworkServerReads())),
                 // Sable：质量、重心、各处的力只在服务端，看载具的受力经只读操作 sable.body 回答。
                 new SupportedMod<>(SableServerCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),
                         () -> new SableServerCompat(new SableForceServerReads())));
