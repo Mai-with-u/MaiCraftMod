@@ -5,7 +5,6 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.function.LongSupplier;
 
 import com.google.gson.JsonElement;
@@ -19,37 +18,31 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
-import org.maiwithu.maicraft.game.serverlink.ClientRequest;
 
 /**
  * ME 网络的读法：哪几格连成一张网在客户端看（线缆画出来的连接、设备贴着设备），网络编号取那一片最小的一格；
  * 那张网怎样（控制器、频道、能量、存储总量、合成 CPU）只有服务端知道，经只读操作 ae2.network 问，
- * 问出去要过几刻才有回答。回答收下后一小段时间内直接复用，过了就重问；
- * 重问期间的读数写明是几秒前的数据，问话没收回时 summaryPending 为真，交付方等它到账再交。
+ * 问出去要过几刻才有回答。问、收、重问与数据时刻交给 {@link ServerNetworkReadings}：回答收下后一小段时间内直接复用，
+ * 过了就重问，重问期间的读数写明是几秒前的数据，问话没收回时 summaryPending 为真，交付方等它到账再交。
  * 客户端看得见的也一起给：这一片里有没有控制器方块、控制器亮没亮。服务器没装 MaiCraft 的 AE2 读数时如实说读不到。
  */
 final class MeNetworkReader implements NetworkReader {
 
     static final NetworkKind KIND = new NetworkKind("me",
             "应用能源2 的 ME 网络：线缆把控制器、驱动器、接口、终端连起来的一张网，共用频道、能量与存储");
-    /** 一份服务端回答用多久（毫秒）：过了重新问，网络状态会变。 */
-    static final long FRESH_MILLIS = 5_000;
     /** 连通的片记多久（毫秒）：一次查看里反复问同一片不重算，过了重新数。 */
     private static final long COMPONENT_MILLIS = 1_000;
 
     private final Ae2Compat compat;
     private final PlayerServices services;
-    /** 时刻从外面给：离线测试拨钟用，生产就是系统时钟。 */
+    /** 时刻从外面给：离线测试拨钟用，生产就是系统时钟；连通的片按它过期。 */
     private final LongSupplier now;
     private final Map<BlockPos, MeComponents.Component> components = new LinkedHashMap<>();
     private long componentsAt;
     /** 每张网的代表格：问服务端时报这一格。 */
     private final Map<String, BlockPos> representative = new LinkedHashMap<>();
-    /** 问话账：问出去还没答的、最近一次答的、连着几次没答上，见 {@link AskLedger}。 */
-    private final AskLedger asks = new AskLedger();
-
-    /** 一答没答上后再重问的次数上限：请求被会话轮换退场这类一过性失败重问就答上了，连着几次都失败就如实交"读不到"。 */
-    private static final int MAX_RETRIES = 2;
+    /** 向服务端要整网读数：问、收、没答上重问、标明数据时刻。 */
+    private final ServerNetworkReadings server;
 
     MeNetworkReader(Ae2Compat compat, PlayerServices services) {
         this(compat, services, System::currentTimeMillis);
@@ -59,6 +52,7 @@ final class MeNetworkReader implements NetworkReader {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");
         this.now = Objects.requireNonNull(now, "now");
+        this.server = new ServerNetworkReadings(Ae2Compat.NETWORK_OPERATION, services.serverReads(), now);
     }
 
     @Override public NetworkKind kind() {
@@ -88,38 +82,25 @@ final class MeNetworkReader implements NetworkReader {
         BlockPos at = representative.get(networkId);
         if (at == null) return NetworkSummary.unreadable(networkId, "还没看到过这张网上的设备，先看一眼");
         Map<String, Object> seen = clientFacts(networkId);
-        if (!services.serverReads().available(Ae2Compat.NETWORK_OPERATION)) {
+        if (!server.available()) {
             return new NetworkSummary(networkId, false, seen,
                     "读不到：服务器没装 MaiCraft 的 AE2 读数（或所有者关了），只给看得见的");
         }
-        settle(networkId);
-        long now = this.now.getAsLong();
-        AskLedger.Answer answer = asks.answer(networkId);
-        // 这一问还在路上时，手里的上一答就是过时的：照"正在重读"的口径标明数据时刻再交，
-        // 不当成本刻的实况——收场时按已经看到的现整理，走的就是这条路。
-        boolean inFlight = asks.pending(networkId);
-        boolean refreshing = inFlight || asks.needsAsk(networkId, now, FRESH_MILLIS);
-        if (refreshing && !inFlight) ask(networkId, at);
-        if (answer == null) return new NetworkSummary(networkId, false, seen, "正在向服务端要这张网的读数，稍后再看");
-        NetworkSummary served = MeSummaries.of(networkId, answer.reply(), seen);
-        if (!refreshing) return served;
+        ServerNetworkReadings.Latest latest = server.latest(networkId, at);
+        if (latest.reply() == null) {
+            return new NetworkSummary(networkId, false, seen, "正在向服务端要这张网的读数，稍后再看");
+        }
+        NetworkSummary served = MeSummaries.of(networkId, latest.reply(), seen);
         // 这一答不是当拍的：读数照给，但写明数据时刻，等这一问到账再读就是新值。
-        String when = answer.failed() ? "，正在重问"
-                : inFlight ? "；这是 " + secondsOld(answer, now) + " 秒前收到的读数，这一次的读数还在路上"
-                : "；这是 " + secondsOld(answer, now) + " 秒前的读数，正在重读";
-        return new NetworkSummary(networkId, served.readable(), served.readings(), served.note() + when);
-    }
-
-    /** 手里这份回答离现在几秒：至少算 1 秒，不当成刚答的。 */
-    private static long secondsOld(AskLedger.Answer answer, long now) {
-        return Math.max(1, (now - answer.at()) / 1000);
+        return latest.staleness().isEmpty() ? served : new NetworkSummary(networkId, served.readable(),
+                served.readings(), served.note() + latest.staleness());
     }
 
     @Override public boolean summaryPending(String networkId) {
-        settle(networkId);
-        // 手里留着上一轮的旧答案不算答了：这一轮的问话没收回，读数就在路上，交付方要等本轮答案。
-        return asks.pending(networkId);
-    }    @Override public Optional<LineMaterials> lineMaterials() {
+        return server.pending(networkId);
+    }
+
+    @Override public Optional<LineMaterials> lineMaterials() {
         return Optional.of(new MeLines());
     }
 
@@ -140,25 +121,6 @@ final class MeNetworkReader implements NetworkReader {
         facts.put("controller_blocks", controllers);
         facts.put("controller_blocks_online", online);
         return facts;
-    }
-
-    private void ask(String networkId, BlockPos at) {
-        JsonObject body = new JsonObject();
-        body.addProperty("x", at.getX());
-        body.addProperty("y", at.getY());
-        body.addProperty("z", at.getZ());
-        asks.asked(networkId, services.serverReads().ask(Ae2Compat.NETWORK_OPERATION, body));
-    }
-
-    // 收回答：答了的记下；被拒、失败、请求退场的也收起来留原因，限额内马上重问一轮——
-    // 会话轮换会把在途的只读请求退场，重问一次就答上了，不把这种失败当读数交给调用方。
-    private void settle(String networkId) {
-        UUID request = asks.inFlight(networkId);
-        if (request == null) return;
-        Optional<ClientRequest.Snapshot> snapshot = services.serverReads().answer(request);
-        if (asks.settled(networkId, snapshot, now.getAsLong(), MAX_RETRIES)) {
-            ask(networkId, representative.get(networkId));
-        }
     }
 
     /** 登记代表格：实机里 membership() 第一次认出这张网的设备时记；离线测试也经它登记。 */
