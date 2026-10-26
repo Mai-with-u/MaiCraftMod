@@ -61,7 +61,7 @@ public final class LiveNightView implements NightfallNeed.ReadsNight {
             foes.add(new ThreatAssessment.Foe(threat.distance(), threat.kind(), threat.armed(), threat.armed()));
         }
         // 眼下还没有怪：按一晚上迟早会碰上的一只僵尸一只骷髅估——空手（镐不算兵器）的身板
-        // 等怪真到了跟前再躲就晚了，天一黑就挖坑；拿着剑、斧的照常干活，来了再打。
+        // 等怪真到了跟前再去弄床就晚了，天一黑就去备一张床；拿着剑、斧的照常干活，来了再打。
         if (foes.isEmpty()) foes.addAll(TYPICAL_NIGHT_PACK);
         var mine = new ThreatAssessment.MySide(self.getHealth(), self.getArmorValue(),
                 profile.weapon().map(WeaponChoice::scoreOf).orElse(0), profile.foodCount(), true);

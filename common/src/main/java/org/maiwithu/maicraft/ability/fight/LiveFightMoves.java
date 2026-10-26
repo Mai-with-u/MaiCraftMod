@@ -72,7 +72,7 @@ public final class LiveFightMoves implements FightMoves {
     @Override public Action walk(GoalCompiler.Compiled goal) { return battle.walk(goal); }
 
     // 下面这些本事也照原样交给战斗引擎的生产动手，点名战斗和自卫一样会：出手时走位不动镜头、走过去先把剑斧拿到手上、
-    // 跳劈、撤不掉时垫高或天黑挖坑、把飞来的火球打回去。
+    // 跳劈、白天撤不掉时垫高、把飞来的火球打回去。
     @Override
     public void stepKeepingAim(TickContext context, Footwork.Step step) {
         battle.stepKeepingAim(context, step);
