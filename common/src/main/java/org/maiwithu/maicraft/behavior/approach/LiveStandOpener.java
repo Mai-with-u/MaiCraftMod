@@ -20,7 +20,11 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -51,16 +55,18 @@ final class LiveStandOpener implements StandOpener {
     private final PermissionCheck permission;
     private final Permissions permissions;
     private final ReachRules reach;
-    private final WalksToSpot walks;
+    private final WalkTo walks;
+    private final TerrainPermit permit;
     private final ProtectedCells guarded;
 
     LiveStandOpener(Supplier<PlayerContext> context, PermissionCheck permission, Permissions permissions,
-                    ReachRules reach, WalksToSpot walks, ProtectedCells guarded) {
+                    ReachRules reach, WalkTo walks, TerrainPermit permit, ProtectedCells guarded) {
         this.context = Objects.requireNonNull(context, "context");
         this.permission = Objects.requireNonNull(permission, "permission");
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.reach = Objects.requireNonNull(reach, "reach");
         this.walks = Objects.requireNonNull(walks, "walks");
+        this.permit = Objects.requireNonNull(permit, "permit");
         this.guarded = Objects.requireNonNull(guarded, "guarded");
     }
 
@@ -135,7 +141,8 @@ final class LiveStandOpener implements StandOpener {
         private final BlockPos feet;
         private final List<BlockPos> cells;
         private int index;
-        private boolean walkStarted;
+        /** 手上去补救站位的这一趟；被打断时收掉，回来重新上路去同一格。 */
+        private WalkRun walk;
         private boolean arrived;
         private int noShotTicks;
         private BlockDigger digger;
@@ -151,11 +158,10 @@ final class LiveStandOpener implements StandOpener {
             PlayerContext player = tick.player();
             last = player;
             if (!arrived) {
-                if (!walkStarted) {
-                    walks.begin(feet, false);
-                    walkStarted = true;
+                if (walk == null) {
+                    walk = walks.start(GoalCompiler.standOn(feet), permit);
                 }
-                ActionStatus walking = walks.tick(tick);
+                ActionStatus walking = walk.tick(tick);
                 if (!(walking instanceof ActionStatus.Done)) return walking;
                 arrived = true;
             }
@@ -184,13 +190,20 @@ final class LiveStandOpener implements StandOpener {
 
         @Override
         public void pause() {
-            walks.pause();
+            // 打断时收掉这趟补救的走到：恢复推进时从原地重新上路去同一格，不续一条过时的路线。
+            if (walk != null) {
+                walk.close();
+                walk = null;
+            }
             if (digger != null && last != null) digger.cancel(last);
         }
 
         @Override
         public void close() {
-            walks.stop();
+            if (walk != null) {
+                walk.close();
+                walk = null;
+            }
             if (digger != null) digger.cancel(last);
         }
 

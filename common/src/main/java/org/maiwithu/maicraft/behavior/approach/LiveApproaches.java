@@ -56,15 +56,14 @@ public final class LiveApproaches implements BringsPlayerClose {
 
     private Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid,
             TaskRecords records) {
-        // 每个靠近动作各走各的一份：路上能动多少地形按这次任务的许可来，暂停与收尾互不牵连。
-        // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关；
-        // 站位补救另走一份，挖开遮挡前过许可检查点。
+        // 每个靠近动作各走各的一趟：路上能动多少地形按这次任务的许可折算成地形许可，
+        // 靠近动作与站位补救都拿同一份走到入口与许可自己去上路，暂停与收尾互不牵连。
+        // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
         ReachRules reach = reachNow();
         TerrainPermit permit = TerrainPermit.of(permissions);
-        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach,
-                new LiveSpotWalks(walks, permit), avoid);
+        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
-                avoid, new LiveSpotWalks(walks, permit), opener, permissions, records);
+                avoid, walks, permit, opener, permissions, records);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */

@@ -3,6 +3,11 @@ package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -41,11 +46,17 @@ public final class Approach implements Action {
     private final ApproachWorldView world;
     private final WalkCost walking;
     private final ProtectedCells guarded;
-    private final WalksToSpot moves;
+    private final WalkTo walks;
+    private final TerrainPermit permit;
     private final StandOpener opener;
     private final Permissions permissions;
     /** 发起方的记账口：就地挖这类要跟着任务结果走的事实记在这里；null 表示不需要记。 */
     private final TaskRecords records;
+
+    /** 手上这一趟走向站位；没有在路上的一趟时为 null。暂停与停稳都由走到运行自己记，这里只读它的情况。 */
+    private WalkRun walk;
+    /** 已叫这趟安全停、还在等落地：落地站稳前原地等着，不把停稳当作到了，也不重新上路。 */
+    private boolean holdingStop;
 
     private Stage stage = Stage.CHECK_HERE;
     private final Deque<StandSpot> pending = new ArrayDeque<>();
@@ -61,20 +72,22 @@ public final class Approach implements Action {
      * @param world       世界与角色的只读视图
      * @param walking     走过去的代价查询；寻路没接上时传按直线距离回答的实现
      * @param guarded     受保护格判断；许可与保护模型没接上时传永远回答否的实现
-     * @param moves       移动执行，由出行轨提供
+     * @param walks       出行轨的走到入口，站位这一趟由它上路
+     * @param permit      这次任务许可折算出的地形许可，路上能动多少地形按它来
      * @param opener      站位补救；交互轨没接上之前传 null，等于不挖不垫
      * @param permissions 这次的许可，决定最后手段能不能用
      * @param records     发起任务的记账口，就地挖的说明记进任务结果；不需要时传 null
      */
     public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
-                    WalkCost walking, ProtectedCells guarded, WalksToSpot moves,
+                    WalkCost walking, ProtectedCells guarded, WalkTo walks, TerrainPermit permit,
                     StandOpener opener, Permissions permissions, TaskRecords records) {
         this.target = target;
         this.reach = reach;
         this.world = world;
         this.walking = walking;
         this.guarded = guarded;
-        this.moves = moves;
+        this.walks = walks;
+        this.permit = permit;
         this.opener = opener;
         this.permissions = permissions;
         this.records = records;
@@ -95,27 +108,33 @@ public final class Approach implements Action {
         return List.copyOf(tried);
     }
 
-    // 被生存需求打断：走向站位先停住、记着去处，回来时接着走，不把这一趟丢了干等。
+    // 被生存需求打断：手上这趟转给走到停下、记着去处，回来时接着走，不把这一趟丢了干等。
     @Override public void pause() {
-        moves.pause();
+        holdingStop = false;
+        if (walk != null) walk.pause();
     }
 
     // 走向站位途中能不能打断按走路说（悬空、正在跳时停不得）；挑站位、核对、补救时是正常干活。
     @Override public Interruptibility interruptibility() {
-        return stage == Stage.WALKING ? moves.interruptibility() : Interruptibility.WORKING;
+        return stage == Stage.WALKING && walk != null ? walk.interruptibility() : Interruptibility.WORKING;
     }
 
-    // 被叫先到安全处再停：走向站位途中转给走路，悬空的先落地、落地后原地等着；挑站位、核对时现在就能停。
+    // 被叫先到安全处再停：手上这趟转给走到，悬空的先落地、落地后原地等着；挑站位、核对时现在就能停。
     @Override public boolean stopSafely() {
-        return stage == Stage.WALKING && moves.stopSafely();
+        if (stage != Stage.WALKING || walk == null || !walk.stopSafely()) return false;
+        holdingStop = true;
+        return true;
     }
 
     @Override public boolean stoppedSafely() {
-        return moves.stoppedSafely();
+        return walk == null || walk.stoppedSafely();
     }
 
     @Override public void close() {
-        moves.stop();
+        if (walk != null) {
+            walk.close();
+            walk = null;
+        }
         if (rescueAction != null) rescueAction.close();
     }
 
@@ -152,16 +171,38 @@ public final class Approach implements Action {
     private ActionStatus takeNextSpot() {
         current = pending.poll();
         if (current != null) {
-            // 湿脚位不要求站进水里：水里那一格寻路站不进去，走到够得着它的位置就算到。
-            moves.begin(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
+            startWalk(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
             stage = Stage.WALKING;
             return ActionStatus.progressed();
         }
         return lastResort();
     }
 
+    /**
+     * 上路去一个站位：换目标前先把上一趟收掉、交出身体。
+     * 湿脚位是水里的格子，寻路给不出「站进去」的路线，按宽松目标走到够得着它的位置就算到；
+     * 干的站位按「站进指定格」上路，到了以身体站进那一格并落地为准。
+     */
+    private void startWalk(BlockPos feet, boolean wetSpot) {
+        if (walk != null) {
+            walk.close();
+            walk = null;
+        }
+        holdingStop = false;
+        walk = walks.start(wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet), permit);
+    }
+
     private ActionStatus walkStep(TickContext context) {
-        return switch (moves.tick(context)) {
+        if (walk == null) return ActionStatus.running();
+        // 被打断时走到停稳了、报的是"已停下"：不是到了，恢复推进时从原地接着走完剩下的路。
+        if (!holdingStop && walk.report().state() == WalkReport.State.STOPPED) {
+            walk.resume();
+            return ActionStatus.running();
+        }
+        ActionStatus status = walk.tick(context);
+        // 收尾途中落地停稳了：原地等外层停下，不把停稳当作到了，也不重新上路。
+        if (holdingStop && walk.report().state() == WalkReport.State.STOPPED) return ActionStatus.running();
+        return switch (status) {
             case ActionStatus.Running running -> running;
             // 到了再核对一次：路走完了不等于位置还能用，世界可能在这几刻里变了。
             case ActionStatus.Done done -> verifyArrival();

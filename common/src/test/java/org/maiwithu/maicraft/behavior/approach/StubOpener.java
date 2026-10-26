@@ -17,6 +17,8 @@ import java.util.Optional;
 final class StubOpener implements StandOpener {
 
     final List<RejectedSpot> asked = new ArrayList<>();
+    /** 交出的补救动作被收掉（close）的次数。 */
+    int closes;
     private final boolean willing;
 
     StubOpener(boolean willing) {
@@ -28,6 +30,10 @@ final class StubOpener implements StandOpener {
         return willing ? Optional.of(new Action() {
             @Override public ActionStatus tick(TickContext context) {
                 return ActionStatus.done();
+            }
+
+            @Override public void close() {
+                closes++;
             }
 
             @Override public String describe() {

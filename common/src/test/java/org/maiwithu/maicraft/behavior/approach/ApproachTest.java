@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -43,7 +44,7 @@ class ApproachTest {
     private Approach approach(ApproachTarget target, StubMoves moves, StandOpener opener,
             Permissions permissions, TaskRecords records) {
         return new Approach(target, REACH, world, walking, guarded,
-                moves, opener, permissions, records);
+                moves, TerrainPermit.WALK_ONLY, opener, permissions, records);
     }
 
     @Test
@@ -65,6 +66,35 @@ class ApproachTest {
         assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)));
         assertEquals(ActionStatus.done(), approach.tick(new StubTick(3)));
         assertEquals(1, moves.begun.size());
+        // 干的站位按「站进指定格」上路：到了以站进那一格为准，邻格不算到。
+        assertEquals("Exact", moves.goals.getLast().goal().getClass().getSimpleName());
+        assertTrue(moves.goals.getLast().goal().isAt(moves.begun.getLast()));
+    }
+
+    @Test
+    void 湿脚位走到够得着就算到_不必站进水里那格() {
+        // 水里的船：周围整片浅水，能站的候选都是湿脚位——水里那一格寻路站不进去，
+        // 按宽松目标上路，走到够得着它的位置就算到，不必把身体放进水里。
+        for (int x = -2; x <= 11; x++) {
+            for (int z = -8; z <= 8; z++) {
+                for (int y = 50; y <= 63; y++) {
+                    world.fluids.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+        world.grounded = false;
+        StubMoves moves = new StubMoves(world, ActionStatus.done());
+        Approach approach = approach(ApproachTarget.ofVehicle(new AABB(4, 60, 0, 5, 62, 1)),
+                moves, null, Permissions.DEFAULT, null);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 10 && !(status instanceof ActionStatus.Done); tick++) {
+            status = approach.tick(new StubTick(tick));
+        }
+        assertEquals(ActionStatus.done(), status);
+        assertFalse(moves.goals.getLast().goal().getClass().getSimpleName().equals("Exact"),
+                "湿脚位不用「站进指定格」的目标");
+        assertTrue(moves.goals.getLast().goal().isAt(moves.begun.getLast().north()),
+                "邻格就算到：不必站进水里那一格");
     }
 
     @Test
@@ -85,8 +115,16 @@ class ApproachTest {
         assertTrue(approach.stopSafely(), "转给走路先落地");
         assertEquals(1, moves.safeStops, "走路收到先停稳");
         assertFalse(approach.stoppedSafely(), "还没落地");
-        moves.airborne = false;
+        // 收尾途中落地站稳：原地等着，落地报的"已停下"不是到了，也不重新上路。
+        assertInstanceOf(ActionStatus.Running.class, approach.tick(new StubTick(4)), "收尾途中还在落地");
+        assertInstanceOf(ActionStatus.Running.class, approach.tick(new StubTick(5)), "落地报的已停下不是到了");
         assertTrue(approach.stoppedSafely(), "落地站稳了");
+        assertEquals(1, moves.begun.size(), "收尾途中原地等着，不重新上路");
+        // 落地等着时被打断，恢复推进后从原地续上同一趟，不重新挑站位。
+        approach.pause();
+        assertInstanceOf(ActionStatus.Running.class, approach.tick(new StubTick(6)));
+        assertEquals(1, moves.begun.size(), "回来接着走，不重新挑站位");
+        assertEquals(1, moves.resumes, "从原地续上这一趟");
     }
 
     @Test
@@ -104,6 +142,8 @@ class ApproachTest {
         }
         assertEquals(ActionStatus.done(), status);
         assertTrue(moves.begun.size() > 1);
+        // 换站位时收掉上一趟，把身体交还给下一趟。
+        assertEquals(moves.begun.size() - 1, moves.closes);
         assertTrue(approach.tried().size() > 1);
         assertTrue(approach.tried().stream().allMatch(attempt -> attempt.result().contains("看不见")));
     }
@@ -215,7 +255,7 @@ class ApproachTest {
         approach.tick(new StubTick(1));
         approach.tick(new StubTick(2));
         approach.close();
-        assertEquals(1, moves.stops);
+        assertEquals(1, opener.closes, "补救动作一并收掉");
     }
 
     @Test
@@ -228,7 +268,7 @@ class ApproachTest {
         approach.tick(new StubTick(2));
         approach.pause();
         assertEquals(1, moves.pauses);
-        assertEquals(0, moves.stops, "被打断不该把这一趟丢掉");
+        assertEquals(0, moves.closes, "被打断不该把这一趟丢掉");
         approach.tick(new StubTick(3));
         assertEquals(1, moves.begun.size(), "回来接着走，不重新挑站位");
     }
