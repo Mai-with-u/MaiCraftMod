@@ -257,7 +257,7 @@ class McpTransportHttpTest {
 
             HttpResponse<String> list = post(skillsSession, 90, "resources/list", new JsonObject(), null, endpoint, null);
             JsonArray resources = result(list).getAsJsonArray("resources");
-            assertEquals(9, resources.size(), "九篇随包技能都在目录里");
+            assertEquals(10, resources.size(), "十篇随包技能都在目录里");
             JsonObject opening = null;
             for (JsonElement element : resources) {
                 JsonObject resource = element.getAsJsonObject();

@@ -48,6 +48,8 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
         registry.vehicleReader(this, services -> new VehicleReading(this, services));
         // 无线红石打字机当一种机器：machine_configure 给它绑键（键 → 两格频率物品），组装前在世界里绑。
         registry.machineType(this, services -> new TypewriterMachine(this, services));
+        // 载具部件资料：只在这一套接上时进资料目录，部件的物品资料页也挂上它，不用玩家行为。
+        registry.knowledgeSource(this, new VehiclePartsKnowledge());
     }
 
     /** 角色附近这个编号的物理结构；不在附近为空。 */

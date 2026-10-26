@@ -2,6 +2,7 @@ survival/survival-opening
 survival/survival-mining
 create/create-machine-workflow
 create/create-power-network
+create/create-vehicles
 mekanism/mekanism-getting-started
 mekanism/mekanism-ore-processing
 progression/progression-ender-dragon
