@@ -139,9 +139,12 @@ final class ModShot implements Action {
         }
         String ammo = shot.get().ammoItem();
         int before = carried(self, ammo);
-        pending = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
+        PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
                 c -> carried(c.localPlayer(), ammo) < before || c.localPlayer().getCooldowns().isOnCooldown(weapon.getItem())
                         ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING, CONFIRM_TICKS);
+        // 提交入口这一刻不收：扳机下一刻再扣，瞄准的账都还在。
+        if (submitted == null) return ActionStatus.progressed();
+        pending = submitted;
         stage = Stage.FIRING;
         return ActionStatus.progressed();
     }

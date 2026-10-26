@@ -85,16 +85,13 @@ final class ShieldGuard {
         if (raising == null) {
             if (self.isUsingItem() || !player.canInteractThisTick() || lowering != null && !lowering.terminal()) return;
             shieldAtRaise = self.getOffhandItem().copy();
-            try {
-                raising = player.interactionSender().useItem(player, InteractionHand.OFF_HAND,
-                        c -> c.localPlayer().isUsingItem() ? InteractionConfirmation.Verdict.APPLIED
-                                : InteractionConfirmation.Verdict.PENDING, CONFIRM_TICKS);
-            } catch (IllegalStateException busy) {
-                // 上一下举盾（或别的动作）还在等确认：这一刻不举，下一刻再试。举盾只是锦上添花，
-                // 不能因为它把整场自卫掀翻——实机 10-13 打完一仗刚收起的举盾还没结清，躲苦力怕时再举就抛错，
-                // 自卫任务出错结束、缓着不再插，站在点着引信的苦力怕旁边被炸死。
-                return;
-            }
+            PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.OFF_HAND,
+                    c -> c.localPlayer().isUsingItem() ? InteractionConfirmation.Verdict.APPLIED
+                            : InteractionConfirmation.Verdict.PENDING, CONFIRM_TICKS);
+            // 提交入口这一刻不收（别的动作还在等确认）：这一刻不举，下一刻再试。举盾只是锦上添花，
+            // 不能因为它把整场自卫掀翻——站在点着引信的苦力怕旁边也得等得起这一刻。
+            if (submitted == null) return;
+            raising = submitted;
         } else if (!raising.terminal()) {
             raising = player.interactionSender().poll(player, raising);
         }
@@ -111,7 +108,9 @@ final class ShieldGuard {
         projection.release(this);
         boolean up = self.isUsingItem() && self.getUsedItemHand() == InteractionHand.OFF_HAND;
         if (up && raising.terminal() && player.canInteractThisTick()) {
-            lowering = player.interactionSender().releaseUsingItem(player, raising);
+            PendingInteraction released = player.interactionSender().releaseUsingItem(player, raising);
+            // 本刻没有交互机会就先不松：下一刻再发松开，盾多举一刻不碍事。
+            if (released != null) lowering = released;
         }
         if (!up || lowering != null) raising = null;
     }

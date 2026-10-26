@@ -87,12 +87,10 @@ public final class ProjectileReturn implements Action {
         if (!(aimed instanceof EntityHitResult hit) || hit.getEntity() != projectile || !player.canInteractThisTick()) {
             return ActionStatus.running();
         }
-        try {
-            pending = sender.attack(player, projectile, turnedBack(self, projectile), CONFIRM_TIMEOUT_TICKS);
-        } catch (IllegalStateException busy) {
-            // 这一刻交互入口被占着（盾还没结清）：下一刻再挥。
-            return ActionStatus.running();
-        }
+        PendingInteraction submitted = sender.attack(player, projectile, turnedBack(self, projectile), CONFIRM_TIMEOUT_TICKS);
+        // 这一刻交互入口不收（盾还没结清或机会被占用）：不算失败，下一刻再挥。
+        if (submitted == null) return ActionStatus.running();
+        pending = submitted;
         return ActionStatus.progressed();
     }
 

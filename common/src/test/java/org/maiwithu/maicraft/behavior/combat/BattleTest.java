@@ -127,7 +127,8 @@ class BattleTest {
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
-                if (busy) throw new IllegalStateException("a native action is already awaiting confirmation");
+                // 交互入口被举盾占着：出手动作在内部按"本刻没轮到"等待，回 Running 不抛错。
+                if (busy) return ActionStatus.running();
                 if (strikeHangs) return ActionStatus.running();
                 strikes++;
                 return rejecting ? ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME, "没确认"))

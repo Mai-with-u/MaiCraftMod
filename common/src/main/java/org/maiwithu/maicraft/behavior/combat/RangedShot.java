@@ -188,9 +188,12 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         if (pending == null) {
             if (!player.canInteractThisTick()) return ActionStatus.running();
             heldAtStart = player.localPlayer().getMainHandItem().copy();
-            pending = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
+            PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
                     c -> c.localPlayer().isUsingItem() ? InteractionConfirmation.Verdict.APPLIED
                             : InteractionConfirmation.Verdict.PENDING, CONFIRM_TICKS);
+            // 提交入口这一刻不收（上一次动作还没结清）：下一刻原样再提交，还没开始拉弓。
+            if (submitted == null) return ActionStatus.running();
+            pending = submitted;
             renew(player);
             return ActionStatus.progressed();
         }
@@ -222,7 +225,10 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         if (held < FULL_DRAW_TICKS || !onTarget || !player.canInteractThisTick()) return ActionStatus.progressed();
         // 有意松手前先交还按住的投影，免得放完箭原版又起手拉下一箭。
         projection.release(this);
-        pending = player.interactionSender().releaseUsingItem(player, pending);
+        PendingInteraction released = player.interactionSender().releaseUsingItem(player, pending);
+        // 本刻没有交互机会就先不松：继续按住，下一刻再放箭。
+        if (released == null) return ActionStatus.progressed();
+        pending = released;
         stage = Stage.FIRING;
         return ActionStatus.progressed();
     }
@@ -241,7 +247,10 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         held = self.getTicksUsingItem();
         if (held >= CrossbowItem.getChargeDuration(self.getMainHandItem(), self) && player.canInteractThisTick()) {
             projection.release(this);
-            pending = player.interactionSender().releaseUsingItem(player, pending);
+            PendingInteraction released = player.interactionSender().releaseUsingItem(player, pending);
+            // 本刻没有交互机会就先不松：继续按住装填，下一刻再松。
+            if (released == null) return ActionStatus.progressed();
+            pending = released;
             stage = Stage.LOADING_RELEASE;
             return ActionStatus.progressed();
         }
@@ -274,8 +283,11 @@ public final class RangedShot implements Action, RangedCombat.Fires {
             return ActionStatus.progressed();
         }
         ItemStack before = hand.copy();
-        pending = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
+        PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
                 InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before), CONFIRM_TICKS);
+        // 提交入口这一刻不收：扳机下一刻再扣，弩仍上着弦不浪费。
+        if (submitted == null) return ActionStatus.progressed();
+        pending = submitted;
         stage = Stage.FIRING;
         return ActionStatus.progressed();
     }
@@ -304,11 +316,9 @@ public final class RangedShot implements Action, RangedCombat.Fires {
                 || !player.canInteractThisTick()) {
             return;
         }
-        try {
-            pending = player.interactionSender().cancelMainHandUse(player, pending);
-        } catch (RuntimeException busy) {
-            // 交互入口此刻不收：投影已交还，原版两刻内松开；弓可能因此放出一箭，如实留在世界里。
-        }
+        PendingInteraction cancelled = player.interactionSender().cancelMainHandUse(player, pending);
+        // 交互入口此刻不收：投影已交还，原版两刻内松开；弓可能因此放出一箭，如实留在世界里。
+        if (cancelled != null) pending = cancelled;
     }
 
     private ActionStatus fail(String reason) {

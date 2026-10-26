@@ -191,10 +191,11 @@ class BattleLimbsTest {
     void busyEntranceReportsNoResultAndKeepsTheStrike() {
         Moves moves = new Moves();
         BattleLimbs limbs = new BattleLimbs(moves, 3);
-        // 交互入口被上一下占着：这一刀抛"还在等确认"，动作留在手上，下一刻再挥。
+        // 交互入口被上一下占着：出手动作在内部按"本刻没轮到"回 Running 等待，槽位照常收下这个结论，
+        // 动作留在手上，下一刻再挥；不抛异常，也不把没轮到记成被拒。
         Action busy = new Action() {
             @Override public ActionStatus tick(TickContext context) {
-                throw new IllegalStateException("a native action is already awaiting confirmation");
+                return ActionStatus.running();
             }
 
             @Override public String describe() {

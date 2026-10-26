@@ -115,14 +115,10 @@ public final class BattleLimbs {
             strike = newStrike.apply(context, targetId);
             strikeTarget = targetId;
         }
-        ActionStatus status;
-        try {
-            status = strike.tick(context);
-        } catch (IllegalStateException busy) {
-            // 上一下举盾还在等确认，交互入口这一刻不收这一刀：下一刻再挥。不能因此把整场战斗掀翻——
-            // 撤离途中被追上还手时，刚举的盾没结清，挥刀抛错会把整场自卫判成出错收场。
-            return new Swing(false, false, false);
-        }
+        // 交互入口这一刻不收（上一动作如举盾还没结清、或机会被占用）时，出手动作在内部按显式结论等待
+        // 并回 Running，这里照常推进：下一刻再挥，不把没轮到当成出错——撤离途中被追上还手时，
+        // 整场自卫不能因此判成出错收场。
+        ActionStatus status = strike.tick(context);
         if (status instanceof ActionStatus.Done) {
             dropStrike();
             rejects = 0;
