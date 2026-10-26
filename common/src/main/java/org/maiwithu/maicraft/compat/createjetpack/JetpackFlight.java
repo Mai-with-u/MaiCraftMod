@@ -11,6 +11,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.ClientHooks;
@@ -237,6 +238,8 @@ final class JetpackFlight implements TravelLeg {
         double horizontal = horizontal(position, aim);
         double rise = aim.y - position.y;
         // 起飞那一格就是脚下这一格：人在这一格里就算到了，不在地上对它的正中（脚下若是坑边，潜行挪不过去）。
+        // 路线起点是找路那一刻从同一个 blockPosition() 现算的，站在灵魂沙上两边都读成灵魂沙那一格，对得上；
+        // 找路起点改用别的脚位算法时，这里要跟着改。
         boolean takeoffCell = waypoint == 0 && player.blockPosition().equals(next);
         if (takeoffCell || horizontal < REACHED_HORIZONTAL && Math.abs(rise) < REACHED_VERTICAL) {
             waypoint++;
@@ -346,6 +349,15 @@ final class JetpackFlight implements TravelLeg {
         return startDescent(level, player);
     }
 
+    /**
+     * 落地后和落点比，落偏了才在说明后面补一句实际落在哪。站在哪一格按寻路的脚位算，和挑落点同一个口径：
+     * 准准落在灵魂沙、下半砖、耕地上的落点时，人的 y 比落点那一格低一点，向下取整会报成落在下面一格。
+     */
+    static String offLanding(BlockGetter level, Vec3 position, BlockPos landing) {
+        BlockPos landed = BlockPassability.playerFeet(level, position.x, position.y, position.z);
+        return landed.equals(landing) ? "" : "（实际落在 " + landed.toShortString() + "）";
+    }
+
     // 快速下降：一边落一边把身子对准落点那一列；落地就去拨回开关。
     private ActionStatus descend(PlayerContext context, ClientLevel level, LocalPlayer player, long now) {
         FastDrop.Stage stage = drop.tick(context, now);
@@ -353,7 +365,7 @@ final class JetpackFlight implements TravelLeg {
             unconfirmed.add(new Change(Change.Kind.OTHER, itemId, 1, "下降时喷气背包开关状态不明：" + drop.unclear()));
         }
         if (stage == FastDrop.Stage.DOWN) {
-            if (!player.blockPosition().equals(landing)) summary += "（实际落在 " + player.blockPosition().toShortString() + "）";
+            summary += offLanding(level, player.position(), landing);
             step = Step.RESTORE;
             return ActionStatus.progressed();
         }
