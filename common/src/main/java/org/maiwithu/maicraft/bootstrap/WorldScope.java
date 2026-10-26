@@ -197,36 +197,31 @@ public final class WorldScope {
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
+        // 依赖按领域用途分组传进去：当刻角色读端、物品事实、世界与观察、动手、走到与出行、
+        // 许可与保护、对外通道、存放位置，外加几样只属于一件事的接缝与实例配置。
         AbilityCatalog.create(new AbilityCatalog.Deps(
-                now, interactions, walksOnFoot, walks, blockScans, scene, memory,
-                session, minecraft.player.getUUID().toString(),
-                new ClientCreatureSituations(now), senses,
-                PlayerViews.backpack(now),
-                LiveCarryReads.offhand(now),
-                LiveCarryReads.itemTags(),
-                LiveCarryReads.characterPosition(now),
-                LiveCarryReads.itemRegistry(),
-                new RegistryToolRequirements(),
-                PlayerViews.hunger(now),
-                PlayerViews.foods(now),
-                PlayerViews.equipment(now),
-                PlayerViews.effects(now),
-                PlayerViews.gearFit(now),
-                useKeyProjection,
-                diggings::get,
-                new ClientTravelWorldView(now),
-                travelProgress,
-                new ChatChannel(now),
-                // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
-                () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
-                new InputDriver(playerControl),
-                instanceConfig.allowGameCommands(), instanceConfig.chatTypewriter(),
-                protection,
-                furnaceFuels,
-                compat,
-                kinds,
-                survivalWiring, configDirectory, preview, documents, identity.key(), itemsInUse, dropConfirmations,
-                instanceConfig.machineBlockLimits(), events, lightLevels, lightingWorld, followLighting, timers), abilities);
+                new CharacterReads(now,
+                        PlayerViews.backpack(now),
+                        LiveCarryReads.offhand(now),
+                        PlayerViews.hunger(now),
+                        PlayerViews.foods(now),
+                        PlayerViews.equipment(now),
+                        PlayerViews.effects(now),
+                        PlayerViews.gearFit(now),
+                        LiveCarryReads.characterPosition(now)),
+                new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
+                        new RegistryToolRequirements(), furnaceFuels),
+                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld),
+                senses,
+                new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl)),
+                new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress),
+                new Guards(protection, new ClientCreatureSituations(now)),
+                new Channels(new ChatChannel(now),
+                        // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
+                        () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
+                        events, timers, session),
+                new Stores(documents, identity.key(), configDirectory),
+                compat, survivalWiring, followLighting, preview, itemsInUse, dropConfirmations, instanceConfig), abilities);
     }
 
     /**

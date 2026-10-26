@@ -68,45 +68,45 @@ final class AcquisitionWiring {
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
             ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource,
             ClientDropPickup drops, Optional<StepsAside> stepsAside) {
-        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.context(), deps.itemTags(), deps.furnaceFuels());
+        RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
-        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.interactions(),
-                recipeReads, deps.memory(), deps.context());
-        ClientYieldScans yieldScans = new ClientYieldScans(deps.blockScans(), deps.context());
+        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
+                recipeReads, deps.world().memory(), deps.character().context());
+        ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context());
         // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
-                deps.interactions(), toMainhand, deps.memory(), deps.context(), collects);
+                deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects);
         RecipeSource craftSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
-                recipeReads, deps.memory(), recipeReads, recipeRuns,
-                deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+                recipeReads, deps.world().memory(), recipeReads, recipeRuns,
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
         // 烧炼来源认熔炉、高炉、烟熏炉三种：高炉、烟熏炉只用记得的现成的，没有照旧用熔炉。
         RecipeSource smeltSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
-                recipeReads, deps.memory(), recipeReads, recipeRuns,
-                deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer, permission);
+                recipeReads, deps.world().memory(), recipeReads, recipeRuns,
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
         // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
-        MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.toolRequirements(),
-                permission, deps.backpack(), deps.offhand(), deps.itemTags(), innerNeeds, placer);
+        MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
+                permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
-                new ClientCropReplanting(toMainhand, deps.interactions(), deps.context()));
-        MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.context(), bringsClose, deps.interactions(),
-                deps.itemTags(), new ClientTradeMenuReads(deps.context()), deps.backpack(), deps.offhand(), innerNeeds);
+                new ClientCropReplanting(toMainhand, deps.hands().interactions(), deps.character().context()));
+        MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.character().context(), bringsClose, deps.hands().interactions(),
+                deps.items().itemTags(), new ClientTradeMenuReads(deps.character().context()), deps.character().backpack(), deps.character().offhand(), innerNeeds);
         // 狩猎的出手与走位走战斗同一条攻击事实（游戏接口层的攻击交互），狩猎只管选目标与收掉落。
-        LiveHunts hunts = new LiveHunts(new LiveHuntMoves(deps.walks()), drops,
-                new ClientCreatureSight(deps.context()), deps.creatures(),
-                deps.backpack(), deps.offhand(), deps.itemTags());
+        LiveHunts hunts = new LiveHunts(new LiveHuntMoves(deps.travel().walks()), drops,
+                new ClientCreatureSight(deps.character().context()), deps.guards().creatures(),
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags());
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
                 containerSource, craftSource, smeltSource, miningSource, harvestSource,
-                new TradeSource(new ClientMerchantScans(deps.context()), deps.creatures(), deps.memory(),
-                        deps.protection(), tradeTakes),
-                new HuntSource(new ClientCreatureScans(deps.context()), deps.creatures(), permission,
-                        deps.itemTags(), hunts),
+                new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
+                        deps.guards().protection(), tradeTakes),
+                new HuntSource(new ClientCreatureScans(deps.character().context()), deps.guards().creatures(), permission,
+                        deps.items().itemTags(), hunts),
                 // 缺水桶时拿空桶去池塘、河边舀（只舀舀了会自己补回来的水，不碰机器里的）。
                 new WaterFillSource(playerServices),
                 // 自己放下的床、工作台、熔炉按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
-                new ReclaimSource(deps.memory(), placer, deps.protection(), permission, collects, deps.itemTags())));
+                new ReclaimSource(deps.world().memory(), placer, deps.guards().protection(), permission, collects, deps.items().itemTags())));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         // 联动交来的"扔进水里会变"的配方表（AE2 的转化）：每一份一条途径，扔料、退开、等、捡用和捡掉落物同一套。
@@ -115,13 +115,13 @@ final class AcquisitionWiring {
             sources.add(new FluidTransformSource(transforms, sites, playerServices, drops, stepsAside));
         }
         ItemAcquisition acquisition = new ItemAcquisition(sources,
-                deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(),
+                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
         // 备料时不把外层正要的东西当原料用掉（做合金不先把做好的合金压成块）。
         craftSource.watchChain(acquisition::inProgress);
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
-        miningSource.prepareWorkTools(new LiveWorkTools(deps.context()), acquisition::inProgress);
+        miningSource.prepareWorkTools(new LiveWorkTools(deps.character().context()), acquisition::inProgress);
         smeltSource.watchChain(acquisition::inProgress);
         // 饿了身上没吃的：吃饭的临时任务经同一个引擎去弄口粮。
         deps.survivalWiring().attachFood(acquisition);
@@ -129,8 +129,8 @@ final class AcquisitionWiring {
         deps.itemsInUse().watch(acquisition::inProgress);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
-        return new ObtainAbility(acquisition, viasOf(sources), deps.itemRegistry(), deps.backpack(), deps.offhand(),
-                deps.itemTags(), ClientRegisteredIds.builtIn());
+        return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), deps.character().backpack(), deps.character().offhand(),
+                deps.items().itemTags(), ClientRegisteredIds.builtIn());
     }
 
     /**
@@ -140,8 +140,8 @@ final class AcquisitionWiring {
     static ItemAcquisition containerOnlyAcquisition(ContainerSource containerSource, AbilityCatalog.Deps deps,
             InventorySpace space) {
         return new ItemAcquisition(List.of(containerSource),
-                deps.backpack(), deps.offhand(), deps.itemTags(),
-                deps.characterPosition(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(),
+                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */

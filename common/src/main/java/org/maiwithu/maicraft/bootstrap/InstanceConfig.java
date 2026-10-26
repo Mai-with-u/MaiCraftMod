@@ -52,7 +52,8 @@ public final class InstanceConfig {
     private final List<String> trustedPlayers;
     private final Map<String, Integer> machineBlockLimits;
 
-    private InstanceConfig(boolean allowGameCommands, boolean chatTypewriter, List<String> trustedPlayers,
+    // 包私有是给总装测试的接缝：测试从这里拼一份摆好开关的配置，生产路径只走 read 与 defaults。
+    InstanceConfig(boolean allowGameCommands, boolean chatTypewriter, List<String> trustedPlayers,
             Map<String, Integer> machineBlockLimits) {
         this.allowGameCommands = allowGameCommands;
         this.chatTypewriter = chatTypewriter;

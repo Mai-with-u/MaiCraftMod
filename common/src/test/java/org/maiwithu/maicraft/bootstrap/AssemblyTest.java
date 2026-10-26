@@ -88,7 +88,7 @@ class AssemblyTest {
         // 目标写能力的完整 ID：目标推进器按 ID 查清单。
         // 控制权交接给空实现：总装测试不接输入层，只验证目标推得动。
         GoalRunTable goals = new GoalRunTable(registry, new InMemoryGoalRunStore(),
-                OfflineCatalog.deps(tempDir).memory(), controlLoop, new PlayerControlHandover() {
+                OfflineCatalog.deps(tempDir).world().memory(), controlLoop, new PlayerControlHandover() {
                     @Override public boolean automationOwnsControls() {
                         return true;
                     }

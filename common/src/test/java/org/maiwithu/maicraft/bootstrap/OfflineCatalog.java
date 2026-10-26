@@ -43,6 +43,7 @@ import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -113,61 +114,52 @@ final class OfflineCatalog {
         ClientHooks.registerChatLog(new ChatLog());
         ServerLinkSession session = new ServerLinkSession(NO_TRANSPORT);
         FacilityKinds facilities = new FacilityKinds(FakeBlockTags.vanilla());
+        // 实例配置按测试要摆逐字打字开关，其余照默认：管理员命令不放、没有自家人、方块上限只有默认那一条。
+        InstanceConfig config = new InstanceConfig(false, chatTypewriter, List.of(),
+                Map.of("create:chain_conveyor", 1));
         // 交互动作入口允许没有按住使用键投影；生存需求共用的挖掘走原生交互，离线给空壳。
         return new AbilityCatalog.Deps(
-                nobody,
-                new Interactions(null),
-                new BaritoneInternals(),
-                new BaritoneInternals(),
-                new BlockScanService(),
-                new Scene(memory, facilities), memory,
-                session,
-                SELF_ID,
-                (ReadsCreatureSituation) entityId -> Optional.empty(),
+                new CharacterReads(nobody,
+                        PlayerViews.backpack(nobody),
+                        LiveCarryReads.offhand(nobody),
+                        PlayerViews.hunger(nobody),
+                        PlayerViews.foods(nobody),
+                        PlayerViews.equipment(nobody),
+                        PlayerViews.effects(nobody),
+                        PlayerViews.gearFit(nobody),
+                        LiveCarryReads.characterPosition(nobody)),
+                new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
+                        LiveCarryReads.toolRequirements(nobody), stack -> 0),
+                new WorldReads(new Scene(memory, facilities), memory, new BlockScanService(), facilities,
+                        // 只读亮度离线给"读不到"的替身：能力清单照常登记，真量光在实机验收。
+                        new ReadsLightLevels() {
+                            @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
+                            @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
+                        },
+                        new UnloadedWorld()),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
-                PlayerViews.backpack(nobody),
-                LiveCarryReads.offhand(nobody),
-                LiveCarryReads.itemTags(),
-                LiveCarryReads.characterPosition(nobody),
-                LiveCarryReads.itemRegistry(),
-                LiveCarryReads.toolRequirements(nobody),
-                PlayerViews.hunger(nobody),
-                PlayerViews.foods(nobody),
-                PlayerViews.equipment(nobody),
-                PlayerViews.effects(nobody),
-                PlayerViews.gearFit(nobody),
-                NO_HOLD,
-                () -> null,
-                new ClientTravelWorldView(nobody),
-                progress -> { },
-                new ChatChannel(nobody),
-                () -> 0,
-                new InputDriver(new PlayerControlBoundary()),
-                false,
-                chatTypewriter, // 聊天逐字打字开关由测试摆，组装层要把它原样接进说话能力。
-                new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, GuessesPlayerMade.NOTHING,
-                        SELF_ID),
-                stack -> 0,
+                new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary())),
+                new Travel(new BaritoneInternals(), new BaritoneInternals(), new ClientTravelWorldView(nobody),
+                        progress -> { }),
+                new Guards(
+                        new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
+                                GuessesPlayerMade.NOTHING, SELF_ID),
+                        (ReadsCreatureSituation) entityId -> Optional.empty()),
+                new Channels(new ChatChannel(nobody), () -> 0,
+                        // 任务事件离线没人听，能力照常登记、参数照常校验。
+                        (kind, message) -> { },
+                        // 计时到点的事件同样没人听。
+                        new Timers(TaskEventSink.NONE),
+                        session),
+                new Stores(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY,
+                        tempDir.resolve("config")),
                 CompatRegistry.empty(),
-                facilities,
                 // 睡觉能力在离线清单里没有登记方，夜晚生存需求按弄不到床对待即可。
                 new SurvivalWiring(),
-                tempDir.resolve("config"),
+                new FollowLighting(),
                 ShowsPreview.NONE,
-                new DocumentStore(tempDir.resolve("state.sqlite")),
-                WORLD_KEY,
                 new ItemsInUse(LiveCarryReads.itemTags()),
                 new DropConfirmations(),
-                Map.of("create:chain_conveyor", 1),
-                (kind, message) -> { },
-                // 只读亮度与照明现场离线给"读不到"的替身：能力清单照常登记，真量光在实机验收。
-                new ReadsLightLevels() {
-                    @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
-                    @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
-                },
-                new UnloadedWorld(),
-                new FollowLighting(),
-                // 计时到点的事件离线没人听，能力照常登记、参数照常校验。
-                new Timers(TaskEventSink.NONE));
+                config);
     }
 }
