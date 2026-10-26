@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -85,6 +88,8 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     /** 本夜试过且睡不上的床：夜休任务来来去去，黑名单跟夜晚走，跨天清空。 */
     private final Set<BlockPos> nightTriedBeds = new HashSet<>();
     private long nightTriedDayIndex = -1;
+    /** 白天结论的宽限账：每个睡觉目标上一次白天评估所在的刻（按目标实例记账，结论即清）。 */
+    private final Map<Goal, Long> daytimeEvaluatedAt = new IdentityHashMap<>();
     /** 夜休失败上报的节流：同一夜同一句"没睡成"只报第一次（实机 10-16 一晚灌了 53 条），记忆跨任务活着。 */
     private final NightRestReports nightRestReports;
 
@@ -183,6 +188,16 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
 
     // 白天的两步：先备床（跑一次备床任务），备好了或备不成，都以"现在睡不了"收场并交代床备好没有。
     private StepDecision decideForDaytime(StepContext step, PlayerContext current) {
+        // /time 改动刚交给服务端时，客户端的日子同步晚一拍：第一次评估先不结论，
+        // 隔一拍读到新时刻再定，免得拿改动前的白天旧值把夜里睡觉误判成白天睡觉。
+        // 同刻的重复评估算同一拍；结论时清账。
+        Long evaluatedAt = daytimeEvaluatedAt.get(step.goal());
+        long tick = step.tick().gameTick();
+        if (!daytimeGraceOver(evaluatedAt, tick)) {
+            daytimeEvaluatedAt.put(step.goal(), tick);
+            return StepDecision.NOT_READY;
+        }
+        daytimeEvaluatedAt.remove(step.goal());
         long minutes = SleepRules.minutesUntilSleepable(current.level());
         String notYet = "现在睡不了，约 " + minutes + " 分钟后可睡";
         boolean bedReady = beds.bedReady(step.tick());
@@ -201,6 +216,12 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
         return finished(daytimeResult("现在睡不了，也没弄到今晚要睡的床", false,
                 prepare.problem() != null ? prepare.problem()
                         : Problem.of(Problem.Kind.NEED_ITEM, "没有床，做床还缺材料", null)));
+    }
+
+    /** 白天结论的宽限：首次评估、同刻的重复评估、或与上次隔了不止一拍的（中间跑过别的任务），
+     * 都再等一拍；只有恰好隔一拍的复核才带着（已同步的）新读数结论。 */
+    static boolean daytimeGraceOver(Long evaluatedAt, long tick) {
+        return evaluatedAt != null && tick - evaluatedAt == 1L;
     }
 
     // 白天的收场：以时间不对结束，remaining 写明入睡，细节交代今晚的床备好没有。
