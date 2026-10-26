@@ -5,15 +5,19 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -31,6 +35,12 @@ class BlockPassabilityTest {
     static void bootMinecraft() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 离线没有数据包，水与岩浆的标签要手动绑上，流体读数才认得出是水。
+        BuiltInRegistries.FLUID.bindTags(Map.of(
+                FluidTags.WATER, List.of(BuiltInRegistries.FLUID.wrapAsHolder(Fluids.WATER),
+                        BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_WATER)),
+                FluidTags.LAVA, List.of(BuiltInRegistries.FLUID.wrapAsHolder(Fluids.LAVA),
+                        BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_LAVA))));
     }
 
     @Test
@@ -58,6 +68,24 @@ class BlockPassabilityTest {
         world.put(new BlockPos(3, 64, 3), Blocks.FIRE.defaultBlockState());
         assertFalse(BlockPassability.canWalkThrough(world, new BlockPos(3, 64, 3)),
                 "原有的危险方块拦截没有被门格改动挤掉");
+    }
+
+    /** 造一格流动水：水面含量低于满格就是流动（会推开角色的那种水）。 */
+    private static BlockState flowingWater() {
+        return Blocks.WATER.defaultBlockState().setValue(LiquidBlock.LEVEL, 3);
+    }
+
+    @Test
+    void flowingWaterIsWaterForTheDryStandableJudgement() {
+        // 流动水没有自己的方块类型：按方块类型判水认不出它，水面一段流动的水被当成实地，靠岸点挑到了水上。
+        assertTrue(BlockPassability.isWater(flowingWater()), "流动水也是水");
+        assertTrue(BlockPassability.isWater(Blocks.WATER.defaultBlockState()), "水源也是水");
+        assertFalse(BlockPassability.isWater(Blocks.ICE.defaultBlockState()), "冰不算水：冰面另按冻住的水分类");
+
+        Grid world = new Grid();
+        world.put(new BlockPos(3, 64, 3), flowingWater());
+        assertFalse(BlockPassability.isDryStandable(world, new BlockPos(3, 65, 3)),
+                "流动水面不构成干地");
     }
 
     /** 小片世界替身：按坐标记方块，没记的当空气。 */

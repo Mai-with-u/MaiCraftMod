@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelPlanner;
 
 /**
@@ -120,7 +121,9 @@ public final class WaterCrossing {
         Block block = state.getBlock();
         if (block == Blocks.ICE || block == Blocks.PACKED_ICE || block == Blocks.BLUE_ICE
                 || block == Blocks.FROSTED_ICE) return Kind.FROZEN;
-        if (block == Blocks.WATER || block == Blocks.LILY_PAD || block == Blocks.BUBBLE_COLUMN) return Kind.WATER;
+        // 判水按流体状态走权威判断：方块类型判水认不出流动水（水面一段流动的水被当成实地，靠岸点挑到水上）。
+        // 气泡水柱的流体就是水，被 isWater 覆盖；睡莲没有流体，单独算水。
+        if (BlockPassability.isWater(state) || block == Blocks.LILY_PAD) return Kind.WATER;
         return Kind.LAND;
     }
 

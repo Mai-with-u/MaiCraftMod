@@ -148,8 +148,12 @@ public final class BlockPassability {
 
     /** 判断此格是否为水源或流动水。 */
     public static boolean isWater(BlockGetter level, BlockPos pos) {
-        return level.getBlockState(pos).getFluidState()
-                .is(FluidTags.WATER);
+        return isWater(level.getBlockState(pos));
+    }
+
+    /** 判断一个方块状态是否为水（水源或流动水），给只有状态没有位置坐标的判断用。 */
+    public static boolean isWater(BlockState state) {
+        return state.getFluidState().is(FluidTags.WATER);
     }
 
     /**

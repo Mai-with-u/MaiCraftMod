@@ -15,9 +15,12 @@ import java.nio.file.Path;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -72,6 +75,12 @@ class BoatCrossingTest {
     static void 引导方块注册表() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 离线没有数据包，水与岩浆的标签要手动绑上，流体读数才认得出是水。
+        BuiltInRegistries.FLUID.bindTags(Map.of(
+                FluidTags.WATER, List.of(BuiltInRegistries.FLUID.wrapAsHolder(Fluids.WATER),
+                        BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_WATER)),
+                FluidTags.LAVA, List.of(BuiltInRegistries.FLUID.wrapAsHolder(Fluids.LAVA),
+                        BuiltInRegistries.FLUID.wrapAsHolder(Fluids.FLOWING_LAVA))));
     }
 
     @Test
