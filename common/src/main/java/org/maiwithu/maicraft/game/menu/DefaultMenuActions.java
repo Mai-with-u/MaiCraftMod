@@ -302,12 +302,13 @@ public final class DefaultMenuActions implements MenuActions {
     public PendingMenuAction submitModAction(PlayerContext context, String what, Runnable send,
                                              MenuConfirmation confirmation, int timeoutTicks) {
         // 模组协议的一下和点格子一样排队：旧事务结清、界面画过，再占本刻的交互机会发包，按确认条件等结果。
+        // 本刻没有交互机会时返回 null：调用方下一刻重发，不算发送失败，也不抛异常。
         requireSubmission(context);
         requireIdle();
         requireVisible(context);
         Objects.requireNonNull(send, "send");
         Objects.requireNonNull(confirmation, "mod menu action requires an exact postcondition");
-        if (!context.tryClaimInteraction()) throw new IllegalStateException("no interaction opportunity this tick");
+        if (!context.tryClaimInteraction()) return null;
         AbstractContainerMenu menu = context.localPlayer().containerMenu;
         PendingMenuAction pending = create(
                 PendingMenuAction.Kind.MOD_ACTION, context, menu, -1, timeoutTicks, false, confirmation);

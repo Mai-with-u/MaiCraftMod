@@ -33,11 +33,8 @@ final class PlantClearing {
     boolean busy(PlayerContext context) {
         if (pending == null) return false;
         if (!pending.terminal()) {
-            try {
-                pending = sender.continueBreaking(context, pending);
-            } catch (IllegalStateException noChance) {
-                // 这一刻没有交互机会：下一刻接着砍。
-            }
+            // 这一刻没有交互机会时推进原样交回等待记录：下一刻接着砍。
+            pending = sender.continueBreaking(context, pending);
         }
         if (pending.terminal()) {
             pending = null;
@@ -54,11 +51,9 @@ final class PlantClearing {
                 || !trivial(context.level(), hit.getBlockPos()) || !context.canInteractThisTick()) {
             return false;
         }
-        try {
-            pending = sender.startBreaking(context, hit, TIMEOUT_TICKS);
-        } catch (IllegalStateException busy) {
-            return false;
-        }
+        // 这一刻没轮到开挖（机会被占用或上一动作没结清）时提交交回 null：本刻不开砍，下一刻再试。
+        pending = sender.startBreaking(context, hit, TIMEOUT_TICKS);
+        if (pending == null) return false;
         ticks = 0;
         return true;
     }

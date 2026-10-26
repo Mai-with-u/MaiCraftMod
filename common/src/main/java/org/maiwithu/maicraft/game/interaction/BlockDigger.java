@@ -257,7 +257,11 @@ public final class BlockDigger {
                 return DigResult.PROGRESSING;
             }
             if (!preparation.test(hit)) return DigResult.PROGRESSING;
-            pending = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
+            PendingInteraction started = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
+            // 提交入口这一刻不收（上一次动作还没结清）：不开挖，下一刻原样重试；
+            // 手中工具的记账等真的开了挖再记，不把没挖的一刻当成换过工具。
+            if (started == null) return DigResult.PROGRESSING;
+            pending = started;
             destroyingItem = player.getMainHandItem().copy();
         } else {
             pending = sender.continueBreaking(context, pending);
@@ -360,16 +364,20 @@ public final class BlockDigger {
         // 切快捷栏也是一次交互：本刻没有机会就留到下一刻，选好的格子不丢。
         if (bestSlot >= 0 && bestSlot < 9 && !context.canInteractThisTick()) return;
         if (bestSlot >= 9 && bestSlot < 36 && !menuActions.ensureVisible(context)) return;
-        pendingToolSlot = -1;
         int selected = player.getInventory().selected;
         if (bestSlot >= 0 && bestSlot < 9 && bestSlot != selected) {
-            toolSelectPending = sender.selectHotbar(
+            PendingInteraction submitted = sender.selectHotbar(
                     context, bestSlot, TOOL_TIMEOUT_TICKS);
+            // 提交入口这一刻不收（上一次动作还没结清）：选格留到下一刻再发，不丢选好的格子。
+            if (submitted == null) return;
+            pendingToolSlot = -1;
+            toolSelectPending = submitted;
         } else if (bestSlot >= 9 && bestSlot < 36) {
             // 工具在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
             // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
             toolStagePending = menuActions.swapInventoryToHotbar(
                     context, bestSlot, VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
+            pendingToolSlot = -1;
         }
     }
 

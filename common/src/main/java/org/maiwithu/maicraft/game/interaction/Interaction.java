@@ -399,11 +399,14 @@ public final class Interaction {
                     c -> c.localPlayer().isUsingItem()
                             ? InteractionConfirmation.Verdict.APPLIED
                             : InteractionConfirmation.Verdict.PENDING);
-            pending = sender.useItem(
+            PendingInteraction submitted = sender.useItem(
                     context, hand, confirmation, timing.hold
                             ? Math.max(CONFIRM_TIMEOUT_TICKS, (int) Math.min(1200L,
                                     (long) before.getUseDuration(player) + CONFIRM_TIMEOUT_TICKS))
                             : CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收（上一次使用还没结清）：不算失败，下一刻原样再提交。
+            if (submitted == null) return Status.RUNNING;
+            pending = submitted;
             return Status.RUNNING;
         }
         pending = sender.poll(context, pending);
@@ -437,8 +440,12 @@ public final class Interaction {
             return Status.RUNNING;
         }
         if (timing.maxHold > 0 && ++held >= timing.maxHold) {
-            pending = sender.releaseUsingItem(context, pending);
-            releasing = true;
+            PendingInteraction released = sender.releaseUsingItem(context, pending);
+            // 本刻没有交互机会就先不松：按住投影两刻内自然过期，下一刻再发松开。
+            if (released != null) {
+                pending = released;
+                releasing = true;
+            }
             return Status.RUNNING;
         }
         return Status.RUNNING;
@@ -500,11 +507,16 @@ public final class Interaction {
         if (recovering || player.getAttackStrengthScale(0.0f) < ATTACK_READY || !context.canInteractThisTick()) {
             return attackWait(recovering ? "它刚挨过打" : "攻击条还没回满或这一刻没有交互机会");
         }
-        pending = sender.attack(
+        PendingInteraction submitted = sender.attack(
                 context,
                 entity,
                 strikeConfirmation != null ? strikeConfirmation : InteractionConfirmation.entityStruck(player, entity),
                 CONFIRM_TIMEOUT_TICKS);
+        // 提交入口这一刻不收（上一次出手如举盾还没结清）：不算失败，下一刻原样再挥。
+        if (submitted == null) {
+            return attackWait("上一动作还在等确认，交互入口这一刻不收这一刀");
+        }
+        pending = submitted;
         return false;
     }
 
@@ -565,13 +577,19 @@ public final class Interaction {
         }
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
-            pending = sender.useItem(
+            PendingInteraction submitted = sender.useItem(
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：不算失败，下一刻原样再点。
+            if (submitted == null) return false;
+            pending = submitted;
         } else {
-            pending = sender.useBlock(
+            PendingInteraction submitted = sender.useBlock(
                     context, hand, hit, blockUseConfirmation(hit, hand),
                     CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：不算失败，下一刻原样再点，也不把预想面记成已点击。
+            if (submitted == null) return false;
+            pending = submitted;
             // 仅记录真正交给原生右键入口的面，选站位时的预想朝向不能当作已点击方向。
             submittedBlockHit = hit;
         }
@@ -704,13 +722,19 @@ public final class Interaction {
         }
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
-            pending = sender.useItem(
+            PendingInteraction submitted = sender.useItem(
                     context, hand, itemUseConfirmation(hand, before),
                     CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：不算失败，下一刻原样再点。
+            if (submitted == null) return false;
+            pending = submitted;
         } else {
-            pending = sender.interact(
+            PendingInteraction submitted = sender.interact(
                     context, entity, hand, entityUseConfirmation(entity, hand),
                     CONFIRM_TIMEOUT_TICKS);
+            // 提交入口这一刻不收：不算失败，下一刻原样再点。
+            if (submitted == null) return false;
+            pending = submitted;
         }
         return false;
     }
@@ -780,8 +804,11 @@ public final class Interaction {
             // 本刻没有交互机会时不发松开：按住使用键的投影两刻内自然过期，原版就看到松键。
             if (context.canInteractThisTick()
                     && (sender.ownsItemUse(pending) || block != null || entity != null || !timing.hold)) {
-                pending = sender.releaseUsingItem(context, pending);
-                releasing = true;
+                PendingInteraction released = sender.releaseUsingItem(context, pending);
+                if (released != null) {
+                    pending = released;
+                    releasing = true;
+                }
             }
         }
         playerInput.halt(player);

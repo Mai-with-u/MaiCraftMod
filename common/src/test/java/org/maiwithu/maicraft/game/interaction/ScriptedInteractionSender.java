@@ -32,9 +32,13 @@ public final class ScriptedInteractionSender implements InteractionSender {
     public boolean retireCalled;
     public int settleItemUseCalled;
     public int releaseCalls;
+    /** 本刻不收：置真时一次性提交交回 null，模拟交互机会被占用或上一动作还在等确认。 */
+    public boolean busyThisTick;
 
     @Override public PendingInteraction useBlock(PlayerContext context, InteractionHand hand, BlockHitResult hit,
                                                  InteractionConfirmation confirmation, int timeoutTicks) {
+        // 本刻不收：交回显式结论 null，不记提交现场，调用方下一刻原样重试。
+        if (busyThisTick) return null;
         PendingInteraction pending = new PendingInteraction(
                 PendingInteraction.Kind.USE_BLOCK, context, timeoutTicks, 1,
                 confirmation, hit.getBlockPos(), hit.getDirection());
@@ -45,6 +49,8 @@ public final class ScriptedInteractionSender implements InteractionSender {
 
     @Override public PendingInteraction useItem(PlayerContext context, InteractionHand hand,
                                                 InteractionConfirmation confirmation, int timeoutTicks) {
+        // 本刻不收：交回显式结论 null，不记提交现场，调用方下一刻原样重试。
+        if (busyThisTick) return null;
         PendingInteraction pending = new PendingInteraction(
                 PendingInteraction.Kind.USE_ITEM, context, timeoutTicks, 1, confirmation, null, null);
         submissions.add(new Submission(pending.kind(), null, confirmation, timeoutTicks));
@@ -151,6 +157,8 @@ public final class ScriptedInteractionSender implements InteractionSender {
     @Override public PendingInteraction interact(
             PlayerContext context, Entity target, InteractionHand hand,
             InteractionConfirmation confirmation, int timeoutTicks) {
+        // 本刻不收：交回显式结论 null，不记提交现场，调用方下一刻原样重试。
+        if (busyThisTick) return null;
         // 右键实体（骑乘、剪毛、交易）与右键方块同一套编排：记下现场、按脚本给结论。
         PendingInteraction pending = new PendingInteraction(
                 PendingInteraction.Kind.INTERACT_ENTITY, context, timeoutTicks, 1, confirmation, null, null);

@@ -13,6 +13,11 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 提交真实玩家操作并逐刻确认：提交一次动作与确认它做成了是两个阶段。
  * 同一时刻只允许一项动作在等确认；确认前不能提交下一次。
  * 边界时刻（换身体、控制权换手、停机、每刻开头）的收尾走 {@link BoundaryLifecycle}。
+ *
+ * <p>提交方法共用一条「本刻不收」的显式结论：本刻的交互机会已被占用、或上一动作还在等确认时，
+ * 提交方法返回 {@code null}，调用方把它当作这一刻没轮到，下一刻原样重试，不算提交失败、
+ * 也不抛异常；只有协议用错（上下文过期、等待记录对不上号）才照旧抛出。
+ * 持续挖掘的推进与取消不返回 null：这一刻没轮到时等待记录原样交回，下一刻接着推进。
  */
 public interface InteractionSender extends BoundaryLifecycle {
 
