@@ -325,7 +325,7 @@ public final class Battle {
             }
             // 往家（没记过家就往打点）那一侧跑：背离追兵的左右九十度里挑离家最近的落点，不一路往野外越跑越远。
             int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
-                    (x, y, z) -> moves.standable(context, x, y, z), homeSide.apply(context));
+                    cell -> moves.standable(context, cell.getX(), cell.getY(), cell.getZ()), homeSide.apply(context));
             List<ThreatField.Threat> threats = pathThreats(field, -1);
             GoalCompiler.Compiled goal = haven != null
                     ? GoalCompiler.approachAvoiding(GoalCompiler.near(new BlockPos(haven[0], haven[1], haven[2]), 2.0), threats)

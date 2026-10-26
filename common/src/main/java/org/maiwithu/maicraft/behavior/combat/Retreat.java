@@ -8,6 +8,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
+
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 /**
  * 撤离：往哪跑、甩没甩开、跑不动了没有。点名战斗与自卫用同一份。
@@ -29,12 +34,6 @@ public final class Retreat {
     private static final int MAX_DROP = 4;
     /** 身体真走出这么远才算甩开了上一个死路，失败账清零。 */
     static final double REAL_PROGRESS = 2.0;
-
-    /** 落点能不能站：生产实现读当刻世界，测试换替身。 */
-    @FunctionalInterface
-    public interface Probe {
-        boolean standable(int x, int y, int z);
-    }
 
     private String why;
     private final Set<Integer> pursuers = new HashSet<>();
@@ -148,17 +147,17 @@ public final class Retreat {
     /**
      * 挑一个落点，往家（没记过家就往打点）那一侧跑：同样背离追兵重心、在左右九十度的八个方向里，挑能站、离家最近的那个；
      * 上一条走不通就按离家远近换下一个。实机 10-15 夜里低血撤离五次，每次只按追兵反方向跑，越跑离家越远，最远到西边 130 格外。
-     * 不知道家和打点在哪（toward 为 null）时同 {@link #haven(double, double, double, double, double, int, Probe)}。
+     * 不知道家和打点在哪（toward 为 null）时按八个方向挨个试，不给「离家最近」的偏好。
      *
      * @param toward 家或打点的水平位置 {x, z}
      */
-    static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns, Probe probe,
-                       double[] toward) {
-        if (toward == null) return haven(x, y, z, fromX, fromZ, turns, probe);
+    static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns,
+                       Predicate<BlockPos> standable, double[] toward) {
+        if (toward == null) return haven(x, y, z, fromX, fromZ, turns, standable);
         double base = awayAngle(x, z, fromX, fromZ);
         List<int[]> landings = new ArrayList<>();
         for (double offset : OFFSETS) {
-            int[] landing = landingAt(x, y, z, base + Math.toRadians(offset), probe);
+            int[] landing = landingAt(x, y, z, base + Math.toRadians(offset), standable);
             if (landing != null) landings.add(landing);
         }
         if (landings.isEmpty()) return null;
@@ -171,10 +170,11 @@ public final class Retreat {
     /**
      * 挑一个落点：背离追兵重心，从第 turns 个方向试起，返回第一个能站的 {x, y, z}；都不行为 null（交给"离开追兵"的寻路）。
      */
-    static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns, Probe probe) {
+    static int[] haven(double x, double y, double z, double fromX, double fromZ, int turns,
+                       Predicate<BlockPos> standable) {
         double base = awayAngle(x, z, fromX, fromZ);
         for (int i = 0; i < OFFSETS.length; i++) {
-            int[] landing = landingAt(x, y, z, base + Math.toRadians(OFFSETS[(i + turns) % OFFSETS.length]), probe);
+            int[] landing = landingAt(x, y, z, base + Math.toRadians(OFFSETS[(i + turns) % OFFSETS.length]), standable);
             if (landing != null) return landing;
         }
         return null;
@@ -192,18 +192,16 @@ public final class Retreat {
     }
 
     // 朝这个方向四十格外的那一列里找能站的落脚处。
-    private static int[] landingAt(double x, double y, double z, double angle, Probe probe) {
+    private static int[] landingAt(double x, double y, double z, double angle, Predicate<BlockPos> standable) {
         int cx = (int) Math.round(x + Math.cos(angle) * REACH_OUT);
         int cz = (int) Math.round(z + Math.sin(angle) * REACH_OUT);
-        return standableNear(cx, (int) Math.floor(y), cz, probe);
+        return standableNear(cx, (int) Math.floor(y), cz, standable);
     }
 
-    // 这一列上离原高度最近的能站处：先试同高，再上下各试到四格。
-    private static int[] standableNear(int x, int aroundY, int z, Probe probe) {
-        for (int dy = 0; dy <= MAX_DROP; dy++) {
-            if (probe.standable(x, aroundY + dy, z)) return new int[] {x, aroundY + dy, z};
-            if (dy > 0 && probe.standable(x, aroundY - dy, z)) return new int[] {x, aroundY - dy, z};
-        }
-        return null;
+    // 这一列上离原高度最近的能站处：先同高、再上下交替往外各试到四格，列内挑选交给环扫内核。
+    private static int[] standableNear(int x, int aroundY, int z, Predicate<BlockPos> standable) {
+        return SpotScan.inColumn(new BlockPos(x, aroundY, z), MAX_DROP, standable)
+                .map(cell -> new int[] {cell.getX(), cell.getY(), cell.getZ()})
+                .orElse(null);
     }
 }

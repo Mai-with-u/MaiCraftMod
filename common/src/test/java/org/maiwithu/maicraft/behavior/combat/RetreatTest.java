@@ -16,7 +16,7 @@ class RetreatTest {
 
     @Test
     void havenIsAwayFromTheChasers() {
-        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64);
+        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, cell -> cell.getY() == 64);
         assertEquals(-40, haven[0], "追兵在东，往西四十格");
         assertEquals(0, haven[2]);
     }
@@ -24,29 +24,29 @@ class RetreatTest {
     @Test
     void blockedStraightBackFallsBackToTheSides() {
         // 正西那一片是湖：偏一点的方向能站就去那儿；一列里上下四格内找落脚处。
-        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> z != 0 && y == 62);
+        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, cell -> cell.getZ() != 0 && cell.getY() == 62);
         assertTrue(haven[0] < 0 && haven[2] != 0, "偏着往西找，实际 " + haven[0] + "," + haven[2]);
         assertEquals(62, haven[1]);
-        assertNull(Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> false), "都不能站交给离开追兵的寻路");
+        assertNull(Retreat.haven(0, 64, 0, 5, 0, 0, cell -> false), "都不能站交给离开追兵的寻路");
         // 第二次走不通从下一个方向试起，不反复撞同一堵墙。
-        int[] second = Retreat.haven(0, 64, 0, 5, 0, 1, (x, y, z) -> y == 64);
+        int[] second = Retreat.haven(0, 64, 0, 5, 0, 1, cell -> cell.getY() == 64);
         assertTrue(second[2] != 0, "换了方向");
     }
 
     @Test
     void havenLeansTowardHomeWithinTheNinetyDegreesAwayFromTheChasers() {
         // 追兵在东、家在北边一百格：背离追兵的左右九十度里挑离家最近的——往北跑，不往正西越跑越远。
-        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {0, -100});
+        int[] haven = Retreat.haven(0, 64, 0, 5, 0, 0, cell -> cell.getY() == 64, new double[] {0, -100});
         assertEquals(0, haven[0]);
         assertEquals(-40, haven[2], "往北四十格");
         // 家就在追兵身后（正东）：最多偏到九十度，不往追兵那边钻。
-        int[] behind = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {100, 0});
+        int[] behind = Retreat.haven(0, 64, 0, 5, 0, 0, cell -> cell.getY() == 64, new double[] {100, 0});
         assertTrue(behind[0] <= 0, "不朝追兵那边跑，实际 " + behind[0] + "," + behind[2]);
         // 这条走不通：按离家远近换下一个。
-        int[] next = Retreat.haven(0, 64, 0, 5, 0, 1, (x, y, z) -> y == 64, new double[] {0, -100});
+        int[] next = Retreat.haven(0, 64, 0, 5, 0, 1, cell -> cell.getY() == 64, new double[] {0, -100});
         assertTrue(next[2] < 0 && next[0] < 0, "换到次近的西北方向，实际 " + next[0] + "," + next[2]);
         // 人就站在打点上：八个落点离打点一样远，照旧正背离着跑。
-        int[] atAnchor = Retreat.haven(0, 64, 0, 5, 0, 0, (x, y, z) -> y == 64, new double[] {0, 0});
+        int[] atAnchor = Retreat.haven(0, 64, 0, 5, 0, 0, cell -> cell.getY() == 64, new double[] {0, 0});
         assertEquals(-40, atAnchor[0]);
         assertEquals(0, atAnchor[2]);
     }

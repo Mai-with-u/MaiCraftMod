@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
 
 import org.maiwithu.maicraft.behavior.navigation.transport.TransportLanding;
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 /**
  * 飞着去时落在哪，纯函数：看过的、能站的格（不是流体、岩浆、细雪、传送门、滴水石锥、垂滴叶、点着的营火……），
@@ -21,7 +22,12 @@ public final class FlightLandings {
 
     private FlightLandings() {}
 
-    /** 目标附近（水平 radius 格内）能落的一格，离目标越近越先；同样近的挑高度差小的。 */
+    /**
+     * 目标附近（水平 radius 格内）能落的一格，离目标越近越先；同样近的挑高度差小的。
+     *
+     * <p>这里保持逐圈往外、一圈有落点就停的找法，不走环扫内核的全局排序：飞着落要的是「最近的圈里矮一点的」，
+     * 不是「全场高差最小的」——更远一圈哪怕有高差小两格的落点也不多飞那一段。一圈内的列内挑选仍由内核代扫。
+     */
     public static Optional<BlockPos> near(BlockGetter view, Predicate<BlockPos> loaded, BlockPos target, int radius,
             int clearance) {
         for (int ring = 0; ring <= radius; ring++) {
@@ -67,15 +73,9 @@ public final class FlightLandings {
         return true;
     }
 
-    // 一列里离参考高度最近、能落的那一格。
+    // 一列里离参考高度最近、能落的那一格：先同高，再上下交替往外，交给内核。
     private static BlockPos column(BlockGetter view, Predicate<BlockPos> loaded, BlockPos reference, int clearance) {
-        for (int offset = 0; offset <= COLUMN_SPAN; offset++) {
-            BlockPos up = reference.above(offset);
-            if (landable(view, loaded, up, clearance)) return up;
-            if (offset == 0) continue;
-            BlockPos down = reference.below(offset);
-            if (landable(view, loaded, down, clearance)) return down;
-        }
-        return null;
+        return SpotScan.inColumn(reference, COLUMN_SPAN, feet -> landable(view, loaded, feet, clearance))
+                .orElse(null);
     }
 }

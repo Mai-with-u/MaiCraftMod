@@ -11,6 +11,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.level.material.Fluids;
 
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
+
 /**
  * 脱困放行策略：起点已处在岩浆致死邻域内时，「邻格有岩浆就禁挖」的常规
  * 保护会把从危险邻域出发的所有路线全数拒绝——起点本身就不安全，这条保护
@@ -61,23 +63,10 @@ public final class HazardEscapePolicy {
 
     public static HazardEscapePolicy detect(BlockGetter view, BlockPos feet,
                                             Predicate<BlockPos> loaded) {
-        BlockPos nearest = null;
-        double nearestSq = Double.MAX_VALUE;
-        for (int dy = -VERTICAL_RANGE; dy <= VERTICAL_RANGE; dy++) {
-            for (int dz = -DETECTION_RADIUS; dz <= DETECTION_RADIUS; dz++) {
-                for (int dx = -DETECTION_RADIUS; dx <= DETECTION_RADIUS; dx++) {
-                    BlockPos pos = feet.offset(dx, dy, dz);
-                    if (!loaded.test(pos) || !isLava(view.getBlockState(pos))) {
-                        continue;
-                    }
-                    double sq = distanceSq(feet, pos);
-                    if (sq < nearestSq) {
-                        nearestSq = sq;
-                        nearest = pos.immutable();
-                    }
-                }
-            }
-        }
+        // 邻域扫描交给内核：离脚最近的岩浆格定危险源，一样近时保留先扫到的那格（内核先低层、先北后南、先西后东）。
+        BlockPos nearest = SpotScan.nearest(feet, DETECTION_RADIUS, VERTICAL_RANGE,
+                pos -> loaded.test(pos) && isLava(view.getBlockState(pos)),
+                pos -> distanceSq(feet, pos)).orElse(null);
         return nearest == null ? INACTIVE : new HazardEscapePolicy(feet.immutable(), nearest);
     }
 
