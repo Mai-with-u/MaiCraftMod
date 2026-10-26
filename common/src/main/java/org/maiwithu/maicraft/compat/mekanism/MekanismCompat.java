@@ -25,11 +25,13 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  * 用线缆管道把机器接进网，要经这里碰模组；每一下都包一层，装的 Mekanism 和编译时用的对不上时整个联动停用。
  *
  * <p>交给登记表的：目录里每种机器与管道、兜住别的能配侧面机器的"其他 Mekanism 机器"、
- * 能量、流体、物品、化学品四种管网的网络读取器（化学品只读，不给接线的线材）。
+ * 能量、流体、物品、化学品四种管网的网络读取器（化学品只读，不给接线的线材；网里的存量经服务端只读操作问）。
  */
 public final class MekanismCompat extends CompatModule {
 
     public static final String MOD_ID = MekanismMachineCatalog.MOD_ID;
+    /** 问管网存量的服务端只读操作：服务器装了 MaiCraft 的通用机械读数才答。 */
+    public static final String NETWORK_OPERATION = "mekanism.network";
 
     /** 别的能配侧面的 Mekanism 机器：看得出侧面配置、能改，说不出它是什么机器。 */
     static final MekanismMachineCatalog.Kind OTHER = new MekanismMachineCatalog.Kind(MOD_ID + ":other_machine",
@@ -50,9 +52,11 @@ public final class MekanismCompat extends CompatModule {
             });
         }
         registry.machineType(this, services -> new MekanismMachineType(OTHER, this, services, this::configurable));
+        // 管网：几段管道、连着几台机器在客户端数，网里存着多少经服务端只读操作 mekanism.network 问。
         for (String medium : List.of("energy", "fluid", "item", "chemical")) {
             registry.networkReader(this, services -> new PipeNetworkReader(medium, this, services));
         }
+        registry.serverRead(this, NETWORK_OPERATION, 1);
         registry.knowledgeSource(this, new MekanismMachineKnowledge());
         // 机器的界面：认出哪几格是真的机器格，投料、开界面看、存取都认得它。
         registry.menuLayout(this, new MekanismMachineLayout(this));

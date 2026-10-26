@@ -64,7 +64,7 @@ class MekanismCompatTest {
     }
 
     /** 读写端替身：按测试摆的管道回答，没有机器。 */
-    private static final class StubReads implements MekanismReads {
+    static final class StubReads implements MekanismReads {
         final Map<BlockPos, Transmitter> pipes = new HashMap<>();
         Set<Integer> machineSlots = Set.of();
         final Map<String, List<Conversion>> conversions = new HashMap<>();

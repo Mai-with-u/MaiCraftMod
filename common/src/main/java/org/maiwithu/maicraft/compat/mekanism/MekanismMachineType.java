@@ -114,7 +114,7 @@ final class MekanismMachineType implements MachineType {
             readings.put("pipes", (long) pipe.get().pipes().size());
             readings.put("machines", (long) pipe.get().machines().size());
             return new MachineState(MachineState.Activity.UNKNOWN, null, null, List.of(), readings,
-                    "读不到存量：管道里存着多少电、多少流体客户端看不到，这里只看得出连着几面");
+                    "这一格只看得出连着几面；存量是整张网的，看它所在那张网的读数");
         }
         Optional<MekanismReads.SideConfig> config = compat.sideConfig(level, at);
         if (config.isEmpty() && kind.role() == MachineRole.POWER_SOURCE) return generatorState(level, at);

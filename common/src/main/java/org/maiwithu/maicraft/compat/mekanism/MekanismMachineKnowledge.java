@@ -60,7 +60,9 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
                 .append("这样的面一个都没有才接介质对得上的别的面。热的侧面不当能量面接。\n")
                 .append("- 线路不贴着同种管道和别的 Mekanism 机器走（会被一起连上），贴着别种管道照走（线缆和物流管道不相连）。")
                 .append("铺完等几秒让连接同步过来再核对两端在不在同一张网。\n")
-                .append("- 读不到存量：网里存着多少电、多少流体客户端看不到，只数得出几段管道、连着几台机器；要看存量打开能量立方、储罐的界面。\n\n");
+                .append("- 存量：网里存着多少电、多少流体或化学品在那张网的读数里（`energy_stored`、`fluid_stored` 这些，")
+                .append("电按 FE、流体按毫桶），是服务端答的；服务器没装 MaiCraft 时读不到，只数得出几段管道、连着几台机器，")
+                .append("要看存量打开能量立方、储罐的界面。物品管网不在网里存东西。\n\n");
         text.append("## 认得的机器与管道\n\n");
         for (MekanismMachineCatalog.Kind kind : MekanismMachineCatalog.kinds()) {
             text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）");
