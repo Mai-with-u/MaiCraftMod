@@ -39,23 +39,15 @@ public final class DragonCombat {
     static final double ARRIVED = 1.5;
     /** 够得着龙头却这么多刻都没砍出去（准星被龙的别的部件挡着），横挪一步换角度。 */
     static final int SWING_STALL_TICKS = 30;
-    /** 换角度时绕开刚才站位多远（格）、绕多少刻。 */
-    static final double SIDESTEP = 1.2;
-    static final int SIDESTEP_TICKS = 15;
     /** 射飞着的龙连着射不出去后，这么多刻里先不射。 */
     static final int BOW_REST_TICKS = 200;
-    /** 目标跑开这么远才重新寻路（格）。 */
-    static final double REPLAN_AFTER = 3.0;
     /** 还立着、没放弃的水晶在战况里写的原因。 */
     public static final String NOT_YET = "还没打掉";
 
     private final BattleMoves moves;
+    /** 手脚槽：打龙自己的一份走路与出手槽位，被拒不设上限、只换角度。 */
+    private final BattleLimbs limbs;
     private final RangedCombat bow = new RangedCombat();
-    private Action walk;
-    private String walkKey;
-    private double[] walkAnchor;
-    private boolean lastWalkFailed;
-    private Action strike;
 
     private final Map<Integer, String> givenUp = new LinkedHashMap<>();
     private final Map<Integer, Long> endermanWaitSince = new HashMap<>();
@@ -94,12 +86,12 @@ public final class DragonCombat {
     private String spotKind;
     private final Set<BlockPos> badSpots = new HashSet<>();
     private int swingStall;
-    private double[] sidestepFrom;
-    private int sidestepTicks;
     private long bowRestUntil;
 
     public DragonCombat(BattleMoves moves) {
         this.moves = moves;
+        // 打龙这边被拒不累计上限：每次被拒都换个角度再试，没有"连着三次就放弃"的账。
+        this.limbs = new BattleLimbs(moves, Integer.MAX_VALUE);
     }
 
     /**
@@ -185,13 +177,12 @@ public final class DragonCombat {
     public Battle.Moment tick(TickContext context, Battlefield field, DragonTactic.Move move) {
         if (lastMove != null && lastMove.getClass() != move.getClass()) {
             // 换了一件事：上一件的出手、寻路、拉了一半的弓都收尾。
-            dropStrike();
-            dropWalk();
+            limbs.drop();
             bow.close();
         }
         boolean episode = lastMove == null || lastMove.getClass() != move.getClass();
         lastMove = move;
-        if (sidestepTicks > 0) sidestepTicks--;
+        limbs.sidestepTick();
         return switch (move) {
             case DragonTactic.AvoidCloud avoid -> avoidCloud(context, field, avoid, episode);
             case DragonTactic.DodgeSweep dodge -> dodgeSweep(context, field, dodge, episode);
@@ -209,7 +200,7 @@ public final class DragonCombat {
     // 躲龙息：当刻疾跑出所有危险区；八个方向都迈不出去才寻路绕出去。
     private Battle.Moment avoidCloud(TickContext context, Battlefield field, DragonTactic.AvoidCloud avoid,
                                      boolean episode) {
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         moves.lowerGuard();
         if (episode) breathDodges++;
@@ -217,11 +208,11 @@ public final class DragonCombat {
         Footwork.Stance stance = new Footwork.Stance(null, cloudHazards(avoid.clouds()), true);
         Footwork.Step step = Footwork.choose(me.x(), me.z(), stance, moves.ground(context));
         if (step.standing() && Footwork.exposed(me.x(), me.z(), stance)) {
-            boolean moved = follow(context, "躲龙息", me.x(), me.z(),
+            boolean moved = limbs.follow(context, "躲龙息", me.x(), me.z(),
                     () -> GoalCompiler.awayFrom(cloudThreats(avoid.clouds(), me.y())));
             return moment(Battle.State.EVADING, "躲开龙息（寻路绕出去）", moved, false);
         }
-        dropWalk();
+        limbs.dropWalk();
         moves.stepAvertingGaze(context, -1, step);
         return moment(Battle.State.EVADING, "躲开龙息", !step.standing(), false);
     }
@@ -229,12 +220,12 @@ public final class DragonCombat {
     // 躲冲撞：跑不开了、副手有盾就面朝它举盾；否则离开航线最近的那一处疾跑（正在航线上就往一侧让开）。
     private Battle.Moment dodgeSweep(TickContext context, Battlefield field, DragonTactic.DodgeSweep dodge,
                                      boolean episode) {
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         if (episode) sweepDodges++;
         DragonArena.Dragon dragon = field.arena().dragon();
         if (dodge.brace()) {
-            dropWalk();
+            limbs.dropWalk();
             moves.guard(context, 0, false);
             moves.stepAvertingGaze(context, dragon.id(), Footwork.Step.STAND);
             return moment(Battle.State.EVADING, "龙冲过来了，跑不开，面朝它举盾", false, false);
@@ -253,7 +244,7 @@ public final class DragonCombat {
         hazards.add(new Footwork.Hazard(hx, hz, DragonGeometry.SWEEP_WIDTH));
         Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, true),
                 moves.ground(context));
-        dropWalk();
+        limbs.dropWalk();
         moves.stepAvertingGaze(context, -1, step);
         return moment(Battle.State.EVADING, "龙冲过来了，横着跑开它的航线", !step.standing(), false);
     }
@@ -261,7 +252,7 @@ public final class DragonCombat {
     // 躲火球：离开它落点附近疾跑；落地后的云下一刻按躲龙息处理。
     private Battle.Moment dodgeFireball(TickContext context, Battlefield field, DragonTactic.DodgeFireball dodge,
                                         boolean episode) {
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         moves.lowerGuard();
         if (episode) fireballDodges++;
@@ -270,14 +261,14 @@ public final class DragonCombat {
         hazards.add(new Footwork.Hazard(dodge.pass().x(), dodge.pass().z(), DragonGeometry.FIREBALL_MISS + 1.0));
         Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, true),
                 moves.ground(context));
-        dropWalk();
+        limbs.dropWalk();
         moves.stepAvertingGaze(context, -1, step);
         return moment(Battle.State.EVADING, "龙火球朝我飞来，横着跑开", !step.standing(), false);
     }
 
     // 龙倒下了：停手，走到出口门边（门洞外）站着，经验球会自己飞过来。
     private Battle.Moment collect(TickContext context, Battlefield field) {
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         moves.lowerGuard();
         DragonArena arena = field.arena();
@@ -296,7 +287,7 @@ public final class DragonCombat {
             restGainAt = tick;
             restStalled = false;
         }
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         moves.lowerGuard();
         DragonArena arena = field.arena();
@@ -317,7 +308,7 @@ public final class DragonCombat {
 
     // 射水晶：站在爆炸范围外、射得到的地方就射；不在就去一圈站位里最近的那个，站上去还射不到就换下一个，都不行就放弃。
     private Battle.Moment shootCrystal(TickContext context, Battlefield field, DragonArena.Crystal crystal) {
-        dropStrike();
+        limbs.dropStrike();
         moves.lowerGuard();
         if (crystal.id() != crystalTarget) {
             crystalTarget = crystal.id();
@@ -337,7 +328,7 @@ public final class DragonCombat {
                 bow.close();
                 return sidestep(context, field, clouds, "射水晶的视线上站着末影人，挪一步换个角度");
             }
-            dropWalk();
+            limbs.dropWalk();
             boolean fired = bow.tick(context, moves, crystal.id(), DragonGeometry.CRYSTAL_SHOT_RANGE);
             if (fired) {
                 shotAt.add(crystal.id());
@@ -367,17 +358,17 @@ public final class DragonCombat {
                 String why = crystal.caged() ? "铁栏笼挡着，射不进去" : "附近找不到站得住又射得到它的地方";
                 givenUp.put(crystal.id(), why);
                 crystalTarget = -1;
-                dropWalk();
+                limbs.dropWalk();
                 return moment(Battle.State.HOLDING, "放弃这颗水晶：" + why, false, false);
             }
             stance = candidates.get(0);
-            dropWalk();
+            limbs.dropWalk();
         }
         BlockPos target = stance;
-        boolean moved = follow(context, "去射水晶的站位 " + target.toShortString(), target.getX() + 0.5,
+        boolean moved = limbs.follow(context, "去射水晶的站位 " + target.toShortString(), target.getX() + 0.5,
                 target.getZ() + 0.5, () -> GoalCompiler.approachAvoiding(GoalCompiler.near(target, 1.0),
                         cloudThreats(clouds, me.y())));
-        if (lastWalkFailed) {
+        if (limbs.lastWalkFailed()) {
             triedStances.add(target);
             stance = null;
         }
@@ -401,31 +392,29 @@ public final class DragonCombat {
         boolean swinging = inReach && safeHere && gazeClear;
         boolean struck = false;
         if (swinging) {
-            struck = swing(context, dragon.id(), me);
+            struck = limbs.swing(context, dragon.id(), me.x(), me.z(), moves::strikeHead).struck();
             swingStall = struck ? 0 : swingStall + 1;
             if (struck) lastEngagement = tick;
             if (swingStall > SWING_STALL_TICKS) {
                 // 准星一直被龙的身子、翅膀挡着：换个角度。
-                dropStrike();
+                limbs.dropStrike();
                 swingStall = 0;
-                markSidestep(me);
+                limbs.markSidestep(me.x(), me.z());
             }
         } else {
-            dropStrike();
+            limbs.dropStrike();
             swingStall = 0;
-            if (inReach && safeHere) markSidestep(me);
+            if (inReach && safeHere) limbs.markSidestep(me.x(), me.z());
         }
         List<Footwork.Hazard> hazards = new ArrayList<>(cloudHazards(clouds));
         hazards.add(new Footwork.Hazard(headCenter.x, headCenter.z, DragonGeometry.strikeZoneReach(head)));
         hazards.add(new Footwork.Hazard(neckCenter.x, neckCenter.z, DragonGeometry.strikeZoneReach(dragon.neck())));
-        if (sidestepTicks > 0 && sidestepFrom != null) {
-            hazards.add(new Footwork.Hazard(sidestepFrom[0], sidestepFrom[1], SIDESTEP));
-        }
+        limbs.sidestepHazard().ifPresent(hazards::add);
         double outer = CombatGeometry.meleeStandOff(me.reach(), head.getXsize() / 2);
         boolean near = Math.hypot(me.x() - headCenter.x, me.z() - headCenter.z) <= outer + Battle.NEAR_MARGIN
                 && Math.abs(head.minY - me.y()) <= Battle.NEAR_MARGIN;
         if (near) {
-            dropWalk();
+            limbs.dropWalk();
             Footwork.Step step = Footwork.choose(me.x(), me.z(),
                     new Footwork.Stance(new Footwork.Band(headCenter.x, headCenter.z, 0, outer), hazards, false),
                     moves.ground(context));
@@ -438,7 +427,7 @@ public final class DragonCombat {
             double neckZone = DragonGeometry.strikeZoneReach(dragon.neck());
             threats.add(new ThreatField.Threat(headCenter.x, headCenter.y, headCenter.z, headZone, headZone));
             threats.add(new ThreatField.Threat(neckCenter.x, neckCenter.y, neckCenter.z, neckZone, neckZone));
-            follow(context, "走到龙头边", headCenter.x, headCenter.z, () -> {
+            limbs.follow(context, "走到龙头边", headCenter.x, headCenter.z, () -> {
                 List<BlockPos> stances = DragonGeometry.headStances(dragon, field.arena().portal(), clouds, me.reach(),
                         moves.surface(context), me.x(), me.z());
                 GoalCompiler.Compiled approach = stances.isEmpty() ? GoalCompiler.band(headCenter, 0, outer)
@@ -455,7 +444,7 @@ public final class DragonCombat {
 
     // 射飞着的龙：推进手上这一箭，脚避开龙息；连着射不出去就先不射，等它落下来。
     private Battle.Moment shootDragon(TickContext context, Battlefield field) {
-        dropStrike();
+        limbs.dropStrike();
         moves.lowerGuard();
         if (bow.givenUp()) {
             bow.reset();
@@ -467,7 +456,7 @@ public final class DragonCombat {
             bow.close();
             return sidestep(context, field, DragonGeometry.dangerClouds(field.arena()), "射龙的视线上站着末影人，挪一步换个角度");
         }
-        dropWalk();
+        limbs.dropWalk();
         boolean fired = bow.tick(context, moves, dragon.id());
         if (fired) lastEngagement = tick;
         if (!bow.steady()) {
@@ -481,7 +470,7 @@ public final class DragonCombat {
 
     // 等龙落：走到出口门旁 8～14 格的一圈上站着，看着龙。
     private Battle.Moment waitForPerch(TickContext context, Battlefield field, String why) {
-        dropStrike();
+        limbs.dropStrike();
         bow.close();
         moves.lowerGuard();
         DragonArena arena = field.arena();
@@ -502,7 +491,7 @@ public final class DragonCombat {
                 || DragonGeometry.inAnyCloud(clouds, spot.getX() + 0.5, spot.getY(), spot.getZ() + 0.5)) {
             spotKind = kind;
             spot = null;
-            dropWalk();
+            limbs.dropWalk();
             for (BlockPos candidate : candidates.get()) {
                 if (!badSpots.contains(candidate)) {
                     spot = candidate;
@@ -517,15 +506,15 @@ public final class DragonCombat {
         }
         BlockPos target = spot;
         if (Math.hypot(me.x() - target.getX() - 0.5, me.z() - target.getZ() - 0.5) > ARRIVED) {
-            follow(context, kind + " " + target.toShortString(), target.getX() + 0.5, target.getZ() + 0.5,
+            limbs.follow(context, kind + " " + target.toShortString(), target.getX() + 0.5, target.getZ() + 0.5,
                     () -> GoalCompiler.approachAvoiding(GoalCompiler.near(target, 1.0), cloudThreats(clouds, me.y())));
-            if (lastWalkFailed) {
+            if (limbs.lastWalkFailed()) {
                 badSpots.add(target);
                 spot = null;
             }
             return moment(Battle.State.HOLDING, doing, true, false);
         }
-        dropWalk();
+        limbs.dropWalk();
         moves.stepAvertingGaze(context, dragonId, Footwork.Step.STAND);
         return moment(Battle.State.HOLDING, doing, true, false);
     }
@@ -533,19 +522,14 @@ public final class DragonCombat {
     // 横挪一步换个角度：绕开刚才站的地方，也绕开龙息。
     private Battle.Moment sidestep(TickContext context, Battlefield field, List<DragonArena.Cloud> clouds, String doing) {
         Battlefield.Me me = field.me();
-        if (sidestepTicks == 0) markSidestep(me);
+        if (!limbs.sidestepActive()) limbs.markSidestep(me.x(), me.z());
         List<Footwork.Hazard> hazards = new ArrayList<>(cloudHazards(clouds));
-        hazards.add(new Footwork.Hazard(sidestepFrom[0], sidestepFrom[1], SIDESTEP));
+        limbs.sidestepHazard().ifPresent(hazards::add);
         Footwork.Step step = Footwork.choose(me.x(), me.z(), new Footwork.Stance(null, hazards, false),
                 moves.ground(context));
-        dropWalk();
+        limbs.dropWalk();
         moves.stepAvertingGaze(context, -1, step);
         return moment(Battle.State.FIGHTING, doing, !step.standing(), false);
-    }
-
-    private void markSidestep(Battlefield.Me me) {
-        sidestepFrom = new double[] {me.x(), me.z()};
-        sidestepTicks = SIDESTEP_TICKS;
     }
 
     // 这一眼（从眼睛看向这一点）会不会对上没惹毛的末影人的眼睛；戴着雕刻南瓜不会。
@@ -559,50 +543,6 @@ public final class DragonCombat {
                     watcher.inSight()));
         }
         return EndermanGaze.provokesAny(eye, new Vec3(x - eye.x, y - eye.y, z - eye.z), eyes, arena.pumpkin());
-    }
-
-    // 砍一下龙头：同一下沿用进行中的出手；砍中了清掉等下一下；被拒就换个角度。
-    private boolean swing(TickContext context, int dragonId, Battlefield.Me me) {
-        if (strike == null) strike = moves.strikeHead(context, dragonId);
-        ActionStatus status;
-        try {
-            status = strike.tick(context);
-        } catch (IllegalStateException busy) {
-            // 上一下举盾还在等确认，交互入口这一刻不收这一刀：下一刻再挥。
-            return false;
-        }
-        if (status instanceof ActionStatus.Done) {
-            dropStrike();
-            return true;
-        }
-        if (status instanceof ActionStatus.Failed) {
-            dropStrike();
-            markSidestep(me);
-        }
-        return false;
-    }
-
-    // 跟着一段寻路走：同一件事、目标没跑开就沿用，跑开三格以上或换了事才重新算路；走不通记下来。
-    private boolean follow(TickContext context, String key, double anchorX, double anchorZ,
-                           Supplier<GoalCompiler.Compiled> goal) {
-        lastWalkFailed = false;
-        if (walk != null && (!key.equals(walkKey)
-                || Math.hypot(anchorX - walkAnchor[0], anchorZ - walkAnchor[1]) > REPLAN_AFTER)) {
-            dropWalk();
-        }
-        if (walk == null) {
-            walk = moves.walk(goal.get());
-            walkKey = key;
-            walkAnchor = new double[] {anchorX, anchorZ};
-        }
-        ActionStatus status = walk.tick(context);
-        if (status instanceof ActionStatus.Failed) {
-            lastWalkFailed = true;
-            dropWalk();
-            return false;
-        }
-        if (status instanceof ActionStatus.Done) dropWalk();
-        return status instanceof ActionStatus.Running running && running.progressed();
     }
 
     // 走位要躲的龙息：每团云的半径、涨幅与余量。
@@ -635,21 +575,9 @@ public final class DragonCombat {
         return new Battle.Moment(state, doing, progressed, struck, fired, -1, null, false);
     }
 
-    private void dropStrike() {
-        if (strike != null) strike.close();
-        strike = null;
-    }
-
-    private void dropWalk() {
-        if (walk != null) walk.close();
-        walk = null;
-        walkKey = null;
-    }
-
     /** 普通打法接手了（先对付贴上来的别的怪）：打龙这边的出手、寻路、拉了一半的弓都收尾。 */
     public void stand() {
-        dropStrike();
-        dropWalk();
+        limbs.drop();
         bow.close();
         lastMove = null;
     }
@@ -662,8 +590,7 @@ public final class DragonCombat {
 
     /** 暂停：寻路与出手停在原处，弓取消。 */
     public void pause() {
-        if (strike != null) strike.pause();
-        if (walk != null) walk.pause();
+        limbs.pause();
         bow.close();
     }
 
@@ -676,8 +603,8 @@ public final class DragonCombat {
                 || lastMove instanceof DragonTactic.DodgeFireball) {
             return Interruptibility.UNSAFE_TO_STOP;
         }
-        if (walk != null) return walk.interruptibility();
-        if (strike != null) return strike.interruptibility();
+        if (limbs.walk() != null) return limbs.walk().interruptibility();
+        if (limbs.strike() != null) return limbs.strike().interruptibility();
         if (lastMove instanceof DragonTactic.Rest) return Interruptibility.BETWEEN_ACTIONS;
         return Interruptibility.WORKING;
     }
