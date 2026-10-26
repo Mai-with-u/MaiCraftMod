@@ -86,9 +86,10 @@ public final class ClientSpotsContainers implements SpotsContainers {
             candidateFromWorld(level, hit, center).ifPresent(found::add);
         }
         // 世界记忆里记过的容器补进来：现场还看得见的按现场读，没加载的按记忆读（到场还要核对）。
-        for (MemoryRecord record : memory.recordsNear(WorldPosition.here(center.getX(), center.getY(), center.getZ()),
-                radius)) {
-            if (record.kind() != MemoryKind.CONTAINER) continue;
+        // 记得的位置加载了、现场却不是那个容器：这条记忆已与现场对不上，按着它走只会白奔一趟，
+        // 当场从记忆里划掉，不再补进候选。
+        for (MemoryRecord record : remembered(level)
+                .near(WorldPosition.here(center.getX(), center.getY(), center.getZ()), radius)) {
             BlockPos at = new BlockPos(record.position().x(), record.position().y(), record.position().z());
             if (seen.contains(at)) continue;
             found.add(candidateFromMemory(record, center));
@@ -116,9 +117,25 @@ public final class ClientSpotsContainers implements SpotsContainers {
             if (kinds.isContainer(blockTypeId)) {
                 return candidateFromWorld(level, at, at);
             }
+            // 记忆里记着这里有只容器、现场却是别的东西：对不上，划掉这条记忆，别让下一次再找来这里。
+            remembered(level).at(position);
             return Optional.empty();
         }
-        return memory.recordAt(MemoryKind.CONTAINER, position).map(record -> candidateFromMemory(record, at));
+        // 没加载的格子到不了现场：按记忆给，到场再核对。
+        return remembered(level).at(position).map(record -> candidateFromMemory(record, at));
+    }
+
+    // 记得的容器与现场核对的读端：每刻按当刻加载的格子读，记忆与现场对不上的当场划掉。
+    private StandingContainers remembered(ClientLevel level) {
+        return new StandingContainers(memory, cellsOf(level), kinds::isContainer);
+    }
+
+    // 现场只读接缝：加载了的格子读此刻的方块 ID，没加载的给空。
+    private StandingContainers.ReadsCells cellsOf(ClientLevel level) {
+        return at -> {
+            BlockPos cell = new BlockPos(at.x(), at.y(), at.z());
+            return level.isLoaded(cell) ? Optional.of(blockTypeIdOf(level.getBlockState(cell))) : Optional.empty();
+        };
     }
 
     // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读。
