@@ -2,34 +2,13 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.item.Items;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.item.ItemStack;
-
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.menu.MenuClick;
-import org.maiwithu.maicraft.behavior.menu.MenuContent;
-import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
-import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
-import org.maiwithu.maicraft.behavior.menu.TransferRun;
-import org.maiwithu.maicraft.behavior.menu.TransferSettlement;
-import org.maiwithu.maicraft.game.menu.CursorStowing;
-import org.maiwithu.maicraft.game.menu.MenuConfirmation;
-import org.maiwithu.maicraft.game.menu.PendingMenuAction;
-import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -39,38 +18,21 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 从终端取货的生产实现：走到 ME 终端跟前、点在面板上打开（不点线缆芯）→ 核对是这台终端的界面、
- * 等网络连接状态与网络存货同步过来 → 按"缺一组以上整组取、不足一组一件一件取再放下"逐笔取 → 关上。
+ * 从终端取货的生产实现：走到 ME 终端跟前、点在面板上打开 → 等网络读数同步 → 逐笔取进背包 → 关上；
+ * 现货不够、网络里有样板时在终端里下单补缺口，开工后重新打开终端站在跟前等成品进网络。
  *
- * <p>每一笔都等游戏确认：整组取看背包里多了几件，取一件看光标上多了一件，放下看光标空了、那一格多了。
- * 只记确认过的量（搬运结算），没动静就不再硬点，对不上的如实记下不凑数。
- * 拿走多少最终以引擎在动作结束后按身上的重新清点为准。关之前把这次看到的网络存货记下，下次报价用。
- * 收场时光标上还有东西，先放回背包（背包放不下就放回网络）再关界面，不留给关界面的流程去还——背包满了它会把东西丢在地上。
+ * <p>一次取货会话拆成三段协作，各自有自己的状态与收场：
+ * 「打开与核对」{@link TerminalSync}（走到、点开、核对是这台、等网络读数同步）、
+ * 「逐笔搬」{@link TakeMoves}（整组取与放下光标，每一笔都等游戏确认）、
+ * 「下单等成品」{@link WaitsForCraft}（在终端里下单、站在跟前等成品进网络）；
+ * 三段共用的界面与记账在 {@link TakeSession}。这里只管会话的阶段推进与收场：
+ * 总期限、被生存需求打断后接着等、关界面，以及取没取够的最后结论。
  *
- * <p>现货取完还缺、网络里那一条有样板时，交给 {@link NetworkCraft} 决定下不下单、下几件，走完下单那几页；
- * 开工后关掉 AE2 退回来的终端重新打开，站在跟前等成品进网络，进来一批取一批。
+ * <p>拿走多少最终以引擎在动作结束后按身上的重新清点为准。收场时光标上还有东西，先放回背包
+ * （背包放不下就放回网络）再关界面，不留给关界面的流程去还——背包满了它会把东西丢在地上。
+ * 下单没成或等不到成品：就算已经取到一些也按失败交回，让引擎划掉这条路，不再回来白跑。
  */
 public final class MenuTerminalTakes implements TerminalTakes {
-
-    /** 一次取货的总期限（刻）：走过去加上最多六十几下单件取，一分钟足够；到点如实收场，不在一台终端上耗死。 */
-    private static final long GIVE_UP_TICKS = 20L * 60;
-    /** 点开后等网络存货表与连接状态同步过来的期限（刻）；等不到不把没同步的网络当成空的。 */
-    private static final int STOCK_WAIT_TICKS = 40;
-    /** 存货表出现后再等几刻（刻）：网络是空的或没连上时，同步到的就是空表，等过这一小会儿才下结论。 */
-    private static final int STOCK_SETTLE_TICKS = 10;
-    /**
-     * 没看到要的东西时，存货表连着这么多刻（刻）不再变才下"网络里没有"的结论：大网络的存货 AE2 分好几个包同步，
-     * 第一个包到了就判没有，实机主城 AE 里的铁锭、铁板都被说成"没有"。
-     */
-    private static final int STOCK_STABLE_TICKS = 10;
-    /** 等存货表同步齐的总期限（刻）：到点还没稳下来就按此刻看到的下结论。 */
-    private static final int STOCK_FULL_WAIT_TICKS = 100;
-    /** 一下取货等游戏确认的期限（刻）。 */
-    private static final int TAKE_TIMEOUT_TICKS = 40;
-    /** 在下单那几页上点一下等换页的期限（刻）；换页由下单那边自己看，这里只让这一下的确认按时结清。 */
-    private static final int PAGE_CONFIRM_TICKS = 60;
-    /** 收场前放好光标的期限（刻）：到点还没放好就照常关界面，光标上的东西交给游戏的关闭流程。 */
-    private static final int CURSOR_TICKS = 40;
 
     private final Ae2Compat compat;
     private final PlayerServices services;
@@ -86,7 +48,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
     @Override public Optional<Action> take(Ae2Terminals.Terminal terminal, String dimension, ItemRequest request,
             Permissions permissions, TaskRecords records) {
-        return Optional.of(new TakeAction(terminals.placed(terminal, dimension, permissions), request, false, records, true));
+        return Optional.of(new TakeAction(terminals.placed(terminal, dimension, permissions), request, false, records,
+                true));
     }
 
     @Override public Optional<Action> takeWireless(String terminalItemId, ItemRequest request, TaskRecords records) {
@@ -112,74 +75,44 @@ public final class MenuTerminalTakes implements TerminalTakes {
         return Optional.of(new TakeAction(terminals.wireless(terminalItemId), request, true, null, false));
     }
 
-    /** 从终端取货的先后顺序；现货取完还缺、网络里有样板时，插一步下单合成，开工后重新打开终端等成品。 */
-    private enum Stage { OPEN, SYNC, TAKE, CRAFT, CURSOR, CLOSE, DONE }
-
-    /** 正在等确认的那一下是哪种取法。 */
-    private enum Pending { STACK, ONE }
-
-    /** 把空桶放进网络后等它出现在存货里的期限（刻）。 */
-    private static final int BUCKET_WAIT_TICKS = 40;
-
-    /** 从终端取货的动作：点开 → 等同步 → 逐笔取 → 关上，跨刻推进。 */
+    /** 从终端取货的会话：点开并等同步 → 逐笔取 → （要时）下单等成品 → 放好光标 → 关上，跨刻推进。 */
     private final class TakeAction implements Action {
 
-        private final TerminalAccess access;
-        private final ItemRequest request;
-        /** 只看一眼：等存货同步齐记下来就关上，什么都不拿。 */
-        private final boolean lookOnly;
-        /** 网络里现成没有时允不允许下单合成；坠落中取落地料不允许，等成品时人已经落地了。 */
-        private final boolean allowCrafting;
-        private MenuOpening opening;
-        private final TransferSettlement settlement = new TransferSettlement();
+        /** 取货会话的先后顺序；现货取完还缺、网络里有样板时，插一段下单合成，开工后重新打开终端等成品。 */
+        private enum Stage { OPEN, TAKE, CRAFT, CURSOR, CLOSE, DONE }
+
+        /** 一次取货的总期限（刻）：走过去加上最多六十几下单件取，一分钟足够；到点如实收场，不在一台终端上耗死。 */
+        private static final long GIVE_UP_TICKS = 20L * 60;
+
+        /** 三段共用的会话上下文：此刻开着的界面、搬运执行、搬运结算与「要什么」。 */
+        private final TakeSession session;
+        /** 「打开与核对」：走到、点开、等网络读数同步。 */
+        private final TerminalSync sync;
+        /** 「下单等成品」：现货不够在终端里下单，站在跟前等成品进网络。 */
+        private final WaitsForCraft craft;
+        /** 「逐笔搬」：整组取与放下光标。 */
+        private final TakeMoves moves;
+
         private Stage stage = Stage.OPEN;
-        private OpenedMenu menu;
         private Action closing;
         private long waited;
-        private int syncWaited;
-        private int settleWaited;
-        /** 没看到要的东西时，存货表上一刻有几条、连着几刻没变、一共等了几刻。 */
-        private int lastStockSize = -1;
-        private int stockStableTicks;
-        private int stockFullWaited;
         /** 收场的原因：一件都没取到时按它失败；取到了就算做完。null 是正常收场（拿够了）。 */
         private Problem stopReason;
-        /** 现货不够时在网络里下单补缺口：下不下单、下单那几页、等成品的期限都在它那里。 */
-        private final NetworkCraft craft;
         /** 下单没成或等不到成品：就算已经取到一些也按失败交回，让引擎划掉这条路，不再回来白跑。 */
         private boolean failEvenIfTaken;
-        /** 等成品时数刻，每秒报一次进展用。 */
-        private int craftBeat;
         /** 站在终端前等成品时被生存需求打断过：回来先重新打开终端接着等，不当成取完了。 */
         private boolean reopenAfterPause;
-
-        // 正在等确认的一下：取法、取的那种东西、点之前角色那一侧与光标的样子。
-        private PendingMenuAction pending;
-        private Pending pendingKind;
-        private SlotSnapshot pendingSample;
-        private List<Integer> pendingSlotIds;
-        private List<SlotSnapshot> pendingBefore;
-
-        // 放下光标的一笔交给搬运执行逐刻点、按光标空掉与那一格增多核对；记下是哪种东西好记账。
-        private TransferRun transport;
-        private boolean putDownPending;
-        private String putDownItem;
-
-        // 收场前放好光标：已经等了几刻、正在等确认的"放回网络"那一下。
-        private int cursorWaited;
-        private PendingMenuAction putBackPending;
 
         /**
          * @param lookOnly 只看一眼，什么都不拿
          * @param records  发起任务的记账口，下单的结论记成 attempts；没有为 null
          */
-        TakeAction(TerminalAccess access, ItemRequest request, boolean lookOnly, TaskRecords records, boolean allowCrafting) {
-            this.access = access;
-            this.request = request;
-            this.lookOnly = lookOnly;
-            this.allowCrafting = allowCrafting;
-            this.opening = access.opening();
-            this.craft = new NetworkCraft(compat, this::sendOnPage, access.describe(), records);
+        TakeAction(TerminalAccess access, ItemRequest request, boolean lookOnly, TaskRecords records,
+                boolean allowCrafting) {
+            this.session = new TakeSession(access, compat, services, request);
+            this.sync = TerminalSync.waitingForStock(session);
+            this.craft = new WaitsForCraft(compat, session, records);
+            this.moves = new TakeMoves(session, craft, lookOnly, allowCrafting);
         }
 
         @Override public ActionStatus tick(TickContext tick) {
@@ -188,390 +121,93 @@ public final class MenuTerminalTakes implements TerminalTakes {
             long limit = craft.involved()
                     ? GIVE_UP_TICKS + CraftOrdering.MOST_TICKS + CraftWait.TOTAL_TICKS : GIVE_UP_TICKS;
             if (++waited > limit && stage.ordinal() < Stage.CURSOR.ordinal()) {
-                stop(Problem.of(Problem.Kind.STUCK, "从 " + access.describe() + " 取货超时", null));
+                stop(Problem.of(Problem.Kind.STUCK, "从 " + session.access().describe() + " 取货超时", null));
             }
             return switch (stage) {
-                case OPEN -> open(tick);
-                case SYNC -> sync(tick);
-                case TAKE -> take(tick);
-                case CRAFT -> craft(tick);
-                case CURSOR -> clearCursor(tick);
+                case OPEN -> onTurn(sync.proceed(tick), Stage.TAKE);
+                case TAKE -> onTurn(moves.proceed(tick), null);
+                case CRAFT -> onTurn(craft.proceed(tick), null);
+                case CURSOR -> onTurn(moves.clearCursor(tick), Stage.CLOSE);
                 case CLOSE -> closeMenu(tick);
                 case DONE -> result();
             };
         }
 
-        // 走过去点开：走不到、点不开、界面认不出，都把打开动作的原因原样交回，引擎换路。
-        private ActionStatus open(TickContext tick) {
-            ActionStatus status = opening.tick(tick);
-            if (!(status instanceof ActionStatus.Done)) return status;
-            menu = opening.opened().orElseThrow();
-            transport = new TransferRun(menu);
-            // 下单时服务端会把终端换成填数量页、确认页，开工后再退回终端：这些都是这次取货接着用的页，
-            // 界面跟着换绑，下单那几页上的操作、关界面都对着此刻那一页。
-            menu.followPageSwaps(this::craftPage);
-            stage = Stage.SYNC;
-            return ActionStatus.progressed();
-        }
-
-        // 服务端换上来的哪些页算这次取货接着用：填合成数量页、合成确认页、退回来的还是这台终端（或这件无线终端）。
-        // 别的界面顶上来不跟，照旧当成终端被关掉。
-        private boolean craftPage(AbstractContainerMenu from, AbstractContainerMenu to) {
-            PlayerContext player = services.context().get();
-            return compat.craftAmountMenu(to) || compat.craftPlanPage(to).isPresent()
-                    || (player != null && access.belongs(to, player.level()));
-        }
-
-        // 在此刻那一页上发模组的包：经已打开的界面发（它跟着下单那几页换绑），和取货同一条就绪规矩——
-        // 本刻有交互机会、上一下结清、界面画过一帧才发；这一下按"换页了"确认。发不了返回 false，下一刻再试。
-        private boolean sendOnPage(String what, Runnable send) {
-            PlayerContext player = services.context().get();
-            if (menu == null || player == null) return false;
-            AbstractContainerMenu page = player.localPlayer().containerMenu;
-            return menu.submitModAction(what, send,
-                    (now, ignored) -> now.localPlayer().containerMenu != page
-                            ? MenuConfirmation.Verdict.APPLIED : MenuConfirmation.Verdict.PENDING,
-                    PAGE_CONFIRM_TICKS).isPresent();
-        }
-
-        // 核对是这台终端的界面，再等连接状态与网络存货同步过来；没连上网络就如实收场。
-        private ActionStatus sync(TickContext tick) {
-            PlayerContext player = tick.player();
-            AbstractContainerMenu raw = player.localPlayer().containerMenu;
-            ClientLevel level = player.level();
-            if (menu.reading().isEmpty()) {
-                return finishWithout(Problem.of(Problem.Kind.TARGET_GONE, "终端界面刚打开就被关上了", null));
-            }
-            if (!access.belongs(raw, level)) {
-                return stopNow(Problem.of(Problem.Kind.TARGET_GONE,
-                        "点开的不是 " + access.describe() + " 的界面", null));
-            }
-            Optional<Boolean> linked = compat.networkLinked(raw);
-            Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
-            if (linked.isEmpty() || stock.isEmpty()) {
-                if (++syncWaited > STOCK_WAIT_TICKS) {
-                    return stopNow(Problem.of(Problem.Kind.STUCK, "终端界面开了，网络存货一直没同步过来", null));
-                }
-                return ActionStatus.running();
-            }
-            // 连上了、也有货就不用再等；空表或没连上时多等一小会儿，免得把还没到的同步当成空网络。
-            boolean clearlyReady = linked.get() && !stock.get().isEmpty();
-            if (!clearlyReady && ++settleWaited <= STOCK_SETTLE_TICKS) return ActionStatus.running();
-            // 刚同步过来的多半只是第一包（大网络分好几包发）：先按"没看全"记，免得下次把没到的当成没有。
-            access.remember(linked.get(), stock.get(), !linked.get());
-            if (!linked.get()) {
-                // 界面上写着原因就照抄（无线终端超出访问点范围、没电、没频道）；读不到才用笼统的说法。
-                String why = compat.unlinkedWhy(raw).map(text -> "（" + text + "）").orElse("（没电或没频道）");
-                return stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                        access.describe() + " 没连上 ME 网络" + why + "，取不了", null));
-            }
-            stage = Stage.TAKE;
-            return ActionStatus.progressed();
-        }
-
-        // 逐笔取：上一下还在等确认就本刻不动手；拿够、网络里没了、背包放不下就去关界面。
-        private ActionStatus take(TickContext tick) {
-            PlayerContext player = tick.player();
-            AbstractContainerMenu raw = player.localPlayer().containerMenu;
-            Optional<MenuContent.Reading> reading = menu.reading();
-            if (reading.isEmpty()) {
-                // 界面被合上了（打断或服务端关的）：取到多少由引擎清点，这里照常收场。
-                return finishWithout(null);
-            }
-            if (pending != null) return awaitTake(player, raw, reading.get());
-            if (putDownPending) return transport.tickAction(this::onSettled);
-            if (menu.busy()) return ActionStatus.running();
-
-            List<Ae2TerminalMenu.StockEntry> stock = compat.networkStock(raw).orElse(List.of());
-            // 只看一眼：等存货表稳下来、记成看全了就去关界面，什么都不拿。
-            if (lookOnly) {
-                if (stockStillArriving(stock.size())) return ActionStatus.running();
-                compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
-                return stopNow(null);
-            }
-            SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
-            // 光标上挂着不是这次要取的东西：多半是有人动过光标，不是程序出错。不在上面叠，收场时由关界面放回背包。
-            if (!cursor.isEmpty() && !wanted(cursor.stack())) {
-                return stopNow(Problem.of(Problem.Kind.STUCK, "终端界面的光标上挂着 " + cursor.count() + " 个"
-                        + itemId(cursor.stack()) + "，不是这次要取的，先停手", null));
-            }
-            Ae2TerminalMenu.StockEntry entry = cursor.isEmpty() ? firstWanted(stock) : entryFor(cursor, stock);
-            if (entry == null) {
-                // 成品刚好取够、网络里也没了：拿够就收场，不再等下单的那一单。
-                if (request.count() - confirmedTotal() <= 0) return stopNow(null);
-                // 一件还没取到就没看见：可能是存货还没同步齐，等表连着几刻不再变多再说没有。
-                if (confirmedTotal() == 0 && stockStillArriving(stock.size())) return ActionStatus.running();
-                // 等到存货表不再变了：这时记下的才算看全了，下次报价可以照它说"没有"。
-                if (confirmedTotal() == 0) compat.networkLinked(raw).ifPresent(linked -> access.remember(linked, stock, true));
-                // 坠落中取落地料不在空中下单：等网络把东西做出来时人已经落地了，现成没有就收场。
-                if (!allowCrafting) return stopNow(nothingLeft());
-                // 现货取完了还缺（或一开始就没有）：网络里那一条有样板就像玩家一样下单补缺口，件数封顶在背包装得下的；
-                // 自己之前下的这样东西还在做就不再下单、接着等；下过单就在跟前等成品进网络，进来一批取一批。
-                List<SlotSnapshot> playerSide = reading.get().playerSnapshots();
-                return switch (craft.noStock(raw, stock, this::wanted, confirmedTotal(),
-                        request.count() - confirmedTotal(), sample -> NetworkTakePlan.room(sample, playerSide))) {
-                    case NetworkCraft.Ordering ordering -> {
-                        stage = Stage.CRAFT;
-                        yield ActionStatus.progressed();
-                    }
-                    // AE2 还记着这一单在做：网络在干活，每秒报一次进展，这段等待的上限由下单那边的期限管。
-                    case NetworkCraft.Waiting waiting -> waiting.jobRunning() && ++craftBeat % 20 == 0
-                            ? ActionStatus.progressed() : ActionStatus.running();
-                    case NetworkCraft.Reopen reopen -> reopen();
-                    case NetworkCraft.Stop stop -> stopCraft(stop);
-                    case NetworkCraft.Nothing nothing -> stopNow(nothingLeft());
-                };
-            }
-            int remaining = request.count() - confirmedTotal();
-            if (entry.fillsBucket() && cursor.isEmpty()) return fillBucket(entry, stock, reading.get(), raw, remaining);
-            NetworkTakePlan.Move move = NetworkTakePlan.next(remaining, cursor, entry,
-                    reading.get().playerSlotIds(), reading.get().playerInventoryIndices(),
-                    reading.get().playerSnapshots());
-            return switch (move) {
-                case NetworkTakePlan.TakeStack takeStack -> submit(Pending.STACK, entry, reading.get(), raw,
-                        () -> compat.takeStack(raw, takeStack.serial()));
-                case NetworkTakePlan.TakeOne takeOne -> submit(Pending.ONE, entry, reading.get(), raw,
-                        () -> compat.takeOne(raw, takeOne.serial()));
-                case NetworkTakePlan.PutDown putDown -> putDown(putDown.slotId(), cursor);
-                case NetworkTakePlan.NoRoom noRoom -> stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
-                        "背包放不下从 " + access.describe() + " 取的" + request.wanted().describe(), null));
-                case NetworkTakePlan.Done done -> stopNow(remaining > 0 ? nothingLeft() : null);
-            };
-        }
-
-        // 要的是一桶水（岩浆）而网络里存的是流体：像玩家拿空桶点终端里的水。网络里有空桶就直接点，
-        // AE 拿一只装满放进背包；没有就先把背包里的空桶放进网络再点；两边都没有空桶如实说。
-        // 原先只认物品，网络里明明有无限水也说"没有水桶"，角色转去舀了自己刷石机里的水。
-        private ActionStatus fillBucket(Ae2TerminalMenu.StockEntry entry, List<Ae2TerminalMenu.StockEntry> stock,
-                MenuContent.Reading reading, AbstractContainerMenu raw, int remaining) {
-            if (remaining <= 0) return stopNow(null);
-            boolean networkHasBucket = stock.stream()
-                    .anyMatch(other -> !other.fillsBucket() && other.stored() > 0 && other.sample().is(Items.BUCKET));
-            if (networkHasBucket) {
-                if (stowSlot(entry.sample().copyWithCount(1), reading) < 0) {
-                    return stopNow(Problem.of(Problem.Kind.INVENTORY_FULL,
-                            "背包放不下从 " + access.describe() + " 装的" + request.wanted().describe(), null));
-                }
-                return submit(Pending.STACK, entry, reading, raw, () -> compat.fillBucket(raw, entry.serial()));
-            }
-            // 背包里的空桶放进网络：放过一次还没在存货里出现就等一会儿，等不到如实说。
-            if (bucketOffered) {
-                return ++bucketWaited <= BUCKET_WAIT_TICKS ? ActionStatus.running()
-                        : stopNow(Problem.of(Problem.Kind.STUCK, "把空桶放进 " + access.describe() + " 的网络后一直没看到", null));
-            }
-            for (int i = 0; i < reading.playerSnapshots().size(); i++) {
-                SlotSnapshot slot = reading.playerSnapshots().get(i);
-                if (slot.isEmpty() || !slot.stack().is(Items.BUCKET)) continue;
-                if (!menu.quickMove(reading.playerSlotIds().get(i))) return ActionStatus.running();
-                bucketOffered = true;
+        // 一段交回的走向换成会话的推进：进下一段、收场，或把动作状态原样交回。afterOpen 是打开并同步齐后去的段。
+        private ActionStatus onTurn(TerminalTurn turn, Stage afterOpen) {
+            if (turn instanceof TerminalTurn.Stay(ActionStatus status)) return status;
+            if (turn instanceof TerminalTurn.Synced) {
+                stage = afterOpen;
                 return ActionStatus.progressed();
             }
-            return stopNow(Problem.of(Problem.Kind.NEED_ITEM, access.describe() + " 的网络里有"
-                    + itemId(entry.sample()) + "要装的流体，可网络里和背包里都没有空桶", "先备一只空桶（三块铁锭）再来装"));
+            if (turn instanceof TerminalTurn.WrapUp(Problem reason, boolean evenIfTaken)) {
+                failEvenIfTaken |= evenIfTaken;
+                return wrapUp(reason);
+            }
+            if (turn instanceof TerminalTurn.FinishNow(Problem reason)) {
+                // 界面已经不在了：不用放光标、不用关，直接收场。
+                if (stopReason == null) stopReason = reason;
+                stage = Stage.DONE;
+                return result();
+            }
+            if (turn instanceof TerminalTurn.Order) {
+                stage = Stage.CRAFT;
+                return ActionStatus.progressed();
+            }
+            if (turn instanceof TerminalTurn.Reopen) {
+                reopen();
+                return ActionStatus.progressed();
+            }
+            // CloseOnly：不用放光标了，直接去关界面。
+            stage = Stage.CLOSE;
+            return ActionStatus.progressed();
         }
 
-        // 下单的几页：点合成 → 填数量、算完能做就开工 → 确认页看结论，每一刻看此刻的界面是哪一页。
-        private ActionStatus craft(TickContext tick) {
-            return switch (craft.ordering(tick.player().localPlayer().containerMenu)) {
-                case NetworkCraft.Reopen reopen -> reopen();
-                case NetworkCraft.Stop stop -> stopCraft(stop);
-                default -> ActionStatus.running();
-            };
+        // 收场：还停在下单那几页上就关掉那一页直接结束；在终端前等的照常放好光标、关界面收场。
+        private ActionStatus wrapUp(Problem reason) {
+            if (stage != Stage.CRAFT) return stopNow(reason);
+            session.abandonMenu();
+            if (stopReason == null) stopReason = reason;
+            stage = Stage.DONE;
+            return result();
+        }
+
+        // 开工了（或等成品时被打断回来）：关掉 AE2 退回来的终端重新打开看存货，等成品进网络。
+        private void reopen() {
+            session.reopen();
+            sync.resetCounters();
+            moves.resetStockCounters();
+            stage = Stage.OPEN;
         }
 
         // 等成品时被打断过（饿了去吃、天黑去睡）：界面已经关了，作业留在网络里接着做。回来重新走到终端前打开，
         // 接着等同一单——等过的时间照算、不重复下单；打断前还没确认的那一下如实记下，不再等它。
         private ActionStatus resumeAfterPause() {
             reopenAfterPause = false;
-            if (pending != null) {
-                settlement.unconfirmed("从 " + access.describe() + " 取货的一下没等到确认就被打断了");
-                pending = null;
-            }
-            if (transport != null) transport.abandon();
-            putDownPending = false;
-            return reopen();
-        }
-
-        // 开工了：关掉 AE2 退回来的终端重新打开看存货，等成品进网络。
-        private ActionStatus reopen() {
-            closeCurrent();
-            opening = access.opening();
-            menu = null;
-            transport = null;
-            putDownPending = false;
-            stage = Stage.OPEN;
-            syncWaited = 0;
-            settleWaited = 0;
-            lastStockSize = -1;
-            stockStableTicks = 0;
-            stockFullWaited = 0;
+            moves.afterPause();
+            reopen();
             return ActionStatus.progressed();
         }
 
-        // 下单没成或等不到成品：还停在下单那几页上就关掉那一页收场；在终端前等的照常放好光标、关界面收场。
-        // 下单这条路走不通时就算已经取到一些也按失败交回，引擎划掉它换别的路。
-        private ActionStatus stopCraft(NetworkCraft.Stop stop) {
-            failEvenIfTaken = stop.evenIfTaken();
-            if (stage != Stage.CRAFT) return stopNow(stop.problem());
-            closeCurrent();
-            if (stopReason == null) stopReason = stop.problem();
-            stage = Stage.DONE;
-            return result();
-        }
-
-        // 关掉此刻开着的界面（下单的几页、退回来的终端）：已打开的界面跟着这几页换绑过，请游戏关的就是此刻那一页。
-        private void closeCurrent() {
-            if (menu != null) menu.abandon();
-        }
-
-        // 存货表还在变（还有包没到）就接着等；连着几刻没变或等到期限就算齐了。
-        private boolean stockStillArriving(int size) {
-            if (++stockFullWaited > STOCK_FULL_WAIT_TICKS) return false;
-            if (size != lastStockSize) {
-                lastStockSize = size;
-                stockStableTicks = 0;
-                return true;
+        // 照常收场：先记下网络存货，再放好光标、关界面。还没打开界面就收场（例如走过去超时）时没有界面要关，直接结束。
+        private void stop(Problem reason) {
+            if (stopReason == null) stopReason = reason;
+            if (session.menu() == null) {
+                stage = Stage.DONE;
+                return;
             }
-            return ++stockStableTicks < STOCK_STABLE_TICKS;
+            session.rememberStockNow();
+            stage = Stage.CURSOR;
         }
 
-        // 发一下取货：本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再试。
-        private ActionStatus submit(Pending kind, Ae2TerminalMenu.StockEntry entry, MenuContent.Reading reading,
-                AbstractContainerMenu raw, Runnable send) {
-            SlotSnapshot sample = SlotSnapshot.of(entry.sample());
-            List<Integer> slotIds = reading.playerSlotIds();
-            List<SlotSnapshot> before = reading.playerSnapshots();
-            SlotSnapshot cursorBefore = SlotSnapshot.of(raw.getCarried());
-            MenuConfirmation confirmation = (context, ignored) -> {
-                AbstractContainerMenu now = context.localPlayer().containerMenu;
-                NetworkTakeConfirmation.Result result = kind == Pending.STACK
-                        ? NetworkTakeConfirmation.stackTaken(sample, before, snapshots(now, slotIds),
-                                SlotSnapshot.of(now.getCarried()))
-                        : NetworkTakeConfirmation.oneTaken(sample, cursorBefore, SlotSnapshot.of(now.getCarried()));
-                return menuVerdict(result.verdict());
-            };
-            String what = (kind == Pending.STACK ? "从 ME 终端整组取 " : "从 ME 终端取一件 ") + itemId(entry.sample());
-            Optional<PendingMenuAction> sent = menu.submitModAction(what, send, confirmation, TAKE_TIMEOUT_TICKS);
-            if (sent.isEmpty()) return ActionStatus.running();
-            pending = sent.get();
-            pendingKind = kind;
-            pendingSample = sample;
-            pendingSlotIds = slotIds;
-            pendingBefore = before;
-            return ActionStatus.progressed();
-        }
-
-        // 等那一下取货的结论：整组取确认了就记账；取一件确认了东西在光标上，放下时再记；没动静或对不上就收场。
-        private ActionStatus awaitTake(PlayerContext player, AbstractContainerMenu raw, MenuContent.Reading reading) {
-            pending = player.menuActions().poll(player, pending);
-            if (!pending.terminal()) return ActionStatus.running();
-            PendingMenuAction settled = pending;
-            pending = null;
-            String item = itemId(pendingSample.stack());
-            switch (settled.status()) {
-                case CONFIRMED_APPLIED -> {
-                    if (pendingKind == Pending.STACK) {
-                        NetworkTakeConfirmation.Result result = NetworkTakeConfirmation.stackTaken(pendingSample,
-                                pendingBefore, snapshots(raw, pendingSlotIds), SlotSnapshot.of(raw.getCarried()));
-                        if (result.amount() > 0) settlement.confirm(item, result.amount());
-                    }
-                    return ActionStatus.progressed();
-                }
-                case CONFIRMED_NOT_APPLIED -> {
-                    // 点了没动静：背包放不下、网络刚断、或这种东西刚被别人取走。不再硬点。
-                    return stopNow(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                            "在 " + access.describe() + " 取" + item + "没取到（背包放不下、网络断了或刚被别人取走）",
-                            null));
-                }
-                default -> {
-                    settlement.unconfirmed("从 " + access.describe() + " 取" + item + "的一下没能确认："
-                            + settled.detail());
-                    return stopNow(Problem.of(Problem.Kind.STUCK,
-                            "从 " + access.describe() + " 取" + item + "的一下没能确认", null));
-                }
-            }
-        }
-
-        // 把光标上的东西放进那一格：一笔交给搬运执行普通点格子，按光标空了、那一格多了核对；
-        // 本刻点不出去（刚取过货、界面还没重新画好）就下一刻再点，不算点过。
-        private ActionStatus putDown(int slotId, SlotSnapshot cursor) {
-            putDownItem = itemId(cursor.stack());
-            putDownPending = true;
-            transport.begin(new TransferRun.Move(List.of(new MenuClick(slotId, false, 0, false)),
-                    new TransferRun.Check.PutDown(slotId), "把光标上的东西放进背包"));
-            return transport.tickAction(this::onSettled);
-        }
-
-        // 放下光标的结论：确认了记账；纹丝不动（多半那一格放不下）回到计划重新挑格；
-        // 对不上如实记下收场。已经在收场放光标时对不上：不再折腾，直接去关界面。
-        private ActionStatus onSettled(TransferRun.MoveResult result) {
-            putDownPending = false;
-            if (result instanceof TransferRun.MoveResult.Confirmed(int amount)) {
-                settlement.confirm(putDownItem, amount);
-                return ActionStatus.progressed();
-            }
-            if (result instanceof TransferRun.MoveResult.MenuGone) {
-                // 界面被合上了：取到多少由引擎清点，这里照常收场。
-                return finishWithout(null);
-            }
-            if (result instanceof TransferRun.MoveResult.NotMoved) {
-                return ActionStatus.running();
-            }
-            settlement.unconfirmed("把光标上的" + putDownItem + "放进背包时两边对不上");
-            if (stage == Stage.CURSOR) {
-                stage = Stage.CLOSE;
-                return ActionStatus.progressed();
-            }
-            return stopNow(Problem.of(Problem.Kind.STUCK, "把光标上的" + putDownItem + "放进背包时两边对不上", null));
-        }
-
-        // 收场前先把光标上的东西放回背包，再关界面：放进背包里能整个装下的一格，背包放不下就放回网络。
-        // 到期限还没放好（例如一直点不出去）就照常关界面，光标上的东西交给游戏的关闭流程。
-        private ActionStatus clearCursor(TickContext tick) {
-            AbstractContainerMenu raw = tick.player().localPlayer().containerMenu;
-            Optional<MenuContent.Reading> reading = menu.reading();
-            if (reading.isEmpty()) return finishWithout(null);
-            if (putBackPending != null) return awaitPutBack(tick.player());
-            if (putDownPending) return transport.tickAction(this::onSettled);
-            SlotSnapshot cursor = SlotSnapshot.of(raw.getCarried());
-            if (cursor.isEmpty() || ++cursorWaited > CURSOR_TICKS) {
-                stage = Stage.CLOSE;
-                return ActionStatus.progressed();
-            }
-            if (menu.busy()) return ActionStatus.running();
-            int slot = stowSlot(cursor.stack().copyWithCount(cursor.count()), reading.get());
-            if (slot >= 0) return putDown(slot, cursor);
-            return putBack(cursor, raw);
-        }
-
-        // 背包里没有一格装得下：在终端的网络格子空白处点一下，把光标上的东西放回网络；本刻发不出去就下一刻再试。
-        private ActionStatus putBack(SlotSnapshot cursor, AbstractContainerMenu raw) {
-            MenuConfirmation confirmation = (context, ignored) -> menuVerdict(NetworkTakeConfirmation.putBack(cursor,
-                    SlotSnapshot.of(context.localPlayer().containerMenu.getCarried())).verdict());
-            Optional<PendingMenuAction> sent = menu.submitModAction("把光标上的东西放回 ME 网络",
-                    () -> compat.putBack(raw), confirmation, TAKE_TIMEOUT_TICKS);
-            if (sent.isEmpty()) return ActionStatus.running();
-            putBackPending = sent.get();
-            return ActionStatus.progressed();
-        }
-
-        // 等放回网络那一下的结论：没能确认就记下，去关界面；放回了一部分（网络满了）下一刻再看光标。
-        private ActionStatus awaitPutBack(PlayerContext player) {
-            putBackPending = player.menuActions().poll(player, putBackPending);
-            if (!putBackPending.terminal()) return ActionStatus.running();
-            PendingMenuAction settled = putBackPending;
-            putBackPending = null;
-            if (settled.status() != PendingMenuAction.Status.CONFIRMED_APPLIED) {
-                settlement.unconfirmed("把光标上的东西放回 " + access.describe() + " 的网络没能确认："
-                        + settled.detail());
-                stage = Stage.CLOSE;
-            }
+        private ActionStatus stopNow(Problem reason) {
+            stop(reason);
             return ActionStatus.progressed();
         }
 
         // 关界面：打开者负责关闭。关不上不冒充没开过，照常收场让引擎清点。
         private ActionStatus closeMenu(TickContext tick) {
-            if (closing == null) closing = menu.closing();
+            if (closing == null) closing = session.menu().closing();
             ActionStatus status = closing.tick(tick);
             if (status instanceof ActionStatus.Running) return status;
             stage = Stage.DONE;
@@ -581,139 +217,37 @@ public final class MenuTerminalTakes implements TerminalTakes {
         // 收场：取到了就算做完（数量由引擎清点）；一件都没取到就按收场原因失败，让引擎换别的路。
         // 下单没成、等不到成品的，取到了也按失败交回（引擎照样按身上清点记下取到的）。
         private ActionStatus result() {
-            if (stopReason == null || (confirmedTotal() > 0 && !failEvenIfTaken)) return ActionStatus.done();
-            String unconfirmed = settlement.unconfirmedFacts().isEmpty() ? ""
-                    : "；没能确认的：" + String.join("；", settlement.unconfirmedFacts());
+            if (stopReason == null || (session.confirmedTotal() > 0 && !failEvenIfTaken)) return ActionStatus.done();
+            String unconfirmed = session.settlement().unconfirmedFacts().isEmpty() ? ""
+                    : "；没能确认的：" + String.join("；", session.settlement().unconfirmedFacts());
             return ActionStatus.failed(Problem.of(stopReason.kind(), stopReason.message() + unconfirmed,
                     stopReason.suggestion()));
         }
 
-        // 去关界面之前把这台终端此刻的网络存货记下：下次报价用，过五分钟当没看过。
-        private ActionStatus stopNow(Problem reason) {
-            stop(reason);
-            return ActionStatus.progressed();
-        }
-
-        // 收场：先记下网络存货，再放好光标、关界面。还没打开界面就收场（例如走过去超时）时没有界面要关，直接结束。
-        private void stop(Problem reason) {
-            if (stopReason == null) stopReason = reason;
-            if (menu == null) {
-                stage = Stage.DONE;
-                return;
-            }
-            rememberStockNow();
-            stage = Stage.CURSOR;
-        }
-
-        // 界面已经不在了：不用关，直接收场。
-        private ActionStatus finishWithout(Problem reason) {
-            if (stopReason == null) stopReason = reason;
-            stage = Stage.DONE;
-            return result();
-        }
-
-        private void rememberStockNow() {
-            PlayerContext player = services.context().get();
-            if (player == null || menu == null || menu.reading().isEmpty()) return;
-            AbstractContainerMenu raw = player.localPlayer().containerMenu;
-            Optional<Boolean> linked = compat.networkLinked(raw);
-            Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
-            if (linked.isPresent() && stock.isPresent()) {
-                access.remember(linked.get(), stock.get(), false);
-            }
-        }
-
-        // 网络里已经没有想要的了：这一笔之前一件都没取到就是"网络里没有"，取到过就是"取完了"。
-        private Problem nothingLeft() {
-            return Problem.of(Problem.Kind.NEED_ITEM,
-                    access.describe() + " 的网络里没有" + request.wanted().describe() + "了", null);
-        }
-
-        /** 为装流体把背包里的空桶放进网络了。 */
-        private boolean bucketOffered;
-        private int bucketWaited;
-
-        private int confirmedTotal() {
-            int total = 0;
-            for (Map.Entry<String, Integer> entry : settlement.confirmedByItem().entrySet()) {
-                total += entry.getValue();
-            }
-            return total;
-        }
-
-        private Ae2TerminalMenu.StockEntry firstWanted(List<Ae2TerminalMenu.StockEntry> stock) {
-            List<Ae2TerminalMenu.StockEntry> wanted = NetworkTakePlan.matching(stock, this::wanted);
-            return wanted.isEmpty() ? null : wanted.getFirst();
-        }
-
-        // 光标上已经有一些：接着取同一条；网络里那条没了也要能把光标上的放下，就按光标的样子补一条存量为零的。
-        private Ae2TerminalMenu.StockEntry entryFor(SlotSnapshot cursor, List<Ae2TerminalMenu.StockEntry> stock) {
-            for (Ae2TerminalMenu.StockEntry entry : stock) {
-                if (SlotSnapshot.of(entry.sample()).sameIdentity(SlotSnapshot.of(cursor.stack().copyWithCount(1)))) {
-                    return entry;
-                }
-            }
-            return new Ae2TerminalMenu.StockEntry(-1, cursor.stack(), 0, false);
-        }
-
-        private boolean wanted(ItemStack stack) {
-            String itemId = itemId(stack);
-            return request.wanted().matches(itemId, services.itemTags().tagsOf(itemId));
-        }
-
         // 被生存需求打断：界面关上。站在终端前等成品时打断的，回来接着等；取现货时打断的就此收场，取到多少由引擎清点。
         @Override public void pause() {
-            if (menu != null && stage == Stage.TAKE && craft.waiting()) reopenAfterPause = true;
-            opening.pause();
-            if (menu != null) menu.abandon();
+            if (session.menu() != null && stage == Stage.TAKE && craft.waiting()) reopenAfterPause = true;
+            session.opening().pause();
+            session.abandonMenu();
         }
 
         // 此刻能不能被生存需求打断：一下取货、放下、放回网络还在等游戏确认时停不得，光标上可能拿着东西；
         // 站在终端前等网络做成品是两件事之间的空当，饿了吃一口、天黑去睡都能插进来，作业留在网络里接着做；其余是正常干活。
         @Override public Interruptibility interruptibility() {
-            if (pending != null || putDownPending || putBackPending != null) return Interruptibility.UNSAFE_TO_STOP;
+            if (moves.unsafeToStop()) return Interruptibility.UNSAFE_TO_STOP;
             return stage == Stage.TAKE && craft.waiting() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
         }
 
         // 收尾：打开动作一并收尾；界面还开着就请游戏关上，光标上的东西由原版的关闭流程还回背包。
         @Override public void close() {
-            opening.close();
+            session.opening().close();
             if (closing != null) closing.close();
-            if (menu != null && stage != Stage.DONE) menu.abandon();
+            if (session.menu() != null && stage != Stage.DONE) session.abandonMenu();
         }
 
         @Override public String describe() {
-            String doing = "从 " + access.describe() + " 取" + request.wanted().describe();
+            String doing = "从 " + session.access().describe() + " 取" + session.request().wanted().describe();
             return craft.waiting() ? doing + "，" + craft.waitingText() : doing;
         }
-    }
-
-    // 只有一份读数、拿不到原界面：放光标、装不装得下的判断走统一的收进背包挑选；
-    // 背包格号用读数里的权威格号，不按界面加槽顺序猜主背包在前。
-    private static int stowSlot(ItemStack stack, MenuContent.Reading reading) {
-        return CursorStowing.fromSnapshots(reading.playerSlotIds(), reading.playerInventoryIndices(),
-                reading.playerSnapshots().stream().map(SlotSnapshot::stack).toList(), stack);
-    }
-
-    // 界面里这些槽位此刻的样子，按给的顺序。
-    private static List<SlotSnapshot> snapshots(AbstractContainerMenu menu, List<Integer> slotIds) {
-        List<SlotSnapshot> snapshots = new ArrayList<>(slotIds.size());
-        for (int slotId : slotIds) {
-            snapshots.add(slotId >= 0 && slotId < menu.slots.size()
-                    ? SlotSnapshot.of(menu.getSlot(slotId).getItem()) : SlotSnapshot.empty());
-        }
-        return snapshots;
-    }
-
-    private static MenuConfirmation.Verdict menuVerdict(MoveConfirmation.Verdict verdict) {
-        return switch (verdict) {
-            case CONFIRMED -> MenuConfirmation.Verdict.APPLIED;
-            case WAITING -> MenuConfirmation.Verdict.PENDING;
-            case DIVERGED -> MenuConfirmation.Verdict.DIVERGED;
-        };
-    }
-
-    private static String itemId(ItemStack stack) {
-        return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 }
