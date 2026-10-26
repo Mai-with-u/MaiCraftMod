@@ -280,8 +280,8 @@ class SleepTaskTest {
         assertEquals(List.of(BED_A), approaches.targets);
         // 躺下了就记住这张床，下次夜里离它不远就回来睡。
         assertEquals(List.of(BED_A), scanner.sleptIn);
-        // 回执写明实际躺进的是哪张床：失败记录躺在 attempts 里时，成功的这条不写，
-        // 读回执的人会把最后一条失败记录当成实际躺下的床。
+        // 结果写明实际躺进的是哪张床：失败记录躺在 attempts 里时，成功的这条不写，
+        // 读结果的人会把最后一条失败记录当成实际躺下的床。
         assertTrue(result.attempts().contains(new Attempt("点床 " + BED_A.toShortString(), "躺下了")),
                 result.attempts().toString());
     }
