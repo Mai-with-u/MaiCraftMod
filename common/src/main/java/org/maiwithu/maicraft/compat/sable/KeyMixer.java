@@ -46,6 +46,16 @@ final class KeyMixer {
         return held;
     }
 
+    /**
+     * 这一刻该按着哪些键：按名字给每个键要按多少（0～1），没给的当 0。飞行稳定器开飞艇时线速度耦合器的四个方向用它，
+     * 和角色键同一套 4 刻一组的调法。
+     */
+    Set<Integer> tick(long tick, Map<String, Double> demands) {
+        Set<Integer> held = new LinkedHashSet<>();
+        for (String role : keys.keySet()) add(held, tick, role, demands.getOrDefault(role, 0.0));
+        return held;
+    }
+
     // 一个角色这一刻按不按：零清掉旧的累计（换向后别来一个迟到的旧脉冲），满量直接按住，中间的按组累计。
     private void add(Set<Integer> held, long tick, String role, double demand) {
         Integer key = keys.get(role);
