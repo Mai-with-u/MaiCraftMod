@@ -24,6 +24,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -63,6 +65,7 @@ class MekanismCompatTest {
         Set<Integer> machineSlots = Set.of();
 
         @Override public Optional<SideConfig> sideConfig(ClientLevel level, BlockPos at) { return Optional.empty(); }
+        @Override public Optional<FixedSides> fixedSides(ClientLevel level, BlockPos at) { return Optional.empty(); }
         @Override public boolean configurable(BlockState state) { return false; }
         @Override public Optional<Transmitter> transmitter(ClientLevel level, BlockPos at) {
             return Optional.ofNullable(pipes.get(at));
@@ -146,6 +149,52 @@ class MekanismCompatTest {
         reads.machineSlots = Set.of();
         assertTrue(layout.classify(slots, player, List.of(0, 1, 2, 3)) instanceof MenuLayout.Unsupported);
         assertTrue(MekanismMachineLayout.MACHINE_MENUS.contains("mekanism:metallurgic_infuser"));
+    }
+
+    @Test
+    void 发电机界面按同一套证明_燃料格与电池格是真机器格() {
+        StubReads reads = new StubReads();
+        MekanismMachineLayout layout = new MekanismMachineLayout(new MekanismCompat(reads));
+        MenuSlots slots = new MenuSlots() {
+            @Override public String menuTypeId() { return "mekanismgenerators:heat_generator"; }
+            @Override public int slotCount() { return 38; }
+            @Override public boolean playerBacked(int slot) { return slot >= 2; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 2; }
+        };
+        // 热能发电机的界面：0 是燃料格，1 是电池格（TileEntityHeatGenerator 的两格），后面是角色背包。
+        reads.machineSlots = Set.of(0, 1);
+        MenuLayout.Layout supported = layout.classify(slots, IntStream.range(2, 38).boxed().toList(), List.of(0, 1));
+        assertEquals(List.of(0, 1), ((MenuLayout.Supported) supported).containerSlots());
+        for (String menu : List.of("heat_generator", "bio_generator", "gas_burning_generator", "solar_generator",
+                "advanced_solar_generator", "wind_generator")) {
+            assertTrue(MekanismMachineLayout.MACHINE_MENUS.contains("mekanismgenerators:" + menu), menu);
+        }
+    }
+
+    @Test
+    void 发电机分烧燃料与不吃料_出电面往外送_燃料面往里收() {
+        Map<String, FuelUse.Kind> fuels = new HashMap<>();
+        for (MekanismMachineCatalog.Kind kind : MekanismMachineCatalog.kinds()) {
+            if (kind.role() == MachineRole.POWER_SOURCE) fuels.put(kind.id(), kind.fuel().kind());
+        }
+        assertEquals(FuelUse.Kind.FUEL, fuels.get("mekanismgenerators:heat_generator"));
+        assertEquals(FuelUse.Kind.FUEL, fuels.get("mekanismgenerators:bio_generator"));
+        assertEquals(FuelUse.Kind.FUEL, fuels.get("mekanismgenerators:gas_burning_generator"));
+        assertEquals(FuelUse.Kind.NO_FUEL, fuels.get("mekanismgenerators:solar_generator"));
+        assertEquals(FuelUse.Kind.NO_FUEL, fuels.get("mekanismgenerators:wind_generator"));
+        assertTrue(MekanismMachineCatalog.kinds().stream().filter(kind -> kind.role() == MachineRole.PROCESSING)
+                .allMatch(kind -> kind.fuel().kind() == FuelUse.Kind.RECIPE), "加工机器照配方投料");
+        // 朝南的热能发电机：正面（南）出电，别的五面收燃料。
+        MekanismReads.FixedSides fixed = new MekanismReads.FixedSides(Direction.SOUTH, Map.of(
+                "energy", Set.of(Direction.SOUTH),
+                "item", Set.of(Direction.NORTH, Direction.EAST, Direction.WEST, Direction.UP, Direction.DOWN)));
+        List<ExchangePoint> points = SideSettings.generatorPoints(fixed, BlockPos.ZERO);
+        assertEquals(6, points.size());
+        assertTrue(points.stream().anyMatch(point -> point.side() == Direction.SOUTH
+                && point.medium() == ExchangePoint.Medium.ENERGY && point.flow() == ExchangePoint.Flow.OUTPUT));
+        assertTrue(points.stream().filter(point -> point.medium() == ExchangePoint.Medium.ITEM)
+                .allMatch(point -> point.flow() == ExchangePoint.Flow.INPUT));
+        assertTrue(new MekanismMachineKnowledge().read(MekanismMachineKnowledge.INDEX).text().contains("energy_out"));
     }
 
     @Test

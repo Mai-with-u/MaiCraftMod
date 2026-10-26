@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -201,6 +202,51 @@ class MachineRunTaskTest {
         assertEquals(2, details.fed().get(0).count(), "料照样投进去了");
         assertEquals(0, details.collected(), "看不见的出口不去收");
         assertTrue(details.notes().stream().anyMatch(note -> note.contains("use 打开")));
+    }
+
+    @Test
+    void 发电机烧燃料_item当燃料备齐直接投_不查配方不拨开关() {
+        Rig rig = new Rig();
+        rig.type.fuel = FuelUse.fuel("能在熔炉里烧的东西");
+        rig.type.state = () -> MachineState.unknown("在不在发电要打开界面看");
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        // 查看器里一条配方都没有：烧燃料的机器不该去查。
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), "minecraft:coal", 8, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("8 件 minecraft:coal 当燃料"), result.summary());
+        assertEquals(1, rig.needs.requests.size(), "燃料先备齐");
+        assertEquals(8, rig.needs.requests.get(0).count());
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(8, details.fed().get(0).count());
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("能在熔炉里烧的东西")), details.notes().toString());
+        assertEquals(0, rig.clicks.clicked.size(), "发电机有燃料自己烧，不去右键");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && "minecraft:coal".equals(change.what()) && change.count() == 8));
+    }
+
+    @Test
+    void 燃料格只放进去一部分_按部分完成说清() {
+        Rig rig = new Rig();
+        rig.type.fuel = FuelUse.fuel("能在熔炉里烧的东西");
+        rig.type.feedActions.add(new ReportedFeed(5, List.of("界面里放进去 5 件，要的是 8 件"), () -> { }));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), "minecraft:coal", 8, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.remaining().stream().anyMatch(line -> line.contains("3 件燃料")), result.remaining().toString());
+    }
+
+    @Test
+    void 不吃料的发电机给了item_照实说不用投() {
+        Rig rig = new Rig();
+        rig.type.fuel = FuelUse.noFuel("靠阳光发电");
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), "minecraft:coal", 1, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.problem().message().contains("靠阳光发电"), result.problem().message());
+        assertEquals(0, rig.needs.requests.size(), "不用投就不去备料");
     }
 
     /** 机器自己从头做到尾的替身：一刻做完，报做出几件、做全没有与说明。 */

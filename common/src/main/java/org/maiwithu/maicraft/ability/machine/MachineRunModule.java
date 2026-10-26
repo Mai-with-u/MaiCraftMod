@@ -40,9 +40,9 @@ final class MachineRunModule implements AbilityModule {
             AbilityDoc.forAbility("machine_run"),
             ParamSpecs.of(
                     ParamSpec.of("item", ParamType.ITEM_OR_TAG)
-                            .doc("要做出什么；不给就只开机").build(),
+                            .doc("要做出什么；发电机这类烧燃料的机器写要投的燃料；不给就只开机").build(),
                     ParamSpec.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1)
-                            .doc("要做几件").build(),
+                            .doc("要做几件；投燃料时是投几件").build(),
                     ParamSpec.of("collect", ParamType.BOOLEAN).defaultValue(true)
                             .doc("做完要不要把出口的东西拿进背包；不要就留在出口").build(),
                     ParamSpec.of("max_seconds", ParamType.INTEGER).range(1, 3600).defaultValue(300)

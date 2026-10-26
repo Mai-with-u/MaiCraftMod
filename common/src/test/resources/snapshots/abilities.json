@@ -1047,13 +1047,13 @@
           "name": "item",
           "type": "string",
           "required": false,
-          "doc": "要做出什么；不给就只开机"
+          "doc": "要做出什么；发电机这类烧燃料的机器写要投的燃料；不给就只开机"
         },
         {
           "name": "count",
           "type": "integer",
           "required": false,
-          "doc": "要做几件",
+          "doc": "要做几件；投燃料时是投几件",
           "default": 1,
           "min": 1,
           "max": 64

@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
@@ -78,6 +79,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private FeedReport feeding;
     /** 机器自己从头做到尾的那一次（蓝图桌写蓝图、蓝图加农炮施工）；按配方做的为 null。 */
     private FullRun fullRun;
+    /** 这次是往发电机这类烧燃料的机器里投燃料：item 就是燃料，投完就收场，不拨开关、不等产物。 */
+    private boolean fuelRun;
 
     MachineRunTask(MachineRunInput input, MachineServices services) {
         super("用机器做东西", Phase.RESOLVE,
@@ -137,6 +140,20 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     describeMachine() + "不收蓝图：file、anchor 只给蓝图桌（写蓝图）和蓝图加农炮（照蓝图施工）",
                     "去掉 file、anchor 按配方做，或换成蓝图桌、蓝图加农炮"));
+        }
+        // 发电机这类烧燃料的：item 就是燃料，备齐直接投，不查配方；不吃料的发电机没有可投的格子，照实说不用投。
+        FuelUse fuel = type.fuelUse(cell);
+        if (input.item() != null && fuel.kind() == FuelUse.Kind.NO_FUEL) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    describeMachine() + "不烧燃料、没有燃料格，不用投料：" + fuel.note(),
+                    "不给 item 只看它的读数，或换一台烧燃料的发电机"));
+        }
+        if (input.item() != null && fuel.kind() == FuelUse.Kind.FUEL) {
+            fuelRun = true;
+            notes.add(describeMachine() + "烧的燃料：" + fuel.note());
+            toGather.add(new MachineRunDetails.Fed(input.item(), input.count()));
+            return Next.go(Phase.GATHER, "把 " + input.item() + " 当燃料投进" + describeMachine()
+                    + "，先备 " + input.count() + " 件");
         }
         return input.item() == null
                 ? Next.go(Phase.SWITCH, "没说要做什么，只开机")
@@ -217,7 +234,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 case ActionStatus.Done done -> {
                     MachineRunDetails.Fed done1 = settleFeed(toFeed.poll());
                     yield Next.go(toFeed.isEmpty() ? Phase.SWITCH : Phase.FEED,
-                            toFeed.isEmpty() ? "投料完了，开机" : "投进去一样，接着投下一样");
+                            toFeed.isEmpty() ? (fuelRun ? "燃料投完了" : "投料完了，开机") : "投进去一样，接着投下一样");
                 }
                 case ActionStatus.Failed failed -> stop(failed.problem());
             };
@@ -255,7 +272,11 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     // 开机：在转就不拨；读数说停着的，走近右键拨一下；别的读数不预判，投了料等产物见分晓。
+    // 投的是燃料时到这里就收场：发电机有燃料自己烧，右键只会打开它的界面。
     private Next<Phase> flipSwitch(TickContext context) {
+        if (fuelRun) {
+            return finishFuel();
+        }
         MachineState now = type.state(cell);
         if (now.activity() == MachineState.Activity.RUNNING) {
             recordProgress("机器本来就在转，不拨开关");
@@ -408,6 +429,25 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 .build());
     }
 
+    // 燃料投完：要的都进去了算完成；燃料格放不下的按部分完成，读数照给，发电没发电由读数与 LLM 再看。
+    private Next<Phase> finishFuel() {
+        int delivered = fuelDelivered();
+        String line = "往" + describeMachine() + "里投了 " + delivered + " 件 " + input.item() + " 当燃料；机器读数："
+                + describeState(type.state(cell)) + describeNetworks();
+        if (delivered >= input.count()) {
+            return Next.done(TaskResult.done(line));
+        }
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, line)
+                .problem(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                        "要投 " + input.count() + " 件，燃料格只放进去 " + delivered + " 件",
+                        "燃料格满了就等它烧掉一些再投，或少投几件"))
+                .build());
+    }
+
+    private int fuelDelivered() {
+        return fed.stream().mapToInt(MachineRunDetails.Fed::count).sum();
+    }
+
     private Next<Phase> finishRun(boolean justSwitchedOn) {
         String machine = describeState(type.state(cell)) + describeNetworks();
         if (justSwitchedOn) {
@@ -527,6 +567,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     @Override protected List<String> remaining() {
+        if (fuelRun) {
+            int unfed = input.count() - fuelDelivered();
+            return unfed <= 0 ? List.of() : List.of("还有 " + unfed + " 件燃料 " + input.item() + " 没投进去");
+        }
         int left = input.count() - watch.produced;
         if (input.item() == null || left <= 0) {
             return List.of();

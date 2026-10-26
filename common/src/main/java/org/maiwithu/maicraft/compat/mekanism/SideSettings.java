@@ -79,6 +79,23 @@ final class SideSettings {
         return points;
     }
 
+    /**
+     * 发电机这类不能配侧面的机器的进出口：出电的那几面往外送，别的介质（燃料格、岩浆、生物乙醇、氢气）往里收。
+     * 进出面是模组按朝向写死的，换不了，说明里写清。
+     */
+    static List<ExchangePoint> generatorPoints(MekanismReads.FixedSides fixed, BlockPos at) {
+        List<ExchangePoint> points = new ArrayList<>();
+        fixed.sides().forEach((medium, sides) -> {
+            boolean energy = medium.equals("energy");
+            for (Direction side : sides) {
+                points.add(new ExchangePoint(at, side, mediumOf(medium),
+                        energy ? ExchangePoint.Flow.OUTPUT : ExchangePoint.Flow.INPUT,
+                        energy ? "发电机从这一面出电（不能配侧面）" : "发电机从这一面收" + mediumName(medium) + "（不能配侧面）"));
+            }
+        });
+        return points;
+    }
+
     static ExchangePoint.Medium mediumOf(String medium) {
         return switch (medium) {
             case "item" -> ExchangePoint.Medium.ITEM;

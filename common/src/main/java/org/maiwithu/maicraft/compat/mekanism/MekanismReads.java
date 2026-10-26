@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.mekanism;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -25,6 +26,12 @@ public interface MekanismReads {
 
     /** 这种方块是不是能配侧面的 Mekanism 机器。 */
     boolean configurable(BlockState state);
+
+    /**
+     * 不能配侧面的 Mekanism 机器（发电机这类）每种介质从哪几面进出：模组按朝向写死的那几面，例如发电机只从正面出电、
+     * 太阳能发电机从底面出电。能配侧面的机器、管道、没加载、不是 Mekanism 的方块给空。
+     */
+    Optional<FixedSides> fixedSides(ClientLevel level, BlockPos at);
 
     /** 这一格管道的读数；不是 Mekanism 的管道（线缆、管道、导管）、没加载给空。 */
     Optional<Transmitter> transmitter(ClientLevel level, BlockPos at);
@@ -87,6 +94,21 @@ public interface MekanismReads {
             Objects.requireNonNull(facing, "facing");
             sides = Map.copyOf(sides);
             choices = Map.copyOf(choices);
+        }
+    }
+
+    /**
+     * 一台不能配侧面的机器的进出面。
+     *
+     * @param facing 机器朝向
+     * @param sides  每种介质（item、fluid、chemical、energy）从哪几个世界方向进出；一面都没有的介质不列
+     */
+    record FixedSides(Direction facing, Map<String, Set<Direction>> sides) {
+        public FixedSides {
+            Objects.requireNonNull(facing, "facing");
+            Map<String, Set<Direction>> copied = new HashMap<>();
+            sides.forEach((medium, faces) -> copied.put(medium, Set.copyOf(faces)));
+            sides = Map.copyOf(copied);
         }
     }
 

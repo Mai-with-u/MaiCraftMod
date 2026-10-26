@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
 /**
- * 通用机械机器这一半的资料：认得哪些机器与管道，侧面配置的设置项怎么写，配置器怎么改，管道怎么接。
+ * 通用机械机器这一半的资料：认得哪些机器与管道，侧面配置的设置项怎么写，配置器怎么改，发电机怎么送燃料，管道怎么接。
  */
 final class MekanismMachineKnowledge implements KnowledgeSource {
 
@@ -15,8 +15,8 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
 
     @Override public List<KnowledgeDocument.Entry> entries() {
         return List.of(new KnowledgeDocument.Entry(INDEX, "machine.mekanism.index", "通用机械的机器与侧面配置",
-                "认得哪些 Mekanism 机器与管道、侧面配置与分拣器规则怎么写、配置器怎么改、怎么投料、管网怎么接",
-                "mekanism 通用机械 侧面配置 配置器 物流分拣器 规则 投料 线缆 管道 导管 能量立方 冶金灌注机"));
+                "认得哪些 Mekanism 机器与管道、侧面配置与分拣器规则怎么写、配置器怎么改、怎么投料、发电机怎么送燃料、管网怎么接",
+                "mekanism 通用机械 侧面配置 配置器 物流分拣器 规则 投料 线缆 管道 导管 能量立方 冶金灌注机 发电机 燃料"));
     }
 
     @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
@@ -43,13 +43,22 @@ final class MekanismMachineKnowledge implements KnowledgeSource {
                 .append("- `machine_run` 对加工机器会走过去点开界面，把料搬进去；格子在界面里，站在外面看不见出口，")
                 .append("投完就收手，做没做好用 `use` 打开它看。\n")
                 .append("- 能开界面看、存取的：加工机器、能量立方与各级工厂；升级、配方显示这类虚拟格不点。\n\n");
+        text.append("## 发电机\n\n")
+                .append("- 热能、生物、燃气发电机有燃料格：`machine_run` 的 `item` 写燃料、`count` 写投几件，不查配方；")
+                .append("角色点开界面把燃料放进燃料格，投完就收手。收哪些燃料见下面各台的说明。\n")
+                .append("- 太阳能、风力发电机不吃料：`machine_run` 给了 `item` 会照实说不用投。\n")
+                .append("- 发电机不能配侧面：只从模组定死的面出电（多数是正面，太阳能是底面，高级太阳能与风力是正面和底面），")
+                .append("`machine_inspect` 的 `energy_out` 写着是哪几面，线缆要接在这几面上。\n\n");
         text.append("## 管网\n\n")
                 .append("- 通用线缆送电、机械管道送流体、物流传输管道送物品、加压管道送化学品；管道贴着管道、贴着机器能收发的那一面就连上。\n")
                 .append("- `machine_connect` 的 `network` 写 energy、fluid 或 item，会用基础那一级的线缆、管道、导管接；")
                 .append("机器要有对应介质能进的那一面（侧面配置不是 none）。网里流着多少这里读不到，只数得出几段管道、连着几台机器。\n\n");
         text.append("## 认得的机器与管道\n\n");
         for (MekanismMachineCatalog.Kind kind : MekanismMachineCatalog.kinds()) {
-            text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）\n");
+            text.append("- ").append(kind.name()).append("（`").append(kind.id()).append("`）");
+            // 发电机带上收什么燃料或靠什么发电：送燃料前不用另查。
+            if (!kind.fuel().note().isEmpty()) text.append("：").append(kind.fuel().note());
+            text.append("\n");
         }
         text.append("- 别的能配侧面的 Mekanism 机器：认作\"其他 Mekanism 机器\"，侧面配置照样能看能改\n");
         return new KnowledgeDocument(INDEX, "machine.mekanism.index", "通用机械的机器与侧面配置", "Mekanism 机器资料",

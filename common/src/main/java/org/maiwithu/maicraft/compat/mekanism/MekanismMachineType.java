@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -17,6 +18,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -30,6 +32,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
  * 通用机械的一种机器或管道：机器按侧面配置给进出口与设置项（side.方向.介质），用配置器一下一下改；
+ * 发电机不能配侧面，按模组写死的那几面给进出口（正面出电）；
  * 管道（线缆、管道、导管）按连着的面给进出口，连着别的管道、机器的面是通的，空着的面能再接。
  * 运行状态只说看得见的：每一面的侧面配置（化学品、热也列出来，只读），机器内部的东西要打开界面看。
  */
@@ -69,7 +72,13 @@ final class MekanismMachineType implements MachineType {
         if (level == null) return List.of();
         Optional<MekanismReads.Transmitter> pipe = compat.transmitter(level, at);
         if (pipe.isPresent()) return pipePoints(pipe.get(), at);
-        return compat.sideConfig(level, at).map(config -> SideSettings.points(config, at)).orElse(List.of());
+        Optional<MekanismReads.SideConfig> config = compat.sideConfig(level, at);
+        if (config.isPresent()) return SideSettings.points(config.get(), at);
+        // 发电机不能配侧面：出电、收燃料的面是模组按朝向写死的。
+        if (kind.role() == MachineRole.POWER_SOURCE) {
+            return compat.fixedSides(level, at).map(fixed -> SideSettings.generatorPoints(fixed, at)).orElse(List.of());
+        }
+        return List.of();
     }
 
     // 管道每一面都能接：连着的面写清连着什么，空着的面能再接一段。
@@ -97,6 +106,7 @@ final class MekanismMachineType implements MachineType {
                     "管道里流着多少要服务端读数，这里只看得出连着几面");
         }
         Optional<MekanismReads.SideConfig> config = compat.sideConfig(level, at);
+        if (config.isEmpty() && kind.role() == MachineRole.POWER_SOURCE) return generatorState(level, at);
         if (config.isEmpty()) return MachineState.unknown("这一格读不到 Mekanism 机器（没加载，或已经不是它）");
         Map<String, Object> readings = new LinkedHashMap<>();
         readings.put("facing", config.get().facing().getName());
@@ -109,6 +119,19 @@ final class MekanismMachineType implements MachineType {
         });
         return new MachineState(MachineState.Activity.UNKNOWN, null, null, List.of(), readings,
                 "侧面配置看得见；在不在干活、进度、电量要打开界面看");
+    }
+
+    // 发电机看得见的只有朝向与出电的那几面；在不在发电、存了多少电、燃料剩多少只在界面里。
+    private MachineState generatorState(ClientLevel level, BlockPos at) {
+        Optional<MekanismReads.FixedSides> fixed = compat.fixedSides(level, at);
+        if (fixed.isEmpty()) return MachineState.unknown("这一格读不到 Mekanism 发电机（没加载，或已经不是它）");
+        Map<String, Object> readings = new LinkedHashMap<>();
+        readings.put("facing", fixed.get().facing().getName());
+        List<String> out = fixed.get().sides().getOrDefault("energy", Set.of()).stream()
+                .map(Direction::getName).sorted().toList();
+        readings.put("energy_out", out.isEmpty() ? "none" : String.join("，", out));
+        return new MachineState(MachineState.Activity.UNKNOWN, null, null, List.of(), readings,
+                "出电的面看得见；在不在发电、存了多少电、燃料还剩多少要打开界面看");
     }
 
     @Override public Optional<String> installationProblem(Installation installation) {
@@ -160,12 +183,19 @@ final class MekanismMachineType implements MachineType {
         return kind.id().equals(MekanismMachineCatalog.MOD_ID + ":logistical_sorter");
     }
 
-    // 投料：走过去点开机器的界面，把料从背包搬进去，机器自己把它放进收它的格；能量立方、管道这类不加工的不收料。
+    // 投料：走过去点开机器的界面，把料从背包搬进去，机器自己把它放进收它的格；发电机的燃料也这样投进燃料格。
+    // 能量立方、管道、太阳能这类不加工也不烧燃料的不收料。
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
         ClientLevel level = level();
-        if (level == null || kind.role() != MachineRole.PROCESSING) return Optional.empty();
+        boolean takesFeed = kind.role() == MachineRole.PROCESSING || kind.fuel().kind() == FuelUse.Kind.FUEL;
+        if (level == null || !takesFeed) return Optional.empty();
         String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
         return Optional.of(new MenuFeed(services, kind.name(), at, blockId, itemId, count, permissions));
+    }
+
+    // 发电机烧燃料或不吃料，别的机器按配方投料；见目录里每种的说明。
+    @Override public FuelUse fuelUse(BlockPos at) {
+        return kind.fuel();
     }
 
     // 机器的格子在界面里，站在外面看不见：做没做好要打开界面看。

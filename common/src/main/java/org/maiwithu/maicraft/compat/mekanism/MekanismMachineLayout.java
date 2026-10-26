@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 
 /**
  * 通用机械机器界面的布局证明：角色背包那一侧是普通的 36 格；机器那一侧只认背后真是机器物品格的格子
- * （输入、输出、电池、附加格），升级、配方显示这类虚拟格与只看不存的格一格都不点。
+ * （输入、输出、电池、附加格、发电机的燃料格），升级、配方显示这类虚拟格与只看不存的格一格都不点。
  * 机器格里的东西机器随时会吃掉或产出，搬运按机器槽核对（源格确切减少、光标空）。
  * 哪一格收什么由格子自己的 mayPlace 回答，只放一部分时不往输出格、电池格里塞。
  */
@@ -21,14 +21,18 @@ final class MekanismMachineLayout implements MenuLayoutProof {
     static final String SORTER_MENU = "mekanism:logistical_sorter";
 
     /**
-     * 证明的菜单类型：认得的加工机器、能量立方、工厂与物流分拣器。这里是菜单类型的注册 ID，不是方块 ID；
-     * 加工机器的菜单与方块同名，各级工厂共用 mekanism:factory。类别：游戏事实（MekanismContainerTypes）。
+     * 证明的菜单类型：认得的加工机器、能量立方、工厂、物流分拣器与发电机。这里是菜单类型的注册 ID，不是方块 ID；
+     * 加工机器、发电机的菜单与方块同名，各级工厂共用 mekanism:factory。发电机的界面和别的 Mekanism 机器同一种容器
+     * （MekanismTileContainer），燃料格、电池格同样是真机器格。类别：游戏事实（MekanismContainerTypes、GeneratorsContainerTypes）。
      */
     static final Set<String> MACHINE_MENUS = Set.of(
             "mekanism:enrichment_chamber", "mekanism:crusher", "mekanism:osmium_compressor",
             "mekanism:metallurgic_infuser", "mekanism:energized_smelter", "mekanism:purification_chamber",
             "mekanism:combiner", "mekanism:precision_sawmill", "mekanism:chemical_injection_chamber",
-            "mekanism:energy_cube", "mekanism:factory", SORTER_MENU);
+            "mekanism:energy_cube", "mekanism:factory", SORTER_MENU,
+            "mekanismgenerators:heat_generator", "mekanismgenerators:bio_generator",
+            "mekanismgenerators:gas_burning_generator", "mekanismgenerators:solar_generator",
+            "mekanismgenerators:advanced_solar_generator", "mekanismgenerators:wind_generator");
 
     private final MekanismCompat compat;
 

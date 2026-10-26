@@ -17,6 +17,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
@@ -186,6 +187,8 @@ final class MachineTestDoubles {
         Function<BlockState, Optional<NetworkLoad>> load = state -> Optional.empty();
         /** 机器自己从头做到尾的做法：默认没有，按配方那一套走。 */
         Function<RunRequest, Optional<FullRun>> fullRun = request -> Optional.empty();
+        /** machine_run 的 item 对它是什么：默认按配方投料，发电机替身改成烧燃料或不吃料。 */
+        FuelUse fuel = FuelUse.RECIPE;
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -305,6 +308,10 @@ final class MachineTestDoubles {
 
         @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
             return fullRun.apply(request);
+        }
+
+        @Override public FuelUse fuelUse(BlockPos at) {
+            return fuel;
         }
     }
 

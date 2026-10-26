@@ -30,6 +30,7 @@ import mekanism.common.network.to_server.PacketModeChange;
 import mekanism.common.network.to_server.filter.PacketEditFilter;
 import mekanism.common.network.to_server.filter.PacketNewFilter;
 import mekanism.common.tile.TileEntityLogisticalSorter;
+import mekanism.common.tile.base.TileEntityMekanism;
 import mekanism.common.tile.component.config.ConfigInfo;
 import mekanism.common.tile.component.config.DataType;
 import mekanism.common.tile.interfaces.ISideConfiguration;
@@ -81,6 +82,22 @@ public final class MekanismClientReads implements MekanismReads {
             choices.put(medium, options);
         }
         return Optional.of(new SideConfig(facing, sides, choices));
+    }
+
+    // 不能配侧面的机器（发电机）：按面问它的物品格、储罐、电量容器挂在哪几面，模组按朝向写死，客户端的方块实体上就有。
+    @Override public Optional<FixedSides> fixedSides(ClientLevel level, BlockPos at) {
+        if (!level.isLoaded(at) || !(level.getBlockEntity(at) instanceof TileEntityMekanism tile)
+                || tile instanceof ISideConfiguration) {
+            return Optional.empty();
+        }
+        Map<String, Set<Direction>> sides = new LinkedHashMap<>();
+        for (Direction side : Direction.values()) {
+            if (!tile.getEnergyContainers(side).isEmpty()) sides.computeIfAbsent("energy", key -> EnumSet.noneOf(Direction.class)).add(side);
+            if (!tile.getInventorySlots(side).isEmpty()) sides.computeIfAbsent("item", key -> EnumSet.noneOf(Direction.class)).add(side);
+            if (!tile.getFluidTanks(side).isEmpty()) sides.computeIfAbsent("fluid", key -> EnumSet.noneOf(Direction.class)).add(side);
+            if (!tile.getChemicalTanks(side).isEmpty()) sides.computeIfAbsent("chemical", key -> EnumSet.noneOf(Direction.class)).add(side);
+        }
+        return Optional.of(new FixedSides(tile.getDirection(), sides));
     }
 
     @Override public boolean configurable(BlockState state) {

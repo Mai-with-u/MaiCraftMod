@@ -133,4 +133,12 @@ public interface MachineType {
     default Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
         return Optional.empty();
     }
+
+    /**
+     * machine_run 给的 item 对这台机器是什么：发电机这类烧燃料的，item 就是燃料，备齐了直接经 {@link #feed} 投，不查配方；
+     * 不吃料的发电机说一句它靠什么发电。大多数机器按配方投料，给 {@link FuelUse#RECIPE}。
+     */
+    default FuelUse fuelUse(BlockPos at) {
+        return FuelUse.RECIPE;
+    }
 }

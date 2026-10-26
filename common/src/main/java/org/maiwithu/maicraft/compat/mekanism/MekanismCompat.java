@@ -72,6 +72,11 @@ public final class MekanismCompat extends CompatModule {
         return call("读侧面配置", () -> reads.sideConfig(level, at));
     }
 
+    /** 不能配侧面的机器（发电机）的进出面；见 {@link MekanismReads#fixedSides}。 */
+    public Optional<MekanismReads.FixedSides> fixedSides(ClientLevel level, BlockPos at) {
+        return call("读发电机的进出面", () -> reads.fixedSides(level, at));
+    }
+
     /** 能不能配侧面；见 {@link MekanismReads#configurable}。 */
     public boolean configurable(BlockState state) {
         return call("认能配侧面的机器", () -> reads.configurable(state));
