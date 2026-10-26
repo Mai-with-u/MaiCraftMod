@@ -303,6 +303,72 @@ class SleepTaskTest {
     }
 
     @Test
+    void blockedBedIsTriedAtMostTwiceThenSwitchedAwayWithReasonsAccounted() {
+        // 第十八轮三夜样本的形状：近旁一张床被怪看着，一张点不上的旧床离得最近，还有一张远处的床。
+        // 旧床点一次被拒"这张床已被阻挡"，换一次站位再点还是被拒，就不再点第三次，换远处的床睡；
+        // 收场里说得出各有几张床因为什么没选：床边有怪一张、被挡点不上一张。
+        BlockPos blocked = new BlockPos(63, 65, -44);
+        BlockPos guarded = new BlockPos(67, 64, -49);
+        BlockPos remembered = new BlockPos(93, 64, -68);
+        List<BedCandidate> candidates = List.of(
+                new BedCandidate(blocked, false, false, false, 2),
+                new BedCandidate(guarded, false, false, true, 6),
+                new BedCandidate(remembered, false, false, false, 29));
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(candidates, true));
+        scanner.offer(new BedScanner.BedScan(candidates, true));
+        scanner.offer(new BedScanner.BedScan(candidates, true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.REFUSED_BY_GAME, "对床头的交互没有生效", null))));
+        Supplier<OverlayMessages.Shown> refusals = () -> new OverlayMessages.Shown("这张床已被阻挡", 60);
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                new StubApproaches(), usesBeds, refusals, Optional::empty));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        // 被挡的床至多点两次（原地点一次、换一次站位再点一次），同一张床不在一次任务里反复重试。
+        assertEquals(2, usesBeds.clicked.stream().filter(blocked::equals).count(), "被挡的床不反复重试");
+        assertEquals(remembered, usesBeds.clicked.getLast(), "换远处的床睡");
+        String attempts = result.attempts().toString();
+        assertTrue(attempts.contains("1 张床边有怪"), attempts);
+        assertTrue(attempts.contains("1 张被挡住或太远点不上"), attempts);
+    }
+
+    @Test
+    void bedsFilteredByTheScanAreAccountedWhenAnotherBedWorks() {
+        // 身边的床被占用筛掉时不再无声无息：选上了别的床，结果里也要说清筛掉了几张、为什么。
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(
+                new BedCandidate(BED_A, true, false, false, 4),
+                new BedCandidate(BED_B, false, false, false, 9)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                new StubApproaches(), usesBeds, () -> null, Optional::empty));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of(BED_B), usesBeds.clicked);
+        assertTrue(result.attempts().toString().contains("1 张被占用"), result.attempts().toString());
+    }
+
+    @Test
+    void aBedGoneOnTheWayIsNotClickedAgain() {
+        // 走到床边发现床被拆了：这张床记成"已经不在了"，不再点第二次，换下一张睡。
+        List<BedCandidate> candidates = List.of(new BedCandidate(BED_A, false, false, false, 4),
+                new BedCandidate(BED_B, false, false, false, 9));
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(candidates, true));
+        scanner.offer(new BedScanner.BedScan(candidates, true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        usesBeds.offer(new Scripted(ActionStatus.failed(
+                Problem.of(Problem.Kind.TARGET_GONE, "床头那一格已经空了", null))));
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                new StubApproaches(), usesBeds, () -> null, Optional::empty));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of(BED_A, BED_B), usesBeds.clicked, "拆掉的床不再点第二次");
+        assertTrue(result.attempts().toString().contains("1 张已经不在了"), result.attempts().toString());
+    }
+
+    @Test
     void aWorldBedIsSleptInBeforeTheBedObtainerIsEverConsulted() {
         // 复现 211：世界有能用的床时，走过去躺下这条路径必须走通，
         // 弄床物品的分支一次都不能被问到——以前半张床被选床丢掉，就退化成去现做一张。

@@ -202,6 +202,7 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             repositionedForBed = false;
             bedSource = SleepDetails.BedSource.WORLD;
             recordProgress("选中了一张床");
+            accountFilteredBeds(scan);
             return Next.go(Phase.APPROACH, "选中了一张床，走过去");
         }
         if (!scan.complete()) {
@@ -230,6 +231,16 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
     /** 选床最远走多远（格，直线）：公开睡觉不另设限，床区半径与扫描范围自己有边；夜休只走近处的床。 */
     protected double bedWalkLimit() {
         return Double.MAX_VALUE;
+    }
+
+    // 选上了床也把被筛掉的账报出来：脚边的床为什么没被选上（床边有怪、被占用、试过点不上），
+    // 只记"选中了一张床"的话，读结果的人不知道身边明明有床却被筛掉了，也没法判断该不该挪床打怪。
+    private void accountFilteredBeds(BedScanner.BedScan scan) {
+        BedChooser.Screening screening = BedChooser.screen(scan.candidates(), excluded, refusedWhy,
+                input.bedArea(), bedWalkLimit());
+        if (screening.scanned() > screening.usable()) {
+            recordAttempt("选床时其它的床", screening.describe());
+        }
     }
 
     /** 附近没有能用的床、身上也没有：公开睡觉先去弄一张；夜休改写成不在夜里去弄床。带选床筛选的分类说明。 */
@@ -279,7 +290,8 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             return onGameRefusal(refusal);
         }
         if (refusal.kind() == Problem.Kind.TARGET_GONE) {
-            // 床在途中被拆了：回选床重挑，不把消失的床再点一遍。
+            // 床在途中被拆了：回选床重挑，不把消失的床再点一遍；"已经不在了"是游戏事实，按原因记账。
+            refusedWhy.put(chosenBed, BedRefusal.GONE);
             excluded.add(chosenBed);
             return Next.go(Phase.CHOOSE_BED, "床没了，换一张");
         }
@@ -326,6 +338,9 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
             repositionedForBed = true;
             return Next.go(Phase.APPROACH, why + "，换一次站位再点");
         }
+        // 点不上的原因跟着床记下（被挡、太远、去床边的路走不通都算点不上），
+        // 找床失败的分类话术按它说"几张点不上"，不混进"试过但说不上为什么"。
+        refusedWhy.put(chosenBed, BedRefusal.BLOCKED);
         excluded.add(chosenBed);
         return giveUpAfterTries(Next.go(Phase.CHOOSE_BED, why + "，换一张床"), refusal.message());
     }
