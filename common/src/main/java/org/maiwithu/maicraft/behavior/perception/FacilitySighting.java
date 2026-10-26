@@ -9,4 +9,4 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  */
 public record FacilitySighting(
         String id, String blockType, WorldPosition position,
-        String direction, String compass, int distance) {}
+        String direction, String compass, int distance) implements SceneSighting {}

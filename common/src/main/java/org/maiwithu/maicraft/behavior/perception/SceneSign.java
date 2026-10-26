@@ -10,4 +10,4 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * @param lines 牌子上写的字；客户端还没收到这块牌子的内容时为 null，不冒充一块空牌子
  */
 public record SceneSign(String id, String blockType, WorldPosition position, String direction, String compass,
-                        int distance, SignLines lines) {}
+                        int distance, SignLines lines) implements SceneSighting {}

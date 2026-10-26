@@ -4,10 +4,15 @@ package org.maiwithu.maicraft.mcp.view;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
+import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
+import org.maiwithu.maicraft.behavior.perception.SceneSighting;
+import org.maiwithu.maicraft.behavior.perception.SceneThing;
 import org.maiwithu.maicraft.behavior.perception.SeenRegistry;
+import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -40,24 +45,34 @@ public final class DetailView {
         json.addProperty("last_direction", entry.direction());
         json.add("last_position", SceneView.position(entry.position()));
         json.addProperty("last_seen_tick", entry.lastSeenTick());
-        // 此刻还在场景里：附上场景给的完整样子。
-        scene.entities().stream().filter(entity -> entity.id().equals(entry.id())).findFirst()
-                .ifPresent(entity -> json.add("now", SceneView.entity(entity)));
-        scene.features().stream().filter(feature -> feature.id().equals(entry.id())).findFirst()
-                .ifPresent(feature -> json.add("now", SceneView.feature(feature)));
-        scene.facilities().stream().filter(facility -> facility.id().equals(entry.id())).findFirst()
-                .ifPresent(facility -> json.add("now", SceneView.facility(facility)));
-        scene.signs().stream().filter(sign -> sign.id().equals(entry.id())).findFirst()
-                .ifPresent(sign -> json.add("now", sign(sign)));
-        // 模组的东西（电梯、车站、列车、物理结构）：场景里那几项加上全部详情（楼层表、座位……）。
-        scene.things().stream().filter(thing -> thing.id().equals(entry.id())).findFirst().ifPresent(thing -> {
-            JsonObject now = json.has("now") ? json.getAsJsonObject("now") : SceneView.thing(thing);
-            now.addProperty("category", thing.category());
-            thing.summary().entrySet().forEach(item -> now.add(item.getKey(), item.getValue()));
-            thing.detail().entrySet().forEach(item -> now.add(item.getKey(), item.getValue()));
+        // 此刻还在场景里：附上场景给的完整样子；模组的东西（电梯、车站、列车、物理结构）
+        // 在场景那几项之上再并上全部详情（楼层表、座位……），与实体同号时并成一条。
+        JsonObject now = null;
+        SceneThing thing = null;
+        for (SceneSighting sighting : scene.sighting(entry.id())) {
+            if (sighting instanceof SceneThing found) {
+                thing = found;
+            } else {
+                now = switch (sighting) {
+                    case SceneEntity entity -> SceneView.entity(entity);
+                    case TerrainFeature feature -> SceneView.feature(feature);
+                    case FacilitySighting facility -> SceneView.facility(facility);
+                    case SceneSign sign -> sign(sign);
+                    // 模组的东西单独收着：它的详情要并进同号实体的样子里，见下面。
+                    case SceneThing ignored -> null;
+                };
+            }
+        }
+        if (thing != null) {
+            JsonObject merged = now != null ? now : SceneView.thing(thing);
+            merged.addProperty("category", thing.category());
+            thing.summary().entrySet().forEach(item -> merged.add(item.getKey(), item.getValue()));
+            thing.detail().entrySet().forEach(item -> merged.add(item.getKey(), item.getValue()));
+            now = merged;
+        }
+        if (now != null) {
             json.add("now", now);
-        });
-        if (!json.has("now")) {
+        } else {
             json.addProperty("in_scene", false);
         }
         // 设施：世界记忆里这个位置记过什么（开过的容器记得里面有什么）。

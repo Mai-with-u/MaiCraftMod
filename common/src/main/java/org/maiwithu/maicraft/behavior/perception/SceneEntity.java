@@ -15,7 +15,7 @@ public record SceneEntity(
         String direction, String compass, int distance, int dy,
         boolean visible, boolean hostile, boolean targetingMe,
         EntitySight.Health health,
-        Map<String, String> traits) {
+        Map<String, String> traits) implements SceneSighting {
 
     public SceneEntity {
         traits = Map.copyOf(traits);

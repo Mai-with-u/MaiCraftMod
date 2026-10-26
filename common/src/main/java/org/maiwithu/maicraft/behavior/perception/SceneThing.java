@@ -13,7 +13,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * @param detail  observe(detail) 时给全的
  */
 public record SceneThing(String id, String category, WorldPosition position, String direction, String compass,
-                         int distance, JsonObject summary, JsonObject detail) {
+                         int distance, JsonObject summary, JsonObject detail) implements SceneSighting {
 
     public SceneThing {
         summary = summary.deepCopy();

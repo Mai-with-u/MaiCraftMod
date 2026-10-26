@@ -9,4 +9,4 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  */
 public record TerrainFeature(
         String id, String kind, WorldPosition center,
-        String direction, String compass, int distance, String size) {}
+        String direction, String compass, int distance, String size) implements SceneSighting {}
