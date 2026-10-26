@@ -178,7 +178,8 @@ public final class BoatRescue implements CatchesFall {
         if (item != null) item.abandon(context, reason);
         if (recovery != null) recovery.cancel(context, reason);
         if (pending != null && !pending.terminal()) {
-            context.interactionSender().retireOneShotForTaskBoundary(context, pending, reason);
+            // 用船物品右键水面也在等确认的现在归物品使用的边界收场，不再按一次性提交误交还。
+            context.interactionSender().settleForTaskBoundary(context, pending, reason);
         }
         pending = null;
         // 已经坐在船里：按一下潜行下来，不把人留在船上交给下一件事。

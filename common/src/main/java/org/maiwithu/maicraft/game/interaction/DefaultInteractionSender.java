@@ -36,9 +36,6 @@ public final class DefaultInteractionSender implements InteractionSender {
     /** 当前正在等确认的动作；副手放置单独记录，与主动作并行等待。 */
     private PendingInteraction active;
     private PendingInteraction auxiliary;
-    /** 记录哪次待确认的物品使用已松开，以及首次观察到松开的时间。 */
-    private PendingInteraction abandonedItemUse;
-    private long abandonedItemUseSinceTick = -1;
     /** 只有确实进入过举盾、进食等持续持用，松手后才适用提前收尾；瞬时右键等待自身的原生确认。 */
     private boolean activeItemUseWasHeld;
     private boolean activeProtocolUsesMenu;
@@ -46,6 +43,8 @@ public final class DefaultInteractionSender implements InteractionSender {
     private String pendingBreakCancellationReason;
     /** 任务已经退出但本刻无交互机会时，端口暂时接住持用，下一刻切槽取消而不是松弓射箭。 */
     private final PendingMainHandStop mainHandStop = new PendingMainHandStop();
+    /** 持续使用自己结束了还在等确认的兜底收尾账。 */
+    private final AbandonedItemUse abandonedItemUse = new AbandonedItemUse();
 
     public DefaultInteractionSender(MenuActions menuActions) {
         this.menuActions = menuActions;
@@ -624,6 +623,27 @@ public final class DefaultInteractionSender implements InteractionSender {
         pendingBreakCancellationReason = null;
     }
 
+    // 物品使用的任务边界收场：期限或确认先给了结论的照读不翻案；已起手的持续使用把停手欠给边界，
+    // 下一刻先停稳再放新任务进来；还没起手的右键没人再读它的确认了，提交可能已生效，如实按不确定收场。
+    @Override
+    public PendingInteraction settleItemUseForTaskBoundary(
+            PlayerContext context, PendingInteraction pending, String boundaryReason) {
+        if (pending.terminal()) return pending;
+        requireActive(pending, PendingInteraction.Kind.USE_ITEM);
+        poll(context, pending);
+        if (pending.terminal()) return pending;
+        var player = context.localPlayer();
+        if (player != null && player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
+            mainHandStop.owe(context, pending);
+            return pending;
+        }
+        String reason = boundaryReason == null || boundaryReason.isBlank()
+                ? "the owning task ended before the item-use confirmation" : boundaryReason;
+        pending.finish(PendingInteraction.Status.UNCERTAIN,
+                reason + "; the submitted item use may still have applied");
+        return pending;
+    }
+
     private PendingInteraction oneShot(PendingInteraction.Kind kind, PlayerContext context,
                                        InteractionConfirmation confirmation, int timeoutTicks) {
         PendingInteraction pending = new PendingInteraction(
@@ -712,8 +732,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         PendingInteraction pending = active;
         if (pending == null || pending.terminal()) {
             pendingBreakCancellationReason = null;
-            abandonedItemUse = null;
-            abandonedItemUseSinceTick = -1;
+            abandonedItemUse.forget();
             return;
         }
         // 持用可能在服务器确认后才开始；持续记录真实状态，瞬时开菜单则一直等待菜单或截止时间。
@@ -721,7 +740,7 @@ public final class DefaultInteractionSender implements InteractionSender {
             activeItemUseWasHeld = true;
         if (pendingBreakCancellationReason == null) {
             poll(context, pending);
-            retireAbandonedItemUse(context, pending);
+            abandonedItemUse.retire(context, pending, activeItemUseWasHeld, pending == active);
             return;
         }
 
@@ -749,39 +768,6 @@ public final class DefaultInteractionSender implements InteractionSender {
             pendingBreakCancellationReason = null;
         }
     }
-
-    /**
-     * 持续使用的兜底收尾：使用已经不在手上（被原版松开、手里的东西被换走，或持用它的任务已经结束），
-     * 确认就永远不会再来了。短暂宽限后如实记不确定，别让一个永远等待的提交把端口卡到 deadline——
-     * 那段时间里下一个任务连第一次点击都提交不了，看上去就是“光瞄准不出手”。
-     * 挖掘和仍然在手上的持用不归这里管：它们得由专门的动作去物理停止。
-     */
-    private void retireAbandonedItemUse(PlayerContext context, PendingInteraction pending) {
-        if (pending.terminal() || pending.kind() != PendingInteraction.Kind.USE_ITEM || !activeItemUseWasHeld
-                || context.localPlayer().isUsingItem()) {
-            abandonedItemUse = null;
-            abandonedItemUseSinceTick = -1;
-            return;
-        }
-        // 计数认准这一次持用：换了新确认就重新起算，不能把上一个的等待算到它头上。
-        if (abandonedItemUse != pending) {
-            abandonedItemUse = pending;
-            abandonedItemUseSinceTick = context.clientTick();
-            return;
-        }
-        // 宽限半秒：物品自行结束的那一瞬，扣数／组件证据要等服务端那一刻结算再同步回来，联机时常常晚几刻到。
-        // 原先只宽限两刻，砂纸磨完一件、成品还没进背包就判"没等到确认"，抛光玫瑰石英怎么都磨不出来。
-        if (context.clientTick() - abandonedItemUseSinceTick < ABANDONED_USE_GRACE_TICKS) return;
-        abandonedItemUse = null;
-        abandonedItemUseSinceTick = -1;
-        if (pending == active && !pending.terminal()) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "手上的持续使用结束了，没等到游戏确认效果");
-        }
-    }
-
-    /** 持续使用自己结束后，等效果同步回来的宽限（刻）。 */
-    private static final int ABANDONED_USE_GRACE_TICKS = 10;
 
     private static MultiPlayerGameMode gameMode(PlayerContext context) {
         Minecraft minecraft = Minecraft.getInstance();

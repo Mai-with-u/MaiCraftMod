@@ -154,10 +154,10 @@ final class BoatRecovery {
         return true;
     }
 
-    /** 被打断：没确认的那一下交还等待，按此刻的样子收场。 */
+    /** 被打断：没确认的那一下按动作种类走各自的边界收场，按此刻的样子收账。 */
     void cancel(PlayerContext context, String reason) {
         if (pending != null && !pending.terminal()) {
-            context.interactionSender().retireOneShotForTaskBoundary(context, pending, reason);
+            context.interactionSender().settleForTaskBoundary(context, pending, reason);
         }
         pending = null;
         boolean present = boat(context) != null;

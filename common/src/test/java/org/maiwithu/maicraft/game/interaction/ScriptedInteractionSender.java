@@ -30,6 +30,7 @@ public final class ScriptedInteractionSender implements InteractionSender {
     /** 持续使用是否仍归提交方管；测试用它模拟归属变化。 */
     public boolean ownsUse = true;
     public boolean retireCalled;
+    public int settleItemUseCalled;
     public int releaseCalls;
 
     @Override public PendingInteraction useBlock(PlayerContext context, InteractionHand hand, BlockHitResult hit,
@@ -101,6 +102,16 @@ public final class ScriptedInteractionSender implements InteractionSender {
     @Override public PendingInteraction cancelBreakingForTaskBoundary(
             PlayerContext context, PendingInteraction pending, String boundaryReason) {
         throw new UnsupportedOperationException("替身没有实现这个入口");
+    }
+
+    @Override public PendingInteraction settleItemUseForTaskBoundary(
+            PlayerContext context, PendingInteraction pending, String boundaryReason) {
+        // 与一次性收场同一套脚本语义：按效果不确定交还，测试据此核对任务边界后等待被放掉。
+        settleItemUseCalled++;
+        if (!pending.terminal()) {
+            pending.finish(PendingInteraction.Status.UNCERTAIN, boundaryReason);
+        }
+        return pending;
     }
 
     @Override public PendingInteraction continueBreaking(PlayerContext context, PendingInteraction pending) {

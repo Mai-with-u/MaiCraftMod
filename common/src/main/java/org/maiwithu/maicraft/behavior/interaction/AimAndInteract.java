@@ -275,10 +275,11 @@ public final class AimAndInteract implements Action {
     }
 
     @Override public void close() {
-        // 任务收尾：没等到确认的一次性提交按不确定交还，已提交的效果不假装撤销。
+        // 任务收尾：没等到确认的提交按各自动作的边界收场交还（物品使用含已起手时的停手欠账），
+        // 已提交的效果不假装撤销。
         if (pending != null && !pending.terminal() && lastContext != null
                 && lastContext.interactionSender() != null) {
-            lastContext.interactionSender().retireOneShotForTaskBoundary(
+            lastContext.interactionSender().settleForTaskBoundary(
                     lastContext, pending, "交互动作结束前没能等到游戏确认");
             result = InteractionResult.of(pending, "动作收尾时仍未确认；提交时射线命中"
                     + submittedHitDescription);

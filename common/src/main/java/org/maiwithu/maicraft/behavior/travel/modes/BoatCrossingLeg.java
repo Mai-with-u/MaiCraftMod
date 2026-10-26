@@ -497,6 +497,15 @@ final class BoatCrossingLeg implements TravelLeg {
             walk.close();
             walk = null;
         }
+        // 放船那一下还等在确认窗里这段就被替换或取消：等待记录写明「到期限或玩家变更时结算」，
+        // 玩家变更就是现在。到什么算什么地如实结算并放掉等待占位，新任务的第一次出手不被它挡住。
+        if (pending != null && !pending.terminal()) {
+            PlayerContext live = services.context().get();
+            if (live != null) {
+                live.interactionSender().settleForTaskBoundary(live, pending, "行程段被替换，放船的确认不再等");
+            }
+        }
+        pending = null;
     }
 
     @Override public List<Change> changes() {

@@ -135,6 +135,9 @@ class DropTaskTest {
         @Override public PendingInteraction retireOneShotForTaskBoundary(
                 PlayerContext c, PendingInteraction p, String reason) {
             throw new UnsupportedOperationException(); }
+        @Override public PendingInteraction settleItemUseForTaskBoundary(
+                PlayerContext c, PendingInteraction p, String reason) {
+            throw new UnsupportedOperationException(); }
     }
 
     /** 角色上下文替身。 */

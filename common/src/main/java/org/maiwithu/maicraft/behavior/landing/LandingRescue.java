@@ -264,10 +264,8 @@ public final class LandingRescue implements CatchesFall {
         fail(reason);
         if (item != null) item.abandon(context, reason);
         if (pending != null && !pending.terminal()) {
-            var sender = context.interactionSender();
-            pending = pending.kind() == PendingInteraction.Kind.BREAK_BLOCK
-                    ? sender.cancelBreakingForTaskBoundary(context, pending, reason)
-                    : sender.retireOneShotForTaskBoundary(context, pending, reason);
+            // 挖掘发停手、喝水这类物品使用按「玩家变更时结算」收场，收场种类的分辨归边界路由。
+            context.interactionSender().settleForTaskBoundary(context, pending, reason);
         }
         pending = null;
         complete = true;

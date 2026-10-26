@@ -140,6 +140,30 @@ public interface InteractionSender extends BoundaryLifecycle {
      */
     void abandonOneShotForTaskBoundary(PendingInteraction pending, String boundaryReason);
 
+    /**
+     * 待确认的物品使用赶上任务边界（目标被替换、取消或任务结束）时的结算：等待记录写明的
+     * 「到期限或玩家变更时结算」，玩家变更就是这条。已经终结的按冻结的结论原样交回；
+     * 已起手的持续使用先把停手欠给边界（下一刻先停稳再放新任务进来）；
+     * 还没起手的右键没人再读它的确认了，提交可能已经生效，如实按效果不确定收场并放掉等待占位，
+     * 新任务的第一次出手不再被旧等待挡住。
+     */
+    PendingInteraction settleItemUseForTaskBoundary(
+            PlayerContext context, PendingInteraction pending, String boundaryReason);
+
+    /**
+     * 任务边界结算一条还在等确认的提交，按动作种类走各自的边界收场：
+     * 挖掘发停手（本刻没机会就欠到下一刻）、物品使用按「玩家变更时结算」收场、其余一次性提交按不确定交还。
+     * 调用方不必分辨手上的提交是哪种：期限或确认先给了结论的，各收场自己都不重复记账。
+     */
+    default PendingInteraction settleForTaskBoundary(
+            PlayerContext context, PendingInteraction pending, String boundaryReason) {
+        return switch (pending.kind()) {
+            case BREAK_BLOCK -> cancelBreakingForTaskBoundary(context, pending, boundaryReason);
+            case USE_ITEM -> settleItemUseForTaskBoundary(context, pending, boundaryReason);
+            default -> retireOneShotForTaskBoundary(context, pending, boundaryReason);
+        };
+    }
+
     /** 逐刻结算：先核对上下文仍是本刻、动作仍是本角色的，再运行只读确认条件。 */
     PendingInteraction poll(PlayerContext context, PendingInteraction pending);
 }
