@@ -26,14 +26,24 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 搬运与存东西能力同一套，每一笔按背包少了几件、界面里多了几件对上才算放进去。
  *
  * <p>做完交出实情：放进去几件；放不下（输入格满了、这样东西它不收）、两边件数对不上的写进说明。一件都没放进去时失败。
+ *
+ * <p>投的是换灌注物的物品（往附加格投煤）时，界面一打开先按机器储罐里已有的扣掉几件，扣完不用投就算做完。
  */
 public final class MenuFeed implements Action, FeedReport {
 
+    /** 界面开着、第一次要搬之前问一次：少投几件，原因写进 notes。 */
+    interface TopUp {
+        int skip(int asked, List<String> notes);
+    }
+
     private final String itemId;
-    private final int asked;
+    private int asked;
     private final StoresInContainer storing;
     private int stored;
     private final List<String> notes = new ArrayList<>();
+    /** 投之前要扣掉机器里已有的；不用扣为 null。 */
+    private final TopUp topUp;
+    private boolean toppedUp;
 
     /**
      * @param machine     机器叫什么，给描述与说明用，例如"富集仓"
@@ -41,12 +51,25 @@ public final class MenuFeed implements Action, FeedReport {
      */
     public MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
             Permissions permissions) {
+        this(services, machine, at, blockTypeId, itemId, count, permissions, null);
+    }
+
+    /** @param topUp 界面打开后先扣掉机器里已有的几件；不用扣给 null */
+    MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
+            Permissions permissions, TopUp topUp) {
         Objects.requireNonNull(services, "services");
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         this.asked = count;
+        this.topUp = topUp;
         StoresInContainer.Ledger ledger = new StoresInContainer.Ledger() {
+            // 搬第一笔前界面已经开着、储罐也同步过来了：这时问一次机器里已有多少，扣掉够数的几件。
             @Override public int left(String id) {
-                return id.equals(itemId) ? asked - stored : 0;
+                if (!id.equals(itemId)) return 0;
+                if (MenuFeed.this.topUp != null && !toppedUp) {
+                    toppedUp = true;
+                    asked -= Math.max(0, Math.min(asked, MenuFeed.this.topUp.skip(asked, notes)));
+                }
+                return asked - stored;
             }
 
             @Override public void stored(String id, int amount) {
@@ -71,9 +94,11 @@ public final class MenuFeed implements Action, FeedReport {
     }
 
     // 搬完确认件数：一件没放进去按失败，带上点开、放不下的经过；放进去的少于要的写一句为什么。
+    // 机器里已有的够了、扣完一件都不用投的，不算失败。
     @Override public ActionStatus tick(TickContext context) {
         ActionStatus status = storing.tick(context);
         if (!(status instanceof ActionStatus.Done)) return status;
+        if (asked == 0) return status;
         if (stored == 0) {
             String seen = notes.isEmpty() ? "" : "：" + String.join("；", notes);
             return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,

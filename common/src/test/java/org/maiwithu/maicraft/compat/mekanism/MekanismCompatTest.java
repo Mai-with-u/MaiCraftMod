@@ -25,6 +25,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
@@ -38,6 +39,8 @@ import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
+import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -63,6 +66,7 @@ class MekanismCompatTest {
     private static final class StubReads implements MekanismReads {
         final Map<BlockPos, Transmitter> pipes = new HashMap<>();
         Set<Integer> machineSlots = Set.of();
+        final Map<String, List<Conversion>> conversions = new HashMap<>();
 
         @Override public Optional<SideConfig> sideConfig(ClientLevel level, BlockPos at) { return Optional.empty(); }
         @Override public Optional<FixedSides> fixedSides(ClientLevel level, BlockPos at) { return Optional.empty(); }
@@ -73,6 +77,10 @@ class MekanismCompatTest {
         @Override public Optional<String> configuratorMode(ItemStack stack) { return Optional.empty(); }
         @Override public void nextConfiguratorMode() { }
         @Override public Set<Integer> openMachineSlots() { return machineSlots; }
+        @Override public Optional<Map<String, Long>> openMachineChemicals(BlockPos at) { return Optional.empty(); }
+        @Override public List<Conversion> conversionsTo(String chemicalId) {
+            return conversions.getOrDefault(chemicalId, List.of());
+        }
         @Override public Optional<SorterState> openSorter(BlockPos at) { return Optional.empty(); }
         @Override public void toggleSorterAutoEject(BlockPos at) { }
         @Override public void setSorterItemRule(BlockPos at, String itemId) { }
@@ -195,6 +203,68 @@ class MekanismCompatTest {
         assertTrue(points.stream().filter(point -> point.medium() == ExchangePoint.Medium.ITEM)
                 .allMatch(point -> point.flow() == ExchangePoint.Flow.INPUT));
         assertTrue(new MekanismMachineKnowledge().read(MekanismMachineKnowledge.INDEX).text().contains("energy_out"));
+    }
+
+    /** 碳能从哪几样换：数据照 Mekanism 的化学品转化配方（chemical_conversion/carbon）。 */
+    private static List<MekanismReads.Conversion> carbon() {
+        return List.of(new MekanismReads.Conversion("mekanism:dust_coal", 10),
+                new MekanismReads.Conversion("minecraft:coal", 10),
+                new MekanismReads.Conversion("minecraft:charcoal", 10),
+                new MekanismReads.Conversion("minecraft:coal_block", 90),
+                new MekanismReads.Conversion("mekanism:enriched_carbon", 80));
+    }
+
+    @Test
+    void 灌注物换料_身上带够的先用_其次身上有的_再其次原版里一件换得少的() {
+        ChemicalConversions.Plan nothing = ChemicalConversions.plan("mekanism:carbon", carbon(), Map.of(), 80).orElseThrow();
+        assertEquals("minecraft:charcoal", nothing.itemId(), "身上什么都没有：原版、一件换得少，同等时按 ID");
+        assertEquals(8, nothing.count());
+        assertEquals(4, nothing.alternatives().size());
+        ChemicalConversions.Plan someCoal = ChemicalConversions.plan("mekanism:carbon", carbon(),
+                Map.of("minecraft:coal", 3), 80).orElseThrow();
+        assertEquals("minecraft:coal", someCoal.itemId(), "身上有几块煤：先用身上有的");
+        ChemicalConversions.Plan enriched = ChemicalConversions.plan("mekanism:carbon", carbon(),
+                Map.of("minecraft:coal", 3, "mekanism:enriched_carbon", 1), 80).orElseThrow();
+        assertEquals("mekanism:enriched_carbon", enriched.itemId(), "身上的一件浓缩碳就够：带够的先用");
+        assertEquals(1, enriched.count());
+        assertEquals(2, ChemicalConversions.plan("mekanism:carbon", carbon(), Map.of(), 15).orElseThrow().count(),
+                "15 份要两块，向上取整");
+        assertTrue(ChemicalConversions.plan("mekanism:carbon", List.of(), Map.of(), 80).isEmpty());
+        assertTrue(ChemicalConversions.describe(nothing, 80).contains("一件换 10，投 8 件"));
+    }
+
+    @Test
+    void 投换料时扣掉机器里已有的_读不到全投_装着别的照投并说明() {
+        ChemicalConversions.Deduction some = ChemicalConversions.deduct("mekanism:carbon", 10, 8,
+                Optional.of(Map.of("mekanism:carbon", 55L)));
+        assertEquals(5, some.skip(), "55 份够五块煤的量");
+        assertEquals(8, ChemicalConversions.deduct("mekanism:carbon", 10, 8,
+                Optional.of(Map.of("mekanism:carbon", 500L))).skip(), "最多少投到一件不投");
+        ChemicalConversions.Deduction unread = ChemicalConversions.deduct("mekanism:carbon", 10, 8, Optional.empty());
+        assertEquals(0, unread.skip());
+        assertTrue(unread.note().contains("读不到"), unread.note());
+        ChemicalConversions.Deduction other = ChemicalConversions.deduct("mekanism:carbon", 10, 8,
+                Optional.of(Map.of("mekanism:redstone", 40L)));
+        assertEquals(0, other.skip());
+        assertTrue(other.note().contains("mekanism:redstone ×40"), other.note());
+        assertEquals("", ChemicalConversions.deduct("mekanism:carbon", 10, 8, Optional.of(Map.of())).note());
+    }
+
+    @Test
+    void 冶金灌注机的灌注物用物品投_换不了的化学品给空() {
+        StubReads reads = new StubReads();
+        reads.conversions.put("mekanism:carbon", List.of(new MekanismReads.Conversion("minecraft:coal", 10),
+                new MekanismReads.Conversion("minecraft:coal_block", 90)));
+        MekanismMachineCatalog.Kind infuser = MekanismMachineCatalog.kinds().stream()
+                .filter(kind -> kind.id().equals("mekanism:metallurgic_infuser")).findFirst().orElseThrow();
+        MekanismMachineType type = new MekanismMachineType(infuser, new MekanismCompat(reads), offline(), state -> false);
+        ShownIngredient carbon = ShownIngredient.of(new ShownStack(ShownStack.Kind.OTHER, "mekanism:carbon", "碳", 10, 1));
+        IngredientFeed feed = type.ingredientFeed(BlockPos.ZERO, carbon, 80).orElseThrow();
+        assertEquals("minecraft:coal", feed.itemId());
+        assertEquals(8, feed.count());
+        assertTrue(feed.note().contains("也能用 minecraft:coal_block"), feed.note());
+        ShownIngredient water = ShownIngredient.of(new ShownStack(ShownStack.Kind.OTHER, "mekanism:steam", "蒸汽", 10, 1));
+        assertTrue(type.ingredientFeed(BlockPos.ZERO, water, 10).isEmpty());
     }
 
     @Test

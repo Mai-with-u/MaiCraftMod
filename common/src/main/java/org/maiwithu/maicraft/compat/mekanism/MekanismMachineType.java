@@ -19,13 +19,17 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
+import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -45,6 +49,12 @@ final class MekanismMachineType implements MachineType {
     private final ConfiguratorClicks configurator;
     /** 每台分拣器上次打开界面时看见的规则与开关：规则只在开着界面时同步。 */
     private final Map<BlockPos, MekanismReads.SorterState> sorterSeen = new HashMap<>();
+    /** 这次 machine_run 定下要往附加格投的换料：投的时候按它扣掉机器储罐里已有的，投完就去掉。 */
+    private final Map<ConversionAt, ChemicalConversions.Plan> conversionFeeds = new HashMap<>();
+
+    /** 哪台机器、投哪样换料。 */
+    private record ConversionAt(BlockPos at, String itemId) {
+    }
 
     MekanismMachineType(MekanismMachineCatalog.Kind kind, MekanismCompat compat, PlayerServices services,
             Predicate<BlockState> covers) {
@@ -190,7 +200,33 @@ final class MekanismMachineType implements MachineType {
         boolean takesFeed = kind.role() == MachineRole.PROCESSING || kind.fuel().kind() == FuelUse.Kind.FUEL;
         if (level == null || !takesFeed) return Optional.empty();
         String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
-        return Optional.of(new MenuFeed(services, kind.name(), at, blockId, itemId, count, permissions));
+        // 投的是这次定下的换料：界面打开后先读机器储罐，已有的够几件就少投几件。
+        ChemicalConversions.Plan conversion = conversionFeeds.remove(new ConversionAt(at.immutable(), itemId));
+        MenuFeed.TopUp topUp = conversion == null ? null : (asked, notes) -> {
+            ChemicalConversions.Deduction deduction = ChemicalConversions.deduct(conversion.chemicalId(),
+                    conversion.perItem(), asked, compat.openMachineChemicals(at));
+            if (!deduction.note().isEmpty()) notes.add(deduction.note());
+            return deduction.skip();
+        };
+        return Optional.of(new MenuFeed(services, kind.name(), at, blockId, itemId, count, permissions, topUp));
+    }
+
+    // 配方要的化学品（灌注物这类）背包带不进去：加工机器从附加格吃物品再换成它。按化学品转化配方挑一样能换的，
+    // 身上带够的先用；记下这一样，投的时候扣掉机器里已有的。查看器把化学品列成"别的东西"，挨个试能不能换。
+    @Override public Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
+        if (kind.role() != MachineRole.PROCESSING) return Optional.empty();
+        Map<String, Integer> carried = new HashMap<>();
+        for (BackpackStack stack : services.backpack().stacks()) carried.merge(stack.itemId(), stack.count(), Integer::sum);
+        for (ShownStack option : ingredient.options()) {
+            if (option.kind() != ShownStack.Kind.OTHER) continue;
+            Optional<ChemicalConversions.Plan> plan = ChemicalConversions.plan(option.id(),
+                    compat.conversionsTo(option.id()), carried, amount);
+            if (plan.isEmpty()) continue;
+            conversionFeeds.put(new ConversionAt(at.immutable(), plan.get().itemId()), plan.get());
+            return Optional.of(new IngredientFeed(plan.get().itemId(), plan.get().count(),
+                    ChemicalConversions.describe(plan.get(), amount)));
+        }
+        return Optional.empty();
     }
 
     // 发电机烧燃料或不吃料，别的机器按配方投料；见目录里每种的说明。

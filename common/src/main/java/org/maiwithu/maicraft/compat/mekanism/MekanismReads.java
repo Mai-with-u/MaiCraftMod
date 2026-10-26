@@ -49,6 +49,25 @@ public interface MekanismReads {
     Set<Integer> openMachineSlots();
 
     /**
+     * 此刻打开着的界面是 at 这台机器的界面时，机器储罐里每种化学品（灌注物也是化学品）有多少；
+     * 不是它的界面给空。储罐里的量只在开着界面时同步给客户端。
+     */
+    Optional<Map<String, Long>> openMachineChemicals(BlockPos at);
+
+    /**
+     * 哪些物品能在机器的附加格里换成这种化学品、一件换多少：通用机械的化学品转化配方（煤换碳、红石换红石灌注物），
+     * 读的是同步到客户端的配方表。没有能换它的物品给空表。
+     */
+    List<Conversion> conversionsTo(String chemicalId);
+
+    /** 一样能换化学品的物品：物品 ID、一件换多少。 */
+    record Conversion(String itemId, long amount) {
+        public Conversion {
+            Objects.requireNonNull(itemId, "itemId");
+        }
+    }
+
+    /**
      * 此刻打开着的界面是 at 这台物流分拣器的界面时，界面同步过来的样子：没有规则对得上时往不往外送、每条规则；
      * 不是它的界面给空。分拣器的规则只在开着界面时同步给客户端。
      */

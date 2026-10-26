@@ -13,6 +13,9 @@ import java.util.Optional;
 import java.util.Set;
 
 import mekanism.api.RelativeSide;
+import mekanism.api.chemical.ChemicalStack;
+import mekanism.api.chemical.IChemicalTank;
+import mekanism.api.recipes.ItemStackToChemicalRecipe;
 import mekanism.common.block.attribute.Attribute;
 import mekanism.common.block.attribute.AttributeSideConfig;
 import mekanism.common.content.transporter.SorterFilter;
@@ -29,6 +32,7 @@ import mekanism.common.network.to_server.PacketGuiInteract;
 import mekanism.common.network.to_server.PacketModeChange;
 import mekanism.common.network.to_server.filter.PacketEditFilter;
 import mekanism.common.network.to_server.filter.PacketNewFilter;
+import mekanism.common.recipe.MekanismRecipeType;
 import mekanism.common.tile.TileEntityLogisticalSorter;
 import mekanism.common.tile.base.TileEntityMekanism;
 import mekanism.common.tile.component.config.ConfigInfo;
@@ -46,6 +50,7 @@ import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 
@@ -150,6 +155,40 @@ public final class MekanismClientReads implements MekanismReads {
             }
         }
         return Set.copyOf(found);
+    }
+
+    // 开着的是这台机器的界面才读：储罐里的量是界面同步过来的，同种化学品的几个储罐合在一起算。
+    @Override public Optional<Map<String, Long>> openMachineChemicals(BlockPos at) {
+        LocalPlayer player = Minecraft.getInstance().player;
+        if (player == null || !(player.containerMenu instanceof MekanismTileContainer<?> container)) return Optional.empty();
+        TileEntityMekanism tile = container.getTileEntity();
+        if (tile == null || !tile.getBlockPos().equals(at)) return Optional.empty();
+        Map<String, Long> held = new LinkedHashMap<>();
+        for (IChemicalTank tank : tile.getChemicalTanks(null)) {
+            ChemicalStack stack = tank.getStack();
+            if (!stack.isEmpty()) held.merge(stack.getChemicalHolder().getRegisteredName(), stack.getAmount(), Long::sum);
+        }
+        return Optional.of(held);
+    }
+
+    // 化学品转化配方随配方表同步到客户端：产出是这种化学品的，每样能放进去的物品按"一件换多少"列出来。
+    @Override public List<Conversion> conversionsTo(String chemicalId) {
+        ClientLevel level = Minecraft.getInstance().level;
+        if (level == null) return List.of();
+        List<Conversion> found = new ArrayList<>();
+        for (RecipeHolder<ItemStackToChemicalRecipe> holder
+                : MekanismRecipeType.CHEMICAL_CONVERSION.getRecipeType().getRecipes(level)) {
+            ItemStackToChemicalRecipe recipe = holder.value();
+            for (ChemicalStack output : recipe.getOutputDefinition()) {
+                if (output.isEmpty() || !output.getChemicalHolder().getRegisteredName().equals(chemicalId)) continue;
+                for (ItemStack input : recipe.getInput().getRepresentations()) {
+                    if (input.isEmpty()) continue;
+                    found.add(new Conversion(BuiltInRegistries.ITEM.getKey(input.getItem()).toString(),
+                            output.getAmount() / Math.max(1, input.getCount())));
+                }
+            }
+        }
+        return List.copyOf(found);
     }
 
     // 开着的是这台分拣器的界面才读：规则与开关是界面同步过来的，逐条看是不是精确的单物品规则。

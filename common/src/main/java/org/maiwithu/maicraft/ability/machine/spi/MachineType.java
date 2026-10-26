@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -140,5 +141,17 @@ public interface MachineType {
      */
     default FuelUse fuelUse(BlockPos at) {
         return FuelUse.RECIPE;
+    }
+
+    /**
+     * 配方里背包带不进机器的那一格原料（化学品这类）能不能用物品投：通用机械的机器从附加格吃煤、红石这些物品，
+     * 再换成配方要的灌注物。能就给投哪样、几件，machine_run 把它排在主料前面经 {@link #feed} 投；
+     * 换不了给空，machine_run 照旧写一句"带不进机器，做不做得看机器里还有没有"。
+     *
+     * @param ingredient 配方里的那一格（查看器认得、但不是物品也不是流体的东西）
+     * @param amount     这次要的总量：配方的量乘上批数
+     */
+    default Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
+        return Optional.empty();
     }
 }

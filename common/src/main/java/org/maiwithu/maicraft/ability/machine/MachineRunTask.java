@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -183,12 +184,20 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 toGather.isEmpty() ? "配方的东西带不进机器，先开机试一次" : "备投料要的东西");
     }
 
-    // 配方原料按批次放大：物品的备料去拿；机器自己要的流体与化学品带不进背包，写进结果。
+    // 配方原料按批次放大：物品的备料去拿。背包带不进去的化学品，机器能从附加格吃物品换的（灌注物从煤、红石换），
+    // 换成那样物品排在主料前面先投：储罐里先有了灌注物，主料一放进去就开工。换不了的流体与化学品写进结果。
     private void queueIngredients(ShownRecipe chosen) {
+        List<MachineRunDetails.Fed> mainItems = new ArrayList<>();
         for (ShownIngredient ingredient : chosen.inputs()) {
             Optional<ShownStack> item = ingredient.options().stream()
                     .filter(option -> option.kind() == ShownStack.Kind.ITEM).findFirst();
             if (ingredient.tag() == null && item.isEmpty()) {
+                Optional<IngredientFeed> byItem = type.ingredientFeed(cell, ingredient, ingredient.amount() * batches);
+                if (byItem.isPresent()) {
+                    notes.add(byItem.get().note());
+                    toGather.add(new MachineRunDetails.Fed(byItem.get().itemId(), byItem.get().count()));
+                    continue;
+                }
                 notes.add("配方还要机器自己要的东西（" + describeIngredient(ingredient)
                         + "），带不进机器，做不做得看机器里还有没有");
                 continue;
@@ -197,9 +206,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     ? WantedItem.ofTag(ingredient.tag())
                     : WantedItem.ofItem(item.get().id());
             long count = (long) ingredient.amount() * batches;
-            toGather.add(new MachineRunDetails.Fed(wanted.specifier(),
+            mainItems.add(new MachineRunDetails.Fed(wanted.specifier(),
                     (int) Math.min(Integer.MAX_VALUE, count)));
         }
+        toGather.addAll(mainItems);
     }
 
     // 备料：一样一样去拿，缺了按缺东西收场；拿到了挪进投料队。

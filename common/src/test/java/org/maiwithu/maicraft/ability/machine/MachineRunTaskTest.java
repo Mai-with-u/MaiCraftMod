@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -247,6 +248,49 @@ class MachineRunTaskTest {
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
         assertTrue(result.problem().message().contains("靠阳光发电"), result.problem().message());
         assertEquals(0, rig.needs.requests.size(), "不用投就不去备料");
+    }
+
+    /** 一条灌注配方：一个铁锭加 10 份碳（查看器列成"别的东西"）出一块铁板。 */
+    private static ShownRecipe infusingRecipe() {
+        return new ShownRecipe("test:infusing/plate", "test:infusing", "灌注",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                List.of(ShownIngredient.of(ShownStack.item(INGOT, "铁锭", 1)),
+                        ShownIngredient.of(new ShownStack(ShownStack.Kind.OTHER, "test:carbon", "碳", 10, 1))),
+                List.of(), List.of(ShownStack.item(PLATE, "铁板", 1)), null);
+    }
+
+    @Test
+    void 化学品能用物品换_换料排在主料前面先备先投() {
+        Rig rig = new Rig();
+        rig.viewer.putMaking(PLATE, List.of(infusingRecipe()));
+        rig.type.ingredientFeed = ingredient -> Optional.of(new IngredientFeed("test:coal", 2, "往附加格投 test:coal"));
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> rig.type.output.put(PLATE, 2)));
+        rig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of(20L), rig.type.ingredientAmounts, "要的量是配方的 10 份乘两批");
+        assertEquals(List.of("test:coal", INGOT), rig.needs.requests.stream().map(request -> request.wanted().specifier())
+                .toList(), "换料先备");
+        assertEquals(List.of("test:coal", INGOT), rig.type.fedItems, "换料先投，再投主料");
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertTrue(details.notes().contains("往附加格投 test:coal"), details.notes().toString());
+        assertTrue(details.notes().stream().noneMatch(note -> note.contains("带不进机器")), details.notes().toString());
+    }
+
+    @Test
+    void 化学品换不了_照旧写带不进机器() {
+        Rig rig = new Rig();
+        rig.viewer.putMaking(PLATE, List.of(infusingRecipe()));
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> rig.type.output.put(PLATE, 2)));
+        rig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
+                Permissions.DEFAULT));
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("test:carbon") && note.contains("带不进机器")),
+                details.notes().toString());
+        assertEquals(List.of(INGOT), rig.type.fedItems);
     }
 
     /** 机器自己从头做到尾的替身：一刻做完，报做出几件、做全没有与说明。 */

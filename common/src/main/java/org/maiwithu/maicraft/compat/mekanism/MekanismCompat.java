@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.mekanism;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -95,6 +96,16 @@ public final class MekanismCompat extends CompatModule {
     /** 此刻打开着的界面里真是机器物品格的格号；见 {@link MekanismReads#openMachineSlots}。 */
     public Set<Integer> openMachineSlots() {
         return call("认机器界面的物品格", reads::openMachineSlots);
+    }
+
+    /** 打开着的机器界面里储罐装着的化学品；见 {@link MekanismReads#openMachineChemicals}。 */
+    public Optional<Map<String, Long>> openMachineChemicals(BlockPos at) {
+        return call("读机器储罐里的化学品", () -> reads.openMachineChemicals(at));
+    }
+
+    /** 能换成这种化学品的物品；见 {@link MekanismReads#conversionsTo}。 */
+    public List<MekanismReads.Conversion> conversionsTo(String chemicalId) {
+        return call("读化学品转化配方", () -> reads.conversionsTo(chemicalId));
     }
 
     /** 打开着的分拣器界面同步过来的样子；见 {@link MekanismReads#openSorter}。 */

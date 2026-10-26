@@ -19,6 +19,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
@@ -189,6 +191,11 @@ final class MachineTestDoubles {
         Function<RunRequest, Optional<FullRun>> fullRun = request -> Optional.empty();
         /** machine_run 的 item 对它是什么：默认按配方投料，发电机替身改成烧燃料或不吃料。 */
         FuelUse fuel = FuelUse.RECIPE;
+        /** 配方里化学品这类原料能不能用物品投：默认不能；收到的总量记在 ingredientAmounts。 */
+        Function<ShownIngredient, Optional<IngredientFeed>> ingredientFeed = ingredient -> Optional.empty();
+        final List<Long> ingredientAmounts = new ArrayList<>();
+        /** 投料的先后：每次 feed 记下投的是什么。 */
+        final List<String> fedItems = new ArrayList<>();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -289,6 +296,7 @@ final class MachineTestDoubles {
         }
 
         @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
+            fedItems.add(itemId);
             return Optional.ofNullable(feedActions.poll());
         }
 
@@ -312,6 +320,11 @@ final class MachineTestDoubles {
 
         @Override public FuelUse fuelUse(BlockPos at) {
             return fuel;
+        }
+
+        @Override public Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
+            ingredientAmounts.add(amount);
+            return ingredientFeed.apply(ingredient);
         }
     }
 
