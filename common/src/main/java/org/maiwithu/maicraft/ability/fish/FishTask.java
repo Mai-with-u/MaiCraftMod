@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
@@ -113,6 +114,8 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private boolean retriedAfterClear;
     private BlockPos spot;
     private BlockPos landing;
+    /** 走向钓位的这一趟：看它报的是到了还是"已停下"。 */
+    private WalkRun approachWalk;
     private int failedCasts;
     private int casts;
     private int caught;
@@ -132,7 +135,8 @@ class FishTask extends PhasedTask<FishTask.Phase> {
             case GET_ROD -> services.obtain().actionFor(
                     new ItemRequest(WantedItem.ofItem(FISHING_ROD), 1, "钓鱼"), permissions, records());
             case TAKE_ROD -> services.toMainhand().moveToMainhand(FISHING_ROD).orElse(null);
-            case APPROACH -> services.walks().start(GoalCompiler.standOn(spot), TerrainPermit.of(permissions));
+            case APPROACH -> approachWalk = services.walks().start(GoalCompiler.standOn(spot),
+                    TerrainPermit.of(permissions));
             case COLLECT -> collect.step == CollectStep.PICKUP ? nextPickup() : null;
             default -> null;
         };
@@ -196,6 +200,11 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private Next<Phase> approach(TickContext context) {
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
+        // 走路报"已停下"不是到了钓位：被叫先到安全处再停、落地了就站着等外层停下；
+        // 被打断过回来就从原地接着走到钓位，不在半路瞄准下竿。
+        if (approachWalk.report().state() == WalkReport.State.STOPPED) {
+            return stopping() ? Next.stay() : Next.go(Phase.APPROACH, "停在半路，从原地接着走到钓位");
+        }
         if (status instanceof ActionStatus.Done) return Next.go(Phase.AIM, "到钓位了");
         // 走不到这个钓位：换下一个候选（不撞同一条路），找不到就按钓位搜索的三分流如实结束。
         excludedStances.add(spot);
