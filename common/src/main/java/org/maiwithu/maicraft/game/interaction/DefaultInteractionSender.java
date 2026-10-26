@@ -39,12 +39,12 @@ public final class DefaultInteractionSender implements InteractionSender {
     /** 只有确实进入过举盾、进食等持续持用，松手后才适用提前收尾；瞬时右键等待自身的原生确认。 */
     private boolean activeItemUseWasHeld;
     private boolean activeProtocolUsesMenu;
-    /** 旧任务留下的挖掘还未实际停止时保留此原因，由 {@link #advance} 完成停手。 */
-    private String pendingBreakCancellationReason;
     /** 任务已经退出但本刻无交互机会时，端口暂时接住持用，下一刻切槽取消而不是松弓射箭。 */
     private final PendingMainHandStop mainHandStop = new PendingMainHandStop();
     /** 持续使用自己结束了还在等确认的兜底收尾账。 */
     private final AbandonedItemUse abandonedItemUse = new AbandonedItemUse();
+    /** 持续挖掘的开挖、推进与停手；任务边界欠下的停挖原因也归它记。 */
+    private final MiningActions mining = new MiningActions(this);
 
     public DefaultInteractionSender(MenuActions menuActions) {
         this.menuActions = menuActions;
@@ -68,7 +68,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     /** 非紧急生活动作等旧点击、停挖和取消蓄力都结清后接手，不能打断正在收尾的动作。 */
     boolean settledForRoutinePause() { return (active == null || active.terminal())
-            && pendingBreakCancellationReason == null && !mainHandStop.owed(); }
+            && !mining.owesCancellation() && !mainHandStop.owed(); }
 
     @Override public PendingInteraction dropSelected(PlayerContext context, ItemStack expectedSelected, boolean fullStack,
                                                      InteractionConfirmation confirmation, int timeoutTicks) {
@@ -111,101 +111,23 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     @Override
     public PendingInteraction startBreaking(PlayerContext context, BlockHitResult hit, int timeoutTicks) {
-        // 先检查当前控制权和有无旧动作，再占用本刻交互机会，记录目标原状态后开始挖；
-        // 本刻不收（机会被占用或上一动作没结清）时交回 null，由调用方下一刻再开挖。
-        if (!acceptSubmission(context)) return null;
-        PendingInteraction pending = new PendingInteraction(
-                PendingInteraction.Kind.BREAK_BLOCK,
-                context,
-                timeoutTicks,
-                2,
-                InteractionConfirmation.blockBecomesAir(
-                        hit.getBlockPos(), context.level().getBlockState(hit.getBlockPos())),
-                hit.getBlockPos(),
-                hit.getDirection());
-        install(pending);
-        try {
-            gameMode(context).startDestroyBlock(hit.getBlockPos(), hit.getDirection());
-            context.localPlayer().swing(InteractionHand.MAIN_HAND);
-        } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining start threw after entering the client action path");
-        }
-        return poll(context, pending);
+        return mining.start(context, hit, timeoutTicks);
     }
 
     @Override
     public PendingInteraction cancelBreaking(PlayerContext context, PendingInteraction pending) {
-        // 先看是否已经挖完；仍在挖才发停止，避免把刚确认完成的操作改说成取消。
-        requireCurrent(context);
-        requireActive(pending, PendingInteraction.Kind.BREAK_BLOCK);
-        poll(context, pending);
-        if (pending.terminal()) {
-            pendingBreakCancellationReason = null;
-            return pending;
-        }
-        // 本刻没有交互机会就先不停：等待记录原样交回，调用方下一刻再来停。
-        if (!claimSubmission(context)) return pending;
-        try {
-            gameMode(context).stopDestroyBlock();
-            pending.finish(PendingInteraction.Status.CANCELLED,
-                    "native mining was cancelled before confirmation");
-        } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining cancellation could not be confirmed");
-        }
-        pendingBreakCancellationReason = null;
-        return pending;
+        return mining.stop(context, pending);
     }
 
     @Override
     public PendingInteraction cancelBreakingForTaskBoundary(
-            PlayerContext context,
-            PendingInteraction pending,
-            String boundaryReason) {
-        // 任务结束时本刻可能已经用过交互机会；来不及停挖就记下来，让下一刻在新任务之前先停止。
-        requireActive(pending, PendingInteraction.Kind.BREAK_BLOCK);
-        poll(context, pending);
-        if (pending.terminal()) {
-            pendingBreakCancellationReason = null;
-            return pending;
-        }
-        String reason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before native mining confirmation"
-                : boundaryReason;
-        if (context.tryClaimInteraction()) {
-            try {
-                gameMode(context).stopDestroyBlock();
-                pending.finish(PendingInteraction.Status.CANCELLED, reason);
-            } catch (RuntimeException failure) {
-                pending.finish(PendingInteraction.Status.UNCERTAIN,
-                        reason + "; native mining cancellation could not be confirmed");
-            }
-            pendingBreakCancellationReason = null;
-            return pending;
-        }
-        pendingBreakCancellationReason = reason;
-        return pending;
+            PlayerContext context, PendingInteraction pending, String boundaryReason) {
+        return mining.stopForTaskBoundary(context, pending, boundaryReason);
     }
 
     @Override
     public PendingInteraction continueBreaking(PlayerContext context, PendingInteraction pending) {
-        // 同一挖掘每刻最多推进一次，且先读取当前结果，已经完成就不再继续挥手。
-        requireCurrent(context);
-        requireActive(pending, PendingInteraction.Kind.BREAK_BLOCK);
-        poll(context, pending);
-        if (pending.terminal() || pending.lastNativeTick() == context.clientTick()) return pending;
-        // 本刻没有交互机会就这一刻不挥手：等待记录原样交回，下一刻接着挖。
-        if (!claimSubmission(context)) return pending;
-        try {
-            gameMode(context).continueDestroyBlock(pending.breakTarget(), pending.breakFace());
-            context.localPlayer().swing(InteractionHand.MAIN_HAND);
-            pending.nativeAdvanced(context.clientTick());
-        } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining continuation threw before the block outcome was confirmed");
-        }
-        return poll(context, pending);
+        return mining.advance(context, pending);
     }
 
     @Override
@@ -596,8 +518,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     @Override public void deferBreakCancellationForTaskBoundary(PendingInteraction pending, String boundaryReason) {
         if (pending == null || pending.terminal() || pending != active
                 || pending.kind() != PendingInteraction.Kind.BREAK_BLOCK) return;
-        pendingBreakCancellationReason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before native mining confirmation" : boundaryReason;
+        mining.oweCancellation(boundaryReason);
     }
 
     /**
@@ -626,7 +547,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         }
         // 换世界、死亡或 F8 交还控制时，副手的旧等待也必须结束，不能带到新操作者身上。
         if (auxiliary != null && !auxiliary.terminal()) auxiliary.finish(PendingInteraction.Status.UNCERTAIN, reason);
-        pendingBreakCancellationReason = null;
+        mining.clearCancellation();
     }
 
     // 物品使用的任务边界收场：期限或确认先给了结论的照读不翻案；已起手的持续使用把停手欠给边界，
@@ -658,23 +579,23 @@ public final class DefaultInteractionSender implements InteractionSender {
         return pending;
     }
 
-    private void install(PendingInteraction pending) {
+    void install(PendingInteraction pending) {
         mainHandStop.drop(); // 新原生动作接管时丢弃旧欠账，不替后来者松手或换物。
         active = pending;
         // 新的一次点击不继承上一次举盾的持用状态，避免无线终端被当作已经松开的盾牌。
         activeItemUseWasHeld = false;
         activeProtocolUsesMenu = false;
-        pendingBreakCancellationReason = null;
+        mining.clearCancellation();
     }
 
     // 上下文必须属于本刻：旧刻的上下文可能指着已经换掉的玩家或连接。
-    private static void requireCurrent(PlayerContext context) {
+    static void requireCurrent(PlayerContext context) {
         if (context == null || !context.isCurrent()) throw new IllegalArgumentException("the player context must belong to the current tick");
     }
 
     // 发包前：角色仍归自动化控制（F8 交还后不能再发），并占用本刻唯一的交互机会。
     // 本刻机会被占用时不抛异常，交回假由提交方法返回显式的「本刻不收」；上下文过期仍是调用方的协议错误。
-    private static boolean claimSubmission(PlayerContext context) {
+    static boolean claimSubmission(PlayerContext context) {
         requireCurrent(context);
         return context.tryClaimInteraction();
     }
@@ -724,11 +645,11 @@ public final class DefaultInteractionSender implements InteractionSender {
      * 先查空位再占机会，过不了闸（上一动作还在等确认、或本刻机会被占用）不烧掉这一刻；
      * 提交方法随即返回 null 表示「本刻不收」。
      */
-    private boolean acceptSubmission(PlayerContext context) {
+    boolean acceptSubmission(PlayerContext context) {
         return idleForNewSubmission(context) && claimSubmission(context);
     }
 
-    private void requireActive(PendingInteraction pending, PendingInteraction.Kind kind) {
+    void requireActive(PendingInteraction pending, PendingInteraction.Kind kind) {
         if (pending == null || pending != active && pending != auxiliary || pending.kind() != kind) {
             throw new IllegalArgumentException("the pending interaction is not the active native action");
         }
@@ -744,45 +665,20 @@ public final class DefaultInteractionSender implements InteractionSender {
         // 每刻先读旧结果；如果有任务已经结束却还没来得及松开挖掘，就先处理这次停止。
         PendingInteraction pending = active;
         if (pending == null || pending.terminal()) {
-            pendingBreakCancellationReason = null;
+            mining.clearCancellation();
             abandonedItemUse.forget();
             return;
         }
         // 持用可能在服务器确认后才开始；持续记录真实状态，瞬时开菜单则一直等待菜单或截止时间。
         if (pending.kind() == PendingInteraction.Kind.USE_ITEM && context.localPlayer().isUsingItem())
             activeItemUseWasHeld = true;
-        if (pendingBreakCancellationReason == null) {
-            poll(context, pending);
-            abandonedItemUse.retire(context, pending, activeItemUseWasHeld, pending == active);
-            return;
-        }
-
+        // 欠着的停挖先结清它；没有欠账就按普通推进读结果、收尾弃用的持用。
+        if (mining.settleOwedCancellation(context, pending)) return;
         poll(context, pending);
-        if (pending.terminal()) {
-            pendingBreakCancellationReason = null;
-            return;
-        }
-        if (pending.kind() != PendingInteraction.Kind.BREAK_BLOCK) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "a task-boundary break cancellation no longer owned the active break interaction");
-            pendingBreakCancellationReason = null;
-            return;
-        }
-        if (!context.tryClaimInteraction()) return;
-        try {
-            gameMode(context).stopDestroyBlock();
-            pending.finish(PendingInteraction.Status.CANCELLED,
-                    pendingBreakCancellationReason);
-        } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    pendingBreakCancellationReason
-                            + "; native mining cancellation could not be confirmed");
-        } finally {
-            pendingBreakCancellationReason = null;
-        }
+        abandonedItemUse.retire(context, pending, activeItemUseWasHeld, pending == active);
     }
 
-    private static MultiPlayerGameMode gameMode(PlayerContext context) {
+    static MultiPlayerGameMode gameMode(PlayerContext context) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.gameMode == null) throw new IllegalStateException("no active client game mode");
         return minecraft.gameMode;

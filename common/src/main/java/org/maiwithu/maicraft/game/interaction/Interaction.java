@@ -13,11 +13,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -578,14 +576,14 @@ public final class Interaction {
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
             PendingInteraction submitted = sender.useItem(
-                    context, hand, itemUseConfirmation(hand, before),
+                    context, hand, UseConfirmations.itemUse(player, hand, before),
                     CONFIRM_TIMEOUT_TICKS);
             // 提交入口这一刻不收：不算失败，下一刻原样再点。
             if (submitted == null) return false;
             pending = submitted;
         } else {
             PendingInteraction submitted = sender.useBlock(
-                    context, hand, hit, blockUseConfirmation(hit, hand),
+                    context, hand, hit, UseConfirmations.blockUse(player, hit, hand),
                     CONFIRM_TIMEOUT_TICKS);
             // 提交入口这一刻不收：不算失败，下一刻原样再点，也不把预想面记成已点击。
             if (submitted == null) return false;
@@ -621,47 +619,6 @@ public final class Interaction {
         failReason = action + " was not confirmed: " + detail + (trace.isEmpty() ? "" : "; " + trace);
         hardFail = true;
         return false;
-    }
-
-    // 点击格、相邻格、手中物品或菜单只要有一项变化，就作为点击已生效的线索。
-    // 它没有验证每种物品真正想产生的完整结果，也没有证明变化一定由这次点击造成。
-    private InteractionConfirmation blockUseConfirmation(BlockHitResult hit, InteractionHand usedHand) {
-        BlockPos clicked = hit.getBlockPos().immutable();
-        BlockPos adjacent = clicked.relative(hit.getDirection()).immutable();
-        var clickedBefore = player.level().getBlockState(clicked);
-        ItemStack heldBefore = player.getItemInHand(usedHand).copy();
-        int beforeMenu = player.containerMenu.containerId;
-        InteractionConfirmation adjacentChanged = player.level().isLoaded(adjacent)
-                ? InteractionConfirmation.blockChanged(
-                        adjacent, player.level().getBlockState(adjacent))
-                : InteractionConfirmation.pending();
-        // 告示牌右键的原生效果是打开编辑屏，四项世界观察全都察觉不到；把屏幕出现补进确认依据，
-        // 否则点击注定以“未确认”超时收场，后续写字阶段根本拿不到执行权。
-        InteractionConfirmation signEditor = clickedBefore.getBlock() instanceof SignBlock
-                ? InteractionConfirmation.signEditorScreenOpened()
-                : InteractionConfirmation.pending();
-        // 打火石把落格的火或传送门方块补进确认依据；只有耐久变化时确认虽可通过，
-        // 火是否真实出现仍由调用方的事后检查如实裁决，不在这里改写结论。
-        InteractionConfirmation ignition = heldBefore.is(Items.FLINT_AND_STEEL)
-                ? InteractionConfirmation.ignitionWorldEffect(clicked.relative(hit.getDirection()))
-                : InteractionConfirmation.pending();
-        return InteractionConfirmation.anyOf(
-                InteractionConfirmation.blockChanged(clicked, clickedBefore),
-                adjacentChanged,
-                InteractionConfirmation.heldItemChanged(usedHand, heldBefore),
-                InteractionConfirmation.menuChanged(beforeMenu),
-                signEditor,
-                ignition);
-    }
-
-    private InteractionConfirmation itemUseConfirmation(InteractionHand usedHand, ItemStack heldBefore) {
-        int beforeMenu = player.containerMenu.containerId;
-        return InteractionConfirmation.anyOf(
-                InteractionConfirmation.heldItemChanged(usedHand, heldBefore),
-                InteractionConfirmation.menuChanged(beforeMenu),
-                c -> c.localPlayer().isUsingItem()
-                        ? InteractionConfirmation.Verdict.APPLIED
-                        : InteractionConfirmation.Verdict.PENDING);
     }
 
     /**
@@ -723,37 +680,20 @@ public final class Interaction {
         if (fallingThrough) {
             ItemStack before = player.getItemInHand(hand).copy();
             PendingInteraction submitted = sender.useItem(
-                    context, hand, itemUseConfirmation(hand, before),
+                    context, hand, UseConfirmations.itemUse(player, hand, before),
                     CONFIRM_TIMEOUT_TICKS);
             // 提交入口这一刻不收：不算失败，下一刻原样再点。
             if (submitted == null) return false;
             pending = submitted;
         } else {
             PendingInteraction submitted = sender.interact(
-                    context, entity, hand, entityUseConfirmation(entity, hand),
+                    context, entity, hand, UseConfirmations.entityUse(player, entity, hand),
                     CONFIRM_TIMEOUT_TICKS);
             // 提交入口这一刻不收：不算失败，下一刻原样再点。
             if (submitted == null) return false;
             pending = submitted;
         }
         return false;
-    }
-
-    // 用手中物品、打开的菜单或乘坐关系变化来判断实体交互；其他变化如羊是否被剪毛不在这份观察里。
-    private InteractionConfirmation entityUseConfirmation(Entity target, InteractionHand usedHand) {
-        Entity vehicleBefore = player.getVehicle();
-        int passengersBefore = target.getPassengers().size();
-        ItemStack heldBefore = player.getItemInHand(usedHand).copy();
-        int beforeMenu = player.containerMenu.containerId;
-        InteractionConfirmation ridingChanged = c ->
-                c.localPlayer().getVehicle() != vehicleBefore
-                        || target.getPassengers().size() != passengersBefore
-                        ? InteractionConfirmation.Verdict.APPLIED
-                        : InteractionConfirmation.Verdict.PENDING;
-        return InteractionConfirmation.anyOf(
-                InteractionConfirmation.heldItemChanged(usedHand, heldBefore),
-                InteractionConfirmation.menuChanged(beforeMenu),
-                ridingChanged);
     }
 
     // 实际视线与目标差不超过 7° 才算转头到位；后续射线检查还要确认没有点到别的东西。
