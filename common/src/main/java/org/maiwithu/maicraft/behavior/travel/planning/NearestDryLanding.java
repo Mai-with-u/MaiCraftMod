@@ -1,9 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.planning;
 
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.BiFunction;
+
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -32,28 +38,15 @@ public final class NearestDryLanding {
      */
     public static Optional<WorldPosition> near(int x, int z, int radius,
             BiFunction<Integer, Integer, OptionalInt> landingOf, String dimension) {
-        double best = Double.MAX_VALUE;
-        int bestX = 0;
-        int bestZ = 0;
-        OptionalInt bestY = OptionalInt.empty();
-        // 方形一圈一圈往外扫，按到目标柱的实际水平距离挑最近的：斜向上一圈里有几格远近不同，不按扫描先后取。
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                OptionalInt y = landingOf.apply(x + dx, z + dz);
-                if (y.isEmpty()) {
-                    continue;
-                }
-                double distance = Math.hypot(dx, dz);
-                if (distance < best) {
-                    best = distance;
-                    bestX = x + dx;
-                    bestZ = z + dz;
-                    bestY = y;
-                }
-            }
-        }
-        return bestY.isPresent()
-                ? Optional.of(new WorldPosition(bestX, bestY.getAsInt(), bestZ, dimension))
-                : Optional.empty();
+        // 环扫交给内核：方形一圈的边界原样传入，按到目标柱的实际水平距离挑最近的第一个；
+        // 斜向上一圈里有几格远近不同，不按扫描先后取，一样近时保留先扫到的。
+        List<BlockPos> spots = SpotScan.columns(x - radius, z - radius, x + radius, z + radius, 1,
+                (columnX, columnZ) -> landingOf.apply(columnX, columnZ).stream()
+                        .mapToObj(y -> new BlockPos(columnX, y, columnZ)).findFirst(),
+                Comparator.comparingDouble(feet -> Math.hypot(feet.getX() - x, feet.getZ() - z)),
+                1);
+        return spots.isEmpty() ? Optional.empty()
+                : Optional.of(new WorldPosition(spots.get(0).getX(), spots.get(0).getY(),
+                        spots.get(0).getZ(), dimension));
     }
 }

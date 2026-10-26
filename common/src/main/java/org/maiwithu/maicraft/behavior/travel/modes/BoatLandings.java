@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.modes;
 
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -9,6 +8,8 @@ import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+
+import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
 
 /**
@@ -34,20 +35,14 @@ public final class BoatLandings {
      */
     public static List<BlockPos> around(Function<BlockPos, Optional<BlockState>> read, BlockPos shore,
             BlockPos destination) {
-        List<BlockPos> spots = new ArrayList<>();
-        int yHint = shore.getY();
-        for (int dx = -SEARCH_RADIUS; dx <= SEARCH_RADIUS; dx++) {
-            for (int dz = -SEARCH_RADIUS; dz <= SEARCH_RADIUS; dz++) {
-                int x = shore.getX() + dx;
-                int z = shore.getZ() + dz;
-                WaterCrossing.standFeet(read, x, z, yHint).ifPresent(feetY -> {
-                    BlockPos feet = new BlockPos(x, feetY, z);
-                    if (touchesWater(read, feet)) spots.add(feet);
-                });
-            }
-        }
-        spots.sort(Comparator.comparingDouble(spot -> spot.distSqr(destination)));
-        return spots.size() > LIMIT ? List.copyOf(spots.subList(0, LIMIT)) : spots;
+        // 环扫交给内核：这一柱挑得出干地脚位、又紧挨着能划的水面才算靠岸点（挨水的要求折进列函数里）；
+        // 按离目的地近先排，只留前 LIMIT 个备换。
+        return SpotScan.columns(shore.getX() - SEARCH_RADIUS, shore.getZ() - SEARCH_RADIUS,
+                shore.getX() + SEARCH_RADIUS, shore.getZ() + SEARCH_RADIUS, 1,
+                (x, z) -> WaterCrossing.standFeet(read, x, z, shore.getY()).stream()
+                        .mapToObj(feetY -> new BlockPos(x, feetY, z)).findFirst()
+                        .filter(feet -> touchesWater(read, feet)),
+                Comparator.comparingDouble(spot -> spot.distSqr(destination)), LIMIT);
     }
 
     /** 这一格紧挨着能划的水面：四邻的柱子里有一柱顶上是活水（没冻住），水面低在脚下一两格也算挨着。 */
