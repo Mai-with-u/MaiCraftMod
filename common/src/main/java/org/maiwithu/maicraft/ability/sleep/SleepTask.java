@@ -264,6 +264,10 @@ class SleepTask extends PhasedTask<SleepTask.Phase> {
         }
         if (status instanceof ActionStatus.Done) {
             enteredSleep = true;
+            // 躺进的是哪张床写进回执：试过的床各自带着拒绝记录躺在 attempts 里，
+            // 成功的这一条不写，读回执的人会拿最后一条失败记录当成实际躺下的床
+            // （实机回执只见"点床 63, 65, -44 被拒"，人却躺在 93, 64, -68 的床上）。
+            recordAttempt("点床 " + chosenBed.toShortString(), "躺下了");
             // 原版躺下时把重生点设到这张床。
             spawnSetAt = chosenBed;
             // 躺下了：记住这张床，下次夜里离家不远就回这张床睡。

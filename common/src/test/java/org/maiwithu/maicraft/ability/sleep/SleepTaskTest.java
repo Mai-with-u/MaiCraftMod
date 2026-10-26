@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -279,6 +280,26 @@ class SleepTaskTest {
         assertEquals(List.of(BED_A), approaches.targets);
         // 躺下了就记住这张床，下次夜里离它不远就回来睡。
         assertEquals(List.of(BED_A), scanner.sleptIn);
+        // 回执写明实际躺进的是哪张床：失败记录躺在 attempts 里时，成功的这条不写，
+        // 读回执的人会把最后一条失败记录当成实际躺下的床。
+        assertTrue(result.attempts().contains(new Attempt("点床 " + BED_A.toShortString(), "躺下了")),
+                result.attempts().toString());
+    }
+
+    @Test
+    void aCheckedBedIsChosenOverACloserUnverifiedRememberedOne() {
+        // 实机三夜样本：身边有床，显式 sleep 却睡到几十格外一张区块没加载、没核对过的记忆床上。
+        // 没核对过的记忆床不抢在核对过的床前面：哪怕它离得近，先走近扫到的那张。
+        BlockPos remembered = new BlockPos(93, 64, -68);
+        FakeScanner scanner = new FakeScanner();
+        scanner.offer(new BedScanner.BedScan(List.of(
+                new BedCandidate(remembered, false, false, false, 6, true),
+                new BedCandidate(BED_A, false, false, false, 40)), true));
+        StubUsesBeds usesBeds = new StubUsesBeds();
+        TaskResult result = runToCompletion(task(scanner, new StubPlacer(), new StubObtain(),
+                new StubApproaches(), usesBeds, () -> null, Optional::empty));
+        assertEquals(List.of(BED_A), usesBeds.clicked, "选了扫到并核对过的床");
+        assertEquals(TaskResult.Status.DONE, result.status());
     }
 
     @Test
