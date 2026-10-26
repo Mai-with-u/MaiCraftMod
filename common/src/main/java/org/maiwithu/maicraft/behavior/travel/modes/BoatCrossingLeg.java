@@ -118,6 +118,19 @@ final class BoatCrossingLeg implements TravelLeg {
             ActionStatus settled = settlePending(live);
             if (settled != null) return settled;
         }
+        // 被要求停下、还没坐上船（备船、走到岸边、放船、走过去坐上）：停在原地，不再放船、上船、划出去；
+        // 手上那一下要先收尾（走路跳在半空）就先推进它到落地站稳，再收掉它停下。放船等确认的那一下等完再停；
+        // 正好这一刻已经坐进船里的，照划船时被叫停的样子在水面停下。
+        if (stopRequested && pending == null && step != Step.ROW && step != Step.DISMOUNT && step != Step.SETTLE
+                && !(live.localPlayer().getVehicle() instanceof Boat)) {
+            if (current != null && !current.stoppedSafely()) {
+                current.tick(context);
+                return ActionStatus.running();
+            }
+            dropCurrent();
+            return failed("按要求停下，停在 " + live.localPlayer().blockPosition().toShortString() + "，还没坐上船",
+                    Problem.Kind.STUCK, null);
+        }
         // 手上没有动作：按步骤起下一步；走到那一步先看停稳的运行能不能从原地接着走。
         if (current == null) {
             if (step == Step.WALK) return resumeWalk();
@@ -463,9 +476,11 @@ final class BoatCrossingLeg implements TravelLeg {
         return current == null ? Interruptibility.WORKING : current.interruptibility();
     }
 
-    // 要求先到安全的地方再停：划在半路停不下来，等这一段把人送上岸或如实停下。
+    // 要求先到安全的地方再停：坐上船以后划在半路停不下来，等这一段把人送上岸或如实停下；
+    // 还没坐上船时手上那一下转给它，走路跳在半空的先落地站稳，再停在岸上。
     @Override public void requestSafeStop() {
         stopRequested = true;
+        if (current != null) current.stopSafely();
     }
 
     // 让给生存需求：松开按键船停原地，回来接着划；手上的走到先松开，停稳后由运行自己从原地接着走。
