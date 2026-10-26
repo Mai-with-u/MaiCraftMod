@@ -6,7 +6,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.maiwithu.maicraft.ability.vehicle.api.StabilizedPlan;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -20,7 +22,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 看一辆载具（machine_inspect 指结构的观察编号 s#）：问各联动的读载具办法谁读得了，读一次交出 vehicle 一节——
- * 种类、座位、每个控制件输入接到谁与推出来的角色、姿态与接地，再合上操纵表（试过的、LLM 定的）查必需角色缺哪个。
+ * 种类、座位、每个控制件输入接到谁与推出来的角色、姿态与接地，再合上操纵表（试过的、LLM 定的）查必需角色缺哪个；
+ * 装着飞行稳定器（Create: Flight Control）时另列一节：每个稳定器的样子、代理每个面接到哪个键、开的时候走哪条路。
  * 要受力时再问服务端（要几刻）：开着动力与关着动力两种静态情况往哪边倒、升力比重量，要配重再给几处位置；
  * 最多等 10 秒，问不到照实写原因，载具的其余部分照样交。只读。
  */
@@ -49,14 +52,15 @@ final class VehicleInspectTask extends PhasedTask<VehicleInspectTask.Phase> {
         }
     }
 
-    /** 结果细节：vehicle 一节、合并后的操纵表、受力（没要为 null）。 */
-    record Details(VehicleReader.View vehicle, VehicleControls.ControlMap controlMap, VehicleReader.Balance balance)
-            implements ResultDetails {}
+    /** 结果细节：vehicle 一节、合并后的操纵表、受力（没要为 null）、飞行稳定器（没装为 null）。 */
+    record Details(VehicleReader.View vehicle, VehicleControls.ControlMap controlMap, VehicleReader.Balance balance,
+                   StabilizedPlan.Section stabilizers) implements ResultDetails {}
 
     private final Input input;
     private final MachineVehicles vehicles;
     private VehicleReader.View view;
     private VehicleControls.ControlMap controlMap;
+    private StabilizedPlan.Section stabilizers;
     private VehicleReader.BalanceQuery query;
     private VehicleReader.Balance balance;
     private String summary;
@@ -92,6 +96,14 @@ final class VehicleInspectTask extends PhasedTask<VehicleInspectTask.Phase> {
                 + view.controls().size() + " 个输入（推出角色的 " + known + " 个" + (roles.isEmpty() ? "" : "：" + roles)
                 + "），" + view.state().contact() + (view.complete() ? "" : "；没读全")
                 + (controlMap.missing().isEmpty() ? "；开它要的角色都齐了" : "；开它还缺：" + String.join("、", controlMap.missing()));
+        // 装着飞行稳定器：列进控制回路，并说清 vehicle_drive 开它时走"设目标高度 + 给方向"还是照旧按键、为什么。
+        Optional<FlightStabilizers.Setup> setup = vehicles.stabilizers(view.structureId());
+        if (setup.isPresent() && !setup.get().stabilizers().isEmpty()) {
+            StabilizedPlan.Plan plan = StabilizedPlan.of(view.kind(), view.controls(), setup.get());
+            stabilizers = StabilizedPlan.section(setup.get(), plan);
+            summary += "；装着 " + setup.get().stabilizers().size() + " 个飞行稳定器，"
+                    + (plan.ready() ? "开的时候设目标高度、按键给方向（不用升力、转向键）" : "开的时候照旧按键：" + plan.why());
+        }
         if (input.balance() == null) return Next.done(TaskResult.done(summary));
         query = vehicles.readers().stream().map(reader -> reader.balance(input.structureId(), "ballast".equals(input.balance())))
                 .flatMap(Optional::stream).findFirst().orElse(null);
@@ -122,7 +134,7 @@ final class VehicleInspectTask extends PhasedTask<VehicleInspectTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return view == null ? ResultDetails.NONE : new Details(view, controlMap, balance);
+        return view == null ? ResultDetails.NONE : new Details(view, controlMap, balance, stabilizers);
     }
 
     @Override protected String describePhase(Phase value) {

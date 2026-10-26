@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 
@@ -20,10 +21,11 @@ import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
  * @param structureOf 观察编号 s# 换成结构身份；不是结构或已经不在为空
  * @param schedulers  给列车定时刻表的办法（machine_configure 指列车车厢 e# 时用）
  * @param entityOf    观察编号 e# 换成游戏里的实体编号；不是实体或已经不在为空
+ * @param stabilizers 读飞行稳定器的办法：看载具时把装着的稳定器列进控制回路（模组没装时为空）
  */
 public record MachineVehicles(List<VehicleReader> readers, VehicleControls controls,
                               Function<String, Optional<String>> structureOf, List<TrainScheduler> schedulers,
-                              Function<String, Optional<Integer>> entityOf) {
+                              Function<String, Optional<Integer>> entityOf, List<FlightStabilizers> stabilizers) {
 
     public MachineVehicles {
         readers = List.copyOf(readers);
@@ -31,10 +33,16 @@ public record MachineVehicles(List<VehicleReader> readers, VehicleControls contr
         Objects.requireNonNull(structureOf, "structureOf");
         schedulers = List.copyOf(schedulers);
         Objects.requireNonNull(entityOf, "entityOf");
+        stabilizers = List.copyOf(stabilizers);
     }
 
     /** 读这个结构：第一个读得了的来读。 */
     Optional<VehicleReader.View> read(String structureId) {
         return readers.stream().map(reader -> reader.read(structureId)).flatMap(Optional::stream).findFirst();
+    }
+
+    /** 这个结构上的飞行稳定器：第一个读得了的来读；没装模组、结构不在为空。 */
+    Optional<FlightStabilizers.Setup> stabilizers(String structureId) {
+        return stabilizers.stream().map(reader -> reader.read(structureId)).flatMap(Optional::stream).findFirst();
     }
 }
