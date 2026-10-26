@@ -131,4 +131,33 @@ class BedChooserTest {
         assertTrue(screening.describe().contains("1 张被占用"));
         assertTrue(screening.describe().contains("1 张试过睡不上"));
     }
+
+    @Test
+    void blockedAndGoneBedsCountByTheirOwnReason() {
+        // 点不上（被挡、太远、路走不通）和走到跟前发现床没了，是两样不同的游戏事实，各归各的原因，
+        // 不混进"试过睡不上"；话术里说得出各有几张。
+        BlockPos blocked = new BlockPos(1, 64, 0);
+        BlockPos gone = new BlockPos(2, 64, 0);
+        BedChooser.Screening screening = BedChooser.screen(
+                List.of(bed(1, 0, false, false, false, 1), bed(2, 0, false, false, false, 2)),
+                Set.of(blocked, gone),
+                Map.of(blocked, BedRefusal.BLOCKED, gone, BedRefusal.GONE),
+                null, Double.MAX_VALUE);
+        assertEquals(1, screening.blocked());
+        assertEquals(1, screening.gone());
+        assertEquals(0, screening.tried());
+        assertTrue(screening.describe().contains("1 张被挡住或太远点不上"));
+        assertTrue(screening.describe().contains("1 张已经不在了"));
+    }
+
+    @Test
+    void reasonsAreListedEvenWhenAUsableBedRemains() {
+        // 选上了床也不许把被筛掉的账吞掉：还剩能睡的床时，分类说明照样列出筛掉的原因。
+        BedChooser.Screening screening = BedChooser.screen(
+                List.of(bed(1, 0, true, false, false, 1), bed(9, 0, false, false, false, 9)),
+                Set.of(), null, Double.MAX_VALUE);
+        assertEquals(1, screening.usable());
+        assertTrue(screening.describe().contains("其中 1 张能睡"));
+        assertTrue(screening.describe().contains("1 张被占用"));
+    }
 }

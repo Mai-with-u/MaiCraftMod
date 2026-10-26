@@ -19,8 +19,10 @@ import net.minecraft.world.level.block.state.properties.BedPart;
  * @param protectedLand 是不是落在这次任务点名保护的地标里
  * @param hostileNear   周围（水平八格、垂直五格）有没有敌对生物——原版不让在怪边睡
  * @param distance      角色到这一格的直线距离（格），近似路径代价
- * @param unverified    这张床没经现场核对（记忆里召回、所在区块没加载，占用、怪物、
- *                      床还在不在都不知道）：只当指路的话，不与扫到并核对过的床抢首选
+ * @param unverified    这张床没经现场核对。可信度语义只在这里定义：核对过 = 当刻读了床还在不在、
+ *                      被占、受保护、床边有没有怪这几项（不管它来自现场扫描还是记忆召回）；
+ *                      未核对 = 只凭记忆召回、所在区块没加载，一项都没读。未核对的床
+ *                      只当指路的话，不与核对过的床抢首选
  */
 public record BedCandidate(BlockPos cell, boolean occupied, boolean protectedLand,
         boolean hostileNear, double distance, boolean unverified) {

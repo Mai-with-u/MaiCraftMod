@@ -96,6 +96,16 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
         registeredLevel = level;
     }
 
+    /**
+     * 找床的候选有两个来源，可信度都在 {@link BedCandidate} 一处定义：
+     * <ul>
+     * <li>现场扫描：已加载世界里按床的种类扫，每张命中都当刻核对床还在不在、被占、受保护、床边有没有怪——核对过；</li>
+     * <li>自己睡过、见过、放下过的床（世界记忆里的工作台账）：床所在那片加载着就同样当刻核对——核对过；
+     *     区块没加载就照记忆照报——未核对，只当指路的话，排在核对过的床后面。</li>
+     * </ul>
+     * 记忆这份账由感知（看见一张床记一条）、睡过、亲手放下各自写进来，床拆了记录不会自己消失：
+     * 召回时发现那格已经不是床，就当"床没了"把这条账忘掉，下次不再按它指路。
+     */
     @Override
     public BedScan scan(TickContext tick, Set<BlockPos> excluded, Set<String> protectedLandmarks) {
         PlayerContext current = context.get();
@@ -110,7 +120,10 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
         List<BedCandidate> candidates = new ArrayList<>();
         Set<BlockPos> seen = new HashSet<>();
         for (BlockPos hit : found.hits()) {
+            // 扫描索引里可能留着方块还没来得及更新的旧位置（客户端预测、同步次序）：用前核对实际世界，
+            // 那格已经不是床就当没这一条，不报也不当"床没了"。
             BedCandidate bed = inspect(level, hit, current, protectedLandmarks);
+            if (bed == null) continue;
             // 一张完整的床占两格、扫描命中两次：折到床头后只报一张。
             if (seen.add(bed.cell())) {
                 candidates.add(bed);
@@ -139,7 +152,12 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
                 }
                 continue;
             }
-            if (!(level.getBlockState(cell).getBlock() instanceof BedBlock)) continue;
+            if (!(level.getBlockState(cell).getBlock() instanceof BedBlock)) {
+                // 床所在那片加载着、那格却不是床：这条"这里有床"的账已经不对了，当场忘掉，
+                // 下次不再按它指路（实机按一条早已不在的床记忆反复往空地走）。
+                memory.forget(MemoryKind.WORKSTATION, here(cell));
+                continue;
+            }
             BedCandidate bed = inspect(level, cell, current, landmarks);
             if (seen.add(bed.cell())) candidates.add(bed);
         }
@@ -186,12 +204,16 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
     /**
      * 现场查一次命中：命中格可能是床头或床尾，先折成睡它要对着点的那一格——床头不在的半张床
      * 也照报，不再当作"半张床"悄悄丢掉（世界明明有床，选床却当没有，就退化成去现做一张）。
+     * 命中格已经不是床（索引里留着的旧位置）时不报，返回空。
      * 占用读锚点格；保护只问这次任务点名保护的地标——睡是"用"床不是动方块，
      * 别人放的床、归属还没问到的床都照睡（村庄的床本来就是给人睡的），
      * "归属拿不准就按受保护处理"是拆改方块的规矩，不套在用床上。
      */
     private BedCandidate inspect(ClientLevel level, BlockPos hit, PlayerContext current, Set<String> landmarks) {
         BlockState state = level.getBlockState(hit);
+        if (!(state.getBlock() instanceof BedBlock)) {
+            return null;
+        }
         boolean headHit = state.getValue(BedBlock.PART) == BedPart.HEAD;
         BlockState stateTowardHead = headHit
                 ? state

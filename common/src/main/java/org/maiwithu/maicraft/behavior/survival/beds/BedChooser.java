@@ -72,26 +72,31 @@ public final class BedChooser {
 
     /**
      * 一次筛选的分类：扫到的床各有几张开不出去、还剩几张能用。
-     * 每张床只归一个主因，按"试过 → 被占用 → 床边有怪 → 受保护 → 太远 → 出了床区"的先后归类，各类相加等于扫到的总数。
+     * 每张床只归一个主因，按"试过 → 被占用 → 床边有怪 → 受保护 → 被挡 → 床没了 → 太远 → 出了床区"的先后归类，
+     * 各类相加等于扫到的总数。
      * 试过的床带着躺下时被拒的原因（见 {@link BedRefusal}）的，按原因各归各的，不算"试过"。
      */
     public record Screening(int scanned, int tried, int occupied, int hostileNear, int protectedLand,
-            int tooFar, int outOfArea, int usable) {
+            int blocked, int gone, int tooFar, int outOfArea, int usable) {
 
         /** 给人看的一句话：附近有没有床、开不出去的开不在哪，找床失败的说明带上它才分得清"没床"和"有床睡不上"。 */
         public String describe() {
             if (scanned == 0) {
                 return "附近扫过了，没有看到床块";
             }
+            StringBuilder why = new StringBuilder("扫到 ").append(scanned).append(" 张床");
             if (usable > 0) {
-                return "扫到 " + scanned + " 张床，其中 " + usable + " 张能睡";
+                why.append("，其中 ").append(usable).append(" 张能睡");
+            } else {
+                why.append("，都睡不上");
             }
-            StringBuilder why = new StringBuilder("扫到 ").append(scanned).append(" 张床，都睡不上");
             List<String> reasons = new ArrayList<>();
             if (tried > 0) reasons.add(tried + " 张试过睡不上");
             if (occupied > 0) reasons.add(occupied + " 张被占用");
             if (hostileNear > 0) reasons.add(hostileNear + " 张床边有怪");
             if (protectedLand > 0) reasons.add(protectedLand + " 张在受保护的地标里");
+            if (blocked > 0) reasons.add(blocked + " 张被挡住或太远点不上");
+            if (gone > 0) reasons.add(gone + " 张已经不在了");
             if (tooFar > 0) reasons.add(tooFar + " 张超出这次肯走的距离");
             if (outOfArea > 0) reasons.add(outOfArea + " 张在指定床区之外");
             for (String reason : reasons) {
@@ -111,8 +116,9 @@ public final class BedChooser {
     }
 
     /**
-     * 同上，试过的床带上躺下被拒的原因：扫描时没看出来的拒绝（怪走近了、床被占了）发生在点床那一刻，
-     * 只有这里把原因接进分类，找床失败的话术才分得清"床边有怪、被占用"和"试过但说不上为什么"。
+     * 同上，试过的床带上被排除的原因：扫描时没看出来的拒绝（怪走近了、床被占了、床被挡了、床没了）
+     * 发生在点床或走近那一刻，只有这里把原因接进分类，找床失败的话术才分得清
+     * "床边有怪、被占用、被挡、不在了"和"试过但说不上为什么"。
      */
     public static Screening screen(List<BedCandidate> candidates, Set<BlockPos> excluded,
             Map<BlockPos, BedRefusal> refusedWhy, WorldPosition bedArea, double maxDistance) {
@@ -120,17 +126,23 @@ public final class BedChooser {
         int occupied = 0;
         int hostileNear = 0;
         int protectedLand = 0;
+        int blocked = 0;
+        int gone = 0;
         int tooFar = 0;
         int outOfArea = 0;
         int usable = 0;
         for (BedCandidate bed : candidates) {
             if (excluded.contains(bed.cell())) {
-                // 试过的床按躺下时被拒的原因归类：原版认出的占用、有怪各归各的，没记下原因的才算"试过"。
+                // 试过的床按排除时的原因归类：原版认出的占用、有怪、被挡、床没了各归各的，没记下原因的才算"试过"。
                 BedRefusal why = refusedWhy.get(bed.cell());
                 if (why == BedRefusal.OCCUPIED) {
                     occupied++;
                 } else if (why == BedRefusal.MONSTERS_NEARBY) {
                     hostileNear++;
+                } else if (why == BedRefusal.BLOCKED) {
+                    blocked++;
+                } else if (why == BedRefusal.GONE) {
+                    gone++;
                 } else {
                     tried++;
                 }
@@ -148,7 +160,8 @@ public final class BedChooser {
                 usable++;
             }
         }
-        return new Screening(candidates.size(), tried, occupied, hostileNear, protectedLand, tooFar, outOfArea, usable);
+        return new Screening(candidates.size(), tried, occupied, hostileNear, protectedLand,
+                blocked, gone, tooFar, outOfArea, usable);
     }
 
     /** 一张床在不在床区半径内：按水平距离算，高度差是玩家常识里"这一片"的一部分，也计入。 */
