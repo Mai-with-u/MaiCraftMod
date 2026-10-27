@@ -6,15 +6,18 @@
 对嵌套 JSON 参数序列化失真时的绕行。
 
 用法：
-  python tools/maicraft_cli.py init                                # 强制重新握手
+  python tools/maicraft_cli.py init                                # 重新握手，打印服务器信息与使用指引
+  python tools/maicraft_cli.py tools                               # 列出服务器发布的全部工具与一句话描述
+  python tools/maicraft_cli.py tools observe                       # 打印某工具的完整描述与 inputSchema
+  python tools/maicraft_cli.py resources                           # 列出服务器发布的资源（玩法技能等）
   python tools/maicraft_cli.py call observe '{"what":"self"}'      # 内联 JSON 参数
   python tools/maicraft_cli.py call execute @payload.json          # UTF-8 文件载荷（含中文时推荐）
-  python tools/maicraft_cli.py call task '{"action":"list"}'
   python tools/maicraft_cli.py --raw call lookup '{"topic":"abilities"}'  # 打印完整响应
 
-五个工具：observe / lookup / execute / task / events。工具的真实行为尚未接入时，
+工具名、参数与取值范围以 `tools` 命令现查为准；玩法技能等资源以
+`resources` 命令现查、`read` 读取。工具的真实行为尚未接入时，
 调用返回结构化的 not_ready 错误（isError=true、code=not_ready），这本身就是
-传输与空壳分发的验收口径。v1 端点目前不提供 MCP 资源。
+传输与空壳分发的验收口径。
 
 Windows 注意：Git Bash 里 curl/argv 会把中文按本地代码页发出造成乱码，
 含非 ASCII 参数一律走 @file（UTF-8），本脚本内部全程 UTF-8 读写。
@@ -77,7 +80,7 @@ class McpConnection:
         payload = json.dumps(body, ensure_ascii=False).encode("utf-8")
         return self._post(payload, self.session_id)
 
-    def initialize(self) -> None:
+    def initialize(self) -> dict:
         self.session_id = None
         status, text, headers = self._rpc(
             "initialize",
@@ -94,7 +97,9 @@ class McpConnection:
             raise RuntimeError("initialize 响应未携带 Mcp-Session-Id，端点可能不是 Streamable HTTP")
         self.session_id = session_id
         self.session_file.write_text(session_id, encoding="utf-8")
+        result = json.loads(text).get("result", {})
         self._rpc("notifications/initialized", notify=True)
+        return result
 
     @staticmethod
     def _session_expired(status: int, text: str) -> bool:
@@ -136,6 +141,15 @@ def unwrap_result(raw_text: str) -> str:
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 
+def first_line(text: str, limit: int = 100) -> str:
+    """取多行描述里第一行非空内容，截到 limit 字，给列表视图用。"""
+    for line in (text or "").strip().splitlines():
+        line = line.strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MaiCraft 内嵌 MCP 端点直连调试 CLI")
     parser.add_argument("--endpoint", default=None, help=f"MCP 端点（默认 {DEFAULT_ENDPOINT}，可用 MAICRAFT_ENDPOINT 覆盖）")
@@ -143,11 +157,14 @@ def main() -> int:
     parser.add_argument("--raw", action="store_true", help="打印完整 JSON-RPC 响应，不解包")
     parser.add_argument("--timeout", type=float, default=120.0, help="单次 HTTP 超时秒数")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("init", help="强制重新 initialize 并缓存新会话")
+    sub.add_parser("init", help="重新握手，缓存会话并打印服务器信息与使用指引")
+    tools_parser = sub.add_parser("tools", help="列出服务器发布的工具（tools/list）；给工具名则打印完整描述与 inputSchema")
+    tools_parser.add_argument("name", nargs="?", default=None, help="工具名，如 observe / lookup / execute / goal / events")
+    sub.add_parser("resources", help="列出服务器发布的资源（resources/list），如玩法技能")
     call_parser = sub.add_parser("call", help="调用 MCP 工具：call <tool> '<json-args>' | call <tool> @args.json")
     call_parser.add_argument("tool")
     call_parser.add_argument("args", nargs="?", default="{}", help="内联 JSON，或 @文件路径（UTF-8，推荐含中文时使用）")
-    read_parser = sub.add_parser("read", help="读取 MCP 资源，如 maicraft://chatflow")
+    read_parser = sub.add_parser("read", help="读取 MCP 资源，如 skill://survival/survival-opening/SKILL.md")
     read_parser.add_argument("uri")
     args = parser.parse_args()
 
@@ -163,8 +180,37 @@ def main() -> int:
     connection = McpConnection(endpoint, session_file, args.timeout)
 
     if args.command == "init":
-        connection.initialize()
+        result = connection.initialize()
         print(f"session {connection.session_id} -> {session_file}")
+        info = result.get("serverInfo", {})
+        print(f"server {info.get('name')} {info.get('version')} | 协议 {result.get('protocolVersion')}")
+        instructions = result.get("instructions")
+        if instructions:
+            print("--- 服务器使用指引 ---")
+            print(instructions)
+        return 0
+    if args.command == "tools":
+        raw = connection.call("tools/list", {})
+        tools = json.loads(raw).get("result", {}).get("tools", [])
+        if args.name:
+            for tool in tools:
+                if tool.get("name") == args.name:
+                    print(f"工具 {tool.get('name')}")
+                    print(tool.get("description") or "")
+                    print("--- inputSchema ---")
+                    print(json.dumps(tool.get("inputSchema", {}), ensure_ascii=False, indent=2))
+                    return 0
+            known = ", ".join(tool.get("name", "") for tool in tools)
+            print(f"服务器没有名为 {args.name} 的工具；现有：{known}")
+            return 1
+        for tool in tools:
+            print(f"{tool.get('name')}: {first_line(tool.get('description') or '')}")
+        return 0
+    if args.command == "resources":
+        raw = connection.call("resources/list", {})
+        resources = json.loads(raw).get("result", {}).get("resources", [])
+        for resource in resources:
+            print(f"{resource.get('uri')}: {first_line(resource.get('description') or '')}")
         return 0
     if args.command == "call":
         if args.args.startswith("@"):
