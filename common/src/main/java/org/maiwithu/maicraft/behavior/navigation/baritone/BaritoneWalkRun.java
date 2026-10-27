@@ -242,7 +242,7 @@ final class BaritoneWalkRun implements WalkRun {
             progress.stopWhereLastSeen(feetOf(now));
         } finally {
             owner.release(this);
-            finishEngineQuietly();
+            finishEngine(owner.engine(), owner.pathing());
         }
     }
 
@@ -723,12 +723,14 @@ final class BaritoneWalkRun implements WalkRun {
         routeDropped = true;
     }
 
+    // 收掉引擎：叫停复算与落地救援，撤路线、松按键；路走完了（或这一趟被收掉），引擎留着的朝向也收掉，
+    // 不收的话下一个动作按前进键会被拧回这趟路的方向。引擎还没起来时只叫停复算与落地救援。
     private void finishEngine(IBaritone engine, PathingBehavior pathing) {
         probe.cancel();
         landing.stop(lastContext, "这一趟走路结束了");
+        if (pathing == null) return;
         pathing.forceCancel();
         engine.getInputOverrideHandler().clearAllKeys();
-        // 路走完了，引擎留着的朝向也收掉：不收的话下一个动作按前进键会被拧回这趟路的方向。
         owner.dropLookTarget();
         NavigationProtection.clear();
     }
@@ -757,22 +759,10 @@ final class BaritoneWalkRun implements WalkRun {
         // 只收拾自己占着的引擎：已经交出身体、或还在排队的运行不能去撤别人正在走的路线。
         if (owner.owns(this)) {
             owner.release(this);
-            finishEngineQuietly();
+            finishEngine(owner.engine(), owner.pathing());
         } else {
             owner.dropQueued(this);
         }
-    }
-
-    private void finishEngineQuietly() {
-        probe.cancel();
-        landing.stop(lastContext, "这一趟走路结束了");
-        var pathing = owner.pathing();
-        if (pathing == null) return;
-        pathing.forceCancel();
-        owner.engine().getInputOverrideHandler().clearAllKeys();
-        // 被收掉的这一趟同样收掉引擎留着的朝向，别让它拧着下一个动作走路的方向。
-        owner.dropLookTarget();
-        NavigationProtection.clear();
     }
 
     @Override
