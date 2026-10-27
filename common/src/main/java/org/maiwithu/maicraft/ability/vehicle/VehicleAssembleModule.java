@@ -10,6 +10,8 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
+import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
@@ -38,6 +40,7 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * 能力只落实"指的是哪一个"——组装器的坐标、记过的地点、看到的东西（b#），或结构的观察编号（s#）——
  * 怎么走过去、拉、确认转换没有由联动模组的组装办法做。拉过一次就不再拉（再拉会拆回去），没转换照实说。
  * 转换了档案跟着走：拆回改记到世界里组装器落回的那一格，再组装认出是同一艘就跟到新结构。
+ * 组装时组装器落在某份机器档案里，拉杆前先把档案的方块没被胶框住的地方补上（胶怎么框问机器类型）。
  */
 public final class VehicleAssembleModule implements AbilityModule {
 
@@ -50,26 +53,32 @@ public final class VehicleAssembleModule implements AbilityModule {
     private final ReadsRememberedPlaces places;
     private final Supplier<BlockPos> feet;
     private final VehicleArchives archives;
+    private final AssemblyGlue glue;
 
     /**
      * @param structures 观察编号 s# 换成结构身份
      * @param feet       角色此刻脚下（坐标没给 y 时按它）
      * @param archives   载具档案：拆回改记到世界里、再组装跟到新结构
+     * @param archived     已建档的机器：组装器落在哪份档案里，整艘是哪些方块
+     * @param machineTypes 各联动的机器类型：还缺哪几框胶、谁来粘
+     * @param dimension    角色此刻所在的维度 ID
      */
     public VehicleAssembleModule(List<VehicleAssembler> assemblers, ReadsSeenTargets seen,
             Function<String, Optional<String>> structures, ReadsRememberedPlaces places, Supplier<BlockPos> feet,
-            VehicleArchives archives) {
+            VehicleArchives archives, ArchivedMachines archived, List<MachineType> machineTypes,
+            Supplier<String> dimension) {
         this.assemblers = List.copyOf(assemblers);
         this.seen = Objects.requireNonNull(seen, "seen");
         this.structures = Objects.requireNonNull(structures, "structures");
         this.places = Objects.requireNonNull(places, "places");
         this.feet = Objects.requireNonNull(feet, "feet");
         this.archives = Objects.requireNonNull(archives, "archives");
+        this.glue = new AssemblyGlue(archived, machineTypes, dimension);
     }
 
     @Override public AbilitySpec spec() {
         return new AbilitySpec("maicraft:vehicle_assemble",
-                "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+                "把建好的方块组装成会动的结构（物理组装器拉一次杆，在机器档案里的先补胶），或拆回方块",
                 AbilityDoc.forAbility("vehicle_assemble"),
                 ParamSpecs.of(ParamSpec.of("operation", ParamType.CHOICE).choices("assemble", "disassemble")
                         .defaultValue("assemble").doc("assemble 组装（默认）/ disassemble 拆回方块").build()),
@@ -121,7 +130,7 @@ public final class VehicleAssembleModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers, archives));
+        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers, archives, glue));
     }
 
     private static StepDecision invalid(String why) {

@@ -76,7 +76,8 @@ class VehicleArchivesTest {
 
     private TaskResult run(boolean assemble, VehicleAssembler.Conversion conversion, String structure) {
         VehicleAssembleTask task = new VehicleAssembleTask(new VehicleAssembler.Request(assemble, ASSEMBLER, null,
-                Permissions.DEFAULT), List.of(assembler(conversion, structure)), archives);
+                Permissions.DEFAULT), List.of(assembler(conversion, structure)), archives,
+                new AssemblyGlue((dimension, cell) -> Optional.empty(), List.of(), () -> "minecraft:overworld"));
         task.start(TickContext.of(0, null));
         for (long tick = 1; tick <= 100; tick++) {
             if (task.tick(TickContext.of(tick, null)) instanceof TickResult.Finished finished) return finished.result();

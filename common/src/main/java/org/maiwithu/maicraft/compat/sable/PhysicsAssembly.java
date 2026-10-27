@@ -251,6 +251,11 @@ final class PhysicsAssembly implements VehicleAssembler {
             return conversion;
         }
 
+        // 组装时交出组装器在世界里的格：组装能力拉杆前按它找机器档案、补胶；拆回不用。
+        @Override public Optional<BlockPos> assembler() {
+            return request.assemble() ? Optional.of(world) : Optional.empty();
+        }
+
         @Override public void pause() {
             if (current != null) current.pause();
         }

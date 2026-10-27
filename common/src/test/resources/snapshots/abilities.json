@@ -295,7 +295,7 @@
       },
       {
         "ability": "maicraft:vehicle_assemble",
-        "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+        "summary": "把建好的方块组装成会动的结构（物理组装器拉一次杆，在机器档案里的先补胶），或拆回方块",
         "parameters": "operation: string = assemble",
         "targets": [
           "landmark",
@@ -1672,7 +1672,7 @@
     },
     {
       "ability": "maicraft:vehicle_assemble",
-      "summary": "把建好胶好的方块组装成会动的结构（物理组装器拉一次杆），或拆回方块",
+      "summary": "把建好的方块组装成会动的结构（物理组装器拉一次杆，在机器档案里的先补胶），或拆回方块",
       "parameters": [
         {
           "name": "operation",

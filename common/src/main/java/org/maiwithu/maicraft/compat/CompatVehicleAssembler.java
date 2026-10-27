@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.compat;
 import java.util.Objects;
 import java.util.Optional;
 
+import net.minecraft.core.BlockPos;
+
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 
 /**
@@ -45,6 +47,11 @@ final class CompatVehicleAssembler implements VehicleAssembler {
         // 拆回前认出的结构照转：组装能力要在拉杆前按它读档案。
         @Override public Optional<String> structure() {
             return run.structure();
+        }
+
+        // 组装器在哪一格照转：组装能力拉杆前按它找机器档案、补胶。
+        @Override public Optional<BlockPos> assembler() {
+            return run.assembler();
         }
     }
 }

@@ -39,7 +39,8 @@ class VehicleAssembleModuleTest {
         return new VehicleAssembleModule(assemblers, id -> Optional.of(WorldPosition.here(5, 70, 5)),
                 id -> id.equals("s3") ? Optional.of("ship-uuid") : Optional.empty(), name -> Optional.empty(),
                 () -> new BlockPos(0, 64, 0), new VehicleArchives(new VehicleControls(documents, "w"), documents, "w",
-                        List.of(), () -> "minecraft:overworld", id -> Optional.empty()));
+                        List.of(), () -> "minecraft:overworld", id -> Optional.empty()),
+                (dimension, cell) -> Optional.empty(), List.of(), () -> "minecraft:overworld");
     }
 
     private StepContext step(Target target, String params) {

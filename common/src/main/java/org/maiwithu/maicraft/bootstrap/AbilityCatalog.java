@@ -583,16 +583,20 @@ public final class AbilityCatalog {
         Supplier<BlockPos> feet = () -> deps.character().context().get() == null
                 || deps.character().context().get().localPlayer() == null
                 ? BlockPos.ZERO : deps.character().context().get().localPlayer().blockPosition();
+        Supplier<String> dimension = () -> deps.character().context().get() == null
+                || deps.character().context().get().level() == null
+                ? "" : deps.character().context().get().level().dimension().location().toString();
         // 组装载具：物理组装器拉一次杆组装或拆回。
         // 档案跟着走：拆回记到世界里组装器那一格（按维度分），再组装跟到新结构，新结构的 s# 从同一张编号表反查。
+        // 组装器落在某份机器档案里时拉杆前先补胶：档案从机器能力的同一个库里读，还缺哪几框、谁来粘问联动的机器类型。
         registry.register(new VehicleAssembleModule(deps.compat().vehicleAssemblers(services),
                 new SceneSeenTargets(deps.world()::scene), id -> deps.world().scene().seen().structureOf(id),
                 deps.world().memory(), feet,
                 new VehicleArchives(vehicleControls(deps), deps.stores().worldDocuments(), deps.stores().worldKey(),
-                        deps.compat().vehicleReaders(services),
-                        () -> deps.character().context().get() == null || deps.character().context().get().level() == null
-                                ? "" : deps.character().context().get().level().dimension().location().toString(),
-                        identity -> deps.world().scene().seen().idOfStructure(identity))));
+                        deps.compat().vehicleReaders(services), dimension,
+                        identity -> deps.world().scene().seen().idOfStructure(identity)),
+                MachineAbilities.archivedMachines(deps.stores().worldDocuments(), deps.stores().worldKey()),
+                deps.compat().machineTypes(services), dimension));
         // 驾驶载具：坐上驾驶座接管控制件试按或开到某处；不在车上先经出行上车，
         // 去记过的地点按世界记忆找，坐标没给 y、按方向开多远从角色脚下算。
         registry.register(new VehicleDriveModule(deps.compat().vehicleDrivers(services),

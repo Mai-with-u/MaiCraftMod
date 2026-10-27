@@ -1,27 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.vehicle;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
+import net.minecraft.core.BlockPos;
+
+import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 组装或拆回一次：问各联动的组装办法谁能做 →（拆回先把这辆的档案读下来）→ 交给它走过去、拉一次、确认 →
- * 档案跟着走：拆回改记到组装器落回的那一格，组装认出是拆回的那一艘就跟到新结构 → 照它的结局结算。
+ * 组装或拆回一次：问各联动的组装办法谁能做 →（拆回先把这辆的档案读下来）→（组装时组装器在机器档案里，先把档案的方块
+ * 没被胶框住的地方一框框补上）→ 交给它走过去、拉一次、确认 → 档案跟着走：拆回改记到组装器落回的那一格，
+ * 组装认出是拆回的那一艘就跟到新结构 → 照它的结局结算。
  * 已经是要的样子就直接完成；拉了没转换照实完成并写明（不判失败），动作本身做不下去才失败。
+ * 补胶没补成就不拉杆：胶不全时拉杆不报错，只会把船身撕下一部分变成结构，比不拉更难收拾。
  */
 final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
 
-    enum Phase { FIND, RUN, NAME }
+    enum Phase { FIND, GLUE, RUN, NAME }
 
     /** 组装出新结构后最多等几刻让它在观察里领到 s#（场景每刻刷新一次）。 */
     static final int NAME_TICKS = 10;
@@ -29,26 +39,43 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
     private final VehicleAssembler.Request request;
     private final List<VehicleAssembler> assemblers;
     private final VehicleArchives archives;
+    private final AssemblyGlue glue;
     private VehicleAssembler.Run run;
     private VehicleArchives.Before before;
     private VehicleAssembler.Conversion conversion;
     private VehicleArchives.Handover archive;
     private int named;
+    // 补胶：组装器所在的机器档案、它的方块、还要补的几段、这一刻在粘的那段、粘上了的与没粘上的。
+    private String glueArchive;
+    private Set<BlockPos> glueBlocks = Set.of();
+    private final Deque<Installation> toGlue = new ArrayDeque<>();
+    private Installation gluing;
+    private final List<String> glued = new ArrayList<>();
+    private List<String> unglued = List.of();
+    private String glueNote;
 
-    VehicleAssembleTask(VehicleAssembler.Request request, List<VehicleAssembler> assemblers, VehicleArchives archives) {
-        super(request.assemble() ? "组装载具" : "拆回载具", Phase.FIND, new ProgressTracker(20L * 60, 20L * 60 * 5));
+    // 补胶要拿胶、走到一框框的角上，比只拉一次杆久：总时长放到 15 分钟，一分钟没进展照样按卡住算。
+    VehicleAssembleTask(VehicleAssembler.Request request, List<VehicleAssembler> assemblers, VehicleArchives archives,
+            AssemblyGlue glue) {
+        super(request.assemble() ? "组装载具" : "拆回载具", Phase.FIND, new ProgressTracker(20L * 60, 20L * 60 * 15));
         this.request = request;
         this.assemblers = List.copyOf(assemblers);
         this.archives = archives;
+        this.glue = glue;
     }
 
     @Override protected Action enter(Phase phase) {
-        return phase == Phase.RUN ? run : null;
+        return switch (phase) {
+            case RUN -> run;
+            case GLUE -> glue.install(gluing = toGlue.peek(), request.permissions()).orElse(null);
+            default -> null;
+        };
     }
 
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case FIND -> find();
+            case GLUE -> glueOne(context);
             case RUN -> runActionThen(context, this::converted);
             case NAME -> ++named >= NAME_TICKS || archives.seenId(conversion.structureId()).isPresent() ? settle() : Next.stay();
         };
@@ -65,13 +92,75 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
                     Optional<String> structure = run.structure().or(() -> Optional.ofNullable(request.structureId()));
                     before = structure.map(archives::before).orElse(null);
                 }
-                return Next.go(Phase.RUN, request.assemble() ? "找到组装器，去拉杆" : "找到组装器，去拆回");
+                return request.assemble() ? checkGlue() : Next.go(Phase.RUN, "找到组装器，去拆回");
             }
         }
         return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, request.assemble()
                 ? request.near().toShortString() + " 附近找不到物理组装器"
                 : (request.structureId() == null ? request.near().toShortString() + " 附近" : "指的结构上") + "找不到物理组装器",
                 "物理组装器要贴着要组装的方块放；指组装器的坐标或结构的观察编号"));
+    }
+
+    // 拉杆前看胶：组装器在哪份机器档案里，那份档案的方块盖没盖全。不在档案里、没有联动答得上、已经盖全，都直接去拉杆；
+    // 缺的一框框排好去补。
+    private Next<Phase> checkGlue() {
+        Optional<BlockPos> at = run.assembler();
+        if (at.isEmpty()) return Next.go(Phase.RUN, "找到组装器，去拉杆");
+        AssemblyGlue.Check check = glue.check(at.get());
+        if (check.archive() == null) {
+            glueNote = "组装器不在任何机器档案里，不知道整艘是哪些方块，没查胶";
+            return Next.go(Phase.RUN, "找到组装器，去拉杆");
+        }
+        glueArchive = check.archive();
+        glueBlocks = check.blocks();
+        if (check.missing().isEmpty()) {
+            glueNote = "没有能看胶的联动（机械动力的联动没接上），没查胶";
+            return Next.go(Phase.RUN, "找到组装器，去拉杆");
+        }
+        if (check.missing().get().isEmpty()) {
+            glueNote = "档案里的方块胶已经盖全";
+            return Next.go(Phase.RUN, "胶已经盖全，去拉杆");
+        }
+        toGlue.addAll(check.missing().get());
+        return Next.go(Phase.GLUE, "档案「" + glueArchive + "」还缺 " + toGlue.size() + " 框胶，先补胶");
+    }
+
+    // 粘一框：动作做完再核对胶真的出现了才算；都粘完再看一遍盖全没有，盖全了去拉杆。
+    private Next<Phase> glueOne(TickContext context) {
+        if (action() == null) {
+            return glueFailed(Problem.of(Problem.Kind.UNSUPPORTED, "没有联动肯粘 " + gluing.kind() + " 这一段"));
+        }
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Failed failed -> glueFailed(failed.problem());
+            case ActionStatus.Done done -> glueDone();
+        };
+    }
+
+    private Next<Phase> glueDone() {
+        if (!glue.installed(gluing)) {
+            return glueFailed(Problem.of(Problem.Kind.REFUSED_BY_GAME, AssemblyGlue.describe(gluing) + " 这一框粘了，胶没出现"));
+        }
+        glued.add(AssemblyGlue.describe(gluing));
+        recordProgress("粘上 " + AssemblyGlue.describe(gluing));
+        toGlue.poll();
+        if (!toGlue.isEmpty()) return Next.go(Phase.GLUE, "接着补下一框");
+        Optional<List<Installation>> left = glue.missing(glueBlocks);
+        if (left.isPresent() && !left.get().isEmpty()) {
+            unglued = left.get().stream().map(AssemblyGlue::describe).toList();
+            return Next.fail(Problem.of(Problem.Kind.REFUSED_BY_GAME, "补了 " + glued.size() + " 框胶，还有 " + unglued.size()
+                    + " 处没盖住，没拉杆：" + String.join("、", unglued), "看那几处是不是夹着档案外的方块、或方块没连着"));
+        }
+        glueNote = "补了 " + glued.size() + " 框胶";
+        return Next.go(Phase.RUN, "胶补全了，去拉杆");
+    }
+
+    // 补胶没补成：不拉杆，照实说哪一框为什么没粘上、已经粘了哪些、还差哪些。
+    private Next<Phase> glueFailed(Problem problem) {
+        unglued = toGlue.stream().map(AssemblyGlue::describe).toList();
+        String done = glued.isEmpty() ? "" : "；已经粘了 " + String.join("、", glued);
+        return Next.fail(Problem.of(problem.kind(), "补胶没补成，没拉杆：" + problem.message() + done
+                + "；还差 " + unglued.size() + " 框", problem.suggestion()));
     }
 
     // 拉完了：组装出新结构时先等它在观察里领到 s#，档案才能说跟到了哪个编号。
@@ -91,13 +180,15 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
         if (conversion.alreadyDone()) {
             return Next.done(TaskResult.done(request.assemble() ? "已经组装过，是一个会动的结构了" : "已经是方块了，不用拆"));
         }
+        String glueLine = glued.isEmpty() ? "" : "先补了 " + glued.size() + " 框胶，";
         if (conversion.converted()) {
             archive = request.assemble() ? archives.assembled(conversion)
                     : before == null ? null : archives.disassembled(before, conversion);
-            return Next.done(TaskResult.done(what + "好了" + (conversion.blocks() > 0 ? "，" + conversion.blocks() + " 格方块" : "")
+            return Next.done(TaskResult.done(glueLine + what + "好了"
+                    + (conversion.blocks() > 0 ? "，" + conversion.blocks() + " 格方块" : "")
                     + (archive == null ? "" : "；" + archiveLine(archive))));
         }
-        return Next.done(TaskResult.done("拉了一次杆，但没有" + (request.assemble() ? "变成会动的结构" : "拆回方块")
+        return Next.done(TaskResult.done(glueLine + "拉了一次杆，但没有" + (request.assemble() ? "变成会动的结构" : "拆回方块")
                 + (conversion.note().isBlank() ? "" : "：" + conversion.note())));
     }
 
@@ -113,15 +204,23 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
         return line;
     }
 
+    // 补胶只要查过就写进细节（补胶没补成、没拉杆时也有）；没查过胶（拆回、车站组车）没有这一节。
     @Override protected ResultDetails details() {
-        return conversion == null ? ResultDetails.NONE
-                : new VehicleAssembleDetails(conversion.structureId(), conversion.alreadyDone(), conversion.converted(),
-                        conversion.blocks(), conversion.note(), archive);
+        VehicleAssembleDetails.Glue glueReport = glueNote == null && glueArchive == null ? null
+                : new VehicleAssembleDetails.Glue(glueArchive, List.copyOf(glued), unglued,
+                        glueNote == null ? "补胶没补成，没拉杆" : glueNote);
+        if (conversion == null) {
+            return glueReport == null ? ResultDetails.NONE
+                    : new VehicleAssembleDetails("", false, false, -1, "", null, glueReport);
+        }
+        return new VehicleAssembleDetails(conversion.structureId(), conversion.alreadyDone(), conversion.converted(),
+                conversion.blocks(), conversion.note(), archive, glueReport);
     }
 
     @Override protected String describePhase(Phase value) {
         return switch (value) {
             case FIND -> "找组装器";
+            case GLUE -> "补胶";
             case RUN -> request.assemble() ? "拉杆组装" : "拉杆拆回";
             case NAME -> "等新结构领到观察编号";
         };

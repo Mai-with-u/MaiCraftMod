@@ -19,7 +19,7 @@ metadata: {"requires-mods": "simulated"}
 
 ## 搭（machine_build）
 
-- 写一份机器蓝图，`machine_build(blueprint=…, target=锚点, name=档案名)`：`cells` 逐格，朝向写进 `properties`；胶写成安装段 `{"kind": "create:super_glue", "offsets": [一角, 对角]}`，框住整艘（两角相距不到 25 格，大船分几块、互相叠一层）；收端可以在 `settings` 里写好 `link.mode` = `receive` 和两个频率格 `link.frequency.1`、`link.frequency.2`。
+- 写一份机器蓝图，`machine_build(blueprint=…, target=锚点, name=档案名)`：`cells` 逐格，朝向写进 `properties`；胶可以不写：组装时会按这份档案自己补；要自己写就写成安装段 `{"kind": "create:super_glue", "offsets": [一角, 对角]}`，两角都得是方块、在框里由方块连着、相距不到 25 格，大船分几块、互相叠一层；收端可以在 `settings` 里写好 `link.mode` = `receive` 和两个频率格 `link.frequency.1`、`link.frequency.2`。
 - 船身架空一格起建（车轮悬架下面是满方块时会被抬高一格），垫的东西放在胶框外面，不然组装时连地面一起带走。头顶留出净空。
 - 施工在后台推进：下达后去备下一段要的东西（频率物品、引擎燃料），用 `events` 等结果。
 - 下达前可以 `machine_review` 看材料和身上缺多少；它不算载具的受力，受力要组装后看。
@@ -34,10 +34,11 @@ metadata: {"requires-mods": "simulated"}
 
 ## 组装（vehicle_assemble）
 
-- `vehicle_assemble(target=物理组装器的坐标或记过的地点)`：走过去拉一次杆。它不补胶，胶要在搭的时候装好。
+- `vehicle_assemble(target=物理组装器的坐标或记过的地点)`：走过去拉一次杆。组装器落在机器档案里时，拉杆前先把档案里没被强力胶框住的地方补上（`glued` 写补了哪几框），档案外的方块不粘；不在档案里就不补，胶要自己在蓝图里装好。
+- 补胶没补成（拿不到强力胶、走不到角跟前）就不拉杆，照 `glued.remaining` 看还差哪几框，备好胶或腾出路再下一次。
 - 只拉一次：拉过不管成没成都不再拉（再拉会拆回去）。看 `converted`（真的转换了）、`blocks`（几块进了结构）、`archive.structure`（新结构的 `s#`）。
-- 拉了没变成结构不算失败，照 `note` 改：胶没框全、组装器没放在船身的方块上、胶框里有方块没挨着、结构太大。改完再下一次 `vehicle_assemble`。
-- `blocks` 比预想的少，或地面被带走了：胶框没盖全或框多了，拆回改。
+- 拉了没变成结构不算失败，照 `note` 改：组装器没放在船身的方块上、胶框里有方块没挨着、结构太大；不在档案里时还可能是胶没框全。改完再下一次 `vehicle_assemble`。
+- `blocks` 比预想的少，或地面被带走了：胶框没盖全或框多了，拆回改；后来另加、没进档案的方块不会被补胶，要先并进档案。
 
 ## 先看（machine_inspect(target=s#)）
 
@@ -85,7 +86,7 @@ metadata: {"requires-mods": "simulated"}
 - 车只开直线，不绕障碍。
 - 组装后不能在船上改无线红石打字机的键和部件设置，也不能在船上施工（加配重也要拆回）；在动着的结构上更不行。
 - 舵轮、油门拉杆、讲台遥控器开不了。
-- 只会用强力胶粘，不会用蜂蜜胶；飞控红石代理哪一面接哪个动作、稳定器的增益与模式不会配，已经配好的照样能开。
+- 只会用强力胶粘，不会用蜂蜜胶（手粘的蜂蜜胶补胶时不算数）；飞控红石代理哪一面接哪个动作、稳定器的增益与模式不会配，已经配好的照样能开。
 
 ## 什么时候停下
 

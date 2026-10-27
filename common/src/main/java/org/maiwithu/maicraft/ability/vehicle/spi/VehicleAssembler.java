@@ -49,6 +49,14 @@ public interface VehicleAssembler {
         default Optional<String> structure() {
             return Optional.empty();
         }
+
+        /**
+         * 组装时拉的那台物理组装器在世界里的哪一格（开始前就找到的）：组装能力拉杆前按它找机器档案、补胶。
+         * 拆回、车站组车、已经是要的样子时为空。
+         */
+        default Optional<BlockPos> assembler() {
+            return Optional.empty();
+        }
     }
 
     /**
