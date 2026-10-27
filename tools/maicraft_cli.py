@@ -12,12 +12,15 @@
   python tools/maicraft_cli.py resources                           # 列出服务器发布的资源（玩法技能等）
   python tools/maicraft_cli.py call observe '{"what":"self"}'      # 内联 JSON 参数
   python tools/maicraft_cli.py call execute @payload.json          # UTF-8 文件载荷（含中文时推荐）
+  python tools/maicraft_cli.py call execute @payload.json --follow # 下目标后自动跟随 next 进事件等待
   python tools/maicraft_cli.py --raw call lookup '{"topic":"abilities"}'  # 打印完整响应
 
-工具名、参数与取值范围以 `tools` 命令现查为准；玩法技能等资源以
-`resources` 命令现查、`read` 读取。工具的真实行为尚未接入时，
-调用返回结构化的 not_ready 错误（isError=true、code=not_ready），这本身就是
-传输与空壳分发的验收口径。
+发送前默认按该工具的 inputSchema 做本地校验（错参数不发出去，
+--no-schema-check 跳过）；--follow 沿服务器给出的 next 提示连续调用，
+适合"下目标→等终态"的整段流程。工具名、参数与取值范围以 `tools`
+命令现查为准；玩法技能等资源以 `resources` 命令现查、`read` 读取。
+工具的真实行为尚未接入时，调用返回结构化的 not_ready 错误
+（isError=true、code=not_ready），这本身就是传输与空壳分发的验收口径。
 
 Windows 注意：Git Bash 里 curl/argv 会把中文按本地代码页发出造成乱码，
 含非 ASCII 参数一律走 @file（UTF-8），本脚本内部全程 UTF-8 读写。
@@ -259,6 +262,8 @@ def main() -> int:
     call_parser.add_argument("tool")
     call_parser.add_argument("args", nargs="?", default="{}", help="内联 JSON，或 @文件路径（UTF-8，推荐含中文时使用）")
     call_parser.add_argument("--no-schema-check", action="store_true", help="跳过发送前的 inputSchema 校验")
+    call_parser.add_argument("--follow", action="store_true", help="自动跟随结果里的 next 提示（如下目标后接事件等待），直到没有提示或到步数上限")
+    call_parser.add_argument("--follow-steps", type=int, default=30, help="--follow 的步数上限（默认 30；events 每步至多等 60 秒）")
     read_parser = sub.add_parser("read", help="读取 MCP 资源，如 skill://survival/survival-opening/SKILL.md")
     read_parser.add_argument("uri")
     args = parser.parse_args()
@@ -318,7 +323,23 @@ def main() -> int:
                 for problem in problems:
                     print(f"参数校验：{problem}")
                 return 1
-        raw = connection.call("tools/call", {"name": args.tool, "arguments": params})
+        tool, call_params = args.tool, params
+        step = 0
+        while True:
+            step += 1
+            raw = connection.call("tools/call", {"name": tool, "arguments": call_params})
+            print(raw if args.raw else unwrap_result(raw))
+            if not args.follow:
+                break
+            data = parse_tool_result(raw)
+            nxt = data.get("next") if isinstance(data, dict) else None
+            if not (isinstance(nxt, dict) and nxt.get("tool")):
+                break
+            if step >= args.follow_steps:
+                print(f"== 已跟随 {step} 步到上限，服务器仍有 next 提示；继续等待就再发一次同样的 call events")
+                break
+            print(f"==> 跟随 next → {nxt['tool']}（第 {step + 1}/{args.follow_steps} 步）")
+            tool, call_params = nxt["tool"], nxt.get("arguments") or {}
     else:
         raw = connection.call("resources/read", {"uri": args.uri})
 
