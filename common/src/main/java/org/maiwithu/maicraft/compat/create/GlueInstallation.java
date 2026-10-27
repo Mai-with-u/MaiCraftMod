@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -58,6 +63,45 @@ final class GlueInstallation implements CreateInstallation {
             return Optional.of("两个对角相距要不到 " + MAX_SPAN + " 格");
         }
         return Optional.empty();
+    }
+
+    // 一片方块要一起动还缺哪几框胶：此刻真有方块的格才算车身，附近现有的胶框都算数，
+    // 新框照服务器的规矩挑、不夹车身以外的实心方块（见 GluePlan）；没加载的格当外物，不往里框。
+    @Override public Optional<List<Installation>> stickTogether(ClientLevel level, Set<BlockPos> cells) {
+        Set<BlockPos> body = new HashSet<>();
+        for (BlockPos cell : cells) {
+            if (level.isLoaded(cell) && solid(level.getBlockState(cell))) body.add(cell.immutable());
+        }
+        if (body.isEmpty()) return Optional.of(List.of());
+        AABB area = AABB.encapsulatingFullBlocks(lowest(body), highest(body)).inflate(1);
+        List<GluePlan.Box> existing = compat.glueBoxes(level, area).stream().map(GlueInstallation::box).toList();
+        List<GluePlan.Box> added = GluePlan.plan(body, existing,
+                cell -> !level.isLoaded(cell) || solid(level.getBlockState(cell)));
+        return Optional.of(added.stream().map(box -> new Installation(KIND, List.of(box.from(), box.to()))).toList());
+    }
+
+    // 车身算哪些格：有方块的，空气和纯流体不算（流体跟不走，也粘不上）。
+    private static boolean solid(BlockState state) {
+        return !state.isAir() && !(state.getBlock() instanceof LiquidBlock);
+    }
+
+    // 一块胶的包围盒换成它框住的格：Create 的框从最小角到最大角再加一格，框住的格按格心算。
+    static GluePlan.Box box(AABB glue) {
+        BlockPos min = BlockPos.containing(glue.minX + 0.5, glue.minY + 0.5, glue.minZ + 0.5);
+        BlockPos max = BlockPos.containing(glue.maxX - 0.5, glue.maxY - 0.5, glue.maxZ - 0.5);
+        return new GluePlan.Box(min, max);
+    }
+
+    private static BlockPos lowest(Set<BlockPos> cells) {
+        return new BlockPos(cells.stream().mapToInt(BlockPos::getX).min().orElseThrow(),
+                cells.stream().mapToInt(BlockPos::getY).min().orElseThrow(),
+                cells.stream().mapToInt(BlockPos::getZ).min().orElseThrow());
+    }
+
+    private static BlockPos highest(Set<BlockPos> cells) {
+        return new BlockPos(cells.stream().mapToInt(BlockPos::getX).max().orElseThrow(),
+                cells.stream().mapToInt(BlockPos::getY).max().orElseThrow(),
+                cells.stream().mapToInt(BlockPos::getZ).max().orElseThrow());
     }
 
     // 拿一支强力胶 → 走到第二角跟前 → 照 Create 选区确认那一下发包 → 等那块胶出现。

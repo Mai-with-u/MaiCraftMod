@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 机械动力手持工具的模组读写接缝：哪些方块能用扳手潜行右键整块拆下，砂纸能把什么磨成什么，
@@ -37,6 +38,9 @@ public interface CreateTools {
 
     /** from 到 to 这一片现在有没有一块正好盖住它的胶。 */
     boolean glued(ClientLevel level, BlockPos from, BlockPos to);
+
+    /** 和这片范围沾边的每一块强力胶各自框住的范围（Create 按两角算的那个框）。 */
+    List<AABB> glueBoxes(ClientLevel level, AABB area);
 
     /** 是不是轨道方块（铺轨的一端）。 */
     boolean track(BlockState state);

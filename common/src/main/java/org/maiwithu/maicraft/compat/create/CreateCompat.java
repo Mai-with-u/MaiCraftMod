@@ -329,6 +329,11 @@ public final class CreateCompat extends CompatModule {
         return call("读强力胶", () -> tools.glued(level, from, to));
     }
 
+    /** 这片范围附近的强力胶各框住哪；见 {@link CreateTools#glueBoxes}。 */
+    public List<AABB> glueBoxes(ClientLevel level, AABB area) {
+        return call("读强力胶", () -> tools.glueBoxes(level, area));
+    }
+
     /** 附近的库存请求器；见 {@link CreateLogistics#tickers}。 */
     public List<CreateLogistics.Ticker> tickers(ClientLevel level, BlockPos center, int radius) {
         return call("读库存请求器", () -> logistics.tickers(level, center, radius));

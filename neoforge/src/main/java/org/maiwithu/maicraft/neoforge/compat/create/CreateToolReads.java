@@ -89,6 +89,11 @@ public final class CreateToolReads implements CreateTools {
                 .anyMatch(glue -> glue.getBoundingBox().equals(span));
     }
 
+    // 附近每一块胶的框：胶是实体，客户端看得到它们，框就是 Create 按两角算的那个包围盒。
+    @Override public List<AABB> glueBoxes(ClientLevel level, AABB area) {
+        return level.getEntitiesOfClass(SuperGlueEntity.class, area).stream().map(SuperGlueEntity::getBoundingBox).toList();
+    }
+
     @Override public boolean track(BlockState state) {
         return state.getBlock() instanceof TrackBlock;
     }

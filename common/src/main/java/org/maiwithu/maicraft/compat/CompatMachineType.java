@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -88,6 +89,11 @@ public final class CompatMachineType implements MachineType {
 
     @Override public boolean installed(Installation installation) {
         return ask(() -> type.installed(installation), false);
+    }
+
+    // 模组停用或对不上时说不管：组装载具照旧直接拉杆，结果里写明没查胶。
+    @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
+        return ask(() -> type.stickTogether(cells), Optional.<List<Installation>>empty());
     }
 
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {

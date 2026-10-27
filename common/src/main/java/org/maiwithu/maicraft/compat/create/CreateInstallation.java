@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.compat.create;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -46,6 +47,11 @@ interface CreateInstallation {
      * @param cells 这台机器里这种机器认领的格与此刻的方块状态
      */
     default Optional<MachineCopy> copy(ClientLevel level, Map<BlockPos, BlockState> cells) {
+        return Optional.empty();
+    }
+
+    /** 要让这一片方块一起动还缺哪几段；不管这件事的安装段给空。只有强力胶管。 */
+    default Optional<List<Installation>> stickTogether(ClientLevel level, Set<BlockPos> cells) {
         return Optional.empty();
     }
 }

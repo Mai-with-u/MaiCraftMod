@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.machine.spi;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -82,6 +83,17 @@ public interface MachineType {
      * 不认这种安装段时给空，认但这一段没放方块时给空表。
      */
     default Optional<List<BlockPos>> placedBy(Installation installation) {
+        return Optional.empty();
+    }
+
+    /**
+     * 要让这一片方块跟着一起动（组装成会动的结构），还缺哪些安装段：Create 是还没被强力胶框住的地方各补一框。
+     * 只算不动手，装交给 {@link #install}；不管这件事的机器类型给空，管但已经都粘好时给空表。
+     * 片外的方块不往里框，免得垫的、地面跟着一起走。
+     *
+     * @param cells 要一起动的方块，世界坐标；此刻那一格是空气或流体的不算
+     */
+    default Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
         return Optional.empty();
     }
 

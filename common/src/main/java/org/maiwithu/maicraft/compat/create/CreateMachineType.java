@@ -149,6 +149,13 @@ final class CreateMachineType implements MachineType {
                 && installation.get().installed(level, wanted);
     }
 
+    // 要一起动的一片还缺哪几框胶：会粘强力胶的装置类机器都答得上，答法是同一份；不会粘的给空。
+    @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
+        ClientLevel level = level();
+        if (level == null || installation.isEmpty()) return Optional.empty();
+        return installation.get().stickTogether(level, cells);
+    }
+
     @Override public Optional<List<BlockPos>> placedBy(Installation wanted) {
         if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
         return Optional.of(installation.get().placedCells(wanted));
