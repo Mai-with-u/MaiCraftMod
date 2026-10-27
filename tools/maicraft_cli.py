@@ -30,6 +30,7 @@ Windows 注意：Git Bash 里 curl/argv 会把中文按本地代码页发出造�
 from __future__ import annotations
 
 import argparse
+import difflib
 import email.message
 import json
 import os
@@ -150,6 +151,99 @@ def first_line(text: str, limit: int = 100) -> str:
     return ""
 
 
+def validate_against_schema(value, schema, path="$", problems=None) -> list[str]:
+    """按 JSON Schema 常用子集校验参数，返回人话问题行。
+
+    只认 type / required / properties / items / enum / minimum / maximum；
+    服务器 schema 里看不懂的关键字一律跳过——校验器缺能力时宁可放行，
+    不拦合法调用。
+    """
+    problems = [] if problems is None else problems
+    if not isinstance(schema, dict):
+        return problems
+    expected = schema.get("type")
+    if expected == "object":
+        if not isinstance(value, dict):
+            problems.append(f"{path} 应为 object，实为 {type(value).__name__}")
+            return problems
+        for key in schema.get("required", []):
+            if key not in value:
+                problems.append(f"{path} 缺少必填字段 {key}")
+        for key, sub in (schema.get("properties") or {}).items():
+            if key in value:
+                validate_against_schema(value[key], sub, f"{path}.{key}", problems)
+        return problems
+    if expected == "array":
+        if not isinstance(value, list):
+            problems.append(f"{path} 应为 array，实为 {type(value).__name__}")
+            return problems
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                validate_against_schema(item, item_schema, f"{path}[{index}]", problems)
+        return problems
+    if expected in ("string", "integer", "number", "boolean"):
+        if expected == "string":
+            type_ok = isinstance(value, str)
+        elif expected == "integer":
+            type_ok = isinstance(value, int) and not isinstance(value, bool)
+        elif expected == "number":
+            type_ok = isinstance(value, (int, float)) and not isinstance(value, bool)
+        else:
+            type_ok = isinstance(value, bool)
+        if not type_ok:
+            problems.append(f"{path} 应为 {expected}，实为 {type(value).__name__}")
+            return problems
+    if isinstance(schema.get("enum"), list) and value not in schema["enum"]:
+        problems.append(f"{path} 应为 {'/'.join(str(item) for item in schema['enum'])} 之一，实为 {value!r}")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if "minimum" in schema and value < schema["minimum"]:
+            problems.append(f"{path} 小于下限 {schema['minimum']}: {value}")
+        if "maximum" in schema and value > schema["maximum"]:
+            problems.append(f"{path} 超过上限 {schema['maximum']}: {value}")
+    return problems
+
+
+def check_tool_args(connection, tool_name: str, params) -> list[str]:
+    """发送前按该工具的 inputSchema 校验参数，返回问题行；空列表=通过。
+
+    tools/list 拿不到时不拦（调用照发）；工具名不存在则拦下并给出相近名。
+    """
+    try:
+        raw = connection.call("tools/list", {})
+        tools = json.loads(raw).get("result", {}).get("tools", [])
+    except Exception:
+        return []
+    schema = next((tool.get("inputSchema") for tool in tools if tool.get("name") == tool_name), None)
+    if schema is None:
+        known = [tool.get("name", "") for tool in tools]
+        close = difflib.get_close_matches(tool_name, known, n=3, cutoff=0.4)
+        hint = f"（相近：{', '.join(close)}）" if close else f"（现有：{', '.join(known)}）"
+        return [f"服务器没有工具 {tool_name}{hint}；本次调用未发出"]
+    problems = validate_against_schema(params, schema)
+    if problems:
+        problems.append("本次调用未发出")
+    return problems
+
+
+def parse_tool_result(raw_text: str):
+    """从 tools/call 的 JSON-RPC 响应里取出结果 data 对象；取不出返回 None。"""
+    try:
+        envelope = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return None
+    result = envelope.get("result")
+    if not isinstance(result, dict):
+        return None
+    contents = result.get("content")
+    if isinstance(contents, list) and contents and isinstance(contents[0], dict) and "text" in contents[0]:
+        try:
+            return json.loads(contents[0]["text"])
+        except json.JSONDecodeError:
+            return None
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MaiCraft 内嵌 MCP 端点直连调试 CLI")
     parser.add_argument("--endpoint", default=None, help=f"MCP 端点（默认 {DEFAULT_ENDPOINT}，可用 MAICRAFT_ENDPOINT 覆盖）")
@@ -164,6 +258,7 @@ def main() -> int:
     call_parser = sub.add_parser("call", help="调用 MCP 工具：call <tool> '<json-args>' | call <tool> @args.json")
     call_parser.add_argument("tool")
     call_parser.add_argument("args", nargs="?", default="{}", help="内联 JSON，或 @文件路径（UTF-8，推荐含中文时使用）")
+    call_parser.add_argument("--no-schema-check", action="store_true", help="跳过发送前的 inputSchema 校验")
     read_parser = sub.add_parser("read", help="读取 MCP 资源，如 skill://survival/survival-opening/SKILL.md")
     read_parser.add_argument("uri")
     args = parser.parse_args()
@@ -217,6 +312,12 @@ def main() -> int:
             params = json.loads(Path(args.args[1:]).read_text(encoding="utf-8"))
         else:
             params = json.loads(args.args)
+        if not args.no_schema_check:
+            problems = check_tool_args(connection, args.tool, params)
+            if problems:
+                for problem in problems:
+                    print(f"参数校验：{problem}")
+                return 1
         raw = connection.call("tools/call", {"name": args.tool, "arguments": params})
     else:
         raw = connection.call("resources/read", {"uri": args.uri})
