@@ -16,9 +16,11 @@ class ProtocolFlowTest {
     private static final class FakePeer implements ServerProtocolDispatcher.Peer {
         final AtomicLong clock = new AtomicLong(100);
         boolean mayMutate = true;
+        boolean admitted = true;
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return clock.get(); }
+        @Override public boolean admitted() { return admitted; }
         @Override public boolean mayMutate() { return mayMutate; }
         @Override public List<ServerFeature> features() {
             return List.of(new ServerFeature("ownership.query", 1, false, true, new JsonObject()),
@@ -142,5 +144,35 @@ class ProtocolFlowTest {
         query.addProperty("requestId", "req-1");
         JsonObject reply = dispatcher.receive(query, peer);
         assertEquals("unknown", reply.get("status").getAsString());
+    }
+
+    @Test
+    void 不是角色账号的玩家握手被拒_原有会话一并作废() {
+        // 服主把这个号从角色账号名单里拿掉后，它再来握手：不给新会话，之前的会话也不能再用。
+        var peer = new FakePeer();
+        var dispatcher = new ServerProtocolDispatcher();
+        String earlier = dispatcher.receive(hello(), peer).get("sessionId").getAsString();
+        peer.admitted = false;
+        JsonObject again = hello();
+        again.addProperty("clientNonce", "nonce-2");
+
+        JsonObject refused = dispatcher.receive(again, peer);
+        assertEquals("welcome", refused.get("kind").getAsString());
+        assertEquals("rejected", refused.get("status").getAsString());
+        assertEquals(ServerProtocolDispatcher.NOT_CHARACTER_ACCOUNT, refused.get("code").getAsString());
+
+        JsonObject request = new JsonObject();
+        request.addProperty("kind", "request");
+        request.addProperty("bootstrap", 1);
+        request.addProperty("sessionId", earlier);
+        request.addProperty("dimension", "minecraft:overworld");
+        request.addProperty("requestId", "req-after");
+        request.addProperty("operationId", "test.place");
+        request.addProperty("version", 1);
+        request.addProperty("controlGeneration", 0);
+        request.add("body", new JsonObject());
+        JsonObject reply = dispatcher.receive(request, peer);
+        assertEquals("rejected", reply.get("status").getAsString());
+        assertEquals("not_applied", reply.get("effect").getAsString());
     }
 }

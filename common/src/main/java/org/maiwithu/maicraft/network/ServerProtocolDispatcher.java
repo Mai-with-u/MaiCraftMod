@@ -10,10 +10,14 @@ import java.util.Map;
 public final class ServerProtocolDispatcher {
     public static final int MAX_REQUESTS_PER_TICK = 8;
     public static final int MAX_SESSIONS = 8;
+    /** 握手被拒的原因码：这个玩家不是服务器认的角色账号，服务端链路不对他开放。 */
+    public static final String NOT_CHARACTER_ACCOUNT = "not_character_account";
 
     public interface Peer {
         String dimension();
         long tick();
+        /** 这个玩家是不是服务器认的角色账号：不是就不给会话，普通玩家照常游玩，只是用不了服务端链路。 */
+        boolean admitted();
         boolean mayMutate();
         List<ServerFeature> features();
         JsonObject execute(String operationId, JsonObject body);
@@ -59,6 +63,12 @@ public final class ServerProtocolDispatcher {
         String nonce = ProtocolJson.string(request, "clientNonce");
         if (request.has("dimension") && !peer.dimension().equals(ProtocolJson.string(request, "dimension")))
             return failure(request, "hello", "dimension_changed", "Hello belongs to a different world", peer.tick());
+        // 不是角色账号的玩家来握手：不建会话，连同之前留下的会话一起关掉（服主刚把他从名单里拿掉时，旧会话也不再能用）。
+        if (!peer.admitted()) {
+            invalidateWorld();
+            return failure(request, "hello", NOT_CHARACTER_ACCOUNT,
+                    "This player is not a MaiCraft character account on this server", peer.tick());
+        }
         sessions.values().removeIf(session -> session.expired(peer.tick()));
         for (ProtocolSession session : sessions.values()) {
             if (session.nonce.equals(nonce)) {

@@ -5,10 +5,13 @@ import com.google.gson.JsonObject;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Locale;
+import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 
 /** 协商出的服务端支持、客户端已登记能力和每次执行条件分别判断。 */
 public final class ServerCapabilityState {
     public enum State { DISCONNECTED, NEGOTIATING, READY, UNCONFIRMED, DENIED, LOST }
+    /** 服务端拒绝握手的原因之一：这个号不是服务器认的角色账号，服主要把它写进服务端配置才开放。 */
+    public static final String NOT_CHARACTER_ACCOUNT = ServerProtocolDispatcher.NOT_CHARACTER_ACCOUNT;
     public record Scope(long connection, String sessionId, String dimension) {}
     public record Feature(int version, boolean mutating, boolean enabled, JsonObject limits) {
         public Feature { limits = limits.deepCopy(); }

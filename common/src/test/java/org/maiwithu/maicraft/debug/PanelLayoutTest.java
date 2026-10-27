@@ -211,6 +211,18 @@ class PanelLayoutTest {
     }
 
     @Test
+    void serverLinkRefusedForNonCharacterAccountTellsTheOwnerToListIt() {
+        // 握手被拒之后过了十秒也算"迟迟没确认"：仍要说是名单的事，不能说成服务器没装 MaiCraft。
+        PanelScene refused = new PanelScene();
+        refused.serverLink = new StatusSnapshot.ServerLink(ServerCapabilityState.State.DENIED,
+                ServerCapabilityState.NOT_CHARACTER_ACCOUNT, false, true);
+
+        String shown = flat(lay(refused, PanelLevel.BRIEF)).replace(" ", "");
+        assertTrue(shown.contains("这台服务器没把这个号列为MaiCraft角色"), shown);
+        assertFalse(shown.contains("多半没装"), shown);
+    }
+
+    @Test
     void timelineMergesRepeatedCallsAndShowsTheCallBeforeTheEventItCaused() {
         PanelScene scene = new PanelScene().working("maicraft:obtain", "做一把铁镐", "采掘");
         for (int i = 0; i < 4; i++) scene.calls.add(PanelScene.succeeded("events", NOW - 100_000 + i * 1000));

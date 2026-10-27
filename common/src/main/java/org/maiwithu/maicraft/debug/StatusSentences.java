@@ -75,6 +75,12 @@ final class StatusSentences {
         if (!connection.control().inWorld()) return Optional.empty();
         if (link.state() == ServerCapabilityState.State.READY && link.confirmed()) return Optional.empty();
         String why = link.reason().isBlank() ? "" : "（" + link.reason() + "）";
+        // 服务器装了 MaiCraft，只是没把这个号当角色：说清该找服主写名单，不能等握手超时后说成"多半没装 MaiCraft"。
+        if (link.state() == ServerCapabilityState.State.DENIED
+                && ServerCapabilityState.NOT_CHARACTER_ACCOUNT.equals(link.reason())) {
+            return Optional.of(new PanelLine.Piece("这台服务器没把这个号列为 MaiCraft 角色，请服主把它写进服务端配置"
+                    + " config/maicraft-server.json 的 characterAccounts", PanelColor.PROBLEM));
+        }
         if (link.expired()) {
             return Optional.of(new PanelLine.Piece("服务端迟迟没握手，服务器多半没装 MaiCraft" + why, PanelColor.PROBLEM));
         }

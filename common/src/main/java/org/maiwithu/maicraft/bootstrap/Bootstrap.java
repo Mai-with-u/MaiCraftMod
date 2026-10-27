@@ -133,6 +133,7 @@ import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.server.BlockOwnershipRecord;
+import org.maiwithu.maicraft.server.CharacterAccounts;
 import org.maiwithu.maicraft.server.OwnershipFile;
 import org.maiwithu.maicraft.server.OwnershipQuery;
 import org.maiwithu.maicraft.server.ServerConfirmations;
@@ -154,7 +155,7 @@ import org.maiwithu.maicraft.compat.SupportedMod;
  * <p>启动顺序：通用部分（独立服务器与客户端都会执行）→ 客户端部分（只在客户端执行）。
  * 能力与联动模组在这里按一份明确的清单创建和登记，不做类路径扫描，新增时在清单里加一行。
  *
- * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询。
+ * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询，服务端链路只对角色账号开放。
  * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话、七项生存需求与控制循环、
  * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、goal、events）。
  */
@@ -186,7 +187,10 @@ public final class Bootstrap {
                                               List<SupportedMod<ServerCompatModule>> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
         ServerOperationRegistry operations = new ServerOperationRegistry();
-        ServerLinkNetwork network = new ServerLinkNetwork(operations);
+        // 服务端链路只对角色账号开放：握手时不是角色账号的不给会话；名单改了之后的每个请求也按名单再核一次。
+        CharacterAccounts accounts = CharacterAccounts.read(loader.configDirectory());
+        operations.setPolicy((player, operation) -> accounts.admits(player));
+        ServerLinkNetwork network = new ServerLinkNetwork(operations, accounts::admits);
         // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
         operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
         // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
