@@ -150,6 +150,34 @@ class ContainerSourceTest {
     }
 
     @Test
+    void 深处的记忆箱子_代价把落差折进去_说明里写清() {
+        // 实机：地表要木镐，报价先挑了记忆里在地底深处的箱子（走路代价按直线算，把它算得很近），
+        // 走到跟前才发现下不去。落差大的箱子把落差再折一遍进代价，只降排序不划掉，说明里交代原因。
+        WorldMemory memory = memory();
+        WorldPosition deep = new WorldPosition(-47, -34, 63, null);
+        memory.rememberContainerOpened(deep, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
+        ContainerSource source = source(memory);
+
+        // 那只箱子在一百多格外：任务给的搜索半径盖住它，才轮得到它报价。
+        SourceContext wide = SourceContext.scoped(CONTEXT.characterAt(), CONTEXT.permissions(), 200, null);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), wide));
+        double straight = Math.sqrt(47d * 47 + 98d * 98 + 63d * 63);
+        assertEquals(straight + 98, offer.cost().distanceBlocks(), 0.01, "98 格落差再折一遍进代价");
+        assertTrue(offer.risk().contains("深处"), offer.risk());
+    }
+
+    @Test
+    void 脚边几格落差的箱子_代价照旧() {
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(new WorldPosition(6, 70, -3, null), "minecraft:chest",
+                List.of("minecraft:iron_ingot"), NOW);
+        ContainerSource source = source(memory);
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request(1), CONTEXT));
+        assertEquals(Math.sqrt(36d + 36d + 9d), offer.cost().distanceBlocks(), 0.01, "落差没超过门槛，不折算");
+    }
+
+    @Test
     void 只看见过的箱子报不知道有多少_排在后面由选择器决定() {
         WorldMemory memory = memory();
         memory.rememberContainerSeen(CHEST_AT, "minecraft:chest", NOW);

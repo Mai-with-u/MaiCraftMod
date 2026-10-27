@@ -51,6 +51,15 @@ public final class ContainerSource implements ItemSource {
     /** 记得没有、但离这么近（格）的箱子再开一眼：几步路的事，记忆可能过时。 */
     static final double RECHECK_NEAR_BLOCKS = 8;
 
+    /**
+     * 落差比这大（格）的箱子按难走到算：脚边几格的地下室不算，深坑、深矿里的算。
+     * 走路代价的来路是直线距离（找容器的读端按坐标直线算，没有走过没走过的路线记忆可用），
+     * 落差大的箱子真走过去多半要下矿、绕洞，直线距离把它算得太近，报价就把落差再折一遍进代价。
+     * 只降排序不划掉：深处的箱子可能经洞穴可达，只是不优先；真没别的来路时它照旧报价，
+     * 到不了跟前由引擎按现场如实收场再换路。
+     */
+    static final double DEEP_DROP_BLOCKS = 24;
+
     @Override public String describe() {
         return "记得的箱子";
     }
@@ -90,14 +99,14 @@ public final class ContainerSource implements ItemSource {
             int count = countWanted(known, request);
             if (count > 0) {
                 return new SourceQuote.Offer(describe(), Math.min(count, request.count()),
-                        new AcquisitionCost(known.walkCost(), 4),
-                        "开箱时以现场为准", positionHint(known));
+                        new AcquisitionCost(reachableCost(known, context), 4),
+                        depthNote(known, context, "开箱时以现场为准"), positionHint(known));
             }
         }
         if (maybe != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                    new AcquisitionCost(maybe.walkCost(), 4),
-                    "这只箱子只是看见过，没开过，不确定里面有什么", positionHint(maybe));
+                    new AcquisitionCost(reachableCost(maybe, context), 4),
+                    depthNote(maybe, context, "这只箱子只是看见过，没开过，不确定里面有什么"), positionHint(maybe));
         }
         if (stale != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
@@ -152,6 +161,32 @@ public final class ContainerSource implements ItemSource {
     /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */
     private static int searchRadius(SourceContext context) {
         return context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
+    }
+
+    // 走过去的代价按到得了与否修正：直线距离之外，落差大的把落差再折一遍（见 DEEP_DROP_BLOCKS 的说明）。
+    private static double reachableCost(ContainerChooser.Candidate candidate, SourceContext context) {
+        return candidate.walkCost() + depthPenalty(candidate, context);
+    }
+
+    // 深度落差：同一个维度里才比（维度没记的按同一个算）；头顶上的和脚下的同样难走。
+    private static double depthPenalty(ContainerChooser.Candidate candidate, SourceContext context) {
+        WorldPosition at = candidate.at();
+        WorldPosition here = context.characterAt();
+        if (at.dimension() != null && here.dimension() != null && !at.dimension().equals(here.dimension())) {
+            return 0;
+        }
+        double drop = Math.abs(at.y() - here.y());
+        return drop <= DEEP_DROP_BLOCKS ? 0 : drop;
+    }
+
+    // 落差大的箱子在风险说明里交代一句：LLM 看得见为什么这只箱子排在了后面。
+    private static String depthNote(ContainerChooser.Candidate candidate, SourceContext context, String original) {
+        double penalty = depthPenalty(candidate, context);
+        if (penalty <= 0) return original;
+        WorldPosition at = candidate.at();
+        String where = at.y() > context.characterAt().y() ? "头顶上" : "脚下";
+        return original + "（在" + where + " " + (int) penalty + " 格深处，"
+                + "没走过这条路线，要绕的路可能远得多）";
     }
 
     /** 开过、且记下的内容里有想要的东西的容器。 */
