@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.ArrayList;
@@ -80,6 +81,41 @@ class RecipeSourceTest {
         }
     }
 
+    /**
+     * 替身：原料问价按用例配置的价目表答，没配的等于各来源都不应价；再记哪几样已确认拿不到。
+     * 备料的动作照 CapturingNeeds 的样子当场做完、记下要了什么。
+     */
+    private static final class PricedNeeds implements ItemNeeds {
+        private final Map<String, Double> prices;
+        private final Set<String> unobtainable;
+
+        private PricedNeeds(Map<String, Double> prices, Set<String> unobtainable) {
+            this.prices = prices;
+            this.unobtainable = unobtainable;
+        }
+
+        @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions,
+                boolean includeMaking) {
+            Double price = prices.get(request.wanted().specifier());
+            return price == null ? Optional.empty() : Optional.of(price);
+        }
+
+        @Override public boolean knownUnobtainable(WantedItem wanted) {
+            return unobtainable.contains(wanted.specifier());
+        }
+
+        @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    return ActionStatus.done();
+                }
+                @Override public String describe() {
+                    return "备" + request.wanted().describe();
+                }
+            };
+        }
+    }
+
     /** 替身：动手做的现场动作，永远接得上，一步做完。 */
     private static final class FakeRuns implements RecipeRuns {
         static final FakeRuns READY = new FakeRuns();
@@ -107,7 +143,7 @@ class RecipeSourceTest {
                 List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:oak_log"), 1)));
     }
 
-    private RecipeSource source(WorldMemory memory, ReadsRecipes recipes, CapturingNeeds needs) {
+    private RecipeSource source(WorldMemory memory, ReadsRecipes recipes, ItemNeeds needs) {
         return new RecipeSource(recipes, memory,
                 itemId -> switch (itemId) { case "minecraft:coal" -> 1600; case "minecraft:coal_block" -> 16000; default -> 0; },
                 FakeRuns.READY, backpack, offhand, tags, needs);
@@ -1215,5 +1251,63 @@ class RecipeSourceTest {
                 .filter(stack -> stack.itemId().equals(itemId))
                 .mapToInt(BackpackStack::count)
                 .sum();
+    }
+
+    /** 做镐的配方：镐头那格给什么、要三件，加两根木棍；摆得进合成格，测试里省去工作台。 */
+    private static WorkstationRecipe pickaxe(String material, WantedItem head) {
+        return new WorkstationRecipe("minecraft:" + material + "_pickaxe", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:" + material + "_pickaxe"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(head, 3),
+                        new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:stick"), 2)), true);
+    }
+
+    @Test
+    void 空背包要镐子_原料近的木镐排在金镐前面() {
+        // 实机：空背包开局备工具，几种做法缺料一样多、报价分不出差别，捡了注册表靠前的金镐——
+        // 而挖金矿又要铁镐，转回了圈。现在按材料可得性排：木镐的木板、木棍是近处树上就有的，
+        // 金锭要从更深的金矿来，金镐整体排在后面。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(
+                        pickaxe("golden", WantedItem.ofItem("minecraft:gold_ingot")),
+                        pickaxe("wooden", WantedItem.ofTag("minecraft:planks"))),
+                new PricedNeeds(Map.of("minecraft:gold_ingot", 41.0,
+                                "#minecraft:planks", 36.0, "minecraft:stick", 36.0), Set.of()));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofTag("minecraft:pickaxes"), 1, "挖石头"), CONTEXT));
+        assertEquals("minecraft:wooden_pickaxe", offer.hint());
+    }
+
+    @Test
+    void 原料已确认拿不到的做法跳过_排下一条() {
+        // 实机：要铁锭，报了"备齐原料后在背包里做铁锭"，可原料是原铁——挖原铁本身要镐，这条路走不通。
+        // 引擎问遍各来源确认原铁拿不到之后，这条做法整条让位给原料拿得到的下一条。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        WorkstationRecipe fromRaw = new WorkstationRecipe("minecraft:iron_ingot_from_raw_iron",
+                WorkstationRecipe.Kind.CRAFTING, WantedItem.ofItem("minecraft:iron_ingot"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)), true);
+        WorkstationRecipe fromNuggets = new WorkstationRecipe("minecraft:iron_ingot_from_nuggets",
+                WorkstationRecipe.Kind.CRAFTING, WantedItem.ofItem("minecraft:iron_ingot"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:iron_nugget"), 9)), true);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(fromRaw, fromNuggets),
+                new PricedNeeds(Map.of(), Set.of("minecraft:raw_iron")));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
+        assertEquals("minecraft:iron_ingot_from_nuggets", offer.hint(), "原铁拿不到，不再报拿原铁来做的方案");
+    }
+
+    @Test
+    void 唯一的做法原料拿不到_如实说配方原料无从取得() {
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        WorkstationRecipe fromRaw = new WorkstationRecipe("minecraft:iron_ingot_from_raw_iron",
+                WorkstationRecipe.Kind.CRAFTING, WantedItem.ofItem("minecraft:iron_ingot"), 1,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:raw_iron"), 1)), true);
+        RecipeSource recipeSource = source(memory, wanted -> List.of(fromRaw),
+                new PricedNeeds(Map.of(), Set.of("minecraft:raw_iron")));
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
+        assertTrue(unavailable.reason().contains("配方原料无从取得"), unavailable.reason());
     }
 }

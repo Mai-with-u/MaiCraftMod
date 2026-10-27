@@ -131,6 +131,8 @@ class RecipeSourceChoicesTest {
         ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:magenta_bed"), 1, "做一张床放进屋里");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request, CONTEXT));
         assertEquals("minecraft:dye_magenta_bed", offer.hint());
+        // 问价阶段排做法先后也会向引擎问原料的可得性（连现做一起比）；这里只核对挑可以互换的原料那一问，先清掉。
+        costAsked.clear();
         Action action = source.begin(request, offer, CONTEXT).orElseThrow();
         ActionStatus status = ActionStatus.running();
         for (int tick = 0; tick < 50 && status instanceof ActionStatus.Running; tick++) status = action.tick(null);
@@ -153,7 +155,10 @@ class RecipeSourceChoicesTest {
         readyMadeCost.put("minecraft:white_bed", 118.0);
         makeMagentaBed();
         assertEquals("minecraft:white_bed", asked.getFirst().wanted().itemId());
-        assertTrue(costAsked.stream().noneMatch(item -> item.endsWith("（含现做）")), "都缺羊毛，只比现成的：" + costAsked);
+        // 排做法先后也会连现做一起问价（那几条带"含现做"）；挑可以互换的床这一问只比现成的——
+        // 三张床都缺羊毛，头三条问价就是挑床的那三条，一张一张只问现成的来路。
+        assertEquals(List.of("minecraft:black_bed", "minecraft:white_bed", "minecraft:red_bed"),
+                costAsked.subList(0, 3), "都缺羊毛，挑床时只比现成的：" + costAsked);
     }
 
     @Test
