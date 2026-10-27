@@ -97,6 +97,12 @@ final class VehicleControlsTask extends PhasedTask<VehicleControlsTask.Phase> {
         return new StepDecision.Run(new Input(structure.get(), seenId, roles, forward));
     }
 
+    /** 这一项是写操纵表的：键是输入（打字机:W，冒号全角半角都行）或 forward。 */
+    static boolean controlsKey(String key) {
+        String trimmed = key.trim();
+        return trimmed.equals("forward") || trimmed.contains(":") || trimmed.contains("：");
+    }
+
     private static StepDecision invalid(String why) {
         return new StepDecision.Finish(TaskResult.failed("操纵表写法不对", Problem.of(Problem.Kind.INVALID_PARAMETER, why,
                 null)));

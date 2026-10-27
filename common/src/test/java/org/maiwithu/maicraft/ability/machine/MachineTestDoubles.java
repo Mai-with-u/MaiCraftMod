@@ -181,6 +181,10 @@ final class MachineTestDoubles {
         /** 装安装段与装部件的动作脚本：每次调用弹一个；空了给空，按"这种机器不给装"对待。 */
         final Deque<Action> installActions = new ArrayDeque<>();
         final Deque<Action> mountActions = new ArrayDeque<>();
+        /** 这种机器在物理结构上读得到、改得了设置（船上的无线红石打字机这一类）。 */
+        boolean onStructure;
+        /** 在结构上改设置时交来的靠近：测试看它是不是保留座位的那一种。 */
+        BringsPlayerClose structureReach;
         /** 在物理结构上装安装段的动作脚本；空了给空，按"结构上不会装"对待。 */
         final Deque<Action> structureInstallActions = new ArrayDeque<>();
         /** 动手顺序的流水：施工、装段、装部件、改设置谁先谁后从这里看。 */
@@ -306,6 +310,20 @@ final class MachineTestDoubles {
             }
             touched.add("change:" + key);
             return Optional.of(new Scripted(1, effect));
+        }
+
+        // 结构上：给了 onStructure 才读得到、改得了（船上的无线红石打字机这一类），读改和地上同一份脚本，记下用的是哪种靠近。
+        @Override public List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
+            return onStructure ? settings(at) : List.of();
+        }
+
+        @Override public Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
+                Permissions permissions, BringsPlayerClose reach) {
+            if (!onStructure) return Optional.empty();
+            structureReach = reach;
+            touched.add("change-on-structure:" + key + "@" + at.toShortString());
+            Runnable effect = onChange.get(key);
+            return effect == null ? Optional.empty() : Optional.of(new Scripted(1, effect));
         }
 
         @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {

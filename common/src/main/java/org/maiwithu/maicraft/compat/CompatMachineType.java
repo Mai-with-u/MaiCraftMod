@@ -131,6 +131,15 @@ public final class CompatMachineType implements MachineType {
         return act(() -> type.change(at, key, value, permissions));
     }
 
+    @Override public List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
+        return ask(() -> type.settingsOnStructure(structureId, at), List.of());
+    }
+
+    @Override public Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
+            Permissions permissions, BringsPlayerClose reach) {
+        return act(() -> type.changeOnStructure(structureId, at, key, value, permissions, reach));
+    }
+
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
         return act(() -> type.feed(at, itemId, count, permissions));
     }

@@ -16,9 +16,15 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param target      目标对象：一格机器方块的写法（观察编号、坐标、记过的地点）
  * @param settings    要改的设置：键是这台机器认的设置项，值统一转成字符串
  * @param permissions 这次任务的许可
+ * @param onStructure 改组装好的物理结构上的机器（船上的无线红石打字机）时是哪个结构；改世界里的为 null
  */
 record MachineConfigureInput(Target target, Map<String, String> settings,
-                             Permissions permissions) implements TaskInput {
+                             Permissions permissions, OnStructure onStructure) implements TaskInput {
+
+    /** 改世界里的机器。 */
+    MachineConfigureInput(Target target, Map<String, String> settings, Permissions permissions) {
+        this(target, settings, permissions, null);
+    }
 
     MachineConfigureInput {
         Objects.requireNonNull(settings, "settings");

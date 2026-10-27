@@ -2,17 +2,22 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -31,6 +36,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>配置器一类是循环切换：改完读回不是要的值就再改一下，读回的值转了一圈还没到
  * 就如实说做不到，不无限点下去。改好一项记一项；后面的项做不了时，前面的照实算数。
+ *
+ * <p>改组装好的物理结构上的机器（船上的无线红石打字机）：在结构的方块里找认这些设置项的那台，几台时挑离角色最近的
+ * （开船时同名的键也按最近的那台按）；读、改都走机器类型在结构上的那一套，走过去用结构上的靠近——坐在座位上够得着就坐着改，
+ * 够不着不离开座位、照实说；船在动先等它停。说的时候写局部坐标。
  */
 final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> {
 
@@ -53,6 +62,11 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
     private String currentKey;
     /** 下一刻要推进的动作：上一刻按现场备好，进入阶段时交给基类。 */
     private Action prepared;
+    /** 结构上的那台说的时候写哪一格、船上一共几台；改世界里的为空串。 */
+    private String onStructureNote = "";
+
+    /** 结构上逐格找机器最多找这么多格；再大的结构不在这里找。 */
+    static final int MAX_STRUCTURE_CELLS = 32_768;
 
     MachineConfigureTask(MachineConfigureInput input, MachineServices services) {
         super("改机器设置", Phase.RESOLVE, new ProgressTracker(600, 3600));
@@ -76,6 +90,11 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
 
     // 认机器：目标那一格没加载按到不了说；没有机器类型认领以不支持结束；不认识的设置项一次报全。
     private Next<Phase> resolve() {
+        if (input.onStructure() != null) {
+            Optional<Problem> notFound = locateOnStructure();
+            if (notFound.isPresent()) return Next.fail(notFound.get());
+            return checkKeys();
+        }
         MachineTargets.Resolution resolved = targets.resolve(input.target());
         if (resolved instanceof MachineTargets.Resolution.DeadEnd dead) {
             return Next.fail(dead.problem());
@@ -91,9 +110,14 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
         if (type == null) {
             return Next.fail(services.unclaimedHere(state, "改设置"));
         }
-        List<String> unknownKeys = unknownKeys(type.settings(cell));
+        return checkKeys();
+    }
+
+    // 不认识的设置项一次报全；已经就是要的值的不动。
+    private Next<Phase> checkKeys() {
+        List<String> unknownKeys = unknownKeys(settingsNow());
         if (!unknownKeys.isEmpty()) {
-            List<String> legal = type.settings(cell).stream().map(MachineSetting::key).toList();
+            List<String> legal = settingsNow().stream().map(MachineSetting::key).toList();
             return Next.fail(Problem.of(Problem.Kind.INVALID_PARAMETER,
                     "这台机器不认识这些设置项：" + String.join("、", unknownKeys)
                             + "；它认的是：" + String.join("、", legal)));
@@ -140,7 +164,11 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
                     + "，到不了要的 " + wanted));
         }
         recordProgress("「" + currentKey + "」读回 " + now + "，还要改成 " + wanted);
-        return type.change(cell, currentKey, wanted, input.permissions())
+        Optional<Action> changing = input.onStructure() == null
+                ? type.change(cell, currentKey, wanted, input.permissions())
+                : type.changeOnStructure(input.onStructure().structureId(), cell, currentKey, wanted, input.permissions(),
+                        input.onStructure().worksite().closeKeepingSeat());
+        return changing
                 .map(action -> {
                     prepared = action;
                     return Next.go(Phase.CHANGE, "改「" + currentKey + "」");
@@ -176,7 +204,7 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
 
     /** 读回一项设置的现值；这一项被拿掉了或读不到时空串，按"读不到"继续。 */
     private String readBack(String key) {
-        return type.settings(cell).stream()
+        return settingsNow().stream()
                 .filter(setting -> setting.key().equals(key))
                 .map(MachineSetting::value)
                 .findFirst()
@@ -194,7 +222,49 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
     }
 
     private String describeMachine() {
-        return type.name();
+        return type.name() + onStructureNote;
+    }
+
+    /** 这台机器此刻的设置项：结构上的按结构身份读地块里那一台。 */
+    private List<MachineSetting> settingsNow() {
+        return input.onStructure() == null ? type.settings(cell)
+                : type.settingsOnStructure(input.onStructure().structureId(), cell);
+    }
+
+    /**
+     * 在结构的方块里找认这些设置项的机器：逐格看是哪种机器、在结构上读得到哪些设置项，全认的才算；
+     * 几台都认时挑离角色最近的那台（开船时同名的键也按最近的那台按）。找不到交问题。
+     */
+    private Optional<Problem> locateOnStructure() {
+        OnStructure on = input.onStructure();
+        StructureWorksites.Worksite worksite = on.worksite();
+        BlockPos min = worksite.min();
+        BlockPos max = worksite.max();
+        long size = (long) (max.getX() - min.getX() + 1) * (max.getY() - min.getY() + 1) * (max.getZ() - min.getZ() + 1);
+        if (size > MAX_STRUCTURE_CELLS) {
+            return Optional.of(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这个结构太大（" + size + " 格），在上面找机器读不过来"));
+        }
+        BlockPos me = services.world().playerSpot().map(spot -> worksite.plotCellAt(Vec3.atBottomCenterOf(spot.pos())))
+                .orElse(min);
+        List<BlockPos> found = new ArrayList<>();
+        for (BlockPos at : BlockPos.betweenClosed(min, max)) {
+            if (!worksite.blocks().loaded(at)) continue;
+            BlockState state = worksite.blocks().state(at);
+            MachineType claiming = state.isAir() ? null : services.claiming(state);
+            if (claiming == null) continue;
+            Set<String> keys = new HashSet<>(claiming.settingsOnStructure(on.structureId(), at).stream()
+                    .map(MachineSetting::key).toList());
+            if (keys.containsAll(input.settings().keySet())) found.add(at.immutable());
+        }
+        if (found.isEmpty()) {
+            return Optional.of(Problem.of(Problem.Kind.UNSUPPORTED, "船上没有认「" + String.join("、", input.settings().keySet())
+                    + "」这些设置项的机器", "船上改得了的是无线红石打字机的键（key.W 这类）；部件的设置框在船上还不会改"));
+        }
+        cell = found.stream().min(Comparator.comparingDouble(at -> at.distSqr(me))).orElseThrow();
+        type = services.claiming(worksite.blocks().state(cell));
+        onStructureNote = "（船上局部坐标 " + on.origin().local(cell).toShortString() + " 那台"
+                + (found.size() > 1 ? "；船上有 " + found.size() + " 台，改的是离角色最近的这台" : "") + "）";
+        return Optional.empty();
     }
 
     @Override protected ResultDetails details() {

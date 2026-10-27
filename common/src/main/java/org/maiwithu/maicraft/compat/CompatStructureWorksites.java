@@ -104,6 +104,10 @@ final class CompatStructureWorksites implements StructureWorksites {
             return worksite.close();
         }
 
+        @Override public BringsPlayerClose closeKeepingSeat() {
+            return worksite.closeKeepingSeat();
+        }
+
         @Override public ReadsBlocks blocks() {
             return worksite.blocks();
         }

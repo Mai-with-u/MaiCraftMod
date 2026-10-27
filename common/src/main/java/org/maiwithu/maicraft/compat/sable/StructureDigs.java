@@ -38,7 +38,7 @@ final class StructureDigs implements DigsBlocks {
     @Override public Optional<Action> dig(BlockPos target) {
         return Optional.of(new StepsInOrder("挖掉船上那一格", List.of(
                 new StepsInOrder.Step("走到够得着的地方", () -> new StructureReach(reads, services, permissions, structureId,
-                        ApproachTarget.ofBlock(target), cell -> false, true)),
+                        ApproachTarget.ofBlock(target), cell -> false, true, false)),
                 new StepsInOrder.Step("挖", () -> new StructureBreak(reads, services, structureId, target)))));
     }
 

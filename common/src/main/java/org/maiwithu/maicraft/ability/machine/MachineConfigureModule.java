@@ -5,17 +5,20 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -32,11 +35,15 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  *
  * <p>设置项有哪些、值怎么写，由登记了的机器类型自报（lookup 里按已装的模组列出）；
  * 这里的参数只是把"要改成什么"带进游戏。认不出的机器以不支持结束，不猜它有什么设置。
+ *
+ * <p>target 给物理结构 s#：settings 写操纵表（打字机:W 的角色、forward）就改操纵表；写机器的设置项（key.W 这类）
+ * 就改船上认这些设置项的机器（无线红石打字机），几台时改离角色最近的那台。两种不混在一次里。
  */
 final class MachineConfigureModule implements AbilityModule {
 
     private final MachineServices services;
     private final MachineVehicles vehicles;
+    private final MachineArchives archives;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_configure",
             "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
@@ -55,9 +62,10 @@ final class MachineConfigureModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    MachineConfigureModule(MachineServices services, MachineVehicles vehicles) {
+    MachineConfigureModule(MachineServices services, MachineVehicles vehicles, MachineArchives archives) {
         this.services = services;
         this.vehicles = vehicles;
+        this.archives = archives;
     }
 
     @Override public AbilitySpec spec() {
@@ -85,9 +93,14 @@ final class MachineConfigureModule implements AbilityModule {
                     .problem(Problem.of(Problem.Kind.INVALID_PARAMETER,
                             "settings 要是至少一项的对象，例如 {\"side.north\": \"output:items\"}")).build());
         }
-        // 指结构的观察编号 s#：改这辆载具的操纵表（每个输入的角色、车头朝哪），只写表，不碰方块。
+        // 指结构的观察编号 s#：写操纵表（每个输入的角色、车头朝哪）就只写表；写机器的设置项就改船上认它的那台机器。
         if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
-            return VehicleControlsTask.decide(seen.id(), settings, vehicles);
+            long controls = settings.keySet().stream().filter(VehicleControlsTask::controlsKey).count();
+            if (controls == settings.size()) return VehicleControlsTask.decide(seen.id(), settings, vehicles);
+            if (controls > 0) {
+                return invalid("操纵表（打字机:W 这类输入、forward）和船上机器的设置（key.W 这类）分两次下");
+            }
+            return onStructure(seen.id(), settings, step.goal().permissions());
         }
         // 指列车的一节车厢 e#、写的是 schedule.*：给这趟车定时刻表，交给坐在操纵台座位上的列车长。
         if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("e")
@@ -103,6 +116,30 @@ final class MachineConfigureModule implements AbilityModule {
         }
         return new StepDecision.Run(new MachineConfigureInput(step.goal().target(), settings,
                 step.goal().permissions()));
+    }
+
+    // 改船上机器的设置：认得出结构上的工地才改得了；局部坐标原点和看载具时同一套，结果按它写是哪一台。
+    private StepDecision onStructure(String seenId, Map<String, String> settings, Permissions permissions) {
+        Optional<String> structure = vehicles.structureOf().apply(seenId);
+        if (structure.isEmpty()) {
+            return new StepDecision.Finish(TaskResult.failed("指的结构不在了", Problem.of(Problem.Kind.TARGET_GONE,
+                    "观察编号 " + seenId + " 指的结构已经不在了", "重新 observe 再指")));
+        }
+        Optional<StructureWorksites.Worksite> worksite = vehicles.worksite(structure.get());
+        if (worksite.isEmpty()) {
+            Problem problem = vehicles.worksites().isEmpty()
+                    ? Problem.of(Problem.Kind.UNSUPPORTED, "没有接上能在物理结构上动手的联动（要 Sable）")
+                    : Problem.of(Problem.Kind.TARGET_GONE, seenId + " 指的结构不在附近，看不到", "走近重新 observe 再指");
+            return new StepDecision.Finish(TaskResult.failed(problem.headline(), problem));
+        }
+        StructureOrigin origin = StructureOrigin.of(worksite.get(), archives.on(structure.get()));
+        return new StepDecision.Run(new MachineConfigureInput(new Target.Seen(seenId), settings, permissions,
+                new OnStructure(structure.get(), seenId, worksite.get(), origin)));
+    }
+
+    private static StepDecision invalid(String why) {
+        return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "设置写法不对")
+                .problem(Problem.of(Problem.Kind.INVALID_PARAMETER, why)).build());
     }
 
     @Override public void registerTasks(TaskFactories factories) {

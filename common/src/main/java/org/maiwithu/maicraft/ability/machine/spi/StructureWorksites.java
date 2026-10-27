@@ -57,8 +57,14 @@ public interface StructureWorksites {
          */
         ConstructionServices services(ConstructionServices onLand, Permissions permissions);
 
-        /** 靠近结构上的一格：船上的甲板或船边的地上，够得着、看得见那一格（补胶这类只发一包的安装段用）。 */
+        /**
+         * 靠近结构上的一格：船上的甲板或船边的地上，够得着、看得见那一格（补胶这类只发一包的安装段用）；
+         * 人坐在船上的座位上够不着时先下座位再挪。
+         */
         BringsPlayerClose close();
+
+        /** 同上，但人坐在座位上够不着时不离开座位、照实说够不着：改船上控制件的设置用（坐着够得着就坐着改）。 */
+        BringsPlayerClose closeKeepingSeat();
 
         /** 读地块里的格：没加载的如实说没加载（整机比对用）。 */
         ReadsBlocks blocks();

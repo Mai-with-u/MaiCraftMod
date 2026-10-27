@@ -47,6 +47,7 @@ class StructureOriginTest {
         @Override public BlockPos plotCellAt(Vec3 world) { return BlockPos.containing(world); }
         @Override public ConstructionServices services(ConstructionServices onLand, Permissions permissions) { return onLand; }
         @Override public BringsPlayerClose close() { return (target, permissions) -> null; }
+        @Override public BringsPlayerClose closeKeepingSeat() { return (target, permissions) -> null; }
         @Override public ReadsBlocks blocks() { return null; }
         @Override public void forgetScan() { }
     }

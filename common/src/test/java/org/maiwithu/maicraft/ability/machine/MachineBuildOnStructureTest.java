@@ -201,6 +201,7 @@ class MachineBuildOnStructureTest {
         @Override public BlockPos plotCellAt(Vec3 world) { return BlockPos.containing(world); }
         @Override public ConstructionServices services(ConstructionServices onLand, Permissions permissions) { return onLand; }
         @Override public BringsPlayerClose close() { return site; }
+        @Override public BringsPlayerClose closeKeepingSeat() { return site; }
         @Override public ReadsBlocks blocks() { return site; }
         @Override public void forgetScan() { forgot = true; }
     }

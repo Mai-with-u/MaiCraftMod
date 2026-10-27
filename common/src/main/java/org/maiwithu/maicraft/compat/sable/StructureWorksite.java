@@ -111,7 +111,11 @@ final class StructureWorksite implements StructureWorksites.Worksite {
     }
 
     @Override public BringsPlayerClose close() {
-        return new Reach();
+        return new Reach(false);
+    }
+
+    @Override public BringsPlayerClose closeKeepingSeat() {
+        return new Reach(true);
     }
 
     @Override public ReadsBlocks blocks() {
@@ -150,8 +154,17 @@ final class StructureWorksite implements StructureWorksites.Worksite {
         return current == null ? null : current.level();
     }
 
-    /** 靠近结构上的一格：整格目标（挖、开关门、补胶）先挑船上的站位；点某一面放方块按远近挑。 */
+    /**
+     * 靠近结构上的一格：整格目标（挖、开关门、补胶）先挑船上的站位；点某一面放方块按远近挑。
+     * 坐在座位上够不着时：keepSeat 保留座位照实说（改控制件的设置），不然先下座位再挪（施工）。
+     */
     private final class Reach implements BringsPlayerClose {
+        private final boolean keepSeat;
+
+        Reach(boolean keepSeat) {
+            this.keepSeat = keepSeat;
+        }
+
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
             return reach(target, permissions, cell -> false);
         }
@@ -165,7 +178,8 @@ final class StructureWorksite implements StructureWorksites.Worksite {
         }
 
         private Action reach(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
-            return new StructureReach(compat, services, permissions, structureId, target, avoid, target.face() == null);
+            return new StructureReach(compat, services, permissions, structureId, target, avoid, target.face() == null,
+                    keepSeat);
         }
     }
 }

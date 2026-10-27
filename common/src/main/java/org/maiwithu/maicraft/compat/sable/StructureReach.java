@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.navigation.StraightWalk;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.travel.modes.GetsOffVehicle;
 import org.maiwithu.maicraft.compat.StepsInOrder;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
@@ -37,6 +38,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 先按眼睛离那一格多远筛，再从那里的眼睛真射一条射线，第一下打中那一格（那一面）的才要。挖方块先挑船上——站在地上挖
  * 船上的方块，Sable 会把船推一下——船上一处都不行才去地上。挑一处走过去，到了再看一次；不行换下一处，试满几处如实说够不着。
  * 船在动先等它停，等太久如实说还在动。只走、只看，不往船上垫方块，不拆船。
+ * 人坐在船上的座位上（开完船还没下来）：坐着看得见、够得着就不动；够不着时，改控制件的设置不离开座位、照实说，
+ * 别的（施工）先按潜行下座位再挪。
  */
 final class StructureReach implements Action {
 
@@ -82,6 +85,8 @@ final class StructureReach implements Action {
     private final ApproachTarget target;
     private final ProtectedCells avoid;
     private final boolean digging;
+    /** 坐在座位上够不着时不离开座位，照实说（改船上控制件的设置）。 */
+    private final boolean keepSeat;
 
     private Action current;
     private final Set<String> tried = new HashSet<>();
@@ -93,9 +98,10 @@ final class StructureReach implements Action {
      * @param target  结构上的那一格（地块坐标）；给了面就要看得见那一面
      * @param avoid   不许当脚站的格（地块坐标）：放方块时要放的那几格
      * @param digging 要挖掉它：先挑船上的站位，也不站在它正上方
+     * @param keepSeat 坐在座位上够不着时不离开座位、照实说；为假时先下座位再挪
      */
     StructureReach(StructureReads reads, PlayerServices services, Permissions permissions, String structureId,
-            ApproachTarget target, ProtectedCells avoid, boolean digging) {
+            ApproachTarget target, ProtectedCells avoid, boolean digging, boolean keepSeat) {
         this.reads = Objects.requireNonNull(reads, "reads");
         this.services = Objects.requireNonNull(services, "services");
         this.permissions = Objects.requireNonNull(permissions, "permissions");
@@ -103,6 +109,7 @@ final class StructureReach implements Action {
         this.target = Objects.requireNonNull(target, "target");
         this.avoid = avoid == null ? cell -> false : avoid;
         this.digging = digging;
+        this.keepSeat = keepSeat;
     }
 
     @Override public ActionStatus tick(TickContext tick) {
@@ -129,6 +136,15 @@ final class StructureReach implements Action {
         waited = 0;
         if (seenFrom(level, player, ship.get(), player.getEyePosition(), InteractionRange.blockReach(player))) {
             return ActionStatus.done();
+        }
+        // 坐在座位上够不着：改控制件的设置保留座位照实说；施工先按潜行下来再挑站位（坐着走不动）。
+        if (player.isPassenger()) {
+            if (keepSeat) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE,
+                        "坐在座位上看不见、够不着船上那一格，没离开座位", "要改就先下座位、走到它跟前再来"));
+            }
+            current = new GetsOffVehicle(services.sneak());
+            return ActionStatus.progressed();
         }
         if (tries >= MAX_TRIES) {
             return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "换了 " + tries + " 处站位还是够不着、看不见船上那一格"

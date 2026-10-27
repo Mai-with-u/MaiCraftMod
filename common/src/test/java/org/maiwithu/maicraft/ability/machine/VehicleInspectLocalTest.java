@@ -71,6 +71,7 @@ class VehicleInspectLocalTest {
         @Override public BlockPos plotCellAt(Vec3 world) { return BlockPos.containing(world).offset(SHIFT); }
         @Override public ConstructionServices services(ConstructionServices onLand, Permissions permissions) { return onLand; }
         @Override public BringsPlayerClose close() { return (target, permissions) -> null; }
+        @Override public BringsPlayerClose closeKeepingSeat() { return (target, permissions) -> null; }
         @Override public void forgetScan() { }
 
         @Override public ReadsBlocks blocks() {

@@ -138,6 +138,24 @@ public interface MachineType {
     Optional<Action> change(BlockPos at, String key, String value, Permissions permissions);
 
     /**
+     * 组装好的物理结构上这一格的设置项与现值（格是结构地块里的）：读得了结构上这种机器的设置才给，不然空表。
+     *
+     * @param structureId 结构身份
+     */
+    default List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
+        return List.of();
+    }
+
+    /**
+     * 在组装好的物理结构上把这一格的一项设置改成要的值（格是地块坐标），走过去用 {@code reach}（坐在座位上够得着就坐着改）。
+     * 只发一包、人够得着就行的（无线红石打字机绑键）给动作；要瞄准点设置框的在结构上还不会，给空。改完由调用方读回核对。
+     */
+    default Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
+            Permissions permissions, BringsPlayerClose reach) {
+        return Optional.empty();
+    }
+
+    /**
      * 往这台机器投料：置物台是手持右键顶面，工作盆、石磨这类扔上去，带界面的点开界面放进去。这种机器不收料时给空。
      * 投法不一定件件都进时，动作再实现 {@link FeedReport} 交出实情。
      */
