@@ -21,7 +21,7 @@ word Executor Java 程序员会以为是线程池；任务叫 Task，新任务�
 word Port 会被读成网络端口；按用途起名，例如 PlayerInput
 word Receipt 说清是哪一种：任务的结果用 TaskResult，游戏对交互的确认用 Confirmation
 word Lease 说清占用的是什么，例如本刻的交互机会
-word Handle 说清它是什么，例如一次任务运行是 TaskRun
+word Handle 说清它是什么，例如一次目标推进的记录是 GoalRun
 word Mandate 已改名：任务的许可用 Permissions
 word Blocker 已改名：任务卡在哪用 Problem
 word Outcome 已改名：任务结果用 TaskResult
