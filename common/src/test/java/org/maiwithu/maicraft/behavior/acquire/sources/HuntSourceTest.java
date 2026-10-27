@@ -103,6 +103,11 @@ class HuntSourceTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(wool(), CONTEXT));
         assertEquals(2, offer.obtainableCount());
         assertTrue(offer.risk().contains("只挑"), offer.risk());
+        // 要 2 块羊毛就是打 2 只：一只五个动作（走近、出手、等倒下、捡），要 1 块只算一只。
+        assertEquals(10, offer.cost().actionCount());
+        SourceQuote.Offer one = assertInstanceOf(SourceQuote.Offer.class, source.quote(
+                new ItemRequest(WantedItem.ofItem("minecraft:white_wool"), 1, "按需要拿取"), CONTEXT));
+        assertEquals(5, one.cost().actionCount());
     }
 
     @Test
@@ -162,6 +167,8 @@ class HuntSourceTest {
                 source(empty).quote(wool(), CONTEXT_WITH_DISTANCE));
         assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, search.obtainableCount());
         assertEquals("search", search.hint());
+        assertTrue(search.searching(), "出去找报成要出去找");
+        assertEquals(2 * 5 + 4, search.cost().actionCount(), "要打 2 只，再加边走边看的几下");
     }
 
     @Test

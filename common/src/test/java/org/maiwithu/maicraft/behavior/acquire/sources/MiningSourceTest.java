@@ -290,6 +290,25 @@ class MiningSourceTest {
     }
 
     @Test
+    void 看得见的再多_动作数也只按要挖的格数算_不舍近求远() {
+        // 眼前一片矿露着 120 格，要 2 块煤：按挖 2 格算代价，比 100 格外记得的箱子便宜，不跑去开箱。
+        List<MinableSpot> vein = new ArrayList<>();
+        for (int i = 0; i < 120; i++) vein.add(coalAt(3 + i % 12, i / 12));
+        MiningSource mining = source(new FakeMinables(vein, true), new FakeDigs());
+
+        SourceQuote.Offer two = assertInstanceOf(SourceQuote.Offer.class,
+                mining.quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "火把"), CONTEXT));
+        assertEquals(120, two.obtainableCount(), "能拿多少照旧按看得见的全部算");
+        assertEquals(2, two.cost().actionCount());
+        assertTrue(two.cost().compareTo(new AcquisitionCost(100, 4)) < 0, "眼前的矿比远处的箱子省事");
+
+        // 要的比看得见的多：看得见的都挖上，动作数到头就是这么多格。
+        SourceQuote.Offer all = assertInstanceOf(SourceQuote.Offer.class,
+                mining.quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 500, "火把"), CONTEXT));
+        assertEquals(120, all.cost().actionCount());
+    }
+
+    @Test
     void 要几件就挖几格_不把附近的矿挖光() {
         FakeDigs digs = new FakeDigs();
         backpack.add("minecraft:iron_pickaxe", 1);

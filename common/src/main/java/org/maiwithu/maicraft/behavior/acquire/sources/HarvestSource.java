@@ -75,8 +75,10 @@ public final class HarvestSource implements ItemSource {
         if (screened.allowed().isEmpty()) {
             return new SourceQuote.NeedsApproval(describe(), screened.firstRefusal());
         }
+        // 动作数按要收的格数算：要几件收几格，熟了的田再大也只收要的那几格，不因为田大就把这条路排到后面。
+        int harvests = Math.min(request.count(), screened.allowed().size());
         return new SourceQuote.Offer(describe(), screened.allowed().size(),
-                new AcquisitionCost(distanceToNearest(screened.allowed(), context), screened.allowed().size()),
+                new AcquisitionCost(distanceToNearest(screened.allowed(), context), harvests),
                 "一格不一定掉一件，收完以实际捡到的为准");
     }
 

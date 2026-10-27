@@ -106,6 +106,11 @@ class HarvestSourceTest {
         assertEquals(2, offer.obtainableCount());
         assertEquals(2.0, offer.cost().distanceBlocks(), 0.001);
         assertTrue(offer.risk().contains("不一定掉一件"));
+        // 只要 1 件：按收 1 格算代价，田里熟的再多也不算进来。
+        SourceQuote.Offer one = assertInstanceOf(SourceQuote.Offer.class,
+                harvest.quote(new ItemRequest(WantedItem.ofItem("minecraft:wheat"), 1, "烹饪原料"), CONTEXT));
+        assertEquals(1, one.cost().actionCount());
+        assertEquals(2, offer.cost().actionCount());
 
         harvest.begin(new ItemRequest(WantedItem.ofItem("minecraft:wheat"), 2, "烹饪原料"),
                 offer, CONTEXT).orElseThrow();

@@ -184,8 +184,11 @@ public final class MiningSource implements ItemSource {
         if (screened.allowed().isEmpty()) {
             return new SourceQuote.NeedsApproval(describe(), screened.firstRefusal());
         }
+        // 动作数按要挖的格数算：一挖就掉的每格一件，要几件挖几格，看得见的再多也只挖要的那几格。
+        // 不按看得见的全部格数算——那样树林里原木越多这条路反倒越"贵"，会舍下眼前的树去远处箱子拿。
+        int digs = Math.min(request.count(), certain.size());
         return new SourceQuote.Offer(describe(), certain.size(),
-                new AcquisitionCost(distanceToNearest(certain, context), certain.size()),
+                new AcquisitionCost(distanceToNearest(certain, context), digs),
                 riskNote(certain.getFirst().blockType()));
     }
 
