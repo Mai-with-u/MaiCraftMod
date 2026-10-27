@@ -232,6 +232,29 @@ class AcquisitionEstimatesTest {
         assertTrue(estimate.how().length() < 2000, "说法应有界：" + estimate.how().length());
     }
 
+    @Test
+    void 原料链最深处是三百二十二格外的箱子_整件取最重一档_最远到箱子_秒数一路相加() {
+        // 实机残留：how 链里写着三百多格外没走过的箱子，档位却是 ready——档位、秒数、最远都要取整条链最重的：
+        // 知道在哪的箱子按 nearby 档给秒数，整件跟着变 nearby，不把深箱绕路藏在轻档位底下。
+        swordRecipes();
+        craft.offer(PLANKS, (request, context) -> new SourceQuote.Offer("自己做", 4, new AcquisitionCost(0, 5, 32),
+                "在背包的合成格里做，不用工作台", "planks"), List.of(want("minecraft:bamboo_block", 1)));
+        craft.offer("minecraft:bamboo_block", (request, context) -> new SourceQuote.Offer("自己做", 1,
+                new AcquisitionCost(0, 6, 288), "在背包的合成格里做", "bblock"),
+                List.of(want("minecraft:bamboo", 9)));
+        chest.offer("minecraft:bamboo", (request, context) -> new SourceQuote.Offer("记得的箱子",
+                SourceQuote.Offer.UNKNOWN_COUNT, new AcquisitionCost(322, 4),
+                "这只箱子只是看见过，没开过，不确定里面有什么", "chest322"), List.of());
+
+        GoalEstimate estimate = engine().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.NEARBY, estimate.effort());
+        assertEquals(322.0, estimate.farthestBlocks());
+        // 秒数相加：三百二十六格的箱子段折成约 77 秒，外层三段现做的动作秒各加上，取整到 5 秒。
+        assertEquals(135, estimate.roughSeconds());
+        assertTrue(estimate.how().contains("记得的箱子（322 格外）"), estimate.how());
+    }
+
     // 床在背包外的工作台上做：缺三块白色羊毛，木板身上有。
     private void bedRecipe() {
         craft.offer(BED, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6, 96),
