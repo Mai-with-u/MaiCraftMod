@@ -503,7 +503,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
             consultWaits = 0;
             stage = Stage.SPACE;
-            return ActionStatus.progressed();
+            // 问完价、定下路线只是换了想法：身体没动、东西没进包，不算真实进展。
+            // 算进展的话，首选来源一直接不下时每轮重新问价都会给停滞守卫续命，身体站桩也判不出卡住。
+            return ActionStatus.running();
         }
 
         // 拿东西前先腾一格：要拿的东西本身不往外挪。腾的时候存了什么、点了没能确认的，
@@ -636,7 +638,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 excluded.add(planned.offer().source());
                 deadEnds.add(planned.offer().source() + "（接不下这次执行，动手时现场对不上了）");
                 stage = Stage.CONSULT;
-                return ActionStatus.progressed();
+                // 这个来源接不下、换下一个也是换了想法再试，不算真实进展，不让停滞守卫的计时清零。
+                return ActionStatus.running();
             }
             step = begun.get();
             stepSource = planned.offer().source();
@@ -645,7 +648,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             carriedByItemAtStepStart = CarriedItems.byItem(backpack, offhand);
             forwardedFacts = 0;
             stage = Stage.RUN;
-            return ActionStatus.progressed();
+            // 起了一步还没有世界效果；走没走动、拿没拿到由这一步自己的推进状态如实报告。
+            return ActionStatus.running();
         }
 
         // 路都走完了：按卡住的原因挑问题种类——全是许可挡路就交许可问题，否则如实说缺什么。
