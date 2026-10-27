@@ -46,6 +46,14 @@ public final class ConstructionSeams {
         /** 身上最不值钱的整块建材，拿来垫临时方块；没有为空。 */
         Optional<String> temporaryMaterial();
 
+        /**
+         * 这个工地许不许垫临时方块。在组装好的物理结构上不垫：垫上去就成了船的一部分，改船的重量和样子，
+         * 够不着的格照实记够不着。地上的工地照常垫。
+         */
+        default boolean temporaryBlocksAllowed() {
+            return true;
+        }
+
         /** 角色所在的维度里岩浆流得远（下界这类超热维度）：倒岩浆前圈流路时按它取流距。 */
         default boolean lavaSpreadsFar() {
             return false;

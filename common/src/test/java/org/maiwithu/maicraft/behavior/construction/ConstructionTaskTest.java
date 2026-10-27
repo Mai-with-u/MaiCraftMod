@@ -75,6 +75,8 @@ class ConstructionTaskTest {
             DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards, ConstructionSeams.Ledger, BringsPlayerClose {
         final Map<BlockPos, BlockState> world = new HashMap<>();
         final Map<String, Integer> carried = new HashMap<>();
+        /** 这个工地许不许垫临时方块；组装好的物理结构上不许。 */
+        boolean temporariesAllowed = true;
         final Set<BlockPos> protectedCells = new HashSet<>();
         /** 只有蹲着才放得出要的样子的格（机械动力的方向机器）；放的时候记下这一下蹲没蹲。 */
         final Set<BlockPos> crouchOnly = new HashSet<>();
@@ -113,6 +115,10 @@ class ConstructionTaskTest {
         @Override public int carried(String itemId) { return carried.getOrDefault(itemId, 0); }
         @Override public boolean creative() { return false; }
         @Override public boolean unbreakable(BlockPos pos) { return state(pos).is(Blocks.BEDROCK); }
+        @Override public boolean temporaryBlocksAllowed() {
+            return temporariesAllowed;
+        }
+
         @Override public Optional<String> temporaryMaterial() {
             return carried("minecraft:cobblestone") > 0 ? Optional.of("minecraft:cobblestone") : Optional.empty();
         }
@@ -473,6 +479,19 @@ class ConstructionTaskTest {
         assertTrue(fake.temporaries.isEmpty());
         assertEquals(AIR, fake.state(new BlockPos(0, 68, 0)));
         assertTrue(details(result).temporaryBlocksLeft().isEmpty());
+    }
+
+    @Test
+    void 不许垫临时方块的工地_够不着照实记() {
+        // 组装好的物理结构上不垫：垫上去就成了船的一部分。
+        Fake fake = new Fake().ground(66);
+        fake.temporariesAllowed = false;
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 70, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(0, count(result, Change.Kind.BLOCK_PLACED), "一块也不垫");
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("不垫临时方块")));
     }
 
     @Test

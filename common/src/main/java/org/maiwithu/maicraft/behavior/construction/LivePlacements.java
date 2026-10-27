@@ -54,8 +54,23 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         // 原先这里只试外形边界上七个点，站位按格子边界那一面挑，两边对不上，站到了又说点不到。
         BlockHitResult hit = FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, clicked, InteractionRange.blockReach(player), face);
         if (hit == null) return Optional.empty();
+        return predictLooking(cell, placeAt, hit, hit.getLocation().subtract(eye));
+    }
+
+    /**
+     * 已经知道点在哪（命中）、从哪个方向看过去时，原版会放成什么：站着放不成要的样子、点的又不是非蹲不可的方块，再试蹲着。
+     * 在物理结构上放方块时命中与视线都按结构自己的轴给（Sable 放方块时把人的朝向换到结构里），算法和地上同一份。
+     *
+     * @param delta 眼睛看向命中点的方向（和命中点同一套坐标）
+     */
+    public Optional<PlacementPrediction.Placement> predictLooking(PlannedCell cell, BlockPos placeAt, BlockHitResult hit,
+            Vec3 delta) {
+        PlayerContext current = context.get();
+        if (current == null || current.localPlayer() == null || current.level() == null) return Optional.empty();
+        LocalPlayer player = current.localPlayer();
+        ClientLevel level = current.level();
+        BlockPos clicked = hit.getBlockPos();
         // 看向命中点的角度：和交互动作转头后的真实视角一致，原版按它决定朝向。
-        Vec3 delta = hit.getLocation().subtract(eye);
         double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * Mth.RAD_TO_DEG);

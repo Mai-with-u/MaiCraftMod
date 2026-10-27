@@ -206,6 +206,11 @@ final class PlacingWork extends ConstructionWork {
             site.unreachable(stuck.pos(), "垫了临时方块，每一面还是放不上");
             return true;
         }
+        // 这个工地不许垫（组装好的物理结构上，垫上去就成了船的一部分）：够不着就照实记够不着。
+        if (!services.site().temporaryBlocksAllowed()) {
+            site.unreachable(stuck.pos(), "够不着，在物理结构上不垫临时方块（会改船的重量和样子）");
+            return true;
+        }
         List<BlockPos> chain = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
                 : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true);
         Optional<String> material = services.site().temporaryMaterial();
