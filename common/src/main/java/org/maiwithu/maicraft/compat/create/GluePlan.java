@@ -11,7 +11,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
@@ -25,6 +28,7 @@ import net.minecraft.core.Direction;
  * 框里不许夹着车身以外的实心方块（垫的柱子、地面、树），不然它们会跟着一起走。挑法：从最低处还没粘的那一对起，
  * 先在车身的外框里往外长出一片不夹外物、对角不超限的区域，再在几种候选（区域对角线两头的车身方块、这一对连到区域各角的车身方块）
  * 里挑盖住最多空缺、两角连得通的那一框；挑不出就只框这一对（两块相邻的方块一框，总是合规），所以一定能盖全。
+ * 轴承转子和船身之间那一对不粘、也不被任何新框同时框住（见 apartFromRotors），其余照常盖全。
  */
 final class GluePlan {
 
@@ -73,21 +77,37 @@ final class GluePlan {
      * @param foreign  这一格是不是车身以外的实心方块（地面、垫的东西）；车身的格不会问它
      */
     static List<Box> plan(Set<BlockPos> body, List<Box> existing, Predicate<BlockPos> foreign) {
+        return plan(body, existing, foreign, (one, other) -> true);
+    }
+
+    /**
+     * 同上，另外有些相邻的两格不许粘在一起（轴承转子和船身）：这样的一对不补，任何新框也不同时框住它俩。
+     *
+     * @param mayStick 相邻的这两格能不能粘在一起
+     */
+    static List<Box> plan(Set<BlockPos> body, List<Box> existing, Predicate<BlockPos> foreign,
+            BiPredicate<BlockPos, BlockPos> mayStick) {
         Objects.requireNonNull(foreign, "foreign");
+        Objects.requireNonNull(mayStick, "mayStick");
         // 长区域时同一格会被问好几次：问过的记下来，世界只读一次。
         Map<BlockPos, Boolean> asked = new HashMap<>();
         Predicate<BlockPos> outsider = cell -> asked.computeIfAbsent(cell, foreign::test);
         Set<BlockPos> cells = Set.copyOf(body);
         Set<Pair> uncovered = new LinkedHashSet<>();
+        List<Pair> apart = new ArrayList<>();
         for (Pair pair : pairs(cells)) {
-            if (existing.stream().noneMatch(box -> box.contains(pair.a()) && box.contains(pair.b()))) uncovered.add(pair);
+            if (!mayStick.test(pair.a(), pair.b())) {
+                apart.add(pair);
+            } else if (existing.stream().noneMatch(box -> box.contains(pair.a()) && box.contains(pair.b()))) {
+                uncovered.add(pair);
+            }
         }
         if (uncovered.isEmpty()) return List.of();
         BlockPos[] bounds = bounds(cells);
         List<Box> added = new ArrayList<>();
         while (!uncovered.isEmpty()) {
             Pair first = uncovered.iterator().next();
-            Box box = best(first, cells, uncovered, outsider, bounds[0], bounds[1]);
+            Box box = best(first, cells, uncovered, apart, outsider, bounds[0], bounds[1]);
             added.add(box);
             uncovered.removeIf(pair -> box.contains(pair.a()) && box.contains(pair.b()));
         }
@@ -109,9 +129,9 @@ final class GluePlan {
     }
 
     // 为这一对挑一框：先长出区域，再在候选里挑盖住空缺最多、两角连得通的；挑不出就只框这一对。
-    private static Box best(Pair first, Set<BlockPos> cells, Set<Pair> uncovered, Predicate<BlockPos> foreign,
-            BlockPos lowest, BlockPos highest) {
-        BlockPos[] region = grow(first, cells, foreign, lowest, highest);
+    private static Box best(Pair first, Set<BlockPos> cells, Set<Pair> uncovered, List<Pair> apart,
+            Predicate<BlockPos> foreign, BlockPos lowest, BlockPos highest) {
+        BlockPos[] region = grow(first, cells, apart, foreign, lowest, highest);
         // 候选：区域四条对角线两头最近的车身方块各成一框；再从这一对的两格各连到区域八个角最近的车身方块，
         // 后一种一定框住这一对，前一种往往框得最大。挑盖住空缺最多的。
         List<BlockPos[]> candidates = new ArrayList<>();
@@ -135,7 +155,7 @@ final class GluePlan {
         for (BlockPos[] ends : candidates) {
             if (ends[0] == null || ends[1] == null || ends[0].equals(ends[1])) continue;
             Box box = ordered(ends[0], ends[1]);
-            if (!connected(cells, box)) continue;
+            if (!connected(cells, box) || framesApart(box.min(), box.max(), apart)) continue;
             long covered = uncovered.stream().filter(pair -> box.contains(pair.a()) && box.contains(pair.b())).count();
             if (covered > most) {
                 most = covered;
@@ -151,8 +171,8 @@ final class GluePlan {
     }
 
     // 从这一对往外长：每轮各个方向试着加一层，不出车身外框、新的一层里没有外物、对角不超限才加，长不动为止。
-    private static BlockPos[] grow(Pair first, Set<BlockPos> cells, Predicate<BlockPos> foreign, BlockPos lowest,
-            BlockPos highest) {
+    private static BlockPos[] grow(Pair first, Set<BlockPos> cells, List<Pair> apart, Predicate<BlockPos> foreign,
+            BlockPos lowest, BlockPos highest) {
         BlockPos min = new Box(first.a(), first.b()).min();
         BlockPos max = new Box(first.a(), first.b()).max();
         boolean grew = true;
@@ -164,6 +184,7 @@ final class GluePlan {
                 BlockPos newMax = positive ? max.relative(direction) : max;
                 if (!inside(newMin, lowest, highest) || !inside(newMax, lowest, highest)) continue;
                 if (newMin.distSqr(newMax) >= (long) MAX_SPAN * MAX_SPAN) continue;
+                if (framesApart(newMin, newMax, apart)) continue;
                 // 新加的这一层：沿这个方向的那一个坐标上，其余两轴铺满。
                 int at = positive ? newMax.get(direction.getAxis()) : newMin.get(direction.getAxis());
                 if (anyForeign(along(newMin, direction.getAxis(), at), along(newMax, direction.getAxis(), at), cells, foreign)) {
@@ -175,6 +196,49 @@ final class GluePlan {
             }
         }
         return new BlockPos[] {min, max};
+    }
+
+    // 这片范围是不是同时框住了某一对不许粘的两格：框住了就等于把它俩粘上了。
+    private static boolean framesApart(BlockPos min, BlockPos max, List<Pair> apart) {
+        return apart.stream().anyMatch(pair -> inside(pair.a(), min, max) && inside(pair.b(), min, max));
+    }
+
+    /**
+     * 轴承转子和船身不许粘在一起：机械动力的轴承转起来时，会顺着强力胶把粘着的东西拖进转子，船身一块跟着转、或者转子装不起来。
+     * 转子从轴承朝向那面的那一格（转子头）起，顺着挨着的风帆类方块认，连着的都算。轴承和转子头那一对照粘
+     * （转子转起来时轴承那一格本来就跳过，粘上组装时转子才跟着船走），转子里面照粘，转子和别的方块之间不粘。
+     *
+     * @param body    要一起动的方块
+     * @param bearing 这一格是不是轴承、朝哪；不是为空
+     * @param sail    这一格是不是风帆类方块（机械动力的风车风帆标签）
+     */
+    static BiPredicate<BlockPos, BlockPos> apartFromRotors(Set<BlockPos> body, Function<BlockPos, Optional<Direction>> bearing,
+            Predicate<BlockPos> sail) {
+        Map<BlockPos, Integer> rotorOf = new HashMap<>();
+        Set<Pair> joints = new HashSet<>();
+        int next = 0;
+        for (BlockPos cell : body) {
+            Optional<Direction> facing = bearing.apply(cell);
+            if (facing.isEmpty()) continue;
+            BlockPos head = cell.relative(facing.get());
+            if (!body.contains(head) || rotorOf.containsKey(head)) continue;
+            int rotor = next++;
+            joints.add(new Pair(cell, head));
+            Deque<BlockPos> frontier = new ArrayDeque<>(List.of(head));
+            rotorOf.put(head, rotor);
+            while (!frontier.isEmpty()) {
+                BlockPos current = frontier.poll();
+                for (Direction direction : Direction.values()) {
+                    BlockPos neighbor = current.relative(direction);
+                    if (body.contains(neighbor) && !rotorOf.containsKey(neighbor) && sail.test(neighbor)) {
+                        rotorOf.put(neighbor, rotor);
+                        frontier.add(neighbor);
+                    }
+                }
+            }
+        }
+        return (one, other) -> Objects.equals(rotorOf.get(one), rotorOf.get(other))
+                || joints.contains(new Pair(one, other)) || joints.contains(new Pair(other, one));
     }
 
     private static BlockPos along(BlockPos pos, Direction.Axis axis, int value) {

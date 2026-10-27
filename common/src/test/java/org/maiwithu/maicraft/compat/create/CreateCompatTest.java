@@ -232,6 +232,7 @@ class CreateCompatTest {
             @Override public void glue(BlockPos from, BlockPos to) { }
             @Override public boolean glued(ClientLevel level, BlockPos from, BlockPos to) { return false; }
             @Override public List<AABB> glueBoxes(ClientLevel level, AABB area) { return List.of(); }
+            @Override public Optional<Direction> bearingFacing(BlockState state) { return Optional.empty(); }
             @Override public boolean track(BlockState state) { return false; }
             @Override public Optional<BlockPos> trackStart(ItemStack held) { return Optional.empty(); }
             @Override public boolean trackConnected(ClientLevel level, BlockPos from, BlockPos to) { return false; }

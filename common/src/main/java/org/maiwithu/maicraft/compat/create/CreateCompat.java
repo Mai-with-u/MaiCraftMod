@@ -329,6 +329,11 @@ public final class CreateCompat extends CompatModule {
         return call("读强力胶", () -> tools.glued(level, from, to));
     }
 
+    /** 这一格是不是轴承、朝哪；见 {@link CreateTools#bearingFacing}。 */
+    public Optional<Direction> bearingFacing(BlockState state) {
+        return call("认轴承", () -> tools.bearingFacing(state));
+    }
+
     /** 这片范围附近的强力胶各框住哪；见 {@link CreateTools#glueBoxes}。 */
     public List<AABB> glueBoxes(ClientLevel level, AABB area) {
         return call("读强力胶", () -> tools.glueBoxes(level, area));

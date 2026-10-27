@@ -9,6 +9,10 @@ import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -34,6 +38,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 final class GlueInstallation implements CreateInstallation {
 
     static final String KIND = "create:super_glue";
+    /** 风帆类方块：机械动力的风车风帆标签（风帆、风帆框架、羊毛，Simulated 的对称风帆也加进来了），螺旋桨数风帆也认它。 */
+    private static final TagKey<Block> SAILS = TagKey.create(Registries.BLOCK,
+            ResourceLocation.fromNamespaceAndPath("create", "windmill_sails"));
     private static final String GLUE = "create:super_glue";
     /** 两角最远不到这么多格（服务器核对的上限）。类别：游戏事实（SuperGlueSelectionPacket）。 */
     private static final int MAX_SPAN = 25;
@@ -75,8 +82,11 @@ final class GlueInstallation implements CreateInstallation {
         if (body.isEmpty()) return Optional.of(List.of());
         AABB area = AABB.encapsulatingFullBlocks(lowest(body), highest(body)).inflate(1);
         List<GluePlan.Box> existing = compat.glueBoxes(level, area).stream().map(GlueInstallation::box).toList();
+        // 轴承转子和船身不粘：转子顺着强力胶会把船身拖进去一起转（见 GluePlan.apartFromRotors）。
         List<GluePlan.Box> added = GluePlan.plan(body, existing,
-                cell -> !level.isLoaded(cell) || solid(level.getBlockState(cell)));
+                cell -> !level.isLoaded(cell) || solid(level.getBlockState(cell)),
+                GluePlan.apartFromRotors(body, cell -> compat.bearingFacing(level.getBlockState(cell)),
+                        cell -> level.getBlockState(cell).is(SAILS)));
         return Optional.of(added.stream().map(box -> new Installation(KIND, List.of(box.from(), box.to()))).toList());
     }
 

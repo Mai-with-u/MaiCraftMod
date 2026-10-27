@@ -7,6 +7,7 @@ import net.createmod.catnip.platform.CatnipServices;
 import com.simibubi.create.content.redstone.link.controller.LinkedControllerInputPacket;
 import com.simibubi.create.content.contraptions.glue.SuperGlueSelectionPacket;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
+import com.simibubi.create.content.contraptions.bearing.BearingBlock;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,6 +39,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import org.maiwithu.maicraft.compat.create.CreateTools;
 
@@ -87,6 +89,12 @@ public final class CreateToolReads implements CreateTools {
         AABB span = SuperGlueEntity.span(from, to);
         return level.getEntitiesOfClass(SuperGlueEntity.class, span.inflate(1)).stream()
                 .anyMatch(glue -> glue.getBoundingBox().equals(span));
+    }
+
+    // 轴承：机械动力的轴承都继承 BearingBlock（航空学的螺旋桨轴承、陀螺仪螺旋桨轴承也是），朝向就是转子那一面。
+    @Override public Optional<Direction> bearingFacing(BlockState state) {
+        return state.getBlock() instanceof BearingBlock ? Optional.of(state.getValue(BlockStateProperties.FACING))
+                : Optional.empty();
     }
 
     // 附近每一块胶的框：胶是实体，客户端看得到它们，框就是 Create 按两角算的那个包围盒。

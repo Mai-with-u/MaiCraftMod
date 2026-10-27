@@ -39,6 +39,12 @@ public interface CreateTools {
     /** from 到 to 这一片现在有没有一块正好盖住它的胶。 */
     boolean glued(ClientLevel level, BlockPos from, BlockPos to);
 
+    /**
+     * 这一格是不是轴承（机械动力的各种轴承，含航空学的螺旋桨轴承）、朝哪：轴承转起来会带着朝向那面的那一格一起转。
+     * 不是轴承为空。
+     */
+    Optional<Direction> bearingFacing(BlockState state);
+
     /** 和这片范围沾边的每一块强力胶各自框住的范围（Create 按两角算的那个框）。 */
     List<AABB> glueBoxes(ClientLevel level, AABB area);
 
