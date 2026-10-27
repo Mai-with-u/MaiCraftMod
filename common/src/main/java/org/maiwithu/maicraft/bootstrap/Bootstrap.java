@@ -270,7 +270,7 @@ public final class Bootstrap {
                 new DarknessNeed(new LiveDarkView(lightLevels),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
-                        survivalWiring, survivalWiring, survivalWiring, survivalWiring.autoSleep()),
+                        survivalWiring, survivalWiring, survivalWiring, survivalWiring, survivalWiring.autoSleep()),
                 new EdgeProximityNeed(new LiveEdgeView(),
                         LiveNightAndEdgeMoves.retreat(walks, events)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。

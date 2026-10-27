@@ -11,7 +11,8 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
  * 夜晚这项生存需求：到了能睡的时间，能弄到床就找空当去睡（夜间休息）；
- * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才去备一张床来睡。夜里被打交给自卫，
+ * 弄不到床时看处境——安全处或打得过就接着干活，露天又打不过才去备一张床来睡；床要出门找而手边做得出一把剑或斧时，
+ * 先备武器（这一晚只试一次），备好了按新身板重新评估，多半不再打不过、接着干活。夜里被打交给自卫，
  * 打不过由战斗引擎边打边撤，这里不再有"原地熬到天亮"的任务。
  * 今晚不去睡的时候——夜里自动去睡被 LLM 关掉（{@link AutoSleep}），或正陪着一个还醒着的人——
  * 不找床、也不备床：露天打不过同样不建任务、不占身体，挨打交给自卫与战斗引擎。
@@ -62,6 +63,15 @@ public final class NightfallNeed implements SurvivalNeed {
         boolean bedReady(TickContext context);
     }
 
+    /**
+     * 夜里先备武器怎么落地：露天打不过、今晚没床时，身上没近战武器、床又要出门找（或弄不到），而手边做得出一把剑或斧，
+     * 就回一个"备武器"任务；不该先备武器时回空。生产实现经拿东西的引擎估算与动手。测试换替身。
+     */
+    @FunctionalInterface
+    public interface PreparesNightWeapon {
+        Task prepareWeapon(TickContext context);
+    }
+
     /** 夜间休息怎么落地：生产实现由睡觉能力提供，去找床、睡下、回来。测试换替身。 */
     @FunctionalInterface
     public interface NightRestMoves {
@@ -78,7 +88,10 @@ public final class NightfallNeed implements SurvivalNeed {
     private final ReadsBedAvailability beds;
     private final NightRestMoves nightRest;
     private final PreparesNightBed bedPreparer;
+    private final PreparesNightWeapon weaponPreparer;
     private final AutoSleep autoSleep;
+    /** 这一晚备过武器没有：只试一次，备不成、备好了还打不过都改去备床；过了能睡的时间清掉。 */
+    private boolean weaponTriedTonight;
     /** 上一回分流给出的急迫程度：创建任务时要按同一条分路走，不能不管分路先问要夜间休息。 */
     private Urgency lastDecision;
 
@@ -90,10 +103,17 @@ public final class NightfallNeed implements SurvivalNeed {
     /** @param autoSleep 夜里自动去睡的开关：关着时不去找床 */
     public NightfallNeed(ReadsNight reader,
             ReadsBedAvailability beds, NightRestMoves nightRest, PreparesNightBed bedPreparer, AutoSleep autoSleep) {
+        this(reader, beds, nightRest, bedPreparer, null, autoSleep);
+    }
+
+    /** @param weaponPreparer 夜里先备武器；没接上时为 null，露天打不过直接去备床 */
+    public NightfallNeed(ReadsNight reader, ReadsBedAvailability beds, NightRestMoves nightRest,
+            PreparesNightBed bedPreparer, PreparesNightWeapon weaponPreparer, AutoSleep autoSleep) {
         this.reader = reader;
         this.beds = beds;
         this.nightRest = nightRest;
         this.bedPreparer = bedPreparer;
+        this.weaponPreparer = weaponPreparer;
         this.autoSleep = autoSleep;
     }
 
@@ -111,6 +131,8 @@ public final class NightfallNeed implements SurvivalNeed {
             lastDecision = null;
             return null;
         }
+        // 过了能睡的时间这一晚就算过去了：下一晚又可以先备一次武器。
+        if (!facts.sleepTime()) weaponTriedTonight = false;
         // 夜里自动去睡被关掉（例如多人游戏有人说"晚上别睡"）：今晚不去睡，不找床也不备床；露天打不过不建任务。
         // 正陪着一个人（跟随）而他还醒着：同样今晚不去睡，不自己走开去睡、也不走开去杀羊做床，免得把人跟丢；
         // 他躺下了才去附近找床睡。不去睡时连附近有没有床都不用扫。
@@ -139,6 +161,15 @@ public final class NightfallNeed implements SurvivalNeed {
             }
         }
         if (decision == Urgency.SOON) {
+            // 露天打不过、今晚没床：床要出门找而手边做得出一把剑或斧时先备武器（这一晚只试一次），
+            // 备好了下一刻按新身板重新分流——多半不再打不过，接着干活；还打不过或备不成再去备床。
+            if (!weaponTriedTonight && weaponPreparer != null) {
+                Task weapon = weaponPreparer.prepareWeapon(context);
+                if (weapon != null) {
+                    weaponTriedTonight = true;
+                    return weapon;
+                }
+            }
             // 备床的引擎还没接上（没进世界）：不占身体，接着干；被打交给自卫。
             return bedPreparer == null ? null : bedPreparer.prepareBed(context);
         }

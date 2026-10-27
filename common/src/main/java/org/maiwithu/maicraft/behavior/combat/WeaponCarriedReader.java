@@ -46,6 +46,22 @@ public final class WeaponCarriedReader {
         return carried;
     }
 
+    /**
+     * 剑与斧（按物品类或剑、斧标签认，模组的也算），各按新造的一件读攻击伤害与攻速：夜里挑先做哪一把用。
+     * 不在身上，格号记 -1。重锤、三叉戟做不出来或太贵，不算在内。
+     */
+    public static List<WeaponChoice.Carried> swordsAndAxes() {
+        List<WeaponChoice.Carried> found = new ArrayList<>();
+        for (Item item : BuiltInRegistries.ITEM) {
+            ItemStack stack = new ItemStack(item);
+            if (stack.isEmpty()) continue;
+            if (item instanceof SwordItem || item instanceof AxeItem || stack.is(ItemTags.SWORDS) || stack.is(ItemTags.AXES)) {
+                found.add(asCarried(stack, -1));
+            }
+        }
+        return found;
+    }
+
     /** 副手在背包里的格号。 */
     static final int OFFHAND_SLOT = 40;
     /** 空手的攻击伤害与每秒攻击次数（原版玩家属性的基础值）。 */

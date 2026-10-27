@@ -237,6 +237,37 @@ class SurvivalBranchTest {
     }
 
     @Test
+    void outmatchedWithoutABedTriesAWeaponFirstOncePerNight() {
+        // 露天打不过、今晚没床：先备武器；这一晚只试一次，再插就去备床；天亮以后下一晚又能先备一次。
+        // 先备武器那一侧说不备（身上有武器、床在附近、手边做不出）时，照旧去备床。
+        NightfallNeed.Facts danger = new NightfallNeed.Facts(true, false, ThreatAssessment.Verdict.OUTMATCHED, 20, 0);
+        NightfallNeed.Facts day = new NightfallNeed.Facts(false, false, ThreatAssessment.Verdict.WINNABLE, 20, 0);
+        NightfallNeed.Facts[] now = {danger};
+        Task bed = new Named();
+        Task weapon = new Named();
+        boolean[] weaponWorthIt = {true};
+        NightfallNeed need = new NightfallNeed(context -> now[0], context -> false, context -> null, context -> bed,
+                context -> weaponWorthIt[0] ? weapon : null, new AutoSleep());
+        TickContext tick = TickContext.of(0, null);
+
+        assertEquals(Urgency.SOON, need.urgency(tick));
+        assertSame(weapon, need.createTask(tick), "先备武器");
+        assertEquals(Urgency.SOON, need.urgency(tick), "备完还打不过");
+        assertSame(bed, need.createTask(tick), "这一晚已经试过武器：去备床");
+
+        now[0] = day;
+        assertNull(need.urgency(tick));
+        now[0] = danger;
+        need.urgency(tick);
+        assertSame(weapon, need.createTask(tick), "下一晚又能先备一次");
+
+        NightfallNeed noWeapon = new NightfallNeed(context -> danger, context -> false, context -> null,
+                context -> bed, context -> null, new AutoSleep());
+        noWeapon.urgency(tick);
+        assertSame(bed, noWeapon.createTask(tick), "不该先备武器：照旧备床");
+    }
+
+    @Test
     void edgeOnlyWhenCloseToDeepDrop() {
         assertTrue(EdgeProximityNeed.atRisk(new EdgeProximityNeed.Facts(0.2, 5, new double[] {0, 0, 0})));
         // 离边远：不算。

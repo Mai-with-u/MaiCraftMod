@@ -438,7 +438,7 @@ public final class AbilityCatalog {
                         new SceneSeenTargets(deps.world()::scene)),
                 shared.innerNeeds(), shared.refusals()::shownMessage, deps.survivalWiring().autoSleep());
         registry.register(sleepModule);
-        deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule, sleepModule);
+        deps.survivalWiring().attach(sleepModule.bedAvailability(), sleepModule, sleepModule, sleepModule::tonightsBed);
     }
 
     /**

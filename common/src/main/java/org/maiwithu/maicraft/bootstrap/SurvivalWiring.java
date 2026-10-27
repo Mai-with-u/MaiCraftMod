@@ -3,10 +3,16 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.survival.night.AutoSleep;
+import org.maiwithu.maicraft.behavior.survival.night.LiveMeleeWeapons;
 import org.maiwithu.maicraft.behavior.survival.night.NightfallNeed;
+import org.maiwithu.maicraft.behavior.survival.night.ReadsMeleeWeapons;
+import org.maiwithu.maicraft.behavior.survival.night.WeaponBeforeBed;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -16,12 +22,16 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 没接上时（还没进世界）按"弄不到床""弄不了吃的"对待，夜里照旧按处境接着干活。
  */
 final class SurvivalWiring implements NightfallNeed.ReadsBedAvailability, NightfallNeed.NightRestMoves,
-        NightfallNeed.PreparesNightBed {
+        NightfallNeed.PreparesNightBed, NightfallNeed.PreparesNightWeapon {
 
     private NightfallNeed.ReadsBedAvailability beds;
     private NightfallNeed.NightRestMoves nightRest;
     private NightfallNeed.PreparesNightBed bedPreparer;
     private ItemNeeds food;
+    /** 备今晚的床此刻多费事：睡觉能力接上后才有，夜里先备武器拿它比。 */
+    private Supplier<GoalEstimate> tonightsBed;
+    /** 身上有没有近战武器、有哪些剑斧：读客户端。 */
+    private final ReadsMeleeWeapons melee = new LiveMeleeWeapons();
     /** 夜里自动去睡的开关：夜晚需求读它，睡觉能力改它，两边拿的是同一份。 */
     private final AutoSleep autoSleep = new AutoSleep();
 
@@ -41,10 +51,11 @@ final class SurvivalWiring implements NightfallNeed.ReadsBedAvailability, Nightf
 
     /** 睡觉能力登记好后接上：找床读端、夜间休息与备床的落地都来自它。 */
     void attach(NightfallNeed.ReadsBedAvailability beds, NightfallNeed.NightRestMoves nightRest,
-            NightfallNeed.PreparesNightBed bedPreparer) {
+            NightfallNeed.PreparesNightBed bedPreparer, Supplier<GoalEstimate> tonightsBed) {
         this.beds = Objects.requireNonNull(beds, "beds");
         this.nightRest = Objects.requireNonNull(nightRest, "nightRest");
         this.bedPreparer = Objects.requireNonNull(bedPreparer, "bedPreparer");
+        this.tonightsBed = Objects.requireNonNull(tonightsBed, "tonightsBed");
     }
 
     @Override
@@ -60,5 +71,13 @@ final class SurvivalWiring implements NightfallNeed.ReadsBedAvailability, Nightf
     @Override
     public Task prepareBed(TickContext context) {
         return bedPreparer == null ? null : bedPreparer.prepareBed(context);
+    }
+
+    // 夜里先备武器：拿东西的引擎（弄口粮的同一台）与床的估算都接上了才比；没进世界不备，直接按备床走。
+    // 许可和备床一样用默认的。
+    @Override
+    public Task prepareWeapon(TickContext context) {
+        if (food == null || tonightsBed == null) return null;
+        return new WeaponBeforeBed(food, tonightsBed, melee, Permissions.DEFAULT).prepareWeapon(context);
     }
 }
