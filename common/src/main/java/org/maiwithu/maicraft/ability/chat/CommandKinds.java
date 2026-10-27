@@ -7,15 +7,15 @@ import java.util.Set;
 /**
  * 游戏命令分两种，全仓只有这一份判断：普通玩家命令（/msg、/home、/help、/spawn 这类谁都能用的）
  * 和管理员命令（/tp、/give、/gamemode、/time 这类要权限的）。角色像生存玩家一样玩：
- * 普通命令照发，管理员命令默认不碰；/maicraft 永远留给人，角色不能改自己的权限或 Mod 设置。
+ * 普通命令照发，管理员命令默认不碰；/maicraft 与 /mai（服主管角色账号名单）永远留给人，角色不能改自己的权限或 Mod 设置。
  *
  * <p>认管理员命令有两条路：一份写死的名单（原版要二级权限的命令，加常见服务器插件的管理员命令），
  * 再问服务器的命令树（单人或局域网主机时拿得到，普通玩家用不了的根命令也算，模组自带的管理员命令
  * 这样也认得出）。连远程服务器时拿不到命令树，只按名单认。纯函数，不碰游戏。
  */
 final class CommandKinds {
-    /** MaiCraft 自己的客户端命令：永远不放行，不让角色改自己的权限。 */
-    static final String RESERVED = "maicraft";
+    /** MaiCraft 自己的命令：/maicraft 与服务端管角色账号名单的 /mai，永远不放行，不让角色改自己或别人的权限。 */
+    static final Set<String> RESERVED = Set.of("maicraft", "mai");
 
     /** 原版需要二级及以上权限的命令，以及常见服务器插件里的管理员命令；连远程服务器拿不到命令树时靠它兜底。 */
     static final Set<String> KNOWN_ADMIN = Set.of(
@@ -44,9 +44,9 @@ final class CommandKinds {
         return colon >= 0 ? name.substring(colon + 1) : name;
     }
 
-    /** 是 MaiCraft 自己的客户端命令：留给人，角色一律不发。 */
+    /** 是 MaiCraft 自己的命令（/maicraft、/mai）：留给人，角色一律不发。 */
     static boolean reserved(String text) {
-        return RESERVED.equals(commandName(text));
+        return RESERVED.contains(commandName(text));
     }
 
     /** 是管理员命令：名单里有的直接算；不在名单里再问服务器的命令树（拿不到就不算）。 */

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.fabric;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -39,6 +40,8 @@ public final class MaiCraftFabric implements ModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, ignored) -> {
             if (handler.player != null) server.clientDisconnected(handler.player);
         });
+        // 服务器登记命令时把 MaiCraft 的服务端命令（服主管角色账号名单的 /mai）交给公共代码登记。
+        CommandRegistrationCallback.EVENT.register((dispatcher, registries, environment) -> server.registerCommands(dispatcher));
         // 破坏方块的事件在方块真正消失后触发，结果可靠；放置由服务端 Mixin 钩子记录。
         PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, ignored) -> {
             if (!world.isClientSide() && player instanceof ServerPlayer serverPlayer)

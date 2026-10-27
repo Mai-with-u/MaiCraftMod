@@ -11,6 +11,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -62,5 +63,36 @@ class CharacterAccountsTest {
         CharacterAccounts mixed = CharacterAccounts.read(configDir);
         assertFalse(mixed.admits("Character01", CHARACTER, false, false));
         assertFalse(mixed.admits("42", FAN, false, false));
+    }
+
+    @Test
+    void 加_撤_写回配置_重开服读得回来() throws IOException {
+        CharacterAccounts accounts = CharacterAccounts.read(configDir);
+        assertTrue(accounts.add("Character01"));
+        assertTrue(accounts.add(FAN.toString()));
+        assertFalse(accounts.add("character01"), "同名不分大小写，不重复加");
+        assertFalse(accounts.add(FAN.toString()), "同一个 UUID 不重复加");
+        assertTrue(accounts.save());
+
+        CharacterAccounts reopened = CharacterAccounts.read(configDir);
+        assertEquals(List.of("Character01", FAN.toString()), reopened.entries(), "重开服照写进去的先后读回");
+        assertTrue(reopened.admits("character01", CHARACTER, false, false));
+
+        // 按名字撤：只撤名字那一项；按名字撤一个按 UUID 记的号，要给出他的 UUID 才撤得掉。
+        assertEquals(List.of("Character01"), reopened.remove("CHARACTER01", null));
+        assertEquals(List.of(), reopened.remove("SomeoneRenamed", null), "名单里按 UUID 记的，光给名字对不上");
+        assertEquals(List.of(FAN.toString()), reopened.remove("SomeoneRenamed", FAN));
+        assertTrue(reopened.entries().isEmpty());
+        assertFalse(reopened.admits("character01", CHARACTER, false, false));
+        assertTrue(reopened.save());
+        assertTrue(CharacterAccounts.read(configDir).entries().isEmpty());
+    }
+
+    @Test
+    void 读不出来的配置开服时不被覆盖() throws IOException {
+        Path file = configDir.resolve(CharacterAccounts.FILE_NAME);
+        Files.writeString(file, "{\"characterAccounts\": [\"Character01\", 42]}", StandardCharsets.UTF_8);
+        CharacterAccounts.read(configDir);
+        assertTrue(Files.readString(file, StandardCharsets.UTF_8).contains("42"), "服主写坏的文件留着让他自己改，开服不盖掉");
     }
 }

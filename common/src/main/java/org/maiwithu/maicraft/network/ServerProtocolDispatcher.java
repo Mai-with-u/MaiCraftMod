@@ -12,6 +12,8 @@ public final class ServerProtocolDispatcher {
     public static final int MAX_SESSIONS = 8;
     /** 握手被拒的原因码：这个玩家不是服务器认的角色账号，服务端链路不对他开放。 */
     public static final String NOT_CHARACTER_ACCOUNT = "not_character_account";
+    /** 服务端主动推的"准入变了"：服主用命令把这个号加进或撤出角色账号名单。 */
+    public static final String ADMISSION = "admission";
 
     public interface Peer {
         String dimension();
@@ -120,6 +122,18 @@ public final class ServerProtocolDispatcher {
 
     public void invalidateWorld() {
         sessions.values().forEach(session -> { session.closed = true; session.allowed = false; });
+    }
+
+    /**
+     * 准入变了的通知：admitted 为真时这个号刚被加进角色账号名单，客户端当场重新握手；
+     * 为假时刚被撤掉，服务端已经关掉他的会话，客户端按"不是角色账号"收场。
+     */
+    public static JsonObject admissionNotice(boolean admitted) {
+        JsonObject notice = new JsonObject();
+        notice.addProperty("kind", ADMISSION);
+        notice.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
+        notice.addProperty("admitted", admitted);
+        return notice;
     }
 
     private boolean limited(long tick) {

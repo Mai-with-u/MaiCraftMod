@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.bootstrap;
 
+import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.commands.CommandSourceStack;
 import com.google.gson.JsonObject;
 import java.util.function.Consumer;
 import net.minecraft.core.BlockPos;
@@ -33,4 +35,7 @@ public interface ServerLifecycle {
 
     /** 玩家破坏了方块：给该玩家的客户端推送一次破坏确认。 */
     void playerBrokeBlock(ServerPlayer player, BlockPos position, BlockState state);
+
+    /** 服务器登记命令时调用：MaiCraft 的服务端命令（服主管角色账号名单的 /mai）登记到这里。 */
+    void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher);
 }

@@ -6,6 +6,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
@@ -38,6 +39,7 @@ public final class MaiCraftNeoForge {
         NeoForge.EVENT_BUS.addListener(this::onChangedDimension);
         NeoForge.EVENT_BUS.addListener(this::onRespawn);
         NeoForge.EVENT_BUS.addListener(this::onBreakBlock);
+        NeoForge.EVENT_BUS.addListener(this::onRegisterCommands);
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {
@@ -70,6 +72,11 @@ public final class MaiCraftNeoForge {
 
     private void onRespawn(PlayerEvent.PlayerRespawnEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) server.clientWorldChanged(player);
+    }
+
+    // 服务器登记命令时把 MaiCraft 的服务端命令（服主管角色账号名单的 /mai）交给公共代码登记。
+    private void onRegisterCommands(RegisterCommandsEvent event) {
+        server.registerCommands(event.getDispatcher());
     }
 
     private void onBreakBlock(BlockEvent.BreakEvent event) {

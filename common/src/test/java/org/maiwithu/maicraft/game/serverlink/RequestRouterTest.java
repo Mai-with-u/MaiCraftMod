@@ -150,4 +150,75 @@ class RequestRouterTest {
         assertThrows(IllegalArgumentException.class,
                 () -> router.submit("unknown.op", new JsonObject(), false));
     }
+
+    private static JsonObject refused(String clientNonce) {
+        JsonObject envelope = new JsonObject();
+        envelope.addProperty("kind", "welcome");
+        envelope.addProperty("bootstrap", 1);
+        envelope.addProperty("status", "rejected");
+        envelope.addProperty("code", "not_character_account");
+        envelope.addProperty("clientNonce", clientNonce);
+        return envelope;
+    }
+
+    private static JsonObject admission(boolean admitted) {
+        JsonObject envelope = new JsonObject();
+        envelope.addProperty("kind", "admission");
+        envelope.addProperty("bootstrap", 1);
+        envelope.addProperty("admitted", admitted);
+        return envelope;
+    }
+
+    @Test
+    void 服主用命令加进名单后当场重新握手_撤掉后当场按不是角色账号收场() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.register(new ClientOperation("ownership.query", 1, false));
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        // 先是不在名单里：握手被拒。
+        router.receive(refused(session.nonce), 1);
+        assertEquals(ServerCapabilityState.State.DENIED, session.capabilities.state());
+        assertFalse(router.serverConfirmed());
+        String firstNonce = session.nonce;
+        int sentBefore = transport.sent.size();
+
+        // 服主 /mai 加进名单：服务端推一条"准入了"，下一刻换随机数重新握手，欢迎包到了就开放。
+        router.receive(admission(true), 1);
+        router.observe(5);
+        assertEquals(sentBefore + 1, transport.sent.size());
+        assertEquals("hello", transport.last().get("kind").getAsString());
+        assertFalse(firstNonce.equals(session.nonce), "重新握手换一个随机数");
+        router.receive(welcome(session.nonce, "session-2"), 1);
+        assertTrue(router.serverConfirmed());
+
+        // 服主 /mai remove：服务端关掉会话并推一条"不准入了"，这边当场收场，调试面板说是名单的事。
+        router.receive(admission(false), 1);
+        assertFalse(router.serverConfirmed());
+        assertEquals(ServerCapabilityState.State.DENIED, session.capabilities.state());
+        assertEquals(ServerCapabilityState.NOT_CHARACTER_ACCOUNT, session.capabilities.reason());
+    }
+
+    @Test
+    void 没被拒过的连接收到准入了不重新握手() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.register(new ClientOperation("ownership.query", 1, false));
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        router.receive(welcome(session.nonce, "session-1"), 1);
+        int sentBefore = transport.sent.size();
+        router.receive(admission(true), 1);
+        router.observe(5);
+        assertTrue(router.serverConfirmed());
+        assertTrue(transport.sent.size() >= sentBefore);
+        assertTrue(transport.sent.subList(sentBefore, transport.sent.size()).stream()
+                .noneMatch(envelope -> envelope.get("kind").getAsString().equals("hello")), "已经握好手的不重来");
+    }
 }

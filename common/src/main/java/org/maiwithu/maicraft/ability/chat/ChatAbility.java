@@ -27,7 +27,7 @@ import java.util.Set;
  * <p>以 / 开头的是游戏命令。角色像生存玩家一样玩：/msg、/home、/help 这类普通玩家命令照发；
  * /tp、/give、/gamemode 这类管理员命令默认不执行（开局直接拒绝，这是本角色自己的规矩，不是游戏的拦截），
  * 实例配置（所有者在配置文件里改，不经任何工具参数）放开后管理员命令也按命令发送，
- * 以角色自己的权限交给服务器裁决——能不能成，服务器说了算。/maicraft 永远留给人。
+ * 以角色自己的权限交给服务器裁决——能不能成，服务器说了算。/maicraft 与 /mai 永远留给人。
  * 哪条算管理员命令见 CommandKinds。读别人的聊天与听消息归感知侧，本能力只管发。
  */
 public final class ChatAbility implements AbilityModule {
@@ -73,7 +73,7 @@ public final class ChatAbility implements AbilityModule {
         AbilityDoc doc = AbilityDoc.forAbility("chat");
         if (allowGameCommands) {
             doc = doc.withExtraNote("本实例连管理员命令也允许执行：`message` 以 `/` 开头时不论哪种命令都不拒绝"
-                    + "（/maicraft 除外），以角色自己的权限交给服务器执行；上面「管理员命令角色不执行」"
+                    + "（/maicraft 与 /mai 除外），以角色自己的权限交给服务器执行；上面「管理员命令角色不执行」"
                     + "的边界在本实例不适用。");
         }
         return new AbilitySpec(
@@ -93,13 +93,13 @@ public final class ChatAbility implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         String message = step.goal().params().text("message");
-        // 命令的规矩放在决定阶段，判断只读、无副作用：/maicraft 留给人；管理员命令默认不碰，实例放开才发；
+        // 命令的规矩放在决定阶段，判断只读、无副作用：/maicraft 与 /mai 留给人；管理员命令默认不碰，实例放开才发；
         // 普通玩家命令像生存玩家一样照发，能不能成由服务器裁决。
         if (message.startsWith("/") && CommandKinds.reserved(message)) {
             return new StepDecision.Finish(TaskResult.failed("没有把话发出去",
                     Problem.of(Problem.Kind.REFUSED_BY_GAME,
-                            "/maicraft 是留给人的客户端命令，角色不能改自己的权限或 Mod 设置",
-                            "要改 Mod 设置请人在游戏里敲")));
+                            "/maicraft 与 /mai 是留给人的命令（/mai 管谁能当角色），角色不能改自己或别人的权限、Mod 设置",
+                            "要改 Mod 设置、角色账号名单请人在游戏里敲")));
         }
         if (message.startsWith("/") && !allowGameCommands && CommandKinds.admin(message, adminCommands)) {
             return new StepDecision.Finish(TaskResult.failed("没有把话发出去",

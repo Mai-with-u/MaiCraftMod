@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
+import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 
 /** 在客户端线程完成能力协商和控制许可续订，不重放任何业务操作。 */
 final class ServerSessionConnection {
@@ -27,6 +28,8 @@ final class ServerSessionConnection {
     // 新连接最多等待十秒确认服主已安装 MaiCraft；换维度和会话续期沿用同一连接的确认。
     private long serverConfirmationDeadline;
     private boolean serverConfirmed;
+    /** 服主刚把这个号加进角色账号名单：下一刻重新握手。 */
+    private boolean rehello;
 
     ServerSessionConnection(BooleanSupplier available, Predicate<JsonObject> sender) {
         this.available = available;
@@ -80,6 +83,13 @@ final class ServerSessionConnection {
         }
         if (capabilities.state == ServerCapabilityState.State.UNCONFIRMED
                 && capabilities.reason.equals("channel_unavailable")) hello(tick, operations);
+        // 服主刚用 /mai 把这个号加进角色账号名单：换一个握手随机数，当场重新握手，不用重进服。
+        if (rehello) {
+            rehello = false;
+            nonce = UUID.randomUUID().toString();
+            serverConfirmationDeadline = tick + 200;
+            hello(tick, operations);
+        }
         if (capabilities.state == ServerCapabilityState.State.NEGOTIATING && tick >= helloDeadline)
             capabilities.reset(ServerCapabilityState.State.UNCONFIRMED, "negotiation_timeout");
         if (capabilities.state == ServerCapabilityState.State.READY && !acknowledged && tick >= controlRetryTick) {
@@ -94,6 +104,10 @@ final class ServerSessionConnection {
     boolean receive(JsonObject envelope, long receivedConnection) {
         if (receivedConnection != connection) return false;
         String kind = ServerCapabilityState.text(envelope, "kind");
+        if (kind.equals(ServerProtocolDispatcher.ADMISSION)) {
+            admission(envelope);
+            return true;
+        }
         if (kind.equals("welcome")) {
             if (!nonce.equals(ServerCapabilityState.text(envelope, "clientNonce"))
                     || capabilities.state != ServerCapabilityState.State.NEGOTIATING) return true;
@@ -152,6 +166,20 @@ final class ServerSessionConnection {
         envelope.addProperty("controlGeneration", wireGeneration);
         envelope.addProperty("allowed", allowed);
         try { send(envelope); } catch (RuntimeException ignored) { /* 同一代控制许可可安全重试，不会新增游戏操作 */ }
+    }
+
+    // 服主改了角色账号名单：加进来的、之前握手被拒的，下一刻重新握手；撤掉的，服务端已经关掉会话，
+    // 这边当场按"不是角色账号"收场，不再开放游戏能力，调试面板说清要找服主。
+    private void admission(JsonObject envelope) {
+        boolean admitted = envelope.has("admitted") && envelope.get("admitted").getAsBoolean();
+        if (admitted) {
+            rehello = capabilities.state == ServerCapabilityState.State.DENIED
+                    && ServerCapabilityState.NOT_CHARACTER_ACCOUNT.equals(capabilities.reason);
+            return;
+        }
+        serverConfirmed = false;
+        acknowledged = false;
+        capabilities.reset(ServerCapabilityState.State.DENIED, ServerCapabilityState.NOT_CHARACTER_ACCOUNT);
     }
 
     boolean mutationPermitted() {

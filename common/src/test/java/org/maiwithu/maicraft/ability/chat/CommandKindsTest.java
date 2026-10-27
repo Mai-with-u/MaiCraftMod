@@ -39,6 +39,10 @@ class CommandKindsTest {
     void maicraft留给人() {
         assertTrue(CommandKinds.reserved("/maicraft commands allow tp"));
         assertTrue(CommandKinds.reserved("/MaiCraft"));
+        // 服主管角色账号名单的 /mai 同样留给人：角色不能给自己或别人开服务端链路。
+        assertTrue(CommandKinds.reserved("/mai Steve"));
+        assertTrue(CommandKinds.reserved("/mai remove Steve"));
+        assertFalse(CommandKinds.reserved("/mail 你好"));
         assertFalse(CommandKinds.reserved("/msg maicraft 你好"));
     }
 }

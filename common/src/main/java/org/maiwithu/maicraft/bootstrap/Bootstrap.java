@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.debug.DebugPanel;
 import org.maiwithu.maicraft.debug.PanelSettings;
 import org.maiwithu.maicraft.debug.StatusReader;
 import org.maiwithu.maicraft.mcp.tool.RecentToolCalls;
+import com.mojang.brigadier.CommandDispatcher;
+import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.Component;
@@ -132,6 +134,7 @@ import org.maiwithu.maicraft.mcp.skill.SkillLibrary;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
+import org.maiwithu.maicraft.server.CharacterAccountCommand;
 import org.maiwithu.maicraft.server.CharacterAccounts;
 import org.maiwithu.maicraft.server.OwnershipFile;
 import org.maiwithu.maicraft.server.OwnershipQuery;
@@ -154,8 +157,7 @@ import org.maiwithu.maicraft.compat.SupportedMod;
  *
  * <p>启动顺序：通用部分（独立服务器与客户端都会执行）→ 客户端部分（只在客户端执行）。
  * 能力与联动模组在这里按一份明确的清单创建和登记，不做类路径扫描，新增时在清单里加一行。
- *
- * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询，服务端链路只对角色账号开放。
+ * <p>服务端一侧已接好：方块归属记录、交互确认通道与只读的归属查询，服务端链路只对角色账号开放（服主用 /mai 管名单）。
  * 客户端一侧已接好游戏接口层的每刻服务、和服务端 MaiCraft 的会话、七项生存需求与控制循环、
  * 进世界时的世界记忆与感知场景，以及目标执行与四个 MCP 工具（lookup、execute、goal、events）。
  */
@@ -228,6 +230,11 @@ public final class Bootstrap {
                 }
                 var confirmations = ServerLinkServices.confirmations(player.serverLevel().getServer());
                 if (confirmations != null) confirmations.broke(player, position, state);
+            }
+
+            // 服主管角色账号名单的 /mai：改完当场写回配置，在线的玩家当场重新握手或断开服务端链路。
+            @Override public void registerCommands(CommandDispatcher<CommandSourceStack> dispatcher) {
+                CharacterAccountCommand.register(dispatcher, accounts, player -> network.admissionChanged(player, push));
             }
         };
     }
