@@ -88,16 +88,28 @@ class RecipeSourceTest {
     private static final class PricedNeeds implements ItemNeeds {
         private final Map<String, Double> prices;
         private final Set<String> unobtainable;
+        /** 价问不出来、且是"附近的方块还没扫完"的那几样：分辨"真没有来路"与"还没看完"。 */
+        private final Set<String> stillLooking;
 
         private PricedNeeds(Map<String, Double> prices, Set<String> unobtainable) {
+            this(prices, unobtainable, Set.of());
+        }
+
+        private PricedNeeds(Map<String, Double> prices, Set<String> unobtainable, Set<String> stillLooking) {
             this.prices = prices;
             this.unobtainable = unobtainable;
+            this.stillLooking = stillLooking;
         }
 
         @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions,
                 boolean includeMaking) {
             Double price = prices.get(request.wanted().specifier());
             return price == null ? Optional.empty() : Optional.of(price);
+        }
+
+        @Override public boolean priceStillLooking(ItemRequest request, Permissions permissions,
+                boolean includeMaking) {
+            return stillLooking.contains(request.wanted().specifier());
         }
 
         @Override public boolean knownUnobtainable(WantedItem wanted) {
@@ -1309,5 +1321,42 @@ class RecipeSourceTest {
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
                 recipeSource.quote(new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "工具准备"), CONTEXT));
         assertTrue(unavailable.reason().contains("配方原料无从取得"), unavailable.reason());
+    }
+
+    /** 任意木板的两条做法：竹木板排在前面（模拟注册顺序），原料是深箱里的竹子；樱桃木板原料是眼前的树。 */
+    private static List<WorkstationRecipe> bambooAndCherryPlanks() {
+        WorkstationRecipe bamboo = new WorkstationRecipe("minecraft:bamboo_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:bamboo_planks"), 2,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:bamboo_block"), 1)), true);
+        WorkstationRecipe cherry = new WorkstationRecipe("minecraft:cherry_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:cherry_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:cherry_log"), 1)), true);
+        return List.of(bamboo, cherry);
+    }
+
+    @Test
+    void 有的原料附近的方块还没扫完_答还在看现场_不按注册顺序捡深箱那条() {
+        // 实机：刚到樱桃林，方块扫描没扫完，樱桃原木问不出价；记得的深箱永远问得出价——
+        // 原先"问不出按最贵垫底"让排不出先后的做法落到注册顺序上，捡了竹木板，
+        // 为两块板去三百多格外深箱绕路，眼前满林的树不看。现在答还在看现场，让引擎等扫完再挑。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        RecipeSource recipeSource = source(memory, wanted -> bambooAndCherryPlanks(),
+                new PricedNeeds(Map.of("minecraft:bamboo_block", 326.0), Set.of(), Set.of("minecraft:cherry_log")));
+        SourceQuote.NotYet notYet = assertInstanceOf(SourceQuote.NotYet.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofTag("minecraft:planks"), 2, "做木剑"), CONTEXT));
+        assertTrue(notYet.reason().contains("还没扫完"), notYet.reason());
+    }
+
+    @Test
+    void 扫完了_眼前樱桃树的做法排到深箱竹木板前面() {
+        // 同一个现场的下一刻：扫描完了，樱桃原木就在几格外——材料可得性把竹木板（原料在三百格外）排到后面。
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:crafting_table", NOW);
+        RecipeSource recipeSource = source(memory, wanted -> bambooAndCherryPlanks(),
+                new PricedNeeds(Map.of("minecraft:bamboo_block", 326.0, "minecraft:cherry_log", 5.0), Set.of()));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(
+                new ItemRequest(WantedItem.ofTag("minecraft:planks"), 2, "做木剑"), CONTEXT));
+        assertEquals("minecraft:cherry_planks", offer.hint(), "眼前的树近，不再绕去深箱");
     }
 }

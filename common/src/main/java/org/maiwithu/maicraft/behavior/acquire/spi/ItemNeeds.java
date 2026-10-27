@@ -128,6 +128,16 @@ public interface ItemNeeds {
     }
 
     /**
+     * 与 cheapestCost 同一把问法：这一刻是不是还有来源没看清现场（附近的方块还没扫完）。
+     * cheapestCost 问不出价有两种可能——真没有来路，或者只是还没看完；做法排先后要把这两种分开，
+     * "还没看完"不该被当成最贵的垫底。实现会重新问一遍，只在问不出价之后用来分辨这两种情形；
+     * 实现不记这件事时为 false。
+     */
+    default boolean priceStillLooking(ItemRequest request, Permissions permissions, boolean includeMaking) {
+        return false;
+    }
+
+    /**
      * 估算：只问价不拿，按引擎此刻会走的路往下估原料，回一份估算（档位、怎么弄、最远多远、粗估秒数）。
      * 途径、距离、半径都不限，许可照给的；夜里该先备武器还是先备床这类内部判断拿它比哪个费事。
      * 实现不估时回"估不了"。

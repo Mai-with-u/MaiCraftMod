@@ -74,6 +74,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final int maxDepth;
     /** 估算：只问价不拿，和动手时同一套挑路。 */
     private final AcquisitionEstimates estimates;
+    /** 问价不拿：来源排做法先后、挑可以互换的原料时用。 */
+    private final PriceAsks priceAsks;
     /**
      * 此刻正在推进的请求链，栈顶是最里层：外层的拿东西推进到来源、来源再回引擎要原料时一层层压进来，
      * 这一刻推进完就弹出。防环、限深、接外层记账口都看它。只算正在推进的：建出来还没开始做的备料动作
@@ -109,6 +111,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         if (maxDepth < 1) throw new IllegalArgumentException("递归深度上限至少为 1：" + maxDepth);
         this.maxDepth = maxDepth;
         this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth);
+        this.priceAsks = new PriceAsks(this.sources, position);
     }
 
     // 估算：只问价不拿，按此刻会走的路往下估原料。内部需求不带限定（夜里比床和武器哪个费事）。
@@ -239,8 +242,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     // 问价不拿：照常问遍来源，只把最近一条路的距离报回去，不动手也不记任何事实。
     // 只有点名才做的途径（交易）照旧不参与：没人点名买东西，问价也不问它。
-    /** 问远近时，说不准有没有的报价按多走这么多格算：排在看得见、记得有的后面，但不比真远的地方更远。 */
-    static final double UNKNOWN_STOCK_BLOCKS = 32;
+    // 说不准有没有的报价按多走一段算，同一把尺子在 PriceAsks 里。
 
     @Override public Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
         SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
@@ -260,7 +262,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
                 // 说不准有没有的（没开过的箱子、没读过的随身背包）排在看得见、记得有的后面：要任意木板时，
                 // 没读过的背包对每种原木都报"可能有"、距离 0，原先十几种木板分不出先后，AE 里的云杉排不进前十二种。
-                double distance = offer.cost().distanceBlocks() + (offer.countUnknown() ? UNKNOWN_STOCK_BLOCKS : 0);
+                double distance = offer.cost().distanceBlocks() + (offer.countUnknown() ? PriceAsks.UNKNOWN_STOCK_BLOCKS : 0);
                 if (nearest.isEmpty() || distance < nearest.get()) nearest = Optional.of(distance);
             }
         }
@@ -269,17 +271,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     // 问价不拿：最省的一条路的总代价；不算现做时跳过合成、烧炼。只有点名才做的途径（交易）照旧不参与。
     @Override public Optional<Double> cheapestCost(ItemRequest request, Permissions permissions, boolean includeMaking) {
-        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
-        Optional<Double> cheapest = Optional.empty();
-        for (ItemSource source : sources) {
-            String via = source.via().name();
-            if (!Scope.ALL.allows(via) || (!includeMaking && AcquireVia.makes(via))) continue;
-            if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
-                double cost = offer.cost().total() + (offer.countUnknown() ? UNKNOWN_STOCK_BLOCKS : 0);
-                if (cheapest.isEmpty() || cost < cheapest.get()) cheapest = Optional.of(cost);
-            }
-        }
-        return cheapest;
+        return priceAsks.ask(request, permissions, includeMaking).cost();
+    }
+
+    // 与 cheapestCost 同一遍问法：问不出价分两种——真没有来路，或只是还没看清现场；做法排先后要把这两种分开。
+    @Override public boolean priceStillLooking(ItemRequest request, Permissions permissions, boolean includeMaking) {
+        return priceAsks.ask(request, permissions, includeMaking).looking();
     }
 
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */

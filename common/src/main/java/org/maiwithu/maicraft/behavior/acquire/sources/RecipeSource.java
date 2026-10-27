@@ -156,11 +156,17 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-        List<WorkstationRecipe> candidates = ranked(request, context);
-        if (candidates.isEmpty()) {
+        Ranked ranked = ranked(request, context);
+        if (ranked.candidates().isEmpty()) {
             return new SourceQuote.Unavailable(describe(), emptyReason(request, context));
         }
-        WorkstationRecipe recipe = candidates.getFirst();
+        // 有的原料还没看清现场（方块没扫完），材料可得性排不出先后：答还在看现场让引擎等一等再问，
+        // 不按配方注册顺序捡一个就定——眼前满林的树还没看全，就挑了"记得的深箱"那条做法。
+        if (ranked.stillLooking()) {
+            return new SourceQuote.NotYet(describe(), "有做出" + request.wanted().describe()
+                    + "的做法，但有的原料附近的方块还没扫完，这一刻排不出先做哪种");
+        }
+        WorkstationRecipe recipe = ranked.candidates().getFirst();
         // 身上缺几件原料就把先去弄它们的麻烦算进报价：缺料的做法排在现成的、近的来路后面。
         double shortfall = missingFor(recipe, request.count()) * SHORTFALL_BLOCKS_PER_ITEM;
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
@@ -206,7 +212,7 @@ public final class RecipeSource implements ItemSource {
     // 烧炼再加上身上不够时要去弄的燃料。工作台、熔炉这类就地摆的设施不列：报价的说明里已经写着要摆一个。
     @Override public List<ItemRequest> missingIngredients(ItemRequest request, SourceQuote.Offer offer,
             SourceContext context) {
-        Optional<WorkstationRecipe> recipe = ranked(request, context).stream()
+        Optional<WorkstationRecipe> recipe = ranked(request, context).candidates().stream()
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst();
         if (recipe.isEmpty()) return List.of();
@@ -218,7 +224,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        List<WorkstationRecipe> candidates = ranked(request, context);
+        List<WorkstationRecipe> candidates = ranked(request, context).candidates();
         WorkstationRecipe recipe = candidates.stream()
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst()
@@ -236,7 +242,7 @@ public final class RecipeSource implements ItemSource {
                     .flatMap(ingredient -> needs.lookAround(ingredient, context.permissions()));
             if (look.isPresent()) {
                 return Optional.of(new LooksBeforeChoosing(look.get(),
-                        () -> run(variantsFor(recipe, ranked(request, context), request, context), recipe, request, context)));
+                        () -> run(variantsFor(recipe, ranked(request, context).candidates(), request, context), recipe, request, context)));
             }
         }
         return Optional.of(run(variants, recipe, request, context));
@@ -262,7 +268,7 @@ public final class RecipeSource implements ItemSource {
 
     // 这一格缺了去弄哪一样：可以互换的原料身上有的先用，没有挑最省的；现做缺几件按这个来源最省的做法算。
     private WantedItem pick(WorkstationRecipe.IngredientStack ingredient, int needed, SourceContext context) {
-        return choice.pick(ingredient, needed, context, (asked, at) -> ranked(asked, at).stream()
+        return choice.pick(ingredient, needed, context, (asked, at) -> ranked(asked, at).candidates().stream()
                 .mapToInt(recipe -> missingFor(recipe, asked.count())).min().orElse(Integer.MAX_VALUE));
     }
 
@@ -312,7 +318,7 @@ public final class RecipeSource implements ItemSource {
     // 缺的原料全被确认拿不到的做法也不算：引擎这一场里已经为它白跑过一圈，再报只会原地转圈。
     // 能用的做法按先后排：高炉、烟熏炉这类只用现成的，附近没记得一台就不算做法（不会为了快一倍去凑一台）；
     // 缺料一样、原料一样时烧得快的在前——记得高炉就把矿石拿去高炉烧，没有照旧用熔炉。
-    private List<WorkstationRecipe> ranked(ItemRequest request, SourceContext context) {
+    private Ranked ranked(ItemRequest request, SourceContext context) {
         List<WorkstationRecipe> candidates = recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .filter(recipe -> recipe.kind().placeable() || findStation(recipe.kind(), context).isPresent())
@@ -321,50 +327,64 @@ public final class RecipeSource implements ItemSource {
                 .filter(recipe -> !ingredientsAllUnobtainable(recipe, request))
                 .toList();
         // 里层问价回来的那一次：不再算材料可得性，按配方注册顺序给出去，问价才能收得住。
-        if (pricingIngredients) return candidates;
+        if (pricingIngredients) return new Ranked(candidates, false);
         // 材料可得性逐条算好再排：排法会在比较里反复取同一条的档，逐次问价会把引擎问上很多遍。
-        Map<WorkstationRecipe, Double> availability = new HashMap<>();
+        Map<WorkstationRecipe, Double> prices = new HashMap<>();
+        boolean stillLooking = false;
         pricingIngredients = true;
         try {
             for (WorkstationRecipe candidate : candidates) {
-                availability.put(candidate, ingredientAvailability(candidate, request, context));
+                Availability priced = availabilityOf(candidate, request, context);
+                prices.put(candidate, priced.worst());
+                stillLooking |= priced.stillLooking();
             }
         } finally {
             pricingIngredients = false;
         }
-        return candidates.stream()
+        List<WorkstationRecipe> sorted = candidates.stream()
                 .sorted(Comparator.<WorkstationRecipe>comparingInt(candidate -> choice.remakeNeedingMaterials(
                                 candidate, request.wanted(),
                                 () -> missingFor(candidate, request.count())) ? 1 : 0)
                         .thenComparing(MaterialPreference.first(preferred(request), tags))
                         // 材料可得性在缺几件之前：缺一样近处的料，好过缺一样要出门深挖的。
-                        .thenComparingDouble(availability::get)
+                        .thenComparingDouble(prices::get)
                         .thenComparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
                         .thenComparingInt(candidate -> candidate.ingredients().size())
                         .thenComparingInt(candidate -> candidate.kind().plannedCookTicks()))
                 .toList();
+        return new Ranked(sorted, stillLooking);
     }
 
+    /** 排好先后的做法，加上"先后排没排得出来"：有原料还没看清现场时，排出来的先后不作数。 */
+    private record Ranked(List<WorkstationRecipe> candidates, boolean stillLooking) {}
+    /** 一条做法的材料可得性：最贵那样原料的价，加上"有没有原料只是还没看清现场、价还没问出来"。 */
+    private record Availability(double worst, boolean stillLooking) {}
     // 材料可得性：每样缺的原料按"把这一点弄进背包最省的一条路要花多少"算，缺的几样里最贵的定整条做法的档；
-    // 身上都有的不缺算 0，问不出价（各来源都不应价，或还没看清现场）的整条按最贵算垫底，但照旧报价。
-    // 空背包要镐子：木镐的原料是附近树上就有的原木，金镐的金矿要出门往深处找，木镐排在金镐前面，
-    // 不再在几种做法都问不出差别时按配方注册顺序捡到哪个做哪个。
-    // 问价走引擎只问价不拿，会回到本来源自己的报价：外层 pricingIngredients 挡住里层再算，收得住。
-    private double ingredientAvailability(WorkstationRecipe recipe, ItemRequest request, SourceContext context) {
+    // 身上都有的不缺算 0，问不出价的整条按最贵算垫底，但照旧报价。空背包要镐子：木镐的原料是近处树上
+    // 就有的原木，金镐的金矿要出门往深处找，木镐排在金镐前面。问价走引擎只问价不拿，会回到本来源自己的
+    // 报价：外层 pricingIngredients 挡住里层再算，收得住。价问不出还要分清是不是"还没看清现场"：方块没扫完
+    // 时价空着只是暂时的，记下来让报价改答"还在看现场"，不把眼前的树排到几十格外深箱的后面。
+    private Availability availabilityOf(WorkstationRecipe recipe, ItemRequest request, SourceContext context) {
         int times = timesNeeded(recipe, request.count());
         double worst = 0;
+        boolean stillLooking = false;
         for (WorkstationRecipe.IngredientStack ingredient : recipe.ingredients()) {
             int needed = ingredient.count() * times;
             int carried = choice.carried(ingredient);
             if (carried >= needed) continue;
-            int shortfall = needed - carried;
-            Optional<Double> price = needs.cheapestCost(new ItemRequest(pick(ingredient, shortfall, context),
-                    shortfall, "补" + recipe.result().describe() + "的原料"), context.permissions(), true);
-            if (price.isEmpty()) return Double.MAX_VALUE;
+            ItemRequest ask = new ItemRequest(pick(ingredient, needed - carried, context), needed - carried,
+                    "补" + recipe.result().describe() + "的原料");
+            Optional<Double> price = needs.cheapestCost(ask, context.permissions(), true);
+            if (price.isEmpty()) {
+                // 问不出价：真没有来路的按最贵垫底；只是还没看清现场的记下来，让报价改答"还在看现场"。
+                stillLooking |= needs.priceStillLooking(ask, context.permissions(), true);
+                worst = Double.MAX_VALUE;
+                continue;
+            }
             worst = Math.max(worst, price.get());
         }
-        return worst;
+        return new Availability(worst, stillLooking);
     }
 
     // 这条做法缺的每样原料是不是都已被确认拿不到：引擎问遍了各来源都没拿到的那样，再往这条做法上备料只会

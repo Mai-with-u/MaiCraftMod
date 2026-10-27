@@ -694,7 +694,7 @@ class ItemAcquisitionTest {
                 .answer(new SourceQuote.Offer("ME 终端", 16, new AcquisitionCost(5, 3), "记得有"));
         assertEquals(Optional.of(5d), engine(backpackUnknown, known).nearestDistanceBlocks(
                 new ItemRequest(WantedItem.ofItem("minecraft:spruce_log"), 1, "做木板"), PERMISSIONS));
-        assertEquals(Optional.of(ItemAcquisition.UNKNOWN_STOCK_BLOCKS), engine(backpackUnknown).nearestDistanceBlocks(
+        assertEquals(Optional.of(PriceAsks.UNKNOWN_STOCK_BLOCKS), engine(backpackUnknown).nearestDistanceBlocks(
                 new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 1, "做木板"), PERMISSIONS));
     }
 }

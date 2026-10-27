@@ -58,4 +58,9 @@ final class DeferredInnerNeeds implements ItemNeeds {
             boolean includeMaking) {
         return engine == null ? Optional.empty() : engine.cheapestCost(request, permissions, includeMaking);
     }
+
+    // 分辨"问不出价"是还没看完还是真没有来路；引擎还没建好时谁也没在扫现场，不算还没看完。
+    @Override public boolean priceStillLooking(ItemRequest request, Permissions permissions, boolean includeMaking) {
+        return engine != null && engine.priceStillLooking(request, permissions, includeMaking);
+    }
 }
