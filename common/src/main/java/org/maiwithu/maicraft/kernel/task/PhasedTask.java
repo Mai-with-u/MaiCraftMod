@@ -305,6 +305,7 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
             case FINISHED -> "结束";
             case REPLACED -> "被新的任务替换";
             case CANCELLED -> "被取消";
+            case ROUTINE_NEEDS_OFF -> "主任务不要起居打断，中止";
             case PLAYER_GONE -> "角色没了（死亡、断线或换世界）";
         };
         result = TaskResult.builder(TaskResult.Status.CANCELLED, label + "：" + why)

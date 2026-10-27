@@ -9,6 +9,8 @@ public enum CloseReason {
     REPLACED,
     /** 被 LLM 或玩家取消。 */
     CANCELLED,
+    /** 主任务声明了 survival_needs=off：起居类临时任务让位收场，把身体还给主任务。 */
+    ROUTINE_NEEDS_OFF,
     /** 角色没了：死亡、断线、换世界。 */
     PLAYER_GONE
 }

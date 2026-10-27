@@ -57,7 +57,8 @@ import java.util.function.Consumer;
  *
  * <p>主任务可以把生存需求关掉，关的程度有两档：许可写 survival_needs=off 时只关起居类的
  * （吃饭、睡觉、补光、捡回遗物），对眼前危险的反应（自卫、换气、脱险）照插，角色能把手里的一件事
- * 干完又不至于干活干到淹死；寻死这类任务自己声明时一个生存需求都不插。换主任务时按新的主任务算。
+ * 干完又不至于干活干到淹死；寻死这类任务自己声明时一个生存需求都不插。换主任务时按新的主任务算：
+ * 新主任务关掉起居类需求时，已经在跑的起居类临时任务立即让位收场。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -134,7 +135,8 @@ public final class ControlLoop {
 
     /**
      * 换主任务：LLM 派了新活时调用。旧的主任务按"被替换"收尾，返回它交代的结果（没有旧主任务时为 null），
-     * 调用方把它记进任务存储，已经发生的事不会因为换活而消失。已经插进来的临时任务不受影响，做完仍会弹出。
+     * 调用方把它记进任务存储，已经发生的事不会因为换活而消失。新主任务的许可写了 survival_needs=off 时，
+     * 已经在跑的起居类临时任务立即让位收场，不然它会一直占着身体，新主目标在队列里永远动不了。
      * 新的主任务在第一次被推进时才 start。
      */
     public TaskResult setMainTask(Task task) {
@@ -142,6 +144,7 @@ public final class ControlLoop {
         TaskResult replaced = endMain(CloseReason.REPLACED);
         rouseOccupying();
         stack.add(0, new Frame(task, null, null));
+        closeRoutineTempTasks();
         return replaced;
     }
 
@@ -170,6 +173,23 @@ public final class ControlLoop {
         brokenNeeds.clear();
         parkedWhere = null;
         waitingRespawn = false;
+    }
+
+    /**
+     * 新主任务不要起居打断（许可写 survival_needs=off）时，栈上已经在跑或等着恢复的起居类临时任务
+     * 立即按"主任务不要起居打断"收场弹出，把身体还给主任务；插入过滤只管以后插不插，管不到已经在栈上的。
+     * 对眼前危险的反应（自卫、换气、脱险）不动，主任务干着活也不能不躲车、不还手。
+     */
+    private void closeRoutineTempTasks() {
+        if (!routineNeedsOff()) return;
+        for (int i = stack.size() - 1; i > 0; i--) {
+            Frame frame = stack.get(i);
+            if (frame.from != null && !frame.from.reactsToImmediateDanger()) {
+                stack.remove(i);
+                LOG.info("{}收场：主任务不要起居打断", frame.task.describe());
+                frame.close(CloseReason.ROUTINE_NEEDS_OFF);
+            }
+        }
     }
 
     // 换了主任务或取消旧目标：压着的临时任务里若有人声明能被新指令叫起（正睡着等天亮这类），

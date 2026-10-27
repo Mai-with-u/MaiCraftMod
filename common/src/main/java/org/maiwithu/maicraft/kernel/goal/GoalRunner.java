@@ -793,6 +793,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             case FINISHED -> "目标没有交代结果就结束了";
             case REPLACED -> "目标被新任务替换";
             case CANCELLED -> "目标被取消";
+            case ROUTINE_NEEDS_OFF -> "主任务不要起居打断，中止";
             case PLAYER_GONE -> "角色不在了，目标中止";
         };
     }

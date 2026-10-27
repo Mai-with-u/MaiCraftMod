@@ -562,6 +562,60 @@ class ControlLoopTest {
         assertAdvancedIsTempTask(loop.tick(TICK), "饥饿");
     }
 
+    @Test
+    void switchingToRoutineOffGoalEndsTheRunningRoutineTempTask() {
+        // 普通主任务在跑、备床临时任务占着身体时换成 off 的主目标：
+        // 在跑的备床任务立即让位收场，身体还给主任务，之后也不为新主目标重建起居任务。
+        FakeTask bed = new FakeTask("备床临时", Interruptibility.WORKING);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON, () -> bed);
+        ControlLoop loop = new ControlLoop(List.of(night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(TICK), "夜晚");
+
+        RoutineOffTask newMain = new RoutineOffTask(Interruptibility.BETWEEN_ACTIONS);
+        loop.setMainTask(newMain);
+
+        assertTrue(bed.closed, "在跑的备床临时任务被收场");
+        assertEquals(CloseReason.ROUTINE_NEEDS_OFF, bed.closeReason, "收场说明写明主任务不要起居打断");
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+        assertSame(newMain, advanced.task(), "身体还给主任务");
+        assertEquals(1, night.created, "off 期间不再为夜晚重建临时任务");
+    }
+
+    @Test
+    void switchingToRoutineOffGoalDoesNotEndTheImmediateDangerTempTask() {
+        // 同一场景换成 off 的主目标时，自卫这样的眼前危险反应照旧占着身体跑完，不被收场。
+        FakeTask defense = new FakeTask("自卫临时", Interruptibility.WORKING);
+        FakeNeed mob = new FakeNeed("自卫", new Urgency[] {Urgency.NOW}, () -> defense) {
+            @Override public boolean reactsToImmediateDanger() {
+                return true;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(mob));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+
+        loop.setMainTask(new RoutineOffTask(Interruptibility.BETWEEN_ACTIONS));
+
+        assertFalse(defense.closed, "自卫临时任务不被收场");
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+        assertSame(defense, advanced.task(), "自卫临时任务接着推进");
+    }
+
+    @Test
+    void switchingToSurvivalOffGoalKeepsTempTasksAlone() {
+        // 寻死这类全关的主目标只管以后插不插，已经在跑的临时任务照旧不受影响。
+        FakeTask bed = new FakeTask("备床临时", Interruptibility.WORKING);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON, () -> bed);
+        ControlLoop loop = new ControlLoop(List.of(night));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(TICK), "夜晚");
+
+        loop.setMainTask(new SurvivalOffTask());
+
+        assertFalse(bed.closed, "全关不收场在跑的临时任务，只关以后的插入");
+    }
+
     /** 许可里写了 survival_needs=off 的目标外壳替身：只关起居类需求，眼前危险的反应照插。 */
     static final class RoutineOffTask extends FakeTask implements RoutineNeedsOff {
         RoutineOffTask(Interruptibility interruptibility) {
