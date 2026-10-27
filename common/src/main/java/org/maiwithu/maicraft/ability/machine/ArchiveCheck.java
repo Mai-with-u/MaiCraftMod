@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
@@ -81,27 +82,52 @@ final class ArchiveCheck {
         Blueprint target = targetPlan(archive.blueprint(), archive.anchor(), archive.dimension());
         BlueprintCheck.Report report = BlueprintCheck.report(target, worldOf(services));
         return new Result(report.complete(), report.counts(), report.differences(), report.extra(),
-                installations(archive, services), parts(archive, services));
+                installations(archive, services, BlockPos::toShortString), parts(archive, services, BlockPos::toShortString));
     }
 
-    private static List<EntryCheck> installations(MachineArchive archive, MachineServices services) {
+    /**
+     * 拿跟在物理结构上的档案对结构比一遍：逐格读结构地块里的格，没对上的格、多出来的格按局部坐标（以档案锚点为零）给，
+     * 不给地块里的大数；安装段与部件照样由机器类型按地块里的格核对，说的时候也换成局部坐标。
+     *
+     * @param structure 读结构地块里的格
+     */
+    static Result compareOnStructure(MachineArchive archive, MachineServices services, ReadsBlocks structure) {
+        Blueprint target = targetPlan(archive.blueprint(), BlockPos.ZERO, archive.dimension());
+        ReadsBlocks local = new ReadsBlocks() {
+            @Override public boolean loaded(BlockPos pos) {
+                return structure.loaded(pos.offset(archive.anchor()));
+            }
+
+            @Override public BlockState state(BlockPos pos) {
+                return structure.state(pos.offset(archive.anchor()));
+            }
+        };
+        BlueprintCheck.Report report = BlueprintCheck.report(target, local);
+        Function<BlockPos, String> where = cell -> cell.subtract(archive.anchor()).toShortString();
+        return new Result(report.complete(), report.counts(), report.differences(), report.extra(),
+                installations(archive, services, where), parts(archive, services, where));
+    }
+
+    private static List<EntryCheck> installations(MachineArchive archive, MachineServices services,
+            Function<BlockPos, String> where) {
         List<EntryCheck> out = new ArrayList<>();
         for (MachineBlueprint.Segment segment : archive.blueprint().installations()) {
             Installation absolute = new Installation(segment.kind(),
                     segment.offsets().stream().map(archive.anchor()::offset).toList(), segment.roles());
             boolean done = services.installedBy(absolute).isPresent();
-            out.add(new EntryCheck(segment.kind(), absolute.cells().getFirst().toShortString() + " → "
-                    + absolute.cells().getLast().toShortString(), done));
+            out.add(new EntryCheck(segment.kind(), where.apply(absolute.cells().getFirst()) + " → "
+                    + where.apply(absolute.cells().getLast()), done));
         }
         return out;
     }
 
-    private static List<EntryCheck> parts(MachineArchive archive, MachineServices services) {
+    private static List<EntryCheck> parts(MachineArchive archive, MachineServices services,
+            Function<BlockPos, String> where) {
         List<EntryCheck> out = new ArrayList<>();
         for (MachineBlueprint.Part part : archive.blueprint().parts()) {
             PartCell absolute = new PartCell(archive.anchor().offset(part.offset()), part.side(), part.itemId());
             boolean done = services.mounted(absolute);
-            out.add(new EntryCheck(part.itemId(), absolute.host().toShortString() + " 的" + part.side().getName()
+            out.add(new EntryCheck(part.itemId(), where.apply(absolute.host()) + " 的" + part.side().getName()
                     + "面", done));
         }
         return out;

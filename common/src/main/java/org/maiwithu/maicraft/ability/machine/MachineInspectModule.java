@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -30,6 +31,9 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  *
  * <p>不打开界面看机器内部（那归 use 与 deposit/obtain），不预测机器能不能转；
  * 转不转以每台的运行状态为准，一起给在结果里。范围没给就是脚下这一片。
+ *
+ * <p>指物理结构 s#、或指跟到结构上的档案名，就是看一辆载具：vehicle 一节，加上结构局部坐标（local），
+ * 指档案名时再按局部坐标整机比对。
  *
  * <p>operation=read_site 读现场：把 target 那一台机器抄成能直接喂回 machine_build 的机器蓝图，并建一份档案
  * （指着档案读时不另建，给整机比对）。只读，不动角色、不改世界。
@@ -94,13 +98,22 @@ final class MachineInspectModule implements AbilityModule {
                 return new StepDecision.Finish(TaskResult.failed("指的结构不在了", Problem.of(Problem.Kind.TARGET_GONE,
                         "观察编号 " + seen.id() + " 指的结构已经不在了", "重新 observe 再指")));
             }
-            String balance = step.goal().params().has("balance") ? step.goal().params().text("balance") : null;
-            return new StepDecision.Run(new VehicleInspectTask.Input(structure.get(), seen.id(), balance));
+            return new StepDecision.Run(vehicleInput(structure.get(), seen.id(), balanceOf(step), null));
         }
         int radius = (int) (step.goal().params().has("radius") ? step.goal().params().integer("radius") : 16);
         MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
                 ? archives.find(landmark.name()).filter(found -> !found.removed()).orElse(null)
                 : null;
+        // 指跟在物理结构上的档案：等于看那个结构——给 vehicle 一节，再按结构局部坐标和档案整机比对；结构这会儿看不到照实说。
+        if (archive != null && archive.onStructure() && !readSite) {
+            if (vehicles.worksite(archive.structure()).isEmpty()) {
+                return new StepDecision.Finish(TaskResult.failed("档案跟着的结构看不到", Problem.of(Problem.Kind.TARGET_GONE,
+                        "档案「" + archive.name() + "」跟在一个物理结构上，这会儿看不到那个结构（不在附近或已经拆光了）",
+                        "走到船跟前再看；拆回后档案会跟回世界")));
+            }
+            return new StepDecision.Run(vehicleInput(archive.structure(), "档案「" + archive.name() + "」所在的结构",
+                    balanceOf(step), archive));
+        }
         if (!readSite) {
             return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius, archive));
         }
@@ -139,6 +152,17 @@ final class MachineInspectModule implements AbilityModule {
         return Optional.empty();
     }
 
+    private static String balanceOf(StepContext step) {
+        return step.goal().params().has("balance") ? step.goal().params().text("balance") : null;
+    }
+
+    // 看载具的输入：认得出结构上的工地就带上局部坐标的原点（跟在上面的档案锚点、组装器或地块中心）。
+    private VehicleInspectTask.Input vehicleInput(String structureId, String seenId, String balance, MachineArchive archive) {
+        Optional<StructureWorksites.Worksite> worksite = vehicles.worksite(structureId);
+        StructureOrigin origin = worksite.map(found -> StructureOrigin.of(found, archives.on(structureId))).orElse(null);
+        return new VehicleInspectTask.Input(structureId, seenId, balance, worksite.orElse(null), origin, archive);
+    }
+
     private static StepDecision fail(String message, String suggestion) {
         Problem problem = Problem.of(Problem.Kind.INVALID_PARAMETER, message, suggestion);
         return new StepDecision.Finish(TaskResult.failed(problem.headline(), problem));
@@ -146,6 +170,6 @@ final class MachineInspectModule implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(MachineInspectInput.class, input -> new MachineInspectTask(input, services, archives, memory));
-        factories.register(VehicleInspectTask.Input.class, input -> new VehicleInspectTask(input, vehicles));
+        factories.register(VehicleInspectTask.Input.class, input -> new VehicleInspectTask(input, vehicles, services));
     }
 }
