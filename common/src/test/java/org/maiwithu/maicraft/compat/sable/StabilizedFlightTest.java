@@ -81,7 +81,7 @@ class StabilizedFlightTest {
         SableStructures.Pose pose = new SableStructures.Pose(new Vec3(0.5, 72, 0.5), new double[]{0, 0, 0, 1},
                 new Vec3(0.5, 2, 0.5), new Vec3(1, 1, 1));
         return new SableStructures.Structure("ship", "", new AABB(-2, 70, -2, 3, 74, 3), pose, pose, BlockPos.ZERO,
-                new BlockPos(2, 4, 2), true);
+                new BlockPos(2, 4, 2), true, BlockPos.ZERO);
     }
 
     private static StabilizedFlight flight(Fake fake) {

@@ -108,19 +108,7 @@ final class DeckMode implements TravelMode {
     // 下船：离角色近的船沿，旁边落差三格以内、站得住的地上格。
     private void leave(ClientLevel level, LocalPlayer player, SableStructures.Structure ship, TravelRequest request,
             OfferSink sink) {
-        List<AABB> hull = hull(level, ship);
-        Pair best = null;
-        for (StructureGeometry.Deck cell : deck(level, ship)) {
-            for (BlockPos ground : beside(cell.world())) {
-                // 往下三格以内找第一个站得住、又不撞船体的地上格，交给环扫内核；一处只有一个落脚，不往深里翻。
-                Optional<BlockPos> found = SpotScan.downward(ground, MAX_DROP,
-                        landing -> BlockPassability.isDryStandable(level, landing) && !touches(hull, landing));
-                if (found.isEmpty()) continue;
-                BlockPos landing = found.get();
-                double cost = cell.world().distanceTo(player.position()) + (ground.getY() - landing.getY());
-                if (best == null || cost < best.cost()) best = new Pair(cell, landing, cost);
-            }
-        }
+        Pair best = leaving(compat, level, player, ship);
         if (best == null) {
             sink.decline(Problem.Kind.UNREACHABLE, "船沿下面找不到落差三格以内、站得住的地方");
             return;
@@ -142,6 +130,27 @@ final class DeckMode implements TravelMode {
         long ticks = Math.round(Math.sqrt(best.ground().distSqr(request.from())) * WALK_TICKS_PER_BLOCK) + STEP_TICKS;
         sink.offer(new TravelOffer(VIA, request.from(), BlockPos.containing(best.deck().world()), ticks, List.of(),
                 List.of(), hint(Kind.BOARD, ship, best.deck().local(), best.ground())));
+    }
+
+    /**
+     * 下船的一处：离角色近的船沿，旁边往下三格以内站得住、又不撞船体的地上格；找不到为 null。
+     * 在船上施工要换到船边地上站时也走它。
+     */
+    static Pair leaving(StructureReads reads, ClientLevel level, LocalPlayer player, SableStructures.Structure ship) {
+        List<AABB> hull = hull(reads, level, ship);
+        Pair best = null;
+        for (StructureGeometry.Deck cell : deck(reads, level, ship)) {
+            for (BlockPos ground : beside(cell.world())) {
+                // 往下三格以内找第一个站得住、又不撞船体的地上格，交给环扫内核；一处只有一个落脚，不往深里翻。
+                Optional<BlockPos> found = SpotScan.downward(ground, MAX_DROP,
+                        landing -> BlockPassability.isDryStandable(level, landing) && !touches(hull, landing));
+                if (found.isEmpty()) continue;
+                BlockPos landing = found.get();
+                double cost = cell.world().distanceTo(player.position()) + (ground.getY() - landing.getY());
+                if (best == null || cost < best.cost()) best = new Pair(cell, landing, cost);
+            }
+        }
+        return best;
     }
 
     /** 上船的一处，或上不去的原因（两者只有一个）。 */
@@ -195,14 +204,11 @@ final class DeckMode implements TravelMode {
         return deck(compat, level, ship);
     }
 
-    private static List<AABB> hull(StructureReads reads, ClientLevel level, SableStructures.Structure ship) {
+    /** 船体的逐格碰撞换到此刻的世界里。 */
+    static List<AABB> hull(StructureReads reads, ClientLevel level, SableStructures.Structure ship) {
         List<AABB> boxes = new ArrayList<>();
         for (AABB local : reads.scan(level, ship).boxes()) boxes.add(StructureGeometry.toWorld(ship.pose(), local));
         return boxes;
-    }
-
-    private List<AABB> hull(ClientLevel level, SableStructures.Structure ship) {
-        return hull(compat, level, ship);
     }
 
     // 甲板格旁边一两格的地上格（同一高度那一层）。
@@ -216,7 +222,8 @@ final class DeckMode implements TravelMode {
         return cells;
     }
 
-    private static boolean touches(List<AABB> hull, BlockPos feet) {
+    /** 人站在这一格（脚）时身体撞不撞船体。 */
+    static boolean touches(List<AABB> hull, BlockPos feet) {
         AABB body = new AABB(feet.getX() + 0.2, feet.getY(), feet.getZ() + 0.2, feet.getX() + 0.8, feet.getY() + 1.8,
                 feet.getZ() + 0.8);
         return hull.stream().anyMatch(body::intersects);

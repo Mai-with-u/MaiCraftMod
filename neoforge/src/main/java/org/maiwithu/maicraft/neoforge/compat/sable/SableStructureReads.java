@@ -45,7 +45,8 @@ public final class SableStructureReads implements SableStructures {
                     new AABB(world.minX(), world.minY(), world.minZ(), world.maxX(), world.maxY(), world.maxZ()),
                     pose(subLevel.logicalPose()), pose(subLevel.lastPose()),
                     new BlockPos(local.minX(), local.minY(), local.minZ()),
-                    new BlockPos(local.maxX(), local.maxY(), local.maxZ()), subLevel == carrying));
+                    new BlockPos(local.maxX(), local.maxY(), local.maxZ()), subLevel == carrying,
+                    subLevel.getPlot().getCenterBlock()));
         }
         return found;
     }

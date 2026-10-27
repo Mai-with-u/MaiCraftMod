@@ -103,6 +103,6 @@ class StructureGeometryTest {
     private static SableStructures.Structure structure(SableStructures.Pose pose, SableStructures.Pose last,
             Map<BlockPos, BlockState> plot) {
         return new SableStructures.Structure("ship", "", new AABB(98, 68, 98, 104, 74, 102), pose, last,
-                new BlockPos(10000, 64, 10000), new BlockPos(10002, 66, 10000), false);
+                new BlockPos(10000, 64, 10000), new BlockPos(10002, 66, 10000), false, new BlockPos(10000, 64, 10000));
     }
 }

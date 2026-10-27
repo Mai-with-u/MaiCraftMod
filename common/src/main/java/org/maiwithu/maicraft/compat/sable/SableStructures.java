@@ -73,9 +73,10 @@ public interface SableStructures {
      * @param localMin      地块里方块范围的最小角（含）
      * @param localMax      地块里方块范围的最大角（含）
      * @param carriesPlayer 角色正站在或坐在它上面
+     * @param plotCenter    地块中心：组装时收进的第一块方块落在这里
      */
     record Structure(String id, String name, AABB worldBounds, Pose pose, Pose lastPose, BlockPos localMin,
-                     BlockPos localMax, boolean carriesPlayer) {}
+                     BlockPos localMax, boolean carriesPlayer, BlockPos plotCenter) {}
 
     /** 和这个区域沾边的物理结构。 */
     List<Structure> near(ClientLevel level, Player viewer, AABB region);
