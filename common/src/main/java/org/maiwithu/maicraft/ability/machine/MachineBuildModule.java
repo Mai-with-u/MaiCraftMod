@@ -246,7 +246,7 @@ final class MachineBuildModule implements AbilityModule {
         String dimension = services.world().playerSpot().map(MachineWorldView.Spot::dimension).orElse("");
         return new StepDecision.Run(new MachineBuildInput(false, parsed, at(origin.plot(), dimension), name, null, permissions,
                 "在结构 " + seenId + " 上按机器蓝图施工（原点：" + origin.describe() + "）",
-                new MachineBuildInput.OnStructure(structure.get(), seenId, worksite.get(), origin)));
+                new OnStructure(structure.get(), seenId, worksite.get(), origin)));
     }
 
     // 跟在结构上的档案：补丁照档案锚点并进去（局部坐标的原点就是它），拆整台时 parsed 为 null。结构这会儿看不到照实说。
@@ -267,7 +267,7 @@ final class MachineBuildModule implements AbilityModule {
         return new StepDecision.Run(new MachineBuildInput(remove, merged, at(archive.anchor(), archive.dimension()),
                 archive.name(), archive, permissions,
                 (remove ? "拆掉结构上的机器「" : "把补丁并进结构上的档案「") + archive.name() + "」",
-                new MachineBuildInput.OnStructure(archive.structure(), seenId, worksite.get(), origin)));
+                new OnStructure(archive.structure(), seenId, worksite.get(), origin)));
     }
 
     private Optional<StructureWorksites.Worksite> worksite(String structureId) {

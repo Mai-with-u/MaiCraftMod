@@ -36,12 +36,12 @@ final class StructureConstruction {
     /** 开工前等停稳的结论：停稳了、还在等、等满了还在动、结构没了。 */
     enum Wait { READY, WAITING, STILL_MOVING, GONE }
 
-    private final MachineBuildInput.OnStructure on;
+    private final OnStructure on;
     private int still;
     private int waited;
     private int movingFor;
 
-    StructureConstruction(MachineBuildInput.OnStructure on) {
+    StructureConstruction(OnStructure on) {
         this.on = Objects.requireNonNull(on, "on");
     }
 

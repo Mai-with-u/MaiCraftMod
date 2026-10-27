@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.ability.machine;
 
 import java.util.Objects;
 
-import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
@@ -29,22 +28,6 @@ record MachineBuildInput(boolean remove, MachineBlueprint blueprint, WorldPositi
     MachineBuildInput(boolean remove, MachineBlueprint blueprint, WorldPosition anchor, String name,
             MachineArchive archive, Permissions permissions, String what) {
         this(remove, blueprint, anchor, name, archive, permissions, what, null);
-    }
-
-    /**
-     * 在组装好的物理结构上施工：哪个结构、它的工地、局部坐标的原点（就是档案锚点：结构上已有档案用它，没有就按原点新建）。
-     *
-     * @param structureId 结构身份
-     * @param seenId      指它的观察编号 s#（说的时候用）；指档案名时为 null
-     * @param worksite    结构上的工地
-     * @param origin      局部坐标的原点
-     */
-    record OnStructure(String structureId, String seenId, StructureWorksites.Worksite worksite, StructureOrigin origin) {
-        OnStructure {
-            Objects.requireNonNull(structureId, "structureId");
-            Objects.requireNonNull(worksite, "worksite");
-            Objects.requireNonNull(origin, "origin");
-        }
     }
 
     MachineBuildInput {

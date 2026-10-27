@@ -231,8 +231,8 @@ class MachineBuildOnStructureTest {
                     new MachineTestDoubles.FakePlaces());
         }
 
-        MachineBuildInput.OnStructure on(StructureOrigin origin) {
-            return new MachineBuildInput.OnStructure("ship-1", "s1", worksite, origin);
+        OnStructure on(StructureOrigin origin) {
+            return new OnStructure("ship-1", "s1", worksite, origin);
         }
 
         /** 结构上还没有档案：按原点（物理组装器）新建一份"飞艇"。 */
