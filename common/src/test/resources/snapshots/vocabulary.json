@@ -280,6 +280,22 @@
       "message": "拿到 3 块原木，还差 5 块",
       "status": "partial",
       "self_brief": "在 minecraft:overworld 12, 64, -8；血 18，饱食 15；手上 minecraft:stone_axe"
+    },
+    "step_finished_event": {
+      "cursor": 10,
+      "kind": "step_finished",
+      "goal_id": 12,
+      "message": "第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
+      "status": "done",
+      "self_brief": "在 minecraft:overworld 12, 64, -8；血 20，饱食 18；手上 minecraft:oak_log",
+      "ready_now": [
+        {
+          "step": 3,
+          "ability": "maicraft:obtain",
+          "purpose": "做木剑",
+          "how": "自己做：在背包的合成格里做，不用工作台"
+        }
+      ]
     }
   }
 }

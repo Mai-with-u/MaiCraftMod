@@ -321,6 +321,8 @@ public final class Bootstrap {
         private final McpConfig mcpConfig = McpConfig.localForProcess(8766);
         // 能力注册表客户端全程一份：进世界时按清单把各能力登记进来，退世界清掉，不跨世界残留；能力需要的模组装没装由加载器回答，没装的能力不登记。
         private final AbilityRegistry abilities;
+        // sequence 做完一步时看后面哪几步此刻不用走路就能做，附在步骤结束的事件上。
+        private final ReadySequenceSteps readySteps;
         /** 这个加载器的联动清单；客户端启动完成时逐行检查成登记表。 */
         private final List<SupportedMod<CompatModule>> compatCatalog;
         /** 联动登记表：启动完成前是空的，之后是按清单检查过的那份；进世界建能力清单时把登记的来源交进去。 */
@@ -386,6 +388,7 @@ public final class Bootstrap {
 
         ClientEntry(LoaderEnvironment loader, List<SupportedMod<CompatModule>> compatCatalog) {
             this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
+            this.readySteps = new ReadySequenceSteps(abilities, () -> playerControl.activeContext().orElse(null));
             this.compatCatalog = List.copyOf(compatCatalog);
         }
 
@@ -444,7 +447,7 @@ public final class Bootstrap {
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
             GoalRunStore goalRuns = new EventPublishingGoalRunStore(
-                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents, selfBriefs);
+                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents, selfBriefs, readySteps);
             // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
             RemembersPlaces places = (name, position) -> {
                 WorldScope scope = worldScope[0];
@@ -663,7 +666,7 @@ public final class Bootstrap {
                 // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 publishingGoalRuns = new EventPublishingGoalRunStore(
-                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs);
+                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs, readySteps);
                 goals.enterWorld(scope.memory(), publishingGoalRuns);
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;

@@ -16,12 +16,15 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate.Effort;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimates;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -42,9 +45,9 @@ class ExecuteEstimateTest {
     private final ToolTestAbility sleep = ToolTestAbility.sleep();
     private boolean inWorld = true;
     private final ToolDispatcher tools;
+    private final AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
 
     ExecuteEstimateTest() {
-        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
         registry.register(use);
         registry.register(sleep);
         registry.register(ToolTestAbility.sequence());
@@ -146,6 +149,21 @@ class ExecuteEstimateTest {
 
         assertEquals("ready", estimate.get("effort").getAsString());
         assertEquals(2, use.estimatedTimes, "隔一会儿再估了一次");
+    }
+
+    @Test
+    void readyAfterListsOnlyLaterStepsThatNeedNoWalking() {
+        // 做完第 1 步：第 2 步 use 估成不用离开，列出来；第 3 步 sleep 不估、第 4 步套着的 sequence 整体不列。
+        use.estimates.add(ready("minecraft:wooden_sword ×1"));
+        Goal step = Goal.of("maicraft:use", null, ParamValues.EMPTY);
+        Goal nested = new Goal("maicraft:sequence", null, null, ParamValues.EMPTY, null, List.of(step), null);
+        Goal sequence = new Goal("maicraft:sequence", null, null, ParamValues.EMPTY, null,
+                List.of(step, step, Goal.of("maicraft:sleep", null, ParamValues.EMPTY), nested), null);
+
+        List<GoalEstimates.StepEstimate> ready = new GoalEstimates(registry).readyAfter(sequence, 0, new Tick(100));
+
+        assertEquals(1, ready.size());
+        assertEquals(1, ready.getFirst().index());
     }
 
     @Test

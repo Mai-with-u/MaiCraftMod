@@ -144,6 +144,19 @@ public final class ResultJson {
         if (event.selfBrief() != null) {
             json.addProperty("self_brief", event.selfBrief());
         }
+        // sequence 的一步做完时，后面此刻不用走路就能做的那几步：第几步、能力、目的、怎么弄。先后由 LLM 自己定。
+        if (!event.readyNow().isEmpty()) {
+            JsonArray ready = new JsonArray();
+            for (TaskEvent.ReadyStep step : event.readyNow()) {
+                JsonObject entry = new JsonObject();
+                entry.addProperty("step", step.step());
+                entry.addProperty("ability", step.ability());
+                if (step.purpose() != null && !step.purpose().isBlank()) entry.addProperty("purpose", step.purpose());
+                entry.addProperty("how", step.how());
+                ready.add(entry);
+            }
+            json.add("ready_now", ready);
+        }
         return json;
     }
 

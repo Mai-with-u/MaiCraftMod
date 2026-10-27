@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.event;
 
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.HashMap;
 import java.util.List;
@@ -21,6 +23,9 @@ import java.util.function.LongSupplier;
  * <p>目标或某一步结束时，事件上附结束那一刻角色的一行自身摘要：LLM 读到结束接着决定下一步，
  * 不用先再看一次自己在哪、血够不够、手上拿着什么、界面关没关。
  *
+ * <p>sequence 的一步做完、整件事还要接着做时，看一眼后面还没开始的步骤里此刻不用走路就能做的那几步（砍完木头，
+ * 木剑的料就够了），附在步骤结束的事件上告诉 LLM；先后不替它调。
+ *
  * <p>停滞提醒在这里看：每刻查一遍还没结束的目标，一条目标太久没有任何事件、
  * 又没有任何终态，就发一条停滞的提醒——受理方不用自己拿表计时干等（实机 10-16 目标挂在
  * 进行中直到进程关闭，对面的任务台账每半小时报一次"无进展"，报了 25 条都没有终态）。
@@ -32,6 +37,8 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
     private final TaskEventLog log;
     /** 结束那一刻角色的一行自身摘要。 */
     private final ReadsSelfBrief selfBrief;
+    /** sequence 一步做完时，后面此刻不用走路就能做的几步。 */
+    private final ReadsReadySteps readySteps;
     /** 各条还没结束的记录上次存盘时的处境；结束后移除，不会越积越多。 */
     private final Map<Long, GoalRunState> lastStates = new HashMap<>();
     /** 单调时钟：停滞按它计时，游戏时间校对、回挡绕不过冷却。 */
@@ -50,15 +57,26 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
     }
 
     public EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log, ReadsSelfBrief selfBrief) {
-        this(delegate, log, selfBrief, System::nanoTime);
+        this(delegate, log, selfBrief, ReadsReadySteps.NONE);
+    }
+
+    public EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log, ReadsSelfBrief selfBrief,
+            ReadsReadySteps readySteps) {
+        this(delegate, log, selfBrief, readySteps, System::nanoTime);
     }
 
     /** @param clock 单调时钟，测试给定值推进 */
     public EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log, ReadsSelfBrief selfBrief,
             LongSupplier clock) {
+        this(delegate, log, selfBrief, ReadsReadySteps.NONE, clock);
+    }
+
+    private EventPublishingGoalRunStore(GoalRunStore delegate, TaskEventLog log, ReadsSelfBrief selfBrief,
+            ReadsReadySteps readySteps, LongSupplier clock) {
         this.delegate = Objects.requireNonNull(delegate, "delegate");
         this.log = Objects.requireNonNull(log, "log");
         this.selfBrief = Objects.requireNonNull(selfBrief, "selfBrief");
+        this.readySteps = Objects.requireNonNull(readySteps, "readySteps");
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
@@ -140,10 +158,41 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
             // sequence 的一步做完记在整件 sequence 的编号上，结论句前带上第几步、哪个能力：连着几步结论一样
             // （一格一格施工每步都是"按图建好了"）时，读事件的人也分得清做完的是哪一步。
             // 结束这一刻顺手附上角色的一行自身摘要（在哪、血、饱食、主手、开着的界面），读不到就不附。
-            case FINISHED -> log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,
-                    step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary() : run.result().summary(),
-                    run.result().status(), selfBrief.current().orElse(null));
+            // sequence 的一步做完、后面还要接着做：再附上后面此刻不用走路就能做的那几步，消息末尾也说一句。
+            case FINISHED -> {
+                List<TaskEvent.ReadyStep> ready = step ? readyAfter(run) : List.of();
+                String message = step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary()
+                        : run.result().summary();
+                log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,
+                        message + readyNote(ready), run.result().status(), selfBrief.current().orElse(null), ready);
+            }
         }
+    }
+
+    // 整件 sequence 还要接着做（这一步做成了，或没做成但写了接着做）才看后面；做完最后一步、要停下的都不看。
+    // 看的时候出了错也只是不附，步骤结束的事件照发。
+    private List<TaskEvent.ReadyStep> readyAfter(GoalRun step) {
+        GoalRun parent = delegate.unfinished().stream()
+                .filter(candidate -> candidate.id() == step.parentRunId())
+                .findFirst().orElse(null);
+        if (parent == null) return List.of();
+        Goal sequence = parent.goal();
+        boolean continues = step.result().status() == TaskResult.Status.DONE
+                || step.goal().onFailure() == Goal.OnFailure.CONTINUE;
+        if (!continues || step.stepOfParent() + 1 >= sequence.steps().size()) return List.of();
+        try {
+            return readySteps.readyAfter(sequence, step.stepOfParent());
+        } catch (RuntimeException failed) {
+            return List.of();
+        }
+    }
+
+    // 消息末尾的一句：一步写"后面第 4 步（…）现在就能做，不用走路"，几步写成一串。
+    private static String readyNote(List<TaskEvent.ReadyStep> ready) {
+        if (ready.isEmpty()) return "";
+        if (ready.size() == 1) return "；后面" + ready.getFirst().label() + "现在就能做，不用走路";
+        return "；后面这几步现在就能做、不用走路："
+                + String.join("、", ready.stream().map(TaskEvent.ReadyStep::label).toList());
     }
 
     private static String describe(GoalRun run) {

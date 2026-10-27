@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.kernel.event;
 
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -20,9 +21,26 @@ import java.util.Objects;
  * @param status    目标或某一步结束时的结果状态；其余事件为 null
  * @param selfBrief 目标或某一步结束那一刻角色的一行自身摘要（在哪、血、饱食、氧气、主手、开着的界面）；
  *                  其余事件、或结束时读不到角色时为 null
+ * @param readyNow  sequence 的一步做完时，后面还没开始的步骤里此刻不用走路就能做的那几步；其余事件为空
  */
 public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
-                        String selfBrief) {
+                        String selfBrief, List<ReadyStep> readyNow) {
+
+    /**
+     * sequence 后面还没开始的一步，此刻不用走路就能做。
+     *
+     * @param step    第几步（从 1 数）
+     * @param ability 能力
+     * @param purpose 这一步写的目的；没写为 null
+     * @param how     估算说的怎么弄
+     */
+    public record ReadyStep(int step, String ability, String purpose, String how) {
+
+        /** 和步骤结束事件同一种叫法："第 4 步（maicraft:obtain，做木剑）"。 */
+        public String label() {
+            return "第 " + step + " 步（" + ability + (purpose == null || purpose.isBlank() ? "" : "，" + purpose) + "）";
+        }
+    }
 
     /** 发生了什么。 */
     public enum Kind {
@@ -85,7 +103,14 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
         this(cursor, kind, goalRunId, message, status, null);
     }
 
+    /** 不带"后面哪几步现在就能做"的事件：除了 sequence 的一步做完，都是这一种。 */
+    public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
+                     String selfBrief) {
+        this(cursor, kind, goalRunId, message, status, selfBrief, List.of());
+    }
+
     public TaskEvent {
+        readyNow = readyNow == null ? List.of() : List.copyOf(readyNow);
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(message, "message");
         if (cursor < 1) throw new IllegalArgumentException("事件序号从 1 开始：" + cursor);

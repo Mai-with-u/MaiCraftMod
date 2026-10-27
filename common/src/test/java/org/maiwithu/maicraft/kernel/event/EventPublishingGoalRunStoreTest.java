@@ -112,6 +112,60 @@ class EventPublishingGoalRunStoreTest {
                 finished);
     }
 
+    private static final Goal OPENING = new Goal("maicraft:sequence", "开局", null, ParamValues.EMPTY, null, List.of(
+            new Goal("maicraft:obtain", "砍木", null, ParamValues.EMPTY, null, null, null),
+            new Goal("maicraft:obtain", "猎羊毛", null, ParamValues.EMPTY, null, null, null),
+            new Goal("maicraft:obtain", "做木剑", null, ParamValues.EMPTY, null, null, null)), null);
+
+    /** 替身：后面第 3 步此刻不用走路就能做；记下被问了几次。 */
+    private static final class ReadySword implements ReadsReadySteps {
+        int asked;
+
+        @Override public List<TaskEvent.ReadyStep> readyAfter(Goal sequence, int finished) {
+            asked++;
+            return List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：身上的原木就够"));
+        }
+    }
+
+    private static List<TaskEvent> finishStep(ReadsReadySteps ready, int index, TaskResult result)
+            throws InterruptedException {
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log,
+                () -> Optional.empty(), ready);
+        GoalRun sequence = new GoalRun(store.nextId(), OPENING);
+        store.save(sequence);
+        GoalRun step = new GoalRun(store.nextId(), OPENING.steps().get(index), sequence.id(), index);
+        store.save(step);
+        step.finish(result, 300);
+        store.save(step);
+        return events(log).stream().filter(event -> event.kind() == TaskEvent.Kind.STEP_FINISHED).toList();
+    }
+
+    @Test
+    void aStepDoneWhileTheSequenceGoesOnTellsWhichLaterStepsAreReadyNow() throws InterruptedException {
+        // 砍完木头，后面第 3 步木剑的料就够了：事件里列出来，消息末尾说一句。
+        TaskEvent finished = finishStep(new ReadySword(), 0, TaskResult.done("拿到 8 根原木")).getFirst();
+
+        assertEquals(1, finished.readyNow().size());
+        assertEquals("自己做：身上的原木就够", finished.readyNow().getFirst().how());
+        assertEquals("第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
+                finished.message());
+    }
+
+    @Test
+    void noReadyStepsWhenTheSequenceStopsOrNothingIsLeft() throws InterruptedException {
+        // 这一步没做成、按默认停下：整件事不往下做，不看后面；做完最后一步也不看。
+        ReadySword ready = new ReadySword();
+        TaskEvent stopped = finishStep(ready, 0, TaskResult.builder(TaskResult.Status.FAILED, "没砍着")
+                .problem(Problem.of(Problem.Kind.NOT_FOUND, "附近没有树", null)).build()).getFirst();
+        TaskEvent last = finishStep(ready, 2, TaskResult.done("做好了木剑")).getFirst();
+
+        assertTrue(stopped.readyNow().isEmpty());
+        assertTrue(last.readyNow().isEmpty());
+        assertEquals("第 3 步（maicraft:obtain，做木剑）：做好了木剑", last.message());
+        assertEquals(0, ready.asked, "不往下做时不去估后面");
+    }
+
     @Test
     void finishingAttachesOneLineAboutTheCharacterAndNothingElseDoes() throws InterruptedException {
         // 目标与 sequence 的一步结束时附上结束那一刻的一行自身摘要；开始、提问这些不附，读不到时照样发事件。

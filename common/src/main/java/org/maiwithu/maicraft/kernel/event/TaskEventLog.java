@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.event;
 
+import java.util.List;
 import java.util.OptionalLong;
 
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -34,7 +35,13 @@ public final class TaskEventLog implements TaskEventSink {
     /** 记一条带自身摘要的事件（目标或某一步结束时）；摘要读不到时给 null，照样记。 */
     public TaskEvent append(TaskEvent.Kind kind, long goalRunId, String message, TaskResult.Status status,
                             String selfBrief) {
-        return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, status, selfBrief));
+        return append(kind, goalRunId, message, status, selfBrief, List.of());
+    }
+
+    /** 记一条 sequence 一步做完的事件：再带上后面此刻不用走路就能做的那几步。 */
+    public TaskEvent append(TaskEvent.Kind kind, long goalRunId, String message, TaskResult.Status status,
+                            String selfBrief, List<TaskEvent.ReadyStep> readyNow) {
+        return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, status, selfBrief, readyNow));
     }
 
     /** 换世界或重启：清空事件、换一个新的流编号，叫醒正在等的读者让它们重新对齐。 */

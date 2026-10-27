@@ -170,6 +170,11 @@ class InterfaceSnapshotTest {
         shapes.add("finished_event", ResultJson.event(new TaskEvent(9, TaskEvent.Kind.FINISHED, 12,
                 "拿到 3 块原木，还差 5 块", TaskResult.Status.PARTIAL,
                 "在 minecraft:overworld 12, 64, -8；血 18，饱食 15；手上 minecraft:stone_axe")));
+        // sequence 的一步做完、整件事还要接着做：附上后面此刻不用走路就能做的那几步。
+        shapes.add("step_finished_event", ResultJson.event(new TaskEvent(10, TaskEvent.Kind.STEP_FINISHED, 12,
+                "第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
+                TaskResult.Status.DONE, "在 minecraft:overworld 12, 64, -8；血 20，饱食 18；手上 minecraft:oak_log",
+                List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：在背包的合成格里做，不用工作台")))));
         return shapes;
     }
 
