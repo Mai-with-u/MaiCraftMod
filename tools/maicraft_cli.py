@@ -340,6 +340,7 @@ def main() -> int:
                 break
             print(f"==> 跟随 next → {nxt['tool']}（第 {step + 1}/{args.follow_steps} 步）")
             tool, call_params = nxt["tool"], nxt.get("arguments") or {}
+        return 0
     else:
         raw = connection.call("resources/read", {"uri": args.uri})
 
