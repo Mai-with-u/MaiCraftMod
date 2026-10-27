@@ -14,7 +14,9 @@ import java.util.List;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.survival.beds.BedCandidate;
 import org.maiwithu.maicraft.behavior.survival.beds.BedChooser;
+import org.maiwithu.maicraft.behavior.survival.beds.BedScanner;
 import org.maiwithu.maicraft.behavior.survival.beds.ClientBedPlacer;
 import org.maiwithu.maicraft.behavior.survival.beds.LiveBedFinder;
 import org.maiwithu.maicraft.behavior.survival.beds.PlacesBed;
@@ -39,7 +41,10 @@ import org.maiwithu.maicraft.game.world.WorldTime;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
+import org.maiwithu.maicraft.kernel.ability.EstimatesGoal;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate.Effort;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -66,7 +71,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 睡觉特有的判断——备不备床、现在睡不睡得、床从哪来。夜间自动休息（生存需求）复用
  * 同一套选床与躺下流程，从这里拿判断与任务。
  */
-public final class SleepModule implements AbilityModule, NightfallNeed.NightRestMoves,
+public final class SleepModule implements AbilityModule, EstimatesGoal, NightfallNeed.NightRestMoves,
         NightfallNeed.PreparesNightBed {
 
     private final Supplier<PlayerContext> context;
@@ -297,6 +302,43 @@ public final class SleepModule implements AbilityModule, NightfallNeed.NightRest
     /** 夜晚这项生存需求读的"今晚有没有床"：附近有能用的床或身上带着床。 */
     public NightfallNeed.ReadsBedAvailability bedAvailability() {
         return beds;
+    }
+
+    // 估算：开关类操作当场改好；下界、末地睡不了；身上带着床 → 不用离开、就地放下睡；附近有能用的床 → 按距离分档；
+    // 附近还没扫完 → 估不了；都没有就按备床的同一个请求估一张床（附近没羊时是弄不到，备原料不出门找）。
+    @Override
+    public GoalEstimate estimate(Goal goal, TickContext tick) {
+        String what = goal.ability();
+        String operation = goal.params().has("operation") ? goal.params().text("operation") : "sleep";
+        if (!"sleep".equals(operation)) {
+            return new GoalEstimate(Effort.READY, what, "当场改开关，不动手", null, GoalEstimate.SECONDS_STEP, List.of(), false);
+        }
+        PlayerContext current = context.get();
+        if (current != null && current.level() != null && SleepRules.bedsExplodeHere(current.level())) {
+            return new GoalEstimate(Effort.BLOCKED, what, "这个维度的床会爆炸，睡不了", null, null, List.of(), false);
+        }
+        Optional<String> carried = beds.carriedBed();
+        if (carried.isPresent()) {
+            return new GoalEstimate(Effort.READY, what, "身上带着 " + carried.get() + "，就地放下睡", null,
+                    GoalEstimate.SECONDS_STEP, List.of(), false);
+        }
+        BedScanner.BedScan scan = beds.scan(tick, Set.of(), goal.permissions().protectedLandmarks());
+        Optional<BedCandidate> bed = BedChooser.choose(scan.candidates(), Set.of(), bedArea(goal).orElse(null));
+        if (bed.isPresent()) {
+            double distance = bed.get().distance();
+            return new GoalEstimate(GoalEstimate.byDistance(distance), what,
+                    "附近有能用的床（" + Math.round(distance) + " 格外），走过去躺下", distance,
+                    GoalEstimate.roughSeconds(distance / GoalEstimate.BLOCKS_PER_SECOND + 3), List.of(), false);
+        }
+        if (!scan.complete()) return GoalEstimate.stillLooking(what, "附近的床还没扫完");
+        GoalEstimate made = tonightsBed();
+        return new GoalEstimate(made.effort(), what, "附近没有能用的床，要备一张：" + made.how(), made.farthestBlocks(),
+                made.roughSeconds(), List.of(), made.stillLooking());
+    }
+
+    /** 备今晚的床此刻多费事：和备床任务同一个请求、同一份许可。夜里该先备武器还是先备床拿它来比。 */
+    public GoalEstimate tonightsBed() {
+        return obtain.estimate(PrepareBedTask.TONIGHTS_BED, currentPermissions());
     }
 
     /** 没床时怎么备一张：经拿东西的引擎去弄一张床到身上（杀羊取毛、合成都由引擎按途径挑）。 */

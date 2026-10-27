@@ -4,6 +4,9 @@ package org.maiwithu.maicraft.mcp.tool;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimates;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimates.StepEstimate;
 import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -23,16 +26,22 @@ import java.util.stream.Stream;
  * <p>控制角色的目标交给目标运行表，成为角色的主任务，原来的主任务被替换；马上返回目标编号，
  * 进展用 events 等、用 goal 查。只读分析、只改记忆的目标当场做完，结果直接返回，不打断手上的活。
  *
- * <p>{@code dry_run=true} 只检查目标、不动手，返回一个计划编号；之后用 {@code plan_id} 执行同一个目标。
+ * <p>{@code dry_run=true} 只检查目标、不动手，返回一个计划编号和一份估算（此刻要花多大功夫）；之后用 {@code plan_id}
+ * 执行同一个目标。下达 sequence 时回复也带一份逐步的估算，不等附近扫完，LLM 看到后面某步便宜得多可以取消重排。
  */
 public final class ExecuteTool implements McpTool {
     /** 检查过的计划最多留几份；LLM 一般检查完马上执行，留太多没有意义。 */
     static final int KEPT_PLANS = 32;
+    /** dry_run 估算时附近还没扫完最多等多久：和拿东西动手前等扫描的五秒一样。 */
+    static final long ESTIMATE_WAIT_MILLIS = 5_000;
+    /** 等扫描时隔多久再估一次。 */
+    static final long ESTIMATE_RETRY_MILLIS = 250;
 
     private final AbilityRegistry registry;
     private final GoalReader reader;
     private final GoalRunTable table;
     private final ClientThread clientThread;
+    private final GoalEstimates estimates;
     private final Map<String, Goal> plans = new LinkedHashMap<>() {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Goal> eldest) {
             return size() > KEPT_PLANS;
@@ -44,6 +53,7 @@ public final class ExecuteTool implements McpTool {
         this.reader = new GoalReader(registry);
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
+        this.estimates = new GoalEstimates(registry);
     }
 
     @Override public String name() {
@@ -87,6 +97,7 @@ public final class ExecuteTool implements McpTool {
             data.addProperty("plan_id", keepPlan(reading.goal()));
             data.addProperty("ability", reading.goal().ability());
             data.addProperty("checked", "目标的写法、参数、目标对象与许可都没有问题");
+            data.add("estimate", estimate(reading.goal(), true));
             return ToolReply.ok(data, notes, null);
         }
         return start(reading.goal(), requestKey, notes);
@@ -112,10 +123,44 @@ public final class ExecuteTool implements McpTool {
         if (launch.repeated()) {
             data.addProperty("repeated", true);
         }
+        // 下达 sequence 也附一份逐步估算：小模型不一定先 dry_run，看到后面某步便宜得多可以取消重排。不等扫描。
+        if (!goal.steps().isEmpty()) {
+            data.add("estimate", estimate(goal, false));
+        }
         JsonObject wait = new JsonObject();
         wait.addProperty("goal_id", run.id());
         wait.addProperty("wait_ms", EventsTool.DEFAULT_WAIT_MS);
         return ToolReply.ok(data, notes, ToolReply.next(ToolCatalog.EVENTS, wait));
+    }
+
+    // 估算在客户端线程上问价；dry_run 时附近还没扫完就隔一会儿再估，最多等 5 秒（在 MCP 请求线程上等，不卡游戏）。
+    // 角色不在世界里、客户端忙时如实说估不了，不影响检查与下达。
+    private JsonObject estimate(Goal goal, boolean waitForScans) {
+        long deadline = System.currentTimeMillis() + ESTIMATE_WAIT_MILLIS;
+        while (true) {
+            JsonObject json;
+            boolean stillLooking;
+            try {
+                if (goal.steps().isEmpty()) {
+                    GoalEstimate single = clientThread.call(context -> estimates.single(goal, context));
+                    json = EstimateJson.of(single);
+                    stillLooking = single.stillLooking();
+                } else {
+                    List<StepEstimate> steps = clientThread.call(context -> estimates.steps(goal, 0, context));
+                    json = EstimateJson.steps(steps);
+                    stillLooking = steps.stream().anyMatch(StepEstimate::stillLooking);
+                }
+            } catch (ClientThread.NotInWorld | ClientThread.Busy unavailable) {
+                return EstimateJson.of(GoalEstimate.unknown(goal.ability(), "此刻估不了：" + unavailable.getMessage()));
+            }
+            if (!waitForScans || !stillLooking || System.currentTimeMillis() >= deadline) return json;
+            try {
+                Thread.sleep(ESTIMATE_RETRY_MILLIS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                return json;
+            }
+        }
     }
 
     private synchronized String keepPlan(Goal goal) {

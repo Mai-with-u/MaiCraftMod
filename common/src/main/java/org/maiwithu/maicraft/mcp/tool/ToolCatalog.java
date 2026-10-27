@@ -75,11 +75,11 @@ public final class ToolCatalog {
                         field("offset", "integer", "只在 topic=wiki 读 url 时用：从第几段读起，照抄上一页的 next_offset 或 sections 里那一节的 offset；不给从 0 起", null)),
                 new String[0]));
         tools.add(tool(EXECUTE,
-                "开始做一件事（下达一个目标）；dry_run=true 只检查、不动手。"
+                "开始做一件事（下达一个目标）；dry_run=true 只检查、估算，不动手。"
                         + "这不是 Minecraft 的 /execute 命令，发消息或命令用能力 chat。",
                 properties(
                         named("goal", GoalSchema.goal()),
-                        field("dry_run", "boolean", "true 时只做校验和预检，返回计划编号和发现的问题", null),
+                        field("dry_run", "boolean", "true 时只做校验和预检，返回计划编号、发现的问题和估算 estimate（此刻要花多大功夫）", null),
                         field("plan_id", "string", "执行一次 dry_run 通过的计划；与 goal 二选一", null),
                         field("request_key", "string", "网络重试用的幂等键；不给时由入口自动生成", null)),
                 new String[]{"goal"}));

@@ -33,6 +33,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 - 同样装了这一套时，`lookup(topic=knowledge)` 多一篇载具部件资料 `maicraft://knowledge/vehicle/parts`：气球与燃烧室、螺旋桨、转向、车轮、收端和胶怎么摆，组装与起飞常见的坑；航空学部件的物品资料页也挂着它。
 - `vehicle_assemble` 组装前会自己补胶了：物理组装器落在机器档案里（`machine_build` 建的或 `read_site` 读的）时，拉杆前把档案里相邻两块没被同一块强力胶框住的地方一框框粘上，档案外的方块（垫的、地面）不框进去；补胶没补成就不拉杆，结果的 `glued` 写补了哪几框、还差哪几框。组装器不在任何档案里照旧直接拉杆。
 - `vehicle_assemble` 组装前补胶时，身上有蜂蜜胶就先用蜂蜜胶：框不用角是方块，常常一框框住整艘（每边不超过 48 格），也不会粘住螺旋桨这类会转的装置；没有蜂蜜胶照旧用强力胶。`machine_build` 的蓝图里也能写蜂蜜胶安装段 `simulated:honey_glue`（写两个对角）。
+- `execute(dry_run=true)` 会估这件事此刻要花多大功夫了（回复里多一个 `estimate`）：档位 `effort` 说要不要离开这里、知不知道东西在哪（`ready` 不用离开、`nearby` 知道在哪走过去、`search` 要出去找、`blocked` 按这次的写法弄不到、`unknown` 估不了），`how` 一句话说走哪条路、缺的原料从哪来，算得出来时带最远走多远 `farthest_blocks` 和粗估秒数 `rough_seconds`。`obtain` 按引擎此刻会走的路往下估原料，`sleep` 看身上、附近有没有床，还没接的能力说"这项能力还不估"。`sequence` 逐步估，下达 `sequence` 时回复也附一份。估算只给你排先后用，不拦操作、不当期限。附近没羊时要床估出来是 `blocked`：做床备羊毛不会出门找羊，要出门找就单独要羊毛并给 `max_distance`。
 
 ### 修复
 

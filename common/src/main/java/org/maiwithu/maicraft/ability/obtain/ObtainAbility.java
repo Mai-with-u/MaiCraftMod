@@ -27,7 +27,9 @@ import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
+import org.maiwithu.maicraft.kernel.ability.EstimatesGoal;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -39,6 +41,7 @@ import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 
 /**
@@ -47,7 +50,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
  * 不进世界就能发现），以及把 via、radius、max_distance 换成引擎认的限定；真正问来源、挑路、动手、重新清点
  * 全在玩家行为层的拿到物品引擎里，这里不做第二份。
  */
-public final class ObtainAbility implements AbilityModule {
+public final class ObtainAbility implements AbilityModule, EstimatesGoal {
 
     /** 搜索半径的防误扫上限：再大就容易把半张地图扫进一次问询。 */
     private static final long MAX_RADIUS = 64;
@@ -110,12 +113,36 @@ public final class ObtainAbility implements AbilityModule {
 
     @Override public StepDecision decide(StepContext step) {
         Goal goal = step.goal();
+        Reading reading = read(goal);
+        if (!reading.invalid().isEmpty()) {
+            return invalidGoal(reading.invalid());
+        }
+        return new StepDecision.Run(new ObtainItems(reading.requests(), scope(goal.params()), goal.permissions(),
+                purposeLabel(goal), describeText(reading.requests())));
+    }
+
+    // 估算：参数照下达时一样读、一样查；写错了的不进世界，估成"按这次的写法弄不到"并写清哪里不对。
+    // 限定（途径、距离、半径）照这次的写法，只管最外层要的那几样。
+    @Override public GoalEstimate estimate(Goal goal, TickContext tick) {
+        Reading reading = read(goal);
+        if (!reading.invalid().isEmpty()) {
+            return new GoalEstimate(GoalEstimate.Effort.BLOCKED, goal.ability(),
+                    "参数有问题：" + String.join("；", reading.invalid()), null, null, List.of(), false);
+        }
+        return acquisition.estimate(reading.requests(), goal.permissions(), scope(goal.params()));
+    }
+
+    /** 读出来的要货单，与参数在游戏里立不住的地方（一处一句）。 */
+    private record Reading(List<ItemRequest> requests, List<String> invalid) {}
+
+    // 参数在游戏里立不立得住一次查清（物品 ID 存在、标签下有注册物品、掉落线索注册过），立得住的拼成要货单。
+    private Reading read(Goal goal) {
         ParamValues params = goal.params();
         List<String> invalid = new ArrayList<>();
         boolean single = params.has("item");
         boolean several = params.has("items");
         if (!single && !several) {
-            return invalidGoal(List.of("缺少要拿的东西：填 item 要一样，或填 items 一次要几样"));
+            return new Reading(List.of(), List.of("缺少要拿的东西：填 item 要一样，或填 items 一次要几样"));
         }
         if (single && several) {
             invalid.add("item 与 items 只能给一样：一次要几样就都写在 items 里");
@@ -144,11 +171,7 @@ public final class ObtainAbility implements AbilityModule {
         } else if (several) {
             requests.addAll(readItems(params.json("items"), purpose, prefer, invalid));
         }
-        if (!invalid.isEmpty()) {
-            return invalidGoal(invalid);
-        }
-        return new StepDecision.Run(new ObtainItems(requests, scope(params), goal.permissions(), purpose,
-                describeText(requests)));
+        return new Reading(requests, invalid);
     }
 
     // 一次要几样的正文：每项一个对象，item 必填、count 不给算 1；同一样写两次合并、件数相加。

@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.game.world.SimilarIds;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -139,6 +140,64 @@ class ObtainAbilityTest {
         StepDecision.Finish typo = assertInstanceOf(StepDecision.Finish.class, decide(params));
         assertEquals("物品标签 #minecraft:log 不存在；你是不是要 #minecraft:logs", typo.result().problem().message(),
                 "标签只和标签比");
+    }
+
+    /** 替身：只会估算的引擎，记下这次按什么限定估了哪几样；被要求动手就报错。 */
+    private static final class EstimatingAcquisition implements StartsAcquisition {
+        List<ItemRequest> estimated;
+        ItemAcquisition.Scope scope;
+
+        @Override public Action need(ItemRequest request, Permissions permissions,
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+            throw new IllegalStateException("估算不该动手");
+        }
+
+        @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+            throw new IllegalStateException("估算不该动手");
+        }
+
+        @Override public GoalEstimate estimate(List<ItemRequest> requests, Permissions permissions,
+                ItemAcquisition.Scope scope) {
+            this.estimated = requests;
+            this.scope = scope;
+            return new GoalEstimate(GoalEstimate.Effort.NEARBY, "minecraft:torch ×8", "自己做", 14.0, 25, List.of(), false);
+        }
+    }
+
+    private static Goal obtainGoal(ObtainAbility ability, JsonObject params) {
+        ParseResult parsed = ability.spec().paramSpecs().parse(params);
+        return Goal.of("maicraft:obtain", null, parsed.params());
+    }
+
+    @Test
+    void 估算_参数写错估成弄不到并写清哪里不对_不问引擎() {
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:toch");
+        ObtainAbility ability = ability();
+        GoalEstimate estimate = ability.estimate(obtainGoal(ability, params), null);
+        assertEquals(GoalEstimate.Effort.BLOCKED, estimate.effort());
+        assertTrue(estimate.how().contains("minecraft:toch 不存在"), estimate.how());
+    }
+
+    @Test
+    void 估算_按这次的途径距离半径交给引擎估() {
+        EstimatingAcquisition acquisition = new EstimatingAcquisition();
+        ObtainAbility ability = new ObtainAbility(acquisition, List.of(AcquireVia.CRAFT, AcquireVia.MINE),
+                new FakeRegistry(), emptyBackpack(), null, itemId -> Set.of(), new FakeIds());
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:torch");
+        params.addProperty("count", 8);
+        params.addProperty("via", "craft");
+        params.addProperty("max_distance", 40);
+
+        GoalEstimate estimate = ability.estimate(obtainGoal(ability, params), null);
+
+        assertEquals(GoalEstimate.Effort.NEARBY, estimate.effort());
+        assertEquals("minecraft:torch", acquisition.estimated.getFirst().wanted().specifier());
+        assertEquals(8, acquisition.estimated.getFirst().count());
+        assertEquals(Set.of("craft"), acquisition.scope.vias());
+        assertEquals(Double.valueOf(40), acquisition.scope.maxDistanceBlocks());
     }
 
     @Test

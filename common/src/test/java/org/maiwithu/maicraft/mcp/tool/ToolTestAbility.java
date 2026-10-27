@@ -4,9 +4,12 @@ package org.maiwithu.maicraft.mcp.tool;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
+import org.maiwithu.maicraft.kernel.ability.EstimatesGoal;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.ability.RequiredMod;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
@@ -14,7 +17,9 @@ import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -23,10 +28,13 @@ import java.util.Set;
  * MCP 工具测试用的替身能力：只有规格，决定直接给结果。几种规格覆盖工具要分辨的情形：
  * 带参数和目标对象的、按顺序做几件事的、不列出的、只改记忆的。
  */
-final class ToolTestAbility implements AbilityModule {
+final class ToolTestAbility implements AbilityModule, EstimatesGoal {
     private final AbilitySpec spec;
     private final boolean takesSteps;
     StepDecision decision = new StepDecision.Finish(TaskResult.done("做完了"));
+    /** 估算时依次给的答案，用完了重复最后一个；空着时说这项能力还不估。 */
+    final List<GoalEstimate> estimates = new ArrayList<>();
+    int estimatedTimes;
 
     private ToolTestAbility(AbilitySpec spec, boolean takesSteps) {
         this.spec = spec;
@@ -83,6 +91,12 @@ final class ToolTestAbility implements AbilityModule {
 
     @Override public StepDecision decide(StepContext step) {
         return decision;
+    }
+
+    @Override public GoalEstimate estimate(Goal goal, TickContext tick) {
+        estimatedTimes++;
+        if (estimates.isEmpty()) return GoalEstimate.notEstimated(goal.ability());
+        return estimates.get(Math.min(estimatedTimes, estimates.size()) - 1);
     }
 
     @Override public boolean acceptsSteps() {

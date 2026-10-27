@@ -32,6 +32,9 @@ final class PrepareBedTask extends PhasedTask<PrepareBedTask.Phase> {
     /** 最多备十分钟：拿床这件事有预算，超了带着引擎给的原因结束。 */
     private static final long MAX_TICKS = 20L * 60 * 10;
 
+    /** 备今晚的床要的东西：任何一种床一张。估算床费不费事时用同一个请求，估的和备的是同一件事。 */
+    static final ItemRequest TONIGHTS_BED = new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "备今晚的床");
+
     private final ItemNeeds obtain;
     private final Permissions permissions;
     private final Supplier<Optional<String>> carriedBed;
@@ -46,8 +49,7 @@ final class PrepareBedTask extends PhasedTask<PrepareBedTask.Phase> {
     @Override
     protected Action enter(Phase phase) {
         // 任何一种床都行：合成配方是三块同色羊毛加三块木板，引擎按途径自己挑。
-        return obtain.actionFor(new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "备今晚的床"), permissions,
-                records());
+        return obtain.actionFor(TONIGHTS_BED, permissions, records());
     }
 
     @Override
