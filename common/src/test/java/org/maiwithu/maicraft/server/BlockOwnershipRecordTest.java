@@ -2,6 +2,10 @@
 package org.maiwithu.maicraft.server;
 
 import java.util.Set;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Path;
@@ -97,6 +101,34 @@ class BlockOwnershipRecordTest {
         }
         assertTrue(record.ownerOf(OVERWORLD, oldest).isEmpty());
         assertTrue(record.ownerOf(OVERWORLD, kept).isPresent());
+    }
+
+    @Test
+    void 后台存盘写的是交出去那一刻的快照_写失败标回有改动(@TempDir Path temp) throws IOException {
+        var record = new BlockOwnershipRecord();
+        var alice = UUID.randomUUID();
+        record.recordPlacement(OVERWORLD, new BlockPos(1, 64, 1), alice, 10);
+        var file = new OwnershipFile(temp.resolve("data").resolve("owners.dat"));
+        List<Runnable> queued = new ArrayList<>();
+
+        var written = file.saveIfDirtyLater(record, queued::add);
+        // 主线程拍完快照、写盘线程还没动手时又放了一格：这一格不在这份快照里，记录又算有改动。
+        record.recordPlacement(OVERWORLD, new BlockPos(2, 64, 2), alice, 11);
+        assertTrue(record.dirty(), "快照之后的改动等下一次存盘");
+        queued.forEach(Runnable::run);
+
+        assertTrue(written.isDone());
+        var restored = file.load();
+        assertTrue(restored.ownerOf(OVERWORLD, new BlockPos(1, 64, 1)).isPresent());
+        assertTrue(restored.ownerOf(OVERWORLD, new BlockPos(2, 64, 2)).isEmpty());
+
+        // 写不进去（存档目录的位置被一个文件占着）：把记录标回有改动，下次重新拍一份再写。
+        var other = new BlockOwnershipRecord();
+        other.recordPlacement(OVERWORLD, new BlockPos(3, 64, 3), alice, 12);
+        Files.writeString(temp.resolve("blocked"), "x");
+        var broken = new OwnershipFile(temp.resolve("blocked").resolve("owners.dat"));
+        broken.saveIfDirtyLater(other, Runnable::run).join();
+        assertTrue(other.dirty(), "没写进盘就还算有改动");
     }
 
     @Test

@@ -48,8 +48,8 @@ public final class BlockOwnershipRecord {
      * 区块里的格按位置编号从小到大排好：一个区块有主的格太多、要分几页回答时，下一页接着上一页最后那一格往下读。
      */
     private final Map<String, Map<Long, NavigableSet<Long>>> byChunk = new HashMap<>();
-    /** 有没有还没存盘的改动。 */
-    private boolean dirty;
+    /** 有没有还没存盘的改动：后台写盘线程写失败时会把它标回来，所以两个线程都看得见。 */
+    private volatile boolean dirty;
 
     /** 记录一次放置；同一格被替换时以后来的为准。 */
     public void recordPlacement(String dimension, BlockPos position, UUID playerId, long tick) {
@@ -145,9 +145,14 @@ public final class BlockOwnershipRecord {
         return dirty;
     }
 
-    /** 存盘成功后调用。 */
+    /** 拍好存盘快照后调用：之后再有放置、拆除就又算有改动。 */
     void saved() {
         dirty = false;
+    }
+
+    /** 快照没写进盘：标回有改动，下次存盘重新拍一份再写。 */
+    void markDirty() {
+        dirty = true;
     }
 
     /**

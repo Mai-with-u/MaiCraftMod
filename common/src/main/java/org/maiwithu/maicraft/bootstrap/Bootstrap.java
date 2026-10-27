@@ -132,10 +132,10 @@ import org.maiwithu.maicraft.mcp.skill.SkillLibrary;
 import org.maiwithu.maicraft.mcp.transport.EmbeddedMcpService;
 import org.maiwithu.maicraft.mcp.transport.McpConfig;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
-import org.maiwithu.maicraft.server.BlockOwnershipRecord;
 import org.maiwithu.maicraft.server.CharacterAccounts;
 import org.maiwithu.maicraft.server.OwnershipFile;
 import org.maiwithu.maicraft.server.OwnershipQuery;
+import org.maiwithu.maicraft.server.OwnershipSaver;
 import org.maiwithu.maicraft.server.ServerConfirmations;
 import org.maiwithu.maicraft.server.ServerLinkNetwork;
 import org.maiwithu.maicraft.server.ServerLinkServices;
@@ -167,14 +167,6 @@ public final class Bootstrap {
 
     private Bootstrap() {}
 
-    // 有改动才写；还没登记（第一刻之前）就什么都不做。
-    private static void saveOwnership(MinecraftServer server) {
-        BlockOwnershipRecord record = ServerLinkServices.ownership(server);
-        if (record != null) {
-            OwnershipFile.of(server).saveIfDirty(record);
-        }
-    }
-
     /** 本刻的控制循环上下文：游戏刻号来自所在世界，角色来自控制权边界发出的当刻上下文。 */
     private record ClientTickContext(long gameTick, PlayerContext player) implements TickContext {}
 
@@ -195,18 +187,21 @@ public final class Bootstrap {
         operations.register(OwnershipQuery.OPERATION, OwnershipQuery.VERSION, false, new OwnershipQuery());
         // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
         ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
+        // 方块归属存盘：主线程只拍快照，压缩写盘在后台，存盘时不卡服。
+        OwnershipSaver ownershipSaver = new OwnershipSaver();
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
                 // 首刻从存档读回本服务器的归属记录并登记确认通道；之后每五分钟把改动存一次盘，停服时再存一次。
                 ServerLinkServices.attachIfAbsent(server, () -> OwnershipFile.of(server).load(),
                         () -> new ServerConfirmations(push, network::hasSession));
                 if (server.getTickCount() % OWNERSHIP_SAVE_INTERVAL_TICKS == 0) {
-                    saveOwnership(server);
+                    ownershipSaver.saveLater(server);
                 }
             }
 
             @Override public void stopped(MinecraftServer server) {
-                saveOwnership(server);
+                // 停服前存最后一份，并等后台把排着的快照都写完，不丢最后的改动。
+                ownershipSaver.saveAndWait(server);
                 ServerLinkServices.detach(server);
                 network.stopped(server);
                 LOG.info("{} 服务端已停止", ModIdentity.NAME);
