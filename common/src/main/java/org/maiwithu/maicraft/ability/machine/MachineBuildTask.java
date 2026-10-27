@@ -209,7 +209,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         }
         installing = next;
         Installation installation = absolute(next);
-        if (typeInstalled(installation).isPresent()) {
+        if (services.installedBy(installation).isPresent()) {
             return segmentFinished("");
         }
         // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。
@@ -233,7 +233,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         }
         laying = null;
         Installation installation = absolute(installing);
-        boolean done = typeInstalled(installation).isPresent();
+        boolean done = services.installedBy(installation).isPresent();
         segmentResults.add(new MachineBuildDetails.SegmentResult(installing.kind(),
                 installation.cells().stream().map(BlockPos::toShortString).toList(), done, why));
         if (done) {
@@ -285,7 +285,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (!why.isEmpty()) {
             done = false;
         } else {
-            done = mountedSomewhere(part);
+            done = services.mounted(part);
             if (!done) {
                 why = "动作做完了，部件没有出现在那一面";
             }
@@ -327,7 +327,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         MachineBlueprint.Setting done = configuring;
         configuring = null;
         boolean applied = result.status() == TaskResult.Status.DONE;
-        String readback = readBack(anchor.offset(done.offset()), done.key());
+        String readback = services.readBack(anchor.offset(done.offset()), done.key());
         settingResults.add(new MachineBuildDetails.SettingResult(done.key(),
                 anchor.offset(done.offset()).toShortString(), applied, readback));
         if (applied) {
@@ -550,7 +550,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private Set<BlockPos> installedCells() {
         Set<BlockPos> cells = new LinkedHashSet<>();
         for (MachineBlueprint.Segment segment : input.blueprint().installations()) {
-            if (typeInstalled(absolute(segment)).isPresent()) {
+            if (services.installedBy(absolute(segment)).isPresent()) {
                 segment.offsets().forEach(offset -> cells.add(anchor.offset(offset)));
             }
         }
@@ -633,13 +633,13 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     /** 还有没有没做成的机器条目：已满足判断用。 */
     private boolean nothingPending() {
         for (MachineBlueprint.Segment segment : input.blueprint().installations()) {
-            if (typeInstalled(absolute(segment)).isEmpty()) {
+            if (services.installedBy(absolute(segment)).isEmpty()) {
                 return false;
             }
         }
         for (MachineBlueprint.Part part : input.blueprint().parts()) {
             PartCell cell = absolute(part);
-            if (services.world().stateAt(cell.host()).isEmpty() || !mountedSomewhere(cell)) {
+            if (services.world().stateAt(cell.host()).isEmpty() || !services.mounted(cell)) {
                 return false;
             }
         }
@@ -652,40 +652,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     private boolean settingAlready(BlockPos at, MachineBlueprint.Setting wanted) {
-        return wanted.value().equals(readBack(at, wanted.key()));
-    }
-
-    /** 读回一格机器的一项设置现值；那格没加载、没有机器类型认领或没有这一项都给空串，按"读不到"继续。 */
-    private String readBack(BlockPos at, String key) {
-        BlockState state = services.world().stateAt(at).orElse(null);
-        MachineType type = state == null ? null : services.claiming(state);
-        if (type == null) {
-            return "";
-        }
-        return type.settings(at).stream()
-                .filter(setting -> setting.key().equals(key))
-                .map(setting -> setting.value() == null ? "" : setting.value())
-                .findFirst()
-                .orElse("");
-    }
-
-    /** 这段安装段现在是不是按要求装成了（按最终结构核对）。 */
-    private Optional<MachineType> typeInstalled(Installation installation) {
-        for (MachineType type : services.machineTypes()) {
-            if (type.installed(installation)) {
-                return Optional.of(type);
-            }
-        }
-        return Optional.empty();
-    }
-
-    private boolean mountedSomewhere(PartCell part) {
-        for (MachineType type : services.machineTypes()) {
-            if (type.mounted(part)) {
-                return true;
-            }
-        }
-        return false;
+        return wanted.value().equals(services.readBack(at, wanted.key()));
     }
 
     private Installation absolute(MachineBlueprint.Segment segment) {

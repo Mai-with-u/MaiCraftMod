@@ -13,7 +13,6 @@ import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
-import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.BlueprintCheck;
@@ -90,7 +89,7 @@ final class ArchiveCheck {
         for (MachineBlueprint.Segment segment : archive.blueprint().installations()) {
             Installation absolute = new Installation(segment.kind(),
                     segment.offsets().stream().map(archive.anchor()::offset).toList(), segment.roles());
-            boolean done = services.machineTypes().stream().anyMatch(type -> type.installed(absolute));
+            boolean done = services.installedBy(absolute).isPresent();
             out.add(new EntryCheck(segment.kind(), absolute.cells().getFirst().toShortString() + " → "
                     + absolute.cells().getLast().toShortString(), done));
         }
@@ -101,7 +100,7 @@ final class ArchiveCheck {
         List<EntryCheck> out = new ArrayList<>();
         for (MachineBlueprint.Part part : archive.blueprint().parts()) {
             PartCell absolute = new PartCell(archive.anchor().offset(part.offset()), part.side(), part.itemId());
-            boolean done = services.machineTypes().stream().anyMatch((MachineType type) -> type.mounted(absolute));
+            boolean done = services.mounted(absolute);
             out.add(new EntryCheck(part.itemId(), absolute.host().toShortString() + " 的" + part.side().getName()
                     + "面", done));
         }

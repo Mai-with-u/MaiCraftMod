@@ -4,14 +4,18 @@ package org.maiwithu.maicraft.ability.machine;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
@@ -78,6 +82,40 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
             }
         }
         return null;
+    }
+
+    /** 这段安装段现在是不是按要求装成了（按最终结构核对）：认它装好了的那一家；都不认为空。施工与整机比对共用。 */
+    Optional<MachineType> installedBy(Installation installation) {
+        for (MachineType type : machineTypes) {
+            if (type.installed(installation)) {
+                return Optional.of(type);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** 这个部件现在装在宿主那一面上了没有：有一家机器类型认就算。施工与整机比对共用。 */
+    boolean mounted(PartCell part) {
+        for (MachineType type : machineTypes) {
+            if (type.mounted(part)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 读回一格机器的一项设置现值；那格没加载、没有机器类型认领或没有这一项都给空串，按"读不到"继续。 */
+    String readBack(BlockPos at, String key) {
+        BlockState state = world.stateAt(at).orElse(null);
+        MachineType type = state == null ? null : claiming(state);
+        if (type == null) {
+            return "";
+        }
+        return type.settings(at).stream()
+                .filter(setting -> setting.key().equals(key))
+                .map(setting -> setting.value() == null ? "" : setting.value())
+                .findFirst()
+                .orElse("");
     }
 
     /** 认不出这格是什么机器时的问题：写明方块 ID 与"缺哪个联动"的说法。 */
