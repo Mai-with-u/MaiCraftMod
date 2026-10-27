@@ -32,6 +32,8 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
@@ -73,6 +75,9 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private List<String> lastLandings = List.of();
     private List<String> lastTrapEscapes = List.of();
     private List<String> lastBroken = List.of();
+    private List<OthersBlockBroken> lastOthersBroken = List.of();
+    /** 被困挖了别人的方块时当场报给宿主的出口；没接上时就地丢弃。 */
+    private TaskEventSink events = TaskEventSink.NONE;
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
     /** 走路前要收起来的东西（联动登记，误开的喷气背包）；进世界、联动加载后接上，之前没有。 */
@@ -103,6 +108,15 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 接上联动登记的走路前要收起来的东西。 */
     public void stowBeforeWalking(Supplier<List<StowBeforeWalking>> stows) {
         this.stows = stows;
+    }
+
+    /** 接上任务事件的出口：被别人的方块封死、挖开出来时当场报一条。 */
+    public void reportTo(TaskEventSink events) {
+        this.events = events == null ? TaskEventSink.NONE : events;
+    }
+
+    TaskEventSink events() {
+        return events;
     }
 
     /** 接上联动登记的能直接飞上高处的装备。 */
@@ -259,8 +273,9 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         // 垫块清单跟着运行走：运行结算后结算方读的是上一段路的清单。
         lastPlacements = List.copyOf(run.placements());
         lastLandings = run.landings();
-        lastTrapEscapes = run.trapEscapes();
+        lastTrapEscapes = run.escape().notes();
         lastBroken = run.broken();
+        lastOthersBroken = run.escape().othersBroken();
         active = null;
     }
 
@@ -285,16 +300,28 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
         return current != null ? current.broken() : lastBroken;
     }
 
+    /** 这段走到（或刚结束的一段）里被困时挖开的别人的方块：在哪、什么方块、谁放的。 */
+    @Override
+    public List<OthersBlockBroken> othersBlocksBrokenDuringCurrentWalk() {
+        BaritoneWalkRun current = active;
+        return current != null ? current.escape().othersBroken() : lastOthersBroken;
+    }
+
     /** 这段走到（或刚结束的一段）里每次卡坑脱困的经过。 */
     @Override
     public List<String> trapEscapesDuringCurrentWalk() {
         BaritoneWalkRun current = active;
-        return current != null ? current.trapEscapes() : lastTrapEscapes;
+        return current != null ? current.escape().notes() : lastTrapEscapes;
     }
 
-    /** 走到中途地形许可变了（卡坑脱困升级、出坑降回）：按它此刻生效的许可重写引擎开关。 */
+    /**
+     * 走到中途地形许可变了（卡坑脱困升级、出坑降回、挖别人的方块到了上限）：按它此刻生效的许可重写引擎开关，
+     * 保护要求也一起重装，放没放开别人的普通方块跟着变。
+     */
     void applyTerrain(BaritoneWalkRun run) {
-        if (active == run) configureTerrain(BaritoneAPI.getSettings(), run.permit());
+        if (active != run) return;
+        configureTerrain(BaritoneAPI.getSettings(), run.permit());
+        NavigationProtection.install(run.sacredCells(), run.noEntryCells(), Integer.MIN_VALUE, run.escape().throughOthers());
     }
 
     /** 寻路引擎问：此刻在走的这一趟是不是正在落地救援（空中放东西、等确认、收回）。 */

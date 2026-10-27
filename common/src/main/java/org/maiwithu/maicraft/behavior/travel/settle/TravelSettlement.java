@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.settle;
 
+import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
@@ -16,14 +17,17 @@ import java.util.List;
  * @param landings     这次每次落地救援的经过（放了什么、收没收回、掉没掉血）；没有为空
  * @param trapEscapes  这次每次卡坑自动脱困的经过（没等许可垫方块或挖天然方块出坑，垫了几块、挖开几格）；没有为空
  * @param crossedWater 这段行程有没有泅渡
+ * @param othersBlocksBroken 被别人的方块封死在小坑里时挖开的别人的方块（在哪、什么方块、谁放的）；没挖过为 null，结果里不出现
  */
 public record TravelSettlement(WorldPosition arrivedAt, RemainingDistance remaining,
-        List<String> placedBlocks, List<String> landings, List<String> trapEscapes, boolean crossedWater)
+        List<String> placedBlocks, List<String> landings, List<String> trapEscapes, boolean crossedWater,
+        List<OthersBlockBroken> othersBlocksBroken)
         implements ResultDetails {
 
     public TravelSettlement {
         placedBlocks = List.copyOf(placedBlocks);
         landings = List.copyOf(landings);
         trapEscapes = List.copyOf(trapEscapes);
+        othersBlocksBroken = othersBlocksBroken == null || othersBlocksBroken.isEmpty() ? null : List.copyOf(othersBlocksBroken);
     }
 }

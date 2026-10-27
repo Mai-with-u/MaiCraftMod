@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.settle;
 
+import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
@@ -73,6 +74,8 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
     private final List<String> placed = new ArrayList<>();
     private final List<String> landings = new ArrayList<>();
     private final List<String> trapEscapes = new ArrayList<>();
+    /** 被困时挖开的别人的方块：在哪、什么方块、谁放的。 */
+    private final List<OthersBlockBroken> othersBroken = new ArrayList<>();
     private WalkRun recordedFor;
     private int recordedPlacements;
     private int recordedBreaks;
@@ -210,7 +213,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         BlockPos feet = lastFeet;
         WorldPosition spot = world.currentSpot();
         WorldPosition at = new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), spot == null ? null : spot.dimension());
-        settlement = new TravelSettlement(at, null, placed, landings, trapEscapes, crossedWater);
+        settlement = new TravelSettlement(at, null, placed, landings, trapEscapes, crossedWater, othersBroken);
         return Next.done(TaskResult.done("回露天：站在露天的地上了，实测位置 " + shortSpot(feet)
                 + (climbed ? "，挖楼梯上来的" : "")));
     }
@@ -268,7 +271,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         recordedPlacements = laid.size();
         List<String> broken = placedBlocks.brokenDuringCurrentWalk();
         for (int i = recordedBreaks; i < broken.size(); i++) {
-            recordChange(new Change(Change.Kind.BLOCK_BROKEN, broken.get(i), 1, "开路挖掉的"));
+            recordChange(new Change(Change.Kind.BLOCK_BROKEN, broken.get(i), 1, placedBlocks.breakNote(broken.get(i))));
         }
         recordedBreaks = broken.size();
     }
@@ -279,6 +282,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         placedBlocks.placedDuringCurrentWalk().forEach(cell -> placed.add(cell.toShortString()));
         landings.addAll(placedBlocks.landingsDuringCurrentWalk());
         trapEscapes.addAll(placedBlocks.trapEscapesDuringCurrentWalk());
+        othersBroken.addAll(placedBlocks.othersBlocksBrokenDuringCurrentWalk());
     }
 
     // 背包每刻比一次：挖楼梯挖出来的石头、路上捡的进变化，用掉的（垫路、吃喝）也进。
@@ -298,7 +302,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
     @Override
     protected ResultDetails details() {
         if (settlement == null && lastFeet != null) {
-            settlement = new TravelSettlement(null, null, placed, landings, trapEscapes, crossedWater);
+            settlement = new TravelSettlement(null, null, placed, landings, trapEscapes, crossedWater, othersBroken);
         }
         return settlement == null ? ResultDetails.NONE : settlement;
     }

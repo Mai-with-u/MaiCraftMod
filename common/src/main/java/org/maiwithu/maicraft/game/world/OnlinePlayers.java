@@ -27,6 +27,16 @@ public final class OnlinePlayers {
     }
 
     /**
+     * 这个编号的玩家此刻在玩家列表里叫什么：被别人的方块封住、挖开后写明是谁放的时用。
+     * 不在线或还没同步时为空，由调用方改写编号，不猜名字。
+     */
+    public static Optional<String> nameById(PlayerContext context, UUID id) {
+        ClientPacketListener connection = context.connection();
+        PlayerInfo info = connection == null ? null : connection.getPlayerInfo(id);
+        return info == null ? Optional.empty() : Optional.of(info.getProfile().getName());
+    }
+
+    /**
      * 这个编号的玩家此刻在不在玩家列表里：看不见他不等于他下线了，走出能看见的范围时他照样在列表里。
      * 还没连上服务器时答不在。
      */

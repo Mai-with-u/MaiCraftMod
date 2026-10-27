@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -50,8 +52,10 @@ final class EngineClicks {
     private int useCooldown;
     /** 最近一次右键确认后垫上的那一格；取走后清空。 */
     private BlockPos placed;
-    /** 最近挖掉的那一格与挖之前是什么："x, y, z 的 方块ID"；取走后清空。 */
-    private String broken;
+    /** 最近挖掉的那一格；取走后清空。 */
+    private BlockPos broken;
+    /** 这一趟挖掉的方块，按先后："x, y, z 的 方块ID"。 */
+    private final List<String> brokenLog = new ArrayList<>();
     /** 正在挖的那一格挖之前是什么方块。 */
     private String diggingType;
 
@@ -80,7 +84,7 @@ final class EngineClicks {
         if (digging != null && context.level().getBlockState(digging).isAir()) {
             return switch (digger.settleGone(context, true)) {
                 case BROKE_TARGET, BROKE_OCCLUDER -> {
-                    broken = digging.toShortString() + " 的 " + (diggingType == null ? "方块" : diggingType);
+                    noteBroken(digging, diggingType == null ? "方块" : diggingType);
                     yield Doing.BROKE_A_BLOCK;
                 }
                 case PROGRESSING -> Doing.WORKING;
@@ -107,11 +111,27 @@ final class EngineClicks {
         return Doing.NOTHING;
     }
 
-    /** 取走最近挖掉的那一格（"x, y, z 的 方块ID"）；没挖过给空。 */
-    Optional<String> takeBroken() {
-        Optional<String> result = Optional.ofNullable(broken);
+    /** 取走最近挖掉的那一格；没挖过给空。 */
+    Optional<BlockPos> takeBroken() {
+        Optional<BlockPos> result = Optional.ofNullable(broken);
         broken = null;
         return result;
+    }
+
+    /** 这一趟挖掉的方块，按先后："x, y, z 的 方块ID"。 */
+    List<String> brokenSoFar() {
+        return List.copyOf(brokenLog);
+    }
+
+    /** 正在挖的那一格；没在挖为 null。被困挖别人的方块时，趁方块还在先问好是谁放的。 */
+    BlockPos digging() {
+        return digger == null ? null : digger.current();
+    }
+
+    // 挖开了一格：记下是哪一格、挖之前是什么，进这一趟的账。
+    private void noteBroken(BlockPos at, String before) {
+        broken = at.immutable();
+        brokenLog.add(at.toShortString() + " 的 " + before);
     }
 
     /** 取走最近一次右键垫上的那一格；没垫过给空。 */
@@ -151,7 +171,7 @@ final class EngineClicks {
                 .toString();
         return switch (digger.digStep(context, hit)) {
             case BROKE_TARGET, BROKE_OCCLUDER -> {
-                broken = hit.getBlockPos().toShortString() + " 的 " + before;
+                noteBroken(hit.getBlockPos(), before);
                 yield Doing.BROKE_A_BLOCK;
             }
             case PROGRESSING -> Doing.WORKING;

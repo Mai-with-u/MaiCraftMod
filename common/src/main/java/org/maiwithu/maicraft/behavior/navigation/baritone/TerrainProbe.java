@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
@@ -55,9 +57,16 @@ final class TerrainProbe {
      *
      * @param breaks 要挖的格子，按方块分组
      * @param places 要垫方块的格子
+     * @param others 要挖的格里有多少是别人放的普通方块，按放的人（玩家编号）分开数；
+     *               只在 change_blocks=none 又困在坑里、按"假如放开别人的普通方块"复算时才有
      */
     record Verdict(PathCalculationResult.Type type, Map<String, List<BlockPos>> breaks, Set<BlockPos> places,
-                   Set<String> outsideWhitelist) {
+                   Set<String> outsideWhitelist, Map<String, Integer> others) {
+        Verdict(PathCalculationResult.Type type, Map<String, List<BlockPos>> breaks, Set<BlockPos> places,
+                Set<String> outsideWhitelist) {
+            this(type, breaks, places, outsideWhitelist, Map.of());
+        }
+
         boolean reachesGoal() {
             return type == PathCalculationResult.Type.SUCCESS_TO_GOAL;
         }
@@ -91,13 +100,15 @@ final class TerrainProbe {
     /**
      * 引擎刚说没有路、或复算还在等的这一刻怎么办。许可本来就能挖的不复算；
      * 复算期间角色被挪了位置（传送、被推）就作废，从新位置重新算路。
+     *
+     * @param trapped 此刻是不是困在封死的坑里：change_blocks=none 又困住时，按"假如放开别人放的普通方块"复算
      */
-    Step step(IBaritone engine, BlockPos feet, long tick) {
+    Step step(IBaritone engine, BlockPos feet, long tick, BooleanSupplier trapped) {
         boolean mayDig = permit.changes() == Permissions.BlockChanges.NATURAL
                 || permit.changes() == Permissions.BlockChanges.ANY;
         if (mayDig) return Step.NOT_NEEDED;
         if (pending == null) {
-            start(engine, feet, tick);
+            start(engine, feet, tick, trapped);
             return Step.WAITING;
         }
         // 复算期间被挪了位置：旧起点的结论不算数，从新位置重新算路；在水里一直漂的也只重来有限几次，之后照旧等结论。
@@ -136,14 +147,20 @@ final class TerrainProbe {
      * 有路可走时建议放宽到哪一档许可。没复算过的问题原样返回。
      *
      * @param carriesScaffold 手边有没有能垫的料
+     * @param names           玩家编号换成名字：说明里写四周是谁放的方块
      */
-    Problem explain(Problem problem, boolean carriesScaffold) {
-        return explain(problem, verdict, unanswered, permit.changes(), carriesScaffold, restarts);
+    Problem explain(Problem problem, boolean carriesScaffold, Function<String, String> names) {
+        return explain(problem, verdict, unanswered, permit.changes(), carriesScaffold, restarts, names);
     }
 
-    /** 同上，结论与许可都摊开传进来：离线测试直接喂一份结论。 */
+    /** 同上，结论与许可都摊开传进来：离线测试直接喂一份结论；玩家编号原样写。 */
     static Problem explain(Problem problem, Verdict verdict, String unanswered, Permissions.BlockChanges changes,
                            boolean carriesScaffold, int restarts) {
+        return explain(problem, verdict, unanswered, changes, carriesScaffold, restarts, Function.identity());
+    }
+
+    static Problem explain(Problem problem, Verdict verdict, String unanswered, Permissions.BlockChanges changes,
+                           boolean carriesScaffold, int restarts, Function<String, String> names) {
         if (verdict == null && unanswered == null) return problem;
         if (unanswered != null) {
             return Problem.of(problem.kind(), problem.message() + "；允许挖垫的只读复算没给出结论：" + unanswered,
@@ -158,18 +175,27 @@ final class TerrainProbe {
                     + restarts + " 次仍没走起来", problem.suggestion());
         }
         String message = problem.message() + "；只读复算：允许挖开、垫方块就有到目标的完整路线，" + bill(verdict)
+                + othersText(verdict, names)
                 + (changes == Permissions.BlockChanges.NONE ? "；这次任务的 change_blocks=none，没有动土" : "")
                 + "；这次什么都没动";
-        return Problem.of(problem.kind(), message, suggestion(verdict, changes, carriesScaffold));
+        String suggestion = verdict.others().isEmpty() ? suggestion(verdict, changes, carriesScaffold)
+                : "被别人放的方块封在坑里：把 change_blocks 放到 temporary 以上，角色就会挖开别人放的普通方块出来"
+                        + "（功能方块不碰，结果里写明挖了谁的）；不想动别人的方块就喊人帮忙或回城";
+        return Problem.of(problem.kind(), message, suggestion);
     }
 
     // 后台按冻结的保护格与身体禁入格算一次允许动土的 A*；算出的路线只拿来数要挖、要垫的格子。
-    private void start(IBaritone engine, BlockPos feet, long tick) {
+    // change_blocks=none 又困在封死的坑里：按"假如放开别人放的普通方块"算，说明里好写清四周是谁的方块、要挖哪几格。
+    private void start(IBaritone engine, BlockPos feet, long tick, BooleanSupplier trapped) {
         verdict = null;
         unanswered = null;
         origin = feet.immutable();
         startedTick = tick;
-        CalculationContext context = CalculationContext.forTerrainProbe(engine, NavigationProtection.snapshot());
+        NavigationProtection.Snapshot frozen = NavigationProtection.snapshot();
+        if (permit.changes() == Permissions.BlockChanges.NONE && trapped.getAsBoolean()) {
+            frozen = frozen.withThroughOthers(true);
+        }
+        CalculationContext context = CalculationContext.forTerrainProbe(engine, frozen);
         Favoring favoring = new Favoring(engine.getPlayerContext(), null, context);
         BetterBlockPos start = new BetterBlockPos(origin);
         AbstractNodeCostSearch probe = new AStarPathFinder(start, start.getX(), start.getY(), start.getZ(),
@@ -185,6 +211,7 @@ final class TerrainProbe {
         Map<String, List<BlockPos>> breaks = new LinkedHashMap<>();
         Set<BlockPos> places = new LinkedHashSet<>();
         Set<String> outside = new LinkedHashSet<>();
+        Map<String, Integer> others = new LinkedHashMap<>();
         // 算路结束时 Baritone 已经把路线摊成逐步动作（postProcess）并按加载区截短；再摊一次会抛异常，
         // 只读复算就从来没出过结论（实机日志"Path must not be verified twice"）。直接用算好的路线。
         IPath path = calculation.getPath().orElse(null);
@@ -197,12 +224,14 @@ final class TerrainProbe {
                     List<BlockPos> cells = breaks.computeIfAbsent(block, k -> new ArrayList<>());
                     if (!cells.contains(cell)) cells.add(cell.immutable());
                     if (!ClearanceWhitelist.allows(state)) outside.add(block);
+                    NavigationProtection.escapeOwner(context.maicraftPolicy, cell.getX(), cell.getY(), cell.getZ(), state)
+                            .ifPresent(owner -> others.merge(owner, 1, Integer::sum));
                 }
                 for (BlockPos cell : movement.toPlace(context.bsi)) places.add(cell.immutable());
                 PathPlannerPool.madeProgress("terrain_probe_movement");
             }
         }
-        return new Verdict(calculation.getType(), breaks, places, outside);
+        return new Verdict(calculation.getType(), breaks, places, outside, others);
     }
 
     private Verdict collect() {
@@ -237,6 +266,14 @@ final class TerrainProbe {
             parts.add("要垫 " + verdict.places().size() + " 格：" + cellsText(verdict.places()));
         }
         return String.join("，", parts);
+    }
+
+    // 要挖的格里有别人放的方块：按放的人分开数，写进说明。
+    private static String othersText(Verdict verdict, Function<String, String> names) {
+        if (verdict.others().isEmpty()) return "";
+        List<String> parts = new ArrayList<>();
+        verdict.others().forEach((owner, count) -> parts.add(names.apply(owner) + " 放的 " + count + " 格"));
+        return "；四周是别人放的方块，要挖的格里有" + String.join("、", parts);
     }
 
     // 有路可走时放宽到哪一档：要挖的放到 natural（有不在可挖名单的方块得 any），只要垫的放到 temporary；没料要先带料。

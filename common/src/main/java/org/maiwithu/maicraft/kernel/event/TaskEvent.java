@@ -95,7 +95,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 计时到点：LLM 自己设下的计时到了（不占身体，角色这期间照常干别的）；
          * 计时编号、设时写的备注、设了多少秒、到点时的游戏时间在消息里。
          */
-        TIMER_DUE
+        TIMER_DUE,
+        /**
+         * 被别人放的方块封死在小坑里，按卡坑脱困挖开了别人放的普通方块：那次脱困一收场（出了坑或走不通）当场发一条；
+         * 在哪被封住、挖了谁的几格、出没出来在消息里，逐格的明细在出行结果的 others_blocks_broken。
+         */
+        OTHERS_BLOCKS_BROKEN
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

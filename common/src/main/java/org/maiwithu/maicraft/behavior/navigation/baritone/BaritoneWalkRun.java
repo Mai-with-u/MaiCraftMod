@@ -129,7 +129,7 @@ final class BaritoneWalkRun implements WalkRun {
         this.engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         this.progress = new WalkRunProgress(goal);
         this.probe = new TerrainProbe(engineGoal, permit);
-        this.escape = new TrapEscape(permit);
+        this.escape = new TrapEscape(permit, owner.events());
         this.gear = new WalkGear(owner);
         this.staging = new HotbarStaging(owner, hands, new HotbarStaging.Run() {
             @Override public boolean done() { return progress.done(); }
@@ -147,9 +147,9 @@ final class BaritoneWalkRun implements WalkRun {
         return escape.effective();
     }
 
-    /** 这段路上每次卡坑脱困的经过。 */
-    List<String> trapEscapes() {
-        return escape.notes();
+    /** 这段路的卡坑脱困：每次的经过、挖开的别人的方块、此刻放没放开别人的普通方块。 */
+    TrapEscape escape() {
+        return escape;
     }
 
     LongSet sacredCells() {
@@ -170,9 +170,6 @@ final class BaritoneWalkRun implements WalkRun {
      * 记下这段路上自己垫的一格：只有右键得到游戏确认、那一格确实长出了方块才记。
      * 垫了什么如实进结算结果，收不收回由 LLM 决定。
      */
-    /** 这段路挖掉的方块，按先后。 */
-    private final List<String> broken = new ArrayList<>();
-
     private void recordPlaced(BlockPos position) {
         if (escape.effective().changes() == Permissions.BlockChanges.NONE) return;
         escape.notePlaced();
@@ -183,7 +180,7 @@ final class BaritoneWalkRun implements WalkRun {
 
     /** 这段路为开路挖掉的方块："x, y, z 的 方块ID"。 */
     List<String> broken() {
-        return List.copyOf(broken);
+        return clicks.brokenSoFar();
     }
 
     /** 这段路垫上的方块格子。 */
@@ -291,7 +288,7 @@ final class BaritoneWalkRun implements WalkRun {
         probe.cancel();
         probe = new TerrainProbe(engineGoal, permit);
         if (activated && owner.owns(this) && !routeDropped && !progress.stopRequested()) {
-            NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE);
+            NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers());
             owner.engine().getCustomGoalProcess().updateGoalAndPath(engineGoal);
         }
         return true;
@@ -390,7 +387,8 @@ final class BaritoneWalkRun implements WalkRun {
         // 走不通：把起点几格、垫料、许可与附近岩浆补进问题，LLM 据此调整；程序出错不补现场，免得把程序问题说成地形问题。
         var spare = owner.spareScaffold(player);
         progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
-                : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty())),
+                : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty(),
+                        owner -> TrapEscape.nameOf(owner, context))),
                         context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
@@ -451,7 +449,7 @@ final class BaritoneWalkRun implements WalkRun {
             case OBSTACLE -> {
                 LOG.warn("[maicraft-path] 在 {} 前卡住了 {} 次，列为障碍重算绕行；{}",
                         front.toShortString(), NavigationStallMemory.ATTEMPTS, facts);
-                NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE);
+                NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers());
                 replanWhenSafe = true;
             }
             case EXHAUSTED -> progress.fail(Problem.of(Problem.Kind.STUCK,
@@ -474,11 +472,15 @@ final class BaritoneWalkRun implements WalkRun {
         boolean right = input.isInputForcedDown(Input.CLICK_RIGHT);
         // 镜头还没转到引擎要的瞄点就不下手：准星路过的别的格不能挖、不能点。
         boolean aimed = owner.precisionAimSettled(context.localPlayer(), context.clientTick());
+        // 被困挖别人的方块：挖之前趁方块还在问好是谁放的；挖开一格记进脱困的账，挖到一趟的上限就收回放开、重新算路。
+        BlockPos digging = context.level() == null ? null : clicks.digging();
+        escape.watchDigging(digging, digging == null ? null : context.level().getBlockState(digging), context);
         EngineClicks.Doing doing = clicks.tick(context, left, right, aimed);
         clicks.takePlaced().ifPresent(this::recordPlaced);
-        clicks.takeBroken().ifPresent(broken::add);
-        // 挖开了一格：卡坑脱困中记一笔挖开了几格。
-        if (doing == EngineClicks.Doing.BROKE_A_BLOCK) escape.noteDug();
+        if (clicks.takeBroken().map(escape::noteBroken).orElse(false)) {
+            owner.applyTerrain(this);
+            replanWhenSafe = true;
+        }
         if (doing != EngineClicks.Doing.NOTHING) {
             displacement.confirm(context.clientTick());
         }
@@ -502,6 +504,8 @@ final class BaritoneWalkRun implements WalkRun {
     private void finishRun(PlayerContext context, LocalPlayer player, IBaritone engine, PathingBehavior pathing) {
         clicks.stop(context);
         context.input().releaseAll(player);
+        // 收场时还在脱困（挖出坑就走到了、没来得及看一眼）：把这次脱困的经过与挖了谁的方块结掉再交账。
+        escape.finish(progress.report().state() == WalkReport.State.ARRIVED);
         owner.release(this);
         finishEngine(engine, pathing);
     }
@@ -653,7 +657,7 @@ final class BaritoneWalkRun implements WalkRun {
         // 卡在坑里：不等复算也不等 LLM 放宽许可，按"搭 → 挖"升一级重新算路；已经升到头还是没路就按走不通收场。
         if (!probe.waiting() && raiseToEscape(engine, feet, tick)) return false;
         if (escape.active()) return true;
-        return switch (probe.step(engine, feet, tick)) {
+        return switch (probe.step(engine, feet, tick, () -> trappedHere(feet))) {
             case NOT_NEEDED, CONCLUDED -> true;
             case WAITING -> false;
             case RESTART -> {
@@ -664,20 +668,24 @@ final class BaritoneWalkRun implements WalkRun {
         };
     }
 
-    // 升一级脱困：只在任务许可低于挖天然方块、人又困在封死的坑里时；新开关写进引擎、从原地重新算路。
+    // 升一级脱困：人困在封死的坑里时，只垫升到挖天然方块，能挖还出不去就放开别人放的普通方块；
+    // 新开关与保护要求写进引擎、从原地重新算路。
     private boolean raiseToEscape(IBaritone engine, BlockPos feet, long tick) {
-        ClientLevel level = lastContext == null ? null : lastContext.level();
-        LocalPlayer self = lastContext == null ? null : lastContext.localPlayer();
-        if (level == null || self == null
-                || !escape.raise(() -> TrapCheck.trapped(new LiveTrapCells(level), feet, WalkDropPolicy.maxDrop(self)), tick)) {
-            return false;
-        }
-        LOG.info("卡在坑里（{}），地形许可临时升到 {} 脱困", feet.toShortString(), escape.effective().changes());
+        if (!escape.raise(feet, () -> trappedHere(feet), tick)) return false;
+        LOG.info("卡在坑里（{}），地形许可临时升到 {}{} 脱困", feet.toShortString(), escape.effective().changes(),
+                escape.throughOthers() ? "，放开别人放的普通方块" : "");
         owner.applyTerrain(this);
         engineFailedPath = false;
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
         replannedFrom(tick);
         return true;
+    }
+
+    // 此刻脚下这一格是不是困在封死的坑里；读不到现场按没困住算。
+    private boolean trappedHere(BlockPos feet) {
+        ClientLevel level = lastContext == null ? null : lastContext.level();
+        LocalPlayer self = lastContext == null ? null : lastContext.localPlayer();
+        return level != null && self != null && TrapCheck.trapped(new LiveTrapCells(level), feet, WalkDropPolicy.maxDrop(self));
     }
 
     // 脱困中隔几刻看一眼：站在地上、从这里只走已经出得去了，就降回任务原来的许可，站稳后按原许可重新算路。

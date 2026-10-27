@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.planning;
 
+import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -96,6 +97,7 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     private final List<String> placedBlocks = new ArrayList<>();
     private final List<String> landings = new ArrayList<>();
     private final List<String> trapEscapes = new ArrayList<>();
+    private final List<OthersBlockBroken> othersBroken = new ArrayList<>();
     private boolean crossedWater;
 
     /** 第几轮问报价；方式留着旧回答口在别的轮里答的不算。 */
@@ -330,12 +332,13 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         return lastFeet;
     }
 
-    // 走路这一段的结算并进整趟：垫的方块、落地救援、脱困、泅渡合在一起，到了记实测位置。
+    // 走路这一段的结算并进整趟：垫的方块、落地救援、脱困（含被困时挖开的别人的方块）、泅渡合在一起，到了记实测位置。
     private void absorb(ResultDetails details) {
         if (!(details instanceof TravelSettlement settlement)) return;
         placedBlocks.addAll(settlement.placedBlocks());
         landings.addAll(settlement.landings());
         trapEscapes.addAll(settlement.trapEscapes());
+        if (settlement.othersBlocksBroken() != null) othersBroken.addAll(settlement.othersBlocksBroken());
         crossedWater |= settlement.crossedWater();
         if (settlement.arrivedAt() != null) arrivedAt = settlement.arrivedAt();
     }
@@ -354,7 +357,7 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         BlockPos aim = lastFeet == null ? null : aim(lastFeet);
         return new JourneyDetails(arrivedAt,
                 arrivedAt == null && aim != null ? RemainingDistance.measure(lastFeet, aim) : null,
-                placedBlocks, landings, trapEscapes, crossedWater, legs);
+                placedBlocks, landings, trapEscapes, crossedWater, legs, othersBroken);
     }
 
     @Override protected List<String> remaining() {

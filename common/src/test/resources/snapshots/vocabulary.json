@@ -173,7 +173,8 @@
     "dimension_changed",
     "follow_status",
     "sky_changed",
-    "timer_due"
+    "timer_due",
+    "others_blocks_broken"
   ],
   "chat_kinds": [
     "player",

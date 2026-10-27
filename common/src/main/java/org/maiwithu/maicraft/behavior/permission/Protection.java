@@ -145,6 +145,32 @@ public final class Protection {
         return !guesses.likelyPlayerMade(position, blockType);
     }
 
+    /**
+     * 角色被封死在小坑里、按任务许可已经挖不出去时，这一格能不能挖开出去：是别人放的普通方块，就给放它的人的编号；
+     * 不能挖给空。
+     *
+     * <p>只认服务端记录写着是别人放的（自家人也算别人，他们只放行取用存储）；功能方块不挖；
+     * 记住的区域里、记住的地点（地标，含"家"）周围 {@link #LANDMARK_RADIUS} 格内的不挖。
+     * 归属还没问到、没有记录的都不放开：拿不准就不动，看着天然的没记录方块本来在"挖天然方块"那一级就能挖。
+     *
+     * @param functional 这一格是不是功能方块（有方块实体、门、会发红石信号、铁轨），调用方按读到的方块认
+     */
+    public Optional<String> breakableWhenTrapped(WorldPosition position, boolean functional) {
+        if (functional) return Optional.empty();
+        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return Optional.empty();
+        Optional<ReadsBlockOwnership.PlacedBy> placedBy =
+                ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
+        if (placedBy.isEmpty() || placedBy.get().playerId().equals(selfPlayerId)) return Optional.empty();
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) return Optional.empty();
+        }
+        // 记住的地点周围不碰：家门口被围也不挖，所有者 2026-10-27 定的。
+        for (WorldPosition spot : places.places().values()) {
+            if (sameDimension(spot, position) && distance(spot, position) <= LANDMARK_RADIUS) return Optional.empty();
+        }
+        return Optional.of(placedBy.get().playerId());
+    }
+
     /** 一只生物受不受保护：有名字、被驯服、拴着绳、围栏里，占上一条就是别人的，不碰。 */
     public boolean creatureProtected(ReadsCreatureSituation.CreatureSituation situation) {
         return situation.bondedToSomeone();

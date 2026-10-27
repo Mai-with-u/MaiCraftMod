@@ -376,6 +376,10 @@ public class CalculationContext {
     }
 
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
+        // 被封死在小坑里、这一趟放开了别人放的普通方块：能挖，但按很高的倍数算，路线先走空当与天然方块，只挖绕不开的那几格。
+        if (allowBreak && NavigationProtection.escapeOwner(maicraftPolicy, x, y, z, current).isPresent()) {
+            return NavigationProtection.ESCAPE_BREAK_MULTIPLIER;
+        }
         // 名单外障碍不作为可挖路线候选，让搜索直接选择绕行；地形许可和例外名单不能越过这道限制。
         // 原木要长在天然树上、树叶要自然长的才算地形：房子的原木地板、屋顶不挖，从门走。
         if (!ClearanceWhitelist.allowsAt(current, new BlockPos(x, y, z), bsi.access,

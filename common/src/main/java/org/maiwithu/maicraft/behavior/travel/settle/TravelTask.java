@@ -299,7 +299,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         // 开路挖掉的方块也进变化：挖了哪几格要说清，none 许可下根本不该有这一路。
         List<String> dug = placedBlocks.brokenDuringCurrentWalk();
         for (int i = recordedBreaks; i < dug.size(); i++) {
-            recordChange(new Change(Change.Kind.BLOCK_BROKEN, dug.get(i), 1, "开路挖掉的"));
+            recordChange(new Change(Change.Kind.BLOCK_BROKEN, dug.get(i), 1, placedBlocks.breakNote(dug.get(i))));
         }
         recordedBreaks = dug.size();
     }
@@ -370,7 +370,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         // 落地救援的经过原样带上：放了什么、收没收回、掉没掉血，LLM 据此决定要不要回去收拾。
         // 卡坑自动脱困的经过也带上：没等许可动了哪些地形，LLM 知道这次为什么多了垫块、少了土。
         settlement = new TravelSettlement(arrivedAt, arrived ? null : remaining, placed,
-                placedBlocks.landingsDuringCurrentWalk(), placedBlocks.trapEscapesDuringCurrentWalk(), crossedWater);
+                placedBlocks.landingsDuringCurrentWalk(), placedBlocks.trapEscapesDuringCurrentWalk(), crossedWater,
+                placedBlocks.othersBlocksBrokenDuringCurrentWalk());
     }
 
     /** 这次行程的结算；取消、空转这类没走到结算步的收场到这里按"停下、没到"补结一次，

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.permission;
 
+import java.util.Map;
 import java.util.Optional;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -14,4 +15,9 @@ public interface ReadsRememberedPlaces {
 
     /** 查一个按名字记的地点；没记过返回空。 */
     Optional<WorldPosition> place(String name);
+
+    /** 记过的全部地点，名字到位置：被困挖开别人的方块时，每个地点周围的都不碰。没记过的给空表。 */
+    default Map<String, WorldPosition> places() {
+        return Map.of();
+    }
 }

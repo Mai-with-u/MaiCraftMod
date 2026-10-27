@@ -76,4 +76,18 @@ class TerrainProbeTest {
         assertTrue(TerrainProbe.explain(NO_ROUTE, null, "等了 15 秒没算完", BlockChanges.NONE, true, 0)
                 .message().endsWith("没给出结论：等了 15 秒没算完"));
     }
+
+    @Test
+    void noneTrappedByOthersSaysWhoseBlocksAndHowToGetOut() {
+        // change_blocks=none 又被别人的方块封在坑里：说明写清四周是谁放的方块，建议放开许可让角色自己挖出来。
+        Map<String, List<BlockPos>> breaks = new LinkedHashMap<>();
+        breaks.put("minecraft:dirt", List.of(new BlockPos(1, 64, 0), new BlockPos(1, 65, 0)));
+        var verdict = new TerrainProbe.Verdict(PathCalculationResult.Type.SUCCESS_TO_GOAL, breaks, Set.of(), Set.of(),
+                Map.of("11111111-2222-3333-4444-555555555555", 2));
+        Problem explained = TerrainProbe.explain(NO_ROUTE, verdict, null, BlockChanges.NONE, true, 0, owner -> "甲");
+        assertTrue(explained.message().contains("要挖 2 格")
+                && explained.message().contains("四周是别人放的方块，要挖的格里有甲 放的 2 格")
+                && explained.message().contains("change_blocks=none，没有动土"), explained.message());
+        assertTrue(explained.suggestion().contains("挖开别人放的普通方块出来"), explained.suggestion());
+    }
 }

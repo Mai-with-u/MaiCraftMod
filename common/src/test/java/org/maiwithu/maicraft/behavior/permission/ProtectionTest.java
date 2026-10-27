@@ -128,7 +128,63 @@ class ProtectionTest {
     }
 
     private static ReadsRememberedPlaces remembered(Map<String, WorldPosition> places) {
-        return name -> Optional.ofNullable(places.get(name));
+        return new ReadsRememberedPlaces() {
+            @Override public Optional<WorldPosition> place(String name) {
+                return Optional.ofNullable(places.get(name));
+            }
+
+            @Override public Map<String, WorldPosition> places() {
+                return places;
+            }
+        };
+    }
+
+    @Test
+    void 被困时能挖开的_只有记录写着别人放的普通方块() {
+        WorldPosition dirt = new WorldPosition(10, 64, 10, "minecraft:overworld");
+        WorldPosition mine = new WorldPosition(11, 64, 10, "minecraft:overworld");
+        WorldPosition unrecorded = new WorldPosition(12, 64, 10, "minecraft:overworld");
+        var protection = protection(Map.of(dirt, OTHER, mine, SELF), List.of(), Map.of(), GuessesPlayerMade.NOTHING);
+        // 别人放的普通方块：给放它的人，结果里好写明挖了谁的。
+        assertEquals(Optional.of(OTHER), protection.breakableWhenTrapped(dirt, false));
+        // 同一格是功能方块（箱子、门、按钮、铁轨……）：被困也不挖。
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(dirt, true));
+        // 自己放的本来就不受保护，不算"别人的"；没有记录的不在放开之列。
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(mine, false));
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(unrecorded, false));
+    }
+
+    @Test
+    void 被困时也不挖_记住的区域里与记住的地点周围八格内的() {
+        WorldPosition home = new WorldPosition(0, 64, 0, "minecraft:overworld");
+        WorldPosition doorstep = new WorldPosition(5, 64, 5, "minecraft:overworld");
+        WorldPosition field = new WorldPosition(40, 64, 40, "minecraft:overworld");
+        WorldPosition farmCell = new WorldPosition(100, 64, 100, "minecraft:overworld");
+        WorldPosition netherDoorstep = new WorldPosition(5, 64, 5, "minecraft:the_nether");
+        var farm = new RememberedRegion("河东的农场", farmCell, 16);
+        var protection = protection(Map.of(doorstep, OTHER, field, OTHER, farmCell, OTHER, netherDoorstep, OTHER),
+                List.of(farm), Map.of("家", home), GuessesPlayerMade.NOTHING);
+        // 家门口被围也不挖（所有者 2026-10-27 定）；记住的区域里的也不挖。
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(doorstep, false));
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(farmCell, false));
+        // 远离地点与区域的野外：能挖；别的维度里同样坐标不算在家附近。
+        assertEquals(Optional.of(OTHER), protection.breakableWhenTrapped(field, false));
+        assertEquals(Optional.of(OTHER), protection.breakableWhenTrapped(netherDoorstep, false));
+    }
+
+    @Test
+    void 被困时归属还没问到的不放开() {
+        ReadsBlockOwnership unknown = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.of(new PlacedBy(OTHER));
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return false;
+            }
+        };
+        var protection = new Protection(unknown, List::of, remembered(Map.of()), GuessesPlayerMade.NOTHING, SELF);
+        assertEquals(Optional.empty(), protection.breakableWhenTrapped(WALL, false));
     }
 
     @Test

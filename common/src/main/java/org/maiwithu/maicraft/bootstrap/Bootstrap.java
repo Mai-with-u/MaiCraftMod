@@ -598,6 +598,8 @@ public final class Bootstrap {
             walks.flyUpGear(() -> compat.flyUpGears());
             // 能刹住往下跳的装备（穿着有气的喷气背包）也交给寻路：计划内的往下跳用它刹住，不翻背包找水桶。
             walks.fallBrakes(() -> compat.fallBrakes());
+            // 被别人的方块封死、挖开出来时当场报一条任务事件：宿主不等走路结束就知道挖了谁的。
+            walks.reportTo(taskEvents);
             tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
             // 随包的玩法技能按联动登记表筛：需要的模组都真的接上了才发布，没接上的不进目录。

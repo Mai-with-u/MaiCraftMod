@@ -96,6 +96,7 @@ final class PanelWords {
             case FOLLOW_STATUS -> "跟随";
             case SKY_CHANGED -> "天色";
             case TIMER_DUE -> "计时到点";
+            case OTHERS_BLOCKS_BROKEN -> "挖了别人的方块";
         };
     }
 

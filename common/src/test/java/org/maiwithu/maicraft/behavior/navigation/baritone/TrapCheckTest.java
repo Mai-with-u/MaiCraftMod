@@ -115,26 +115,35 @@ class TrapCheckTest {
     }
 
     @Test
-    void escapeClimbsBuildThenDigAndStepsBackDown() {
-        // 给过动土余地（只垫不挖）的困局才升：升到挖天然方块为止。
+    void escapeClimbsBuildThenDigThenOthersAndStepsBackDown() {
+        // 给过动土余地（只垫不挖）的困局才升：先升到挖天然方块，还出不去再放开别人放的普通方块。
         TrapEscape escape = new TrapEscape(TerrainPermit.TEMPORARY);
-        assertTrue(escape.raise(() -> true, 0));
+        assertTrue(escape.raise(null, () -> true, 0));
         assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "只垫升到挖天然方块");
+        assertFalse(escape.throughOthers(), "先只挖天然方块");
         escape.notePlaced();
-        assertFalse(escape.raise(() -> true, 9), "最多到挖天然方块");
+        assertTrue(escape.raise(null, () -> true, 9), "能挖天然方块还出不去：放开别人放的普通方块");
+        assertTrue(escape.throughOthers());
+        assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "许可档位不变，只放开别人的普通方块");
+        assertFalse(escape.raise(null, () -> true, 18), "升到头了");
         Problem stuck = escape.explain(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null));
         assertTrue(stuck.message().contains("还是没出去"), stuck.message());
-        escape.noteDug();
+        escape.noteBroken(new BlockPos(0, 64, 0));
         escape.restore();
         assertEquals(Permissions.BlockChanges.TEMPORARY, escape.effective().changes(), "出坑降回任务的许可");
+        assertFalse(escape.throughOthers(), "出坑收回放开");
         assertTrue(escape.notes().getFirst().contains("垫了 1 块、挖开 1 格"), escape.notes().getFirst());
     }
 
     @Test
-    void enoughPermissionOrOpenGroundNeverRaises() {
+    void naturalPermitOpensOthersOnlyWhenTrapped() {
         assertNull(TrapEscape.next(TerrainPermit.NATURAL));
-        assertFalse(new TrapEscape(TerrainPermit.NATURAL).raise(() -> true, 0), "任务许可本来就能挖");
-        assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(() -> false, 0), "没困住就不放宽许可");
+        // 默认许可本来就能挖天然方块：被困时直接放开别人放的普通方块。
+        TrapEscape trapped = new TrapEscape(TerrainPermit.NATURAL);
+        assertTrue(trapped.raise(null, () -> true, 0), "默认许可被困：放开别人的普通方块");
+        assertTrue(trapped.throughOthers());
+        assertFalse(new TrapEscape(TerrainPermit.NATURAL).raise(null, () -> false, 0), "没困住就不放开");
+        assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(null, () -> false, 0), "没困住就不放宽许可");
     }
 
     @Test
@@ -142,7 +151,7 @@ class TrapCheckTest {
         // change_blocks=none 是"一格都不动"：困在封死的坑里也不挖不垫，
         // 宁可按走不通收场，由调用方看着"哪里必须动"的说明决定放不放开。
         assertNull(TrapEscape.next(TerrainPermit.WALK_ONLY));
-        assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(() -> true, 0), "none 困死也不动土");
+        assertFalse(new TrapEscape(TerrainPermit.WALK_ONLY).raise(null, () -> true, 0), "none 困死也不动土");
         assertEquals(Permissions.BlockChanges.NONE, new TrapEscape(TerrainPermit.WALK_ONLY).effective().changes());
         assertTrue(new TrapEscape(TerrainPermit.WALK_ONLY).notes().isEmpty(), "没升过就没有脱困经过");
     }
