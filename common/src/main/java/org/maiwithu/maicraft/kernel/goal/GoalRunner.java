@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
+import org.maiwithu.maicraft.kernel.interrupt.RoutineNeedsOff;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeedsOff;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -45,7 +46,7 @@ import java.util.function.Supplier;
  * <p>推进的记录 {@link GoalRun} 每次处境变化都存进目标运行存储；重启后从存储读回还没结束的
  * 记录，恢复为暂停，明确恢复后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
  */
-public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFacts {
+public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff, KeepsTempTaskFacts {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunner.class);
 
     private final Goal goal;
@@ -87,21 +88,19 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, KeepsTempTaskFa
     /** 收尾之后要做的那件事。 */
     private enum Ending { PAUSE, CANCEL }
 
-    /**
-     * 目标在跑，且许可关掉了生存需求（survival_needs=off）或手上的能力任务此刻自己要关（寻死从收护具到死）：控制循环据此不插任何生存需求。
-     * sequence 正在跑某一步时按那一步；暂停、等回答的目标不关，被打了照样还手。
-     */
+    // 全关是寻死这类任务自己声明的；许可 survival_needs=off 走 routineNeedsOff 只停起居类。都在目标跑着时才关，sequence 按那一步。
     @Override public boolean survivalNeedsOff() {
         if (run.state() != GoalRunState.RUNNING) return false;
-        if (stepRunner != null) return stepRunner.survivalNeedsOff();
-        return goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF
-                || child != null && !child.finished() && child.running() instanceof SurvivalNeedsOff own && own.survivalNeedsOff();
+        return stepRunner != null ? stepRunner.survivalNeedsOff()
+                : child != null && !child.finished() && child.running() instanceof SurvivalNeedsOff own && own.survivalNeedsOff();
     }
 
-    /**
-     * 生存需求的临时任务在这条目标身上做成的事（顺手插的火把、垫的料）：它自己的结果没有别人再看，
-     * 变化与没能确认的交互记到这里，目标收尾时随最终结果一起交代。
-     */
+    @Override public boolean routineNeedsOff() {
+        return run.state() == GoalRunState.RUNNING && (stepRunner != null ? stepRunner.routineNeedsOff()
+                : goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF);
+    }
+
+    /** 生存需求的临时任务在这条目标身上做成的事（顺手插的火把、垫的料）：它自己的结果没有别人再看，变化与没能确认的交互记到这里，目标收尾时随最终结果一起交代。 */
     @Override
     public void keepTempTaskFacts(TaskResult tempResult) {
         tempTaskFacts.add(tempResult);

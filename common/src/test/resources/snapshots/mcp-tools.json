@@ -182,7 +182,7 @@
                   },
                   "survival_needs": {
                     "type": "string",
-                    "description": "吃饭、躲怪这些生存需求要不要插进来（默认 on）",
+                    "description": "吃饭、睡觉这类起居需求要不要插进来；off 时被攻击、溺水这类眼前危险仍会打断（默认 on）",
                     "enum": [
                       "on",
                       "off"

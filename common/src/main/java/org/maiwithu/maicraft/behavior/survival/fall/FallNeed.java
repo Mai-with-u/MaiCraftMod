@@ -43,6 +43,9 @@ public final class FallNeed implements SurvivalNeed {
         this.walkHandlesFall = walkHandlesFall;
     }
 
+    // 正往致命高度掉是眼前危险：主目标声明 survival_needs=off 也照样护住落地。
+    @Override public boolean reactsToImmediateDanger() { return true; }
+
     @Override public String name() { return "落地防护"; }
 
     @Override

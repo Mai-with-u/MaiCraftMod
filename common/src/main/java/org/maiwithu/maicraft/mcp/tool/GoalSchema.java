@@ -84,7 +84,7 @@ final class GoalSchema {
                 + "any 一切不受保护的", names(Permissions.BlockChanges.values())));
         properties.add("fight", choice("能打谁", names(Permissions.Fight.values())));
         properties.add("kill_animals", choice("能杀哪些动物", names(Permissions.AnimalKilling.values())));
-        properties.add("survival_needs", choice("吃饭、躲怪这些生存需求要不要插进来（默认 on）",
+        properties.add("survival_needs", choice("吃饭、睡觉这类起居需求要不要插进来；off 时被攻击、溺水这类眼前危险仍会打断（默认 on）",
                 names(Permissions.SurvivalNeeds.values())));
         JsonObject rare = new JsonObject();
         rare.addProperty("type", "boolean");

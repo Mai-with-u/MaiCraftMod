@@ -16,7 +16,7 @@ import java.util.Set;
  * @param fight              战斗的主动程度
  * @param useRareItems       能否使用稀有消耗品（末影珍珠、不死图腾、钻石……）
  * @param killAnimals        能否为了具体需要击杀动物
- * @param survivalNeeds      是否处理生存需求；只有寻死这类明确的任务可以关闭
+ * @param survivalNeeds      是否处理起居类生存需求（吃饭、睡觉）；off 时眼前危险的反应（自卫、换气）照常介入
  * @param protectedLandmarks 额外不许碰的地标名
  */
 public record Permissions(
@@ -88,7 +88,7 @@ public record Permissions(
         ANY
     }
 
-    /** 是否处理生存需求（吃饭、睡觉、自救）。 */
+    /** 是否处理起居类的生存需求（吃饭、睡觉、补光）；off 时对眼前危险的反应照常介入。 */
     public enum SurvivalNeeds {
         ON,
         OFF

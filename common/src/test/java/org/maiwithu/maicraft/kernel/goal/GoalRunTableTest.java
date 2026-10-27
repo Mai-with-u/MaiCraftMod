@@ -239,19 +239,20 @@ class GoalRunTableTest {
     }
 
     @Test
-    void goalWhosePermissionsTurnSurvivalNeedsOffSaysSo() {
-        // survival_needs=off 的目标（寻死这类）对控制循环声明关掉生存需求；默认许可不关。
+    void goalWhosePermissionsTurnRoutineNeedsOffSaysSo() {
+        // survival_needs=off 的目标对控制循环声明关掉起居类生存需求，但不声明全关（眼前危险的反应照插）；默认许可两样都不关。
         Permissions off = Permissions.DEFAULT.mergedWith(null, null, null, null,
                 Permissions.SurvivalNeeds.OFF, null);
-        Goal suicide = new Goal(ABILITY, null, null, ParamValues.EMPTY, off, List.of(), Goal.OnFailure.STOP);
+        Goal withOff = new Goal(ABILITY, null, null, ParamValues.EMPTY, off, List.of(), Goal.OnFailure.STOP);
 
-        assertTrue(table.launch(suicide, null).runner().survivalNeedsOff());
-        assertFalse(table.launch(GOAL, null).runner().survivalNeedsOff());
+        assertTrue(table.launch(withOff, null).runner().routineNeedsOff());
+        assertFalse(table.launch(withOff, null).runner().survivalNeedsOff(), "许可 off 只关起居类，不是寻死那种全关");
+        assertFalse(table.launch(GOAL, null).runner().routineNeedsOff());
 
-        // 许可写了 off 的目标暂停后不关：停着等恢复时被打了照样还手。
-        GoalRunner paused = table.launch(suicide, null).runner();
+        // 许可写了 off 的目标暂停后不关：停着等恢复时被打了照样还手，饿了也照常找吃的。
+        GoalRunner paused = table.launch(withOff, null).runner();
         table.pause(paused.run().id());
-        assertFalse(paused.survivalNeedsOff());
+        assertFalse(paused.routineNeedsOff());
     }
 
     @Test

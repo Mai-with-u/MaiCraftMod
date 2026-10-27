@@ -34,6 +34,9 @@ public final class BreathNeed implements SurvivalNeed {
         this.airRoutes = airRoutes;
     }
 
+    // 快淹死是眼前危险：主目标声明 survival_needs=off 也照样换气，不干活干到呛水。
+    @Override public boolean reactsToImmediateDanger() { return true; }
+
     @Override public String name() { return "换气"; }
 
     @Override

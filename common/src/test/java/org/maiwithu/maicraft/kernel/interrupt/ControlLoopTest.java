@@ -500,21 +500,80 @@ class ControlLoopTest {
 
     @Test
     void mainTaskThatTurnedSurvivalNeedsOffIsNeverInterrupted() {
-        // 寻死这类任务把 survival_needs 关掉：快淹死也不插换气，手上的事照常推进。
+        // 寻死这类任务把生存需求关掉：快淹死也不插换气、被围殴也不自卫，手上的事照常推进。
         FakeTask main = new SurvivalOffTask();
         FakeNeed breath = FakeNeed.always("换气", Urgency.NOW);
-        ControlLoop loop = new ControlLoop(List.of(breath));
+        FakeNeed mob = FakeNeed.danger("自卫", Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(breath, mob));
         loop.setMainTask(main);
 
         for (long tick = 0; tick < 5; tick++) {
             loop.tick(new TestContext(tick));
         }
 
-        assertEquals(0, breath.created, "生存需求关掉时不建临时任务");
+        assertEquals(0, breath.created, "生存需求全关时不建临时任务");
+        assertEquals(0, mob.created, "自卫也一并关掉");
         assertTrue(main.ticks > 0, "主任务照常推进");
     }
 
-    /** 许可里关掉了生存需求的主任务替身。 */
+    @Test
+    void goalWithRoutineNeedsOffStillLetsImmediateDangerThrough() {
+        // 主目标的许可写 survival_needs=off：被打了照样自卫，不能干活干到死；起居的饥饿直接不参与。
+        FakeTask main = new RoutineOffTask(Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        FakeNeed mob = FakeNeed.danger("自卫", Urgency.NOW);
+        ControlLoop loop = new ControlLoop(List.of(hunger, mob));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertEquals("自卫", advanced.interrupting().name());
+        assertNull(advanced.deferred(), "起居类的饥饿连被按住都不算");
+        assertEquals(0, hunger.created);
+    }
+
+    @Test
+    void goalWithRoutineNeedsOffSkipsHungerEvenBetweenActions() {
+        // 主目标的许可写 survival_needs=off：两个动作之间的空当也不拿去吃饭睡觉，角色能连着干活。
+        FakeTask main = new RoutineOffTask(Interruptibility.BETWEEN_ACTIONS);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.LATER);
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(hunger, night));
+        loop.setMainTask(main);
+
+        ControlLoop.Decision.Advanced advanced = assertAdvanced(loop.tick(TICK));
+
+        assertSame(main, advanced.task());
+        assertNull(advanced.interrupting());
+        assertNull(advanced.deferred());
+        assertEquals(0, hunger.created);
+        assertEquals(0, night.created);
+    }
+
+    @Test
+    void replacingTheRoutineOffGoalLiftsTheSuppression() {
+        // off 的目标被换成普通目标：起居需求照常插队。
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("饥饿", Urgency.LATER)));
+        loop.setMainTask(new RoutineOffTask(Interruptibility.BETWEEN_ACTIONS));
+        loop.tick(TICK);
+
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.BETWEEN_ACTIONS));
+
+        assertAdvancedIsTempTask(loop.tick(TICK), "饥饿");
+    }
+
+    /** 许可里写了 survival_needs=off 的目标外壳替身：只关起居类需求，眼前危险的反应照插。 */
+    static final class RoutineOffTask extends FakeTask implements RoutineNeedsOff {
+        RoutineOffTask(Interruptibility interruptibility) {
+            super("干活", interruptibility);
+        }
+
+        @Override public boolean routineNeedsOff() {
+            return true;
+        }
+    }
+
+    /** 自己声明一个生存需求都不要的主任务替身（寻死这类）。 */
     static final class SurvivalOffTask extends FakeTask implements SurvivalNeedsOff {
         SurvivalOffTask() {
             super("寻死", Interruptibility.WORKING);
@@ -883,6 +942,8 @@ class ControlLoopTest {
         private final Supplier<Task> factory;
         private int calls;
         int created;
+        /** 是不是眼前危险的反应替身（自卫、换气这类）：survival_needs=off 也照插。 */
+        private boolean danger;
 
         FakeNeed(String name, Urgency[] script, Supplier<Task> factory) {
             this.name = name;
@@ -904,6 +965,13 @@ class ControlLoopTest {
             return of(name, new Urgency[0]);
         }
 
+        /** 眼前危险的反应替身（自卫、换气这类）：主目标声明 survival_needs=off 也照插。 */
+        static FakeNeed danger(String name, Urgency urgency) {
+            FakeNeed need = always(name, urgency);
+            need.danger = true;
+            return need;
+        }
+
         /** 按次序回答急迫程度，脚本用完后重复最后一个；写 null 表示那一次不再需要处理。 */
         static FakeNeed of(String name, Urgency... script) {
             return new FakeNeed(name, script, () -> new FakeTask(name + "临时", Interruptibility.WORKING));
@@ -922,6 +990,10 @@ class ControlLoopTest {
             Urgency urgency = script[Math.min(calls, script.length - 1)];
             calls++;
             return urgency;
+        }
+
+        @Override public boolean reactsToImmediateDanger() {
+            return danger;
         }
 
         @Override public Task createTask(TickContext context) {

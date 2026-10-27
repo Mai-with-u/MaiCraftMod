@@ -54,6 +54,10 @@ import java.util.function.Consumer;
  *
  * <p>临时任务之间也分先后：正在办的临时任务只让给更急的需求，同样急时只让给登记在它前面的需求。
  * 自卫打到一半不会被"天黑了"抢去找床（实机这样被僵尸追着打死）；反过来找床时挨打照样先自卫。
+ *
+ * <p>主任务可以把生存需求关掉，关的程度有两档：许可写 survival_needs=off 时只关起居类的
+ * （吃饭、睡觉、补光、捡回遗物），对眼前危险的反应（自卫、换气、脱险）照插，角色能把手里的一件事
+ * 干完又不至于干活干到淹死；寻死这类任务自己声明时一个生存需求都不插。换主任务时按新的主任务算。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -179,11 +183,24 @@ public final class ControlLoop {
         }
     }
 
-    // 主任务的许可关掉了生存需求（寻死这类明确的事）：一个生存需求都不插，临时任务也不建。
-    private boolean survivalNeedsOff() {
+    // 主任务自己声明不要生存需求（寻死这类明确的事）：一个生存需求都不插，临时任务也不建，不在打断规则里开后门。
+    private boolean allSurvivalNeedsOff() {
         if (stack.isEmpty()) return false;
         Frame bottom = stack.get(0);
         return bottom.from == null && bottom.task instanceof SurvivalNeedsOff off && off.survivalNeedsOff();
+    }
+
+    // 主任务的许可写了 survival_needs=off：起居类的生存需求（吃饭、睡觉、补光、捡回遗物）不插队，
+    // 角色能把手里的一件事干完；对眼前危险的反应（自卫、换气、脱险）照插，不干活干到淹死。
+    private boolean routineNeedsOff() {
+        if (stack.isEmpty()) return false;
+        Frame bottom = stack.get(0);
+        return bottom.from == null && bottom.task instanceof RoutineNeedsOff off && off.routineNeedsOff();
+    }
+
+    // 这个需求此刻参不参与挑选：全关时都不参与；只关起居类时，眼前危险的反应照常参与。
+    private boolean excluded(SurvivalNeed need, boolean allOff, boolean routineOff) {
+        return allOff || routineOff && !need.reactsToImmediateDanger();
     }
 
     /** 本刻正在被推进（或被压着等待恢复）的任务里最上面的那个；没有任务时为 null。 */
@@ -280,7 +297,10 @@ public final class ControlLoop {
         Frame current = top();
         // 主任务被停在了半路：只等生存需求先救命，活不接着干；建不出救命任务就继续停着。
         if (current.paused) {
-            for (SurvivalNeed need : survivalNeedsOff() ? List.<SurvivalNeed>of() : needs) {
+            boolean allOff = allSurvivalNeedsOff();
+            boolean routineOff = routineNeedsOff();
+            for (SurvivalNeed need : needs) {
+                if (excluded(need, allOff, routineOff)) continue;
                 if (hasLiveTask(need)) continue;
                 Urgency urgency = urgencyOf(need, context, null);
                 // 停着时也按没做成的等待来：救不成的需求不每刻重建一遍。
@@ -407,10 +427,10 @@ public final class ControlLoop {
      */
     private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask, Frame top) {
         Choice choice = new Choice();
-        if (survivalNeedsOff()) {
-            return choice;
-        }
+        boolean allOff = allSurvivalNeedsOff();
+        boolean routineOff = routineNeedsOff();
         for (SurvivalNeed need : needs) {
+            if (excluded(need, allOff, routineOff)) continue;
             if (hasLiveTask(need)) continue;
             // 需求可以看到此刻被推进的任务：要不要让位给主任务由需求自己结合处境判断。
             Urgency urgency = urgencyOf(need, context, currentTask);

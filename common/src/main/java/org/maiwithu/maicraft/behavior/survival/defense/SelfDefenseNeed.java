@@ -113,6 +113,9 @@ public final class SelfDefenseNeed implements SurvivalNeed {
         return threat.kind() == ThreatAssessment.Kind.PLAYER && trusted.test(threat.uuid());
     }
 
+    // 被攻击是眼前危险：主目标声明 survival_needs=off 也照样自卫，不站着挨打。
+    @Override public boolean reactsToImmediateDanger() { return true; }
+
     @Override public String name() { return "自卫"; }
 
     @Override

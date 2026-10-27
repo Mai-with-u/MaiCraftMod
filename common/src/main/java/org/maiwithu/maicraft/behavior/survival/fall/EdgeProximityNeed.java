@@ -49,6 +49,9 @@ public final class EdgeProximityNeed implements SurvivalNeed {
         this.moves = moves;
     }
 
+    // 站在致命落差边上随时会掉是眼前危险：主目标声明 survival_needs=off 也照样退开。
+    @Override public boolean reactsToImmediateDanger() { return true; }
+
     @Override public String name() { return "贴边"; }
 
     @Override
