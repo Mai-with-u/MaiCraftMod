@@ -81,6 +81,15 @@ public final class RecipeShortfall {
         return steps;
     }
 
+    // 估算时问：此刻还缺的原料逐样一条请求（去弄哪一样和动手备料时同一套挑法），都够时为空。
+    List<ItemRequest> stillMissing(int times) {
+        List<ItemRequest> missing = new ArrayList<>();
+        for (WorkstationRecipe.IngredientStack ingredient : ordered(times)) {
+            missingRequest(ingredient, times).ifPresent(missing::add);
+        }
+        return missing;
+    }
+
     // 缺的原料按"这一次里已知拿不到的排最前"排好，其余保持配方里的先后。
     private List<WorkstationRecipe.IngredientStack> ordered(int times) {
         List<WorkstationRecipe.IngredientStack> ordered = new ArrayList<>(recipe.ingredients());

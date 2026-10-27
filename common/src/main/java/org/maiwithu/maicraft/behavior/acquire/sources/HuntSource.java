@@ -134,10 +134,11 @@ public final class HuntSource implements ItemSource {
             return new SourceQuote.Unavailable(describe(),
                     none + "；不越界去找，愿意走就给 max_distance，或先 travel 到有猎物的地方");
         }
+        // 走着看、碰上才有：估算按"要出去找"分档，不说成知道猎物在哪。
         return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
                 new AcquisitionCost(context.maxDistanceBlocks(), ACTIONS_PER_KILL + 4),
                 "附近没有，愿意走 " + maxDistanceText(context) + " 格出去找，走到一片再看一片；见到才出手",
-                SEARCH_HINT);
+                SEARCH_HINT).outToSearch();
     }
 
     private static String maxDistanceText(SourceContext context) {

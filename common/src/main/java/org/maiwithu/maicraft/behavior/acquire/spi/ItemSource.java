@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire.spi;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.kernel.task.Action;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -43,5 +44,14 @@ public interface ItemSource {
      */
     default Optional<Action> look(ItemRequest request, SourceContext context) {
         return Optional.empty();
+    }
+
+    /**
+     * 估算时问：照这份报价动手，身上还缺、要先交给引擎去备的原料有哪几样（每样一条请求，件数是还缺的）。
+     * 现做的来源（合成、烧炼）回答；现成拿的来源没有原料要备，默认为空。
+     * 只在估算里问，不放进每次报价——问价每刻都可能重来，备料清单要按配方再挑一遍原料，没必要次次算。
+     */
+    default List<ItemRequest> missingIngredients(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+        return List.of();
     }
 }

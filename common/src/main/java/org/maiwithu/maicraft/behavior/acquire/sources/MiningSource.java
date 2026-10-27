@@ -446,7 +446,9 @@ public final class MiningSource implements ItemSource {
         int depth = Math.max(0, context.characterAt().y() - deposit.workingY());
         return new SourceQuote.Offer(describe(), request.count(),
                 new AcquisitionCost(depth + PROSPECT_TUNNEL_GUESS, depth + PROSPECT_TUNNEL_GUESS),
-                prospectPlan(context, deposit) + "，看见了就挖；" + riskNote(deposit.ore()));
+                prospectPlan(context, deposit) + "，看见了就挖；" + riskNote(deposit.ore()))
+                // 沿矿层挖通道、看见了才挖：知道在哪几层，不知道在哪一格，估算按"要出去找"分档。
+                .outToSearch();
     }
 
     // 说给 LLM 听的打算：往下挖到哪层、还是在这一层横着挖。

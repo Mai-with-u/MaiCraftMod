@@ -181,6 +181,21 @@ public final class RecipeSource implements ItemSource {
         return (long) recipe.kind().plannedCookTicks() * times;
     }
 
+    // 估算时问：照报价挑中的那条配方做够件数，身上还缺的原料逐样列出（挑哪一样和动手备料时一样），
+    // 烧炼再加上身上不够时要去弄的燃料。工作台、熔炉这类就地摆的设施不列：报价的说明里已经写着要摆一个。
+    @Override public List<ItemRequest> missingIngredients(ItemRequest request, SourceQuote.Offer offer,
+            SourceContext context) {
+        Optional<WorkstationRecipe> recipe = ranked(request, context).stream()
+                .filter(candidate -> candidate.id().equals(offer.hint()))
+                .findFirst();
+        if (recipe.isEmpty()) return List.of();
+        int times = timesNeeded(recipe.get(), request.count());
+        List<ItemRequest> missing = new ArrayList<>(new RecipeShortfall(recipe.get(), context, choice, needs, backpack,
+                offhand, tags, this::pick).stillMissing(times));
+        if (recipe.get().kind().cooks()) fuelNeed(recipe.get(), times).ifPresent(missing::add);
+        return missing;
+    }
+
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         List<WorkstationRecipe> candidates = ranked(request, context);
         WorkstationRecipe recipe = candidates.stream()

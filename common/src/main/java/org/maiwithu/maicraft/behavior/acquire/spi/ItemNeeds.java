@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -124,6 +125,15 @@ public interface ItemNeeds {
      */
     default Optional<Double> cheapestCost(ItemRequest request, Permissions permissions, boolean includeMaking) {
         return Optional.empty();
+    }
+
+    /**
+     * 估算：只问价不拿，按引擎此刻会走的路往下估原料，回一份估算（档位、怎么弄、最远多远、粗估秒数）。
+     * 途径、距离、半径都不限，许可照给的；夜里该先备武器还是先备床这类内部判断拿它比哪个费事。
+     * 实现不估时回"估不了"。
+     */
+    default GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+        return GoalEstimate.unknown(request.wanted().specifier() + " ×" + request.count(), "拿东西的引擎还没接上");
     }
 
     /**

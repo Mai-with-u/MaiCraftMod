@@ -20,9 +20,11 @@ public sealed interface SourceQuote {
      * @param cost            拿到它的代价
      * @param risk            要留意的事，例如"没开过，不确定里面有什么"；没有就为 null
      * @param hint            来源自己认的线索（哪个箱子、哪条配方），引擎原样带回去不解读
+     * @param searching       要出去找：只知道往哪去找、走着看碰上才有（出去找猎物、沿矿层挖通道碰矿）；
+     *                        知道东西在哪一格的（看得见、记得、网络里查得到、就在脚下）为假。估算按它分档
      */
     record Offer(String source, int obtainableCount, AcquisitionCost cost, String risk,
-            String hint) implements SourceQuote {
+            String hint, boolean searching) implements SourceQuote {
 
         public Offer {
             if (obtainableCount != UNKNOWN_COUNT && obtainableCount <= 0) {
@@ -30,9 +32,19 @@ public sealed interface SourceQuote {
             }
         }
 
+        /** 知道东西在哪的报价：绝大多数来源都是这样。 */
+        public Offer(String source, int obtainableCount, AcquisitionCost cost, String risk, String hint) {
+            this(source, obtainableCount, cost, risk, hint, false);
+        }
+
         /** 数量明确、没有线索的报价。 */
         public Offer(String source, int obtainableCount, AcquisitionCost cost, String risk) {
             this(source, obtainableCount, cost, risk, "");
+        }
+
+        /** 同一份报价，改说成"要出去找、碰上才有"：出去找猎物、长程挖矿这类走着看的来源用。 */
+        public Offer outToSearch() {
+            return new Offer(source, obtainableCount, cost, risk, hint, true);
         }
 
         /** 数量未知的报价：只记得有个箱子、没开过的时候给。 */

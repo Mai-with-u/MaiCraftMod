@@ -426,6 +426,28 @@ class RecipeSourceTest {
         assertEquals(1, fuelNeed.count());
     }
 
+    @Test
+    void 估算时问还缺哪几样_原料与燃料都列出来_不去备料() {
+        WorldMemory memory = memory();
+        memory.rememberWorkstationUsed(TABLE_AT, "minecraft:furnace", NOW);
+        CapturingNeeds needs = new CapturingNeeds();
+        RecipeSource recipeSource = source(memory, wanted -> List.of(ironSmelting()), needs);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 2, "工具准备");
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, recipeSource.quote(request, CONTEXT));
+
+        List<ItemRequest> missing = recipeSource.missingIngredients(request, offer, CONTEXT);
+
+        assertEquals(List.of("minecraft:raw_iron", "minecraft:coal"),
+                missing.stream().map(ingredient -> ingredient.wanted().specifier()).toList());
+        assertEquals(2, missing.getFirst().count());
+        assertTrue(needs.asked.isEmpty(), "估算只问不备料");
+
+        // 身上原料、燃料都够：没有要先去弄的。
+        backpack.add("minecraft:raw_iron", 2);
+        backpack.add("minecraft:coal", 1);
+        assertTrue(recipeSource.missingIngredients(request, offer, CONTEXT).isEmpty());
+    }
+
     private static WorkstationRecipe ironSmelting() {
         return new WorkstationRecipe("minecraft:iron_ingot", WorkstationRecipe.Kind.SMELTING,
                 WantedItem.ofItem("minecraft:iron_ingot"), 1,
