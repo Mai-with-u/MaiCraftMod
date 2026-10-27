@@ -19,6 +19,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.Rotation;
 
 import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
 import org.maiwithu.maicraft.behavior.construction.CellKind;
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 /**
  * 机器档案库：按世界把每台机器的档案存成一篇文档，键是档案名。
  * 存不进去（库坏了、超预算）时保存返回假，施工照常结算，只是档案没留住；读不到按没有这台机器对待。
+ * 组装成物理结构的机器档案跟着结构走：组装时平移进结构的地块，拆回时按组装器落点和转的整 90° 跟回世界。
  */
 final class MachineArchives implements ArchivedMachines {
 
@@ -67,9 +69,56 @@ final class MachineArchives implements ArchivedMachines {
         }
         for (String key : keys) {
             Optional<MachineArchive> archive = readKey(key);
-            if (archive.isEmpty() || archive.get().removed() || !archive.get().dimension().equals(dimension)) continue;
+            // 记在结构上的档案锚点是地块里的格，和世界里的格对不上，不算在世界里盖住这一格。
+            if (archive.isEmpty() || archive.get().removed() || archive.get().onStructure()
+                    || !archive.get().dimension().equals(dimension)) continue;
             Set<BlockPos> blocks = blocksOf(archive.get());
             if (blocks.contains(cell)) return Optional.of(new Machine(archive.get().name(), blocks));
+        }
+        return Optional.empty();
+    }
+
+    // 组装后：组装器所在的那份档案跟到结构上。组装是纯平移，锚点挪的和组装器挪的一样多，偏移不变。
+    @Override public Optional<Moved> moveOntoStructure(String dimension, BlockPos worldAssembler, String structureId,
+            BlockPos plotAssembler) {
+        Optional<Machine> covering = covering(dimension, worldAssembler);
+        if (covering.isEmpty()) return Optional.empty();
+        Optional<MachineArchive> archive = find(covering.get().name());
+        if (archive.isEmpty()) return Optional.empty();
+        BlockPos shift = plotAssembler.subtract(worldAssembler);
+        MachineArchive moved = archive.get().movedOnto(structureId, archive.get().anchor().offset(shift));
+        return Optional.of(new Moved(moved.name(), save(moved)));
+    }
+
+    // 拆回后：记在这个结构上的档案跟回世界。拆回以组装器为轴转整 90° 落到组装器当时的世界格：
+    // 世界锚点 = 组装器落点 + 转过的（地块锚点 − 地块里的组装器），蓝图跟着转。
+    @Override public Optional<Moved> moveToWorld(String structureId, BlockPos plotAssembler, BlockPos worldAssembler,
+            Rotation turn) {
+        Optional<MachineArchive> archive = on(structureId);
+        if (archive.isEmpty()) return Optional.empty();
+        BlockPos fromAssembler = archive.get().anchor().subtract(plotAssembler).rotate(turn);
+        MachineArchive moved = archive.get().movedToWorld(worldAssembler.offset(fromAssembler),
+                archive.get().blueprint().turned(turn));
+        return Optional.of(new Moved(moved.name(), save(moved)));
+    }
+
+    @Override public Optional<String> onStructure(String structureId) {
+        return on(structureId).map(MachineArchive::name);
+    }
+
+    /** 记在这个结构上、还没拆除的那份档案；几份都记在上面时取档案名排在前面的那份，没有为空。 */
+    Optional<MachineArchive> on(String structureId) {
+        List<String> keys;
+        try {
+            keys = documents.keys(SCOPE, worldKey);
+        } catch (IOException broken) {
+            return Optional.empty();
+        }
+        for (String key : keys) {
+            Optional<MachineArchive> archive = readKey(key);
+            if (archive.isPresent() && !archive.get().removed() && structureId.equals(archive.get().structure())) {
+                return archive;
+            }
         }
         return Optional.empty();
     }
@@ -130,6 +179,9 @@ final class MachineArchives implements ArchivedMachines {
             root.addProperty("last_check_at", archive.lastCheckAt().toString());
             root.addProperty("last_check_note", archive.lastCheckNote());
         }
+        if (archive.structure() != null) {
+            root.addProperty("structure", archive.structure());
+        }
         return root.toString();
     }
 
@@ -147,7 +199,8 @@ final class MachineArchives implements ArchivedMachines {
         return new MachineArchive(name, root.get("dimension").getAsString(), anchor, blueprint, designId,
                 root.get("removed").getAsBoolean(), networks,
                 root.has("last_check_at") ? Instant.parse(root.get("last_check_at").getAsString()) : null,
-                root.has("last_check_note") ? root.get("last_check_note").getAsString() : null);
+                root.has("last_check_note") ? root.get("last_check_note").getAsString() : null,
+                root.has("structure") ? root.get("structure").getAsString() : null);
     }
 
     private static JsonObject encodeBlueprint(MachineBlueprint blueprint) {

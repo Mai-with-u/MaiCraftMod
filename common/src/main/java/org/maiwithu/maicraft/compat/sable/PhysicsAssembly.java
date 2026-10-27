@@ -179,7 +179,8 @@ final class PhysicsAssembly implements VehicleAssembler {
         private ActionStatus waitStill(ClientLevel level, LocalPlayer player, long now) {
             Optional<SableStructures.Structure> ship = ship(level, player);
             if (ship.isEmpty()) {
-                return finish(new Conversion(false, true, structureId, -1, "走过去时结构已经没了", landed(level), before));
+                return finish(new Conversion(false, true, structureId, -1, "走过去时结构已经没了", landed(level), before,
+                        packet));
             }
             if (StructureGeometry.moving(ship.get())) {
                 stillSince = Long.MIN_VALUE;
@@ -216,13 +217,18 @@ final class PhysicsAssembly implements VehicleAssembler {
                         compat.forget(ship.id());
                         StructureGeometry.Scan scan = compat.scan(level, ship);
                         if (!scan.assemblers().isEmpty()) {
+                            // 组装器进了地块的哪一格：结构上有几台时取此刻离拉杆那一格最近的，机器档案按它平移进地块。
+                            BlockPos plot = scan.assemblers().stream().min(Comparator.comparingDouble(local ->
+                                    ship.pose().toWorld(Vec3.atCenterOf(local)).distanceToSqr(Vec3.atCenterOf(world))))
+                                    .orElseThrow();
                             return finish(new Conversion(false, true, ship.id(), scan.blocks(), "拉了一次杆，组装成一个结构",
-                                    world, scan.makeup()));
+                                    world, scan.makeup(), plot));
                         }
                     }
                 }
             } else if (ship(level, player).isEmpty()) {
-                return finish(new Conversion(false, true, structureId, -1, "拉了一次杆，结构拆回成方块", landed(level), before));
+                return finish(new Conversion(false, true, structureId, -1, "拉了一次杆，结构拆回成方块", landed(level), before,
+                        packet));
             }
             if (now - stepStart >= CONFIRM_TICKS) {
                 return finish(new Conversion(false, false, structureId == null ? "" : structureId, -1,

@@ -15,9 +15,26 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param note        经过一句话
  * @param archive     档案这次怎么走的（改记在世界里、跟到新结构、当新载具、留在原身份下）；车站组车、没转换为 null
  * @param glued       拉杆前补胶的经过；拆回、车站组车、已经是要的样子时为 null
+ * @param machineArchive 机器档案这次怎么走的；组装器不在任何机器档案里、结构上没记机器档案、没转换时为 null
  */
 record VehicleAssembleDetails(String structure, boolean alreadyDone, boolean converted, int blocks, String note,
-        VehicleArchives.Handover archive, Glue glued) implements ResultDetails {
+        VehicleArchives.Handover archive, Glue glued, MachineArchiveMove machineArchive) implements ResultDetails {
+
+    /** 机器档案跟到结构上了。 */
+    static final String ON_STRUCTURE = "on_structure";
+    /** 机器档案跟回世界了。 */
+    static final String IN_WORLD = "in_world";
+    /** 机器档案没跟成，留在原处。 */
+    static final String KEPT = "kept";
+
+    /**
+     * 机器档案（machine_build 建的那份）这次怎么走的。
+     *
+     * @param name  档案名
+     * @param state on_structure 跟到结构上 / in_world 跟回世界 / kept 没跟成留在原处
+     * @param note  一句话
+     */
+    record MachineArchiveMove(String name, String state, String note) {}
 
     /**
      * 拉杆前补胶的经过。

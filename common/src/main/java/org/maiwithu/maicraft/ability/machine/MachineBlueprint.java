@@ -7,8 +7,10 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.construction.CellKind;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 
@@ -82,6 +84,26 @@ record MachineBlueprint(List<PlannedCell> cells, List<Part> parts, List<Segment>
     /** 按位置找逐格清单里的格；蓝图没写的格给空。 */
     Optional<PlannedCell> cellAt(BlockPos offset) {
         return cells.stream().filter(cell -> cell.pos().equals(offset)).findFirst();
+    }
+
+    /**
+     * 整份蓝图绕原点转 {@code turn}：逐格的偏移与有朝向的方块状态、部件的宿主与它装在哪一面、安装段的格、
+     * 设置与工序的格一起转。物理结构拆回时以组装器为轴转整 90° 落回世界，档案跟回世界就按它转。
+     * 设置的键和值里写的方向（某一面进出）是模组自己的写法，这里认不出，不跟着转。
+     */
+    MachineBlueprint turned(Rotation turn) {
+        if (turn == Rotation.NONE) return this;
+        // 逐格清单和建造落锚走同一条转法（偏移按原版方块坐标转、方块状态一起转），落在原点上就还是相对偏移。
+        List<PlannedCell> turnedCells = cells.isEmpty() ? List.of()
+                : Blueprint.at("", BlockPos.ZERO, turn, cells).cells();
+        return new MachineBlueprint(turnedCells,
+                parts.stream().map(part -> new Part(part.offset().rotate(turn), turn.rotate(part.side()), part.itemId()))
+                        .toList(),
+                installations.stream().map(segment -> new Segment(segment.kind(),
+                        segment.offsets().stream().map(offset -> offset.rotate(turn)).toList(), segment.roles())).toList(),
+                settings.stream().map(setting -> new Setting(setting.offset().rotate(turn), setting.key(), setting.value()))
+                        .toList(),
+                processes.stream().map(process -> new Process(process.offset().rotate(turn), process.item())).toList());
     }
 
     /** 宿主格的方块状态：部件能不能装、安装段靠不靠得上都以它判；那一格不是放方块给空。 */

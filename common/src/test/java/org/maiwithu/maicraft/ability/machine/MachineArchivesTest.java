@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -16,6 +17,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.FurnaceBlock;
+import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.state.BlockState;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -106,6 +110,66 @@ class MachineArchivesTest {
 
         assertTrue(archives.save(archives.find("Airship").orElseThrow().markRemoved()));
         assertTrue(archives.covering("minecraft:overworld", new BlockPos(100, 70, 100)).isEmpty(), "拆了的不算");
+    }
+
+    @Test
+    void 组装后跟到结构上_锚点平移偏移不变_世界里不再算盖住() {
+        MachineArchives archives = new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1");
+        MachineBlueprint ship = new MachineBlueprint(List.of(
+                PlannedCell.block(new BlockPos(0, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of())),
+                List.of(), List.of(), List.of(), List.of());
+        BlockPos anchor = new BlockPos(100, 70, 100);
+        assertTrue(archives.save(MachineArchive.fresh("飞艇", "minecraft:overworld", anchor, ship, null)));
+        BlockPos worldAssembler = new BlockPos(101, 70, 100);
+        BlockPos plotAssembler = new BlockPos(20_000_008, 128, 20_000_008);
+
+        ArchivedMachines.Moved moved = archives.moveOntoStructure("minecraft:overworld", worldAssembler, "ship-1",
+                plotAssembler).orElseThrow();
+        assertEquals("飞艇", moved.name());
+        assertTrue(moved.saved());
+        MachineArchive read = archives.find("飞艇").orElseThrow();
+        assertEquals("ship-1", read.structure(), "读回时还记着在哪个结构上");
+        assertEquals(new BlockPos(20_000_007, 128, 20_000_008), read.anchor(), "锚点和组装器挪得一样多");
+        assertEquals(ship, read.blueprint(), "组装是纯平移，偏移一格不变");
+        assertEquals(Optional.of("飞艇"), archives.onStructure("ship-1"));
+        assertTrue(archives.covering("minecraft:overworld", worldAssembler).isEmpty(), "跟到结构上后世界里不再算盖住");
+        assertTrue(archives.moveOntoStructure("minecraft:overworld", new BlockPos(0, 0, 0), "ship-2", plotAssembler)
+                .isEmpty(), "组装器不在任何档案里不跟");
+    }
+
+    @Test
+    void 拆回跟回世界_按组装器落点和转的整九十度换算_蓝图跟着转() {
+        MachineArchives archives = new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1");
+        BlockState facingNorth = Blocks.FURNACE.defaultBlockState()
+                .setValue(FurnaceBlock.FACING, Direction.NORTH);
+        MachineBlueprint ship = new MachineBlueprint(List.of(
+                PlannedCell.block(new BlockPos(0, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 0, 0), facingNorth, Set.of("facing"))),
+                List.of(new MachineBlueprint.Part(new BlockPos(1, 0, 0), Direction.NORTH, "test:part")),
+                List.of(new MachineBlueprint.Segment("test:glue", List.of(new BlockPos(0, 0, 0), new BlockPos(1, 0, 0)))),
+                List.of(new MachineBlueprint.Setting(new BlockPos(1, 0, 0), "mode", "fast")), List.of());
+        BlockPos plotAnchor = new BlockPos(20_000_007, 128, 20_000_008);
+        BlockPos plotAssembler = new BlockPos(20_000_008, 128, 20_000_008);
+        assertTrue(archives.save(MachineArchive.freshOn("ship-1", "飞艇", "minecraft:overworld", plotAnchor, ship)));
+        BlockPos landed = new BlockPos(50, 64, 50);
+
+        ArchivedMachines.Moved moved = archives.moveToWorld("ship-1", plotAssembler, landed, Rotation.CLOCKWISE_90)
+                .orElseThrow();
+        assertTrue(moved.saved());
+        MachineArchive read = archives.find("飞艇").orElseThrow();
+        assertNull(read.structure(), "跟回世界后不再记在结构上");
+        // 锚点在组装器西边一格：顺时针转 90° 后到组装器北边一格。
+        assertEquals(new BlockPos(50, 64, 49), read.anchor());
+        assertEquals(new BlockPos(0, 0, 1), read.blueprint().cells().get(1).pos(), "东边一格转到南边一格");
+        assertEquals(Direction.EAST, read.blueprint().cells().get(1).state().getValue(
+                FurnaceBlock.FACING), "朝北的熔炉转成朝东");
+        assertEquals(Direction.EAST, read.blueprint().parts().getFirst().side(), "部件的面跟着转");
+        assertEquals(List.of(new BlockPos(0, 0, 0), new BlockPos(0, 0, 1)),
+                read.blueprint().installations().getFirst().offsets(), "安装段的格跟着转");
+        assertEquals(new BlockPos(0, 0, 1), read.blueprint().settings().getFirst().offset(), "设置的格跟着转");
+        assertTrue(archives.onStructure("ship-1").isEmpty());
+        assertTrue(archives.covering("minecraft:overworld", landed.offset(0, 0, -1)).isPresent(), "回到世界里又能按格找到");
     }
 
     @Test

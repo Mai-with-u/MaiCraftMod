@@ -136,7 +136,8 @@ class VehicleAssembleGlueTest {
         Pull pull = new Pull();
         VehicleAssembleTask task = new VehicleAssembleTask(
                 new VehicleAssembler.Request(false, ASSEMBLER, null, Permissions.DEFAULT), List.of(request -> Optional.of(pull)),
-                archives(), new AssemblyGlue(archived("飞艇"), List.of(types), () -> "minecraft:overworld"));
+                archives(), new AssemblyGlue(archived("飞艇"), List.of(types), () -> "minecraft:overworld"),
+                new MachineArchiveFollow(archived("飞艇"), () -> "minecraft:overworld"));
         TaskResult result = finish(task);
         assertTrue(pull.pulled);
         assertTrue(types.asked.isEmpty());
@@ -150,7 +151,8 @@ class VehicleAssembleGlueTest {
     private TaskResult run(Pull pull, ArchivedMachines archived, List<MachineType> types) {
         VehicleAssembleTask task = new VehicleAssembleTask(
                 new VehicleAssembler.Request(true, ASSEMBLER, null, Permissions.DEFAULT), List.of(request -> Optional.of(pull)),
-                archives(), new AssemblyGlue(archived, types, () -> "minecraft:overworld"));
+                archives(), new AssemblyGlue(archived, types, () -> "minecraft:overworld"),
+                new MachineArchiveFollow(archived, () -> "minecraft:overworld"));
         return finish(task);
     }
 

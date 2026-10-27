@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -24,8 +25,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 组装或拆回一次：问各联动的组装办法谁能做 →（拆回先把这辆的档案读下来）→（组装时组装器在机器档案里，先把档案的方块
- * 没被胶框住的地方一框框补上）→ 交给它走过去、拉一次、确认 → 档案跟着走：拆回改记到组装器落回的那一格，
- * 组装认出是拆回的那一艘就跟到新结构 → 照它的结局结算。
+ * 没被胶框住的地方一框框补上）→ 交给它走过去、拉一次、确认 → 档案跟着走：操纵表拆回改记到组装器落回的那一格、
+ * 组装认出是拆回的那一艘就跟到新结构，机器档案组装时平移进地块、拆回时按落点和转的整 90° 跟回世界 → 照它的结局结算。
  * 已经是要的样子就直接完成；拉了没转换照实完成并写明（不判失败），动作本身做不下去才失败。
  * 补胶没补成就不拉杆：胶不全时拉杆不报错，只会把船身撕下一部分变成结构，比不拉更难收拾。
  */
@@ -40,10 +41,12 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
     private final List<VehicleAssembler> assemblers;
     private final VehicleArchives archives;
     private final AssemblyGlue glue;
+    private final MachineArchiveFollow machines;
     private VehicleAssembler.Run run;
     private VehicleArchives.Before before;
     private VehicleAssembler.Conversion conversion;
     private VehicleArchives.Handover archive;
+    private VehicleAssembleDetails.MachineArchiveMove machineArchive;
     private int named;
     // 补胶：组装器所在的机器档案、它的方块、还要补的几段、这一刻在粘的那段、粘上了的与没粘上的。
     private String glueArchive;
@@ -56,12 +59,13 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
 
     // 补胶要拿胶、走到一框框的角上，比只拉一次杆久：总时长放到 15 分钟，一分钟没进展照样按卡住算。
     VehicleAssembleTask(VehicleAssembler.Request request, List<VehicleAssembler> assemblers, VehicleArchives archives,
-            AssemblyGlue glue) {
+            AssemblyGlue glue, MachineArchiveFollow machines) {
         super(request.assemble() ? "组装载具" : "拆回载具", Phase.FIND, new ProgressTracker(20L * 60, 20L * 60 * 15));
         this.request = request;
         this.assemblers = List.copyOf(assemblers);
         this.archives = archives;
         this.glue = glue;
+        this.machines = Objects.requireNonNull(machines, "machines");
     }
 
     @Override protected Action enter(Phase phase) {
@@ -184,12 +188,22 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
         if (conversion.converted()) {
             archive = request.assemble() ? archives.assembled(conversion)
                     : before == null ? null : archives.disassembled(before, conversion);
+            machineArchive = followMachineArchive();
             return Next.done(TaskResult.done(glueLine + what + "好了"
                     + (conversion.blocks() > 0 ? "，" + conversion.blocks() + " 格方块" : "")
-                    + (archive == null ? "" : "；" + archiveLine(archive))));
+                    + (archive == null ? "" : "；" + archiveLine(archive))
+                    + (machineArchive == null ? "" : "；" + machineArchive.note())));
         }
         return Next.done(TaskResult.done(glueLine + "拉了一次杆，但没有" + (request.assemble() ? "变成会动的结构" : "拆回方块")
                 + (conversion.note().isBlank() ? "" : "：" + conversion.note())));
+    }
+
+    // 机器档案跟着走：组装平移进地块；拆回按拆前结构的朝向算转了几个 90°，读不到朝向就留在结构上照实说。
+    private VehicleAssembleDetails.MachineArchiveMove followMachineArchive() {
+        if (request.assemble()) return machines.afterAssemble(conversion);
+        if (before == null) return null;
+        Double heading = before.view().map(view -> view.state().heading()).orElse(null);
+        return machines.afterDisassemble(before.structureId(), heading, conversion);
     }
 
     // 档案的一句话：跟到新结构时带上改过的地方、没带过去的操纵表行，同样的内容在 archive 里分条列着。
@@ -211,10 +225,10 @@ final class VehicleAssembleTask extends PhasedTask<VehicleAssembleTask.Phase> {
                         glueNote == null ? "补胶没补成，没拉杆" : glueNote);
         if (conversion == null) {
             return glueReport == null ? ResultDetails.NONE
-                    : new VehicleAssembleDetails("", false, false, -1, "", null, glueReport);
+                    : new VehicleAssembleDetails("", false, false, -1, "", null, glueReport, null);
         }
         return new VehicleAssembleDetails(conversion.structureId(), conversion.alreadyDone(), conversion.converted(),
-                conversion.blocks(), conversion.note(), archive, glueReport);
+                conversion.blocks(), conversion.note(), archive, glueReport, machineArchive);
     }
 
     @Override protected String describePhase(Phase value) {

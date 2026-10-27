@@ -70,17 +70,25 @@ public interface VehicleAssembler {
      * @param assembler   转换后组装器在世界里的哪一格：组装是拉杆时它所在的格，拆回是它落回世界的格；
      *                    重新组装时按它认是不是拆回过的那一艘。不知道为 null
      * @param makeup      结构的方块清单（方块 ID → 格数）：组装是组装出来的，拆回是拆之前的；不知道为空
+     * @param plotAssembler 组装器在结构地块里的格：组装是组装出来以后的，拆回是拆之前的；机器档案按它和
+     *                    {@code assembler} 在结构与世界之间换算。不知道为 null
      */
     record Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note,
-                      BlockPos assembler, Map<String, Integer> makeup) {
+                      BlockPos assembler, Map<String, Integer> makeup, BlockPos plotAssembler) {
 
         public Conversion {
             makeup = Map.copyOf(makeup);
         }
 
+        /** 不带组装器在地块里的格（只认组装器落点与方块清单的）。 */
+        public Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note,
+                BlockPos assembler, Map<String, Integer> makeup) {
+            this(alreadyDone, converted, structureId, blocks, note, assembler, makeup, null);
+        }
+
         /** 只说结局、不带组装器落点与方块清单（车站组车这类没有物理组装器的）。 */
         public Conversion(boolean alreadyDone, boolean converted, String structureId, int blocks, String note) {
-            this(alreadyDone, converted, structureId, blocks, note, null, Map.of());
+            this(alreadyDone, converted, structureId, blocks, note, null, Map.of(), null);
         }
     }
 }

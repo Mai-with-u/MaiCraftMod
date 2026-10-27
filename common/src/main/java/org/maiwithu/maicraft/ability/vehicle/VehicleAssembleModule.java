@@ -54,6 +54,7 @@ public final class VehicleAssembleModule implements AbilityModule {
     private final Supplier<BlockPos> feet;
     private final VehicleArchives archives;
     private final AssemblyGlue glue;
+    private final MachineArchiveFollow machines;
 
     /**
      * @param structures 观察编号 s# 换成结构身份
@@ -74,6 +75,8 @@ public final class VehicleAssembleModule implements AbilityModule {
         this.feet = Objects.requireNonNull(feet, "feet");
         this.archives = Objects.requireNonNull(archives, "archives");
         this.glue = new AssemblyGlue(archived, machineTypes, dimension);
+        // 机器档案和补胶读的是同一批档案：组装时组装器所在的那份跟到结构上，拆回时跟回世界。
+        this.machines = new MachineArchiveFollow(archived, dimension);
     }
 
     @Override public AbilitySpec spec() {
@@ -130,7 +133,8 @@ public final class VehicleAssembleModule implements AbilityModule {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers, archives, glue));
+        factories.register(VehicleAssembleInput.class, input -> new VehicleAssembleTask(input.request(), assemblers, archives, glue,
+                machines));
     }
 
     private static StepDecision invalid(String why) {
