@@ -27,10 +27,10 @@ final class PrepareBedTask extends PhasedTask<PrepareBedTask.Phase> {
     /** 任务的进度：只有弄床一个阶段。 */
     enum Phase { OBTAIN }
 
-    /** 两分钟没进展算卡住：合成与取物每步都有确认，两分钟没动静就是绕不出来了。 */
+    /** 两分钟没进展算卡住：合成与取物每步都有确认，两分钟没动静就是绕不出来了。C 玩家常识。 */
     private static final long STUCK_AFTER_TICKS = 20L * 60 * 2;
-    /** 最多备十分钟：拿床这件事有预算，超了带着引擎给的原因结束。 */
-    private static final long MAX_TICKS = 20L * 60 * 10;
+    /** 最多备三分钟：备床是给睡觉让路的临时任务，超了带着引擎给的原因结束，别一直占着身体。C 玩家常识。 */
+    private static final long MAX_TICKS = 20L * 60 * 3;
 
     /** 备今晚的床要的东西：任何一种床一张。估算床费不费事时用同一个请求，估的和备的是同一件事。 */
     static final ItemRequest TONIGHTS_BED = new ItemRequest(WantedItem.ofTag("minecraft:beds"), 1, "备今晚的床");
