@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -71,6 +72,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final ReadsCharacterPosition position;
     private final Optional<InventorySpace> space;
     private final int maxDepth;
+    /** 估算：只问价不拿，和动手时同一套挑路。 */
+    private final AcquisitionEstimates estimates;
     /**
      * 此刻正在推进的请求链，栈顶是最里层：外层的拿东西推进到来源、来源再回引擎要原料时一层层压进来，
      * 这一刻推进完就弹出。防环、限深、接外层记账口都看它。只算正在推进的：建出来还没开始做的备料动作
@@ -105,6 +108,23 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         this.space = space;
         if (maxDepth < 1) throw new IllegalArgumentException("递归深度上限至少为 1：" + maxDepth);
         this.maxDepth = maxDepth;
+        this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth);
+    }
+
+    // 估算：只问价不拿，按此刻会走的路往下估原料。内部需求不带限定（夜里比床和武器哪个费事）。
+    @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+        return estimates.estimate(request, permissions, Scope.ALL);
+    }
+
+    // obtain 的估算：限定照这次的写法，只管最外层要的那几样；一张单子每样一份，合起来取最重的。
+    @Override public GoalEstimate estimate(List<ItemRequest> requests, Permissions permissions, Scope scope) {
+        return GoalEstimate.several(describeAll(requests), requests.stream()
+                .map(request -> estimates.estimate(request, permissions, scope)).toList());
+    }
+
+    /** 一张要货单的写法：minecraft:oak_log ×8、minecraft:white_wool ×3。 */
+    static String describeAll(List<ItemRequest> requests) {
+        return String.join("、", requests.stream().map(AcquisitionEstimates::describe).toList());
     }
 
     /**

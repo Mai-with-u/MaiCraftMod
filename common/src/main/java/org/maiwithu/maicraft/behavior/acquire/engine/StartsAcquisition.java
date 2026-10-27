@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -39,5 +40,16 @@ public interface StartsAcquisition {
      */
     default String triedSoFar() {
         return "";
+    }
+
+    /**
+     * 估一张要货单：只问价不拿，限定（途径、距离、半径）照这次的写法，只管最外层要的那几样，原料不带。
+     * 每样一份，合起来取最重的档位、秒数相加；实现不估时每样都是"估不了"。
+     */
+    default GoalEstimate estimate(List<ItemRequest> requests, Permissions permissions, ItemAcquisition.Scope scope) {
+        return GoalEstimate.several(ItemAcquisition.describeAll(requests), requests.stream()
+                .map(request -> GoalEstimate.unknown(request.wanted().specifier() + " ×" + request.count(),
+                        "拿东西的引擎还没接上"))
+                .toList());
     }
 }
