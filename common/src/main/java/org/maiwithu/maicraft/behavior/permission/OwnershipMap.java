@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.permission;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,6 +37,9 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
  * 直到比它晚发出的询问有了回答，再以回答为准。不先记下，刚装好的门在下一次重问之前查不到记录，
  * 只能靠"像玩家放的门"去猜，被当成别人的东西不许动。
  *
+ * <p>一个区块有主的格太多时服务端分页回答：照抄回答里的 after 接着问，几页都收齐才把整块记下；
+ * 中途哪一页失败，整块按没问到处理，过一阵从头再问，不把半块当成整块。
+ *
  * <p>读可以在任何线程（寻路在后台线程上算路时也要问）；发请求、收回答只在客户端刻里做。
  */
 public final class OwnershipMap implements ReadsBlockOwnership {
@@ -49,6 +54,8 @@ public final class OwnershipMap implements ReadsBlockOwnership {
     static final long REFRESH_AFTER_MILLIS = 30_000L;
     /** 请求失败后多久再试。 */
     static final long RETRY_AFTER_MILLIS = 5_000L;
+    /** 一个区块最多接着问这么多页：一页两三千格，够装满最高的世界；再多按没问到处理，不把半块当整块。 */
+    static final int MAX_PAGES_PER_CHUNK = 1024;
 
     /** 一个区块：归属按维度分开记。 */
     record ChunkKey(String dimension, int x, int z) {}
@@ -56,8 +63,13 @@ public final class OwnershipMap implements ReadsBlockOwnership {
     /** 一个区块里有主的格子：位置 → 放置人编号；发出这次询问的时刻（比它早放下的格，回答里都有了）。 */
     record ChunkOwners(Map<Long, String> owners, long fetchedAtMillis) {}
 
-    /** 一次在途的询问：请求编号与发出的时刻。 */
-    private record Asked(UUID id, long atMillis) {}
+    /**
+     * 一次在途的询问：请求编号、问第一页的时刻（整块按这个时刻记）、前几页已经收到的格、这是第几页。
+     */
+    private record Asked(UUID id, long atMillis, Map<Long, String> gathered, int page) {}
+
+    /** 一页回答：这一页的格（位置 → 放置人编号）；还有下一页时带着接着问要抄的 after。 */
+    record Page(Map<Long, String> owners, OptionalLong after) {}
 
     private final ServerLinkSession session;
     /** 角色自己的玩家编号：服务端推来的放置确认都是角色自己的动作，按这个编号记。 */
@@ -230,34 +242,58 @@ public final class OwnershipMap implements ReadsBlockOwnership {
     }
 
     private void submit(ChunkKey key) {
+        submit(key, OptionalLong.empty(), new Asked(null, System.currentTimeMillis(), Map.of(), 0));
+    }
+
+    // 发出一页询问：after 为空问第一页；接着问时照抄上一页回答里的 after，前几页收到的格跟着这次询问带着走。
+    private void submit(ChunkKey key, OptionalLong after, Asked previous) {
         JsonObject body = new JsonObject();
         body.addProperty("chunk_x", key.x());
         body.addProperty("chunk_z", key.z());
+        after.ifPresent(cursor -> body.addProperty("after", cursor));
         // 只读请求：不改世界。
         ClientRequest request = session.router().submit("ownership.chunk", body, false);
-        pending.put(key, new Asked(request.id(), System.currentTimeMillis()));
+        pending.put(key, new Asked(request.id(), previous.atMillis(), previous.gathered(), previous.page() + 1));
     }
 
-    // 收回已结算的回答：成功的整块记下，失败或请求已退场的记下失败时刻，过一阵再问。
+    // 收回已结算的回答：还有下一页的接着问，问齐了整块记下；失败或请求已退场的记下失败时刻，过一阵从头再问。
     private void settle() {
         long now = System.currentTimeMillis();
+        record NextPage(ChunkKey key, OptionalLong after, Asked sofar) {}
+        List<NextPage> continuing = new ArrayList<>();
         for (Iterator<Map.Entry<ChunkKey, Asked>> it = pending.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<ChunkKey, Asked> entry = it.next();
-            Optional<ClientRequest.Snapshot> snapshot = session.router().poll(entry.getValue().id());
+            Asked asked = entry.getValue();
+            Optional<ClientRequest.Snapshot> snapshot = session.router().poll(asked.id());
             if (snapshot.isPresent() && !snapshot.get().settled()) continue;
             it.remove();
-            Optional<Map<Long, String>> owners = snapshot.flatMap(OwnershipMap::parse);
-            if (owners.isPresent()) {
-                // 按发问的时刻记：在途期间自己又放下的格，这份回答里还没有，留着自己记的那一笔。
-                remember(entry.getKey(), owners.get(), entry.getValue().atMillis());
-            } else {
+            Optional<Page> page = snapshot.flatMap(OwnershipMap::parse);
+            if (page.isEmpty()) {
                 failedAt.put(entry.getKey(), now);
+                continue;
+            }
+            Map<Long, String> gathered = new HashMap<>(asked.gathered());
+            gathered.putAll(page.get().owners());
+            if (page.get().after().isEmpty()) {
+                // 问齐了：按问第一页的时刻记，在途期间自己又放下的格回答里还没有，留着自己记的那一笔。
+                remember(entry.getKey(), Map.copyOf(gathered), asked.atMillis());
+            } else if (asked.page() >= MAX_PAGES_PER_CHUNK) {
+                // 页数多得不像话：多半是回答出了毛病，按没问到处理，不把半块当整块。
+                failedAt.put(entry.getKey(), now);
+            } else {
+                continuing.add(new NextPage(entry.getKey(), page.get().after(),
+                        new Asked(asked.id(), asked.atMillis(), gathered, asked.page())));
             }
         }
+        // 遍历完再发接着问的那一页：边遍历边往在途表里放会打乱遍历。
+        for (NextPage next : continuing) submit(next.key(), next.after(), next.sofar());
     }
 
-    /** 回答换成位置 → 放置人：每格四个数（x、y、z、放置人在表里的序号）；请求失败或回答缺字段给空。 */
-    static Optional<Map<Long, String>> parse(ClientRequest.Snapshot snapshot) {
+    /**
+     * 一页回答换成位置 → 放置人：每格四个数（x、y、z、放置人在表里的序号）；more 为真时带上接着问要抄的 after。
+     * 请求失败、回答缺字段、说有下一页却没给 after，都给空。
+     */
+    static Optional<Page> parse(ClientRequest.Snapshot snapshot) {
         if (snapshot.status() != ClientRequest.Status.SUCCEEDED) return Optional.empty();
         JsonObject result = snapshot.result();
         if (!result.has("owners") || !result.has("cells")) return Optional.empty();
@@ -270,7 +306,10 @@ public final class OwnershipMap implements ReadsBlockOwnership {
             map.put(BlockPos.asLong(cells.get(i).getAsInt(), cells.get(i + 1).getAsInt(), cells.get(i + 2).getAsInt()),
                     owners.get(person).getAsString());
         }
-        return Optional.of(Map.copyOf(map));
+        boolean more = result.has("more") && result.get("more").getAsBoolean();
+        if (!more) return Optional.of(new Page(Map.copyOf(map), OptionalLong.empty()));
+        if (!result.has("after")) return Optional.empty();
+        return Optional.of(new Page(Map.copyOf(map), OptionalLong.of(result.get("after").getAsLong())));
     }
 
     // 位置所在的区块；没写维度就是角色此刻所在的维度，那也不知道时给空。

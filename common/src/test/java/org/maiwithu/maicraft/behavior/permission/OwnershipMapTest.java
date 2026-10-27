@@ -112,9 +112,35 @@ class OwnershipMapTest {
         for (int value : new int[] {1, 64, 2, 1, -3, 70, 4, 0}) cells.add(value);
         result.add("owners", owners);
         result.add("cells", cells);
-        ClientRequest.Snapshot snapshot = new ClientRequest.Snapshot(UUID.randomUUID(), "ownership.chunk", 1, false,
+        Optional<OwnershipMap.Page> parsed = OwnershipMap.parse(succeeded(result));
+        assertEquals(Map.of(BlockPos.asLong(1, 64, 2), "bob", BlockPos.asLong(-3, 70, 4), "alice"),
+                parsed.orElseThrow().owners());
+        assertTrue(parsed.orElseThrow().after().isEmpty(), "没写 more 就是整块一页答完");
+    }
+
+    @Test
+    void 还有下一页时带着接着问的编号_说有下一页却没给编号按没问到算() {
+        JsonObject result = new JsonObject();
+        JsonArray owners = new JsonArray();
+        owners.add("alice");
+        JsonArray cells = new JsonArray();
+        for (int value : new int[] {1, 64, 2, 0}) cells.add(value);
+        result.add("owners", owners);
+        result.add("cells", cells);
+        result.addProperty("more", true);
+        result.addProperty("after", BlockPos.asLong(1, 64, 2));
+
+        OwnershipMap.Page page = OwnershipMap.parse(succeeded(result)).orElseThrow();
+        assertEquals(BlockPos.asLong(1, 64, 2), page.after().orElseThrow());
+        assertEquals(Map.of(BlockPos.asLong(1, 64, 2), "alice"), page.owners());
+
+        // 半块不能当整块：缺了接着问的编号，这一页整个不算，过一阵从头再问。
+        result.remove("after");
+        assertTrue(OwnershipMap.parse(succeeded(result)).isEmpty());
+    }
+
+    private static ClientRequest.Snapshot succeeded(JsonObject result) {
+        return new ClientRequest.Snapshot(UUID.randomUUID(), "ownership.chunk", 2, false,
                 ClientRequest.Status.SUCCEEDED, ClientRequest.Effect.NOT_APPLIED, false, null, null, 0, result);
-        Optional<Map<Long, String>> parsed = OwnershipMap.parse(snapshot);
-        assertEquals(Map.of(BlockPos.asLong(1, 64, 2), "bob", BlockPos.asLong(-3, 70, 4), "alice"), parsed.orElseThrow());
     }
 }

@@ -3,13 +3,15 @@ package org.maiwithu.maicraft.server;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Optional;
-import java.util.Set;
+import java.util.OptionalLong;
+import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.BiPredicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
@@ -41,8 +43,11 @@ public final class BlockOwnershipRecord {
     public record Owner(UUID playerId, long tick) {}
 
     private final Map<String, LinkedHashMap<BlockPos, Owner>> byDimension = new LinkedHashMap<>();
-    /** 按区块分的索引：客户端一次问一整个区块里哪些格有主，不必逐格问，也不必翻遍整个维度。 */
-    private final Map<String, Map<Long, Set<BlockPos>>> byChunk = new HashMap<>();
+    /**
+     * 按区块分的索引：客户端一次问一整个区块里哪些格有主，不必逐格问，也不必翻遍整个维度。
+     * 区块里的格按位置编号从小到大排好：一个区块有主的格太多、要分几页回答时，下一页接着上一页最后那一格往下读。
+     */
+    private final Map<String, Map<Long, NavigableSet<Long>>> byChunk = new HashMap<>();
     /** 有没有还没存盘的改动。 */
     private boolean dirty;
 
@@ -91,23 +96,38 @@ public final class BlockOwnershipRecord {
         return placements == null ? Optional.empty() : Optional.ofNullable(placements.get(position.immutable()));
     }
 
-    /** 一个区块里每一格有主的方块是谁放的；这个区块一格都没记到时给空表。 */
+    /** 一个区块里每一格有主的方块是谁放的，按位置编号从小到大；这个区块一格都没记到时给空表。 */
     public Map<BlockPos, Owner> ownedInChunk(String dimension, int chunkX, int chunkZ) {
-        var positions = byChunk.getOrDefault(dimension, Map.of()).get(ChunkPos.asLong(chunkX, chunkZ));
-        var placements = byDimension.get(dimension);
-        if (positions == null || placements == null) return Map.of();
         Map<BlockPos, Owner> owned = new LinkedHashMap<>();
-        for (BlockPos position : positions) {
-            Owner owner = placements.get(position);
-            if (owner != null) owned.put(position, owner);
-        }
+        readChunk(dimension, chunkX, chunkZ, OptionalLong.empty(), (position, owner) -> {
+            owned.put(position, owner);
+            return true;
+        });
         return owned;
+    }
+
+    /**
+     * 按位置编号从小到大读一个区块里有主的格，一格一格交给 reader，reader 返回 false 就停。
+     * after 给了只从编号比它大的格读起：一个区块有主的格可能上万，回答要分几页，每页接着上一页最后那一格往下读，
+     * 两页之间有人放下、拆掉方块也不会重复给同一格。
+     */
+    public void readChunk(String dimension, int chunkX, int chunkZ, OptionalLong after,
+                          BiPredicate<BlockPos, Owner> reader) {
+        NavigableSet<Long> positions = byChunk.getOrDefault(dimension, Map.of()).get(ChunkPos.asLong(chunkX, chunkZ));
+        var placements = byDimension.get(dimension);
+        if (positions == null || placements == null) return;
+        NavigableSet<Long> rest = after.isPresent() ? positions.tailSet(after.getAsLong(), false) : positions;
+        for (long key : rest) {
+            BlockPos position = BlockPos.of(key);
+            Owner owner = placements.get(position);
+            if (owner != null && !reader.test(position, owner)) return;
+        }
     }
 
     private void index(String dimension, BlockPos position) {
         byChunk.computeIfAbsent(dimension, ignored -> new HashMap<>())
-                .computeIfAbsent(ChunkPos.asLong(position), ignored -> new HashSet<>())
-                .add(position);
+                .computeIfAbsent(ChunkPos.asLong(position), ignored -> new TreeSet<>())
+                .add(position.asLong());
     }
 
     private void unindex(String dimension, BlockPos position) {
@@ -116,7 +136,7 @@ public final class BlockOwnershipRecord {
         long key = ChunkPos.asLong(position);
         var positions = chunks.get(key);
         if (positions == null) return;
-        positions.remove(position);
+        positions.remove(position.asLong());
         if (positions.isEmpty()) chunks.remove(key);
     }
 

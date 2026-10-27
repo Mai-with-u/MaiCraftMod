@@ -191,8 +191,8 @@ public final class Bootstrap {
         CharacterAccounts accounts = CharacterAccounts.read(loader.configDirectory());
         operations.setPolicy((player, operation) -> accounts.admits(player));
         ServerLinkNetwork network = new ServerLinkNetwork(operations, accounts::admits);
-        // 客户端可查询的只读操作：一个区块里哪些格是谁放的。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
-        operations.register(OwnershipQuery.OPERATION, 1, false, new OwnershipQuery());
+        // 客户端可查询的只读操作：角色附近一个区块里哪些格是谁放的，格多时分页答。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
+        operations.register(OwnershipQuery.OPERATION, OwnershipQuery.VERSION, false, new OwnershipQuery());
         // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
         ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
         return new ServerLifecycle() {
@@ -587,8 +587,8 @@ public final class Bootstrap {
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
         void connectSession(LinkTransport transport) {
             session = new ServerLinkSession(transport);
-            // 按区块查方块归属是第一个只读操作。
-            session.router().register(new ClientOperation(OwnershipQuery.OPERATION, 1, false));
+            // 按区块查方块归属是第一个只读操作；版本和服务端一致，回答分页的版本两边对上才协商得到。
+            session.router().register(new ClientOperation(OwnershipQuery.OPERATION, OwnershipQuery.VERSION, false));
         }
 
         @Override public void started() {
