@@ -12,7 +12,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * 动作成没成（changes / unconfirmed）、结构对不对（check）分开给；机器能不能转不在这里判，留给 machine_run。
  *
  * @param archiveName 档案名
- * @param anchor      档案锚点
+ * @param anchor      档案锚点；在物理结构上施工时不给（地块里的格对 LLM 没有用，格都按局部坐标写）
  * @param removed     这次拆掉了整台
  * @param checkComplete 整机比对下得了结论没有；有格没加载时为假；没跑到比对为 null
  * @param checkCounts 整机比对各结论几格，键是结论的小写名（matches、missing、checked_by_machine……）
@@ -21,11 +21,22 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param parts       每个部件的结局
  * @param settings    每条装后设置的读回
  * @param note        给 LLM 的一句说明（档案没存进去、有格没加载），没有为空字符串
+ * @param structure   在物理结构上施工时是哪个结构（观察编号 s#；指档案名时为空）；在世界里施工为 null
+ * @param localOrigin 在物理结构上施工时局部坐标的原点是哪一格，一句话；在世界里施工为 null
  */
 record MachineBuildDetails(String archiveName, WorldPosition anchor, boolean removed,
                            Boolean checkComplete, Map<String, Integer> checkCounts, Map<String, Integer> cells,
                            List<SegmentResult> installations, List<PartResult> parts,
-                           List<SettingResult> settings, String note) implements ResultDetails {
+                           List<SettingResult> settings, String note, String structure,
+                           String localOrigin) implements ResultDetails {
+
+    /** 在世界里施工的结果细节。 */
+    MachineBuildDetails(String archiveName, WorldPosition anchor, boolean removed, Boolean checkComplete,
+            Map<String, Integer> checkCounts, Map<String, Integer> cells, List<SegmentResult> installations,
+            List<PartResult> parts, List<SettingResult> settings, String note) {
+        this(archiveName, anchor, removed, checkComplete, checkCounts, cells, installations, parts, settings, note,
+                null, null);
+    }
 
     MachineBuildDetails {
         checkCounts = checkCounts == null ? Map.of() : Map.copyOf(checkCounts);

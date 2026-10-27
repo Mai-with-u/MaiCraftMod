@@ -8,11 +8,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.ability.design.api.BuildingDesign;
 import org.maiwithu.maicraft.ability.design.api.DesignCompiler;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
@@ -43,6 +45,9 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  *
  * <p>自己只做参数核对、锚点解析与补丁合并；核对、备料、清障、砌筑、倒桶、验收是施工引擎的事，
  * 安装段、部件与设置是机器类型的事，这台机器能不能转不在这里判，留给 machine_run。
+ *
+ * <p>target 给物理结构 s#、或指已经跟到结构上的档案名，就是在组装好的船上施工：蓝图偏移按结构局部坐标
+ * （原点是结构上跟过来的档案锚点，没有档案时是物理组装器，再没有是地块中心），结构上没有档案就按原点新建一份记在它上面。
  */
 final class MachineBuildModule implements AbilityModule {
 
@@ -51,6 +56,8 @@ final class MachineBuildModule implements AbilityModule {
     private final AnchorResolver anchors;
     private final Optional<DesignStore> designs;
     private final WorldMemory memory;
+    /** 观察编号 s# 换成结构身份、结构上的工地：在组装好的船上施工用。 */
+    private final MachineVehicles vehicles;
     /** 按这次任务的许可拼一份施工服务，交给施工引擎。 */
     private final Function<Permissions, ConstructionServices> construction;
     private final AbilitySpec spec = new AbilitySpec(
@@ -61,7 +68,8 @@ final class MachineBuildModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("blueprint", ParamType.JSON_OBJECT)
                             .doc("机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、"
-                                    + "settings 装后设置；和 design_id 二选一，operation=remove 时不给").build(),
+                                    + "settings 装后设置；和 design_id 二选一，operation=remove 时不给；"
+                                    + "target 是物理结构 s# 时偏移按结构局部坐标").build(),
                     ParamSpec.of("design_id", ParamType.TEXT)
                             .doc("已保存的设计编号：按它存的方块清单建（没有机器附加条目）").build(),
                     ParamSpec.of("name", ParamType.TEXT)
@@ -76,13 +84,14 @@ final class MachineBuildModule implements AbilityModule {
 
     MachineBuildModule(MachineServices services, MachineArchives archives, AnchorResolver anchors,
             Optional<DesignStore> designs, WorldMemory memory,
-            Function<Permissions, ConstructionServices> construction) {
+            Function<Permissions, ConstructionServices> construction, MachineVehicles vehicles) {
         this.services = Objects.requireNonNull(services, "services");
         this.archives = Objects.requireNonNull(archives, "archives");
         this.anchors = Objects.requireNonNull(anchors, "anchors");
         this.designs = Objects.requireNonNull(designs, "designs");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.construction = Objects.requireNonNull(construction, "construction");
+        this.vehicles = Objects.requireNonNull(vehicles, "vehicles");
     }
 
     @Override public AbilitySpec spec() {
@@ -122,6 +131,9 @@ final class MachineBuildModule implements AbilityModule {
 
     // 建：目标是已有档案（按 landmark 名字找到）就合并补丁照档案锚点改，否则解析新锚点按新机器建。
     private StepDecision decideBuild(StepContext step, ParamValues params, MachineBlueprint parsed, String what) {
+        if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
+            return onStructure(seen.id(), parsed, params, step.goal().permissions());
+        }
         if (step.goal().target() instanceof Target.Landmark landmark) {
             Optional<MachineArchive> byName = archives.find(landmark.name());
             if (byName.isPresent()) {
@@ -150,6 +162,9 @@ final class MachineBuildModule implements AbilityModule {
 
     // 改：补丁相对档案锚点合并，建成什么以合并结果为准；档案在别的维度照实说去不了。
     private StepDecision patch(MachineArchive archive, MachineBlueprint parsed, Permissions permissions) {
+        if (archive.onStructure()) {
+            return onStructure(archive, null, parsed, permissions);
+        }
         if (services.world().playerSpot().isEmpty()) {
             return fail("角色现在不在世界里，动不了机器", Problem.Kind.UNREACHABLE, "先回到世界");
         }
@@ -166,25 +181,34 @@ final class MachineBuildModule implements AbilityModule {
                 permissions, "把补丁并进档案「" + archive.name() + "」"));
     }
 
-    // 拆：只认档案名；拆过再拆按没得拆说，蓝图保留着可以随时再建。
+    // 拆：认档案名，或物理结构 s#（拆跟在它上面的档案）；拆过再拆按没得拆说，蓝图保留着可以随时再建。
     private StepDecision decideRemove(StepContext step, ParamValues params) {
         if (params.has("blueprint") || params.has("design_id")) {
             return fail("拆除按档案来，不用给蓝图", Problem.Kind.INVALID_PARAMETER, "target 指档案名即可");
         }
-        if (!(step.goal().target() instanceof Target.Landmark landmark)) {
-            return fail("拆除要指档案名（target 的 landmark 写法）", Problem.Kind.INVALID_PARAMETER,
+        Optional<MachineArchive> archive;
+        String called;
+        if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
+            called = seen.id() + " 上的机器档案";
+            archive = vehicles.structureOf().apply(seen.id()).flatMap(archives::on);
+        } else if (step.goal().target() instanceof Target.Landmark landmark) {
+            called = "「" + landmark.name() + "」";
+            archive = archives.find(landmark.name());
+        } else {
+            return fail("拆除要指档案名（target 的 landmark 写法）或物理结构 s#", Problem.Kind.INVALID_PARAMETER,
                     "先查世界记忆或 machine_inspect 确认名字");
         }
-        Optional<MachineArchive> archive = archives.find(landmark.name());
         if (archive.isEmpty()) {
-            return fail("没有叫「" + landmark.name() + "」的机器档案", Problem.Kind.NOT_FOUND,
-                    "名字对上再拆；机器建档后才有档案可拆");
+            return fail("没有" + called + "这份机器档案", Problem.Kind.NOT_FOUND, "名字对上再拆；机器建档后才有档案可拆");
         }
         if (archive.get().removed()) {
-            return fail("「" + landmark.name() + "」已经是拆除状态", Problem.Kind.NOT_POSSIBLE_HERE,
+            return fail(called + "已经是拆除状态", Problem.Kind.NOT_POSSIBLE_HERE,
                     "要重建就照它的蓝图再下一次 machine_build");
         }
         MachineArchive target = archive.get();
+        if (target.onStructure()) {
+            return onStructure(target, null, null, step.goal().permissions());
+        }
         WorldPosition at = new WorldPosition(target.anchor().getX(), target.anchor().getY(),
                 target.anchor().getZ(), target.dimension());
         Problem offWorld = worldCheck(at);
@@ -193,6 +217,72 @@ final class MachineBuildModule implements AbilityModule {
         }
         return new StepDecision.Run(new MachineBuildInput(true, null, at, target.name(), target,
                 step.goal().permissions(), "拆掉机器「" + target.name() + "」"));
+    }
+
+    // 指物理结构 s#：结构上已经跟着一份档案就把补丁并进去；没有就按局部坐标的原点新建一份记在结构上。
+    private StepDecision onStructure(String seenId, MachineBlueprint parsed, ParamValues params, Permissions permissions) {
+        Optional<String> structure = vehicles.structureOf().apply(seenId);
+        if (structure.isEmpty()) {
+            return fail("观察编号 " + seenId + " 指的结构已经不在了", Problem.Kind.TARGET_GONE, "重新 observe 再指");
+        }
+        Optional<MachineArchive> onIt = archives.on(structure.get());
+        if (onIt.isPresent()) {
+            if (params.has("name")) {
+                return fail(seenId + " 上已经跟着档案「" + onIt.get().name() + "」，不用给 name", Problem.Kind.INVALID_PARAMETER,
+                        "去掉 name，补丁照这份档案的锚点并进去");
+            }
+            return onStructure(onIt.get(), seenId, parsed, permissions);
+        }
+        Optional<StructureWorksites.Worksite> worksite = worksite(structure.get());
+        if (worksite.isEmpty()) return noWorksite(seenId);
+        StructureOrigin origin = StructureOrigin.of(worksite.get(), Optional.empty());
+        String name = params.has("name") ? params.text("name")
+                : !worksite.get().name().isBlank() ? worksite.get().name() : "载具@" + seenId;
+        if (archives.find(name).isPresent()) {
+            return fail("档案名「" + name + "」已经有一台机器在用", Problem.Kind.INVALID_PARAMETER, "换一个 name");
+        }
+        Optional<StepDecision> over = overLimit(parsed);
+        if (over.isPresent()) return over.get();
+        String dimension = services.world().playerSpot().map(MachineWorldView.Spot::dimension).orElse("");
+        return new StepDecision.Run(new MachineBuildInput(false, parsed, at(origin.plot(), dimension), name, null, permissions,
+                "在结构 " + seenId + " 上按机器蓝图施工（原点：" + origin.describe() + "）",
+                new MachineBuildInput.OnStructure(structure.get(), seenId, worksite.get(), origin)));
+    }
+
+    // 跟在结构上的档案：补丁照档案锚点并进去（局部坐标的原点就是它），拆整台时 parsed 为 null。结构这会儿看不到照实说。
+    private StepDecision onStructure(MachineArchive archive, String seenId, MachineBlueprint parsed, Permissions permissions) {
+        Optional<StructureWorksites.Worksite> worksite = worksite(archive.structure());
+        if (worksite.isEmpty()) {
+            return vehicles.worksites().isEmpty() ? noWorksite("档案「" + archive.name() + "」")
+                    : fail("档案「" + archive.name() + "」跟在一个物理结构上，这会儿看不到那个结构（不在附近或已经拆光了）",
+                            Problem.Kind.TARGET_GONE, "走到船跟前再下达；拆回后档案会跟回世界");
+        }
+        boolean remove = parsed == null;
+        MachineBlueprint merged = remove ? null : MachinePatch.merge(archive.blueprint(), parsed);
+        if (!remove) {
+            Optional<StepDecision> over = overLimit(merged);
+            if (over.isPresent()) return over.get();
+        }
+        StructureOrigin origin = StructureOrigin.of(worksite.get(), Optional.of(archive));
+        return new StepDecision.Run(new MachineBuildInput(remove, merged, at(archive.anchor(), archive.dimension()),
+                archive.name(), archive, permissions,
+                (remove ? "拆掉结构上的机器「" : "把补丁并进结构上的档案「") + archive.name() + "」",
+                new MachineBuildInput.OnStructure(archive.structure(), seenId, worksite.get(), origin)));
+    }
+
+    private Optional<StructureWorksites.Worksite> worksite(String structureId) {
+        return vehicles.worksite(structureId);
+    }
+
+    // 认不出结构上的工地：没装能在物理结构上施工的联动，或那个结构不在附近。
+    private StepDecision noWorksite(String what) {
+        return vehicles.worksites().isEmpty()
+                ? fail("没有接上能在物理结构上施工的联动（要 Sable）", Problem.Kind.UNSUPPORTED, null)
+                : fail(what + " 指的结构不在附近，看不到", Problem.Kind.TARGET_GONE, "走近重新 observe 再指");
+    }
+
+    private static WorldPosition at(BlockPos cell, String dimension) {
+        return new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), dimension);
     }
 
     /**

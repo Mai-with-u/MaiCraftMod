@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -62,11 +63,15 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>施工与逐条改设置这两种子任务按动作推进：整台机器被生存需求打断时它们跟着暂停、松手，
  * 先到安全处再停、提前结束时的收尾、此刻能不能打断都转给它们，它们交代的事实并进这次的结果。
+ *
+ * <p>在组装好的物理结构上施工（指 s# 或跟到结构上的档案）：先等结构停稳再开工，施工中结构连着动起来就停手照实说，
+ * 结构没了（最后一块拆掉）档案标成已拆除；施工引擎换上结构上的接缝，整机比对读结构地块里的格，记下的格换成局部坐标；
+ * 安装段只装胶，部件与装后设置照实写结构上还不会。
  */
 final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
-    /** 看是否已满足 → 施工 → 装安装段 → 装部件 → 改设置 → 整机比对并落档案。 */
-    enum Phase { PRECHECK, CONSTRUCT, INSTALL, MOUNT, CONFIGURE, SETTLE }
+    /** （结构上先等停稳 →）看是否已满足 → 施工 → 装安装段 → 装部件 → 改设置 → 整机比对并落档案。 */
+    enum Phase { WAIT_STILL, PRECHECK, CONSTRUCT, INSTALL, MOUNT, CONFIGURE, SETTLE }
 
     private static final String BUILD_PURPOSE = "按机器蓝图施工";
     private static final String REMOVE_PURPOSE = "拆机器";
@@ -107,11 +112,17 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private MachineBlueprint.Part mounting;
     private MachineBlueprint.Setting configuring;
     private BlueprintCheck.Result check;
+    /** 在物理结构上施工时的那几样；在世界里为 null。 */
+    private final StructureConstruction onStructure;
+    /** 结构上施工收场的原因：开工前一直在动、施工中动起来了、结构没了；照常收场为 null。 */
+    private Problem structureStop;
 
     MachineBuildTask(MachineBuildInput input, MachineServices services, MachineArchives archives,
             WorldMemory memory, Function<Permissions, ConstructionServices> constructionServices) {
-        super("按机器蓝图施工", Phase.PRECHECK, new ProgressTracker(1200, 216000));
+        super("按机器蓝图施工", input.onStructure() == null ? Phase.PRECHECK : Phase.WAIT_STILL,
+                new ProgressTracker(1200, 216000));
         this.input = input;
+        this.onStructure = input.onStructure() == null ? null : new StructureConstruction(input.onStructure());
         this.services = services;
         this.archives = archives;
         this.memory = memory;
@@ -133,7 +144,13 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
+        // 结构上施工：结构没了、动起来了就停手，转去整机比对照实收场，不追着动着的船施工。
+        if (onStructure != null && phase != Phase.WAIT_STILL && phase != Phase.SETTLE && structureStop == null) {
+            Optional<Next<Phase>> stop = structureStops();
+            if (stop.isPresent()) return stop.get();
+        }
         return switch (phase) {
+            case WAIT_STILL -> waitStill();
             case PRECHECK -> precheck();
             case CONSTRUCT -> construct(context);
             case INSTALL -> install(context);
@@ -141,6 +158,25 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             case CONFIGURE -> configure(context);
             case SETTLE -> settle();
         };
+    }
+
+    // 结构上开工前等它停稳：真人不在飞行中加配重。等满 200 刻还在动、结构没了就照实结束，一格不动。
+    private Next<Phase> waitStill() {
+        StructureConstruction.Wait wait = onStructure.waitStill();
+        if (wait == StructureConstruction.Wait.READY) return Next.go(Phase.PRECHECK, "结构停稳了，开工");
+        return wait == StructureConstruction.Wait.WAITING ? Next.stay() : Next.fail(onStructure.cannotStart(wait));
+    }
+
+    // 施工中盯着结构：没了（最后一块拆掉）或连着动起来了就停手——手上的施工按取消收尾（已确认的照记），转去整机比对照实收场。
+    private Optional<Next<Phase>> structureStops() {
+        Optional<Problem> stop = onStructure.stopReason();
+        if (stop.isEmpty()) return Optional.empty();
+        structureStop = stop.get();
+        if (child != null) {
+            child.close();
+            child = null;
+        }
+        return Optional.of(Next.go(Phase.SETTLE, structureStop.message()));
     }
 
     // 已满足：目标是已有档案、补丁没带来任何变化，且结构与机器条目都对 → 一个动作都不做。
@@ -171,7 +207,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             }
             // 施工包成这一阶段的动作：吃饭、自卫插进来时施工跟着停下松手，建机器提前结束时它按取消收尾。
             prepared = child = new ChildTaskAction(new ConstructionTask(new ConstructionInput(site.get(),
-                    input.permissions(), purpose()), constructionServices.apply(input.permissions())), records());
+                    input.permissions(), purpose()), construction()), childRecords());
             return Next.go(Phase.CONSTRUCT, later ? "装完安装段，再放压在上面的格" : "交施工引擎放普通格与流体");
         }
         // 施工引擎在干活：它有真实进展（放下一格、挖掉一格）由动作报给整台机器，不被一分钟没进展的卡住判定掐掉。
@@ -186,10 +222,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             constructionResult = result;
         }
         if (result.status() == TaskResult.Status.FAILED) {
-            return Next.fail(result.problem());
+            return Next.fail(onStructure == null ? result.problem() : onStructure.localize(result.problem()));
         }
         if (result.status() == TaskResult.Status.PARTIAL && carriedProblem == null) {
-            carriedProblem = result.problem();
+            carriedProblem = onStructure == null ? result.problem() : onStructure.localize(result.problem());
         }
         return Next.go(nextWorkPhase(), "现场做完，" + (nothingLeft() ? "整机比对" : "装机器自己的部分"));
     }
@@ -212,30 +248,31 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (services.installedBy(installation).isPresent()) {
             return segmentFinished("");
         }
-        // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。
-        for (MachineType type : services.machineTypes()) {
-            Optional<Action> offered = type.install(installation, input.permissions());
-            if (offered.isEmpty()) {
-                continue;
-            }
+        // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。结构上只有胶这种发一包就成的装得了。
+        Optional<Action> offered = onStructure != null
+                ? onStructure.install(services.machineTypes(), installation, input.permissions())
+                : services.machineTypes().stream().map(type -> type.install(installation, input.permissions()))
+                        .flatMap(Optional::stream).findFirst();
+        if (offered.isPresent()) {
             prepared = offered.get();
             laying = prepared;
             return Next.go(Phase.INSTALL, "装 " + next.kind() + " 这一段");
         }
-        return segmentFinished(noTypeFor(installation.kind()));
+        return segmentFinished(onStructure != null ? "结构上还不会装 " + next.kind() + "（只有胶能在结构上补）"
+                : noTypeFor(installation.kind()));
     }
 
     // 一段收场：装没装成以机器类型按最终结构核对的结论为准，动作的失败原因带在说明里；
     // 装的动作顺手做成的事（清掉手上记着的接线起点）照实记进变化。
     private Next<Phase> segmentFinished(String why) {
         if (laying instanceof InstallReport report) {
-            report.changes().forEach(this::recordChange);
+            report.changes().forEach(childRecords()::change);
         }
         laying = null;
         Installation installation = absolute(installing);
         boolean done = services.installedBy(installation).isPresent();
         segmentResults.add(new MachineBuildDetails.SegmentResult(installing.kind(),
-                installation.cells().stream().map(BlockPos::toShortString).toList(), done, why));
+                installation.cells().stream().map(this::where).toList(), done, why));
         if (done) {
             recordProgress("装好了 " + installing.kind());
         } else {
@@ -260,6 +297,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             return Next.go(nextWorkPhase(), "部件做完");
         }
         mounting = next;
+        if (onStructure != null) {
+            return partFinished("结构上还不会装部件");
+        }
         PartCell part = absolute(next);
         Optional<BlockState> host = services.world().stateAt(part.host());
         if (host.isEmpty()) {
@@ -290,7 +330,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 why = "动作做完了，部件没有出现在那一面";
             }
         }
-        partResults.add(new MachineBuildDetails.PartResult(mounting.itemId(), part.host().toShortString(),
+        partResults.add(new MachineBuildDetails.PartResult(mounting.itemId(), where(part.host()),
                 part.side().getName(), done, why));
         if (done) {
             recordProgress("装上了部件 " + mounting.itemId());
@@ -311,6 +351,13 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             }
             configuring = next;
             BlockPos at = anchor.offset(next.offset());
+            if (onStructure != null) {
+                // 结构上的格改设置还不会（machine_configure 指船上的格也还不会）：照实记下没改，不去点。
+                settingResults.add(new MachineBuildDetails.SettingResult(next.key(), where(at), false, ""));
+                recordAttempt("改设置 " + next.key(), "结构上还不会改设置");
+                configuring = null;
+                return Next.go(Phase.CONFIGURE, "结构上的设置还不会改，接着下一条");
+            }
             // 这一条包成这一阶段的动作：走过去、开界面、循环切换时被打断跟着停下松手，提前结束时它按取消收尾。
             prepared = child = new ChildTaskAction(new MachineConfigureTask(new MachineConfigureInput(
                     new Target.Position(at.getX(), at.getY(), at.getZ(), null),
@@ -329,7 +376,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         boolean applied = result.status() == TaskResult.Status.DONE;
         String readback = services.readBack(anchor.offset(done.offset()), done.key());
         settingResults.add(new MachineBuildDetails.SettingResult(done.key(),
-                anchor.offset(done.offset()).toShortString(), applied, readback));
+                where(anchor.offset(done.offset())), applied, readback));
         if (applied) {
             recordProgress("「" + done.key() + "」改好了，读回 " + readback);
         } else {
@@ -341,6 +388,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
     // 整机比对与落档：结构对不对、装没装成、档案存没存住三件事分开说，互不冒充。
     private Next<Phase> settle() {
+        if (structureStop != null && structureStop.kind() == Problem.Kind.TARGET_GONE) {
+            return structureGone();
+        }
         if (check == null) {
             check = compareNow();
             recordProgress("整机比对：" + describeCheck());
@@ -350,12 +400,26 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 && partResults.stream().allMatch(MachineBuildDetails.PartResult::mounted)
                 && settingResults.stream().allMatch(MachineBuildDetails.SettingResult::applied);
         saveArchive(structureOk);
-        boolean allOk = structureOk && entriesOk && constructionDone();
+        if (onStructure != null) onStructure.finished();
+        boolean allOk = structureOk && entriesOk && constructionDone() && structureStop == null;
         String summary = "机器「" + input.name() + "」"
                 + (allOk ? (input.remove() ? "拆完了" : "建好了") : "做到一半：结构与机器条目详见结果细节");
         return allOk ? Next.done(TaskResult.done(summary))
                 : Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary)
                         .problem(problem()).build());
+    }
+
+    // 结构没了：最后一块方块拆掉后 Sable 删掉整个结构。已确认的拆放照算，跟在它上面的档案标成已拆除（蓝图留着）。
+    private Next<Phase> structureGone() {
+        onStructure.finished();
+        if (input.archive() != null && !archives.save(input.archive().markRemoved())) {
+            recordAttempt("存档案", "档案「" + input.name() + "」没存进去，施工结果不受影响");
+        }
+        if (input.remove()) {
+            return Next.done(TaskResult.done("机器「" + input.name() + "」拆完了，最后一块拆掉后结构也没了"));
+        }
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "机器「" + input.name() + "」做到一半：结构没了")
+                .problem(structureStop).build());
     }
 
     /** 档案更新：补丁并入或标拆除；存不进只记问题，不改判施工。 */
@@ -364,17 +428,25 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         MachineArchive stored;
         if (input.remove()) {
             stored = existingArchive().markRemoved();
-            // 拆掉的机器从记忆里抹掉：位置上已经没有这台机器，留着旧记录只会再骗一次。
-            memory.forget(MemoryKind.MACHINE, input.anchor());
+            // 拆掉的机器从记忆里抹掉：位置上已经没有这台机器，留着旧记录只会再骗一次。结构上的不在世界记忆里。
+            if (onStructure == null) memory.forget(MemoryKind.MACHINE, input.anchor());
         } else {
-            stored = (input.archive() != null ? input.archive()
-                    : MachineArchive.fresh(input.name(), input.anchor().dimension(), anchor, input.blueprint(), null))
+            stored = (input.archive() != null ? input.archive() : newArchive())
                     .withBlueprint(input.blueprint(), null, now, checkNote(structureOk));
-            memory.rememberMachine(input.anchor(), input.name(), now);
+            // 世界里的机器记进世界记忆；结构上的跟着结构走，地块里的格记进去没有用。
+            if (onStructure == null) memory.rememberMachine(input.anchor(), input.name(), now);
         }
         if (!archives.save(stored)) {
             recordAttempt("存档案", "档案「" + input.name() + "」没存进去，施工结果不受影响");
         }
+    }
+
+    // 新建的档案：在结构上施工就记在那个结构上（锚点是局部坐标的原点），不然记在世界里。
+    private MachineArchive newArchive() {
+        return onStructure == null
+                ? MachineArchive.fresh(input.name(), input.anchor().dimension(), anchor, input.blueprint(), null)
+                : MachineArchive.freshOn(onStructure.structureId(), input.name(), input.anchor().dimension(), anchor,
+                        input.blueprint());
     }
 
     private MachineArchive existingArchive() {
@@ -388,6 +460,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
     /** 组装问题：先说施工没做完的原因，再说机器条目哪几件没做成。 */
     private Problem problem() {
+        if (structureStop != null) {
+            return structureStop;
+        }
         if (carriedProblem != null) {
             return carriedProblem;
         }
@@ -442,9 +517,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (check != null && !check.complete()) {
             notes.add("有格没加载，整机比对下不了结论");
         }
-        return new MachineBuildDetails(input.name(), input.anchor(), input.remove(),
+        return new MachineBuildDetails(input.name(), onStructure == null ? input.anchor() : null, input.remove(),
                 check == null ? null : check.complete(), counts, constructionCells(),
-                segmentResults, partResults, settingResults, String.join("；", notes));
+                segmentResults, partResults, settingResults, String.join("；", notes),
+                onStructure == null ? null : onStructure.seenId(), onStructure == null ? null : onStructure.origin());
     }
 
     /** 施工子任务结果里的每格结局计数，两遍施工加在一起；没跑到施工（例如已满足提前收场）给空表。 */
@@ -460,6 +536,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
 
     @Override protected String describePhase(Phase value) {
         return switch (value) {
+            case WAIT_STILL -> "等结构停稳";
             case PRECHECK -> "看是否已满足";
             case CONSTRUCT -> "施工：普通格与流体";
             case INSTALL -> "装安装段";
@@ -604,7 +681,23 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     private BlueprintCheck.Result compareNow() {
-        return BlueprintCheck.compare(target, worldView, Set.of());
+        return BlueprintCheck.compare(target, onStructure == null ? worldView : onStructure.blocks(), Set.of());
+    }
+
+    /** 施工引擎用的接缝：在结构上施工换成结构上的读格、靠近、点、挖。 */
+    private ConstructionServices construction() {
+        ConstructionServices onLand = constructionServices.apply(input.permissions());
+        return onStructure == null ? onLand : onStructure.services(onLand, input.permissions());
+    }
+
+    /** 施工与装段动作的记账口：结构上记下的格换成局部坐标再并进结果。 */
+    private TaskRecords childRecords() {
+        return onStructure == null ? records() : onStructure.records(records());
+    }
+
+    /** 结果里写一格：世界里照写，结构上写局部坐标。 */
+    private String where(BlockPos at) {
+        return onStructure == null ? at.toShortString() : onStructure.local(at);
     }
 
     /** 没对上的格数：要施工引擎动手的，加没加载下不了结论的。 */

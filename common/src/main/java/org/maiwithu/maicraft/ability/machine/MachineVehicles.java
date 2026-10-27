@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
 import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
@@ -14,7 +15,7 @@ import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 /**
  * 机器能力看载具、改操纵表、给列车定时刻表要的几样：联动登记的读载具办法与定时刻表办法、操纵表，
  * 和把观察编号 s#、e# 换成结构身份、实体编号的查法。载具也是机器：machine_inspect 指 s# 时给出 vehicle 一节与操纵表，
- * machine_configure 指 s# 时改操纵表、指列车车厢 e# 时定时刻表。
+ * machine_configure 指 s# 时改操纵表、指列车车厢 e# 时定时刻表，machine_build 指 s# 时在停稳的结构上施工。
  *
  * @param readers     读载具的办法，按联动清单顺序；第一个读得了的来读
  * @param controls    操纵表（试过的、LLM 定的按结构身份存着）
@@ -22,10 +23,19 @@ import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
  * @param schedulers  给列车定时刻表的办法（machine_configure 指列车车厢 e# 时用）
  * @param entityOf    观察编号 e# 换成游戏里的实体编号；不是实体或已经不在为空
  * @param stabilizers 读飞行稳定器的办法：看载具时把装着的稳定器列进控制回路（模组没装时为空）
+ * @param worksites   物理结构上的工地：在停稳的结构上施工、看载具时给局部坐标（模组没装时为空）
  */
 public record MachineVehicles(List<VehicleReader> readers, VehicleControls controls,
                               Function<String, Optional<String>> structureOf, List<TrainScheduler> schedulers,
-                              Function<String, Optional<Integer>> entityOf, List<FlightStabilizers> stabilizers) {
+                              Function<String, Optional<Integer>> entityOf, List<FlightStabilizers> stabilizers,
+                              List<StructureWorksites> worksites) {
+
+    /** 没有物理结构工地的一份（测试与没装 Sable 时用）。 */
+    public MachineVehicles(List<VehicleReader> readers, VehicleControls controls,
+            Function<String, Optional<String>> structureOf, List<TrainScheduler> schedulers,
+            Function<String, Optional<Integer>> entityOf, List<FlightStabilizers> stabilizers) {
+        this(readers, controls, structureOf, schedulers, entityOf, stabilizers, List.of());
+    }
 
     public MachineVehicles {
         readers = List.copyOf(readers);
@@ -34,6 +44,12 @@ public record MachineVehicles(List<VehicleReader> readers, VehicleControls contr
         schedulers = List.copyOf(schedulers);
         Objects.requireNonNull(entityOf, "entityOf");
         stabilizers = List.copyOf(stabilizers);
+        worksites = List.copyOf(worksites);
+    }
+
+    /** 这个结构上的工地：第一个认得的联动给；没装模组、结构不在附近为空。 */
+    Optional<StructureWorksites.Worksite> worksite(String structureId) {
+        return worksites.stream().map(found -> found.at(structureId)).flatMap(Optional::stream).findFirst();
     }
 
     /** 读这个结构：第一个读得了的来读。 */

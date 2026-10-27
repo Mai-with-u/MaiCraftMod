@@ -1108,7 +1108,7 @@
           "name": "blueprint",
           "type": "object",
           "required": false,
-          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置；和 design_id 二选一，operation=remove 时不给"
+          "doc": "机器蓝图的正文（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置；和 design_id 二选一，operation=remove 时不给；target 是物理结构 s# 时偏移按结构局部坐标"
         },
         {
           "name": "design_id",
