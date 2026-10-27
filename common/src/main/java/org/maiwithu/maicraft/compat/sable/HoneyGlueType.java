@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.StepsInOrder;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -107,11 +108,21 @@ final class HoneyGlueType implements MachineType {
 
     // 蜂蜜胶换到主手 → 走到框里最低处那块方块跟前 → 发包 → 等那块胶出现。
     @Override public Optional<Action> install(Installation installation, Permissions permissions) {
+        return glue(installation, permissions, services.approach());
+    }
+
+    // 结构上照样发一包：两角是地块坐标（服务器不核距离、按框生成），走过去用结构上的靠近，上船或站到船边。
+    @Override public Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+            BringsPlayerClose reach) {
+        return glue(installation, permissions, reach);
+    }
+
+    private Optional<Action> glue(Installation installation, Permissions permissions, BringsPlayerClose reach) {
         if (!KIND.equals(installation.kind()) || installation.cells().size() != 2) return Optional.empty();
         HoneyGluePlan.Box box = boxOf(installation);
         return Optional.of(new StepsInOrder("用蜂蜜胶框住 " + box.min().toShortString() + " 到 " + box.max().toShortString(),
                 List.of(new StepsInOrder.Step("蜂蜜胶换到主手", this::toMainhand),
-                        new StepsInOrder.Step("走到这一框跟前", () -> services.approach().toward(
+                        new StepsInOrder.Step("走到这一框跟前", () -> reach.toward(
                                 ApproachTarget.ofBlock(standNear(box)), permissions)),
                         new StepsInOrder.Step("粘上", () -> new Glues(box)))));
     }

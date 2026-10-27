@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
 import org.maiwithu.maicraft.compat.sable.SableCompat;
 import org.maiwithu.maicraft.compat.sable.SimulatedCompat;
+import org.maiwithu.maicraft.compat.sable.StructureScans;
 import org.maiwithu.maicraft.compat.flightcontrol.FlightControlCompat;
 import org.maiwithu.maicraft.compat.createjetpack.CreateJetpackCompat;
 import org.maiwithu.maicraft.compat.create.CreateCompat;
@@ -65,6 +66,8 @@ public final class ClientCompatCatalog {
 
     /** 清单里支持的全部模组，按接入先后排。 */
     public static List<SupportedMod<CompatModule>> mods() {
+        // Sable 与 Simulated 两个入口共用一本逐格读的记事本：在船上施工改了方块作废一次，两边都照新结构读。
+        StructureScans scans = new StructureScans();
         return List.of(
                 // 精妙背包：实测过 3.25.69（精妙核心 1.4.72）；装了 3.26 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
@@ -101,14 +104,14 @@ public final class ClientCompatCatalog {
                         () -> new CreateJetpackCompat(new JetpackReads())),
                 // Sable（物理结构）：按 2.0.3 编译，实测实例装的就是它；装了 2.1 及以上不登记。
                 new SupportedMod<>(SableCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),
-                        () -> new SableCompat(new SableStructureReads())),
+                        () -> new SableCompat(new SableStructureReads(), scans)),
                 // Create: Flight Control（飞行稳定器）：作者只在 Modrinth 发，那里最早是 0.5.1，按它编译；用到的字段与设置包
                 // 和实测实例装的 0.5.0 一致；装了 0.6 及以上不登记。
                 new SupportedMod<>(FlightControlCompat.MOD_ID, "Create: Flight Control", new VerifiedVersions("0.5.0", "0.6"),
                         () -> new FlightControlCompat(new FlightControlPartReads())),
                 // Simulated（载具部件）：按 1.3.0 编译，实测实例的 Create Aeronautics 一套里打着它；装了 1.4 及以上不登记。
                 new SupportedMod<>(SimulatedCompat.MOD_ID, "Simulated 载具部件", new VerifiedVersions("1.3.0", "1.4"),
-                        () -> new SimulatedCompat(new SimulatedPartReads(), new SableStructureReads())),
+                        () -> new SimulatedCompat(new SimulatedPartReads(), new SableStructureReads(), scans)),
                 // 通用机械：按 10.7.19 编译，实测实例装的是 10.7.19.85；装了 10.8 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(MekanismCompat.MOD_ID, "通用机械", new VerifiedVersions("10.7.19", "10.8"),
                         () -> new MekanismCompat(new MekanismClientReads())),

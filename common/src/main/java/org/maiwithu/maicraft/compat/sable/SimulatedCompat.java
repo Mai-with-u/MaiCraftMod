@@ -31,12 +31,18 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
 
     private final SimulatedParts parts;
     private final SableStructures structures;
-    private final StructureScans scans = new StructureScans();
+    private final StructureScans scans;
 
     public SimulatedCompat(SimulatedParts parts, SableStructures structures) {
+        this(parts, structures, new StructureScans());
+    }
+
+    /** @param scans 逐格读的记事本，和 Sable 的入口共用一本 */
+    public SimulatedCompat(SimulatedParts parts, SableStructures structures, StructureScans scans) {
         super(MOD_ID, "Simulated 载具部件");
         this.parts = Objects.requireNonNull(parts, "parts");
         this.structures = Objects.requireNonNull(structures, "structures");
+        this.scans = Objects.requireNonNull(scans, "scans");
     }
 
     @Override public void contribute(CompatRegistry registry) {

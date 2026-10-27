@@ -181,6 +181,8 @@ final class MachineTestDoubles {
         /** 装安装段与装部件的动作脚本：每次调用弹一个；空了给空，按"这种机器不给装"对待。 */
         final Deque<Action> installActions = new ArrayDeque<>();
         final Deque<Action> mountActions = new ArrayDeque<>();
+        /** 在物理结构上装安装段的动作脚本；空了给空，按"结构上不会装"对待。 */
+        final Deque<Action> structureInstallActions = new ArrayDeque<>();
         /** 动手顺序的流水：施工、装段、装部件、改设置谁先谁后从这里看。 */
         final List<String> touched = new ArrayList<>();
         List<ExchangePoint> ports = List.of();
@@ -256,6 +258,13 @@ final class MachineTestDoubles {
         @Override public Optional<Action> install(Installation installation, Permissions permissions) {
             touched.add("install:" + installation.kind());
             return Optional.ofNullable(installActions.poll());
+        }
+
+        // 在物理结构上装：只有测试给了结构上的装法（胶）才肯装，记下是在结构上装的。
+        @Override public Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+                BringsPlayerClose reach) {
+            touched.add("install-on-structure:" + installation.kind());
+            return Optional.ofNullable(structureInstallActions.poll());
         }
 
         @Override public boolean installed(Installation installation) {

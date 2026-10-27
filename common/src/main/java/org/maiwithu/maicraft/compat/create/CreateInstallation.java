@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -29,6 +30,15 @@ interface CreateInstallation {
 
     /** 用 Create 自己的方式装这一段的动作。 */
     Action install(Installation installation, Permissions permissions);
+
+    /**
+     * 在组装好的物理结构上装这一段（格是地块坐标，走过去用给的靠近）：只发一包、人站得够近就行的（强力胶）给动作，
+     * 要瞄准点击的在结构上还不会，给空。
+     */
+    default Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+            BringsPlayerClose reach) {
+        return Optional.empty();
+    }
 
     /** 这一段现在是不是按要求装成了，按最终结构核对。 */
     boolean installed(ClientLevel level, Installation installation);

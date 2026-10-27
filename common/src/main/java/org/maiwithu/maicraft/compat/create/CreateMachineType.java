@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
@@ -141,6 +142,13 @@ final class CreateMachineType implements MachineType {
     @Override public Optional<Action> install(Installation wanted, Permissions permissions) {
         if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
         return Optional.of(installation.get().install(wanted, permissions));
+    }
+
+    // 在物理结构上装：只有发一包就成的那种（强力胶）给动作，走过去用结构上的靠近。
+    @Override public Optional<Action> installOnStructure(Installation wanted, Permissions permissions,
+            BringsPlayerClose reach) {
+        if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
+        return installation.get().installOnStructure(wanted, permissions, reach);
     }
 
     @Override public boolean installed(Installation wanted) {

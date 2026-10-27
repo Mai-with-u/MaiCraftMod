@@ -9,6 +9,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -72,6 +73,15 @@ public interface MachineType {
 
     /** 用模组自己的方式装这一段（两端的轴已就位后用传送带连上）；这种机器不管这种安装段时给空。 */
     Optional<Action> install(Installation installation, Permissions permissions);
+
+    /**
+     * 在组装好的物理结构上装这一段：格是结构的地块坐标，走过去用 {@code reach}（它会上船或站到船边够得着的地方）。
+     * 只发一包、人站得够近就行的安装段（胶）装得了；要瞄准点击的（传送带、链条、机械臂）在结构上还不会，给空。
+     */
+    default Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+            BringsPlayerClose reach) {
+        return Optional.empty();
+    }
 
     /** 这一段现在是不是按要求装成了；按最终结构核对，给整机比对用。 */
     boolean installed(Installation installation);

@@ -26,11 +26,17 @@ public final class SableCompat extends CompatModule implements StructureReads {
     /** 服务端只读操作：一个物理结构的受力。 */
     public static final String FORCES_OPERATION = "sable.body";
     private final SableStructures structures;
-    private final StructureScans scans = new StructureScans();
+    private final StructureScans scans;
 
     public SableCompat(SableStructures structures) {
+        this(structures, new StructureScans());
+    }
+
+    /** @param scans 逐格读的记事本，和 Simulated 的入口共用一本：在船上施工后作废一次两边都照新结构读 */
+    public SableCompat(SableStructures structures, StructureScans scans) {
         super(MOD_ID, "Sable 物理结构");
         this.structures = Objects.requireNonNull(structures, "structures");
+        this.scans = Objects.requireNonNull(scans, "scans");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -41,6 +47,8 @@ public final class SableCompat extends CompatModule implements StructureReads {
         registry.travelMode(this, services -> new DeckMode(this, services));
         // 受力只在服务端：看载具的受力经只读操作 sable.body 问（质量、重心、各处的力，两种情况与配重建议）。
         registry.serverRead(this, FORCES_OPERATION, 1);
+        // 停稳的结构上施工（machine_build 指 s#）：读格、上船或站到船边去够、按结构的轴放、对着结构上的格点和挖。
+        registry.structureWorksites(this, services -> new SableWorksites(this, services));
     }
 
     /** 和一个区域沾边的物理结构；见 {@link SableStructures#near}。 */
@@ -61,5 +69,10 @@ public final class SableCompat extends CompatModule implements StructureReads {
     /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
     @Override public StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
         return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local));
+    }
+
+    /** 这个结构下次重读（在船上施工改了方块）。 */
+    void forget(String id) {
+        scans.forget(id);
     }
 }

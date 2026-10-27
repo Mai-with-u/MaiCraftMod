@@ -15,6 +15,7 @@ import java.util.Optional;
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.ability.quest.spi.QuestBookOperations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
@@ -94,6 +95,7 @@ public final class CompatRegistry {
     private final Slot<TrainScheduler> trainSchedulers = slot("定列车时刻表的办法", CompatTrainScheduler::new);
     private final Slot<RideAlong> rideAlongs = slot("同乘的办法", CompatRideAlong::new);
     private final Slot<FlightStabilizers> flightStabilizers = slot("飞行稳定器", CompatFlightStabilizers::new);
+    private final Slot<StructureWorksites> structureWorksites = slot("物理结构上的工地", CompatStructureWorksites::new);
     private final List<String> decisions = new ArrayList<>();
 
     /** 声明一种槽：建这个动作同时把它放进槽集合，回滚按槽集合撤，不用另记一份。 */
@@ -287,6 +289,11 @@ public final class CompatRegistry {
         flightStabilizers.add(module, build);
     }
 
+    /** 联动入口交一种在物理结构上施工的工地（Sable）的建法：进世界时建，包一层后交给机器施工；模组停用后认不出结构。 */
+    public void structureWorksites(CompatModule module, Function<PlayerServices, StructureWorksites> build) {
+        structureWorksites.add(module, build);
+    }
+
     /** 联动入口交一种观察（电梯、车站、列车、物理结构在 observe 里的样子）：包一层后交给场景；模组停用后不再报。 */
     public void modSight(CompatModule module, ModSight sight) {
         modSights.add(module, sight);
@@ -403,6 +410,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的飞行稳定器读写办法；规矩同物品来源。 */
     public List<FlightStabilizers> flightStabilizers(PlayerServices services) {
         return flightStabilizers.build(services);
+    }
+
+    /** 进世界时建联动模组的物理结构工地；规矩同物品来源。 */
+    public List<StructureWorksites> structureWorksites(PlayerServices services) {
+        return structureWorksites.build(services);
     }
 
     /** 进世界时建联动模组的挖掘加速；规矩同物品来源。 */

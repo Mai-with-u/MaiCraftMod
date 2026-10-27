@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.StepsInOrder;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -116,12 +117,22 @@ final class GlueInstallation implements CreateInstallation {
 
     // 拿一支强力胶 → 走到第二角跟前 → 照 Create 选区确认那一下发包 → 等那块胶出现。
     @Override public Action install(Installation installation, Permissions permissions) {
+        return glue(installation, permissions, services.approach());
+    }
+
+    // 结构上照样是发一包：两角是地块坐标，服务器按结构位姿核人离第二角多远，走过去用结构上的靠近（上船或站到船边）。
+    @Override public Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+            BringsPlayerClose reach) {
+        return Optional.of(glue(installation, permissions, reach));
+    }
+
+    private Action glue(Installation installation, Permissions permissions, BringsPlayerClose reach) {
         BlockPos from = installation.cells().get(0);
         BlockPos to = installation.cells().get(1);
         return new StepsInOrder("用强力胶粘 " + from.toShortString() + " 到 " + to.toShortString(), List.of(
                 new StepsInOrder.Step("拿强力胶", () -> services.needs().actionFor(
                         new ItemRequest(WantedItem.ofItem(GLUE), 1, "粘装置"), permissions)),
-                new StepsInOrder.Step("走到第二角跟前", () -> services.approach().toward(ApproachTarget.ofBlock(to), permissions)),
+                new StepsInOrder.Step("走到第二角跟前", () -> reach.toward(ApproachTarget.ofBlock(to), permissions)),
                 new StepsInOrder.Step("粘上", () -> new Glues(from, to))));
     }
 

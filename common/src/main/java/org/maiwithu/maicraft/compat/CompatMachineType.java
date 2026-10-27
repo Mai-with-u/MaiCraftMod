@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -85,6 +86,11 @@ public final class CompatMachineType implements MachineType {
 
     @Override public Optional<Action> install(Installation installation, Permissions permissions) {
         return act(() -> type.install(installation, permissions));
+    }
+
+    @Override public Optional<Action> installOnStructure(Installation installation, Permissions permissions,
+            BringsPlayerClose reach) {
+        return act(() -> type.installOnStructure(installation, permissions, reach));
     }
 
     @Override public boolean installed(Installation installation) {
