@@ -107,11 +107,55 @@ class FetchesFoodTest {
     }
 
     @Test
-    void 叫得出名字的有就先拿它_不拿生肉这类() {
+    void 近处能打猎就不绕远拿面包() {
+        // 门口有羊（打猎报价 2 格），面包合成要走 20 格：直接打猎拿肉，不为熟食绕远。
         FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 2d, "#c:foods/bread", 20d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
         assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
+    void 一样近时熟食优先_不先吃生肉() {
+        FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 5d, "#c:foods/bread", 5d));
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
         assertEquals(List.of("#c:foods/bread"), needs.asked);
+    }
+
+    @Test
+    void 只有远处的面包时还是去拿面包() {
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 20d));
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#c:foods/bread"), needs.asked);
+    }
+
+    @Test
+    void 弄不成换下一类不算真实进展() {
+        // 面包弄不成、换熟肉：换类别只是换个想法再试，身体没动，报告的状态不带进展，
+        // 不然每换一类都给停滞守卫续命，站桩一晚上也判不出卡住。
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 2d, "#c:foods/cooked_meat", 8d)) {
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                asked.add(request.wanted().specifier());
+                boolean bread = request.wanted().specifier().equals("#c:foods/bread");
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return bread ? ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "面包弄不到"))
+                                : ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "替身去拿";
+                    }
+                };
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        // 第一刻去拿面包，面包当场失败：换下一类的这一刻返回的状态不带进展。
+        ActionStatus afterSwitch = fetch.tick(at(0));
+        assertInstanceOf(ActionStatus.Running.class, afterSwitch);
+        assertEquals(false, ((ActionStatus.Running) afterSwitch).progressed());
     }
 
     @Test

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival.hunger;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
@@ -19,8 +20,9 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 饿了身上没吃的：像玩家一样去弄点现成的口粮。按面包、熟肉、熟鱼、蔬菜、水果几类挨个问拿东西的引擎哪一类最近
- * （网络里、箱子里有就拿，没有再做、再打猎），挑最近的那一类拿几件；有预算，超时或哪儿都没有如实说。
+ * 饿了身上没吃的：像玩家一样去弄点现成的口粮。面包、熟肉、熟鱼、蔬菜、水果几类和"能吃的口粮"一大类
+ * （含生肉、模组食物）同一轮问拿东西的引擎哪类最近（网络里、箱子里有就拿，没有再做、再打猎），
+ * 挑最近的那类拿几件，一样近时熟食优先；有预算，超时或哪儿都没有如实说。
  * 没弄满也不要紧：吃饭任务每刻看身上，弄到第一件这会儿能吃的（打到的生肉、烤好的第一块熟肉）就把这里叫停、先吃。
  */
 final class FetchesFood implements Action {
@@ -67,20 +69,23 @@ final class FetchesFood implements Action {
         }
         ActionStatus status = current.tick(context);
         // 这一类问价时说有、去弄却没弄成（报价太乐观）：换下一类，不就此饿着。
+        // 换类别只是换个想法再试，身体没动、东西没进包，不算真实进展——算进展会让停滞守卫永不熔断。
         if (status instanceof ActionStatus.Failed failed) {
             current.close();
             current = null;
             lastFailure = failed.problem();
-            return ActionStatus.progressed();
+            return ActionStatus.running();
         }
         return status;
     }
 
-    // 挨类问一句要走多远（只问价不拿）：问得出的里面挑最近的；面包、熟肉这几类都弄不到，
-    // 再问"能吃的口粮"一大类（模组食物、生肉都算），不因为叫不出名字就饿着。
+    // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮问价，挑报价最近的去拿：
+    // 面包虽常有小麦合成报价，但远处有羊有鸡时打猎更近，不该绕远去做面包；一样近时按 KINDS 的顺序挑，
+    // 熟的、不用再加工的排前面，生肉是饿急了的备选。
     private Optional<ItemRequest> nearestKind() {
-        Optional<ItemRequest> named = nearestOf(KINDS);
-        return named.isPresent() ? named : nearestOf(List.of(EverydayFood.TAG));
+        List<String> all = new ArrayList<>(KINDS);
+        all.add(EverydayFood.TAG);
+        return nearestOf(all);
     }
 
     private Optional<ItemRequest> nearestOf(List<String> kinds) {
