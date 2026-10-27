@@ -13,19 +13,21 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.network.ServerOperationException;
+import org.maiwithu.maicraft.server.compat.AskedCell;
 import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 import org.maiwithu.maicraft.server.compat.ServerCompatRegistry;
 
 /**
- * Sable（物理结构）的服务端联动入口：登记只读操作 sable.forces——客户端问一个物理结构的受力，回答质量、重心、惯性、
+ * Sable（物理结构）的服务端联动入口：登记只读操作 sable.body——客户端问一个物理结构的受力，回答质量、重心、惯性、
  * 速度，开着动力与关着动力两种情况往哪边倒、倒得多快，升力比重量；要配重时附几处放一块铁块（或给定方块）能让两种情况
  * 都倒得慢的位置。各处的力要打开 Sable 的记账才记得到：第一次问时打开，回答写明下一刻再问。只读，不施力、不改结构。
+ * 只答重心离角色不远的结构（和按格问的只读操作同一个距离），远处别人的船不回答，不让它变成远程跟踪船在哪。
  */
 public final class SableServerCompat extends ServerCompatModule {
 
     public static final String MOD_ID = "sable";
-    /** 只读操作的名字：machine_inspect 看载具的受力经它问。 */
-    public static final String FORCES_OPERATION = "sable.forces";
+    /** 只读操作的名字：machine_inspect 看载具的受力经它问，和客户端联动问的是同一个名字。 */
+    public static final String FORCES_OPERATION = "sable.body";
     /** 配重最多试多少个空格、给几处。 */
     static final int CELL_LIMIT = 4096;
     static final int TOP = 5;
@@ -52,14 +54,22 @@ public final class SableServerCompat extends ServerCompatModule {
             throw ServerOperationException.notApplied("bad_request", "要给 structure（物理结构的身份）");
         }
         String id = request.get("structure").getAsString();
-        Optional<StructureForceReads.Forces> found = call("读物理结构的受力", () -> reads.forces(level, id, true));
+        // 先只读、不打开记账：认出这个结构，核对它的重心离角色近不近；远处的船既不回答，也不替它打开记账。
+        Optional<StructureForceReads.Forces> found = call("读物理结构的受力", () -> reads.forces(level, id, false));
         if (found.isEmpty()) throw ServerOperationException.notApplied("not_found", "这个世界里没有这个物理结构");
         StructureForceReads.Forces forces = found.get();
+        Optional<Vec3> centerWorld = call("换到世界坐标", () -> reads.toWorld(level, id, forces.center()));
+        if (centerWorld.isEmpty()) throw ServerOperationException.notApplied("not_found", "这个世界里没有这个物理结构");
+        if (!near(player.position(), centerWorld.get())) {
+            throw ServerOperationException.notApplied("too_far", "这个物理结构离角色太远，只答附近的");
+        }
+        // 离得近、还没在记账：现在打开，这一次照实说下一刻再问才有各处的力。
+        if (!forces.tracking()) call("打开受力记账", () -> reads.forces(level, id, true));
         JsonObject out = new JsonObject();
         out.addProperty("tracking", forces.tracking());
         out.addProperty("mass", ForceBalance.round(forces.mass()));
         out.add("center", vector(forces.center()));
-        call("换到世界坐标", () -> reads.toWorld(level, id, forces.center())).ifPresent(world -> out.add("center_world", vector(world)));
+        out.add("center_world", vector(centerWorld.get()));
         out.add("inertia", vector(forces.inertia()));
         out.add("gravity", vector(forces.gravity()));
         out.add("velocity", vector(forces.velocity()));
@@ -106,6 +116,11 @@ public final class SableServerCompat extends ServerCompatModule {
             out.addProperty("ballast_cells_tried", cells.size());
         }
         return out;
+    }
+
+    /** 结构的重心离角色够不够近：和按格问的只读操作同一个距离。 */
+    static boolean near(Vec3 player, Vec3 centerWorld) {
+        return player.distanceToSqr(centerWorld) <= (double) AskedCell.MAX_DISTANCE * AskedCell.MAX_DISTANCE;
     }
 
     private static JsonObject caseJson(ForceBalance.Case found) {
