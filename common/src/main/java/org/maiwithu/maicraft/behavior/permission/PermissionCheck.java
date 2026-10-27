@@ -219,7 +219,7 @@ public final class PermissionCheck {
                 "要用的话，把这次任务的 use_rare_items 设为 true"));
     }
 
-    /** 被拒的许可问题升级成向 LLM 提问：只有 NEED_APPROVAL 升级，其余原样留给重试策略。 */
+    /** 被拒的许可问题升级成向 LLM 提问：只有 NEED_APPROVAL 升级，其余原样留给调用方再试、换办法或结束。 */
     public Optional<Question> approvalQuestion(Problem refusal) {
         return QuestionEscalation.escalate(refusal);
     }

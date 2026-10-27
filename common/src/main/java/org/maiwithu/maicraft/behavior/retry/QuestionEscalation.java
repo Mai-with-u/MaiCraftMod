@@ -27,7 +27,7 @@ public final class QuestionEscalation {
 
     /**
      * 许可墙升级为提问：只有超出许可（{@code NEED_APPROVAL}）的失败才升级，
-     * 其他种类一律不问，让调用方按重试策略继续走。返回的提问把卡在哪的事实原样写进问句，
+     * 其他种类一律不问，让调用方自己决定再试、换办法还是结束。返回的提问把卡在哪的事实原样写进问句，
      * 建议里怎样能继续就作为默认做法列为第一个选项。
      */
     public static Optional<Question> escalate(Problem refusal) {

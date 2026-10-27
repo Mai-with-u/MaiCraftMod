@@ -33,7 +33,7 @@ public sealed interface StepDecision {
      * <p>decideAgain 为 false 时，任务的结果就是这一步的结果：成功算完成，失败带着事实结束。
      * 为 true 时，任务结束后（无论成败）回来重新决定这一步：决定能从
      * {@link StepContext#taskResults()} 看到刚结束的结果——成功了看这一步是否已经满足，
-     * 失败了按重试策略换办法，或者带着事实结束。
+     * 失败了换办法，或者带着事实结束。
      */
     record Run(TaskInput input, boolean decideAgain) implements StepDecision {
         public Run {
