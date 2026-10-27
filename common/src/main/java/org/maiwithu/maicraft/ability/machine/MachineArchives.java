@@ -5,11 +5,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -18,6 +20,8 @@ import com.google.gson.JsonParser;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
+import org.maiwithu.maicraft.behavior.construction.CellKind;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.construction.PlannedCellCodec;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -26,7 +30,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
  * 机器档案库：按世界把每台机器的档案存成一篇文档，键是档案名。
  * 存不进去（库坏了、超预算）时保存返回假，施工照常结算，只是档案没留住；读不到按没有这台机器对待。
  */
-final class MachineArchives {
+final class MachineArchives implements ArchivedMachines {
 
     /** 文档库里的范围名：机器档案都存这个范围下，与别的用途互不覆盖。 */
     static final String SCOPE = "machine-archive";
@@ -47,6 +51,45 @@ final class MachineArchives {
         try {
             String json = documents.read(SCOPE, worldKey, key(name), DOCUMENT_LIMIT);
             return json == null ? Optional.empty() : Optional.of(decode(name, json));
+        } catch (IOException | RuntimeException broken) {
+            return Optional.empty();
+        }
+    }
+
+    // 按一格找档案：库里没有位置索引，逐篇读这个世界的机器档案，挑维度对得上、没拆、声明了这一格要放方块的。
+    // 只在组装载具这类一次性的事里用，档案不多，逐篇读省得另维护一份会和档案对不上的索引；读不出的那篇跳过。
+    @Override public Optional<Machine> covering(String dimension, BlockPos cell) {
+        List<String> keys;
+        try {
+            keys = documents.keys(SCOPE, worldKey);
+        } catch (IOException broken) {
+            return Optional.empty();
+        }
+        for (String key : keys) {
+            Optional<MachineArchive> archive = readKey(key);
+            if (archive.isEmpty() || archive.get().removed() || !archive.get().dimension().equals(dimension)) continue;
+            Set<BlockPos> blocks = blocksOf(archive.get());
+            if (blocks.contains(cell)) return Optional.of(new Machine(archive.get().name(), blocks));
+        }
+        return Optional.empty();
+    }
+
+    // 档案落地后声明要放方块的格：锚点加偏移；清空与倒桶的格不是这台机器的方块。
+    static Set<BlockPos> blocksOf(MachineArchive archive) {
+        Set<BlockPos> blocks = new HashSet<>();
+        for (PlannedCell cell : archive.blueprint().cells()) {
+            if (cell.kind() == CellKind.BLOCK) blocks.add(archive.anchor().offset(cell.pos()));
+        }
+        return blocks;
+    }
+
+    // 按库里的键读一篇：名字取正文里存的那个（键是小写过的）。
+    private Optional<MachineArchive> readKey(String key) {
+        try {
+            String json = documents.read(SCOPE, worldKey, key, DOCUMENT_LIMIT);
+            if (json == null) return Optional.empty();
+            JsonObject root = JsonParser.parseString(json).getAsJsonObject();
+            return Optional.of(decode(root.has("name") ? root.get("name").getAsString() : key, json));
         } catch (IOException | RuntimeException broken) {
             return Optional.empty();
         }

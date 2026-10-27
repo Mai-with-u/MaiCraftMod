@@ -9,6 +9,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
+import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -37,6 +38,15 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 public final class MachineAbilities {
 
     private MachineAbilities() {
+    }
+
+    /**
+     * 已建档的机器，按一格找它属于哪一台：和机器能力存档案用同一个文档库与世界身份编号，读的是同一批档案。
+     * 组装载具前补胶要知道整艘船是哪些方块，就从这里拿。
+     */
+    public static ArchivedMachines archivedMachines(DocumentStore worldDocuments, String worldKey) {
+        return new MachineArchives(Objects.requireNonNull(worldDocuments, "worldDocuments"),
+                Objects.requireNonNull(worldKey, "worldKey"));
     }
 
     /**

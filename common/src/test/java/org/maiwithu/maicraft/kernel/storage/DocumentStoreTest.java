@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -25,6 +26,18 @@ class DocumentStoreTest {
         assertTrue(store.write("state", identity("world-a"), "checkpoint", "{\"hp\":10}", false));
         assertTrue(store.contains("state", identity("world-a"), "checkpoint"));
         assertEquals("{\"hp\":10}", store.read("state", identity("world-a"), "checkpoint", LIMIT));
+    }
+
+    @Test
+    void keysListOneScopeAndIdentityInOrder(@TempDir Path temp) throws IOException {
+        var store = new DocumentStore(temp.resolve("state.sqlite"));
+        assertEquals(List.of(), store.keys("machine", identity("world-a")), "库还没建时是空表");
+        store.write("machine", identity("world-a"), "b", "{}", false);
+        store.write("machine", identity("world-a"), "a", "{}", false);
+        store.write("machine", identity("world-b"), "c", "{}", false);
+        store.write("state", identity("world-a"), "d", "{}", false);
+        // 只列同一范围、同一世界的键：别的世界、别的用途的文档不混进来。
+        assertEquals(List.of("a", "b"), store.keys("machine", identity("world-a")));
     }
 
     @Test

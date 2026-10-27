@@ -8,6 +8,8 @@ import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.UnaryOperator;
 import org.sqlite.JDBC;
 import org.sqlite.SQLiteConfig;
@@ -59,6 +61,23 @@ public final class DocumentStore {
             statement.setString(1, scope); statement.setString(2, identity); statement.setString(3, key);
             try (var result = statement.executeQuery()) { return result.next(); }
         } catch (SQLException failure) { throw new IOException("document_lookup_failed", failure); }
+    }
+
+    /**
+     * 一个范围、一个世界身份下所有文档的键，按键排序；库文件还不存在时是空表。
+     * 只列键不读正文：要按内容找（例如哪份机器档案盖住了某一格）的调用方，再逐篇按键读。
+     */
+    public List<String> keys(String scope, String identity) throws IOException {
+        if (Files.notExists(file)) return List.of();
+        try (var connection = open(); var statement = connection.prepareStatement(
+                "SELECT document_key FROM documents WHERE scope=? AND identity_key=? ORDER BY document_key")) {
+            statement.setString(1, scope); statement.setString(2, identity);
+            List<String> keys = new ArrayList<>();
+            try (var result = statement.executeQuery()) {
+                while (result.next()) keys.add(result.getString(1));
+            }
+            return List.copyOf(keys);
+        } catch (SQLException failure) { throw new IOException("document_list_failed", failure); }
     }
 
     /**

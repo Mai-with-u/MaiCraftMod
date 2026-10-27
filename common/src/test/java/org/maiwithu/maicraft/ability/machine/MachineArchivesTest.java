@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 
@@ -84,6 +85,27 @@ class MachineArchivesTest {
         MachineArchive read = archives.find("压机").orElseThrow();
         assertEquals(2, read.blueprint().cells().size());
         assertEquals(Optional.of("net1"), Optional.ofNullable(read.networks().get("me")));
+    }
+
+    @Test
+    void 按一格找档案_只认声明要放方块的格_拆了的与别的维度不算() {
+        MachineArchives archives = new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1");
+        MachineBlueprint ship = new MachineBlueprint(List.of(
+                PlannedCell.block(new BlockPos(0, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.block(new BlockPos(1, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of()),
+                PlannedCell.air(new BlockPos(0, 1, 0))), List.of(), List.of(), List.of(), List.of());
+        BlockPos anchor = new BlockPos(100, 70, 100);
+        assertTrue(archives.save(MachineArchive.fresh("Airship", "minecraft:overworld", anchor, ship, null)));
+        assertTrue(archives.save(MachineArchive.fresh("下界的", "minecraft:the_nether", anchor, ship, null)));
+
+        ArchivedMachines.Machine found = archives.covering("minecraft:overworld", new BlockPos(101, 70, 100)).orElseThrow();
+        assertEquals("Airship", found.name(), "名字按存的原样给，不是库里小写过的键");
+        assertEquals(Set.of(new BlockPos(100, 70, 100), new BlockPos(101, 70, 100)), found.blocks(), "清空的格不算方块");
+        assertTrue(archives.covering("minecraft:overworld", new BlockPos(100, 71, 100)).isEmpty(), "清空的格不算盖住");
+        assertTrue(archives.covering("minecraft:the_end", new BlockPos(100, 70, 100)).isEmpty(), "维度对不上不算");
+
+        assertTrue(archives.save(archives.find("Airship").orElseThrow().markRemoved()));
+        assertTrue(archives.covering("minecraft:overworld", new BlockPos(100, 70, 100)).isEmpty(), "拆了的不算");
     }
 
     @Test
