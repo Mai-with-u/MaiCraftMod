@@ -414,7 +414,7 @@ Rig rig = new Rig(tempDir);
     }
 
     /** 一套离线替身：现场与施工引擎的接缝全在一个假对象上，什么都能一刻做完。 */
-    private static final class FakeSite implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
+    static final class FakeSite implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
             ConstructionSeams.Clicks, DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards,
             ConstructionSeams.Ledger, BringsPlayerClose {
         /** 与机器现场视图共用的同一张世界表：引擎放成什么，机器比对读到的就是什么。 */
@@ -512,7 +512,7 @@ Rig rig = new Rig(tempDir);
     }
 
     /** 一刻做完的动作。 */
-    private record Immediate(Runnable effect) implements Action {
+    record Immediate(Runnable effect) implements Action {
         @Override public ActionStatus tick(TickContext context) {
             effect.run();
             return ActionStatus.done();
@@ -521,7 +521,7 @@ Rig rig = new Rig(tempDir);
         @Override public String describe() { return "替身动作"; }
     }
 
-    private static Immediate immediate(Runnable effect) {
+    static Immediate immediate(Runnable effect) {
         return new Immediate(effect);
     }
 
