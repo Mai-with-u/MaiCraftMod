@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.vehicle;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -33,7 +34,9 @@ final class AssemblyGlue {
      */
     AssemblyGlue(ArchivedMachines archived, List<MachineType> machineTypes, Supplier<String> dimension) {
         this.archived = Objects.requireNonNull(archived, "archived");
-        this.machineTypes = List.copyOf(machineTypes);
+        // 按先后排好：同一片几家都能粘时先问先后值大的（身上有蜂蜜胶就先用它），排序稳定，同样大的照登记顺序。
+        this.machineTypes = machineTypes.stream()
+                .sorted(Comparator.comparingInt(MachineType::stickPreference).reversed()).toList();
         this.dimension = Objects.requireNonNull(dimension, "dimension");
     }
 
@@ -57,7 +60,7 @@ final class AssemblyGlue {
         return new Check(machine.get().name(), machine.get().blocks(), missing(machine.get().blocks()));
     }
 
-    /** 这些方块还缺的胶段：第一家答得上的机器类型说了算；都答不上为空。 */
+    /** 这些方块还缺的胶段：按先后问，第一家答得上的机器类型说了算；都答不上为空。 */
     Optional<List<Installation>> missing(Set<BlockPos> blocks) {
         for (MachineType type : machineTypes) {
             Optional<List<Installation>> answer = type.stickTogether(blocks);
@@ -80,8 +83,8 @@ final class AssemblyGlue {
         return machineTypes.stream().anyMatch(type -> type.installed(segment));
     }
 
-    /** 一段胶的说法："x, y, z 到 x, y, z"。 */
+    /** 一段胶的说法："simulated:honey_glue x, y, z 到 x, y, z"，前面写明是哪种胶。 */
     static String describe(Installation segment) {
-        return String.join(" 到 ", segment.cells().stream().map(BlockPos::toShortString).toList());
+        return segment.kind() + " " + String.join(" 到 ", segment.cells().stream().map(BlockPos::toShortString).toList());
     }
 }

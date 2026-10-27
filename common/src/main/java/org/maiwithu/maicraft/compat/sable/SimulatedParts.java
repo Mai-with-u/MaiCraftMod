@@ -8,6 +8,7 @@ import java.util.UUID;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.phys.AABB;
 
 /**
  * Simulated（物理组装器、无线红石打字机、舵轮这些载具部件）的读写接缝：玩家能做的原生操作。只翻译，不判断。
@@ -67,6 +68,18 @@ public interface SimulatedParts {
 
     /** 按下或松开无线红石打字机的一个键：和真人接管无线红石打字机后按键盘时发的一样（按住不重发，松开发一次）。 */
     void typewriterKey(BlockPos local, int key, boolean press);
+
+    /** 和这片范围沾边的每一块胶各自框住的范围：Simulated 的蜂蜜胶和机械动力的强力胶都算（组装物理结构时两种都认）。 */
+    List<AABB> glueBoxes(ClientLevel level, AABB area);
+
+    /** 和这片范围沾边的每一块蜂蜜胶框住的范围。 */
+    List<AABB> honeyGlueBoxes(ClientLevel level, AABB area);
+
+    /**
+     * 用蜂蜜胶框住 from 到 to 这一片：和玩家点完两个角时发的一样。服务器看手里有蜂蜜胶、框每边不超过上限，
+     * 就扣一点耐久生成一块蜂蜜胶；不要求角是方块。
+     */
+    void honeyGlue(BlockPos from, BlockPos to);
 
     /** 交还打字机：和真人接管时按 Esc 一样，客户端先放下，再告诉服务器断开。 */
     void typewriterDisconnect(ClientLevel level, String structureId, BlockPos local);

@@ -67,6 +67,32 @@ class VehicleAssembleGlueTest {
     }
 
     @Test
+    void 两家都能粘_先用先后值大的那家() {
+        Installation superSegment = new Installation("create:super_glue", List.of(ASSEMBLER, new BlockPos(3, 64, 3)));
+        Installation honeySegment = new Installation("simulated:honey_glue", List.of(ASSEMBLER, new BlockPos(3, 64, 3)));
+        Glue superGlue = new Glue("create:super_glue", List.of(superSegment), true, 0, true);
+        Glue honey = new Glue("simulated:honey_glue", List.of(honeySegment), true, 1, true);
+        Pull pull = new Pull();
+        TaskResult result = run(pull, archived("飞艇"), List.of(superGlue, honey));
+        assertTrue(pull.pulled);
+        assertEquals(List.of(honeySegment), honey.installedSegments, "身上有蜂蜜胶就先用它");
+        assertTrue(superGlue.installedSegments.isEmpty(), "强力胶这次没用上");
+        assertTrue(details(result).glued().added().getFirst().startsWith("simulated:honey_glue"),
+                "结果写明是哪种胶：" + details(result).glued().added());
+    }
+
+    @Test
+    void 先问的那家答不上_交给下一家() {
+        Installation superSegment = new Installation("create:super_glue", List.of(ASSEMBLER, new BlockPos(3, 64, 3)));
+        Glue superGlue = new Glue("create:super_glue", List.of(superSegment), true, 0, true);
+        Glue honey = new Glue("simulated:honey_glue", List.of(), true, 1, false);
+        Pull pull = new Pull();
+        run(pull, archived("飞艇"), List.of(superGlue, honey));
+        assertTrue(pull.pulled);
+        assertEquals(List.of(superSegment), superGlue.installedSegments, "身上没有蜂蜜胶就用强力胶");
+    }
+
+    @Test
     void 胶已经盖全_直接拉杆() {
         Glue types = new Glue(List.of(), true);
         Pull pull = new Pull();
@@ -118,9 +144,13 @@ class VehicleAssembleGlueTest {
     }
 
     private TaskResult run(Pull pull, ArchivedMachines archived, Glue types) {
+        return run(pull, archived, List.of(types));
+    }
+
+    private TaskResult run(Pull pull, ArchivedMachines archived, List<MachineType> types) {
         VehicleAssembleTask task = new VehicleAssembleTask(
                 new VehicleAssembler.Request(true, ASSEMBLER, null, Permissions.DEFAULT), List.of(request -> Optional.of(pull)),
-                archives(), new AssemblyGlue(archived, List.of(types), () -> "minecraft:overworld"));
+                archives(), new AssemblyGlue(archived, types, () -> "minecraft:overworld"));
         return finish(task);
     }
 
@@ -170,22 +200,42 @@ class VehicleAssembleGlueTest {
 
     /** 会粘胶的机器类型替身：问缺什么时答还没粘上的那几段；粘的动作一刻做完，sticks 为假时胶不出现。 */
     private static final class Glue implements MachineType {
+        private final String kind;
         private final List<Installation> needed;
         private final boolean sticks;
+        private final int preference;
+        private final boolean answers;
         final List<Installation> installedSegments = new ArrayList<>();
         final List<Set<BlockPos>> asked = new ArrayList<>();
 
         Glue(List<Installation> needed, boolean sticks) {
+            this("test:glue", needed, sticks, 0, true);
+        }
+
+        /**
+         * @param preference 先后值
+         * @param answers    答不答"还缺哪几段"（蜂蜜胶身上没有时不答）
+         */
+        Glue(String kind, List<Installation> needed, boolean sticks, int preference, boolean answers) {
+            this.kind = kind;
             this.needed = needed;
             this.sticks = sticks;
+            this.preference = preference;
+            this.answers = answers;
+        }
+
+        @Override public int stickPreference() {
+            return preference;
         }
 
         @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
             asked.add(new HashSet<>(cells));
+            if (!answers) return Optional.empty();
             return Optional.of(needed.stream().filter(segment -> !installedSegments.contains(segment)).toList());
         }
 
         @Override public Optional<Action> install(Installation installation, Permissions permissions) {
+            if (!installation.kind().equals(kind)) return Optional.empty();
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     if (sticks) installedSegments.add(installation);
@@ -202,7 +252,7 @@ class VehicleAssembleGlueTest {
             return installedSegments.contains(installation);
         }
 
-        @Override public String id() { return "test:glue"; }
+        @Override public String id() { return kind; }
         @Override public String name() { return "胶"; }
         @Override public String modId() { return "test"; }
         @Override public boolean covers(BlockState state) { return false; }

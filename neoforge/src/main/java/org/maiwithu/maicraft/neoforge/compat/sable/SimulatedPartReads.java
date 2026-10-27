@@ -12,10 +12,13 @@ import java.util.UUID;
 import com.simibubi.create.content.redstone.link.LinkBehaviour;
 import com.simibubi.create.content.redstone.link.RedstoneLinkBlock;
 import com.simibubi.create.content.redstone.link.RedstoneLinkNetworkHandler;
+import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
+import dev.simulated_team.simulated.content.entities.honey_glue.HoneyGlueEntity;
 import dev.simulated_team.simulated.content.blocks.redstone.linked_typewriter.LinkedTypewriterBlockEntity;
 import dev.simulated_team.simulated.content.blocks.redstone.linked_typewriter.LinkedTypewriterEntries;
 import dev.simulated_team.simulated.network.packets.AssemblePacket;
+import dev.simulated_team.simulated.network.packets.honey_glue.HoneyGlueSpawnPacket;
 import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterDisconnectUser;
 import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterKeyInteractionPacket;
 import dev.simulated_team.simulated.network.packets.linked_typewriter.TypewriterKeySavePacket;
@@ -28,6 +31,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.lwjgl.glfw.GLFW;
 
@@ -39,6 +43,22 @@ import org.maiwithu.maicraft.compat.sable.SimulatedParts;
  * 和真人接管无线红石打字机后按键盘、按 Esc 时发的一样。只翻译，不判断。
  */
 public final class SimulatedPartReads implements SimulatedParts {
+
+    // 胶都是实体，客户端看得到：强力胶的框是它的包围盒，蜂蜜胶的框同步到客户端后也是包围盒。
+    @Override public List<AABB> glueBoxes(ClientLevel level, AABB area) {
+        List<AABB> boxes = new ArrayList<>(honeyGlueBoxes(level, area));
+        level.getEntitiesOfClass(SuperGlueEntity.class, area).forEach(glue -> boxes.add(glue.getBoundingBox()));
+        return boxes;
+    }
+
+    @Override public List<AABB> honeyGlueBoxes(ClientLevel level, AABB area) {
+        return level.getEntitiesOfClass(HoneyGlueEntity.class, area).stream().map(HoneyGlueEntity::getBoundingBox).toList();
+    }
+
+    // 玩家点完蜂蜜胶的两个角时，客户端发的就是这一包（HoneyGlueClientHandler.selectPos）。
+    @Override public void honeyGlue(BlockPos from, BlockPos to) {
+        PacketDistributor.sendToServer(new HoneyGlueSpawnPacket(from, to));
+    }
 
     @Override public void pullAssembler(BlockPos at) {
         PacketDistributor.sendToServer(new AssemblePacket(at));

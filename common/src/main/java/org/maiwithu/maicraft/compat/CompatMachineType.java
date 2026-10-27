@@ -96,6 +96,10 @@ public final class CompatMachineType implements MachineType {
         return ask(() -> type.stickTogether(cells), Optional.<List<Installation>>empty());
     }
 
+    @Override public int stickPreference() {
+        return ask(type::stickPreference, 0);
+    }
+
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
         return ask(() -> type.placedBy(installation), Optional.empty());
     }

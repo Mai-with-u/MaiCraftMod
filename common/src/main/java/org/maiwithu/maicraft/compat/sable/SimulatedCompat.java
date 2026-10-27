@@ -48,6 +48,8 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
         registry.vehicleReader(this, services -> new VehicleReading(this, services));
         // 无线红石打字机当一种机器：machine_configure 给它绑键（键 → 两格频率物品），组装前在世界里绑。
         registry.machineType(this, services -> new TypewriterMachine(this, services));
+        // 蜂蜜胶当一种只管安装段的机器类型：组装前补胶时身上有蜂蜜胶就先用它，蓝图里也能写蜂蜜胶安装段。
+        registry.machineType(this, services -> new HoneyGlueType(this, services));
         // 载具部件资料：只在这一套接上时进资料目录，部件的物品资料页也挂上它，不用玩家行为。
         registry.knowledgeSource(this, new VehiclePartsKnowledge());
     }
@@ -76,6 +78,21 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
     /** 这个结构下次重读。 */
     void forget(String id) {
         scans.forget(id);
+    }
+
+    /** 这片范围附近的胶（蜂蜜胶与强力胶）各框住哪；见 {@link SimulatedParts#glueBoxes}。 */
+    List<AABB> glueBoxes(ClientLevel level, AABB area) {
+        return call("读胶", () -> parts.glueBoxes(level, area));
+    }
+
+    /** 这片范围附近的蜂蜜胶各框住哪；见 {@link SimulatedParts#honeyGlueBoxes}。 */
+    List<AABB> honeyGlueBoxes(ClientLevel level, AABB area) {
+        return call("读蜂蜜胶", () -> parts.honeyGlueBoxes(level, area));
+    }
+
+    /** 用蜂蜜胶框住一片；见 {@link SimulatedParts#honeyGlue}。 */
+    void honeyGlue(BlockPos from, BlockPos to) {
+        run("用蜂蜜胶框住一片", () -> parts.honeyGlue(from, to));
     }
 
     /** 拉一次物理组装器的杆；见 {@link SimulatedParts#pullAssembler}。 */
