@@ -53,7 +53,8 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
 
     protected PathNode mostRecentConsidered;
 
-    protected final PathNode[] bestSoFar = new PathNode[COEFFICIENTS.length];
+    /** 各系数下目前最好的部分路线；算路开始时建立，算路结束后只读。 */
+    protected PartialPathRanking ranking;
 
     private volatile boolean isFinished;
 
@@ -70,12 +71,10 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
      *
      * @see <a href="https://docs.google.com/document/d/1WVHHXKXFdCR1Oz__KtK8sFqyvSwJN_H4lftkHFgmzlc/edit">here</a>
      */
-    protected static final double[] COEFFICIENTS = {1.5, 2, 2.5, 3, 4, 5, 10};
-
     /**
      * If a path goes less than 5 blocks and doesn't make it to its goal, it's not worth considering.
      */
-    protected static final double MIN_DIST_PATH = 5;
+    protected static final double MIN_DIST_PATH = PartialPathRanking.MIN_DIST_PATH;
 
     /**
      * there are floating point errors caused by random combinations of traverse and diagonal over a flat area
@@ -159,21 +158,6 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
     protected abstract Optional<IPath> calculate0(long primaryTimeout, long failureTimeout);
 
     /**
-     * Determines the distance squared from the specified node to the start
-     * node. Intended for use in distance comparison, rather than anything that
-     * considers the real distance value, hence the "sq".
-     *
-     * @param n A node
-     * @return The distance, squared
-     */
-    protected double getDistFromStartSq(PathNode n) {
-        int xDiff = n.x - startX;
-        int yDiff = n.y - startY;
-        int zDiff = n.z - startZ;
-        return xDiff * xDiff + yDiff * yDiff + zDiff * zDiff;
-    }
-
-    /**
      * Attempts to search the block position hashCode long to {@link PathNode} map
      * for the node mapped to the specified pos. If no node is found,
      * a new node is created.
@@ -207,41 +191,44 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
 
     /** Called by the search worker between expansions, never by the render/client thread. */
     protected final void publishPathSnapshots(int numNodes) {
-        bestPathSnapshot = bestSoFar(false, numNodes).orElse(null);
+        PathNode best = ranking == null ? null : ranking.firstNodePastStart();
+        bestPathSnapshot = best == null ? null
+                : new Path(realStart, startNode, best, numNodes, goal, context);
         recentPathSnapshot = mostRecentConsidered == null ? null
                 : new Path(realStart, startNode, mostRecentConsidered, numNodes, goal, context);
     }
 
     protected Optional<IPath> bestSoFar(boolean logInfo, int numNodes) {
-        if (startNode == null) {
+        if (ranking == null) {
             return Optional.empty();
         }
         double bestDist = 0;
-        for (int i = 0; i < COEFFICIENTS.length; i++) {
-            if (bestSoFar[i] == null) {
+        for (int i = 0; i < PartialPathRanking.COEFFICIENTS.length; i++) {
+            PathNode node = ranking.nodeByCoefficient(i);
+            if (node == null) {
                 continue;
             }
-            double dist = getDistFromStartSq(bestSoFar[i]);
+            double dist = ranking.distanceFromStartSquared(node);
             if (dist > bestDist) {
                 bestDist = dist;
             }
-            if (dist > MIN_DIST_PATH * MIN_DIST_PATH) { // square the comparison since distFromStartSq is squared
+            if (dist > PartialPathRanking.MIN_DIST_PATH * PartialPathRanking.MIN_DIST_PATH) { // square the comparison since distFromStartSq is squared
                 if (logInfo) {
-                    if (COEFFICIENTS[i] >= 3) {
+                    if (PartialPathRanking.COEFFICIENTS[i] >= 3) {
                         System.out.println("Warning: cost coefficient is greater than three! Probably means that");
                         System.out.println("the path I found is pretty terrible (like sneak-bridging for dozens of blocks)");
                         System.out.println("But I'm going to do it anyway, because yolo");
                     }
                     System.out.println("Path goes for " + Math.sqrt(dist) + " blocks");
-                    logDebug("A* cost coefficient " + COEFFICIENTS[i]);
+                    logDebug("A* cost coefficient " + PartialPathRanking.COEFFICIENTS[i]);
                 }
-                return Optional.of(new Path(realStart, startNode, bestSoFar[i], numNodes, goal, context));
+                return Optional.of(new Path(realStart, startNode, node, numNodes, goal, context));
             }
         }
         // instead of returning bestSoFar[0], be less misleading
         // if it actually won't find any path, don't make them think it will by rendering a dark blue that will never actually happen
         if (logInfo) {
-            logDebug("Even with a cost coefficient of " + COEFFICIENTS[COEFFICIENTS.length - 1] + ", I couldn't get more than " + Math.sqrt(bestDist) + " blocks");
+            logDebug("Even with a cost coefficient of " + PartialPathRanking.COEFFICIENTS[PartialPathRanking.COEFFICIENTS.length - 1] + ", I couldn't get more than " + Math.sqrt(bestDist) + " blocks");
             logDebug("No path found =(");
             logNotification("No path found =(", true);
         }

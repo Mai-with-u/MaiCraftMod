@@ -65,13 +65,10 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         startNode = getNodeAtPosition(startX, startY, startZ, BetterBlockPos.longHash(startX, startY, startZ));
         startNode.cost = 0;
         startNode.combinedCost = startNode.estimatedCostToGoal;
+        double minimumImprovement = Baritone.settings().minimumImprovementRepropagation.value ? MIN_IMPROVEMENT : 0;
+        ranking = new PartialPathRanking(startX, startY, startZ, startNode, minimumImprovement);
         BinaryHeapOpenSet openSet = new BinaryHeapOpenSet();
         openSet.insert(startNode);
-        double[] bestHeuristicSoFar = new double[COEFFICIENTS.length];//keep track of the best node by the metric of (estimatedCostToGoal + cost / COEFFICIENTS[i])
-        for (int i = 0; i < bestHeuristicSoFar.length; i++) {
-            bestHeuristicSoFar[i] = startNode.estimatedCostToGoal;
-            bestSoFar[i] = startNode;
-        }
         MutableMoveResult res = new MutableMoveResult();
         BetterWorldBorder worldBorder = new BetterWorldBorder(calcContext.world.getWorldBorder());
         long startTime = System.currentTimeMillis();
@@ -97,7 +94,6 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
         // 好几种落地办法，64 个节点就能拖过十几秒才看到超时。
         int timeCheckInterval = 1;
         int pathingMaxChunkBorderFetch = Baritone.settings().pathingMaxChunkBorderFetch.value; // grab all settings beforehand so that changing settings during pathing doesn't cause a crash or unpredictable behavior
-        double minimumImprovement = Baritone.settings().minimumImprovementRepropagation.value ? MIN_IMPROVEMENT : 0;
         Moves[] allMoves = Moves.values();
         while (!openSet.isEmpty() && numEmptyChunk < pathingMaxChunkBorderFetch && !cancelRequested) {
             if ((numNodes & (timeCheckInterval - 1)) == 0) { // only call this once every 64 nodes (about half a millisecond)
@@ -210,15 +206,9 @@ public final class AStarPathFinder extends AbstractNodeCostSearch {
                     } else {
                         openSet.insert(neighbor);//dont double count, dont insert into open set if it's already there
                     }
-                    for (int i = 0; i < COEFFICIENTS.length; i++) {
-                        double heuristic = neighbor.estimatedCostToGoal + neighbor.cost / COEFFICIENTS[i];
-                        if (bestHeuristicSoFar[i] - heuristic > minimumImprovement) {
-                            bestHeuristicSoFar[i] = heuristic;
-                            bestSoFar[i] = neighbor;
-                            if (failing && getDistFromStartSq(neighbor) > MIN_DIST_PATH * MIN_DIST_PATH) {
-                                failing = false;
-                            }
-                        }
+                    // 任一系数因这个节点走出了离起点够远的分段：搜索从"找像样分段"切换到"按时限交付路线"。
+                    if (ranking.consider(neighbor)) {
+                        failing = false;
                     }
                 }
             }
