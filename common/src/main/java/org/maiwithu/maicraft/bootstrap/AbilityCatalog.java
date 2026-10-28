@@ -203,49 +203,30 @@ public final class AbilityCatalog {
                 shared.refusals()));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
-        registry.register(new EatModule(deps.character().backpack(), deps.character().offhand(),
-                deps.character().hunger(), deps.character().foods(), deps.character().equipment(),
-                deps.character().effects(), deps.items().itemTags(), deps.hands().useKeyProjection(),
-                Optional.of(shared.toMainhand())));
+        registry.register(eatModule(deps, shared));
 
         // 装备：穿卸走背包界面的原生操作；卸下时背包满了先按腾地方腾一格，腾不动才如实说装不下。
-        registry.register(new EquipModule(deps.character().backpack(), deps.character().offhand(),
-                deps.character().equipment(), deps.character().gearFit(), Optional.of(shared.space()),
-                Optional.of(new ClientGearChanges(deps.character().context(), shared.toMainhand())),
-                deps.items().itemTags()));
+        registry.register(equipModule(deps, shared));
 
         // 丢弃：换手接上了；丢完朝旁边走两步，别让丢出的东西落回自己头上。
         // 丢东西的现场部件与腾地方共用一份：落点登记写进同一本避让账，走开的每一步绕开它。
         // 给了坐标就朝那一格扔（传送带、工作盆上）：接住东西的高度按那一格方块顶面算，空着的格按落到底。
-        registry.register(new DropModule(deps.character().backpack(), deps.character().offhand(),
-                deps.items().itemTags(), shared.dropping(),
-                (itemId, count, cell, permissions) -> new TossesOnto(itemId, count, cell,
-                        TossArc.catchHeightOf(deps.character().context().get(), cell), permissions, shared.bringClose(),
-                        shared.toMainhand(), FirstPersonScene::of)));
+        registry.register(dropModule(deps, shared));
 
         // 寻死：脱甲收图腾、挑死法走过去、重生后按原件穿回，见 registerSuicide。
         registerSuicide(registry, deps, shared);
         // 拿到物品：身上的不算来源（引擎开场就清点），已实现的途径都登记，见 obtainModule。
-        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形，脚下空着垫一块。
-        ClientStairsDown stairs = stairsDown(deps, shared);
         // 从记得的箱子与现场容器拿东西的来源：候选由找容器的读端给出（现场扫描与世界记忆并成一份），
         // 刚摆下、记忆里还没有的箱子也接得住；拿到物品的引擎与附魔的受限补齐共用同一份。
         ContainerSource containerSource = containerSource(deps, shared);
-        registry.register(AcquisitionWiring.obtainModule(deps, shared.playerServices(), shared.bringClose(),
-                shared.toMainhand(), shared.permission(), shared.innerNeeds(), shared.collects(), stairs,
-                shared.space(), containerSource, shared.drops(), shared.dropping().stepsAside()));
+        registry.register(obtainModule(deps, shared, containerSource));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared.storing(), shared.collects(), shared.networks()));
 
         // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
         // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
-        registry.register(new EnchantModule(deps.character().context(),
-                AcquisitionWiring.containerOnlyAcquisition(containerSource, deps, shared.space()), shared.space(),
-                (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
-                        shared.bringClose(), deps.hands().interactions(), deps.character().context()),
-                new SceneSeenTargets(deps.world()::scene), deps.world().memory(), deps.world().blockScans(),
-                deps.items().itemTags(), deps.items().itemRegistry()));
+        registry.register(enchantModule(deps, shared, containerSource));
 
         // 睡觉：选床、放自带床、现做一张、白天备床与夜间自动休息都从这里接，见 registerSleep。
         registerSleep(registry, deps, shared);
@@ -262,9 +243,7 @@ public final class AbilityCatalog {
         registerMachineAbilities(registry, deps, designs, shared, construction);
 
         // 照明：区域补光量光选灯位、放灯交给施工引擎；随行补光的开关接会话设置。
-        registry.register(new LightModule(deps.followLighting(), anchors(deps), deps.character().position(),
-                construction, deps.world().lightLevels(), deps.world().lightingWorld(),
-                deps.character().backpack(), deps.character().offhand()));
+        registry.register(lightModule(deps, construction));
 
         registerStandalone(registry, deps, shared, construction);
         return registry;
@@ -580,6 +559,60 @@ public final class AbilityCatalog {
         // 逐字打字开关必须从实例配置接进来：它决定发话任务一开始是逐字打草稿，还是整句直接提交。
         return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.config().allowGameCommands(),
                 deps.config().chatTypewriter(), commandTree::adminOnly);
+    }
+
+    /** 拿到物品能力的一份：往下挖楼梯的现场部件在这里拼，身外的来源清单与引擎见 AcquisitionWiring。 */
+    private static AbilityModule obtainModule(Deps deps, Shared shared, ContainerSource containerSource) {
+        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形，脚下空着垫一块。
+        ClientStairsDown stairs = stairsDown(deps, shared);
+        return AcquisitionWiring.obtainModule(deps, shared.playerServices(), shared.bringClose(),
+                shared.toMainhand(), shared.permission(), shared.innerNeeds(), shared.collects(), stairs,
+                shared.space(), containerSource, shared.drops(), shared.dropping().stepsAside());
+    }
+
+    /** 照明能力的一份：区域补光量光选灯位、放灯交给施工引擎；随行补光的开关接会话设置。 */
+    private static LightModule lightModule(Deps deps, Function<Permissions, ConstructionServices> construction) {
+        return new LightModule(deps.followLighting(), anchors(deps), deps.character().position(),
+                construction, deps.world().lightLevels(), deps.world().lightingWorld(),
+                deps.character().backpack(), deps.character().offhand());
+    }
+
+    /** 进食能力的一份：换手接在背包界面的原生搬运上，吃之前先把食物换到主手。 */
+    private static EatModule eatModule(Deps deps, Shared shared) {
+        return new EatModule(deps.character().backpack(), deps.character().offhand(),
+                deps.character().hunger(), deps.character().foods(), deps.character().equipment(),
+                deps.character().effects(), deps.items().itemTags(), deps.hands().useKeyProjection(),
+                Optional.of(shared.toMainhand()));
+    }
+
+    /** 装备能力的一份：穿卸与换手走背包界面，卸下时背包满了用和拿东西同一份背包空间先腾一格。 */
+    private static EquipModule equipModule(Deps deps, Shared shared) {
+        return new EquipModule(deps.character().backpack(), deps.character().offhand(),
+                deps.character().equipment(), deps.character().gearFit(), Optional.of(shared.space()),
+                Optional.of(new ClientGearChanges(deps.character().context(), shared.toMainhand())),
+                deps.items().itemTags());
+    }
+
+    /**
+     * 丢弃能力的一份：丢东西的现场部件与腾地方共用；给了坐标就朝那一格扔，接住东西的高度按那一格方块顶面算，
+     * 扔之前走近、换到主手与别的能力是同一套。
+     */
+    private static DropModule dropModule(Deps deps, Shared shared) {
+        return new DropModule(deps.character().backpack(), deps.character().offhand(),
+                deps.items().itemTags(), shared.dropping(),
+                (itemId, count, cell, permissions) -> new TossesOnto(itemId, count, cell,
+                        TossArc.catchHeightOf(deps.character().context().get(), cell), permissions, shared.bringClose(),
+                        shared.toMainhand(), FirstPersonScene::of));
+    }
+
+    /** 附魔能力的一份：缺料只走身上与记得的容器那一条受限补齐，点开附魔台走容器界面，台子按观察编号、记过的地点或分刻扫描找。 */
+    private static EnchantModule enchantModule(Deps deps, Shared shared, ContainerSource containerSource) {
+        return new EnchantModule(deps.character().context(),
+                AcquisitionWiring.containerOnlyAcquisition(containerSource, deps, shared.space()), shared.space(),
+                (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
+                        shared.bringClose(), deps.hands().interactions(), deps.character().context()),
+                new SceneSeenTargets(deps.world()::scene), deps.world().memory(), deps.world().blockScans(),
+                deps.items().itemTags(), deps.items().itemRegistry());
     }
 
     /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */
