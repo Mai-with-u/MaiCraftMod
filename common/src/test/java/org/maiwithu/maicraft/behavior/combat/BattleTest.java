@@ -384,6 +384,21 @@ class BattleTest {
     }
 
     @Test
+    void aCreeperAtHeelSprintsStraightAwayInsteadOfPathingAround() {
+        // 撤离途中苦力怕贴进起爆半径（3 格）：不当寻路绕行跑，当刻疾跑沿远离它的方向直线拉开，不停顿。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6));
+        senses.threats.add(creeper(2.5, false));
+        senses.health = 4;
+        Moves moves = new Moves();
+        Battle.Moment running = battle(senses, moves).tick(new Tick(0));
+        assertEquals(Battle.State.RETREATING, running.state());
+        assertEquals("苦力怕贴身，疾跑直线拉开", running.doing());
+        assertTrue(moves.walks.isEmpty(), "不开寻路绕行");
+        assertTrue(moves.lastStep().sprint() && moves.lastStep().dx() < 0, "疾跑往西直线拉开");
+    }
+
+    @Test
     void aBusyInteractionSkipsTheSwingInsteadOfEndingTheFight() {
         // 被追上（贴着我）要还手，交互入口还被举盾占着：这一刀不挥，仗照打，不抛错。
         Senses senses = new Senses();

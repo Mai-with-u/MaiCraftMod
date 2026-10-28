@@ -288,6 +288,20 @@ public final class Battle {
             return new Moment(State.ESCAPED, "甩开了追兵", true, false, false, -1, retreat.why(), false);
         }
         Battlefield.Me me = field.me();
+        // 苦力怕贴身：撤离途中它进了起爆半径（3 格），不再走寻路绕行式撤离——引信一点这几十格绕路就是原地挨炸。
+        // 改为当刻疾跑沿远离它的方向直线拉开，禁用绕行与停顿（八个方向都被挡才站住）；点着引信的由躲爆炸先接走，到不了这里。
+        Battlefield.Foe bomb = creeperAtHeel(field);
+        if (bomb != null) {
+            limbs.dropWalk();
+            limbs.dropStrike();
+            moves.lowerGuard();
+            Footwork.Step step = Footwork.choose(me.x(), me.z(),
+                    new Footwork.Stance(null, List.of(new Footwork.Hazard(bomb.threat().x(), bomb.threat().z(),
+                            bomb.threat().dangerRadius())), true), moves.ground(context));
+            moves.step(context, bomb.id(), step);
+            return new Moment(State.RETREATING, "苦力怕贴身，疾跑直线拉开", !step.standing(), false, false,
+                    bomb.id(), retreat.why(), cornered);
+        }
         Battlefield.Foe pursuer = nearestChaser(field);
         // 真被追上（它已经够得着我）才停下退着还手；只是跟在后面几格就接着疾跑——人跑起来比僵尸快，
         // 停下来还手反倒被围上。实机 10-14 四只尸壳跟在三格外，角色每隔一下就停下还手，十几秒被追死。
@@ -307,32 +321,7 @@ public final class Battle {
         limbs.dropStrike();
         // 跑的时候盾放下：举着盾走路只有两成速度、也疾跑不了。实机 10-14 撤离时一路举盾，被尸壳贴着追死。
         moves.lowerGuard();
-        if (limbs.walk() == null) {
-            double cx = 0;
-            double cz = 0;
-            List<Battlefield.Foe> chasers = field.chasers();
-            for (Battlefield.Foe foe : chasers) {
-                cx += foe.threat().x();
-                cz += foe.threat().z();
-            }
-            cx /= Math.max(1, chasers.size());
-            cz /= Math.max(1, chasers.size());
-            // 这一刻一只追兵都看不见：按最后露面的位置背离着跑，不朝世界原点反方向乱跑。
-            double[] remembered = chasers.isEmpty() ? retreat.pursuersCenter() : null;
-            if (remembered != null) {
-                cx = remembered[0];
-                cz = remembered[1];
-            }
-            // 往家（没记过家就往打点）那一侧跑：背离追兵的左右九十度里挑离家最近的落点，不一路往野外越跑越远。
-            int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
-                    cell -> moves.standable(context, cell.getX(), cell.getY(), cell.getZ()), homeSide.apply(context));
-            List<ThreatField.Threat> threats = pathThreats(field, -1);
-            GoalCompiler.Compiled goal = haven != null
-                    ? GoalCompiler.approachAvoiding(GoalCompiler.near(new BlockPos(haven[0], haven[1], haven[2]), 2.0), threats)
-                    : threats.isEmpty() ? null : GoalCompiler.awayFrom(threats.stream()
-                            .map(threat -> threat.withClearance(Retreat.REACH_OUT)).toList());
-            if (goal != null) limbs.startWalk("撤离", moves.walk(goal));
-        }
+        startRetreatWalk(context, field, me);
         Action retreatWalk = limbs.walk();
         ActionStatus status = retreatWalk == null ? null : retreatWalk.tick(context);
         if (status == null || status instanceof ActionStatus.Failed) {
@@ -349,6 +338,35 @@ public final class Battle {
         if (status instanceof ActionStatus.Done) limbs.dropWalk();
         boolean moved = status instanceof ActionStatus.Running running && running.progressed();
         return new Moment(State.RETREATING, "撤离：" + retreat.why(), moved, false, false, -1, retreat.why(), cornered);
+    }
+
+    // 挑撤离的下一步：手头没有在走的就挑一个背离追兵重心的落点（知道家就往家那一侧偏），交给寻路。
+    private void startRetreatWalk(TickContext context, Battlefield field, Battlefield.Me me) {
+        if (limbs.walk() != null) return;
+        double cx = 0;
+        double cz = 0;
+        List<Battlefield.Foe> chasers = field.chasers();
+        for (Battlefield.Foe foe : chasers) {
+            cx += foe.threat().x();
+            cz += foe.threat().z();
+        }
+        cx /= Math.max(1, chasers.size());
+        cz /= Math.max(1, chasers.size());
+        // 这一刻一只追兵都看不见：按最后露面的位置背离着跑，不朝世界原点反方向乱跑。
+        double[] remembered = chasers.isEmpty() ? retreat.pursuersCenter() : null;
+        if (remembered != null) {
+            cx = remembered[0];
+            cz = remembered[1];
+        }
+        // 往家（没记过家就往打点）那一侧跑：背离追兵的左右九十度里挑离家最近的落点，不一路往野外越跑越远。
+        int[] haven = Retreat.haven(me.x(), me.y(), me.z(), cx, cz, retreat.turns(),
+                cell -> moves.standable(context, cell.getX(), cell.getY(), cell.getZ()), homeSide.apply(context));
+        List<ThreatField.Threat> threats = pathThreats(field, -1);
+        GoalCompiler.Compiled goal = haven != null
+                ? GoalCompiler.approachAvoiding(GoalCompiler.near(new BlockPos(haven[0], haven[1], haven[2]), 2.0), threats)
+                : threats.isEmpty() ? null : GoalCompiler.awayFrom(threats.stream()
+                        .map(threat -> threat.withClearance(Retreat.REACH_OUT)).toList());
+        if (goal != null) limbs.startWalk("撤离", moves.walk(goal));
     }
 
     // 就地垫高：往上垫三格站到柱顶；垫不成就照旧背水一战，这一仗不再试。
@@ -608,6 +626,20 @@ public final class Battle {
     private static Battlefield.Foe nearestChaser(Battlefield field) {
         Battlefield.Foe nearest = null;
         for (Battlefield.Foe foe : field.chasers()) {
+            if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
+        }
+        return nearest;
+    }
+
+    /**
+     * 撤离途中贴上身的没点引信的苦力怕：进了起爆半径（它的危险半径，即点火距离 3 格）就算贴身。
+     * 点着引信的不算——那由躲爆炸的打法先接走。
+     */
+    private static Battlefield.Foe creeperAtHeel(Battlefield field) {
+        Battlefield.Foe nearest = null;
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (foe.threat().kind() != ThreatAssessment.Kind.EXPLOSIVE || foe.fusing()) continue;
+            if (foe.distance() > foe.threat().dangerRadius()) continue;
             if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
         }
         return nearest;
