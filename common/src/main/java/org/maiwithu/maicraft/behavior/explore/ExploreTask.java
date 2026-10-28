@@ -2,13 +2,8 @@
 package org.maiwithu.maicraft.behavior.explore;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -50,10 +45,6 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
     /** 探索的阶段：观察 → 选航点 → 走行段 → 到场复核。 */
     public enum Phase { OBSERVE, WAYPOINT, WALK, ARRIVE }
 
-    // 数值初值按实机观感调整：观察圈与抽样网格、航点远近、打分射线、留意扫描的间隔。
-    static final int WAYPOINT_MAX = 80;
-    static final int WAYPOINT_MIN = 16;
-    static final int RAY_COUNT = 17;
     /** 没给 max_seconds 时多久没有真实进展算卡住（刻）：观察与走行都有进展就续期。 */
     private static final long DEFAULT_STUCK_AFTER_TICKS = 20L * 90;
 
@@ -68,6 +59,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
     private final ExploreFindings findings = new ExploreFindings();
     private final LegHistory history = new LegHistory();
     private final ObservationSampling sampling = new ObservationSampling();
+    /** 航点候选：沿扇形射线或方形螺旋外扩，取已加载、不越判定带的落点列。 */
+    private final WaypointCandidates waypoints;
     private final BlockPos origin;
 
     private ExplorationSector sector;
@@ -97,6 +90,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         WorldPosition spot = world.currentSpot();
         this.origin = spot == null ? BlockPos.ZERO : new BlockPos(spot.x(), spot.y(), spot.z());
         this.startDimension = spot == null ? null : spot.dimension();
+        this.waypoints = new WaypointCandidates(world, origin, radius);
         // 方位在出发时按视角换算并固定，之后转头不改变搜索方向；没有朝向读数按正北折算。
         float facing = world.facingYaw() == null ? 0f : world.facingYaw();
         this.sector = direction == null
@@ -261,8 +255,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             return ended;
         }
         List<WaypointChooser.Candidate> candidates = sector.angleDegrees() >= 360
-                ? spiralCandidates()
-                : rayCandidates();
+                ? waypoints.spiral(sector, selfColumn())
+                : waypoints.rays(sector, selfColumn());
         Optional<WaypointChooser.Candidate> chosen =
                 WaypointChooser.choose(candidates, sampling.triedColumns);
         if (chosen.isPresent()) {
@@ -514,85 +508,6 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         double dx = spot.x() - origin.getX();
         double dz = spot.z() - origin.getZ();
         return sector.contains(dx, dz) && distance >= sector.minDistance();
-    }
-
-    /** 扇形内沿射线找落点：每条射线从最远往回找第一个已加载且不越判定带的列。 */
-    private List<WaypointChooser.Candidate> rayCandidates() {
-        BlockPos from = selfColumn();
-        double half = sector.angleDegrees() / 2;
-        List<WaypointChooser.Candidate> candidates = new ArrayList<>();
-        for (int ray = 0; ray < RAY_COUNT; ray++) {
-            double bearing = sector.centerBearing() - half
-                    + (sector.angleDegrees() * ray / (RAY_COUNT - 1));
-            for (int dist = WAYPOINT_MAX; dist >= WAYPOINT_MIN; dist -= ObservationSampling.COLUMN_STEP) {
-                int x = from.getX() + (int) Math.round(Math.sin(Math.toRadians(bearing)) * dist);
-                int z = from.getZ() - (int) Math.round(Math.cos(Math.toRadians(bearing)) * dist);
-                ColumnSample sample = world.sampleColumn(x, z);
-                if (!sample.loaded() || distanceFrom(x, z) > radius.waypointBound()) {
-                    continue;
-                }
-                candidates.add(toCandidate(new BlockPos(x, 0, z), sample, from, dist));
-                break;
-            }
-        }
-        return candidates;
-    }
-
-    /** 无方向时方形螺旋外扩：沿途截取最远 80 格的已加载路段，不越判定带。 */
-    private List<WaypointChooser.Candidate> spiralCandidates() {
-        BlockPos from = selfColumn();
-        List<WaypointChooser.Candidate> candidates = new ArrayList<>();
-        for (int ring = ObservationSampling.COLUMN_STEP; ring <= WAYPOINT_MAX && candidates.size() < RAY_COUNT;
-                ring += ObservationSampling.COLUMN_STEP) {
-            for (int[] offset : squareRing(ring)) {
-                int x = from.getX() + offset[0];
-                int z = from.getZ() + offset[1];
-                ColumnSample sample = world.sampleColumn(x, z);
-                if (!sample.loaded() || distanceFrom(x, z) > radius.waypointBound()) {
-                    continue;
-                }
-                candidates.add(toCandidate(new BlockPos(x, 0, z), sample, from,
-                        Math.sqrt((double) offset[0] * offset[0] + offset[1] * offset[1])));
-            }
-        }
-        return candidates;
-    }
-
-    /** 航点候选：纯水面不做落点；要不要跨水沿直线探一眼，渡不渡由走到的跨水保证结算。 */
-    private WaypointChooser.Candidate toCandidate(BlockPos column, ColumnSample sample,
-            BlockPos from, double rayDistance) {
-        double dx = column.getX() - origin.getX();
-        double dz = column.getZ() - origin.getZ();
-        return new WaypointChooser.Candidate(column, sample.topFluid(),
-                crossesWater(from, column), Math.sqrt(dx * dx + dz * dz), rayDistance,
-                sector.eccentricity(dx, dz));
-    }
-
-    /** 从出发点到落点的直线上有没有顶盖是液体的列：穿水候选整体让位，全穿水（身处岛屿）仍选。 */
-    private boolean crossesWater(BlockPos from, BlockPos column) {
-        int steps = (int) Math.max(1, Math.floor(Math.hypot(
-                column.getX() - from.getX(), column.getZ() - from.getZ()) / (double) ObservationSampling.COLUMN_STEP));
-        for (int step = 1; step < steps; step++) {
-            int x = from.getX() + (column.getX() - from.getX()) * step / steps;
-            int z = from.getZ() + (column.getZ() - from.getZ()) * step / steps;
-            ColumnSample sample = world.sampleColumn(x, z);
-            if (sample.loaded() && sample.topFluid()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** 回字形一圈上的采样点，按抽样步长取。 */
-    private static List<int[]> squareRing(int ring) {
-        List<int[]> cells = new ArrayList<>();
-        for (int edge = -ring; edge <= ring; edge += ObservationSampling.COLUMN_STEP) {
-            cells.add(new int[]{edge, -ring});
-            cells.add(new int[]{edge, ring});
-            cells.add(new int[]{-ring, edge});
-            cells.add(new int[]{ring, edge});
-        }
-        return cells;
     }
 
     /** 留意清单的结构线索与实体：按间隔扫一轮；走到结构跟前的线索升级成到访，不降级。 */
