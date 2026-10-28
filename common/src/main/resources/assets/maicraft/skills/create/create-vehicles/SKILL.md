@@ -1,10 +1,10 @@
 ---
 name: create-vehicles
-description: 机械动力航空学一套（Simulated、Aeronautics、Offroad）的飞艇与小车：选部件、搭船身、给无线红石打字机绑键、组装成会动的结构、先看再试按、开过去，开不好时怎么改；要自己造一艘飞艇或一辆车、或要开现成的载具时读
+description: 机械动力航空学一套（Simulated、Aeronautics、Offroad）的飞艇、固定翼与小车：选部件、搭船身、给无线红石打字机绑键、组装成会动的结构、先看再试按、开过去，固定翼要多长的跑道，开不好时怎么改；要自己造一艘飞艇、一架固定翼或一辆车、或要开现成的载具时读
 metadata: {"requires-mods": "simulated"}
 ---
 
-# 机械动力航空学：飞艇与小车
+# 机械动力航空学：飞艇、固定翼与小车
 
 一辆载具从无到开走要过七段：选部件 → 搭 → 绑键 → 组装 → 先看 → 试按 → 开，开不好就停在地上直接在船上改（加配重、换方块），大改再拆回。每段有自己的证据，前一段成了不冒充后一段：方块对上蓝图不等于组装成了结构，组装成了不等于托得起来，试按有反应不等于开得到、停得稳。
 
@@ -13,8 +13,9 @@ metadata: {"requires-mods": "simulated"}
 ## 先定做什么
 
 - 现场已经有船或车：`observe` 的 `mod_things.structure` 里拿 `s#`，`machine_inspect(target=s#)` 看 `kind` 和 `control_map`，能开就直接开，别为一趟路再造一辆。
-- 飞艇翻山越水，车只适合平地直线。第一辆做小、做对称：重心好找，受力好调，拆回改也快。
+- 飞艇翻山越水、能悬停，起降不挑地方；固定翼快，但起飞要一长条平地滑跑、降落要找跑道；车只适合平地直线。第一辆做小、做对称：重心好找，受力好调，拆回改也快。
 - 飞艇至少要：升力（气球加热空气燃烧室，或浮空水晶加向上的推力）、推进（螺旋桨轴承加风帆）、转向（左右两个桨分开开最省事）、船上的转动来源（便携式引擎）、座位、无线红石打字机、每个键一个收端、物理组装器。车把升力和桨换成车轮悬架加车轮，前轮两侧的收端管转向。
+- 固定翼至少要：机翼（固定在机身两侧的普通风帆或风帆框架，`facing` 朝下，升力才朝上）、推进（机头或机尾的螺旋桨轴承加桨叶）、转向（方向舵或副翼，见下面）、起落架（车轮悬架加车轮）、座位、无线红石打字机、物理组装器；升降舵、刹车有更好。不要气球、燃烧室、浮空水晶：有浮力会被当成飞艇开。
 - 材料与配方：`lookup(topic=recipe, id=物品 ID)`；部件的思索在它的物品资料页（`lookup(topic=knowledge, id=物品 ID)`）。拿料交给 `obtain`。
 
 ## 搭（machine_build）
@@ -42,8 +43,8 @@ metadata: {"requires-mods": "simulated"}
 
 ## 先看（machine_inspect(target=s#)）
 
-- `kind` 是 `airship` 或 `car` 才开得了；`structure`（没有座位或控制件）、`plane`（只有螺旋桨）、`unknown`（太大读不全或有格没加载）都开不了，先改船。
-- `seats[]` 里有 `driver`；`controls[]` 列出每个绑了频率的键、收端几个、接着什么、推出来的 `role`；`control_map.missing` 写开这一类还缺哪个必需角色（飞艇要动力、升力、偏航，车要动力、转向）。
+- `kind` 是 `airship`、`plane`、`car`、`boat` 才开得了；`structure`（没有座位或控制件）、`unknown`（太大读不全、有格没加载，或只有螺旋桨没有机翼）都开不了，先改船。造的是固定翼却读成 `airship`，是船上还有气球、燃烧室或浮空水晶；读成 `unknown` 多半是机翼的风帆装在了轴承上（跟着转的不算机翼）。
+- `seats[]` 里有 `driver`；`controls[]` 列出每个绑了频率的键、收端几个、接着什么、推出来的 `role`；`control_map.missing` 写开这一类还缺哪个必需角色（飞艇要动力、升力、偏航，固定翼要动力和偏航或横滚，车要动力、转向）。
 - 受力（服务端也装了 MaiCraft 才有）：`balance=forces` 看 `lift_ratio`（升力比重量，大于 1 才托得住）和两种情况 `cases` 的 `steady`、`tendency`；`balance=ballast` 再给几处放铁块的位置。第一次问要多等几刻。这是静态预测，不是实飞。
 - `local` 一节是结构局部坐标：`origin` 原点是哪一格（船上跟着机器档案时就是档案锚点，造船时蓝图的偏移照用；没有档案是物理组装器），`seats`、`ballast` 写座位和配重建议在局部坐标的哪一格。在船上施工照这一套写偏移。
 - 配重不在天上加：停在地上量好（`balance=ballast`），直接在船上补铁块——`machine_build(target=s#, blueprint={"cells": [{"offset": [x, y, z], "block": "minecraft:iron_block"}]})`，偏移照 `local.ballast` 写；补完再 `balance=forces` 看两种情况变没变好。不用拆回。
@@ -53,12 +54,15 @@ metadata: {"requires-mods": "simulated"}
 - 停在地上或水面上试：`vehicle_drive(vehicle=s#, operation=test, inputs=[{"control": "打字机:W", "ticks": 20}, {"control": "打字机:空格", "ticks": 120}])`，最多 16 条，每条 1～200 刻。气球是慢慢充起来的，升力键按久一点。
 - 每条看 `response` 和 `effect`（沿结构自己的轴挪了几格、转了几度，已扣掉漂移）。试过的作用记进操纵表；第一次试出动力时，船往哪边走哪边就是车头，所以桨朝哪推都行。
 - 推错了、试不出来（在地上推不动、作用太小记成 `none`）：照你的接线直接定，`machine_configure(target=s#, settings={"打字机:A": "yaw_left", "打字机:D": "yaw_right", "forward": "+z"})`，你定的以你为准，之后试按不会盖掉。
+- 固定翼的舵（升降舵、方向舵、副翼）停在地上试不出来：没有气流，舵面转了机身不动，`vehicle_drive` 不记它们。照接线直接定：`machine_configure(target=s#, settings={"打字机:上": "pitch_up", "打字机:下": "pitch_down", "打字机:A": "yaw_left", "打字机:D": "yaw_right"})`；螺旋桨键照常试按，车头也照常定。定反了也不要紧：飞起来第一次用时它看得出，这一趟反着用并在结果里写明，你再用 machine_configure 改过来。
 - 证据：试按只证明这个键让船怎么动，不证明开得到。`control_map.missing` 空了、`forward` 也有了再开。
 
 ## 开
 
 - 只想开到某处停住：`vehicle_drive(vehicle=s#, target=…)`，`target` 给坐标、记过的地点，或"往东南西北哪边开多远"。要去一个地方、到了下船走完最后一段：`travel(target=…, via=vehicle, vehicle=s#)`；不给 `via=vehicle` 时 `travel` 不会擅自开船。
 - 飞艇的阶段：垂直离地约 8 格、姿态稳了才前进 → 保持巡航高度对准落点 → 离落点 24 格内移到它正上方减速 → 垂直下降 → 接地松开所有键、停稳。结果 `drove` 里 `phases` 写阶段怎么变，`landing` 落在哪、怎么选的，`arrived`、`parked` 分开写到没到、停没停稳。
+- 固定翼：停在一长条直的平地一头，机头顺着它（起飞跑道就是机头前方，不会在地上掉头）。满动力滑跑到离地，离地 8 格内直着爬，再转向；到目的地 128 格内找一条跑道，对准、沿约 6° 下滑、近地拉平、接地刹车。结果 `drove.takeoff` 写这一趟滑了几格（`distance`）、离地那一刻每秒几格（`liftoff_speed`），`drove.go_arounds` 写复飞了几次，`phases` 里有 `takeoff_roll`、`climb_out`、`cruise`、`approach`、`descent`、`flare`、`rollout`、`landed`。
+- 固定翼要多长的跑道：起飞前方畅通的地面（宽要比翼展多 2 格）要够它滑到离地，先给 100 格以上，不够也会先滑、滑到剩下的不够刹停就刹住并写滑了几格；第一次飞完看 `drove.takeoff.distance`，落地要的跑道是它的两倍再加机身长、至少 48 格，宽是翼展再加 4 格，不能是水、高低差不超过 1 格，跑道头外面 120 格内不能有树、山挡着下滑线。目的地附近（±96 格）没有这样的地，它会飞回起飞的地方降。机翼越多，离地越快、滑得越短。
 - `cruise_altitude` 默认取当前与目的地高的那个再加 32。越高升力越弱，升不上去就给低一点；前方地形高了它会自己往上抬，不绕。
 - 车和船朝目标开直线，到了刹住；路上的障碍不绕，按着动力 5 秒挪不动就照实停下。
 - 装了 Create: Flight Control 的飞艇：高度稳定器、智能姿态稳定器、线速度耦合器都接着在转的轴、接了飞控计算机或开了直接施力，而且无线红石打字机有四个键经飞控红石代理接到耦合器沿船身 +x、-x、+z、-z 时，开的时候改成设目标高度加给方向，船不转头直接滑过去，不查升力、转向键和车头。先看 `machine_inspect` 的 `stabilizers.driven_by`：是 `stabilizers` 就走这条路，是 `keys` 时 `why` 写缺什么，照旧按键开；开完 `drove.driven_by` 写实际怎么开的。
@@ -72,6 +76,9 @@ metadata: {"requires-mods": "simulated"}
 | 起飞就歪、一头栽 | `balance` 两种 `cases` 的 `tendency` | `balance=ballast` 的位置加铁块；推进装到重心高度附近 |
 | 飞到一半掉高度 | 巡航高度、`lift_ratio` | `cruise_altitude` 给低一点，或加升力 |
 | 落地了但没停稳 | `drove.parked_samples` 与 `drove.landing` | 换平整的落点；调配重 |
+| 固定翼滑到头没离地（`stop_takeoff`） | `drove.takeoff`、`phases` 里中止的原因 | 换一条更长的地起飞；加机翼、减重；加抬头键帮它离地 |
+| 固定翼复飞好几次、飞回起飞的地方 | `drove.go_arounds`、`phases`、`landing` | 目的地附近清出一条够长够平的地；转向不够快就加副翼或加大舵面 |
+| 固定翼结果写某个键"这一趟反着用" | `note` | 照它说的用 machine_configure 改操纵表 |
 | 车卡住不动 | `drove.distance_left`、应力读数 | 换一个直线上没挡的目标分段开；查引擎燃料和过载 |
 | 一个键开了两样东西、松开还在动 | `controls[]` 的 `receivers`、`drives` | 挪收端；换这辆专用的频率 |
 
@@ -91,7 +98,7 @@ metadata: {"requires-mods": "simulated"}
 
 ## 现在还不会的
 
-- 固定翼不会自动起降；只靠朝上的螺旋桨飞的也算固定翼。
+- 固定翼只在陆地上降落（浮在水上的能滑跑起飞，落地只找地上的跑道）；不会在地上掉头找跑道。只靠朝上的螺旋桨、没有机翼的种类说不清，开不了。
 - 车只开直线，不绕障碍。
 - 组装后不能在船上改部件设置（舵轮、油门拉杆、燃烧室、扭力弹簧、螺旋桨的设置框），也不会在船上装传送带这类安装段、装部件；在动着的结构上不施工。
 - 舵轮、油门拉杆、讲台遥控器开不了。

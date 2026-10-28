@@ -22,12 +22,12 @@ final class VehiclePartsKnowledge implements KnowledgeSource {
     static final String RESOURCE = "/assets/maicraft/knowledge/vehicle/parts.md";
     /** 这一套三个模组的命名空间：它们的物品资料页都挂这一篇。 */
     private static final Set<String> NAMESPACES = Set.of("simulated", "aeronautics", "offroad");
-    private static final String TITLE = "载具部件：飞艇和车怎么搭";
-    private static final String DESCRIPTION = "升力、推进、转向、车轮、无线红石打字机与收端、胶与物理组装器各怎么摆，以及组装和起飞常见的坑";
+    private static final String TITLE = "载具部件：飞艇、固定翼和车怎么搭";
+    private static final String DESCRIPTION = "升力、机翼、推进、转向、车轮、无线红石打字机与收端、胶与物理组装器各怎么摆，以及组装和起飞常见的坑";
     private static final KnowledgeDocument.Entry ENTRY = new KnowledgeDocument.Entry(URI, "vehicle.parts", TITLE, DESCRIPTION,
-            "载具 飞艇 飞船 小车 汽车 车 气球 蒙皮 燃烧室 燃烧器 浮空水晶 升力 螺旋桨 桨 风帆 推进 舵 转向 车轮 悬架 轮胎 刹车 "
+            "载具 飞艇 飞船 固定翼 飞机 机翼 跑道 起落架 小车 汽车 车 气球 蒙皮 燃烧室 燃烧器 浮空水晶 升力 螺旋桨 桨 风帆 推进 舵 转向 车轮 悬架 轮胎 刹车 "
                     + "物理组装器 组装 强力胶 胶 无线红石打字机 收端 频率 便携式引擎 定向齿轮换向器 扭力弹簧 配重 重心 "
-                    + "airship car vehicle balloon envelope burner levitite propeller sail wheel tire assembler glue "
+                    + "airship plane airplane wing runway car vehicle balloon envelope burner levitite propeller sail wheel tire assembler glue "
                     + "simulated aeronautics offroad");
 
     @Override public List<KnowledgeDocument.Entry> entries() {

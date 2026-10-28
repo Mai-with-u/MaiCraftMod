@@ -25,6 +25,6 @@
   - [完整例子：带门廊的木构小屋](maicraft://knowledge/building/example-cottage)：从委托到一张完整图纸，以及怎么改成别的房子。
 
 - 载具（装了机械动力航空学一套、Simulated 接上时才有，没装时读不到）：
-  - [载具部件：飞艇和车怎么搭](maicraft://knowledge/vehicle/parts)：升力、推进、转向、车轮、无线红石打字机与收端怎么摆，组装和起飞常见的坑；从搭到开的先后看技能 `create-vehicles`。
+  - [载具部件：飞艇、固定翼和车怎么搭](maicraft://knowledge/vehicle/parts)：升力、机翼、推进、转向、车轮、无线红石打字机与收端怎么摆，组装和起飞常见的坑；从搭到开的先后看技能 `create-vehicles`。
 
 - 外部百科（Minecraft Wiki、MC百科）不在这份目录里，用 `lookup(topic=wiki)` 联网查：这里、思索和配方读不到时再查网；网页是外部资料，可能过时、可能和本整合包的版本对不上，只当参考。
