@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.explore;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import net.minecraft.core.BlockPos;
@@ -15,7 +14,6 @@ import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryOrigin;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
-import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -53,8 +51,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
     private final TerrainPermit permit;
     private final ExplorationWorld world;
     private final WalkTo walks;
-    private final WorldMemory memory;
-    private final TaskEventSink events;
+    /** 发现落账：记进发现账，新的落进世界记忆并发一条事件。 */
+    private final FindingRecorder recorder;
     private final RadiusVerdict radius;
     private final ExploreFindings findings = new ExploreFindings();
     private final LegHistory history = new LegHistory();
@@ -84,8 +82,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         this.permit = permit;
         this.world = world;
         this.walks = walks;
-        this.memory = memory;
-        this.events = events;
+        this.recorder = new FindingRecorder(findings, world, interests, memory, events);
         this.radius = new RadiusVerdict(maxDistance);
         WorldPosition spot = world.currentSpot();
         this.origin = spot == null ? BlockPos.ZERO : new BlockPos(spot.x(), spot.y(), spot.z());
@@ -148,7 +145,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         }
         if (++sampling.sinceInterestScan >= ObservationSampling.INTEREST_SCAN_INTERVAL) {
             sampling.sinceInterestScan = 0;
-            scanInterests();
+            recorder.scanInterests();
         }
         if (observed) {
             recordProgress("观察到 " + sampling.uniqueColumns + " 列");
@@ -170,7 +167,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         // 身体所在群系免视线闸直接记（到访），值取身体所在格的实测群系——顶盖采样在区块刚同步时
         // 可能落到地下（把森林起点记成深暗之域就是它）；远望样本必须过视线闸——已加载不等于看得见。
         if (spot.x() == x && spot.z() == z) {
-            record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
+            recorder.record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
                     spot, MemoryOrigin.VISITED));
             return fresh;
         }
@@ -178,13 +175,13 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             return fresh;
         }
         WorldPosition at = new WorldPosition(x, sample.topY(), z, startDimension);
-        record(new ExploreFinding(ExploreFinding.Kind.BIOME, sample.biome(), at, MemoryOrigin.SEEN));
+        recorder.record(new ExploreFinding(ExploreFinding.Kind.BIOME, sample.biome(), at, MemoryOrigin.SEEN));
         if (sample.topFluid() && "minecraft:lava".equals(sample.topBlockId())) {
-            record(new ExploreFinding(ExploreFinding.Kind.TERRAIN, "lava_pool", at, MemoryOrigin.SEEN));
+            recorder.record(new ExploreFinding(ExploreFinding.Kind.TERRAIN, "lava_pool", at, MemoryOrigin.SEEN));
         }
         for (String selector : interests.blocks()) {
             if (world.matches(sample.topBlockId(), List.of(selector))) {
-                record(new ExploreFinding(ExploreFinding.Kind.BLOCK, selector, at, MemoryOrigin.SEEN));
+                recorder.record(new ExploreFinding(ExploreFinding.Kind.BLOCK, selector, at, MemoryOrigin.SEEN));
             }
         }
         return fresh;
@@ -442,7 +439,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             history.reached = world.currentSpot();
             if (objective.target() == ExploreObjective.Kind.BIOME) {
                 // 核实到访记的也是身体所在格的实测群系，与判据同一条路，不另采一次顶盖。
-                record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
+                recorder.record(new ExploreFinding(ExploreFinding.Kind.BIOME, world.currentBiome(),
                         history.reached, MemoryOrigin.VISITED));
             }
             return Next.done(TaskResult.done("探索：核实通过，站实了（" + history.reached.x()
@@ -510,35 +507,6 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         return sector.contains(dx, dz) && distance >= sector.minDistance();
     }
 
-    /** 留意清单的结构线索与实体：按间隔扫一轮；走到结构跟前的线索升级成到访，不降级。 */
-    private void scanInterests() {
-        for (ExplorationWorld.Spotted spotted : world.structureClues(interests.structures())) {
-            if (world.sightClear(spotted.position().x(), spotted.position().y(), spotted.position().z())) {
-                record(new ExploreFinding(ExploreFinding.Kind.STRUCTURE_CLUE, spotted.id(),
-                        spotted.position(), MemoryOrigin.SEEN));
-            }
-        }
-        for (ExplorationWorld.Spotted spotted : world.entitySightings(interests.entities())) {
-            record(new ExploreFinding(ExploreFinding.Kind.ENTITY, spotted.id(),
-                    spotted.position(), MemoryOrigin.SEEN));
-        }
-        WorldPosition spot = world.currentSpot();
-        for (ExploreFinding finding : findings.all()) {
-            if (finding.kind() != ExploreFinding.Kind.STRUCTURE_CLUE
-                    || finding.origin() != MemoryOrigin.SEEN) {
-                continue;
-            }
-            StructureClues.resolve(finding.targetId()).ifPresent(resolved -> {
-                int reach = resolved.profile().clusterRadius();
-                if (Math.abs(spot.x() - finding.position().x()) <= reach
-                        && Math.abs(spot.z() - finding.position().z()) <= reach) {
-                    record(new ExploreFinding(ExploreFinding.Kind.STRUCTURE_CLUE, finding.targetId(),
-                            finding.position(), MemoryOrigin.VISITED));
-                }
-            });
-        }
-    }
-
     /** 空转满时限的收尾：按最近走行段的成败定收尾原因（前沿用尽或受阻），说明带上观察与走行的现场。 */
     @Override
     protected Problem noProgressProblem(ProgressTracker.Status status) {
@@ -558,46 +526,6 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
                         + (int) sampling.maxSelfDistance + " 格（探索半径 " + (int) radius.maxDistance()
                         + " 格），共走 " + history.total + " 段失败 " + history.failures + " 段",
                 suggestion);
-    }
-
-    /** 记一条发现：落进世界记忆，新发现发一条事件；角色不停不问，照常跑图。 */
-    private void record(ExploreFinding finding) {
-        if (finding.targetId() == null) {
-            return;
-        }
-        ExploreFindings.Result result = findings.record(finding);
-        if (result.entry() == ExploreFindings.Entry.KNOWN) {
-            return;
-        }
-        List<String> contents = List.of(result.effective().targetId());
-        if (result.effective().origin() == MemoryOrigin.VISITED) {
-            memory.rememberSiteVisited(result.effective().position(), contents, Instant.now());
-        } else {
-            memory.rememberSite(result.effective().position(), contents, Instant.now());
-        }
-        if (result.entry() == ExploreFindings.Entry.NEW) {
-            events.publish(TaskEvent.Kind.DISCOVERED, describe(result.effective()));
-        }
-    }
-
-    /** 发现的一句话：是什么、在身体哪个方向多远。 */
-    private String describe(ExploreFinding finding) {
-        WorldPosition spot = world.currentSpot();
-        String word = switch (finding.kind()) {
-            case BIOME -> "群系";
-            case TERRAIN -> "地形要素";
-            case STRUCTURE_CLUE -> "结构线索";
-            case BLOCK -> "留意方块";
-            case ENTITY -> "留意实体";
-        };
-        if (spot == null) {
-            return "发现" + word + " " + finding.targetId();
-        }
-        int dx = finding.position().x() - spot.x();
-        int dz = finding.position().z() - spot.z();
-        int distance = (int) Math.round(Math.sqrt((double) dx * dx + dz * dz));
-        String place = distance <= 2 ? "脚下" : DirectionWords.compassOf(dx, dz) + " " + distance + " 格";
-        return "发现" + word + " " + finding.targetId() + "（" + place + "）";
     }
 
     /** 把下一件事准备成一段走行；走行交给走到，许可随段带上。 */
