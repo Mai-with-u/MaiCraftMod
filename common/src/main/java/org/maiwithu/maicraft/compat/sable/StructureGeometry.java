@@ -2,22 +2,33 @@
 package org.maiwithu.maicraft.compat.sable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Quaterniond;
 import org.joml.Vector3d;
+
+import org.maiwithu.maicraft.ability.vehicle.spi.BearingRotors;
 
 /**
  * 物理结构的几何，纯函数：地块里的方块按位姿换到世界里——逐格碰撞、甲板上能站的格、在怎么动。
@@ -47,12 +58,14 @@ final class StructureGeometry {
      * @param parts    认得的部件（控制件、收端、执行件、浮力源）：所在的格与方块 ID
      * @param assemblers 物理组装器所在的格（拆回时拉它）
      * @param makeup   方块清单：方块 ID → 格数；拆回再组装时按它认是不是同一艘、哪里改过
+     * @param wings    机翼所在的格：固定在结构上、会产生升力的方块，装在轴承正面跟着转的不算
      */
     record Scan(boolean complete, List<AABB> boxes, int blocks, List<BlockPos> seats, List<Part> parts,
-                List<BlockPos> assemblers, Map<String, Integer> makeup) {
+                List<BlockPos> assemblers, Map<String, Integer> makeup, List<BlockPos> wings) {
 
         Scan {
             makeup = Map.copyOf(makeup);
+            wings = List.copyOf(wings);
         }
 
         /** 控制件（无线红石打字机、舵轮、油门拉杆）。 */
@@ -69,14 +82,46 @@ final class StructureGeometry {
     /** 结构上的一个部件：地块里的格与方块 ID。 */
     record Part(BlockPos local, String id) {}
 
-    /** 地块里逐格读一遍：每格自己的碰撞形状、座位、认得的部件；格数超了或有没加载的格就是没读全。 */
+    /**
+     * 认机翼用的三样：这块方块装在物理结构上产不产生升力（问 Sable），是不是轴承、朝哪，是不是风帆类方块
+     * （顺着它们认轴承转子，跟着转的风帆不算机翼）。
+     */
+    record WingRules(Predicate<BlockState> lifts, Function<BlockState, Optional<Direction>> bearing,
+                     Predicate<BlockState> sail) {
+
+        /** 不认机翼：读不到升力时用。 */
+        static final WingRules NONE = new WingRules(state -> false, state -> Optional.empty(), state -> false);
+
+        /** 机械动力的风车风帆标签：风帆、风帆框架、对称风帆都在里面。 */
+        private static final TagKey<Block> SAILS = TagKey.create(Registries.BLOCK,
+                ResourceLocation.fromNamespaceAndPath("create", "windmill_sails"));
+
+        /** 升力问 Sable；轴承按方块 ID 认、朝向读方块状态，风帆类按风车风帆标签或会产生升力认。 */
+        static WingRules of(Predicate<BlockState> lifts) {
+            return new WingRules(lifts, WingRules::bearingFacing, state -> state.is(SAILS) || lifts.test(state));
+        }
+
+        private static Optional<Direction> bearingFacing(BlockState state) {
+            String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            return VehicleParts.BEARINGS.contains(id) && state.hasProperty(BlockStateProperties.FACING)
+                    ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty();
+        }
+    }
+
+    /** 地块里逐格读一遍，不认机翼。 */
     static Scan scan(SableStructures.Structure structure, Function<BlockPos, BlockState> read) {
+        return scan(structure, read, WingRules.NONE);
+    }
+
+    /** 地块里逐格读一遍：每格自己的碰撞形状、座位、认得的部件、机翼；格数超了或有没加载的格就是没读全。 */
+    static Scan scan(SableStructures.Structure structure, Function<BlockPos, BlockState> read, WingRules rules) {
         List<AABB> boxes = new ArrayList<>();
         List<BlockPos> seats = new ArrayList<>();
         List<Part> parts = new ArrayList<>();
         List<BlockPos> assemblers = new ArrayList<>();
         Map<String, Integer> makeup = new TreeMap<>();
-        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, parts, assemblers, makeup);
+        if (cells(structure) > MAX_CELLS) return new Scan(false, boxes, 0, seats, parts, assemblers, makeup, List.of());
+        WingCells wings = new WingCells(rules);
         boolean complete = true;
         int blocks = 0;
         for (BlockPos local : BlockPos.betweenClosed(structure.localMin(), structure.localMax())) {
@@ -93,10 +138,42 @@ final class StructureGeometry {
             if (id.endsWith("_seat")) seats.add(local.immutable());
             if (VehicleParts.known(id)) parts.add(new Part(local.immutable(), id));
             if (ASSEMBLER.equals(id)) assemblers.add(local.immutable());
+            wings.note(local.immutable(), state);
             VoxelShape shape = state.getCollisionShape(EmptyBlockGetter.INSTANCE, local);
             for (AABB part : shape.toAabbs()) boxes.add(part.move(local));
         }
-        return new Scan(complete, boxes, blocks, seats, parts, assemblers, makeup);
+        return new Scan(complete, boxes, blocks, seats, parts, assemblers, makeup, wings.wings());
+    }
+
+    // 逐格读时顺手记下的：会产生升力的格、轴承朝哪、风帆类的格、所有方块；读完去掉轴承转子上的就是机翼。
+    private static final class WingCells {
+        private final WingRules rules;
+        private final List<BlockPos> lifting = new ArrayList<>();
+        private final Map<BlockPos, Direction> bearings = new HashMap<>();
+        private final Set<BlockPos> sails = new HashSet<>();
+        private final Set<BlockPos> filled = new HashSet<>();
+
+        WingCells(WingRules rules) {
+            this.rules = rules;
+        }
+
+        void note(BlockPos local, BlockState state) {
+            filled.add(local);
+            if (rules.lifts().test(state)) lifting.add(local);
+            rules.bearing().apply(state).ifPresent(facing -> bearings.put(local, facing));
+            if (rules.sail().test(state)) sails.add(local);
+        }
+
+        // 螺旋桨桨叶、舵面这类装在轴承正面跟着转的风帆不是机翼。
+        List<BlockPos> wings() {
+            if (lifting.isEmpty()) return List.of();
+            Set<BlockPos> turning = new HashSet<>();
+            for (BearingRotors.Rotor rotor : BearingRotors.of(filled, cell -> Optional.ofNullable(bearings.get(cell)),
+                    sails::contains)) {
+                turning.addAll(rotor.cells());
+            }
+            return lifting.stream().filter(cell -> !turning.contains(cell)).toList();
+        }
     }
 
     /**

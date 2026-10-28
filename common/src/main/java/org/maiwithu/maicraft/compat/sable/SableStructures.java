@@ -86,4 +86,12 @@ public interface SableStructures {
 
     /** 结构地块里的实体（装在船上的螺旋桨、风帆这类装置）此刻在世界里的范围。 */
     List<AABB> attachedEntities(ClientLevel level, String id);
+
+    /**
+     * 这块方块装在物理结构上产不产生升力：Sable 把它当升力面、升力系数大于零（机械动力的风帆、风帆框架；
+     * 对称风帆只产生阻力，不算）。认机翼用；读写端不会认的当不产生。
+     */
+    default boolean lifts(BlockState state) {
+        return false;
+    }
 }

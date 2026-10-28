@@ -26,10 +26,12 @@ public final class StructureScans {
 
     private record Scanned(long at, StructureGeometry.Scan scan) {}
 
-    StructureGeometry.Scan scan(long now, SableStructures.Structure structure, Function<BlockPos, BlockState> read) {
+    // 记事本里有两百刻内读过的就用它；不然逐格重读一遍（连机翼一起认）记下来。
+    StructureGeometry.Scan scan(long now, SableStructures.Structure structure, Function<BlockPos, BlockState> read,
+            StructureGeometry.WingRules wings) {
         Scanned cached = scans.get(structure.id());
         if (cached != null && now - cached.at() < FRESH_TICKS) return cached.scan();
-        StructureGeometry.Scan scan = StructureGeometry.scan(structure, read);
+        StructureGeometry.Scan scan = StructureGeometry.scan(structure, read, wings);
         scans.entrySet().removeIf(entry -> now - entry.getValue().at() > FRESH_TICKS * 10L);
         scans.put(structure.id(), new Scanned(now, scan));
         return scan;

@@ -24,6 +24,9 @@ final class VehicleParts {
     /** 收端旁边接着这些就是动力：螺旋桨轴承出推力，模拟传动器调车轮的转速。 */
     static final Set<String> POWER = Set.of("aeronautics:propeller_bearing",
             "aeronautics:gyroscopic_propeller_bearing", "simulated:analog_transmission");
+    /** 在空中推着走的：螺旋桨轴承。固定翼要有它。 */
+    static final Set<String> PROPELLERS = Set.of("aeronautics:propeller_bearing",
+            "aeronautics:gyroscopic_propeller_bearing");
     /** 升力：可调燃烧器、蒸汽喷口给气球供气。 */
     static final Set<String> LIFT = Set.of("aeronautics:adjustable_burner", "aeronautics:steam_vent");
     /** 转向：扭力弹簧、旋转轴承、定向齿轮换向器拨风帆或舵，车轮悬架打方向。 */
@@ -35,6 +38,9 @@ final class VehicleParts {
     static final Set<String> FLOAT = Set.of("aeronautics:levitite", "aeronautics:pearlescent_levitite");
     /** 车轮。 */
     static final String WHEEL = "offroad:wheel_mount";
+    /** 轴承：转起来把朝向那面的那一格和连着的风帆带着转（螺旋桨、舵面、风车），认机翼时去掉它们。 */
+    static final Set<String> BEARINGS = Set.of("create:mechanical_bearing", "create:windmill_bearing",
+            "create:clockwork_bearing", "aeronautics:propeller_bearing", "aeronautics:gyroscopic_propeller_bearing");
 
     /** 角色的说法：给 LLM 的字段值。 */
     static final String ROLE_POWER = "power";
@@ -102,17 +108,20 @@ final class VehicleParts {
     }
 
     /**
-     * 整辆的种类：没读全说不清；没有座位或控制件就只是结构；有车轮是车，有浮力（燃烧器、蒸汽喷口、气球、浮空水晶）是飞艇，
-     * 浮在水上是船，只有螺旋桨是固定翼；都不是说不清。
+     * 整辆的种类，按这个先后认：没读全说不清；没有座位或控制件就只是结构；有浮力（燃烧器、蒸汽喷口、气球、浮空水晶）
+     * 是飞艇，哪怕也装了机翼——能悬停、垂直起降最稳；没有浮力、有机翼又有推进是固定翼，带车轮也是（车轮当起落架）；
+     * 有车轮是车；浮在水上是船；只有推进、没有机翼的（朝上的桨当直升机）说不清。
+     *
+     * @param wings 结构上有机翼（固定在结构上、会产生升力的方块，不在轴承转子上）
      */
-    static String kind(boolean complete, int seats, Collection<String> parts, boolean onWater) {
+    static String kind(boolean complete, int seats, Collection<String> parts, boolean wings, boolean onWater) {
         if (!complete) return "unknown";
         boolean controls = parts.stream().anyMatch(CONTROLS::contains);
         if (seats == 0 || !controls) return "structure";
-        if (parts.contains(WHEEL)) return "car";
         if (parts.stream().anyMatch(id -> LIFT.contains(id) || FLOAT.contains(id) || envelope(id))) return "airship";
+        if (wings && parts.stream().anyMatch(PROPELLERS::contains)) return "plane";
+        if (parts.contains(WHEEL)) return "car";
         if (onWater) return "boat";
-        if (parts.stream().anyMatch(POWER::contains)) return "plane";
         return "unknown";
     }
 

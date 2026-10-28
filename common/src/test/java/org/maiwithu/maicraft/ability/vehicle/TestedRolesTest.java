@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.ability.vehicle;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
@@ -43,5 +45,7 @@ class TestedRolesTest {
     @Test
     void 太小是看不出动() {
         assertEquals("none", TestedRoles.of(effect(0.1, 0.1, 0.1, 1, 1, 1), "airship", "").role());
+        assertTrue(TestedRoles.motionless(effect(0.1, 0.1, 0.1, 1, 1, 1)), "固定翼停在地上按舵键就是这样");
+        assertFalse(TestedRoles.motionless(effect(0, 0, 0, 0, 5, 0)), "转了 5° 不算看不出动");
     }
 }

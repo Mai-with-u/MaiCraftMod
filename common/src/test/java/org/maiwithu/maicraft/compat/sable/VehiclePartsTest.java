@@ -35,14 +35,26 @@ class VehiclePartsTest {
     void 种类按部件推() {
         List<String> airship = List.of(StructureGeometry.TYPEWRITER, "aeronautics:white_envelope",
                 "aeronautics:propeller_bearing");
-        assertEquals("airship", VehicleParts.kind(true, 1, airship, false));
-        assertEquals("unknown", VehicleParts.kind(false, 1, airship, false), "没读全说不清");
-        assertEquals("structure", VehicleParts.kind(true, 0, airship, false), "没有座位只是结构");
-        assertEquals("car", VehicleParts.kind(true, 1, List.of(StructureGeometry.TYPEWRITER, "offroad:wheel_mount"), false));
-        assertEquals("boat", VehicleParts.kind(true, 1, List.of(StructureGeometry.TYPEWRITER,
-                "aeronautics:propeller_bearing"), true));
+        assertEquals("airship", VehicleParts.kind(true, 1, airship, false, false));
+        assertEquals("airship", VehicleParts.kind(true, 1, airship, true, false), "有浮力又有机翼按飞艇开");
+        assertEquals("unknown", VehicleParts.kind(false, 1, airship, false, false), "没读全说不清");
+        assertEquals("structure", VehicleParts.kind(true, 0, airship, false, false), "没有座位只是结构");
+        assertEquals("car", VehicleParts.kind(true, 1, List.of(StructureGeometry.TYPEWRITER, "offroad:wheel_mount"),
+                false, false));
+        List<String> propeller = List.of(StructureGeometry.TYPEWRITER, "aeronautics:propeller_bearing");
+        assertEquals("boat", VehicleParts.kind(true, 1, propeller, false, true));
+        assertEquals("unknown", VehicleParts.kind(true, 1, propeller, false, false), "只有推进没有机翼说不清");
+    }
+
+    @Test
+    void 有机翼又有推进是固定翼_带车轮也是() {
+        List<String> propeller = List.of(StructureGeometry.TYPEWRITER, "aeronautics:propeller_bearing");
+        assertEquals("plane", VehicleParts.kind(true, 1, propeller, true, false));
         assertEquals("plane", VehicleParts.kind(true, 1, List.of(StructureGeometry.TYPEWRITER,
-                "aeronautics:propeller_bearing"), false));
+                "aeronautics:propeller_bearing", "offroad:wheel_mount"), true, false), "车轮当起落架");
+        assertEquals("plane", VehicleParts.kind(true, 1, propeller, true, true), "浮在水上的固定翼");
+        assertEquals("car", VehicleParts.kind(true, 1, List.of(StructureGeometry.TYPEWRITER, "offroad:wheel_mount"),
+                true, false), "有风帆没有螺旋桨还是车");
     }
 
     @Test

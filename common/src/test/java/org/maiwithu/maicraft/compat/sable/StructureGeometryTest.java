@@ -8,12 +8,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
@@ -59,6 +62,26 @@ class StructureGeometryTest {
         assertFalse(scan.boxes().isEmpty());
         AABB first = StructureGeometry.toWorld(ship.pose(), scan.boxes().getFirst());
         assertTrue(first.minY >= 69.99, "地块里 y=64 那层换到世界在 y=70：" + first);
+    }
+
+    @Test
+    void 机翼是固定在船身上会产生升力的方块_轴承正面跟着转的不算() {
+        // 白羊毛当会产生升力的风帆，侦测器当朝上的轴承：轴承正面那块和连着它的白羊毛是转子，船身另一头那块才是机翼。
+        Map<BlockPos, BlockState> plot = new HashMap<>();
+        for (int x = 0; x < 3; x++) plot.put(new BlockPos(10000 + x, 64, 10000), Blocks.OAK_PLANKS.defaultBlockState());
+        plot.put(new BlockPos(10000, 65, 10000),
+                Blocks.OBSERVER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.UP));
+        plot.put(new BlockPos(10000, 66, 10000), Blocks.WHITE_WOOL.defaultBlockState());
+        plot.put(new BlockPos(10001, 66, 10000), Blocks.WHITE_WOOL.defaultBlockState());
+        plot.put(new BlockPos(10002, 65, 10000), Blocks.WHITE_WOOL.defaultBlockState());
+        StructureGeometry.WingRules rules = new StructureGeometry.WingRules(state -> state.is(Blocks.WHITE_WOOL),
+                state -> state.is(Blocks.OBSERVER) ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty(),
+                state -> state.is(Blocks.WHITE_WOOL));
+        StructureGeometry.Scan scan = StructureGeometry.scan(structure(STILL, STILL, plot),
+                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState()), rules);
+        assertEquals(List.of(new BlockPos(10002, 65, 10000)), scan.wings());
+        assertTrue(StructureGeometry.scan(structure(STILL, STILL, plot),
+                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState())).wings().isEmpty(), "不认机翼时没有");
     }
 
     @Test

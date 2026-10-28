@@ -100,6 +100,7 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
     }
 
     // 每条按过的认出角色，记进操纵表（试过的）；车头没定时按认成动力的那一条定。读不到种类按飞艇的叫法记偏航。
+    // 固定翼停在地上按舵键看不出动：没有气流舵面转了机身不动，不记成 none，留着推出来的那行，提示照接线定。
     private String record(VehicleDriver.Report report) {
         if (report.structureId().isEmpty()) return "";
         Optional<VehicleReader.View> view = readers.stream().map(reader -> reader.read(report.structureId()))
@@ -108,8 +109,13 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
         String forward = controls.stored(report.structureId()).forward();
         String found = "";
         List<VehicleControls.Entry> entries = new ArrayList<>();
+        List<String> rudders = new ArrayList<>();
         for (VehicleDriver.Tried tried : report.tried()) {
             if (!tried.pressed() || tried.effect() == null) continue;
+            if (kind.equals("plane") && TestedRoles.motionless(tried.effect())) {
+                rudders.add(tried.control());
+                continue;
+            }
             TestedRoles.Verdict verdict = TestedRoles.of(tried.effect(), kind, forward);
             if (!verdict.forward().isEmpty()) {
                 forward = verdict.forward();
@@ -117,13 +123,15 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
             }
             entries.add(new VehicleControls.Entry(tried.control(), verdict.role(), VehicleControls.TESTED, verdict.note()));
         }
-        if (entries.isEmpty()) return "";
+        String still = rudders.isEmpty() ? "" : "。" + String.join("、", rudders)
+                + " 没记：固定翼的舵要有速度才起作用，停在地上试不出，照接线用 machine_configure 定 pitch_up、pitch_down、yaw_*、roll_*";
+        if (entries.isEmpty()) return still;
         boolean saved = controls.tested(report.structureId(), entries, found);
         controlMap = VehicleControls.merge(kind, view.map(VehicleReader.View::controls).orElse(List.of()),
                 controls.stored(report.structureId()));
         String roles = entries.stream().map(entry -> entry.control() + " " + entry.role()).collect(Collectors.joining("、"));
         return "。操纵表记下：" + roles + (found.isEmpty() ? "" : "，车头 " + found) + (saved ? "" : "（没存住）")
-                + (controlMap.missing().isEmpty() ? "" : "；还缺：" + String.join("、", controlMap.missing()));
+                + (controlMap.missing().isEmpty() ? "" : "；还缺：" + String.join("、", controlMap.missing())) + still;
     }
 
     @Override protected ResultDetails details() {

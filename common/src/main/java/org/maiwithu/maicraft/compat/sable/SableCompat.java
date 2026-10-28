@@ -68,7 +68,13 @@ public final class SableCompat extends CompatModule implements StructureReads {
 
     /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
     @Override public StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
-        return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local));
+        return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local),
+                StructureGeometry.WingRules.of(this::lifts));
+    }
+
+    // 认机翼时问 Sable 这块方块装在物理结构上产不产生升力。
+    private boolean lifts(BlockState state) {
+        return Boolean.TRUE.equals(call("认机翼", () -> structures.lifts(state)));
     }
 
     /** 这个结构下次重读（在船上施工改了方块）。 */

@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 import dev.ryanhcode.sable.Sable;
+import dev.ryanhcode.sable.api.block.BlockSubLevelLiftProvider;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.BoundingBox3d;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
@@ -29,7 +30,8 @@ import org.maiwithu.maicraft.compat.sable.SableStructures;
 /**
  * 读 Sable 物理结构的读写端（客户端）：客户端子世界容器里和区域沾边的子世界——编号、名字、世界里的范围、
  * 这一刻与上一刻的位姿、地块里方块的范围；角色正被哪个子世界带着（站在上面或坐着）；地块里一格的方块
- * 只从已经拿到的地块区块读，没有就答没加载，不为读而去加载；装在地块里的实体按位姿把范围换到世界。只翻译，不判断。
+ * 只从已经拿到的地块区块读，没有就答没加载，不为读而去加载；装在地块里的实体按位姿把范围换到世界；
+ * 一块方块装在结构上产不产生升力照 Sable 的升力面答。只翻译，不判断。
  */
 public final class SableStructureReads implements SableStructures {
 
@@ -91,6 +93,11 @@ public final class SableStructureReads implements SableStructures {
             boxes.add(new AABB(minX, minY, minZ, maxX, maxY, maxZ));
         }
         return boxes;
+    }
+
+    // 产不产生升力照 Sable 自己的升力面：机械动力的风帆由 Sable 挂上升力面，对称风帆的升力系数是 0。
+    @Override public boolean lifts(BlockState state) {
+        return state.getBlock() instanceof BlockSubLevelLiftProvider lift && lift.sable$getLiftScalar() > 0;
     }
 
     private static SubLevel subLevel(ClientLevel level, String id) {

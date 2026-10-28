@@ -4,7 +4,7 @@
 
 target 给物理结构的观察编号 `s#`（装了 Simulated 时）就是看一辆载具，不扫世界里的方块，结果是 `vehicle` 一节：
 
-- `kind`：`airship` 飞艇（有燃烧器、蒸汽喷口、气球或浮空水晶）/ `car` 车（有车轮悬架）/ `boat` 船（底下是水）/ `plane` 固定翼（只有螺旋桨）；没有座位或控制件的是 `structure`（只是会动的结构，不是载具）；没读全说不清是 `unknown`。
+- `kind`：`airship` 飞艇（有燃烧器、蒸汽喷口、气球或浮空水晶，哪怕也装了机翼）/ `plane` 固定翼（没有浮力，有机翼又有螺旋桨轴承，带车轮也是；机翼是固定在船身上的普通风帆、风帆框架，螺旋桨桨叶和舵面不算）/ `car` 车（有车轮悬架）/ `boat` 船（底下是水）；没有座位或控制件的是 `structure`（只是会动的结构，不是载具）；没读全、只有螺旋桨没有机翼说不清是 `unknown`。
 - `seats[]`：每个座位此刻在世界里的位置，`driver` 是坐着够得着无线红石打字机的驾驶座。
 - `controls[]`：无线红石打字机每个绑了频率的键——`control` 就是 `vehicle_drive` 的 `inputs` 里写的名字（`打字机:W`），`frequency` 两格频率物品，`receivers` 结构上收这个频率的收端几个，`drives` 收端旁边接着的执行件，`role` 推出来的角色（`power` 动力、`lift` 升力、`steer` 转向，左右要试按）与 `basis` 依据；隔着离合器、齿轮、红石线的推不出，是 `unknown`，用 `vehicle_drive(test)` 试按看它让船怎么动。
 - `state`：`moving`、`speed` 每秒几格、`heading` 结构自己的 +z（造的时候朝南那头）此刻朝哪（0 南、90 西、180 北、270 东）、`pitch` 与 `roll` 绕自己的 x、z 轴斜了几度、`contact` 底面压着地面 `grounded` / 悬空 `airborne` / 底下有格没加载 `unknown`、`driving` 谁在驾驶（`self` 角色坐在驾驶座上、`other` 别人在用无线红石打字机）。

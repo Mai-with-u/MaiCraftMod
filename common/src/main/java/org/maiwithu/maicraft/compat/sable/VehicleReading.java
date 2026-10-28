@@ -107,7 +107,8 @@ final class VehicleReading implements VehicleReader {
         boolean onWater = VehicleAttitude.onWater(ship.pose(), scan.boxes(), cell -> !level.isLoaded(cell) ? null
                 : !level.getFluidState(cell).isEmpty());
         List<String> ids = scan.parts().stream().map(StructureGeometry.Part::id).toList();
-        String kind = VehicleParts.kind(complete, seats.size(), ids, onWater);
+        // 机翼（固定在结构上、会产生升力、不在轴承转子上的）连同推进认固定翼。
+        String kind = VehicleParts.kind(complete, seats.size(), ids, !scan.wings().isEmpty(), onWater);
         VehicleAttitude.Angles angles = VehicleAttitude.angles(ship.pose());
         String contact = VehicleAttitude.contact(ship.pose(), scan.boxes(), cell -> solidTop(level, cell));
         State state = new State(StructureGeometry.moving(ship),

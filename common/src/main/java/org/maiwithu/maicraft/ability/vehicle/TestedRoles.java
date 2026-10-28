@@ -69,6 +69,13 @@ final class TestedRoles {
         return new Verdict("none", "", "看不出动（挪不到 " + MOVE + " 格、转不到 " + TURN + "°）");
     }
 
+    /** 挪不到 0.3 格、转不到 3°：看不出动。固定翼的舵停在地上没有气流就是这样。 */
+    static boolean motionless(VehicleDriver.Effect effect) {
+        double tilt = Math.max(Math.abs(effect.turnX()), Math.abs(effect.turnZ()));
+        return Math.abs(effect.turnY()) < TURN && tilt < TURN && Math.abs(effect.y()) < MOVE
+                && Math.hypot(effect.x(), effect.z()) < MOVE;
+    }
+
     static String opposite(String axis) {
         return (axis.startsWith("+") ? "-" : "+") + axis.substring(1);
     }
