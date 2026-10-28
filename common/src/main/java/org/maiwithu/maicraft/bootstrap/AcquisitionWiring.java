@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.acquire.sources.MiningSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.sources.RecipeSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.ReclaimSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.RememberedWoodSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.RegistryRecipeReads;
 import org.maiwithu.maicraft.behavior.acquire.sources.TradeSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.TransformSites;
@@ -99,6 +100,8 @@ final class AcquisitionWiring {
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
                 containerSource, craftSource, smeltSource, miningSource, harvestSource,
+                // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
+                new RememberedWoodSites(deps.world().memory(), bringsClose, deps.items().itemTags()),
                 new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
                         deps.guards().protection(), tradeTakes),
                 new HuntSource(new ClientCreatureScans(deps.character().context()), deps.guards().creatures(), permission,

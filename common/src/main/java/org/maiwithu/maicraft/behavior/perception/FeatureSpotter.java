@@ -96,12 +96,15 @@ public final class FeatureSpotter {
     /** 一种可聚类的符号对应的特征：特征名，以及成片出现时它证明的产地产物。 */
     private record Kind(String name, List<String> resources) {}
 
+    /** 树林这条产地证据在记忆里记的词：来源侧认它挑"哪里见过木头"，这个词只有这一处定义。 */
+    public static final String WOOD_CLUE = "木头";
+
     // 网格符号到特征的对照：只有值得报成一处特征的三种。
     // 产地证据也在这里一并声明（树林证明有木头）：新添产地知识只改这张表，别处不再认种类字符串。
     private static Kind kindOf(char cell) {
         return switch (cell) {
             case OverheadGrid.WATER -> new Kind("水体", List.of());
-            case OverheadGrid.TREE -> new Kind("树林", List.of("木头"));
+            case OverheadGrid.TREE -> new Kind("树林", List.of(WOOD_CLUE));
             case OverheadGrid.DROP -> new Kind("落差", List.of());
             default -> null;
         };
