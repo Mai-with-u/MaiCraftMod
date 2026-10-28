@@ -57,7 +57,7 @@ class DragonCombatTest {
         @Override public boolean arcTo(TickContext context, int entityId, double maxRange) { return arc; }
         @Override public boolean canShoot(TickContext context) { return true; }
         @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
-        @Override public boolean attackReady(TickContext context) { return true; }
+        @Override public int ticksToReady(TickContext context) { return 0; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
         @Override public void lowerGuard() {}
         @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
@@ -87,7 +87,7 @@ class DragonCombatTest {
     }
 
     private static Battlefield field(double x, double z, double health, DragonArena arena) {
-        Battlefield.Me me = new Battlefield.Me(x, 64, z, 0.3, health, 10, 3.0, true, true, true, 7, 4);
+        Battlefield.Me me = new Battlefield.Me(x, 64, z, 0.3, health, 10, 3.0, 0, true, true, 7, 4);
         return new Battlefield(me, List.of(), arena);
     }
 

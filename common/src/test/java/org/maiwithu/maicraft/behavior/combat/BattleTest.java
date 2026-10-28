@@ -70,6 +70,12 @@ class BattleTest {
         final List<GoalCompiler.Compiled> walks = new ArrayList<>();
         ActionStatus walkStatus = ActionStatus.progressed();
         BattleMoves.Posture posture = BattleMoves.Posture.GROUNDED;
+        /** 离下一刀还差几刻；0 即够格。 */
+        int ticks;
+        /** 目标身上的受击红闪还剩几刻。 */
+        int hurtFlash;
+        /** 最后一次举盾时说的"要出手了、盾放下"；没叫过为 null。 */
+        Boolean guardStrike;
         boolean canPillar;
         int pillars;
         /** 出手被拒（原生攻击没得到确认）。 */
@@ -125,6 +131,12 @@ class BattleTest {
 
         @Override public BattleMoves.Posture posture(TickContext context) { return posture; }
 
+        /** 摆一个姿势，并给出离下一刀还差几刻。 */
+        void pose(boolean onGround, boolean falling, boolean canJump, int ticksToReady) {
+            posture = new BattleMoves.Posture(onGround, falling, canJump);
+            ticks = ticksToReady;
+        }
+
         @Override public Action strike(TickContext context, int entityId) {
             return new Instant(() -> {
                 // 交互入口被举盾占着：出手动作在内部按"本刻没轮到"等待，回 Running 不抛错。
@@ -145,8 +157,11 @@ class BattleTest {
 
         @Override public boolean canShoot(TickContext context) { return bow; }
         @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
-        @Override public boolean attackReady(TickContext context) { return true; }
-        @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
+        @Override public int ticksToReady(TickContext context) { return ticks; }
+        @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {
+            guardStrike = aboutToStrike;
+        }
+        @Override public int hurtFlashTicks(TickContext context, int entityId) { return hurtFlash; }
         @Override public void lowerGuard() { lowered++; }
         @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) { steps.add(step); }
@@ -183,6 +198,13 @@ class BattleTest {
         return new CombatSenses.Threat(id, UUID.randomUUID(), "minecraft:zombie", x, 64, 0, Math.abs(x),
                 ThreatAssessment.Kind.MELEE, false, true, true, 0.3, Math.max(0, Math.abs(x) - 0.3),
                 Math.abs(x) < 1.43, 2.02, false);
+    }
+
+    /** 在东边 x 格处、看得见的另一位玩家：两边交互距离都是 3，他够得着我的中心距是 3.3 格。 */
+    private static CombatSenses.Threat player(double x) {
+        return new CombatSenses.Threat(9, UUID.randomUUID(), "minecraft:player", x, 64, 0, Math.abs(x),
+                ThreatAssessment.Kind.PLAYER, false, true, false, 0.3, Math.max(0, Math.abs(x) - 0.3),
+                Math.abs(x) < 3.3, 3.3, false);
     }
 
     private static CombatSenses.Threat creeper(double x, boolean armed) {
@@ -394,19 +416,19 @@ class BattleTest {
         Moves moves = new Moves();
         Battle fight = battle(senses, moves);
         // 站在地上、头顶有空、充能过半：起跳，这一刻不砍。
-        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        moves.pose(true, false, true, 5);
         fight.tick(new Tick(0));
         assertTrue(moves.lastStep().jump(), "起跳");
         assertEquals(0, moves.strikes);
         // 往上升时不砍，往下落时砍（原版暴击）。
-        moves.posture = new BattleMoves.Posture(false, false, false, 0.9f);
+        moves.pose(false, false, false, 1);
         fight.tick(new Tick(1));
         assertEquals(0, moves.strikes, "还在往上升");
-        moves.posture = new BattleMoves.Posture(false, true, false, 1f);
+        moves.pose(false, true, false, 0);
         fight.tick(new Tick(2));
         assertEquals(1, moves.strikes, "下落时砍");
         // 跳不了（头顶有方块）：站着砍。
-        moves.posture = new BattleMoves.Posture(true, false, false, 1f);
+        moves.pose(true, false, false, 0);
         fight.tick(new Tick(3));
         assertEquals(2, moves.strikes);
     }
@@ -459,7 +481,7 @@ class BattleTest {
 
     @Test
     void meleeBandFollowsBothSidesReachAndTheCooldown() {
-        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, true, true, false, 3, 4);
+        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, 0, true, false, 3, 4);
         Footwork.Band ready = Battle.meleeBand(me, zombie(1, 3), true);
         assertEquals(2.02, ready.inner(), 1e-9, "内沿是僵尸够得着我");
         assertEquals(3.15, ready.outer(), 1e-9, "外沿是我稳稳够得着它");
@@ -612,9 +634,9 @@ class BattleTest {
         senses.threats.add(zombie(1, 2.6));
         Moves moves = new Moves();
         Battle fight = battle(senses, moves);
-        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        moves.pose(true, false, true, 5);
         fight.tick(new Tick(0));
-        moves.posture = new BattleMoves.Posture(false, false, false, 0.7f);
+        moves.pose(false, false, false, 3);
         fight.tick(new Tick(1));
         assertEquals(2, moves.aimedStrike, "起跳、往上升时镜头都压在出手点上");
     }
@@ -628,17 +650,17 @@ class BattleTest {
         Battle fight = battle(senses, moves);
         int t = 0;
         for (int leap = 0; leap < 2; leap++) {
-            moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+            moves.pose(true, false, true, 5);
             fight.tick(new Tick(t++));
             assertTrue(moves.lastStep().jump(), "第 " + (leap + 1) + " 跳");
-            moves.posture = new BattleMoves.Posture(false, false, false, 0.7f);
+            moves.pose(false, false, false, 3);
             fight.tick(new Tick(t++));
-            moves.posture = new BattleMoves.Posture(false, true, false, 0.8f);
+            moves.pose(false, true, false, 2);
             fight.tick(new Tick(t++));
         }
         // 两跳都一刀没砍出去，落地：这一阵站着砍，不再起跳。
         int swingsBefore = moves.keptAim;
-        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        moves.pose(true, false, true, 5);
         for (int i = 0; i < 20; i++) {
             fight.tick(new Tick(t++));
             assertFalse(moves.lastStep().jump(), "站着砍的这一阵不跳");
@@ -655,18 +677,55 @@ class BattleTest {
         moves.strikeHangs = true;
         moves.crosshair = true;
         Battle fight = battle(senses, moves);
-        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        moves.pose(true, false, true, 5);
         fight.tick(new Tick(0));
-        moves.posture = new BattleMoves.Posture(false, true, false, 0.8f);
+        moves.pose(false, true, false, 2);
         fight.tick(new Tick(1));
         moves.strikeHangs = false;
-        moves.posture = new BattleMoves.Posture(true, false, true, 1f);
+        moves.pose(true, false, true, 0);
         fight.tick(new Tick(2));
         assertFalse(moves.lastStep().jump(), "落地满条：不再起跳");
         assertEquals(1, moves.strikes, "站着直接砍");
         // 砍完接着跳劈。
-        moves.posture = new BattleMoves.Posture(true, false, true, 0.6f);
+        moves.pose(true, false, true, 5);
         fight.tick(new Tick(3));
         assertTrue(moves.lastStep().jump());
+    }
+    @Test
+    void coolingAgainstAPlayerWaitsOutsideHisReachThenStepsInJustEarlyEnough() {
+        // 点名打玩家：站在离他 4 格的冷却带里，离出手带外沿差 0.85 格，走过去要 4 刻。
+        Senses senses = new Senses();
+        senses.threats.add(player(4.0));
+        Moves moves = new Moves();
+        Battle fight = new Battle(senses, moves, NAMED_ID_NINE, ThreatAssessment.VIGILANCE_RADIUS);
+        moves.ticks = 10;
+        fight.tick(new Tick(0));
+        assertTrue(moves.lastStep().standing(), "剑还差 10 刻：站在他够不着外等，实际 " + moves.lastStep());
+        assertEquals(Boolean.FALSE, moves.guardStrike, "等着的时候举着盾");
+        // 攻击条够了，他身上的红闪还剩 8 刻：照样等。
+        moves.ticks = 3;
+        moves.hurtFlash = 8;
+        fight.tick(new Tick(1));
+        assertTrue(moves.lastStep().standing(), "红闪还没退：站着等，实际 " + moves.lastStep());
+        // 还差 5 刻：走 4 刻加落脚一刻，提前往里走，盾放下（举着盾走路只有两成速度）。
+        moves.hurtFlash = 0;
+        moves.ticks = 5;
+        fight.tick(new Tick(2));
+        assertTrue(moves.lastStep().dx() > 0, "提前往他那边走，实际 " + moves.lastStep());
+        assertEquals(Boolean.TRUE, moves.guardStrike, "往里走就放下盾");
+        assertEquals(0, moves.strikes, "还够不着，不挥");
+    }
+
+    @Test
+    void againstAZombieTheCadenceLeavesFootworkAsBefore() {
+        // 打僵尸：2.6 格处既在冷却带也在出手带里（我够得着它、它够不着我的那条缝），离下一刀几刻都站着不动。
+        for (int ticks : new int[] {10, 1, 0}) {
+            Senses senses = new Senses();
+            senses.threats.add(zombie(1, 2.6));
+            Moves moves = new Moves();
+            moves.ticks = ticks;
+            battle(senses, moves).tick(new Tick(0));
+            assertTrue(moves.lastStep().standing(), "还差 " + ticks + " 刻：站在缝里，实际 " + moves.lastStep());
+        }
     }
 }

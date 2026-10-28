@@ -100,7 +100,7 @@ class FightTaskTest {
         @Override public Action shoot(TickContext context, int entityId) { return action("射 " + entityId, ActionStatus.running()); }
         @Override public boolean canShoot(TickContext context) { return false; }
         @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
-        @Override public boolean attackReady(TickContext context) { return true; }
+        @Override public int ticksToReady(TickContext context) { return 0; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
         @Override public void lowerGuard() {}
         @Override public Footwork.Ground ground(TickContext context) { return (dx, dz) -> Footwork.Footing.FLAT; }

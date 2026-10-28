@@ -25,8 +25,18 @@ public interface BattleMoves {
     /** 身上有没有剑斧这类近战武器。 */
     boolean hasMeleeWeapon(TickContext context);
 
-    /** 攻击此刻充能好了没。 */
-    boolean attackReady(TickContext context);
+    /** 离下一刀还差几刻：攻击条到 0.95、主手不是这一刻才换上的为 0（按游戏接口层的攻击充能算）。 */
+    int ticksToReady(TickContext context);
+
+    /** 它身上的受击红闪还剩几刻：红闪里再打只结算比上一下高出的部分。没接上时按没有。 */
+    default int hurtFlashTicks(TickContext context, int entityId) {
+        return 0;
+    }
+
+    /** 这会儿平地走路每刻走多远（格），按自己的移动速度属性折，疾跑那三成不算。没接上时按原版默认的走路。 */
+    default double walkPerTick(TickContext context) {
+        return StrikeCadence.WALK_PER_TICK;
+    }
 
     /** 举盾放盾：对手离这么近、这一刻是不是正要出手（要出手就放下）。 */
     void guard(TickContext context, double distance, boolean aboutToStrike);
@@ -92,8 +102,8 @@ public interface BattleMoves {
     String mainHand(TickContext context);
 
     /**
-     * 此刻身子在不在地上、在不在往下落、能不能起跳（不在水里岩浆里、没在爬梯子、没骑着东西、头顶有空），
-     * 以及攻击充能到几成。跳劈要看这些；没接上时按站在地上、不能跳、充满算。
+     * 此刻身子在不在地上、在不在往下落、能不能起跳（不在水里岩浆里、没在爬梯子、没骑着东西、头顶有空）。
+     * 跳劈要看这些；没接上时按站在地上、不能跳算。
      */
     default Posture posture(TickContext context) {
         return Posture.GROUNDED;
@@ -162,9 +172,8 @@ public interface BattleMoves {
      * 身子此刻的姿势。
      *
      * @param falling 离地往下落：这时候砍是原版暴击（伤害 × 1.5）
-     * @param charge  攻击充能（0 到 1）
      */
-    record Posture(boolean onGround, boolean falling, boolean canJump, float charge) {
-        public static final Posture GROUNDED = new Posture(true, false, false, 1f);
+    record Posture(boolean onGround, boolean falling, boolean canJump) {
+        public static final Posture GROUNDED = new Posture(true, false, false);
     }
 }

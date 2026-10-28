@@ -47,7 +47,9 @@ public final class LiveFightMoves implements FightMoves {
     @Override public Action shoot(TickContext context, int entityId) { return battle.shoot(context, entityId); }
     @Override public boolean canShoot(TickContext context) { return battle.canShoot(context); }
     @Override public boolean hasMeleeWeapon(TickContext context) { return battle.hasMeleeWeapon(context); }
-    @Override public boolean attackReady(TickContext context) { return battle.attackReady(context); }
+    @Override public int ticksToReady(TickContext context) { return battle.ticksToReady(context); }
+    @Override public int hurtFlashTicks(TickContext context, int entityId) { return battle.hurtFlashTicks(context, entityId); }
+    @Override public double walkPerTick(TickContext context) { return battle.walkPerTick(context); }
 
     @Override
     public void guard(TickContext context, double distance, boolean aboutToStrike) {

@@ -382,10 +382,15 @@ public final class Battle {
         Battlefield.Me me = field.me();
         CombatSenses.Threat threat = target.threat();
         boolean inReach = threat.visible() && threat.withinReach(me.reach());
-        // 跳劈（苦力怕不跳）：充能过半起跳、往下落时砍；落地满条、准星在它身上就站着砍，两跳没砍出去站着砍一阵。
-        JumpStrike.Move jump = leap.decide(moves.posture(context), inReach,
+        // 离下一刀还差几刻：攻击条、主手拿没拿稳、它身上的受击红闪取大的。冷却中站冷却带等，
+        // 剩的刻数不超过走到出手带要的刻数加一刻就提前往里走，到跟前正好够格（出刀节拍）。
+        int strikeIn = Math.max(me.ticksToReady(), moves.hurtFlashTicks(context, target.id()));
+        Footwork.Band readyBand = meleeBand(me, threat, true);
+        boolean stepIn = StrikeCadence.stepIn(strikeIn, threat.distance() - readyBand.outer(), moves.walkPerTick(context));
+        // 跳劈（苦力怕不跳）：离下一刀 7 刻以内起跳、往下落时砍；落地满条、准星在它身上就站着砍，两跳没砍出去站着砍一阵。
+        JumpStrike.Move jump = leap.decide(moves.posture(context), strikeIn, inReach,
                 threat.kind() != ThreatAssessment.Kind.EXPLOSIVE,
-                () -> me.attackReady() && moves.crosshairOn(context, target.id()));
+                () -> strikeIn == 0 && moves.crosshairOn(context, target.id()));
         boolean jumpNow = jump.jumpNow();
         boolean holdSwing = jump.holdSwing();
         // 手上还在换武器（开背包换进快捷栏、按数字键选中）：这几刻不挥，换完再砍。
@@ -404,10 +409,11 @@ public final class Battle {
             // 还够不着、离得也够远：路上先把剑斧拿到手上，到跟前一出手就是它。
             moves.arm(context, threat.distance());
         }
-        if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), inReach && me.attackReady());
+        // 往里走了就放下盾：举着盾走路只有两成速度，算好的刻数就不对了；冷却带里等着时举着。
+        if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), stepIn);
         else moves.lowerGuard();
-        Footwork.Band band = trimmed(meleeBand(me, threat, me.attackReady()), target.id(), inReach, threat.visible(),
-                threat.distance());
+        Footwork.Band band = trimmed(stepIn ? readyBand : meleeBand(me, threat, false), target.id(), inReach,
+                threat.visible(), threat.distance());
         boolean moved;
         limbs.sidestepTick();
         if (perched) {

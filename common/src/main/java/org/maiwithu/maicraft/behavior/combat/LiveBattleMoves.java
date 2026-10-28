@@ -9,6 +9,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
 import net.minecraft.world.item.ShieldItem;
 import net.minecraft.world.phys.EntityHitResult;
@@ -126,9 +128,30 @@ public final class LiveBattleMoves implements BattleMoves {
     }
 
     @Override
-    public boolean attackReady(TickContext context) {
-        return hands.attackReady(context);
+    public int ticksToReady(TickContext context) {
+        return hands.ticksToReady(context);
     }
+
+    // 它身上的受击红闪：被打后原版给 10 刻，客户端收到受击动画时同样记着，每刻减一。
+    @Override
+    public int hurtFlashTicks(TickContext context, int entityId) {
+        var player = context.player();
+        Entity target = player == null || player.level() == null ? null : player.level().getEntity(entityId);
+        return target instanceof LivingEntity living ? Math.max(0, living.hurtTime) : 0;
+    }
+
+    // 平地走路每刻多远：移动速度属性折过来（速度药水、缓慢跟着变），正在疾跑就把疾跑那三成去掉——
+    // 走进出手带按走路算，疾跑会吃掉暴击。
+    @Override
+    public double walkPerTick(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        if (self == null) return StrikeCadence.WALK_PER_TICK;
+        double speed = self.getAttributeValue(Attributes.MOVEMENT_SPEED) / (self.isSprinting() ? SPRINT_BOOST : 1.0);
+        return speed * StrikeCadence.WALK_PER_SPEED;
+    }
+
+    /** 原版疾跑给移动速度乘的倍数。 */
+    private static final double SPRINT_BOOST = 1.3;
 
     @Override
     public void guard(TickContext context, double distance, boolean aboutToStrike) {
@@ -286,7 +309,7 @@ public final class LiveBattleMoves implements BattleMoves {
         boolean headroom = self.level().getBlockState(head).getCollisionShape(self.level(), head).isEmpty();
         boolean canJump = onGround && headroom && !self.isInWater() && !self.isInLava() && !self.onClimbable()
                 && !self.isPassenger();
-        return new Posture(onGround, falling, canJump, self.getAttackStrengthScale(0.0F));
+        return new Posture(onGround, falling, canJump);
     }
 
     /** 第一刻才开走的寻路：走到没接上时如实失败。 */

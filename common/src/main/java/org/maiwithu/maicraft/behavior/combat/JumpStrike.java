@@ -6,17 +6,19 @@ import java.util.function.BooleanSupplier;
 /**
  * 跳劈：什么时候起跳、手什么时候先按住不砍、什么时候不跳了站着砍。战斗引擎每刻问一次，记着这一仗跳的几件事。
  *
- * <p>够得着、头顶有空、不是苦力怕（跳起来落不回原地躲不了），充能过半就起跳，往下落时才砍，原版算暴击；
+ * <p>够得着、头顶有空、不是苦力怕（跳起来落不回原地躲不了），离下一刀还剩 7 刻以内就起跳，往下落时才砍，原版算暴击；
  * 跳不了（水里、梯子上、头顶有方块）就站着砍。起跳前、往上升时手先按住，镜头由引擎压在出手的那一点上。
+ * 起跳按刻数掐，不按充能几成：平地起跳第 7 刻开始往下落、第 12 刻落地，够格正好落在往下落的那几刻里；
+ * 按"充能过半"起跳，剑正好，铁斧往下落时只剩一两刻能砍，重锤落地了还没满。比 7 刻还快就充满的（空手）落地就跳。
  *
- * <p>跳了砍不出去不硬跳：落地时攻击条满、准星正落在它身上就站着直接砍（斧子这类慢武器一跳的工夫充不满，
- * 往下落时还没满，落地才满）；连着两跳一刀没砍出去就站着砍一阵；按了跳一直没离地（灵魂沙、蜂蜜块上）也站着砍一阵。
+ * <p>跳了砍不出去不硬跳：落地时攻击条满、准星正落在它身上就站着直接砍；连着两跳一刀没砍出去就站着砍一阵；
+ * 按了跳一直没离地（灵魂沙、蜂蜜块上）也站着砍一阵。
  * 实机 10-15 跳劈跳半天不劈：近战没出手 81 次，"镜头还没转到"44 次。
  */
 final class JumpStrike {
 
-    /** 充能到这么多就起跳：落到能砍的时候正好充满，跳劈不比站着砍慢。 */
-    static final float JUMP_AT = 0.5f;
+    /** 离下一刀还剩这么多刻（含）以内就起跳：起跳后第 7 刻开始往下落，够格那一刻正好在往下落。 */
+    static final int JUMP_LEAD_TICKS = 7;
     /** 连着这么多刻想跳却没离地：这一阵不跳了，站着砍。 */
     static final int MAX_GROUNDED_JUMPS = 5;
     /** 跳不起来、或连着两跳一刀没砍出去之后，站着砍这么久（刻）。 */
@@ -49,11 +51,13 @@ final class JumpStrike {
     /**
      * 这一刻跳不跳、砍不砍。
      *
-     * @param inReach      够得着它
-     * @param leapable     它能跳着砍（苦力怕不跳：跳起来落不回原地躲不了）
-     * @param strikeReady  落地这一刻问：攻击条满了、准星正落在它身上
+     * @param ticksToStrike 离下一刀还差几刻（攻击条、主手拿没拿稳、它身上的受击红闪取大的）
+     * @param inReach       够得着它
+     * @param leapable      它能跳着砍（苦力怕不跳：跳起来落不回原地躲不了）
+     * @param strikeReady   落地这一刻问：攻击条满了、准星正落在它身上
      */
-    Move decide(BattleMoves.Posture posture, boolean inReach, boolean leapable, BooleanSupplier strikeReady) {
+    Move decide(BattleMoves.Posture posture, int ticksToStrike, boolean inReach, boolean leapable,
+                BooleanSupplier strikeReady) {
         if (noLeapTicks > 0) noLeapTicks--;
         if (groundStrikeTicks > 0) groundStrikeTicks--;
         if (jumpPressed && !posture.onGround()) {
@@ -65,7 +69,7 @@ final class JumpStrike {
         if (leapAirborne && posture.onGround()) landed(inReach && strikeReady.getAsBoolean());
         boolean leaping = inReach && noLeapTicks == 0 && groundStrikeTicks == 0 && leapable
                 && (posture.canJump() || !posture.onGround());
-        boolean jumpNow = leaping && posture.onGround() && posture.charge() >= JUMP_AT;
+        boolean jumpNow = leaping && posture.onGround() && ticksToStrike <= JUMP_LEAD_TICKS;
         if (jumpNow) jumpPressed = true;
         groundedJumps = jumpNow ? groundedJumps + 1 : posture.onGround() ? groundedJumps : 0;
         if (groundedJumps > MAX_GROUNDED_JUMPS) {

@@ -35,14 +35,19 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
     /**
      * 我方：位置、身板、血、交互距离、手上的本事。
      *
-     * @param reach       实体交互距离属性
-     * @param attackReady 攻击充能好了（原生出手的门槛）
-     * @param hasMelee    身上有剑斧这类近战武器
-     * @param canShoot    身上有能射的（有箭的弓、能装的弩、联动远程）
-     * @param weaponScore 挑中的武器分，威胁评估用
+     * @param reach        实体交互距离属性
+     * @param ticksToReady 离下一刀还差几刻：攻击条到 0.95、主手不是这一刻才换上的为 0（原生出手的门槛）
+     * @param hasMelee     身上有剑斧这类近战武器
+     * @param canShoot     身上有能射的（有箭的弓、能装的弩、联动远程）
+     * @param weaponScore  挑中的武器分，威胁评估用
      */
     public record Me(double x, double y, double z, double halfWidth, double health, int armorPoints, double reach,
-                     boolean attackReady, boolean hasMelee, boolean canShoot, int weaponScore, int foodCount) {
+                     int ticksToReady, boolean hasMelee, boolean canShoot, int weaponScore, int foodCount) {
+
+        /** 攻击此刻够格出手。 */
+        public boolean attackReady() {
+            return ticksToReady <= 0;
+        }
 
         /** 威胁评估看的我方处境；退没退路由调用方给。 */
         public ThreatAssessment.MySide side(boolean hasEscapeRoute) {
@@ -191,7 +196,7 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         double[] at = moves.selfPosition(context);
         int weaponScore = weaponScore(profile);
         Me me = new Me(at[0], at[1], at[2], PLAYER_HALF_WIDTH, profile.health(), profile.armorPoints(),
-                profile.reach(), moves.attackReady(context), moves.hasMeleeWeapon(context),
+                profile.reach(), moves.ticksToReady(context), moves.hasMeleeWeapon(context),
                 moves.canShoot(context), weaponScore, profile.foodCount());
         Set<UUID> attackers = new HashSet<>();
         for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) attackers.add(attacker.uuid());

@@ -93,7 +93,7 @@ class RetreatTest {
     }
 
     private static Battlefield field(Battlefield.Foe... foes) {
-        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 4, 0, 3, true, true, false, 3, 0);
+        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 4, 0, 3, 0, true, false, 3, 0);
         return new Battlefield(me, List.of(foes));
     }
 

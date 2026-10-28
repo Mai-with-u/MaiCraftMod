@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 class DragonTacticTest {
 
     private static Battlefield.Me me(double health, boolean melee, boolean bow) {
-        return new Battlefield.Me(0, 64, 20, 0.3, health, 10, 3.0, true, melee, bow, melee ? 7 : 0, 4);
+        return new Battlefield.Me(0, 64, 20, 0.3, health, 10, 3.0, 0, melee, bow, melee ? 7 : 0, 4);
     }
 
     /** 在 (x, y, z)、每刻速度 (vx, 0, vz)、在干 activity、干了 ticks 刻、离我 distance 的龙；龙头在身子北边。 */
@@ -68,7 +68,7 @@ class DragonTacticTest {
                 zombie(7, 1)), "血低、怪贴脸也先跑出龙息");
         // 龙吼到第 30 刻：按龙头朝向预先算的那一口也算。站在龙头正前方的先跑开。
         DragonArena roar = arena(0, perched(DragonArena.Activity.ROARING, 30), List.of(), List.of(), List.of());
-        Battlefield.Me inFront = new Battlefield.Me(0.5, 64, -9, 0.3, 20, 10, 3.0, true, true, true, 7, 4);
+        Battlefield.Me inFront = new Battlefield.Me(0.5, 64, -9, 0.3, 20, 10, 3.0, 0, true, true, 7, 4);
         assertInstanceOf(DragonTactic.AvoidCloud.class, DragonTactic.decide(new Battlefield(inFront, List.of(), roar),
                 DragonTactic.Memory.FRESH));
     }
@@ -221,7 +221,7 @@ class DragonTacticTest {
         // 惹毛的末影人在十格外：有弓也不射（它会瞬移躲开箭），近身打。
         CombatSenses.Threat enderman = new CombatSenses.Threat(8, UUID.randomUUID(), "minecraft:enderman", 10, 64, 0, 10,
                 ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 9.7, false, 2.0, false, true);
-        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 10, 3.0, true, true, true, 7, 4);
+        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 10, 3.0, 0, true, true, 7, 4);
         Tactic.Plan plan = Tactic.decide(new Battlefield(me, List.of(new Battlefield.Foe(enderman, true, true, true, true))),
                 new Tactic.Memory(-1, false, false, Set.of(), false, false));
         assertInstanceOf(Tactic.Melee.class, plan);

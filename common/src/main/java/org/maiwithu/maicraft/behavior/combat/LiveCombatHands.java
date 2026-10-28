@@ -59,10 +59,10 @@ public final class LiveCombatHands {
                 != WeaponChoice.Weapon.BARE_HANDS;
     }
 
-    /** 此刻够格出手（攻击条与主手拿没拿稳，按攻击充能那一份算）；没有角色时按够格。 */
-    public boolean attackReady(TickContext context) {
+    /** 离下一刀还差几刻（攻击条与主手拿没拿稳，按攻击充能那一份算）；没有角色时按够格。 */
+    public int ticksToReady(TickContext context) {
         self(context);
-        return AttackCharge.ready(context.player());
+        return AttackCharge.ticksToReady(context.player());
     }
 
     public void guard(TickContext context, double distance, boolean aboutToStrike) {
