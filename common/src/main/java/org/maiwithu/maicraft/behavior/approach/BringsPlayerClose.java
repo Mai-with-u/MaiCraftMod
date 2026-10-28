@@ -13,6 +13,14 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
  */
 public interface BringsPlayerClose {
 
+    /**
+     * 走近站位这一趟的耐心：走了这么久（刻）还没到也没放弃，就当这一趟走不成，
+     * 让调用方换一面、换一格。走向站位的走路自己不出走不通的结论（人掉进深坑、
+     * 站位在够不着的高处时，走路一刻答一次"还在走"），不设时限一格就吃满上层任务的停滞闸。
+     * 类别：玩家常识（绕工地走一圈用不了这么久）。
+     */
+    int WALK_PATIENCE_TICKS = 20 * 20;
+
     /** 生成一个靠近动作：走到够得着、看得见这个目标的位置。 */
     Action toward(ApproachTarget target, Permissions permissions);
 

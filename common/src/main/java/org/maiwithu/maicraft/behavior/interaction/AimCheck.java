@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
@@ -54,6 +55,15 @@ public final class AimCheck {
     /** 准星命中了目标格朝 face 的表面：放方块点哪一面只看命中的朝向，外形伸出格外的部分也算。 */
     public static boolean hitsFace(HitResult hit, BlockPos target, Direction face) {
         return hitsBlock(hit, target) && ((BlockHitResult) hit).getDirection() == face;
+    }
+
+    /**
+     * 准星指中了这一格、而这一格里是能被整个替换掉的东西（草、雪层这类）：原版右键会把它替换掉、
+     * 把手里的东西放进这一格，所以指中它哪一面都算指准了，不按点名的面筛。
+     * {@code state} 是这一格此刻的样子；没加载（null）或装着不能替换的方块时不算。
+     */
+    public static boolean hitsReplaceableCell(HitResult hit, BlockPos target, BlockState state) {
+        return hitsBlock(hit, target) && state != null && state.canBeReplaced();
     }
 
     /** 准星命中了指定的那只实体；另一只实体走进射线不算命中。 */

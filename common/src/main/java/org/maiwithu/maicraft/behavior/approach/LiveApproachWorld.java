@@ -165,7 +165,13 @@ public final class LiveApproachWorld implements ApproachWorldView {
         double reach = InteractionRange.blockReach(player);
         // 放方块点的那一面：按外形上朝这个方向的表面判，和放置预测、出手瞄准同一条规则。
         if (target.face() != null) {
-            return FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, cell, reach, target.face()) != null;
+            if (FirstPersonInteractionTargeting.visibleFaceHit(level, player, eye, cell, reach, target.face()) != null) {
+                return true;
+            }
+            // 这一格里是能直接放进去的东西（雪层、草）：指中它的任何一面原版都会把东西放进这一格，
+            // 不按点名的面筛——要放的那格自己占着格时，按面筛会把目标格自己当遮挡，走近永远判"看不见"。
+            return state.canBeReplaced()
+                    && FirstPersonInteractionTargeting.visibleBlockHit(level, player, eye, cell, reach) != null;
         }
         AABB cellBox = new AABB(cell);
         boolean part = !target.bounds().equals(cellBox);

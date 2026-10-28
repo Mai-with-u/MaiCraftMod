@@ -16,6 +16,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -112,10 +113,11 @@ final class ClearingWork extends ConstructionWork {
                 : ApproachTarget.ofBlockFace(cell.pos(), chainFace);
     }
 
-    // 挖的这一下有限时：够不着、被挡住这类挖不下来的格到点记做不了、换下一格，
-    // 不让一格吃满施工的停滞闸（耐心与采掘挖一格同一条）。
+    // 走近与挖都有限时：走近的耐心是靠近接缝上那份（走向站位的走路自己不出走不通的结论），
+    // 挖的耐心与采掘挖一格同一条。到点按没做成交给 failed 记原因换下一格，不让一格吃满施工的停滞闸。
     @Override protected long maxActionTicks(Action current) {
-        return step == Step.DIG || step == Step.DISMANTLE ? DigsBlocks.DIG_PATIENCE_TICKS : Long.MAX_VALUE;
+        if (step == Step.DIG || step == Step.DISMANTLE) return DigsBlocks.DIG_PATIENCE_TICKS;
+        return step == Step.APPROACH ? BringsPlayerClose.WALK_PATIENCE_TICKS : Long.MAX_VALUE;
     }
 
     // 挖到一半被自卫、吃饭这类事插队叫走：人会被带离跟前，手上那一下也早松了。

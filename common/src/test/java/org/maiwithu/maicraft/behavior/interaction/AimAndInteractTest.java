@@ -359,6 +359,21 @@ class AimAndInteractTest {
     }
 
     @Test
+    void aReplaceableCellIsClickedWhateverFaceTheRayHits() {
+        // 这一格里是能直接放进去的东西（雪层、草）：准星指中它的任何一面，原版右键都会把东西替换着放进这一格，
+        // 不再因命中面不朝点名的方向就当被挡住——放格卡死时射线命中的正是要放的那格自己。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.blocks.put(TARGET, Blocks.SNOW.defaultBlockState());
+        scene.ray = new BlockHitResult(Vec3.atCenterOf(TARGET), Direction.NORTH, TARGET, false);
+        runUntilSubmitted(new AimAndInteract(InteractionTarget.BlockTarget.facing(TARGET, Direction.UP),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene), context);
+        assertEquals(1, sender.submissions.size());
+        assertEquals(TARGET, sender.submissions.getFirst().hit().getBlockPos(), "提交的就是这一格");
+    }
+
+    @Test
     void anEntityClickSettlesOnPassengerConfirmationWithoutAnyMenu() {
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);

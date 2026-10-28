@@ -16,6 +16,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
@@ -25,6 +26,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -245,6 +247,12 @@ final class PlacingWork extends ConstructionWork {
     private boolean mayPlaceTemporary(BlockPos pos) {
         return !site.declared().contains(pos)
                 && services.guards().allows(PermissionCheck.WorldAction.PLACE_BLOCK, pos, null).isEmpty();
+    }
+
+    // 走近站位这一趟也有限时：走向站位的走路自己不出走不通的结论（人掉进深坑、站位在够不着的高处，
+    // 走路一刻答一次"还在走"），到点收掉换下一面再试，不让一格的走近吃满施工的停滞闸。
+    @Override protected long maxActionTicks(Action current) {
+        return step == Step.APPROACH ? BringsPlayerClose.WALK_PATIENCE_TICKS : Long.MAX_VALUE;
     }
 
     private ActionStatus tryNextCandidate() {

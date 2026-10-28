@@ -164,6 +164,12 @@ public final class AimAndInteract implements Action {
                     : block.face() != null ? scene.visibleFaceHit(block.pos(), block.face())
                     : block.part() != null ? scene.visiblePartHit(block.pos(), block.part())
                     : scene.visibleHit(block.pos());
+            // 点名的面看不到、而这一格里是能直接放进去的东西（雪层、草）：不挑面，
+            // 这一格里看得见的任何部位都能点——原版右键会把东西替换着放进这一格。
+            if (visible == null && block.face() != null) {
+                BlockState live = scene.blockAt(block.pos());
+                if (live != null && live.canBeReplaced()) visible = scene.visibleHit(block.pos());
+            }
             return visible == null ? null : visible.getLocation();
         }
         return scene.visibleEntityPoint(((InteractionTarget.EntityTarget) target).entity());
@@ -268,7 +274,12 @@ public final class AimAndInteract implements Action {
                 return scene.sightPointsAtLiquid(block.pos());
             }
             // 放方块点的那一面：点中这一格、面朝对了就行，伸出格外的轮缘也算。
-            if (block.face() != null) return AimCheck.hitsFace(hit, block.pos(), block.face());
+            if (block.face() != null) {
+                if (AimCheck.hitsFace(hit, block.pos(), block.face())) return true;
+                // 这一格里是能直接放进去的东西（雪层、草）：指中它的任何一面原版都会把东西放进这一格，
+                // 不因命中面不朝点名的方向就当被挡住（射线命中的可能正是要放的那格自己）。
+                return AimCheck.hitsReplaceableCell(hit, block.pos(), scene.blockAt(block.pos()));
+            }
             return block.part() == null ? AimCheck.hitsBlock(hit, block.pos())
                     : AimCheck.hitsPart(hit, block.pos(), block.part());
         }

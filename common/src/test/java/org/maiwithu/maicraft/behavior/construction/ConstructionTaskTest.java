@@ -310,6 +310,12 @@ class ConstructionTaskTest {
         @Override public String describe() { return "挖着不动"; }
     }
 
+    /** 一直走不到的动作：演走向站位永远走不完（人掉进深坑、站位在够不着的高处）。 */
+    private static final class 走着不动 implements Action {
+        @Override public ActionStatus tick(TickContext context) { return ActionStatus.running(); }
+        @Override public String describe() { return "走着不动"; }
+    }
+
     private static TaskResult run(Fake fake, Blueprint blueprint) {
         Task task = new ConstructionTask(new ConstructionInput(blueprint, Permissions.DEFAULT, "施工"), fake.services());
         for (long tick = 1; tick <= 5000; tick++) {
@@ -772,6 +778,20 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertEquals(Blocks.DIRT, fake.state(new BlockPos(0, 64, 0)).getBlock(), "挖不动的格没动");
         assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("做了 300 刻还没做成")),
+                details(result).problems().toString());
+    }
+
+    @Test
+    void 走不到的站位限时让路_砌筑换面换格不再吃满停滞闸() {
+        // 站位到不了时走向站位的走路自己不出结论（人掉进深坑、站位在够不着的高处）：
+        // 走近到点收掉、换下一面，面试遍了记放不上接着放别的格，整个砌筑不再因一格的走近熔断。
+        Fake fake = new Fake().ground(63);
+        fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 1);
+        fake.approach = new 走着不动();
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("做了 400 刻还没做成")),
                 details(result).problems().toString());
     }
 
