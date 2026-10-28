@@ -42,6 +42,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
  * 收场说明带上现场——停在哪、离目的地还差多少、许可能不能动土；目标高度够不着时写明高度。
  * 目的地高得一次规划算不收敛时（坑底直上台地这类长爬升），空转要收场前拆出一段爬升：
  * 交往上挖楼梯爬到中途落脚点，再从新落脚点接着算路，拆满还没到就带着已爬到的高度如实收场。
+ * 目的地在脚下深处时，下掘靠一路挖天然方块推进：一段走路半途收场、只要这一段真的挖深了，
+ * 就从挖到的地方重开一段走路接着算路接着挖；有一段没能更深，带着挖到哪、还差多深如实收场。
  * 中途停下分两步：先向走到请求停，等落到安全边界（落地、走完正在跨的一步）才真停，
  * 停下后按取消结算，写明实测停在哪、离目的地还差多远；被生存需求打断时走到运行先把自己停稳，
  * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；路上捡进背包与从背包用掉的
@@ -71,6 +73,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private int climbLegs;
     /** 这段爬升里离目的地最近的一次还差多少级：再近一级以上才算爬升里的进展。 */
     private int bestClimbRemaining = Integer.MAX_VALUE;
+    /** 已经拆出去的下掘段数：一段走路半途收场后从原地重开的一段算一段。 */
+    private int descentLegs;
+    /** 这一段走路出发时的脚位：段末比它挖得更深，才允许再拆一段下掘。 */
+    private BlockPos legStartFeet;
 
     /** 读地表高度与角色在哪：远程出行按地表一段一段走；没有为 null（只按目的地走一整段）。 */
     private final TravelWorldView world;
@@ -147,6 +153,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     /** 把目的地编译成导航目标交给走到；出行不碰寻路内部。 */
     private WalkRun startWalk() {
+        // 每一段走路从当前站的地方起算：段末有没有比段首挖得更深，是下掘分段要不要再拆的依据。
+        legStartFeet = lastFeet;
         // 出行没有途中要保护的方块：目的地是去站的地方，不是要去动的东西。
         NavGoal leg = surfaceLeg();
         onSurfaceLeg = leg != null;
@@ -230,12 +238,25 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         };
     }
 
-    /** 这段走路失败了：目的地还高得远、许能动土就先拆一段爬升再重新算路；不然如实失败。 */
+    /** 这段走路失败了：目的地还高得远、许能动土就先拆一段爬升再重新算路；
+     *  目的地在脚下深处、这一段真的往下挖深了，就从挖到的地方重开一段走路接着去；不然如实失败。 */
     private Next<Phase> afterWalkFailed(Problem problem) {
         if (maySplitLeg()) {
             return Next.go(Phase.CLIMB, "一次算不出整条路，先挖楼梯爬一段");
         }
+        if (mayRetryDescentLeg()) {
+            descentLegs++;
+            return Next.go(Phase.WALK, "这一段没走完，从挖到的地方重新算路接着去");
+        }
         return failWithJourney(problem);
+    }
+
+    /** 要不要再拆一段下掘：许能动土、还没拆满、目的地确实还在脚下，而且这一段比出发时挖得更深。 */
+    private boolean mayRetryDescentLeg() {
+        return mayDig() && descentLegs < ClimbSegments.MAX_LEGS
+                && legStartFeet != null && lastFeet != null
+                && DescentSegments.needsLeg(destination, lastFeet)
+                && DescentSegments.legDugDeeper(legStartFeet, lastFeet);
     }
 
     /** 推进一段爬升：挖楼梯逐刻往上走，爬到哪、离目的地还差几级如实记账；爬完或爬不动都交回走路重新算路。 */
@@ -318,7 +339,11 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     private Next<Phase> failWithJourney(Problem problem) {
         buildSettlement(lastFeet, false, remainingFromHere());
-        return Next.fail(problem);
+        // 拆过下掘段的收场带挖到哪、还差多深；只拆过爬升段的由空转收尾那边带，不在这里重复包一层。
+        Problem judged = descentLegs > 0 && lastFeet != null
+                ? DescentSegments.stillShort(destination, lastFeet, descentLegs, problem)
+                : problem;
+        return Next.fail(judged);
     }
 
     /** 空转满时限的收尾：换成本领域的现场说明，只给不出更好解释时沿用进度跟踪的通用说法；
@@ -335,9 +360,12 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         };
         Problem judged = TravelStuckCheck.judge(destination, permit, lastFeet, lastProgress, idleTicks);
         Problem underlying = judged == null ? generic : judged;
-        return climbLegs == 0 || lastFeet == null
-                ? underlying
-                : ClimbSegments.stillShort(destination, lastFeet, climbLegs, underlying);
+        if (climbLegs > 0 && lastFeet != null) {
+            return ClimbSegments.stillShort(destination, lastFeet, climbLegs, underlying);
+        }
+        return descentLegs > 0 && lastFeet != null
+                ? DescentSegments.stillShort(destination, lastFeet, descentLegs, underlying)
+                : underlying;
     }
 
     /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走，不把长爬升一次判死。 */
@@ -352,6 +380,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         crossedWater = crossedWater || report.crossedWater();
         if (report.feet() != null) {
             lastFeet = report.feet();
+            // 头一段还没报过位置就先动了身：这一段的深浅从第一次报到的脚位起算。
+            if (legStartFeet == null) {
+                legStartFeet = report.feet();
+            }
         }
         recordPlacementsSoFar();
         noteBackpack(context);

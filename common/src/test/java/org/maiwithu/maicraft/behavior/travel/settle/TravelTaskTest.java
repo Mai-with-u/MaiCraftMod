@@ -104,6 +104,13 @@ class TravelTaskTest {
         return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, stairs, permissions);
     }
 
+    /** 接上许可、没接挖楼梯的出行任务：下掘重走段只看许可能不能动土，不用楼梯。 */
+    private TravelTask taskWithPermit(Target target, Permissions permissions) {
+        DestinationResolver resolver = new DestinationResolver(world, places, seen);
+        var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, null, permissions);
+    }
+
     /** 演一段一直走不动的路：报告取完后留在原地，空转计时到点就判卡住。 */
     private void stallAt(BlockPos feet) {
         walks.enqueue(new ScriptedWalk(WalkReport.onTheWay(feet, false)));
@@ -526,5 +533,64 @@ class TravelTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(0, stairs.calls, "没拆爬升段");
         assertFalse(result.problem().message().contains("爬"), () -> result.problem().message());
+    }
+
+    @Test
+    void stalledDescentWalkRetriesFromWhereItDugTo() {
+        // 地表往下走目的地在深处：一段走路挖下 4 格后卡住收场，只要这一段真挖深了，
+        // 就从挖到的地方重新算路接着去，不把半截下掘判成整趟到不了。
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 62, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 58, -2), false)));
+        walks.enqueue(new ScriptedWalk(WalkReport.arrived(new BlockPos(12, 30, -2), false)));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(2, walks.started.size(), "从挖到的地方重新上路走完了");
+    }
+
+    @Test
+    void descentLegWithoutFurtherProgressEndsWithDepthFacts() {
+        // 重走的一段没比上一段挖得更深：如实收场，说明带拆了几段、挖到哪、还差多深，
+        // 下一层走不通的说明只取结论句。
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 62, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 58, -2), false)));
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展；脚下是石头"),
+                        new BlockPos(12, 58, -2), false)));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("下掘分了 1 段"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("挖到 (12, 58, -2)"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("还深 28 格"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("长时间没有进展"), () -> result.problem().message());
+        assertFalse(result.problem().message().contains("脚下是石头"), () -> "不整段重抄下一层的说明：" + result.problem().message());
+    }
+
+    @Test
+    void temporaryPermitDoesNotRetryDescentLegs() {
+        // 只许垫临时方块不许挖：下掘重走不了，往下走的路半途收场照旧如实失败，不去动不许动的地形。
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 62, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 58, -2), false)));
+        Permissions temporary = Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY,
+                null, null, null, null, null);
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), temporary);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(1, walks.started.size(), "没重开下掘段");
+        assertFalse(result.problem().message().contains("下掘"), () -> result.problem().message());
     }
 }
