@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
-import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts;
 
 /**
  * 路线到不了目标、引擎只给"往那边最好走到哪"的半截路时，看人有没有离目标更近。
@@ -14,7 +14,7 @@ final class PartialRouteWatch {
     /** 半截路上这么久没更近就放弃。 */
     static final int LIMIT_TICKS = 600;
     /** 更近两格才算更近：寻路估价一格约 3.6。 */
-    static final double MIN_GAIN = 2 * NavGoal.COST_HEURISTIC;
+    static final double MIN_GAIN = 2 * HeuristicCosts.COST_HEURISTIC;
 
     private double best = Double.MAX_VALUE;
     private long bestTick = Long.MIN_VALUE;

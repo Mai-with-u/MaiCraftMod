@@ -81,9 +81,9 @@ class NavGoalTest {
 
     @Test
     void heuristicConstantsStayFiniteAndPositive() {
-        assertTrue(NavGoal.JUMP_ONE_BLOCK > 0.0 && Double.isFinite(NavGoal.JUMP_ONE_BLOCK),
+        assertTrue(HeuristicCosts.JUMP_ONE_BLOCK > 0.0 && Double.isFinite(HeuristicCosts.JUMP_ONE_BLOCK),
                 "jump cost comes from fall physics");
-        assertTrue(NavGoal.DESCEND_ONE_BLOCK > 0.0 && Double.isFinite(NavGoal.DESCEND_ONE_BLOCK),
+        assertTrue(HeuristicCosts.DESCEND_ONE_BLOCK > 0.0 && Double.isFinite(HeuristicCosts.DESCEND_ONE_BLOCK),
                 "descend cost comes from fall physics");
     }
 }

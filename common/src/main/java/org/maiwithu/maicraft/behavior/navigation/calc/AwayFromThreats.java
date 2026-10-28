@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.calc;
 
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.COST_HEURISTIC;
+
 import java.util.List;
 
 import net.minecraft.core.BlockPos;

@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.calc;
 
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.COST_HEURISTIC;
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.DESCEND_ONE_BLOCK;
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.JUMP_ONE_BLOCK;
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.SQRT_2;
+import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.pointBound;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
@@ -13,39 +19,6 @@ import java.util.Objects;
  * 不同目标还提供搜索估价和一个代表位置；代表位置不一定是应站的位置，例如避险目标的代表点在威胁附近。
  */
 public interface NavGoal {
-
-    // ---- 启发式常量(数值与内核成本表同源) ----
-
-    /** 对角步的水平距离系数。 */
-    double SQRT_2 = Math.sqrt(2.0);
-    /** 加权 A* 沿用的乐观单格成本(≈疾跑单格)。 */
-    double COST_HEURISTIC = 3.563;
-    /** 升一格的乐观成本(跳跃抛物线差)。 */
-    double JUMP_ONE_BLOCK = fallTicks(1.25) - fallTicks(0.25);
-    /** 降一格的乐观成本(坠落两格耗时之半)。 */
-    double DESCEND_ONE_BLOCK = fallTicks(2) / 2.0;
-
-    /** 坠落第 ticks 刻内的位移(格/刻)，来自原版的坠落阻力与重力取值。 */
-    private static double fallVelocity(int ticks) {
-        return (Math.pow(0.98, ticks) - 1) * -3.92;
-    }
-
-    /** 坠落 distance 格所需刻数：逐刻累减位移，末段线性插值。调用者给有限的非负数。 */
-    private static double fallTicks(double distance) {
-        if (distance == 0) {
-            return 0;
-        }
-        double remaining = distance;
-        int tickCount = 0;
-        while (true) {
-            double perTick = fallVelocity(tickCount);
-            if (remaining <= perTick) {
-                return tickCount + remaining / perTick;
-            }
-            remaining -= perTick;
-            tickCount++;
-        }
-    }
 
     /**
      * 判断路线是否可以在这个脚位格结束；不在这里移动玩家或验证实际交互。
@@ -75,25 +48,6 @@ public interface NavGoal {
         return NavGoalFingerprint.of(this);
     }
 
-    // ---- 共用的八方向水平距离与垂直距离下界 ----
-
-    /**
-     * 按横向直走／斜走以及上下高差估算到中心点的费用；这个帮助方法自身不知道目标允许多大的到达范围。
-     */
-    static double pointBound(BlockPos goal, BlockPos from) {
-        double dx = Math.abs(goal.getX() - from.getX());
-        double dz = Math.abs(goal.getZ() - from.getZ());
-        // 水平下界为（对角步数 × √2 + 直行步数）× COST_HEURISTIC；此处权重约等于疾跑成本，已经纳入估价，堆键不会再次相乘。
-        double horizontal = (Math.min(dx, dz) * SQRT_2 + Math.abs(dx - dz))
-                * COST_HEURISTIC;
-        // 垂直下界按每格上升 JUMP、下降 DESCEND（fall[2]/2）计价。
-        int dy = goal.getY() - from.getY();
-        double vertical = dy > 0
-                ? dy * JUMP_ONE_BLOCK
-                : -dy * DESCEND_ONE_BLOCK;
-        return horizontal + vertical;
-    }
-
     // ---- 目标构造方法 ----
 
     /** 要求脚位恰好到达此方块格。 */
@@ -111,7 +65,7 @@ public interface NavGoal {
 
     /**
      * 要求脚位到达指定 Y 高度，X/Z 不限；用于“升到这个高度”或“下降到挖掘深度”。估价只计算垂直距离，
-     * 每格上升按 {@link #JUMP_ONE_BLOCK} 计，下降按 {@link #DESCEND_ONE_BLOCK} 计。
+     * 每格上升按 {@link HeuristicCosts#JUMP_ONE_BLOCK} 计，下降按 {@link HeuristicCosts#DESCEND_ONE_BLOCK} 计。
      */
     static NavGoal yLevel(int level) {
         return new YLevel(level);
