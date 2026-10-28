@@ -284,7 +284,8 @@ class SelfDefenseTaskTest {
         assertEquals(1, moves.walks, "血快见底，迈开腿撤");
         moves.at[0] = -30;
         senses.threats.clear();
-        TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 2, 5)).result();
+        // 脱险要攒满一段安静期（连着数秒无人锁定、无敌怪凑近）才算甩开，不是逃出视线那一步就算。
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 2, 70)).result();
         assertEquals(TaskResult.Status.DONE, finished.status(), "甩开了追兵就是这次被攻击处理好了");
         assertTrue(finished.summary().contains("已撤离") && finished.summary().contains("血快见底"), finished.summary());
         assertTrue(task.cannotResumeInPlace(), "人已经不在开打的原地");
