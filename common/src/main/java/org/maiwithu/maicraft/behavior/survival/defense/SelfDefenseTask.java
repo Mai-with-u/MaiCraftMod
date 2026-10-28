@@ -32,8 +32,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 自卫插曲：谁威胁角色就打谁，打完回到开打的原地。怎么打全交给战斗引擎（{@link Battle}），和点名战斗是同一个；
- * 这里只记插曲的账：打点、开始与结束事件、危险消失后观察一阵、捡这一仗掉出来的东西和射出去的箭、打完走回打点、
- * 回不去就暂停主任务说明停在哪。
+ * 这里只记插曲的账：打点、危险消失后观察一阵、捡这一仗掉出来的东西和射出去的箭、打完走回打点、
+ * 回不去就暂停主任务说明停在哪；开始与结束事件由控制循环统一发布，这里只给收场事件带战况的说明。
  *
  * <p>名单无差别：正在追我的都打（会分裂的怪裂开后新个体天然进来）。不追出打点 16 格（只比水平距离）去打没在打我的；
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
@@ -82,8 +82,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private boolean displaced;
     /** 主任务为什么停、离打点几格、人停在哪：交给控制循环写进主任务的暂停说明。 */
     private String displacedWhy;
-    /** 收场事件发过没有：自己走完的路当场发；卡住、出错这类被内核收场的那一刻没机会发，由 finishedNote 补一条。 */
-    private boolean finishReported;
+    /** 走回打点收场那刻记下的一场账：位移几格、掉了约几颗心，控制循环发收场事件时带上。 */
+    private String finishFacts;
     /** 被陌生玩家打了：不管主任务在哪做都一样，都停下等 LLM 决定还不还手。 */
     private boolean awaitsOrders;
     /** 这次打过角色的陌生玩家（实体编号）：不还手，收场时暂停主任务等 LLM 决定。 */
@@ -154,8 +154,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             double[] self = moves.selfPosition(context);
             System.arraycopy(self, 0, anchor, 0, 3);
             if (need.drops() != null) dropsBefore = need.drops().nearby();
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
-                    "被威胁，插入自卫：打点在 " + Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]));
         }
         Battle.Moment moment = battle.tick(context);
         tally.note(context, moment, senses, moves);
@@ -190,8 +188,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         }
         String who = String.join("、", names);
         displacedWhy = "被玩家 " + who + " 打了，没有还手，" + whereNow(context);
-        // 收场信息已经在这条事件里说清（还手不还手等 LLM 决定），结束时不再补一条重复的。
-        finishReported = true;
         events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
                 + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
@@ -251,9 +247,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         double heartsLost = heartsLost(context);
         if (drift < 1.5) {
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
-            finishReported = true;
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
-                    "自卫结束，回到打点；" + tally.describe() + "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心");
+            finishFacts = "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心";
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
                     .details(details(drift, heartsLost)).build());
         }
@@ -267,7 +261,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         if (status instanceof ActionStatus.Failed) {
             // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
             displaced = true;
-            finishReported = true;
             need.ignoreUnreachable(battle.unreachable(), context.gameTick());
             double[] self = moves.selfPosition(context);
             String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
@@ -292,15 +285,14 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     }
 
     /**
-     * 收场事件的兜底：回到打点、撤离、走不回打点、被玩家打停手这几条路在走到结局的那一刻已经自己发过收场事件，
-     * 不再补；卡住被内核收场、推进中程序出错这类自己没走到结局的收场，事件还没发过——
-     * 缺了它，读事件流的一方分不清这场是打完了、还在打还是收手了（实机一场只有开始没有收场，事件对不上）。
-     * 结果的结论句原样带上，战况跟着走，不另起一套说法。
+     * 收场事件的说明：开始与结束事件由控制循环统一发布，这里只供内容——
+     * 结果的结论句带着这场怎么收的（回到打点、甩开了追兵、卡住、出错），再带上一场战况与位移，
+     * 读事件流的一方不用翻结果细节就知道这场打得怎么样。
      */
     @Override
     public String finishedNote(TaskResult result) {
-        if (finishReported) return null;
-        return "自卫插曲收场：" + result.summary() + "；" + tally.describe();
+        String facts = finishFacts == null ? "" : finishFacts + "；";
+        return "自卫插曲收场：" + result.summary() + "；" + facts + tally.describe();
     }
 
     // 主任务暂停说明里的那半句：离打点几格、人停在哪、打点在哪。

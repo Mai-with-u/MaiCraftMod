@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.kernel.interrupt;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -569,6 +571,44 @@ class ControlLoopTest {
     }
 
     @Test
+    void temporaryTaskOccupationPublishesPairedStartAndFinishEvents() {
+        // 主目标跑着被饥饿插进临时任务：占身开始与还回身体各发一条成对事件，
+        // 主目标停住期间观察者确认得了身体被谁借走、拿去做什么、什么时候还回来。
+        RecordingEvents events = new RecordingEvents();
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("饥饿",
+                () -> new FakeTask("吃饭", Interruptibility.WORKING).finishingAfter(1), Urgency.NOW, null)), events);
+        loop.setMainTask(new FakeTask("砌墙", Interruptibility.WORKING));
+
+        ControlLoop.Decision.Advanced done = assertAdvanced(loop.tick(TICK));
+        assertEquals("饥饿", done.interrupting().name());
+        assertEquals(TaskResult.Status.DONE, done.finished().status());
+
+        assertEquals(List.of(
+                "TEMPORARY_TASK_STARTED:生存需求「饥饿」插进临时任务：吃饭",
+                "TEMPORARY_TASK_FINISHED:吃饭做完了"), events.published);
+        assertSame(assertAdvanced(loop.tick(TICK)).task(), loop.currentTask());
+        assertEquals(2, events.published.size(), "主任务接着做时不再发事件");
+    }
+
+    @Test
+    void temporaryTaskClosedEarlyStillPublishesAFinishEvent() {
+        // 新主任务声明不要起居打断，已经在跑的起居类临时任务当场收场：
+        // 开始那条已经发过，结束也要发一条，读事件流的一方才知道身体已经交还。
+        RecordingEvents events = new RecordingEvents();
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("饥饿",
+                () -> new FakeTask("吃饭", Interruptibility.WORKING), Urgency.NOW)), events);
+        loop.setMainTask(new FakeTask("砌墙", Interruptibility.WORKING));
+        assertAdvancedIsTempTask(loop.tick(TICK), "饥饿");
+        assertEquals(1, events.published.size(), "前置：开始事件已发");
+
+        loop.setMainTask(new RoutineOffTask(Interruptibility.WORKING));
+
+        assertEquals("TEMPORARY_TASK_FINISHED:主任务不要起居打断，吃饭收场：吃饭收尾",
+                events.published.get(1));
+        assertEquals(2, events.published.size());
+    }
+
+    @Test
     void replacingTheRoutineOffGoalLiftsTheSuppression() {
         // off 的目标被换成普通目标：起居需求照常插队。
         ControlLoop loop = new ControlLoop(List.of(FakeNeed.always("饥饿", Urgency.LATER)));
@@ -1071,6 +1111,15 @@ class ControlLoopTest {
         @Override public Task createTask(TickContext context) {
             created++;
             return factory.get();
+        }
+    }
+
+    /** 记下发过的事件：核对临时任务占身的成对事件用。 */
+    private static final class RecordingEvents implements TaskEventSink {
+        final List<String> published = new ArrayList<>();
+
+        @Override public void publish(TaskEvent.Kind kind, String message) {
+            published.add(kind + ":" + message);
         }
     }
 }

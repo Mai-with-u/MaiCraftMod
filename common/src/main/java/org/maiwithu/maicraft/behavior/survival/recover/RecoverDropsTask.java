@@ -5,8 +5,6 @@ import java.util.Objects;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.kernel.event.TaskEvent;
-import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -52,16 +50,14 @@ public final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
     private final LostItemsNeed.Death death;
     private final long expiresAtTick;
     private final Moves moves;
-    private final TaskEventSink events;
     private int runs;
     private int carriedBefore = -1;
 
-    public RecoverDropsTask(LostItemsNeed.Death death, long expiresAtTick, Moves moves, TaskEventSink events) {
+    public RecoverDropsTask(LostItemsNeed.Death death, long expiresAtTick, Moves moves) {
         super("回去捡东西", Phase.RUN_BACK, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.death = Objects.requireNonNull(death, "death");
         this.expiresAtTick = expiresAtTick;
         this.moves = Objects.requireNonNull(moves, "moves");
-        this.events = events;
     }
 
     @Override
@@ -104,9 +100,6 @@ public final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
         if (stopping()) return Next.stay();
         if (status instanceof ActionStatus.Failed failed) recordAttempt("跑回死的地方", failed.problem().message());
         if (++runs < RUN_TRIES) return Next.go(Phase.RUN_BACK, "还没到死的地方，再起步");
-        if (events != null) {
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "跑不回死的地方，东西没捡成，接着干活");
-        }
         return Next.fail(Problem.of(Problem.Kind.UNREACHABLE, "跑不回死的地方，东西没捡成"));
     }
 
@@ -124,9 +117,6 @@ public final class RecoverDropsTask extends PhasedTask<RecoverDropsTask.Phase> {
     }
 
     private Next<Phase> finish(String summary, TaskResult.Status status) {
-        if (events != null) {
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "，接着干活");
-        }
         return Next.done(TaskResult.builder(status, summary).build());
     }
 

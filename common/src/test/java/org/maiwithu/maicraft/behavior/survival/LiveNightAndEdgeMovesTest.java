@@ -60,7 +60,7 @@ class LiveNightAndEdgeMovesTest {
         Walks walks = new Walks();
         TravelFakes.ScriptedWalk leg = airborneLeg();
         walks.queued.add(leg);
-        Task task = LiveNightAndEdgeMoves.retreat(walks, null).stepBack(new double[] {5, 0, 0});
+        Task task = LiveNightAndEdgeMoves.retreat(walks).stepBack(new double[] {5, 0, 0});
         assertWindsDownThenSetsOffAgain(task, walks, leg);
     }
 
@@ -69,7 +69,7 @@ class LiveNightAndEdgeMovesTest {
         Walks walks = new Walks();
         TravelFakes.ScriptedWalk leg = airborneLeg();
         walks.queued.add(leg);
-        Task task = LiveNightAndEdgeMoves.lostItems(walks, NOTHING_TO_PICK, null)
+        Task task = LiveNightAndEdgeMoves.lostItems(walks, NOTHING_TO_PICK)
                 .recover(new LostItemsNeed.Death(30, 64, 0, "minecraft:overworld", 0, 3), 100_000);
         assertWindsDownThenSetsOffAgain(task, walks, leg);
     }

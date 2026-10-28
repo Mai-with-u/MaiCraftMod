@@ -4,8 +4,6 @@ package org.maiwithu.maicraft.behavior.survival.fall;
 import java.util.Locale;
 import java.util.Objects;
 
-import org.maiwithu.maicraft.kernel.event.TaskEvent;
-import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -34,7 +32,6 @@ public final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
     private static final long STUCK_AFTER_TICKS = 20L * 30;
 
     private final StepBackTask.Moves moves;
-    private final TaskEventSink events;
     private final double[] safeSpot;
     /** 还没推进过：第一刻就到了落点说明这一步退不出东西来。 */
     private boolean firstTick = true;
@@ -46,11 +43,10 @@ public final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
         double[] selfPosition(TickContext context);
     }
 
-    public StepBackTask(double[] safeSpot, Moves moves, TaskEventSink events) {
+    public StepBackTask(double[] safeSpot, Moves moves) {
         super("退离边沿", Phase.STEP, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.safeSpot = Objects.requireNonNull(safeSpot, "safeSpot");
         this.moves = Objects.requireNonNull(moves, "moves");
-        this.events = events;
     }
 
     @Override protected Action enter(Phase phase) { return moves.walkTo(safeSpot[0], safeSpot[1], safeSpot[2]); }
@@ -66,9 +62,6 @@ public final class StepBackTask extends PhasedTask<StepBackTask.Phase> {
         }
         firstTick = false;
         if (remaining <= ARRIVED_WITHIN) {
-            if (events != null) {
-                events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, "退回了安全处，继续干活");
-            }
             return Next.done(TaskResult.builder(TaskResult.Status.DONE, "退离边沿，站回了安全处").build());
         }
         // 路走完了人却还没到落点（落点就在脚下边沿、走不过去）：算没退成，让控制循环缓一阵再说，

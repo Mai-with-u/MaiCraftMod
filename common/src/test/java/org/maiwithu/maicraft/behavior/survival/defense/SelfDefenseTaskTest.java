@@ -166,16 +166,16 @@ class SelfDefenseTaskTest {
         assertEquals(TaskResult.Status.DONE, finished.status());
         assertTrue(finished.summary().contains("回到打点"));
         assertFalse(task.cannotResumeInPlace());
-        assertTrue(events.messages.get(0).contains("插入自卫"), events.messages.toString());
+        // 开始与结束事件由控制循环统一发布，任务自己不再发；任务只供收场说明（战况、位移）。
+        assertTrue(events.messages.isEmpty(), events.messages.toString());
         // 收场交代拿什么打、挥中几下（替身世界里看不到实体倒下，不写打掉了谁）。
-        String last = events.messages.get(events.messages.size() - 1);
-        assertTrue(last.contains("拿 minecraft:iron_sword 挥中 " + moves.strikes + " 下"), last);
+        String note = task.finishedNote(finished);
+        assertTrue(note != null && note.contains("自卫插曲收场"), String.valueOf(note));
+        assertTrue(note.contains("拿 minecraft:iron_sword 挥中 " + moves.strikes + " 下"), note);
+        assertTrue(note.contains("位移"), note);
         var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
         assertEquals(moves.strikes, details.hits());
         assertEquals("minecraft:iron_sword", details.weapon());
-        // 自己走完的收场当场发过一条，结束时不再补一条重复的。
-        assertEquals(1, events.messages.stream().filter(m -> m.contains("自卫结束")).count(), events.messages.toString());
-        assertNull(task.finishedNote(finished), "已经发过收场事件，不再补");
     }
 
     @Test
@@ -235,8 +235,7 @@ class SelfDefenseTaskTest {
         TickResult result = run(task, 0, 700);
         TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
         assertEquals(TaskResult.Status.FAILED, finished.status(), finished.summary());
-        assertEquals(1, events.messages.stream().filter(m -> m.contains("插入自卫")).count(), events.messages.toString());
-        // 开始有一条、收场补一条，成对。
+        // 卡住被内核收场的也不缺收场事件：控制循环统一发，任务给它带战况的收场说明。
         String note = task.finishedNote(finished);
         assertTrue(note != null && note.contains("自卫插曲收场"), String.valueOf(note));
         assertTrue(note.contains("没有新进展"), note);
@@ -298,8 +297,11 @@ class SelfDefenseTaskTest {
         assertEquals(TaskResult.Status.DONE, finished.status());
         assertTrue(finished.summary().contains("回到打点"), finished.summary());
         assertFalse(task.cannotResumeInPlace(), "人走回了打点，主任务不用停");
-        assertEquals(1, events.messages.stream().filter(m -> m.contains("插入自卫")).count(), events.messages.toString());
-        assertEquals(1, events.messages.stream().filter(m -> m.contains("自卫结束")).count(), events.messages.toString());
+        // 任务自己不发事件：开始与结束由控制循环统一发布，这里只核对收场说明带上了位移。
+        assertTrue(events.messages.isEmpty(), events.messages.toString());
+        String note = task.finishedNote(finished);
+        assertTrue(note != null && note.contains("自卫插曲收场"), String.valueOf(note));
+        assertTrue(note.contains("位移"), note);
     }
 
     @Test

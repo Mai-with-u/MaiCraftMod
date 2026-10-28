@@ -29,15 +29,15 @@ public final class LiveNightAndEdgeMoves {
     private LiveNightAndEdgeMoves() {}
 
     /** 贴边退避的动手实现。 */
-    public static EdgeProximityNeed.RetreatMoves retreat(WalkTo walks, TaskEventSink events) {
-        return safeSpot -> new StepBackTask(safeSpot, new EdgeSteps(walks), events);
+    public static EdgeProximityNeed.RetreatMoves retreat(WalkTo walks) {
+        return safeSpot -> new StepBackTask(safeSpot, new EdgeSteps(walks));
     }
 
     /**
      * 回死的地方捡东西的动手实现：跑回去用走到（按默认许可能挖能垫，路上被挡就开路），
      * 捡用共用的捡掉落物。
      */
-    public static LostItemsNeed.RecoversDrops lostItems(WalkTo walks, PicksUpDrops drops, TaskEventSink events) {
+    public static LostItemsNeed.RecoversDrops lostItems(WalkTo walks, PicksUpDrops drops) {
         RecoverDropsTask.Moves moves = new RecoverDropsTask.Moves() {
             @Override public Action runTo(double x, double y, double z) {
                 return new WalkMove(walks, new double[] {x, y, z}, TerrainPermit.NATURAL, 2.0, "跑回死的地方");
@@ -63,7 +63,7 @@ public final class LiveNightAndEdgeMoves {
                 return stacks;
             }
         };
-        return (death, expiresAtTick) -> new RecoverDropsTask(death, expiresAtTick, moves, events);
+        return (death, expiresAtTick) -> new RecoverDropsTask(death, expiresAtTick, moves);
     }
 
     /** 读身体：本地玩家此刻在哪、哪个维度、身上（主背包、副手、盔甲）有几格东西。 */

@@ -49,7 +49,7 @@ class StepBackTaskTest {
     @Test
     void 一插进来就已经在落点上_算没退成() {
         // 挖楼梯时落点旁边另有一道深落差：原先每刻插一次、立刻"站回了安全处"，一秒刷二十条。
-        StepBackTask task = new StepBackTask(new double[] {10.5, 64, 10.5}, standingAt(10.6, 10.4), null);
+        StepBackTask task = new StepBackTask(new double[] {10.5, 64, 10.5}, standingAt(10.6, 10.4));
         task.start(TICK);
         TickResult.Finished finished = assertInstanceOf(TickResult.Finished.class, task.tick(TICK));
         assertNotEquals(TaskResult.Status.DONE, finished.result().status());

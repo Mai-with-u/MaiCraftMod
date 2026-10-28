@@ -101,10 +101,10 @@ final class SurvivalNeedCatalog {
                 new NightfallNeed(new LiveNightView(combatSenses),
                         survivalWiring, survivalWiring, survivalWiring, survivalWiring, survivalWiring.autoSleep()),
                 new EdgeProximityNeed(new LiveEdgeView(),
-                        LiveNightAndEdgeMoves.retreat(walks, events)),
+                        LiveNightAndEdgeMoves.retreat(walks)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
                 new LostItemsNeed(LiveNightAndEdgeMoves.players(),
-                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops, events), events)), events, deathDecisions);
+                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops))), events, deathDecisions);
         // 换一件事做之前先关掉上一件留下的界面（工作台、过滤器），再让新的那件动手。
         loop.onTaskSwitch(context -> LeftoverScreens.close(context.player()));
         return loop;

@@ -3,8 +3,6 @@ package org.maiwithu.maicraft.behavior.survival.recover;
 
 import java.util.Objects;
 
-import org.maiwithu.maicraft.kernel.event.TaskEvent;
-import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -50,7 +48,6 @@ public final class LostItemsNeed implements SurvivalNeed {
 
     private final ReadsPlayer players;
     private final RecoversDrops recovery;
-    private final TaskEventSink events;
     /** 上一刻看到的身体：死的那一刻循环停摆不再问，所以它就是死前最后一刻的样子。 */
     private PlayerNow last;
     /** 还没回去捡的那次死亡。 */
@@ -62,10 +59,9 @@ public final class LostItemsNeed implements SurvivalNeed {
     /** 重生后先等这么久（刻）再动身；背包内容也在这段时间里等它到。 */
     static final long SETTLE_TICKS = 40;
 
-    public LostItemsNeed(ReadsPlayer players, RecoversDrops recovery, TaskEventSink events) {
+    public LostItemsNeed(ReadsPlayer players, RecoversDrops recovery) {
         this.players = Objects.requireNonNull(players, "players");
         this.recovery = Objects.requireNonNull(recovery, "recovery");
-        this.events = events;
     }
 
     @Override public String name() { return "回去捡东西"; }
@@ -107,11 +103,6 @@ public final class LostItemsNeed implements SurvivalNeed {
         Death death = pending;
         // 一次死亡只回去一次：插进去了就算处理过，捡不全也不再回头。
         pending = null;
-        if (events != null) {
-            events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
-                    "刚重生，回死的地方捡东西（还有 " + Math.max(0, (death.gameTick() + DESPAWN_TICKS
-                            - context.gameTick()) / 20) + " 秒就消失）");
-        }
         return recovery.recover(death, death.gameTick() + DESPAWN_TICKS);
     }
 

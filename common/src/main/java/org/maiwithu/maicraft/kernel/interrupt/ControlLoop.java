@@ -166,7 +166,7 @@ public final class ControlLoop {
         for (int i = stack.size() - 1; i >= 0; i--) {
             Frame frame = stack.remove(i);
             if (frame.from != null) {
-                frame.close(CloseReason.PLAYER_GONE);
+                reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
         }
         backoffs.clear();
@@ -187,7 +187,7 @@ public final class ControlLoop {
             if (frame.from != null && !frame.from.reactsToImmediateDanger()) {
                 stack.remove(i);
                 LOG.info("{}收场：主任务不要起居打断", frame.task.describe());
-                frame.close(CloseReason.ROUTINE_NEEDS_OFF);
+                reportTempClosedEarly(frame, frame.close(CloseReason.ROUTINE_NEEDS_OFF), "主任务不要起居打断");
             }
         }
     }
@@ -221,6 +221,13 @@ public final class ControlLoop {
     // 这个需求此刻参不参与挑选：全关时都不参与；只关起居类时，眼前危险的反应照常参与。
     private boolean excluded(SurvivalNeed need, boolean allOff, boolean routineOff) {
         return allOff || routineOff && !need.reactsToImmediateDanger();
+    }
+
+    // 没走到结局就被收场（角色不在了、新主任务不要起居打断）的临时任务也发一条结束事件：
+    // 开始那条已经发过，缺了这条，读事件流的一方分不清身体已经交还还是还在被占着。
+    private void reportTempClosedEarly(Frame frame, TaskResult result, String why) {
+        events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
+                why + "，" + frame.task.describe() + "收场：" + result.summary());
     }
 
     /** 本刻正在被推进（或被压着等待恢复）的任务里最上面的那个；没有任务时为 null。 */
@@ -404,7 +411,7 @@ public final class ControlLoop {
             Frame frame = stack.get(i);
             if (frame.from != null) {
                 stack.remove(i);
-                frame.close(CloseReason.PLAYER_GONE);
+                reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
         }
         // 主任务停在原地：先停手上的动作，别让上一刻的输入继续压在一个死掉的身体上。
@@ -515,6 +522,12 @@ public final class ControlLoop {
         TickResult result;
         if (!frame.started) {
             frame.started = true;
+            // 临时任务占住身体的头一刻发一条开始事件：主目标停住期间，读事件流的一方靠它确认
+            // 身体被哪个生存需求借走、拿去做什么；不发这条，占身什么时候开始就查不到。
+            if (frame.from != null) {
+                events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
+                        "生存需求「" + frame.from.name() + "」插进临时任务：" + frame.task.describe());
+            }
             frame.runner.begin(frame.task, context);
             // 启动就出错的任务当场有了结果，不再推进它。
             result = frame.runner.finished() ? TickResult.finished(frame.runner.result()) : frame.runner.tick(context);
@@ -526,10 +539,13 @@ public final class ControlLoop {
         }
         LOG.info("任务结束：{}（{}）", frame.task.describe(), finished.result().summary());
         stack.remove(frame);
-        // 插进来的临时任务做完要说一声的（夜里自己睡了一觉）：发一条事件，LLM 才知道时间跳了、人挪过。
-        if (frame.from != null && frame.task instanceof AnnouncesFinish announces) {
-            String note = announces.finishedNote(finished.result());
-            if (note != null) events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, note);
+        // 收场事件统一在这里发，与开始那条成对：观察者才确认得了身体什么时候被借走、什么时候还回来。
+        // 任务能给更具体的收场说明（夜里自己去睡了一觉、自卫的战况）就用它的；给不出就用结果的结论句。
+        if (frame.from != null) {
+            String note = frame.task instanceof AnnouncesFinish announces
+                    ? announces.finishedNote(finished.result()) : null;
+            events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
+                    note != null ? note : finished.result().summary());
         }
         // 临时任务做成的事发生在主任务身上：插了一支灯、垫了一块料，把交代的结果递给主任务记账，
         // 不让变化跟着临时任务的结果一起消失。

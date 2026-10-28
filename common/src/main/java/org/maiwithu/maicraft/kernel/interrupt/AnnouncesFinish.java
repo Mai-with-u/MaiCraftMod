@@ -4,10 +4,11 @@ package org.maiwithu.maicraft.kernel.interrupt;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
- * 插进来做完要告诉 LLM 一声的临时任务的特征接口：夜里自己去睡了一觉（时间一下跳到了天亮）这类，
- * 不说 LLM 就不知道发生过；吃一口、插一支火把这类小事不用说。
+ * 收场事件上能给更具体说明的临时任务的特征接口：夜里自己去睡了一觉（时间一下跳到了天亮）、
+ * 自卫的战况与位移，这类任务自己才知道的收场细节。
  *
- * <p>控制循环在它收尾时按它给的一句话发一条临时任务结束事件。
+ * <p>临时任务的开始与结束事件由控制循环统一发布；任务实现了它，结束事件就用它给的一句话，
+ * 给不出（返回 null）就用交代结果的结论句。
  */
 public interface AnnouncesFinish {
 

@@ -45,7 +45,7 @@ class LostItemsNeedTest {
     private final LostItemsNeed need = new LostItemsNeed(players, (death, expires) -> {
         recovered = death;
         return null;
-    }, null);
+    });
 
     private static LostItemsNeed.PlayerNow player(Object who, double x, String dimension, long tick, int stacks) {
         return new LostItemsNeed.PlayerNow(who, x, 64, 0, dimension, tick, stacks);
