@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.behavior.inventory.drops.IncidentalLoot;
  *
  * <p>纯判断，不碰游戏。腾背包只做可逆的搬动，不替玩家扔东西：能合的散堆先合起来；然后从最不值钱的开始
  * 往外存——身上带着无线终端或附近有能用的 ME 终端就存进网络，随身背包能塞就塞，附近有记得的容器就存进去。
- * 装备、贵重品与任务留用的不进计划；能搬的都搬了还腾不出，如实失败，把现场能丢的候选、能存的容器
+ * 装备、贵重品与要留的东西不进计划；能搬的都搬了还腾不出，如实失败，把现场能丢的候选、能存的容器
  * 列进建议里，丢哪一堆、存到哪由调用方拿主意。
  */
 final class SpacePlanner {
@@ -73,7 +73,7 @@ final class SpacePlanner {
         List<SpaceMove> moves = new ArrayList<>();
         slotsFreed += addMergeMoves(scene, moves);
 
-        // 挪东西从最不值钱的开始：垃圾、零碎、建材、食物、有用的依次往后，装备、贵重、任务留用的不动。
+        // 挪东西从最不值钱的开始：垃圾、零碎、建材、食物、有用的依次往后，装备、贵重、要留的东西不动。
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         List<BackpackStack> movable = movableStacksWorthLeastFirst(scene);
         int containerIndex = 0;
@@ -162,7 +162,7 @@ final class SpacePlanner {
         }
     }
 
-    // 能自动挪去存的堆：装备、贵重与任务留用的不动，从垃圾排起（垃圾里按先存哪堆的既定顺序），
+    // 能自动挪去存的堆：装备、贵重与要留的东西不动，从垃圾排起（垃圾里按先存哪堆的既定顺序），
     // 零碎按清单先后，其余同级的保持背包里的格子顺序。
     private static List<BackpackStack> movableStacksWorthLeastFirst(Scene scene) {
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
@@ -170,7 +170,7 @@ final class SpacePlanner {
         List<Entry> entries = new ArrayList<>();
         for (BackpackStack stack : scene.stacks()) {
             Worth worth = ItemWorth.of(stack, scene.reservedItemIds(), totals);
-            if (worth == Worth.TASK_RESERVED || worth == Worth.GEAR || worth == Worth.PRECIOUS) continue;
+            if (worth == Worth.KEPT || worth == Worth.GEAR || worth == Worth.PRECIOUS) continue;
             int order = worth == Worth.JUNK ? JunkItems.dropOrder(stack.itemId())
                     : worth == Worth.INCIDENTAL ? IncidentalLoot.dropOrder(stack.itemId()) : 0;
             entries.add(new Entry(stack, worth.ordinal(), order));

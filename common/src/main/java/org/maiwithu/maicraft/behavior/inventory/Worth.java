@@ -9,8 +9,8 @@ package org.maiwithu.maicraft.behavior.inventory;
  * 和腾不出时给调用方列可丢的候选，丢不丢由调用方拿主意，Mod 不再替人扔东西。
  */
 enum Worth {
-    /** 这个任务正要用的东西，动都不动。 */
-    TASK_RESERVED,
+    /** 要留的东西：预留的、这个任务正要用的，动都不动。 */
+    KEPT,
     /** 工具、武器、护甲：干活和保命靠它。 */
     GEAR,
     /** 稀有贵重：带附魔、标了稀有度，丢了很难补回来。 */

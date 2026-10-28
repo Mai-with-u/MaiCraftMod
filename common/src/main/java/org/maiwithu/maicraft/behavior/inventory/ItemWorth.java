@@ -18,12 +18,12 @@ final class ItemWorth {
     private ItemWorth() {}
 
     /**
-     * 这一格物品值哪一级。顺序就是"先看更要紧的"：任务留用的压过一切，
+     * 这一格物品值哪一级。顺序就是"先看更要紧的"：要留的东西压过一切，
      * 装备、贵重依次往下，垃圾压过食物和建材——腐肉虽然能吃，也没人把它当口粮留着。
      */
     static Worth of(BackpackStack stack, Set<String> reservedItemIds, Map<String, Integer> totalsInBackpack) {
         if (reservedItemIds.contains(stack.itemId())) {
-            return Worth.TASK_RESERVED;
+            return Worth.KEPT;
         }
         // 不能叠的非食物（扳手、无线终端、配置器、模组工具）也当随身装备：腾背包不把手头工具存走、丢掉。
         // 实机腾背包时扳手不见了，要用时还得再做一把。

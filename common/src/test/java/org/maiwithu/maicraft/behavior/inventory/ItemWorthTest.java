@@ -21,7 +21,7 @@ class ItemWorthTest {
     @Test
     void 任务留用的东西压过一切() {
         BackpackStack pickaxe = stack("minecraft:diamond_pickaxe", 1, true, false, true, false);
-        assertEquals(Worth.TASK_RESERVED,
+        assertEquals(Worth.KEPT,
                 ItemWorth.of(pickaxe, Set.of("minecraft:diamond_pickaxe"), Map.of()));
     }
 
@@ -79,7 +79,7 @@ class ItemWorthTest {
     @Test
     void 任务要用的零碎不算零碎() {
         // 正在为过滤器打蜘蛛拿线：线是这次任务留用的。
-        assertEquals(Worth.TASK_RESERVED,
+        assertEquals(Worth.KEPT,
                 ItemWorth.of(stack("minecraft:string", 3, false, false, false, false), Set.of("minecraft:string"),
                         Map.of()));
     }
