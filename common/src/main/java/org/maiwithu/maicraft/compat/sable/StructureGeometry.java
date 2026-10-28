@@ -83,22 +83,31 @@ final class StructureGeometry {
     record Part(BlockPos local, String id) {}
 
     /**
-     * 认机翼用的三样：这块方块装在物理结构上产不产生升力（问 Sable），是不是轴承、朝哪，是不是风帆类方块
-     * （顺着它们认轴承转子，跟着转的风帆不算机翼）。
+     * 认机翼用的三样：这块方块装在物理结构上产生的升力沿结构自己的哪个方向（问 Sable，不产生为空），是不是轴承、朝哪，
+     * 是不是风帆类方块（顺着它们认轴承转子，跟着转的风帆不算机翼）。
      */
-    record WingRules(Predicate<BlockState> lifts, Function<BlockState, Optional<Direction>> bearing,
+    record WingRules(Function<BlockState, Optional<Direction>> lift, Function<BlockState, Optional<Direction>> bearing,
                      Predicate<BlockState> sail) {
 
         /** 不认机翼：读不到升力时用。 */
-        static final WingRules NONE = new WingRules(state -> false, state -> Optional.empty(), state -> false);
+        static final WingRules NONE = new WingRules(state -> Optional.empty(), state -> Optional.empty(), state -> false);
+
+        /**
+         * 这块能当机翼：升力朝上或朝下（帆面平放）。竖着装的风帆升力是水平的，托不起机身，是垂尾或船帆，
+         * 带帆的船不因此被认成固定翼。
+         */
+        boolean holdsUp(BlockState state) {
+            return lift.apply(state).filter(direction -> direction.getAxis() == Direction.Axis.Y).isPresent();
+        }
 
         /** 机械动力的风车风帆标签：风帆、风帆框架、对称风帆都在里面。 */
         private static final TagKey<Block> SAILS = TagKey.create(Registries.BLOCK,
                 ResourceLocation.fromNamespaceAndPath("create", "windmill_sails"));
 
-        /** 升力问 Sable；轴承按方块 ID 认、朝向读方块状态，风帆类按风车风帆标签或会产生升力认。 */
-        static WingRules of(Predicate<BlockState> lifts) {
-            return new WingRules(lifts, WingRules::bearingFacing, state -> state.is(SAILS) || lifts.test(state));
+        /** 升力问 Sable；轴承按方块 ID 认、朝向读方块状态，风帆类按风车风帆标签或会产生升力认（不论朝向）。 */
+        static WingRules of(Function<BlockState, Optional<Direction>> lift) {
+            return new WingRules(lift, WingRules::bearingFacing,
+                    state -> state.is(SAILS) || lift.apply(state).isPresent());
         }
 
         private static Optional<Direction> bearingFacing(BlockState state) {
@@ -159,7 +168,7 @@ final class StructureGeometry {
 
         void note(BlockPos local, BlockState state) {
             filled.add(local);
-            if (rules.lifts().test(state)) lifting.add(local);
+            if (rules.holdsUp(state)) lifting.add(local);
             rules.bearing().apply(state).ifPresent(facing -> bearings.put(local, facing));
             if (rules.sail().test(state)) sails.add(local);
         }

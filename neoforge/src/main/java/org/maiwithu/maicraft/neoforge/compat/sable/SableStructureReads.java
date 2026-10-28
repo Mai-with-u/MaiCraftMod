@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.neoforge.compat.sable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import dev.ryanhcode.sable.Sable;
@@ -17,6 +18,7 @@ import dev.ryanhcode.sable.sublevel.plot.LevelPlot;
 import dev.ryanhcode.sable.sublevel.plot.PlotChunkHolder;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.ChunkPos;
@@ -31,7 +33,7 @@ import org.maiwithu.maicraft.compat.sable.SableStructures;
  * 读 Sable 物理结构的读写端（客户端）：客户端子世界容器里和区域沾边的子世界——编号、名字、世界里的范围、
  * 这一刻与上一刻的位姿、地块里方块的范围；角色正被哪个子世界带着（站在上面或坐着）；地块里一格的方块
  * 只从已经拿到的地块区块读，没有就答没加载，不为读而去加载；装在地块里的实体按位姿把范围换到世界；
- * 一块方块装在结构上产不产生升力照 Sable 的升力面答。只翻译，不判断。
+ * 一块方块装在结构上产不产生升力、升力朝哪照 Sable 的升力面答。只翻译，不判断。
  */
 public final class SableStructureReads implements SableStructures {
 
@@ -95,9 +97,11 @@ public final class SableStructureReads implements SableStructures {
         return boxes;
     }
 
-    // 产不产生升力照 Sable 自己的升力面：机械动力的风帆由 Sable 挂上升力面，对称风帆的升力系数是 0。
-    @Override public boolean lifts(BlockState state) {
-        return state.getBlock() instanceof BlockSubLevelLiftProvider lift && lift.sable$getLiftScalar() > 0;
+    // 产不产生升力、朝哪照 Sable 自己的升力面：机械动力的风帆由 Sable 挂上升力面，升力沿法线（facing 的反面），
+    // 对称风帆的升力系数是 0。
+    @Override public Optional<Direction> liftDirection(BlockState state) {
+        return state.getBlock() instanceof BlockSubLevelLiftProvider lift && lift.sable$getLiftScalar() > 0
+                ? Optional.of(lift.sable$getNormal(state)) : Optional.empty();
     }
 
     private static SubLevel subLevel(ClientLevel level, String id) {

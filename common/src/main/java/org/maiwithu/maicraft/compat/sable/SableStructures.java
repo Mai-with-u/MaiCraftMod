@@ -3,9 +3,11 @@ package org.maiwithu.maicraft.compat.sable;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -88,10 +90,10 @@ public interface SableStructures {
     List<AABB> attachedEntities(ClientLevel level, String id);
 
     /**
-     * 这块方块装在物理结构上产不产生升力：Sable 把它当升力面、升力系数大于零（机械动力的风帆、风帆框架；
-     * 对称风帆只产生阻力，不算）。认机翼用；读写端不会认的当不产生。
+     * 这块方块装在物理结构上产生升力时，升力沿结构自己的哪个方向（Sable 升力面的法线：机械动力的风帆、风帆框架
+     * 是 facing 的反面）；不产生升力（对称风帆只产生阻力、普通方块）为空。认机翼用；读写端不会认的当不产生。
      */
-    default boolean lifts(BlockState state) {
-        return false;
+    default Optional<Direction> liftDirection(BlockState state) {
+        return Optional.empty();
     }
 }

@@ -10,6 +10,7 @@ import java.util.UUID;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -79,12 +80,13 @@ public final class SimulatedCompat extends CompatModule implements StructureRead
     /** 一个结构的逐格读结果；见 {@link StructureScans}。 */
     @Override public StructureGeometry.Scan scan(ClientLevel level, SableStructures.Structure structure) {
         return scans.scan(level.getGameTime(), structure, local -> block(level, structure.id(), local),
-                StructureGeometry.WingRules.of(this::lifts));
+                StructureGeometry.WingRules.of(this::liftDirection));
     }
 
-    // 认机翼时问 Sable 这块方块装在物理结构上产不产生升力。
-    private boolean lifts(BlockState state) {
-        return Boolean.TRUE.equals(call("认机翼", () -> structures.lifts(state)));
+    // 认机翼时问 Sable 这块方块装在物理结构上产不产生升力、升力朝哪；读失败按不产生。
+    private Optional<Direction> liftDirection(BlockState state) {
+        Optional<Direction> direction = call("认机翼", () -> structures.liftDirection(state));
+        return direction == null ? Optional.empty() : direction;
     }
 
     /** 这个结构下次重读。 */

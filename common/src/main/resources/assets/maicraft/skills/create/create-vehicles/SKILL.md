@@ -43,7 +43,7 @@ metadata: {"requires-mods": "simulated"}
 
 ## 先看（machine_inspect(target=s#)）
 
-- `kind` 是 `airship`、`plane`、`car`、`boat` 才开得了；`structure`（没有座位或控制件）、`unknown`（太大读不全、有格没加载，或只有螺旋桨没有机翼）都开不了，先改船。造的是固定翼却读成 `airship`，是船上还有气球、燃烧室或浮空水晶；读成 `unknown` 多半是机翼的风帆装在了轴承上（跟着转的不算机翼）。
+- `kind` 是 `airship`、`plane`、`car`、`boat` 才开得了；`structure`（没有座位或控制件）、`unknown`（太大读不全、有格没加载，或只有螺旋桨没有机翼）都开不了，先改船。造的是固定翼却读成 `airship`，是船上还有气球、燃烧室或浮空水晶；读成 `unknown` 多半是机翼的风帆装在了轴承上（跟着转的不算机翼），或者竖着装了（帆面要平放、`facing` 朝下）。
 - `seats[]` 里有 `driver`；`controls[]` 列出每个绑了频率的键、收端几个、接着什么、推出来的 `role`；`control_map.missing` 写开这一类还缺哪个必需角色（飞艇要动力、升力、偏航，固定翼要动力和偏航或横滚，车要动力、转向）。
 - 受力（服务端也装了 MaiCraft 才有）：`balance=forces` 看 `lift_ratio`（升力比重量，大于 1 才托得住）和两种情况 `cases` 的 `steady`、`tendency`；`balance=ballast` 再给几处放铁块的位置。第一次问要多等几刻。这是静态预测，不是实飞。
 - `local` 一节是结构局部坐标：`origin` 原点是哪一格（船上跟着机器档案时就是档案锚点，造船时蓝图的偏移照用；没有档案是物理组装器），`seats`、`ballast` 写座位和配重建议在局部坐标的哪一格。在船上施工照这一套写偏移。

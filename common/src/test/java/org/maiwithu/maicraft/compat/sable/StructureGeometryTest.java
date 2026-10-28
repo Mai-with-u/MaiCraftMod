@@ -74,14 +74,36 @@ class StructureGeometryTest {
         plot.put(new BlockPos(10000, 66, 10000), Blocks.WHITE_WOOL.defaultBlockState());
         plot.put(new BlockPos(10001, 66, 10000), Blocks.WHITE_WOOL.defaultBlockState());
         plot.put(new BlockPos(10002, 65, 10000), Blocks.WHITE_WOOL.defaultBlockState());
-        StructureGeometry.WingRules rules = new StructureGeometry.WingRules(state -> state.is(Blocks.WHITE_WOOL),
-                state -> state.is(Blocks.OBSERVER) ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty(),
-                state -> state.is(Blocks.WHITE_WOOL));
         StructureGeometry.Scan scan = StructureGeometry.scan(structure(STILL, STILL, plot),
-                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState()), rules);
+                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState()), woolWings());
         assertEquals(List.of(new BlockPos(10002, 65, 10000)), scan.wings());
         assertTrue(StructureGeometry.scan(structure(STILL, STILL, plot),
                 local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState())).wings().isEmpty(), "不认机翼时没有");
+    }
+
+    @Test
+    void 竖着装的风帆升力是水平的_不算机翼() {
+        // 白羊毛当平放的风帆（升力朝上），淡蓝羊毛当竖着装的风帆（升力朝北）：船帆、垂尾托不起机身。
+        Map<BlockPos, BlockState> plot = new HashMap<>();
+        for (int x = 0; x < 3; x++) plot.put(new BlockPos(10000 + x, 64, 10000), Blocks.OAK_PLANKS.defaultBlockState());
+        plot.put(new BlockPos(10000, 65, 10000), Blocks.LIGHT_BLUE_WOOL.defaultBlockState());
+        plot.put(new BlockPos(10000, 66, 10000), Blocks.LIGHT_BLUE_WOOL.defaultBlockState());
+        StructureGeometry.Scan sailboat = StructureGeometry.scan(structure(STILL, STILL, plot),
+                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState()), woolWings());
+        assertTrue(sailboat.wings().isEmpty(), "只有竖帆：没有机翼");
+        plot.put(new BlockPos(10002, 65, 10000), Blocks.WHITE_WOOL.defaultBlockState());
+        StructureGeometry.Scan plane = StructureGeometry.scan(structure(STILL, STILL, plot),
+                local -> plot.getOrDefault(local, Blocks.AIR.defaultBlockState()), woolWings());
+        assertEquals(List.of(new BlockPos(10002, 65, 10000)), plane.wings(), "平放的那块才是机翼");
+    }
+
+    // 白羊毛升力朝上、淡蓝羊毛升力朝北，侦测器当轴承；两种羊毛都算风帆类（认转子用）。
+    private static StructureGeometry.WingRules woolWings() {
+        return new StructureGeometry.WingRules(
+                state -> state.is(Blocks.WHITE_WOOL) ? Optional.of(Direction.UP)
+                        : state.is(Blocks.LIGHT_BLUE_WOOL) ? Optional.of(Direction.NORTH) : Optional.empty(),
+                state -> state.is(Blocks.OBSERVER) ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty(),
+                state -> state.is(Blocks.WHITE_WOOL) || state.is(Blocks.LIGHT_BLUE_WOOL));
     }
 
     @Test
