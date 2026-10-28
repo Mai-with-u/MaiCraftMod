@@ -35,8 +35,9 @@ final class FixedWingFlight {
     static final int STOP_RANGE = 128;
     static final int STEP = 8;
     static final int STOP_STEP = 16;
-    /** 一刻最多试几条候选跑道：费时的扫描分几刻做。 */
+    /** 一刻最多试几条候选跑道、最多读多少格地面：费时的扫描分几刻做，客户端一刻里不为找跑道卡住。 */
     static final int CHECKS_PER_TICK = 24;
+    static final int READS_PER_TICK = 6000;
     /** 隔几刻量一次前方、看一次跑道上有没有挡路的。 */
     static final int AHEAD_EVERY = 5;
     static final int BLOCKED_EVERY = 10;
@@ -161,7 +162,7 @@ final class FixedWingFlight {
             start(Stage.NEAR, destination, sample, ground);
         }
         if (search == null) return;
-        Optional<Runway> found = search.advance(CHECKS_PER_TICK);
+        Optional<Runway> found = search.advance(CHECKS_PER_TICK, READS_PER_TICK);
         if (found.isPresent()) {
             use(found.get(), stage != Stage.STOP);
             previous = search;

@@ -138,6 +138,8 @@ final class Runways {
         private final LandingSites.Ground ground;
         private int next;
         private Runway longest;
+        /** 这一轮读了几格地面（高度与是不是液体各算一次）：一轮读够了就留到下一刻接着试。 */
+        private int reads;
 
         /**
          * @param center  在哪一点附近找
@@ -153,7 +155,18 @@ final class Runways {
             this.length = length;
             this.width = width;
             this.forced = forced;
-            this.ground = ground;
+            // 读地面时顺手记数：一刻里试几条候选按读了多少格算，客户端一刻不为找跑道卡住。
+            this.ground = new LandingSites.Ground() {
+                @Override public Integer top(int x, int z) {
+                    reads++;
+                    return ground.top(x, z);
+                }
+
+                @Override public boolean liquid(int x, int z) {
+                    reads++;
+                    return ground.liquid(x, z);
+                }
+            };
             List<Vec3> centers = new ArrayList<>();
             for (int x = -range; x <= range; x += step) {
                 for (int z = -range; z <= range; z += step) centers.add(center.add(x, 0, z));
@@ -169,7 +182,15 @@ final class Runways {
 
         /** 再试最多 checks 条：试到一条能落的就给它；这一轮没试到为空。 */
         Optional<Runway> advance(int checks) {
-            for (int i = 0; i < checks && next < candidates.size(); i++) {
+            return advance(checks, Integer.MAX_VALUE);
+        }
+
+        /**
+         * 再试最多 checks 条，读地面读够 maxReads 格就停（正在试的那条试完）：试到一条能落的就给它；这一轮没试到为空。
+         */
+        Optional<Runway> advance(int checks, int maxReads) {
+            reads = 0;
+            for (int i = 0; i < checks && next < candidates.size() && reads < maxReads; i++) {
                 Candidate candidate = candidates.get(next++);
                 Optional<Runway> runway = check(candidate);
                 if (runway.isPresent()) return runway;
