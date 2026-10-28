@@ -80,18 +80,11 @@ public final class RecipeSource implements ItemSource {
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
     private static final int VARIANT_POOL = 64;
 
-    /** 备燃料时的规划数字：一块煤烧 1600 刻，按它算要带几块，实际烧多久以燃料表为准。 */
-    private static final int PLANNED_COAL_BURN_TICKS = 1600;
-    private static final String COAL = "minecraft:coal";
-    private static final String LOGS_TAG = "minecraft:logs";
-    private static final String PLANKS_TAG = "minecraft:planks";
-    /** 一块木板烧多久（刻）：一块半件的量。 */
-    private static final int PLANK_BURN_TICKS = 300;
-
     private final Set<WorkstationRecipe.Kind> kinds;
     private final ReadsRecipes recipes;
     private final WorldMemory memory;
-    private final ReadsFuels fuels;
+    /** 烧炼要备的燃料：身上能烧的够不够、不够时备木板还是煤。 */
+    private final FuelShortfall fuel;
     private final RecipeRuns runs;
     private final BackpackView backpack;
     private final OffhandContents offhand;
@@ -121,7 +114,7 @@ public final class RecipeSource implements ItemSource {
         this.kinds = Set.copyOf(kinds);
         this.recipes = recipes;
         this.memory = memory;
-        this.fuels = fuels;
+        this.fuel = new FuelShortfall(backpack, fuels, tags);
         this.runs = runs;
         this.backpack = backpack;
         this.offhand = offhand;
@@ -219,7 +212,7 @@ public final class RecipeSource implements ItemSource {
         int times = timesNeeded(recipe.get(), request.count());
         List<ItemRequest> missing = new ArrayList<>(new RecipeShortfall(recipe.get(), context, choice, needs, backpack,
                 offhand, tags, this::pick).stillMissing(times));
-        if (recipe.get().kind().cooks()) fuelNeed(recipe.get(), times).ifPresent(missing::add);
+        if (recipe.get().kind().cooks()) fuel.need(recipe.get(), times).ifPresent(missing::add);
         return missing;
     }
 
@@ -478,11 +471,6 @@ public final class RecipeSource implements ItemSource {
         }
     }
 
-    // 这件东西是不是这条配方要的原料：烧炼时不把要烧的东西当燃料。
-    private boolean isIngredientOf(WorkstationRecipe recipe, String itemId) {
-        return recipe.ingredients().stream().anyMatch(ingredient -> ingredient.accepts(itemId, tags.tagsOf(itemId)));
-    }
-
     // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
     // 外层正要的东西当这一步的原料：为了做安山合金去弄合金块，又拿身上刚做好的合金压成块——白白压掉。
     // 实机要 38 个安山合金，引擎选了"合金块拆成合金"，把做好的合金压成一个块，拆的配方没解锁，76 块安山岩做的合金进了块里。
@@ -533,7 +521,7 @@ public final class RecipeSource implements ItemSource {
         RecipeShortfall shortfall = new RecipeShortfall(recipe, context, choice, needs, backpack, offhand, tags, this::pick);
         List<Action> steps = shortfall.ingredients(times, permissions);
         if (recipe.kind().cooks()) {
-            fuelNeed(recipe, times).ifPresent(fuel -> steps.add(shortfall.tolerant(fuel, null, 0, permissions)));
+            fuel.need(recipe, times).ifPresent(fuelItem -> steps.add(shortfall.tolerant(fuelItem, null, 0, permissions)));
         }
         // 备完料先看够不够做一份：一份都不够就不去摆设施、不走过去，以备料的原因收场。
         steps.add(topUp(recipe, shortfall, times, permissions));
@@ -712,42 +700,6 @@ public final class RecipeSource implements ItemSource {
                         .withWait(cookWait(recipe, timesNeeded(recipe, count))),
                 "附近没有" + recipe.kind().displayName() + placing,
                 recipe.id());
-    }
-
-    // 烧炼要的燃料：身上有烧得着的就用身上的（挑烧得最久的），一件都没有才去弄煤。
-    private Optional<ItemRequest> fuelNeed(WorkstationRecipe recipe, int times) {
-        // 燃料表是熔炉口径；高炉、烟熏炉烧得快、燃料也耗得快，按熔炉口径一件仍是 200 刻。
-        int smeltTicks = times * recipe.kind().fuelTicksPerItem();
-        // 身上能烧的加起来够不够：十块木板能烤好几块肉，不能只看最耐烧的一件就说要去弄煤。
-        // 工具、武器这类一格一件的不算燃料，这次要烧的原料也不算。
-        long burnable = 0;
-        for (var stack : backpack.stacks()) {
-            if (stack.maxStackSize() <= 1 || isIngredientOf(recipe, stack.itemId())) continue;
-            burnable += (long) stack.count() * fuels.burnTicks(stack.itemId());
-        }
-        if (burnable >= smeltTicks) {
-            return Optional.empty();
-        }
-        // 身上有原木（又不全是这次要烧的）：拿原木做木板当燃料，开局就这么烧——要烧木炭时再去弄煤只会转圈
-        // （实机做火把缺木炭，揣着原木却因为"没有燃料"烧不了木炭）。没有原木才去弄煤。
-        long spareLogs = 0;
-        boolean burnsLogs = false;
-        for (var stack : backpack.stacks()) {
-            if (!tags.tagsOf(stack.itemId()).contains(LOGS_TAG)) continue;
-            spareLogs += stack.count();
-            burnsLogs |= isIngredientOf(recipe, stack.itemId());
-        }
-        // 这一炉本来就烧原木（烧木炭）：留够要烧的那几根，剩下的才拿去做木板。
-        if (burnsLogs) spareLogs -= times;
-        long missingTicks = smeltTicks - burnable;
-        if (spareLogs > 0) {
-            int planksNeeded = Math.max(1, (int) Math.ceil((double) missingTicks / PLANK_BURN_TICKS));
-            return Optional.of(new ItemRequest(WantedItem.ofTag(PLANKS_TAG), planksNeeded,
-                    "烧炼" + recipe.result().describe() + "的燃料"));
-        }
-        int coalNeeded = Math.max(1, (int) Math.ceil((double) missingTicks / PLANNED_COAL_BURN_TICKS));
-        return Optional.of(new ItemRequest(WantedItem.ofItem(COAL), coalNeeded,
-                "烧炼" + recipe.result().describe() + "的燃料"));
     }
 
     // 没有备料要做、动手也接不上：一个当场说明问题的动作，免得"备料成功"冒充做成了。
