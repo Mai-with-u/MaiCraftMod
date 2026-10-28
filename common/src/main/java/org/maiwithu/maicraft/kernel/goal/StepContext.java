@@ -38,13 +38,23 @@ public interface StepContext {
     }
 
     /**
+     * 生存需求的临时任务在这条目标身上交代的结果，按结束先后。临时任务做成的事发生在这条目标身上，
+     * 能力做决定与收场要看得见它：例如夜里临时休息已经睡着了，睡觉这一步就不能再按"现在睡不了"收场。
+     */
+    default List<TaskResult> tempTaskResults() {
+        return List.of();
+    }
+
+    /**
      * 目标推进器交给能力的那一份：第几步读目标运行此刻的记录，LLM 的回答读目标运行里的那一份，
      * 已经结束的任务结果在交出去这一刻抄一份，推进器之后再记的不会混进这次决定。
      */
-    static StepContext of(GoalRun run, TickContext context, List<TaskResult> finishedResults) {
+    static StepContext of(GoalRun run, TickContext context, List<TaskResult> finishedResults,
+            List<TaskResult> tempTaskResults) {
         Goal goal = run.goal();
         List<String> answers = run.answers();
         List<TaskResult> results = List.copyOf(finishedResults);
+        List<TaskResult> tempResults = List.copyOf(tempTaskResults);
         return new StepContext() {
             @Override public Goal goal() {
                 return goal;
@@ -64,6 +74,10 @@ public interface StepContext {
 
             @Override public List<TaskResult> taskResults() {
                 return results;
+            }
+
+            @Override public List<TaskResult> tempTaskResults() {
+                return tempResults;
             }
         };
     }

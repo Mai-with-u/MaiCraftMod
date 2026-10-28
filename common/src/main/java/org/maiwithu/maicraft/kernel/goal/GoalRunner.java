@@ -681,8 +681,9 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
                 new IllegalStateException("能力 " + goal.ability() + " 没有登记，目标做不下去"));
     }
 
-    // 能力做决定时看的现场：这一步的目标、第几步、本刻、LLM 的回答与已经结束的任务结果。
+    // 能力做决定时看的现场：这一步的目标、第几步、本刻、LLM 的回答、已经结束的任务结果，
+    // 以及临时任务在这条目标身上交代的结果。
     private StepContext stepContext(TickContext context) {
-        return StepContext.of(run, context, finishedResults);
+        return StepContext.of(run, context, finishedResults, tempTaskFacts);
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.sleep;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -46,6 +47,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate.Effort;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.goal.AfterTask;
+import org.maiwithu.maicraft.kernel.goal.AbilityHooks;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
@@ -59,6 +62,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TaskInput;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -178,6 +182,12 @@ public final class SleepModule implements AbilityModule, EstimatesGoal, Nightfal
                     .problem(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "这个维度的床会爆炸，睡不了", null))
                     .build());
         }
+        // 这一夜已经在这条目标身上睡着过（夜里临时休息代睡了这一觉）：按睡觉动作的实际结算收场，
+        // 不再按醒来后的白天现场重新判——醒来当然是白天，会把真睡着误报成"现在睡不了"。
+        Optional<TaskResult> slept = sleptSettlement(step.tempTaskResults());
+        if (slept.isPresent()) {
+            return finished(sleptResult(slept.get()));
+        }
         // 白天被叫去睡不干等：先把今晚的床备好，然后报告"现在睡不了"，天黑后夜间自动休息自己去睡。
         if (!WorldTime.canAttemptSleep(current.level())) {
             return decideForDaytime(step, current);
@@ -227,6 +237,49 @@ public final class SleepModule implements AbilityModule, EstimatesGoal, Nightfal
      * 都再等一拍；只有恰好隔一拍的复核才带着（已同步的）新读数结论。 */
     static boolean daytimeGraceOver(Long evaluatedAt, long tick) {
         return evaluatedAt != null && tick - evaluatedAt == 1L;
+    }
+
+    /**
+     * 已经睡着过的结算：结果细节里确认躺下的那一条，取最新的一条。睡没睡着只信睡觉动作的实际结算，
+     * 不拿睡前或醒来后的可睡窗口判断冒充——临时休息代睡的那一觉、任务自己睡着的那一觉都在这里认出来。
+     */
+    static Optional<TaskResult> sleptSettlement(List<TaskResult> results) {
+        TaskResult slept = null;
+        for (TaskResult result : results) {
+            if (result.details() instanceof SleepDetails details && details.enteredSleep()) {
+                slept = result;
+            }
+        }
+        return Optional.ofNullable(slept);
+    }
+
+    /** 睡着了的收场结论：任务做成了没有，以它实际睡着的事实为准；细节原样带上。 */
+    static TaskResult sleptResult(TaskResult sleep) {
+        String summary = sleep.details() instanceof SleepDetails details && details.nightSkippedBySleep()
+                ? "已经睡过一觉了，夜晚也跳过了"
+                : "已经睡过一觉了";
+        return TaskResult.builder(TaskResult.Status.DONE, summary)
+                .details(sleep.details())
+                .build();
+    }
+
+    @Override
+    public AbilityHooks hooks() {
+        return new AbilityHooks() {
+            @Override
+            public AfterTask afterTask(StepContext step, TaskInput input, TaskResult result) {
+                // 任务自己睡着了的：按它自己的结果收场，不动。
+                if (result.details() instanceof SleepDetails details && details.enteredSleep()) {
+                    return AfterTask.accept(result);
+                }
+                // 任务没睡着就结束了（醒来后可睡窗口已关这类），但这一夜已经由临时休息睡着过：
+                // 目标按实际睡着收场，不拿醒来后的"现在睡不了"冒充结论。
+                Optional<TaskResult> slept = sleptSettlement(step.tempTaskResults());
+                return slept
+                        .map(s -> (AfterTask) AfterTask.replace(new StepDecision.Finish(sleptResult(s))))
+                        .orElseGet(() -> AfterTask.accept(result));
+            }
+        };
     }
 
     // 白天的收场：以时间不对结束，remaining 写明入睡，细节交代今晚的床备好没有。
