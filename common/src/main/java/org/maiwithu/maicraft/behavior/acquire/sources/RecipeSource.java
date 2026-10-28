@@ -28,7 +28,6 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
-import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -243,7 +242,9 @@ public final class RecipeSource implements ItemSource {
 
     private Action run(List<WorkstationRecipe> variants, WorkstationRecipe recipe, ItemRequest request,
             SourceContext context) {
-        return variants.size() <= 1 ? attempt(recipe, request, context) : new Variants(request, variants, context);
+        return variants.size() <= 1 ? attempt(recipe, request, context)
+                : new TriesRecipeVariants(request, variants, variant -> attempt(variant, request, context),
+                        backpack, offhand, tags);
     }
 
     // 这种做法缺的第一样原料，按还缺几件发请求；什么都不缺给空。
@@ -413,64 +414,6 @@ public final class RecipeSource implements ItemSource {
         return assemble(recipe, station.map(MemoryRecord::position).orElse(null), times, context);
     }
 
-    /**
-     * 几种一样缺料的做法挨个试：这一种做砸了、要的东西一件没多，就换下一种；做出过东西就照常收场，由引擎清点。
-     * 都不成时把试过的几种和原因一并交代。
-     */
-    private final class Variants implements Action {
-        private final ItemRequest request;
-        private final List<WorkstationRecipe> variants;
-        private final SourceContext context;
-        private final List<String> failures = new ArrayList<>();
-        private int index;
-        private Action current;
-        private int carriedBefore;
-
-        private Variants(ItemRequest request, List<WorkstationRecipe> variants, SourceContext context) {
-            this.request = request;
-            this.variants = variants;
-            this.context = context;
-        }
-
-        @Override public ActionStatus tick(TickContext tick) {
-            if (current == null) {
-                carriedBefore = CarriedItems.matching(backpack, offhand, request.wanted(), tags);
-                current = attempt(variants.get(index), request, context);
-            }
-            ActionStatus status = current.tick(tick);
-            if (!(status instanceof ActionStatus.Failed failed)) return status;
-            boolean delivered = CarriedItems.matching(backpack, offhand, request.wanted(), tags) > carriedBefore;
-            // 每种做法只记它自己那一句结论（缺哪几样原料）；原料为什么弄不来由拿东西的引擎收着，最外层讲一次。
-            failures.add(variants.get(index).id() + "：" + failed.problem().headline());
-            if (!delivered && index + 1 < variants.size()) {
-                current.close();
-                current = null;
-                index++;
-                return ActionStatus.progressed();
-            }
-            if (failures.size() == 1) return status;
-            return ActionStatus.failed(Problem.of(failed.problem().kind(), "试了 " + failures.size() + " 种做法都没做成；"
-                    + String.join("；", failures), failed.problem().suggestion()));
-        }
-
-        @Override public void pause() {
-            if (current != null) current.pause();
-        }
-
-        @Override public void close() {
-            if (current != null) current.close();
-        }
-
-        @Override public Interruptibility interruptibility() {
-            return current == null ? Interruptibility.WORKING : current.interruptibility();
-        }
-
-        @Override public String describe() {
-            return current == null ? "做" + request.wanted().describe()
-                    : current.describe() + "（第 " + (index + 1) + "/" + variants.size() + " 种做法）";
-        }
-    }
-
     // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
     // 外层正要的东西当这一步的原料：为了做安山合金去弄合金块，又拿身上刚做好的合金压成块——白白压掉。
     // 实机要 38 个安山合金，引擎选了"合金块拆成合金"，把做好的合金压成一个块，拆的配方没解锁，76 块安山岩做的合金进了块里。
@@ -506,7 +449,7 @@ public final class RecipeSource implements ItemSource {
         List<Action> steps = shortfall.ingredients(times, context.permissions());
         Optional<Action> run = runs.runInInventory(recipe, times, context.records());
         if (run.isEmpty()) {
-            return steps.isEmpty() ? nothingToDo(recipe)
+            return steps.isEmpty() ? StationFallbacks.nothingToDo(recipe)
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料", steps.toArray(Action[]::new));
         }
         steps.add(topUp(recipe, shortfall, times, context.permissions()));
@@ -537,7 +480,7 @@ public final class RecipeSource implements ItemSource {
             // 工作台、石切台站在跟前一口气做完：做完就把这台收回背包；熔炉要关着界面等它烧，放下就留着。
             AtomicReference<WorldPosition> placedAt = new AtomicReference<>();
             steps.addAll(placeSteps(recipe, permissions, placedAt));
-            Action run = shortfall.explaining(runAtPlacedStation(recipe, times, permissions, context.records()));
+            Action run = shortfall.explaining(new RunsAtPlacedStation(runs, recipe, times, permissions, context.records()));
             steps.add(recipe.kind().cooks() ? run : new TakesBackPlacedStation(run, recipe.kind(), placedAt,
                     permissions, context.records(), placer, memory, backpack, () -> CarriedItems.matching(backpack,
                             offhand, WantedItem.ofItem(recipe.kind().blockType()), tags)));
@@ -552,53 +495,13 @@ public final class RecipeSource implements ItemSource {
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
             return steps.isEmpty()
-                    ? nothingToDo(recipe)
+                    ? StationFallbacks.nothingToDo(recipe)
                     : new StepwiseActions("为「做" + recipe.result().describe() + "」备原料",
                             steps.toArray(Action[]::new));
         }
         steps.add(shortfall.explaining(run.get()));
         return new StepwiseActions("备齐原料后去" + recipe.kind().displayName() + "做"
                 + recipe.result().describe(), steps.toArray(Action[]::new));
-    }
-
-    // 到刚摆下的那台设施上做：动手时才从世界记忆里认它的位置。附近本来没有这台设施，
-    // 它的记录是摆台那一步做完才写下的；串动作还没开始跑时就查，查到的永远是空，
-    // 于是只剩摆台、不做东西，结果还像做完了。认不出位置（摆台的动作没记下）就如实失败，由引擎换路。
-    private Action runAtPlacedStation(WorkstationRecipe recipe, int times, Permissions permissions,
-            TaskRecords records) {
-        return new Action() {
-            private Action run;
-
-            @Override public ActionStatus tick(TickContext tick) {
-                if (run == null) {
-                    run = runs.runAtRememberedStation(recipe, times, permissions, records).orElse(null);
-                    if (run == null) {
-                        return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                                recipe.kind().displayName() + "摆下了，但记忆里没有它的位置，做不了"
-                                        + recipe.result().describe()));
-                    }
-                }
-                return run.tick(tick);
-            }
-
-            @Override public void pause() {
-                if (run != null) run.pause();
-            }
-
-            @Override public void close() {
-                if (run != null) run.close();
-            }
-
-            @Override public Interruptibility interruptibility() {
-                return run == null ? Interruptibility.WORKING : run.interruptibility();
-            }
-
-            @Override public String describe() {
-                return run == null
-                        ? "到刚摆下的" + recipe.kind().displayName() + "跟前做" + recipe.result().describe()
-                        : run.describe();
-            }
-        };
     }
 
     // 备完料的关口：身上的料够做一份就往下走；不够就把还缺的再备一轮——先备出来的中间产物被后面的
@@ -700,20 +603,6 @@ public final class RecipeSource implements ItemSource {
                         .withWait(cookWait(recipe, timesNeeded(recipe, count))),
                 "附近没有" + recipe.kind().displayName() + placing,
                 recipe.id());
-    }
-
-    // 没有备料要做、动手也接不上：一个当场说明问题的动作，免得"备料成功"冒充做成了。
-    private Action nothingToDo(WorkstationRecipe recipe) {
-        return new Action() {
-            @Override public ActionStatus tick(TickContext context) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
-                        "在" + recipe.kind().displayName() + "上做" + recipe.result().describe()
-                                + "的现场动作还没接上，做不了"));
-            }
-            @Override public String describe() {
-                return "做" + recipe.result().describe() + "的现场动作还没接上";
-            }
-        };
     }
 
     private int timesNeeded(WorkstationRecipe recipe, int count) {

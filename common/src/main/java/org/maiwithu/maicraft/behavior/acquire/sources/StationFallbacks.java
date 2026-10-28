@@ -13,7 +13,8 @@ import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
 
 /**
  * 做东西时设施这头的几种"做不了"：摆不了台子、报价时记得的炉子动手时不见了、
- * 只有高炉烟熏炉上的做法却没记得这种炉子。都只带着问题如实收场，不冒充做成，由引擎换别的路。
+ * 只有高炉烟熏炉上的做法却没记得这种炉子、在设施上动手的那一步接不上。
+ * 都只带着问题如实收场，不冒充做成，由引擎换别的路。
  * 纯文案与一步即败的动作，不碰游戏。
  */
 public final class StationFallbacks {
@@ -52,6 +53,20 @@ public final class StationFallbacks {
         String names = String.join("、", stoves);
         return "有在" + names + "上做出" + wanted.describe() + "的配方（" + example
                 + "），但没记得附近有" + names + "；用过一次才会记得它在哪，不会为了做东西专门去做一台";
+    }
+
+    // 没有备料要做、动手也接不上：一个当场说明问题的动作，免得"备料成功"冒充做成了。
+    static Action nothingToDo(WorkstationRecipe recipe) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
+                        "在" + recipe.kind().displayName() + "上做" + recipe.result().describe()
+                                + "的现场动作还没接上，做不了"));
+            }
+            @Override public String describe() {
+                return "做" + recipe.result().describe() + "的现场动作还没接上";
+            }
+        };
     }
 
     private static Action failing(Problem problem, String description) {
