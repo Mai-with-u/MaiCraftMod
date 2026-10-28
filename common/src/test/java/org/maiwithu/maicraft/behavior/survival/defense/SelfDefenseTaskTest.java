@@ -42,7 +42,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
 /**
- * 自卫插曲：打完观察一阵再走回打点；撤离甩开记完成、人不在原地不让主任务悄悄续上；
+ * 自卫插曲：打完观察一阵再走回打点；撤离甩开追兵后也观察一阵、走回打点，走不回才让主任务停下；
  * 不追出打点 16 格去打没在打我的；回不去打点如实说停在哪；走不到又不打我的半分钟内不再为它插进来。
  */
 class SelfDefenseTaskTest {
@@ -271,7 +271,9 @@ class SelfDefenseTaskTest {
     }
 
     @Test
-    void escapingCountsAsHandledAndKeepsTheMainTaskParked() {
+    void escapingWalksBackAndHandsTheBodyBackToTheMainTask() {
+        // 撤离甩开追兵不算收好：像打完一样先观察一阵（安静期攒满才认甩开）、再走回打点，
+        // 回到打点这场才算完、不把守着原地的主任务停住——主目标不用等 LLM 手动解除暂停。
         Senses senses = new Senses();
         senses.threats.add(zombie(1, 6, 6));
         senses.health = 4;
@@ -284,15 +286,20 @@ class SelfDefenseTaskTest {
         assertEquals(1, moves.walks, "血快见底，迈开腿撤");
         moves.at[0] = -30;
         senses.threats.clear();
-        // 脱险要攒满一段安静期（连着数秒无人锁定、无敌怪凑近）才算甩开，不是逃出视线那一步就算。
-        TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 2, 70)).result();
-        assertEquals(TaskResult.Status.DONE, finished.status(), "甩开了追兵就是这次被攻击处理好了");
-        assertTrue(finished.summary().contains("已撤离") && finished.summary().contains("血快见底"), finished.summary());
-        assertTrue(task.cannotResumeInPlace(), "人已经不在开打的原地");
-        // 主任务的暂停说明：为什么停、离打点几格、人停在哪，不让 LLM 以为是游戏重连。
-        String why = task.stoppedWhere();
-        assertTrue(why.contains("自卫撤离") && why.contains("离打点 30 格") && why.contains("人停在 -30, 64, 0"), why);
-        assertFalse(task.waitsForOrders(), "在哪做都一样的主任务可以从新地点接着做");
+        // 甩开靠安静期（连着数秒无人锁定、无敌怪凑近）认定，不是逃出视线那一步就算；甩开后还有观察期。
+        TickResult afterEscape = run(task, 2, 2 + 80 + SelfDefenseTask.WATCH_TICKS);
+        assertInstanceOf(TickResult.Running.class, afterEscape, "甩开之后还在走回打点，没收场");
+        assertEquals(2, moves.walks, "观察期过了，起了一趟走回打点的路");
+        // 人回到打点旁：当场收好，主任务从原地接着做。
+        moves.at[0] = 1;
+        moves.walkStatus = ActionStatus.done();
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, 2 + 80 + SelfDefenseTask.WATCH_TICKS, 400)).result();
+        assertEquals(TaskResult.Status.DONE, finished.status());
+        assertTrue(finished.summary().contains("回到打点"), finished.summary());
+        assertFalse(task.cannotResumeInPlace(), "人走回了打点，主任务不用停");
+        assertEquals(1, events.messages.stream().filter(m -> m.contains("插入自卫")).count(), events.messages.toString());
+        assertEquals(1, events.messages.stream().filter(m -> m.contains("自卫结束")).count(), events.messages.toString());
     }
 
     @Test

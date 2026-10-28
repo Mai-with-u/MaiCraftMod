@@ -37,8 +37,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>名单无差别：正在追我的都打（会分裂的怪裂开后新个体天然进来）。不追出打点 16 格（只比水平距离）去打没在打我的；
  * 正压着我打的、远处射我的不受这个限制。危险消失后再观察两秒（跑得几乎一样快的怪会在边界上一进一出）；
- * 撤离往家（没记过家就往打点）那一侧跑，甩开了就是这次处理好了，人已不在原地：守着原地的主任务停下等 LLM，
- * 去某地、拿东西这类在哪做都一样的从新地点接着做（由主任务自己声明），停下时说清为什么停、离打点几格、停在哪。
+ * 撤离往家（没记过家就往打点）那一侧跑。甩开了追兵不算完：跟打完一样先观察一阵、再走回打点，
+ * 回到打点这场才算收好，守着原地的主任务从原地接着做，不用等 LLM 解除暂停；
+ * 走不回打点才如实交代人停在哪，让守着原地的主任务停下等指示。
  *
  * <p>夜里撤不掉又打不过：不就地等天亮——引擎照常迎战与撤离，撤不掉就迎战到死；甩开追兵后天黑血低
  * 也不停在野地里等下一只，撤离照常收场，夜里没床的备床睡觉由夜晚这项生存需求接手。
@@ -77,7 +78,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private Action walkBack;
     /** 刚决定换去的阶段：外壳在换阶段时被基类收尾，靠它分清是换阶段还是任务真结束。 */
     private Phase goingTo;
-    /** 撤离后人不在原地，或收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
+    /** 收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
     private boolean displaced;
     /** 主任务为什么停、离打点几格、人停在哪：交给控制循环写进主任务的暂停说明。 */
     private String displacedWhy;
@@ -164,7 +165,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             events.publish(TaskEvent.Kind.NEED_UNHANDLED, "想撤也走不动：撤离路线连着走不通，退无可退，就地迎战");
         }
         return switch (moment.state()) {
-            case ESCAPED -> leaveDisplaced(context, moment.retreatWhy());
+            // 甩开了追兵：跟打完一样先观察一阵（追得几乎一样快的怪会在边界上一进一出），再走回打点；
+            // 走不回才按走不回的路径交代。原先甩开就当场按"人已不在原地"收场，守着原地的主任务
+            // 被无条件停住等 LLM——人其实就在打点旁边，玩家会走回去接着干。
+            case ESCAPED -> watchFirst();
             case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
             default -> Next.stay();
         };
@@ -285,23 +289,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             walkBack = null;
         }
         return Next.stay();
-    }
-
-    // 甩开了追兵，这次被攻击就算处理好了（记完成）。记成失败会让生存需求缓一阵，缓着的那几秒再被追上就是站着挨打。
-    // 天黑血低也不停在野地里等下一只：照常收场，夜里没床的备床睡觉由夜晚这项生存需求接手。
-    // 人已经不在开打的原地：守着原地的主任务停下等 LLM（暂停说明里写为什么停、离打点几格、停在哪），
-    // 在哪做都一样的从新地点接着做——这由主任务自己声明，这里只交代事实。
-    private Next<Phase> leaveDisplaced(TickContext context, String why) {
-        displaced = true;
-        String reason = why == null ? "打不过" : why;
-        displacedWhy = "自卫撤离（" + reason + "）甩开了追兵，" + whereNow(context);
-        double drift = distanceFromAnchor(context);
-        String summary = "已撤离，甩开了追兵（" + reason + "），" + tally.describe()
-                + "离打点 " + Math.round(drift) + " 格";
-        finishReported = true;
-        events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED, summary + "，人在 " + here(context));
-        return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
-                .details(details(drift, heartsLost(context))).build());
     }
 
     /**
