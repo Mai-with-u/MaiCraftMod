@@ -75,17 +75,25 @@ class FoodPickerTest {
     }
 
     @Test
-    void 饿了顺手吃不动金苹果和腐肉_见底掉血时才什么都吃_腐肉先于金苹果() {
+    void 饿到不能疾跑就吃腐肉垫一口_珍贵的与会中毒的还不到时候() {
         FoodValue goldenApple = new FoodValue("minecraft:golden_apple", 4, 9.6f, 1.6f, true,
                 List.of(new FoodEffect("minecraft:regeneration", true)));
+        FoodValue pufferfish = new FoodValue("minecraft:pufferfish", 1, 0.2f, 0.1f, false,
+                List.of(new FoodEffect("minecraft:poison", false), new FoodEffect("minecraft:hunger", false)));
         List<FoodPicker.Carried> carried = List.of(
                 carried("minecraft:golden_apple", 1, goldenApple),
                 carried("minecraft:rotten_flesh", 5, food("minecraft:rotten_flesh", 4, 0.8f,
-                        new FoodEffect("minecraft:hunger", false))));
-        assertEquals(Optional.empty(), FoodPicker.forHunger(carried, 5, false));
-        // 见底掉血：先吃腐肉保命，只剩金苹果时才动它。
+                        new FoodEffect("minecraft:hunger", false))),
+                carried("minecraft:pufferfish", 2, pufferfish));
+        // 饿到不能疾跑（饱食 6 及以下）：没有普通食物就吃腐肉这类差粮，饿极了先吃差粮；
+        // 珍贵的（金苹果）和会中毒的（河豚）还不到动它们的时候。
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.forHunger(carried, 6, false));
+        assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.forHunger(carried, 5, false));
+        // 见底掉血：还是先吃腐肉保命，只剩金苹果时才动它。
         assertEquals(Optional.of("minecraft:rotten_flesh"), FoodPicker.forHunger(carried, 0, true));
         assertEquals(Optional.of("minecraft:golden_apple"), FoodPicker.forHunger(carried.subList(0, 1), 0, true));
+        // 还饿得动（饱食 7）：腐肉也不动，交给弄吃的或 LLM。
+        assertEquals(Optional.empty(), FoodPicker.forHunger(carried, 7, false));
         assertTrue(FoodPicker.harmless(goldenApple));
         assertTrue(!FoodPicker.plain(goldenApple));
     }

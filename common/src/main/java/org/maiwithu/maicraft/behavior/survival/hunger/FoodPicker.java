@@ -86,9 +86,9 @@ public final class FoodPicker {
 
     /**
      * 自己饿了顺手吃一口：只在普通食物里挑，按饱食度还差多少挑补得刚好的——补得进去的里面挑最多的，
-     * 都会溢出就挑溢出最少的，不拿一块牛排去补一格饱食度。没有普通食物时，只有饱食度见底、
-     * 已经在掉血（starving）才什么都吃：先按 {@link #autoPick} 吃垃圾食物，再没有才动珍贵的、
-     * 会传送的，会中毒的留到最后；否则不吃，交给弄吃的或 LLM。
+     * 都会溢出就挑溢出最少的，不拿一块牛排去补一格饱食度。没有普通食物时，饿到不能疾跑（饱食 6 及以下，
+     * 见 {@link HungerNeed#SPRINT_FLOOR}）就吃腐肉这类垃圾食物垫一口，见底掉血才什么都吃：
+     * 先按 {@link #autoPick} 吃垃圾食物，再没有才动珍贵的、会传送的，会中毒的留到最后；否则不吃，交给弄吃的或 LLM。
      */
     public static Optional<String> forHunger(List<Carried> carried, int foodLevel, boolean starving) {
         int missing = Math.max(1, 20 - foodLevel);
@@ -96,9 +96,13 @@ public final class FoodPicker {
                 .filter(candidate -> plain(candidate.value()))
                 .min(Comparator.comparingInt(candidate -> waste(candidate.value().nutrition(), missing)))
                 .map(Carried::itemId);
-        if (plainPick.isPresent() || !starving) return plainPick;
+        // 饿到不能疾跑就先顾身体：没有普通食物时吃垃圾食物（腐肉这类）。类别：玩家常识——饿极了先吃差粮，
+        // 短暂的饥饿效果比跑不动、继续掉到见底掉血轻；但珍贵的、会传送的、会中毒的还不到动它们的时候。
+        boolean eatJunk = starving || foodLevel <= HungerNeed.SPRINT_FLOOR;
+        if (plainPick.isPresent() || !eatJunk) return plainPick;
         Optional<String> casual = autoPick(carried);
         if (casual.isPresent()) return casual;
+        if (!starving) return Optional.empty();
         // 饿到掉血又只剩要点名的：保命要紧，先吃有益的（金苹果），再吃会传送的，会中毒的垫底。
         return carried.stream()
                 .filter(candidate -> candidate.value().nutrition() > 0)

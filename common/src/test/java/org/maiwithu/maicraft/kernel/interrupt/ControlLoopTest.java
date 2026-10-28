@@ -243,6 +243,24 @@ class ControlLoopTest {
     }
 
     @Test
+    void hungerTakesOverRightAfterTheRetreatEnds() {
+        // 撤离（自卫临时任务）一收场，饿到不能疾跑的饥饿需求立刻插队接手进食，不让角色饿着继续赶路。
+        FakeTask main = new FakeTask("寻路赶路", Interruptibility.WORKING);
+        FakeNeed hunger = FakeNeed.always("饥饿", Urgency.SOON);
+        ControlLoop loop = new ControlLoop(List.of(
+                FakeNeed.of("自卫", () -> new FakeTask("自卫临时", Interruptibility.WORKING).finishingAfter(2),
+                        Urgency.NOW, null),
+                hunger));
+        loop.setMainTask(main);
+        assertAdvancedIsTempTask(loop.tick(TICK), "自卫");
+        ControlLoop.Decision.Advanced finished = assertAdvanced(loop.tick(TICK));
+        assertEquals(TaskResult.Status.DONE, finished.finished().status());
+        // 撤离刚收场，饥饿马上接手。
+        assertAdvancedIsTempTask(loop.tick(TICK), "饥饿");
+        assertEquals(1, hunger.created);
+    }
+
+    @Test
     void displacedTempTaskParksWorkButNotTravel() {
         // 打完架人已经不在打点：挖矿这种守着原地的主任务停在半路等 LLM，LLM 让接着做就撤掉停住。
         FakeTask mine = new FakeTask("挖矿", Interruptibility.WORKING);
