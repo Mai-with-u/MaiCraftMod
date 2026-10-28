@@ -20,6 +20,8 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
+import org.maiwithu.maicraft.ability.vehicle.spi.BearingRotors;
+
 /**
  * 补胶计划，纯函数：一片要一起动的方块（车身）里，相邻两格要同在一块强力胶框里才粘在一起；
  * 现有的胶框已经盖住的不管，还没盖住的用几块新框补上。
@@ -205,7 +207,7 @@ final class GluePlan {
 
     /**
      * 轴承转子和船身不许粘在一起：机械动力的轴承转起来时，会顺着强力胶把粘着的东西拖进转子，船身一块跟着转、或者转子装不起来。
-     * 转子从轴承朝向那面的那一格（转子头）起，顺着挨着的风帆类方块认，连着的都算。轴承和转子头那一对照粘
+     * 转子是哪几格照共用的认法（{@link BearingRotors}）。轴承和转子头那一对照粘
      * （转子转起来时轴承那一格本来就跳过，粘上组装时转子才跟着船走），转子里面照粘，转子和别的方块之间不粘。
      *
      * @param body    要一起动的方块
@@ -217,25 +219,10 @@ final class GluePlan {
         Map<BlockPos, Integer> rotorOf = new HashMap<>();
         Set<Pair> joints = new HashSet<>();
         int next = 0;
-        for (BlockPos cell : body) {
-            Optional<Direction> facing = bearing.apply(cell);
-            if (facing.isEmpty()) continue;
-            BlockPos head = cell.relative(facing.get());
-            if (!body.contains(head) || rotorOf.containsKey(head)) continue;
-            int rotor = next++;
-            joints.add(new Pair(cell, head));
-            Deque<BlockPos> frontier = new ArrayDeque<>(List.of(head));
-            rotorOf.put(head, rotor);
-            while (!frontier.isEmpty()) {
-                BlockPos current = frontier.poll();
-                for (Direction direction : Direction.values()) {
-                    BlockPos neighbor = current.relative(direction);
-                    if (body.contains(neighbor) && !rotorOf.containsKey(neighbor) && sail.test(neighbor)) {
-                        rotorOf.put(neighbor, rotor);
-                        frontier.add(neighbor);
-                    }
-                }
-            }
+        for (BearingRotors.Rotor rotor : BearingRotors.of(body, bearing, sail)) {
+            int index = next++;
+            joints.add(new Pair(rotor.bearing(), rotor.head()));
+            for (BlockPos cell : rotor.cells()) rotorOf.put(cell, index);
         }
         return (one, other) -> Objects.equals(rotorOf.get(one), rotorOf.get(other))
                 || joints.contains(new Pair(one, other)) || joints.contains(new Pair(other, one));
