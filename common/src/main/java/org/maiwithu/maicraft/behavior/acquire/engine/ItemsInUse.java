@@ -18,7 +18,9 @@ import org.maiwithu.maicraft.kernel.result.Change;
  * 正要用的东西：上一个目标刚拿到的，加上手上这件事正在拿的（拿石镐时要的圆石、备料要的木板）。
  * 路上垫脚不先动它们——挖了三块圆石，爬上来时又把三块垫下去，这一趟就白跑了。
  *
- * <p>只留拿到的那么多件，多出来的照样能垫；下一个目标结束就换成那个目标拿到的。
+ * <p>只留拿到的那么多件，多出来的照样能垫；下一个动过背包的目标结束就换成那个目标拿到的——
+ * 中间发一句话、设一个计时、写一次预留这类不碰背包的目标不算，不然"拿圆石、说一句拿到了、回露天"
+ * 那几块圆石照样被垫掉。
  * 要的是标签（"任一石质工具材料"）时，挂着这个标签的料都按这个数留。
  *
  * <p>上一个目标要的本来就是吃的（能吃的口粮一大类、{@code c:foods} 下的面包熟肉这类），拿到的就是拿来吃的，
@@ -40,8 +42,9 @@ public final class ItemsInUse implements ItemsToKeep {
         this.tags = Objects.requireNonNull(tags, "tags");
     }
 
-    /** 一个目标结束：记下它拿到的东西，换掉更早那个目标的。 */
+    /** 一个目标结束：动过背包的才记下它拿到的东西、换掉更早那个目标的；没有物品变化的不算"上一个目标"。 */
     public void goalFinished(List<Change> changes) {
+        if (changes.stream().noneMatch(ItemsInUse::touchesBackpack)) return;
         Map<String, Integer> gained = new LinkedHashMap<>();
         for (Change change : changes) {
             // 要的本来就是吃的：拿来就是吃的，不留着。
@@ -51,6 +54,14 @@ public final class ItemsInUse implements ItemsToKeep {
             }
         }
         lastGoal = Map.copyOf(gained);
+    }
+
+    // 这条变化动没动背包：拿到、用掉、存走、丢掉、放下方块都算；拆方块、走路、点开门不算。
+    private static boolean touchesBackpack(Change change) {
+        return switch (change.kind()) {
+            case ITEM_GAINED, ITEM_CONSUMED, ITEM_STORED, ITEM_DROPPED, BLOCK_PLACED -> true;
+            default -> false;
+        };
     }
 
     /** 目标要的是不是吃的那几类标签：能吃的口粮一大类，或 c:foods 与它下面的分类。点名的具体物品不算。 */

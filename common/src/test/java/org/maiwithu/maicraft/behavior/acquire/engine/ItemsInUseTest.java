@@ -29,6 +29,18 @@ class ItemsInUseTest {
     }
 
     @Test
+    void 不碰背包的目标结束不冲掉上一个目标刚拿到的() {
+        // 拿圆石、说一句拿到了、回露天：说话那个目标没有物品变化，圆石照旧留着；放了方块的目标才算动过背包。
+        inUse.goalFinished(List.of(Change.of(Change.Kind.ITEM_GAINED, "minecraft:cobblestone", 3)));
+        inUse.goalFinished(List.of());
+        inUse.goalFinished(List.of(Change.of(Change.Kind.MOVED, "minecraft:player", 1)));
+        assertEquals(3, inUse.keep("minecraft:cobblestone"));
+
+        inUse.goalFinished(List.of(Change.of(Change.Kind.BLOCK_PLACED, "minecraft:dirt", 1)));
+        assertEquals(0, inUse.keep("minecraft:cobblestone"));
+    }
+
+    @Test
     void 要的是标签时_挂着这个标签的料都按这个数留() {
         tags.put("minecraft:cobblestone", "minecraft:stone_tool_materials");
         inUse.goalFinished(List.of(Change.of(Change.Kind.ITEM_GAINED, "#minecraft:stone_tool_materials", 3)));
