@@ -3,7 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 
 import java.util.Optional;
 
-import net.minecraft.core.BlockPos;
+import it.unimi.dsi.fastutil.longs.LongSets;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -12,8 +12,10 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
-import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
-import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.perception.FeatureSpotter;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
@@ -24,24 +26,29 @@ import org.maiwithu.maicraft.kernel.task.Action;
 /**
  * 记得的木头产地：世界记忆里"这一片见过树林"的产地线索。附近看不见会掉原木的方块时
  * （树在山脊上、视线被地形挡住是常事），按记得的位置报一条"走去那儿砍树"的路，
- 不让规划里只剩走得更远的记忆箱子。
- 产地线索只是路过时看见过，树可能已经砍过：数量按"不知道有多少"报，排在有确定货的来源后面；
- 到了那儿按眼前的现场重新问价——树上还在就由采掘接手，只剩空地就这一条如实收场换别的路，不把过时的记忆当成有货。
+ * 不让规划里只剩走得更远的记忆箱子。
+ *
+ * <p>产地线索只是路过时看见过，树可能已经砍过：数量按"不知道有多少"报，排在有确定货的来源后面；
+ * 到了那儿按眼前的现场重新问价——树还在就由采掘接手，只剩空地就这一条如实收场换别的路，不把过时的记忆当成有货。
+ * 线索记的是那片树林的大致中心，高度是当时看见它的人站的高度、不是树所在的高度：
+ * 距离按水平算，走过去也只走到那一柱列附近，不朝那个高度的一格去挖。
  */
 public final class RememberedWoodSites implements ItemSource {
 
     /** 找记得的产地的半径：与采掘看现场的范围一致，再远就该走跨区出行，不在这里顺手砍。 */
     public static final int SEARCH_RADIUS_BLOCKS = MiningSource.SEARCH_RADIUS_BLOCKS;
+    /** 走到树林中心水平多近算到了（格）：站进这一片里，四周的树都在采掘看得见的范围内。类别：玩家常识。 */
+    static final double ARRIVE_RADIUS_BLOCKS = 8;
     /** 原木的物品标签：问的是这类东西时，"记得哪里有树林"才算一条来路。 */
     private static final String LOGS_TAG = "minecraft:logs";
 
     private final WorldMemory memory;
-    private final BringsPlayerClose bringsClose;
+    private final WalkTo walks;
     private final ReadsItemTags tags;
 
-    public RememberedWoodSites(WorldMemory memory, BringsPlayerClose bringsClose, ReadsItemTags tags) {
+    public RememberedWoodSites(WorldMemory memory, WalkTo walks, ReadsItemTags tags) {
         this.memory = memory;
-        this.bringsClose = bringsClose;
+        this.walks = walks;
         this.tags = tags;
     }
 
@@ -71,18 +78,19 @@ public final class RememberedWoodSites implements ItemSource {
         }
         MemoryRecord site = nearest.get();
         return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                new AcquisitionCost(RememberedStations.distance(site.position(), here), 1),
+                new AcquisitionCost(flatDistance(site.position(), here), 1),
                 "那里只是路过看见过有树，过去才知道还在不在（可能已经砍过）；到了按眼前的现场重新问价",
                 positionHint(site.position()));
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        // 动手就是走到报价认的那片产地：到了之后方块扫描看得见树时，下一次问价自然由采掘接手报价；
-        // 树已经被砍过、到了一片空地，引擎清点后一件没拿到就把这条划掉换别的路，不围着空地反复走。
+        // 动手就是走到报价认的那片树林里：高度没核实，只走到那一柱列附近（和按线索找要塞同一种走法）。
+        // 到了之后方块扫描看得见树时，下一次问价自然由采掘接手报价；树已经被砍过、到了一片空地，
+        // 引擎清点后一件没拿到就把这条划掉换别的路，不围着空地反复走。
         WorldPosition site = parsePosition(offer.hint());
-        return Optional.of(bringsClose.toward(ApproachTarget.ofBlockToDig(
-                        new BlockPos(site.x(), site.y(), site.z())),
-                context.permissions(), context.records()));
+        return Optional.of(walks.start(
+                new GoalCompiler.Compiled(NavGoal.column(site.x(), site.z(), ARRIVE_RADIUS_BLOCKS), LongSets.emptySet()),
+                TerrainPermit.of(context.permissions())));
     }
 
     // 要的是不是木头：点名 #minecraft:logs 的算，点名具体物品、物品挂着原木标签的也算；
@@ -97,7 +105,12 @@ public final class RememberedWoodSites implements ItemSource {
         return context.radiusBlocks() == null ? SEARCH_RADIUS_BLOCKS : context.radiusBlocks();
     }
 
-    /** 报价认位置的写法：引擎不解读，动手时原样带回去查现场与记忆。 */
+    // 到那片树林的水平距离：线索的高度是当时看见的人站的高度，算进去只会把远近量歪。
+    private static double flatDistance(WorldPosition at, WorldPosition here) {
+        return Math.hypot(at.x() - here.x(), at.z() - here.z());
+    }
+
+    /** 报价认位置的写法：引擎不解读，动手时原样带回去。 */
     private static String positionHint(WorldPosition at) {
         return at.x() + "," + at.y() + "," + at.z() + (at.dimension() == null ? "" : "@" + at.dimension());
     }

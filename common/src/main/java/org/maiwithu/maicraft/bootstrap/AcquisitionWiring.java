@@ -101,7 +101,7 @@ final class AcquisitionWiring {
         List<ItemSource> sources = new ArrayList<>(List.of(
                 containerSource, craftSource, smeltSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
-                new RememberedWoodSites(deps.world().memory(), bringsClose, deps.items().itemTags()),
+                new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags()),
                 new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
                         deps.guards().protection(), tradeTakes),
                 new HuntSource(new ClientCreatureScans(deps.character().context()), deps.guards().creatures(), permission,
