@@ -62,6 +62,8 @@ public final class TargetIndex {
         int version = 1;
         int activeRefs;
         long lastUseTick;
+        /** 至今补建过多少个区块段的索引条目：读端据此判断视野的账还在不在补新方块。 */
+        long entriesBuilt;
         final Map<QueryKey, QueryProgress> queries = new LinkedHashMap<>();
     }
 
@@ -332,6 +334,7 @@ public final class TargetIndex {
                 if (budget-- <= 0) break;
                 entry = build(section, idx);
                 idx.sections.put(sectionKey, entry);
+                idx.entriesBuilt++;
             }
             collect(entry, section, level, cx, sy, cz, targets, progress.nearest, sourcesOnly, exposedOnly);
             progress.sectionIndex++;
@@ -438,6 +441,12 @@ public final class TargetIndex {
                 nearest.offer(cell);
             }
         }
+    }
+
+    /** 这个维度至今补建过多少个区块段的索引条目：刚清空或换世界后从零往上补，读端据此分辨"还没看清"与"真没有"。 */
+    public long sectionsBuilt(ResourceKey<Level> dimension) {
+        LevelIndex idx = indexes.get(dimension);
+        return idx == null ? 0 : idx.entriesBuilt;
     }
 
     // ==================== 生命周期 ====================

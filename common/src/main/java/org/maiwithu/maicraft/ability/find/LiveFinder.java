@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
+import org.maiwithu.maicraft.game.world.ScanQuietness;
 import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -63,6 +64,8 @@ final class LiveFinder implements FindsAround {
     private final WorldMemory memory;
     /** 这次要找的方块按维度补登记进扫描索引：没登记的方块索引里查不到。 */
     private final ScanTargets registered;
+    /** 附近索引的视野账安静了没有：补账没停时"没扫到"只是"还没看清"，安静判定喂给任务收束。 */
+    private final ScanQuietness quietness = new ScanQuietness();
     /** 被视线闸挡下的候选账本：配额满不冒充扫完，看不见的位置排除后继续外推。 */
     private final BlockedCandidates blocked = new BlockedCandidates();
     /** 上一轮所在维度：扫描中换世界，这轮作废，不冒充结论。 */
@@ -115,6 +118,9 @@ final class LiveFinder implements FindsAround {
             return new Round(List.of(), true, false);
         }
         registered.ensure(level, targets);
+        // 视野账还在补新方块（刚清空、刚登记新目标、刚走到的冷索引）时，这一刻的空结果说不准有没有：
+        // 记下入账进度，等它安静了任务才把"没扫到"收成"没有"。
+        quietness.observe(scans.sectionsBuilt(level));
         // 账本跟着查询走：位置、目标、数量、半径任一变了就清账重来。
         blocked.followQuery(center, input.selectors(), input.count(), input.radius());
         var result = scans.query(level, center, targets, input.count(),
@@ -137,7 +143,7 @@ final class LiveFinder implements FindsAround {
             confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
         boolean complete = blocked.settle(result.complete(), hits.size(), input.count(), rejected);
-        return new Round(List.copyOf(hits), complete, false);
+        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet());
     }
 
     /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；没过的返回 false。 */

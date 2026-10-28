@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -58,6 +59,8 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
     private final Map<String, FindDetails.Found> accepted = new LinkedHashMap<>();
     /** 去重的凭据：实体按游戏实体编号，方块与线索按位置。 */
     private final Set<String> counted = new HashSet<>();
+    /** 最近一轮附近索引的视野账安静了没有：没安静时空的结论只是"还没看清"。 */
+    private boolean scanQuiet = true;
 
     FindTask(FindInput input, Scene scene, FindsAround finder, RemembersSightings memory, FollowsEnderEyes eyes) {
         super("寻找", Phase.SCAN, new ProgressTracker(STUCK_AFTER_TICKS,
@@ -98,6 +101,13 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
         List<FindDetails.Found> found = found();
         if (found.size() >= input.count()) {
             return Next.done(FindSettlement.done(input, found, countByType(found)));
+        }
+        scanQuiet = round.scanQuiet();
+        if (!scanQuiet) {
+            // 视野的账还在往索引里补新方块（刚换世界、刚登记新目标、刚走到的冷索引）：
+            // 这时"扫完且没有"其实是"还没看清"。把等待算成真实进展，掐停滞闸的刻数从安静那一刻起算。
+            recordProgress("这一片还在看清：视野扫描还在补进新方块");
+            return Next.stay();
         }
         if (round.complete()) {
             if (input.followsEyes() && found.isEmpty()) {
@@ -200,6 +210,17 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
             counts.merge(entry.type(), 1, Integer::sum);
         }
         return counts;
+    }
+
+    /** 等满时限时现场还没看完：如实说没看完、为什么，不写成原地打转。 */
+    @Override
+    protected Problem noProgressProblem(ProgressTracker.Status status) {
+        if (!scanQuiet) {
+            return Problem.of(Problem.Kind.STUCK,
+                    "半径 " + input.radius() + " 格的现场还没看完：视野扫描一直在补进新方块，已等 "
+                            + activeTicks() + " 刻");
+        }
+        return super.noProgressProblem(status);
     }
 
     @Override

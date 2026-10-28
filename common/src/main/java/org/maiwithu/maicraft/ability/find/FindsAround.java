@@ -27,15 +27,22 @@ public interface FindsAround {
      * @param hits         这一刻确认的命中；同一回合可能重复给出之前给过的，任务负责去重
      * @param complete     愿意找的范围扫完了没有
      * @param worldChanged 扫描期间换了世界：这轮结果作废，任务如实结束，不冒充结论
+     * @param hiddenLead   范围内被挡住、看不见的那些的线索；没有为 null
+     * @param scanQuiet    附近方块索引的视野账安静了没有（连续多刻没有补进新方块）；
+     *                     没安静时"扫完且没有"只是"还没看清"，任务不下"没有"的结论
      */
-    record Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead) {
+    record Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead, boolean scanQuiet) {
 
         public Round {
             hits = List.copyOf(hits);
         }
 
         Round(List<Hit> hits, boolean complete, boolean worldChanged) {
-            this(hits, complete, worldChanged, null);
+            this(hits, complete, worldChanged, null, true);
+        }
+
+        Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead) {
+            this(hits, complete, worldChanged, hiddenLead, true);
         }
     }
 

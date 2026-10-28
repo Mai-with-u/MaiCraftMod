@@ -186,6 +186,11 @@ public abstract class PhasedTask<P extends Enum<P>> implements Task {
         progress.recordProgress(what);
     }
 
+    /** 本任务到目前已推进了多少刻：收尾说明里报等了多久、走了多远用它。 */
+    protected final long activeTicks() {
+        return progress.activeTicks();
+    }
+
     /** 记下一条已确认发生的变化，结束时进入结果的 changes。 */
     protected final void recordChange(Change change) {
         changes.add(Objects.requireNonNull(change, "change"));

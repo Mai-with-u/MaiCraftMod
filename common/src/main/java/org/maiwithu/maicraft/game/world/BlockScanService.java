@@ -81,6 +81,11 @@ public final class BlockScanService implements RegistersScanTargets {
         return index.query(level, center, targets, want, maxChunkRadius, buildBudget);
     }
 
+    /** 这个维度至今补建过多少个区块段的索引条目：读端每刻看一眼这个数涨没涨，就知道视野的账还在不在补。 */
+    public long sectionsBuilt(ClientLevel level) {
+        return index.sectionsBuilt(level.dimension());
+    }
+
     /**
      * 登记一次大范围球形扫描，围绕发起时的位置分几刻走完，完成时通过回调给结果与覆盖账本。
      *

@@ -195,6 +195,41 @@ class FindTaskTest {
     }
 
     @Test
+    void 视野账还在补新方块_空结果不下没有的结论_等待不算原地打转() {
+        // 冷索引：视野扫描一直在往登记账里补新方块，扫完的空结果只是"还没看清"；
+        // 等待算真实进展，等满两秒安静了才按没找到收场，中途不掐停滞闸（停滞闸 200 刻）。
+        for (int i = 0; i < 250; i++) {
+            finder.script.add(new FindsAround.Round(List.of(), true, false, null, false));
+        }
+        finder.script.add(new FindsAround.Round(List.of(), true, false));
+        TaskResult result = run(new FindInput(FindInput.FindKind.BLOCK,
+                List.of("minecraft:diamond_ore"), 1, 48));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind(), result.summary());
+    }
+
+    @Test
+    void 视野账一直没安静_等满时限如实说还没看完() {
+        // 站在原地但别的扫描一直在补账：等到最多能做的时限（两千四百刻），收场说明写"还没看完"，不写成找不到。
+        for (int i = 0; i < 2500; i++) {
+            finder.script.add(new FindsAround.Round(List.of(), true, false, null, false));
+        }
+        FindTask task = new FindTask(new FindInput(FindInput.FindKind.BLOCK,
+                List.of("minecraft:diamond_ore"), 1, 48), scene, finder, memory, eyes);
+        task.start(tick());
+        for (int i = 0; i < 2500; i++) {
+            if (task.tick(tick()) instanceof TickResult.Finished finished) {
+                assertEquals(TaskResult.Status.FAILED, finished.result().status());
+                assertTrue(finished.result().problem().message().contains("还没看完"),
+                        finished.result().problem().message());
+                return;
+            }
+        }
+        throw new AssertionError("等满时限了还没收场");
+    }
+
+    @Test
     void 实体命中带保护事实并沿用实体编号() {
         FindsAround.Hit named = new FindsAround.Hit(FindInput.FindKind.ENTITY, "minecraft:sheep",
                 WorldPosition.here(3, 64, 0), 7, true, "有名字");
