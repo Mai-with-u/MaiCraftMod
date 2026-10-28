@@ -21,8 +21,11 @@ import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
  * 身子两格空的落点交给寻路，寻路同样尽量不进追兵的危险半径；知道家（或打点）在哪时，这几个落点里挑离家最近的。
  * 上一条路走不通就换下一个方向，不反复撞同一堵墙。
  *
- * <p>甩开：四十格内没有正在追我的才算，只认这次参与了追击的与新近打过我的——远处没参与的怪不让这次逃跑无限延长。
- * 开始了就跑到甩开，回了一点血不回头；身体真走出两格才清失败账，连续三次走不通才承认退无可退、背水一战。
+ * <p>脱险：拉开之后还得安静一阵才算——连着几秒没有任何追兵锁定自己（没在追、也没打过我的）、
+ * 又没有任何怪凑进危险半径，才承认脱险，如实收场交还身体。只认这次参与追击的与新近打过我的——
+ * 远处没参与的怪不让这次逃跑无限延长；追兵还在远处晃着但既没追过来也够不着的，不让逃跑无限拖着。
+ * 远程追兵（骷髅这类）甩出它的射程就够不着我了，它在射程外亮着攻击标记也不算锁定。
+ * 开始了就跑到脱险，回了一点血不回头；身体真走出两格才清失败账，连续三次走不通才承认退无可退、背水一战。
  */
 public final class Retreat {
 
@@ -39,6 +42,8 @@ public final class Retreat {
     private final Set<Integer> pursuers = new HashSet<>();
     /** 这次的追兵最后一次露面在哪（x, z）、之后又过了几刻：拐过墙角一时看不见的不当它凭空消失。 */
     private final Map<Integer, double[]> lastSeen = new HashMap<>();
+    /** 连着多少刻没人锁定自己、也没有怪凑近（刻）：攒够这一段安静期才算脱险。 */
+    private int calmTicks;
     private int failures;
     private int turns;
     private double[] lastFailureAt;
@@ -49,6 +54,7 @@ public final class Retreat {
         pursuers.clear();
         for (Battlefield.Foe foe : field.chasers()) pursuers.add(foe.id());
         lastSeen.clear();
+        calmTicks = 0;
         failures = 0;
         turns = 0;
         lastFailureAt = null;
@@ -70,29 +76,41 @@ public final class Retreat {
         }
     }
 
-    /** 甩开了：四十格内没有这次参与追击的（追没追着都算）、也没有新近打过我的。 */
+    /**
+     * 脱险了没有：连着一段安静期（{@link #CALM_TICKS}）里没有任何这次追兵或打过我的在锁定自己、
+     * 没有任何怪凑进危险半径、追兵也没有刚在近处消失，才算甩开。追兵还在远处但既没追也没够得着的，
+     * 不打断安静期——撤离收场只看眼前还危不危险，不看它离得多远。
+     */
     boolean escaped(Battlefield field) {
         remember(field);
+        boolean calm = true;
+        // 锁定：这次参与追击的或新近打过我的正在追我。远程追兵甩出它的射程就射不着了，
+        // 它在射程外亮着攻击标记不算锁定——不然被骷髅追着一路跑进夜里（F 游戏事实：原版骷髅索敌与射箭 15 格）。
         for (Battlefield.Foe foe : field.chasers()) {
-            if (pursuers.contains(foe.id()) || foe.attacker()) return false;
+            if (!pursuers.contains(foe.id()) && !foe.attacker()) continue;
+            if (foe.threat().kind() == ThreatAssessment.Kind.RANGED
+                    && foe.distance() > RANGED_ESCAPE_DISTANCE) continue;
+            calm = false;
         }
-        // 这次追我的还在四十格内：这一刻没在"追"（没对着我、隔着坡看不见）也没甩开，它转眼又追上来。
-        // 实机 10-14 低血被尸壳追，每跑二三十格就算甩开、收手站住，尸壳追上来又跑，三分钟跑出两百多格，最后被追上。
+        // 危险半径：任何怪（含没参与的）凑到它的危险半径外加余量以内、或点着引信的进了波及范围，都还没脱险。
         for (Battlefield.Foe foe : field.foes()) {
-            if (pursuers.contains(foe.id())) return false;
+            if (foe.fusing() && foe.distance() < foe.blastClearance()) calm = false;
+            if (foe.distance() < foe.threat().dangerRadius() + DANGER_MARGIN) calm = false;
         }
-        // 还看得见、会还手的就在 10 格内：这一刻它只是没在"追"（目标一闪一闪），不算甩开。原先撤一步就算甩开，
-        // 自卫刚收场下一刻又插进来，一秒里"已撤离，离打点 0 格"好几回，赶路的主任务跟着走走停停。
+        // 还看得见、会还手的就在 10 格内：它下一刻就能锁上来（目标标记一闪一闪也不当它没敌意），不算脱险。
         for (Battlefield.Foe foe : field.foes()) {
-            if (foe.fightsBack() && foe.threat().visible() && foe.distance() < CLEAR_GAP) return false;
+            if (foe.fightsBack() && foe.threat().visible() && foe.distance() < CLEAR_GAP) calm = false;
         }
-        // 追兵一时被地形挡住看不见（夜里、山里一拐弯就没了）：它最后露面的地方还在 10 格内、离露面不到三秒，
-        // 就当它还在后面接着跑。原先一看不见就算甩开，没武器时"已撤离，离打点 0 格"一秒好几回。
+        // 这次追兵刚从视野里消失、最后露面还在近处：多半就在墙后接着走，不当它走了。
         Battlefield.Me me = field.me();
         for (double[] seen : lastSeen.values()) {
-            if (Math.hypot(seen[0] - me.x(), seen[1] - me.z()) < CLEAR_GAP) return false;
+            if (Math.hypot(seen[0] - me.x(), seen[1] - me.z()) < CLEAR_GAP) calm = false;
         }
-        return true;
+        if (!calm) {
+            calmTicks = 0;
+            return false;
+        }
+        return ++calmTicks >= CALM_TICKS;
     }
 
     // 每刻记下这次追兵露面的位置；没露面的又老一刻，老过三秒就忘掉。
@@ -124,6 +142,24 @@ public final class Retreat {
     static final double CLEAR_GAP = 10;
     /** 追兵看不见多久（刻）才当它不在了：三秒。 */
     static final int REMEMBER_TICKS = 60;
+
+    /**
+     * 脱险要的安静期（刻）：连着三秒没人锁定自己、也没有怪凑近才收场。类别：玩家常识——甩开追兵后
+     * 站下缓几秒没被再咬才算真脱险；太短会在边界上一进一出、撤离一秒收场一回。这个时长也覆盖
+     * 「甩掉视线后短时间无新箭」：骷髅拉满一张弓约两秒，三秒没挨新箭就是它已经射不着了。
+     */
+    static final int CALM_TICKS = 60;
+
+    /**
+     * 危险半径外再留的余量（格）：刚停下时贴得近的怪一迈步就够得着，多留两格再算脱险。类别：玩家常识。
+     */
+    static final double DANGER_MARGIN = 2.0;
+
+    /**
+     * 远程追兵算甩开的距离（格）：原版骷髅索敌与射箭 15 格（游戏事实），再加 5 格余量；
+     * 甩出这条线它就够不着我了，不用等它出四十格的视野圈。类别：游戏事实加常识余量。
+     */
+    static final double RANGED_ESCAPE_DISTANCE = 20;
 
     /**
      * 一条撤离路线走不通：换下一个方向再试；身体比上次失败处真走出两格就清账重数。
