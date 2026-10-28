@@ -84,4 +84,81 @@ class NaturalTreesTest {
         World world = tree(true);
         assertFalse(NaturalTrees.partOfNaturalTree(new BlockPos(0, 64, 0), world, pos -> true, new HashMap<>()));
     }
+
+    /** 云杉/枞树这类锥形冠：竖干顶梢一两层光秃，叶环挂在中上部。 */
+    private static World conifer() {
+        World world = new World();
+        for (int y = 133; y <= 139; y++) world.log(30, y, 33);
+        // 叶环在 136、137 两层：贴干一圈距离 1，再往外一圈距离 2；顶上 138、139 光秃。
+        for (int y = 136; y <= 137; y++) {
+            world.leaf(31, y, 33, 1, false);
+            world.leaf(29, y, 33, 1, false);
+            world.leaf(30, y, 34, 1, false);
+            world.leaf(30, y, 32, 1, false);
+            world.leaf(32, y, 33, 2, false);
+            world.leaf(28, y, 33, 2, false);
+        }
+        return world;
+    }
+
+    @Test
+    void 顶梢光秃叶环挂中上部的锥形冠是树() {
+        World world = conifer();
+        // 从树干哪一格看都一样，含实机现场 (30,133,33)~(30,139,33) 的两端。
+        assertTrue(NaturalTrees.partOfNaturalTree(new BlockPos(30, 139, 33), world, pos -> true, new HashMap<>()));
+        assertTrue(NaturalTrees.partOfNaturalTree(new BlockPos(30, 133, 33), world, pos -> true, new HashMap<>()));
+    }
+
+    @Test
+    void 两列并排的粗干锥形冠也是树() {
+        World world = new World();
+        for (int y = 130; y <= 140; y++) {
+            world.log(10, y, 20);
+            world.log(11, y, 20);
+        }
+        // 叶环挂在中上部，整圈包住两列干，含四角。
+        for (int y = 136; y <= 138; y++) {
+            world.leaf(9, y, 20, 1, false);
+            world.leaf(12, y, 20, 1, false);
+            world.leaf(10, y, 19, 1, false);
+            world.leaf(11, y, 19, 1, false);
+            world.leaf(10, y, 21, 1, false);
+            world.leaf(11, y, 21, 1, false);
+            world.leaf(9, y, 19, 2, false);
+            world.leaf(12, y, 21, 2, false);
+        }
+        assertTrue(NaturalTrees.partOfNaturalTree(new BlockPos(10, 140, 20), world, pos -> true, new HashMap<>()));
+        assertTrue(NaturalTrees.partOfNaturalTree(new BlockPos(11, 132, 20), world, pos -> true, new HashMap<>()));
+    }
+
+    @Test
+    void 木屋的原木墙和横梁不是树() {
+        World world = new World();
+        // 一面 3x3 的原木墙，旁边搭着持久树叶当装饰。
+        for (int x = 0; x <= 2; x++) {
+            for (int y = 64; y <= 66; y++) world.log(x, y, 0);
+        }
+        world.leaf(1, 65, 1, 1, true);
+        assertFalse(NaturalTrees.partOfNaturalTree(new BlockPos(1, 65, 0), world, pos -> true, new HashMap<>()));
+        // 横着的梁：原木只有一格高，旁边挨着别的原木也不算冠。
+        World beam = new World();
+        beam.log(0, 70, 0);
+        beam.log(1, 70, 0);
+        beam.log(2, 70, 0);
+        assertFalse(NaturalTrees.partOfNaturalTree(new BlockPos(1, 70, 0), beam, pos -> true, new HashMap<>()));
+    }
+
+    @Test
+    void 叶子只长在树干下半段不算树冠() {
+        World world = new World();
+        for (int y = 64; y <= 71; y++) world.log(0, y, 0);
+        // 下半段贴一圈非持久叶，上半段全光秃：树冠不在树上部的样子不是立树。
+        for (int y = 64; y <= 66; y++) {
+            world.leaf(1, y, 0, 1, false);
+            world.leaf(-1, y, 0, 1, false);
+            world.leaf(0, y, 1, 1, false);
+            world.leaf(0, y, -1, 1, false);
+        }
+        assertFalse(NaturalTrees.partOfNaturalTree(new BlockPos(0, 71, 0), world, pos -> true, new HashMap<>()));
+    }
 }
