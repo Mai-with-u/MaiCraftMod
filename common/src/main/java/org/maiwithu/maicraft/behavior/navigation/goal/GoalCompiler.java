@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.navigation.goal;
 import org.maiwithu.maicraft.behavior.navigation.calc.ApproachAvoiding;
 import org.maiwithu.maicraft.behavior.navigation.calc.AwayFromThreats;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoalFingerprint;
 import org.maiwithu.maicraft.behavior.navigation.calc.ThreatField;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -41,7 +42,7 @@ public final class GoalCompiler {
     }
 
     public record CompiledFingerprint(
-            NavGoal.SemanticFingerprint goal,
+            NavGoalFingerprint goal,
             Set<Long> sacred) {
         public CompiledFingerprint {
             sacred = Set.copyOf(sacred);

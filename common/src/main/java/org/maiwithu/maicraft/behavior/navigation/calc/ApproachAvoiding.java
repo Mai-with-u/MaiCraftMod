@@ -59,8 +59,8 @@ public final class ApproachAvoiding implements NavGoal {
     }
 
     @Override
-    public SemanticFingerprint semanticFingerprint() {
-        return new SemanticFingerprint("approach_avoiding",
+    public NavGoalFingerprint semanticFingerprint() {
+        return new NavGoalFingerprint("approach_avoiding",
                 List.of(approach.semanticFingerprint(), field.penaltyFactor(), field.sortedThreats()));
     }
 }

@@ -59,7 +59,7 @@ public final class AwayFromThreats implements NavGoal {
     }
 
     @Override
-    public SemanticFingerprint semanticFingerprint() {
-        return new SemanticFingerprint("away_from_threats", List.of(field.penaltyFactor(), field.sortedThreats()));
+    public NavGoalFingerprint semanticFingerprint() {
+        return new NavGoalFingerprint("away_from_threats", List.of(field.penaltyFactor(), field.sortedThreats()));
     }
 }

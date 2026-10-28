@@ -8,6 +8,7 @@ import baritone.api.pathing.goals.Goal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.navigation.calc.NavGoalFingerprint;
 import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 
@@ -21,7 +22,7 @@ import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
  */
 final class MaiCraftGoalAdapter implements Goal {
     private final NavGoal delegate;
-    private final NavGoal.SemanticFingerprint fingerprint;
+    private final NavGoalFingerprint fingerprint;
     /** 读现场地形，用来核候选脚位是不是干地；还没读到世界（没上路）时给 null，只按位置条件放行。 */
     private final Supplier<BlockGetter> world;
 

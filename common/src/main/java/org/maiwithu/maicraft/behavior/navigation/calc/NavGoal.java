@@ -4,9 +4,7 @@ package org.maiwithu.maicraft.behavior.navigation.calc;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -73,76 +71,8 @@ public interface NavGoal {
     /**
      * 把类型和具体要求变成可比较的值；位置相同但半径或威胁变化时，也能认出目标已经不同。
      */
-    default SemanticFingerprint semanticFingerprint() {
-        return SemanticFingerprint.of(this);
-    }
-
-    /** 不可变值键，用于比较分别重新构建的两个目标快照。 */
-    record SemanticFingerprint(String kind, List<?> parameters) {
-        public SemanticFingerprint {
-            kind = Objects.requireNonNull(kind, "kind");
-            parameters = List.copyOf(parameters);
-        }
-
-        public static SemanticFingerprint of(NavGoal goal) {
-            Objects.requireNonNull(goal, "goal");
-            if (goal instanceof Exact g) {
-                return key("exact", g.goal.asLong());
-            }
-            if (goal instanceof Column g) {
-                return key("column", g.x, g.z, g.radius);
-            }
-            if (goal instanceof YLevel g) {
-                return key("y_level", g.level);
-            }
-            if (goal instanceof Near g) {
-                return key("near", g.goal.asLong(), g.radius);
-            }
-            if (goal instanceof Ring g) {
-                return key("ring", g.goal.asLong(), g.inner, g.outer);
-            }
-            if (goal instanceof DistanceBand g) {
-                return key("distance_band", g.focus.x, g.focus.y, g.focus.z, g.inner, g.outer);
-            }
-            if (goal instanceof NearGround g) {
-                return key("near_ground", g.goal.asLong(), g.radius, g.verticalTolerance);
-            }
-            if (goal instanceof Adjacent g) {
-                return key("adjacent", g.goal.asLong());
-            }
-            if (goal instanceof MineStance g) {
-                return key("mine_stance", g.ore.asLong());
-            }
-            if (goal instanceof GetToBlock g) {
-                return key("get_to_block", g.goal.asLong());
-            }
-            if (goal instanceof Composite g) {
-                return key("composite", multiset(g.members.stream()
-                        .map(NavGoal::semanticFingerprint).toList()));
-            }
-            if (goal instanceof MineColumn g) {
-                return key("mine_column", g.ore.asLong(), g.maxBelow);
-            }
-            if (goal instanceof RunAway g) {
-                return key("run_away", g.from.asLong(), g.maintainY);
-            }
-            // 目前只有一个旧式匿名目标，变化参数只有中心点；以后新增参数的自定义目标必须覆写 semanticFingerprint()。
-            // 无法识别的自定义目标默认只比较类名和代表位置；有其他会变化的要求时，应由自定义实现提供自己的比较值。
-            return key("custom:" + goal.getClass().getName(), goal.center().asLong());
-        }
-
-        private static SemanticFingerprint key(String kind, Object... parameters) {
-            return new SemanticFingerprint(kind, List.of(parameters));
-        }
-
-        /** 组合目标不依赖输入顺序，但会保留重复成员对语义的影响。 */
-        private static <T> Map<T, Integer> multiset(List<T> values) {
-            Map<T, Integer> counts = new HashMap<>();
-            for (T value : values) {
-                counts.merge(value, 1, Integer::sum);
-            }
-            return Map.copyOf(counts);
-        }
+    default NavGoalFingerprint semanticFingerprint() {
+        return NavGoalFingerprint.of(this);
     }
 
     // ---- 共用的八方向水平距离与垂直距离下界 ----

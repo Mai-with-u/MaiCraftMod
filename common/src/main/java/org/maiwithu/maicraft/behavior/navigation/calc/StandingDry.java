@@ -45,7 +45,7 @@ public final class StandingDry implements NavGoal {
         return inner.center();
     }
 
-    @Override public SemanticFingerprint semanticFingerprint() {
+    @Override public NavGoalFingerprint semanticFingerprint() {
         // 装饰不改位置要求，与内层目标等价；出行目的地恒套这一层，不会让重定目标认不出来。
         return inner.semanticFingerprint();
     }
