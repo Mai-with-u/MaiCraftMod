@@ -133,11 +133,13 @@ final class AcquisitionEstimates {
                     case SourceQuote.NotYet notYet -> looking.add(notYet.source() + "：" + notYet.reason());
                 }
             }
+            // 有来源还没看清现场：动手时引擎拿着别的报价也先等它看完再挑路，这时挑出来的未必是动手时走的那条，
+            // 估算照实说还在看，由外面等一会儿再估。
+            if (!looking.isEmpty()) return Part.unknown(what, "附近还没看完：" + String.join("；", looking), true);
             List<String> deadEnds = new ArrayList<>();
             while (true) {
                 List<Planned> plan = choose(offers, request.count());
                 if (plan.isEmpty()) {
-                    if (!looking.isEmpty()) return Part.unknown(what, "附近还没看完：" + String.join("；", looking), true);
                     List<String> reasons = new ArrayList<>(approvals);
                     reasons.addAll(refusals);
                     reasons.addAll(deadEnds);

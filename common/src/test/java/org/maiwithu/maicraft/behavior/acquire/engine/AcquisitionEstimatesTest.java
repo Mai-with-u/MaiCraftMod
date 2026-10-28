@@ -178,6 +178,24 @@ class AcquisitionEstimatesTest {
     }
 
     @Test
+    void 一个来源还在看现场_别的来源有报价也估不了_和动手时一样先等() {
+        // 冷索引：采掘还没看完，记得的箱子报得出价。动手时引擎会先等采掘看完再挑路（眼前的树排到箱子前面），
+        // 估算这时按箱子那条估就和动手时走的不是同一条：如实说还在看，等一会儿再估。
+        chest.offer(LOG, (request, context) -> new SourceQuote.Offer("记得的箱子", 3, new AcquisitionCost(40, 3), null),
+                List.of());
+        mine.offer(LOG, (request, context) -> new SourceQuote.NotYet("采掘", "附近的方块还没扫完"), List.of());
+        GoalEstimate looking = engine().estimate(want(LOG, 3), PERMISSIONS);
+        assertEquals(Effort.UNKNOWN, looking.effort());
+        assertTrue(looking.stillLooking(), "附近还没看完，等一会儿再估就和动手时挑的同一条");
+
+        mine.offer(LOG, (request, context) -> new SourceQuote.Offer("采掘", 3, new AcquisitionCost(12, 3), null),
+                List.of());
+        GoalEstimate settled = engine().estimate(want(LOG, 3), PERMISSIONS);
+        assertEquals(Effort.NEARBY, settled.effort(), "看完了：眼前的树");
+        assertTrue(!settled.stillLooking());
+    }
+
+    @Test
     void 原料链转回自己_那一样估不了_不卡住() {
         craft.offer(PLANKS, (request, context) -> new SourceQuote.Offer("自己做", 4, new AcquisitionCost(0, 5), null, "p"),
                 List.of(want(LOG, 1)));
