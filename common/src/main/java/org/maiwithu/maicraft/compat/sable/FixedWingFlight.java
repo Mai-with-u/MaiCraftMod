@@ -184,23 +184,26 @@ final class FixedWingFlight {
                 Runways.needed(measured, length), span + 4, next == Stage.STOP, ground);
     }
 
-    // 这条跑道连着 3 次落不下：接着试下一条候选；候选试完、或已经是起飞跑道、迫降那片，照规矩往下走。
+    // 这条跑道连着 3 次落不下：接着试下一条候选（先绕圈等）；目的地附近的候选试完了飞回起飞跑道；
+    // 已经是起飞跑道、迫降那片、或就近停下找的最后一条，照最后那样硬落、不再复飞（就近停下不回起飞跑道）。
     private void nextRunway(PilotSample sample) {
         Runway current = pilot.runway();
-        if (current == departure || (current != null && current.forced())) {
-            notes.add((current == departure ? "起飞跑道" : "迫降的那片地") + "也连着 " + FixedWingPilot.ATTEMPTS
-                    + " 次落不下，这次照最后那样硬落，不再复飞");
-            pilot.land(current, false, true);
-            return;
-        }
-        if (previous != null && !previous.exhausted() && stage != Stage.STOP) {
+        if (current == null) return;
+        boolean last = current == departure || current.forced();
+        if (!last && previous != null && !previous.exhausted()) {
             notes.add("这条跑道连着 " + FixedWingPilot.ATTEMPTS + " 次落不下，换下一条候选");
             search = previous;
             previous = null;
-            pilot.orbit(destination);
+            pilot.orbit(stage == Stage.STOP ? sample.position() : destination);
             return;
         }
-        landDeparture(false);
+        if (!last && stage != Stage.STOP) {
+            landDeparture(false);
+            return;
+        }
+        notes.add((current == departure ? "起飞跑道" : current.forced() ? "迫降的那片地" : "就近找的跑道") + "也连着 "
+                + FixedWingPilot.ATTEMPTS + " 次落不下，这次照最后那样硬落，不再复飞");
+        pilot.land(current, false, true);
     }
 
     private void use(Runway runway, boolean forDestination) {
