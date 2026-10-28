@@ -490,8 +490,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
             // 有来源还没看清现场（视野扫描还在补新方块）：先等它看完再排做法。冷索引时看得见的来源
             // 要几秒才报得出价，拿着只有记忆来源的报价先定路，会为眼前的树绕去远处的深箱。
+            // 等着看清现场算真实进展（和找东西等视野看稳一样）：这一段有上限，不记的话停滞闸短的任务
+            // （用东西缺一件去拿，十秒没进展就判卡住）会在看清之前先把整件事掐掉。
             if (stillLooking && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
-                return ActionStatus.running();
+                return ActionStatus.progressed();
             }
             // 挑路只看报价本身；来源是谁在执行时用得上，一并记着。
             plan = AcquisitionSelector.choose(offers.stream().map(Planned::offer).toList(), stillNeeded)

@@ -134,6 +134,23 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 等着看清现场算真实进展_停滞闸短的任务不在看清之前先判卡住() {
+        // 用东西缺一件去拿：用东西的停滞闸只有十秒，冷索引看清现场可能要更久。
+        // 等的这一段有上限，每刻都记进展；不记的话十秒一到整件事被掐掉，等的那几秒白等。
+        ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"));
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 3, new AcquisitionCost(40, 3), null));
+        Action action = engine(chest, mine).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 3, "用东西要拿在手上"), PERMISSIONS);
+        for (int tick = 1; tick <= 20; tick++) {
+            ActionStatus status = action.tick(new StubTick(tick));
+            ActionStatus.Running running = assertInstanceOf(ActionStatus.Running.class, status, "第 " + tick + " 刻");
+            assertTrue(running.progressed(), "第 " + tick + " 刻还在看现场，也算有进展");
+        }
+    }
+
+    @Test
     void 等满时限来源还在看现场_如实说没看完就收场() {
         ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)
                 .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"));
