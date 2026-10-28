@@ -36,4 +36,35 @@ public interface StepContext {
     default List<TaskResult> taskResults() {
         return List.of();
     }
+
+    /**
+     * 目标推进器交给能力的那一份：第几步读目标运行此刻的记录，LLM 的回答读目标运行里的那一份，
+     * 已经结束的任务结果在交出去这一刻抄一份，推进器之后再记的不会混进这次决定。
+     */
+    static StepContext of(GoalRun run, TickContext context, List<TaskResult> finishedResults) {
+        Goal goal = run.goal();
+        List<String> answers = run.answers();
+        List<TaskResult> results = List.copyOf(finishedResults);
+        return new StepContext() {
+            @Override public Goal goal() {
+                return goal;
+            }
+
+            @Override public int stepIndex() {
+                return run.stepIndex();
+            }
+
+            @Override public TickContext tick() {
+                return context;
+            }
+
+            @Override public List<String> answers() {
+                return answers;
+            }
+
+            @Override public List<TaskResult> taskResults() {
+                return results;
+            }
+        };
+    }
 }

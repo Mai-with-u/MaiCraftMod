@@ -415,7 +415,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         // 调用方在结论里就能看到现场，不用再查一次位置。
         TaskResult closed = closeRunningChild(reason);
         List<String> closedRemaining = closed == null ? List.of() : closed.remaining();
-        String summary = cancelledSummary(reason);
+        String summary = GoalConclusions.cancelledSummary(reason);
         if (!closedRemaining.isEmpty()) {
             summary = summary + "：" + String.join("；", closedRemaining);
         }
@@ -424,7 +424,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             ending.remaining(closedRemaining);
             ending.details(closed.details());
         }
-        ending.remaining(stepsNotStarted(goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
+        ending.remaining(GoalConclusions.stepsNotStarted(goal, goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
         TaskResult cancelled = ending.build();
         settle(closed == null ? cancelled : cancelled.withFactsBefore(List.of(closed)), null);
         return result;
@@ -656,10 +656,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         run.recordStepResult(stepResult);
         Goal step = goal.steps().get(index);
         if (stepResult.status() != TaskResult.Status.DONE && step.onFailure() == Goal.OnFailure.STOP) {
-            return settle(sequenceResult(index + 1), context);
+            return settle(GoalConclusions.sequenceResult(goal, finishedResults, index + 1), context);
         }
         if (index + 1 >= goal.steps().size()) {
-            return settle(sequenceResult(goal.steps().size()), context);
+            return settle(GoalConclusions.sequenceResult(goal, finishedResults, goal.steps().size()), context);
         }
         run.advanceToStep(index + 1);
         save();
@@ -676,51 +676,6 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
                 .filter(candidate -> candidate.parentRunId() == run.id())
                 .filter(candidate -> candidate.stepOfParent() == index)
                 .findFirst();
-    }
-
-    /**
-     * sequence 的结论：全部做成就是完成；一步都没做成就是失败；其余是部分完成。
-     * 没做成的步骤和还没开始的步骤都写进剩下的部分，问题取第一个没做成的步骤的问题。
-     * 各步骤已经发生的事实由收尾统一并进来。
-     */
-    private TaskResult sequenceResult(int nextStep) {
-        int total = goal.steps().size();
-        int done = 0;
-        Problem problem = null;
-        List<String> remaining = new ArrayList<>();
-        for (int i = 0; i < finishedResults.size(); i++) {
-            TaskResult stepResult = finishedResults.get(i);
-            if (stepResult.status() == TaskResult.Status.DONE) {
-                done++;
-                continue;
-            }
-            if (problem == null) problem = stepResult.problem();
-            remaining.add(stepLabel(i) + "：" + stepResult.summary());
-            remaining.addAll(stepResult.remaining());
-        }
-        remaining.addAll(stepsNotStarted(nextStep));
-        if (done == total) {
-            return TaskResult.done("按顺序做完了全部 " + total + " 步");
-        }
-        TaskResult.Status status = done == 0 && problem != null ? TaskResult.Status.FAILED : TaskResult.Status.PARTIAL;
-        return TaskResult.builder(status, done + " / " + total + " 步做成")
-                .problem(problem)
-                .remaining(remaining)
-                .build();
-    }
-
-    /** sequence 里从 fromStep 起还没开始的步骤；普通目标没有。 */
-    private List<String> stepsNotStarted(int fromStep) {
-        List<String> notStarted = new ArrayList<>();
-        for (int i = fromStep; i < goal.steps().size(); i++) {
-            notStarted.add(stepLabel(i) + "：没有开始");
-        }
-        return notStarted;
-    }
-
-    // 没做成、没开始的步骤按"第几步（能力，目的）"列出，和每一步做完时发的事件叫法一样。
-    private String stepLabel(int index) {
-        return goal.steps().get(index).stepLabel(index);
     }
 
     /** 当前任务已经结算完，把两件事之间的空当清出来。 */
@@ -762,39 +717,8 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
                 new IllegalStateException("能力 " + goal.ability() + " 没有登记，目标做不下去"));
     }
 
+    // 能力做决定时看的现场：这一步的目标、第几步、本刻、LLM 的回答与已经结束的任务结果。
     private StepContext stepContext(TickContext context) {
-        List<String> answers = run.answers();
-        List<TaskResult> results = List.copyOf(finishedResults);
-        return new StepContext() {
-            @Override public Goal goal() {
-                return goal;
-            }
-
-            @Override public int stepIndex() {
-                return run.stepIndex();
-            }
-
-            @Override public TickContext tick() {
-                return context;
-            }
-
-            @Override public List<String> answers() {
-                return answers;
-            }
-
-            @Override public List<TaskResult> taskResults() {
-                return results;
-            }
-        };
-    }
-
-    private static String cancelledSummary(CloseReason reason) {
-        return switch (reason) {
-            case FINISHED -> "目标没有交代结果就结束了";
-            case REPLACED -> "目标被新任务替换";
-            case CANCELLED -> "目标被取消";
-            case ROUTINE_NEEDS_OFF -> "主任务不要起居打断，中止";
-            case PLAYER_GONE -> "角色不在了，目标中止";
-        };
+        return StepContext.of(run, context, finishedResults);
     }
 }
