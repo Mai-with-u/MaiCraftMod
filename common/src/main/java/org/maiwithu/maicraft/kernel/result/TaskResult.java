@@ -77,6 +77,19 @@ public record TaskResult(
         return new Builder(status, summary);
     }
 
+    /** 同一个结果，变化换成给的这一份（条数与先后不变，只补记每条的细节，例如其中几件是预留的）。 */
+    public TaskResult withChanges(List<Change> replaced) {
+        if (replaced.size() != changes.size()) {
+            throw new IllegalArgumentException("换变化只能一条换一条：" + replaced.size() + "/" + changes.size());
+        }
+        Builder builder = new Builder(status, summary).problem(problem).details(details);
+        builder.changes.addAll(replaced);
+        builder.remaining.addAll(remaining);
+        builder.unconfirmed.addAll(unconfirmed);
+        builder.attempts.addAll(attempts);
+        return builder.build();
+    }
+
     /** 在已有结果的基础上修改，例如收尾时补上运行中记下的变化。 */
     public Builder toBuilder() {
         Builder builder = new Builder(status, summary).problem(problem).details(details);

@@ -267,6 +267,7 @@ final class GoalRunCodec {
             item.addProperty("what", change.what());
             item.addProperty("count", change.count());
             if (change.note() != null) item.addProperty("note", change.note());
+            if (change.fromReserved() > 0) item.addProperty("from_reserved", change.fromReserved());
             array.add(item);
         }
         return array;
@@ -278,7 +279,8 @@ final class GoalRunCodec {
             JsonObject item = element.getAsJsonObject();
             changes.add(new Change(Change.Kind.valueOf(upper(item.get("kind").getAsString())),
                     item.get("what").getAsString(), item.get("count").getAsInt(),
-                    item.has("note") ? item.get("note").getAsString() : null));
+                    item.has("note") ? item.get("note").getAsString() : null,
+                    item.has("from_reserved") ? item.get("from_reserved").getAsInt() : 0));
         }
         return changes;
     }

@@ -179,6 +179,10 @@ public final class ResultJson {
             if (change.note() != null) {
                 item.addProperty("note", change.note());
             }
+            // 其中几件是调用方预留着的：下令的目标不够才动预留的，动了就说，预留也跟着扣了。
+            if (change.fromReserved() > 0) {
+                item.addProperty("from_reserved", change.fromReserved());
+            }
             array.add(item);
         }
         return array;

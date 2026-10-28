@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
  * 目标结束时记下它拿到了什么：下一个目标路上垫脚不先动这些（挖来做石镐的圆石，爬上来时不垫下去）。
@@ -36,5 +37,9 @@ final class NotesGoalGains implements GoalRunStore {
 
     @Override public List<GoalRun> unfinished() {
         return delegate.unfinished();
+    }
+
+    @Override public TaskResult settling(GoalRun run, TaskResult result) {
+        return delegate.settling(run, result);
     }
 }

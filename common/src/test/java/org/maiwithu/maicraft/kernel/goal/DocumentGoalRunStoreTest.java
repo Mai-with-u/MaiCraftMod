@@ -125,6 +125,20 @@ class DocumentGoalRunStoreTest {
     }
 
     @Test
+    void reservedCountsOnChangesSurviveARestart() {
+        // 一步里放了 30 块木板、25 块是预留的：重启读回来，那条变化上记的预留件数还在。
+        AbilityRegistry registry = registry("maicraft:dig");
+        DocumentGoalRunStore store = store(registry);
+        GoalRun run = new GoalRun(store.nextId(), Goal.of("maicraft:dig", null, ParamValues.EMPTY));
+        run.recordStepResult(TaskResult.builder(TaskResult.Status.DONE, "放了木板")
+                .change(new Change(Change.Kind.BLOCK_PLACED, "minecraft:oak_planks", 30, null, 25)).build());
+        store.save(run);
+
+        GoalRun back = store(registry).unfinished().get(0);
+        assertEquals(25, back.stepResults().get(0).changes().get(0).fromReserved());
+    }
+
+    @Test
     void idsKeepGrowingAcrossRestartsAndFinishedRunsLeaveTheSave() {
         AbilityRegistry registry = registry("maicraft:dig");
         DocumentGoalRunStore store = store(registry);

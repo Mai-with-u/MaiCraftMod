@@ -65,7 +65,7 @@ public final class ReservedItems implements ItemsToKeep {
     }
 
     private final ReadsItemTags tags;
-    /** 身上每种物品一共几件（主背包、快捷栏与副手）；读不到当刻的角色时为空。 */
+    /** 身上每种物品一共几件（主背包、快捷栏与副手）；读不到当刻的角色时给 null。 */
     private final Supplier<Map<String, Integer>> carried;
     private Storage storage = Storage.NONE;
     /** 物品或标签 → 那一条预留；先写的排前面。 */
@@ -136,7 +136,7 @@ public final class ReservedItems implements ItemsToKeep {
             if (reservation.atLeast() == null) return ALL;
             int need = reservation.atLeast();
             if (reservation.tag()) {
-                if (carriedNow == null) carriedNow = carried.get();
+                if (carriedNow == null) carriedNow = carriedOrNone();
                 need = Math.max(0, need - othersUnder(reservation, itemId, carriedNow));
             }
             floor = Math.max(floor, need);
@@ -146,18 +146,25 @@ public final class ReservedItems implements ItemsToKeep {
 
     /** 这条预留管的东西身上一共几件（标签按合计）。 */
     public int carriedFor(Reservation reservation) {
-        return carriedUnder(reservation, carried.get());
+        return carriedUnder(reservation, carriedOrNone());
+    }
+
+    // 读不到当刻的角色时按身上什么都没有算：留够几件按写下的件数，宁可多留。
+    private Map<String, Integer> carriedOrNone() {
+        Map<String, Integer> now = carried.get();
+        return now == null ? Map.of() : now;
     }
 
     /**
      * 下令的目标结束了：按它的变化算动了几件预留的，从预留里扣掉，返回每条变化里有几件是预留的（与 changes 一一对应）。
      * 目标开始时身上比预留多出来的那些先算作不留的，超出那部分才是动了预留；预留的件数排在最后用，
-     * 所以从后往前记到变化上。全都留着的不扣；扣到零就撤掉那一条。
+     * 所以从后往前记到变化上。全都留着的不扣；扣到零就撤掉那一条。读不到身上现在有几件时不扣，宁可多留。
      */
     public int[] usedByOrder(List<Change> changes) {
         int[] fromReserved = new int[changes.size()];
         if (reservations.isEmpty() || changes.isEmpty()) return fromReserved;
         Map<String, Integer> after = carried.get();
+        if (after == null) return fromReserved;
         Map<String, Reservation> next = new LinkedHashMap<>(reservations);
         boolean changed = false;
         for (Reservation reservation : reservations.values()) {

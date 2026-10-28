@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.List;
@@ -157,9 +158,7 @@ public final class Bootstrap {
         private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
         // 预留一份：调用方用 reserve 写下的"身上这几样各留够几件"，进世界换成那个世界存着的，退世界清空；
         // 身上件数读当刻的主背包与副手，标签按合计留。
-        private final ReservedItems reserved = new ReservedItems(LiveCarryReads.itemTags(), () -> CarriedItems.byItem(
-                PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
-                LiveCarryReads.offhand(() -> playerControl.activeContext().orElse(null))));
+        private final ReservedItems reserved = new ReservedItems(LiveCarryReads.itemTags(), this::carriedNow);
         // 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道；走路垫脚按它留够数，只垫多出来的。
         private final ItemsToKeep kept = reserved.plus(itemsInUse);
         private final BaritoneInternals walks = new BaritoneInternals(kept);
@@ -171,6 +170,18 @@ public final class Bootstrap {
         private EquipmentConfirmations equipmentConfirmations;
         /** 伤害证据的记忆：自卫与提醒共用；服务器的伤害包经 Mixin 喂进来。 */
         private CombatMemory combatMemory;
+        // 身上每种东西几件：只在客户端线程、一刻之内读得到当刻的角色；读不到给 null，预留按"不知道"处理、不扣账。
+        private Map<String, Integer> carriedNow() {
+            Optional<PlayerContext> now;
+            try {
+                now = playerControl.activeContext();
+            } catch (IllegalStateException offClientThread) {
+                return null;
+            }
+            if (now.isEmpty()) return null;
+            return CarriedItems.byItem(PlayerViews.backpack(now::get), LiveCarryReads.offhand(now::get));
+        }
+
         /** 角色身上的八条提醒：事件进任务事件流，证据经 observe(self) 交出去。 */
         private PlayerReminders reminders;
         private final RestStatistics restStatistics = new RestStatistics();
@@ -305,7 +316,8 @@ public final class Bootstrap {
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
             GoalRunStore goalRuns = new EventPublishingGoalRunStore(
-                    new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), taskEvents, selfBriefs, readySteps);
+                    new SettlesReservations(new NotesGoalGains(new InMemoryGoalRunStore(), itemsInUse), reserved),
+                    taskEvents, selfBriefs, readySteps);
             // 记地点交给当前世界的世界记忆；不在世界里时如实以程序错误收场，不悄悄丢掉。
             RemembersPlaces places = (name, position) -> {
                 WorldScope scope = worldScope[0];
@@ -526,7 +538,8 @@ public final class Bootstrap {
                 // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 publishingGoalRuns = new EventPublishingGoalRunStore(
-                        new NotesGoalGains(scope.goalRuns(), itemsInUse), taskEvents, selfBriefs, readySteps);
+                        new SettlesReservations(new NotesGoalGains(scope.goalRuns(), itemsInUse), reserved),
+                        taskEvents, selfBriefs, readySteps);
                 goals.enterWorld(scope.memory(), publishingGoalRuns);
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;

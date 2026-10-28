@@ -106,6 +106,10 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
         return delegate.unfinished();
     }
 
+    @Override public TaskResult settling(GoalRun run, TaskResult result) {
+        return delegate.settling(run, result);
+    }
+
     /**
      * 每刻看一眼：哪条还没结束的目标太久没有任何事件了，发一条停滞提醒。
      * 只看 LLM 下达的那些（sequence 的步骤记在整个 sequence 的编号上）。

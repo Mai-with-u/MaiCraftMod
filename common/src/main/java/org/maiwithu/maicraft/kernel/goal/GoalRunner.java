@@ -663,9 +663,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
 
     /** 结束目标：把临时任务与前面已经结束的任务的事实并进结论，记录随之存盘，之后本推进封存。 */
     private TickResult settle(TaskResult ending, TickContext context) {
-        List<TaskResult> earlier = new ArrayList<>(tempTaskFacts);
-        earlier.addAll(finishedResults);
-        result = ending.withFactsBefore(earlier);
+        // 先只并上这个目标自己前面任务的事实交给存储链补一笔（动了预留的扣掉），再把临时任务交代的接到最前面：
+        // 饿了吃掉留着的那口、自卫垫的方块是保命，不算下令的目标动了预留。
+        TaskResult own = store.settling(run, ending.withFactsBefore(finishedResults));
+        result = own.withFactsBefore(tempTaskFacts);
         run.finish(result, context == null ? -1 : context.gameTick());
         save();
         LOG.info("目标 {} 结束：{}", run.id(), result.summary());

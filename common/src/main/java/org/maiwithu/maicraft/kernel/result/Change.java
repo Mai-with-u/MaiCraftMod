@@ -12,8 +12,9 @@ import java.util.Objects;
  * @param what  涉及的东西，通常是物品、方块或实体的注册 ID
  * @param count 数量；方块与移动类变化一般为 1
  * @param note  补充说明，例如"存进了家里的箱子"；可以为 null
+ * @param fromReserved 这几件里有几件是调用方预留着的（下令的目标不够才动预留的）；没动预留为 0
  */
-public record Change(Kind kind, String what, int count, String note) {
+public record Change(Kind kind, String what, int count, String note, int fromReserved) {
 
     /** 变化种类。 */
     public enum Kind {
@@ -34,6 +35,19 @@ public record Change(Kind kind, String what, int count, String note) {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(what, "what");
         if (count < 0) throw new IllegalArgumentException("变化的数量不能为负：" + count);
+        if (fromReserved < 0 || fromReserved > count) {
+            throw new IllegalArgumentException("动了的预留件数要在 0 到这条变化的数量之间：" + fromReserved + "/" + count);
+        }
+    }
+
+    /** 没动预留的一条变化。 */
+    public Change(Kind kind, String what, int count, String note) {
+        this(kind, what, count, note, 0);
+    }
+
+    /** 同一条变化，记上其中几件是预留的。 */
+    public Change withFromReserved(int reservedCount) {
+        return new Change(kind, what, count, note, reservedCount);
     }
 
     public static Change of(Kind kind, String what, int count) {
