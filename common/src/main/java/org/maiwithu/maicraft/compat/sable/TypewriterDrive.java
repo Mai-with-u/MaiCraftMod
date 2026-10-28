@@ -400,7 +400,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
 
     // 停稳确认：松开所有键后，接地（船浮着就行）、慢、不斜，连着 20 个样本；100 刻内做不到照实说。
     private ActionStatus park(PilotSample sample, long now) {
-        boolean settled = (request.kind().equals("boat") || sample.grounded())
+        // 固定翼迫降在水面上：浮着就行，和船一样。
+        boolean settled = (request.kind().equals("boat") || sample.grounded() || (wing != null && wing.afloat()))
                 && sample.velocity().length() < PARKED_SPEED && sample.tilt() < PARKED_TILT;
         parkedCount = settled ? parkedCount + 1 : 0;
         if (parkedCount >= PARK_SAMPLES) {

@@ -67,6 +67,8 @@ final class FixedWingPilot {
     static final double UNMEASURED_LIFTOFF = 10;
     /** 没有跑道时在目的地上空绕圈的半径（格）。C */
     static final double ORBIT_RADIUS = 48;
+    /** 正下方是水、船底离水面这么近以内（或泡进水里）算碰到水面，和压着地面一样算接地（格）。C */
+    static final double AFLOAT = 0.3;
 
     /**
      * 这一刻的姿态：机头抬起多少度（抬头为正），右翼往下多少度（右压为正）。
@@ -74,10 +76,16 @@ final class FixedWingPilot {
     record Attitude(double pitch, double roll) {}
 
     /**
-     * 这一刻外面量的：起飞时机头前方畅通多远（没量为 NaN），机身正下方地面的顶面（不知道为 NaN），
-     * 选好的跑道上长出了挡路的方块。
+     * 这一刻外面量的：起飞时机头前方畅通多远（没量为 NaN），机身正下方地面的顶面（不知道为 NaN；正下方是水时是水面），
+     * 选好的跑道上长出了挡路的方块，正下方是不是水。
      */
-    record Situation(double clearAhead, double groundBelow, boolean runwayBlocked) {}
+    record Situation(double clearAhead, double groundBelow, boolean runwayBlocked, boolean waterBelow) {
+
+        /** 正下方不是水。 */
+        Situation(double clearAhead, double groundBelow, boolean runwayBlocked) {
+            this(clearAhead, groundBelow, runwayBlocked, false);
+        }
+    }
 
     /** 有哪些操纵：俯仰、横滚、偏航、地上的转向（前轮打方向）、刹车。 */
     record Controls(boolean pitch, boolean roll, boolean yaw, boolean steer, boolean brake) {}
@@ -303,8 +311,10 @@ final class FixedWingPilot {
             pitchRate = (attitude.pitch() - lastAttitude.pitch()) * 20;
             rollRate = (attitude.roll() - lastAttitude.roll()) * 20;
         }
-        airborne = VehicleAttitude.AIRBORNE.equals(sample.contact()) ? airborne + 1 : 0;
-        grounded = sample.grounded() ? grounded + 1 : 0;
+        // 浮在水上、落到水面都算接地：水没有碰撞，船底泡在水里时接地探头只会说悬空，离水面才算离地。
+        boolean touching = sample.grounded() || afloat(sample, situation);
+        airborne = !touching && VehicleAttitude.AIRBORNE.equals(sample.contact()) ? airborne + 1 : 0;
+        grounded = touching ? grounded + 1 : 0;
         Command command = steer(sample, attitude, situation);
         last = sample;
         lastAttitude = attitude;
@@ -655,6 +665,12 @@ final class FixedWingPilot {
         double roll = controls.roll() ? attitudeServo(-attitude.roll(), rollRate) : 0;
         return new Command(power, pitch, roll, controls.yaw() ? turn : 0, controls.steer() ? turn : 0,
                 brake && controls.brake());
+    }
+
+    /** 正下方是水、船底贴着水面或泡在水里：浮着或刚落到水面上。 */
+    static boolean afloat(PilotSample sample, Situation situation) {
+        return situation.waterBelow() && !Double.isNaN(situation.groundBelow())
+                && sample.position().y - situation.groundBelow() <= AFLOAT;
     }
 
     // 离地多高：知道正下方的地面就按它，不然按起飞时的高度。

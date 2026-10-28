@@ -20,7 +20,8 @@ import net.minecraft.world.phys.Vec3;
  * 开固定翼的手上那一半：每刻量现场交给飞控——滑跑时每 5 刻量一次机头前方畅通多远，下滑、拉平时每 10 刻看跑道上
  * 长没长出挡路的方块，爬升、巡航时每 5 刻看前方地形，高了就抬巡航高度；离目的地 128 格内开始分几刻找落地的跑道
  * （目的地 ±32 → 放宽到 ±96 → 飞回起飞的跑道），同一条 3 次落不下换下一条候选，起飞跑道也 3 次落不下就硬落一次。
- * 被叫先停、时间用完、动力没了：就近（此刻位置 ±128 格）找跑道降，没有够长的挑最长的一片平地迫降，不回起飞跑道。
+ * 被叫先停、时间用完、动力没了：就近（此刻位置 ±128 格）找跑道降，没有够长的挑最长的一片平地迫降，不回起飞跑道；
+ * 连平地也没有（海上、密林上空）就回原来挑的那条，没挑过回起飞跑道，再没有往机头前方迫降，水面也落——不在天上一直绕。
  * 舵的方向飞着核对，反了这一趟反着按，记下哪个键实际是什么；飞控的输出照操纵表调成开关键。
  * 地面只读已加载的区块，含树叶的高度图（树冠也挡路），没加载的不当畅通。
  */
@@ -61,6 +62,11 @@ final class FixedWingFlight {
     private Runways.Search previous;
     private Stage stage;
     private Runway departure;
+    /** 最近一次交给飞控去落的那条与它是不是给目的地挑的：就近停下找不到地时回它。 */
+    private Runway chosen;
+    private boolean chosenForDestination;
+    /** 这一刻浮在水上（落到水面上、或从水面起飞前）：停稳确认按浮着算。 */
+    private boolean afloat;
     private double clearAhead = Double.NaN;
     private boolean blocked;
     private Integer startTop;
@@ -93,21 +99,28 @@ final class FixedWingFlight {
 
     /** 这一刻该按着哪些键。 */
     Set<Integer> fly(ClientLevel level, SableStructures.Structure ship, PilotSample sample, long now) {
-        LandingSites.Ground ground = ground(level);
+        return fly(ground(level), attitude(ship.pose(), forward), sample, now);
+    }
+
+    /** 同上，地面怎么读、此刻的姿态交进来：离线测试走同一份。 */
+    Set<Integer> fly(LandingSites.Ground ground, FixedWingPilot.Attitude attitude, PilotSample sample, long now) {
         Vec3 at = sample.position();
-        Integer below = ground.top((int) Math.floor(at.x), (int) Math.floor(at.z));
+        int x = (int) Math.floor(at.x);
+        int z = (int) Math.floor(at.z);
+        Integer below = ground.top(x, z);
         if (startTop == null) startTop = below != null ? below : (int) Math.round(at.y);
         watch(sample, now, ground);
         searchRunway(sample, ground);
-        FixedWingPilot.Attitude attitude = attitude(ship.pose(), forward);
-        FixedWingPilot.Command command = pilot.tick(sample, attitude,
-                new FixedWingPilot.Situation(clearAhead, below == null ? Double.NaN : below, blocked));
+        FixedWingPilot.Situation situation = new FixedWingPilot.Situation(clearAhead,
+                below == null ? Double.NaN : below, blocked, below != null && ground.liquid(x, z));
+        afloat = FixedWingPilot.afloat(sample, situation);
+        FixedWingPilot.Command command = pilot.tick(sample, attitude, situation);
         if (departure == null && pilot.leftGround() && pilot.takeoffStart() != null) {
             Vec3 start = pilot.takeoffStart();
             departure = new Runway(new Vec3(start.x, startTop, start.z), pilot.takeoffHeading(),
                     Math.max(Runways.MIN_LENGTH, pilot.rolled() + (Double.isNaN(clearAhead) ? 0 : clearAhead)), span + 4, false);
         }
-        if (pilot.wantsNextRunway() && search == null) nextRunway(sample);
+        if (pilot.wantsNextRunway() && search == null) nextRunway(sample, ground);
         if (pilot.powerLost() && !stopping) {
             notes.add("动力没了，就近找跑道迫降");
             stop(sample, ground);
@@ -162,15 +175,21 @@ final class FixedWingFlight {
             case NEAR -> start(Stage.WIDE, destination, sample, ground);
             case WIDE -> {
                 notes.add("目的地附近 ±" + WIDE_RANGE + " 格没找到够长够平的跑道，飞回起飞的跑道");
-                landDeparture(false);
+                landDeparture(sample, ground);
             }
             case STOP -> {
                 Optional<Runway> longest = done.longest();
                 if (longest.isPresent()) {
                     notes.add("附近没有够长的跑道，迫降在最长的一片平地（" + Math.round(longest.get().length()) + " 格）");
                     use(longest.get(), false);
+                } else if (chosen != null) {
+                    // 海上、密林上空就近找不到地：回原来挑的那条，远也比在天上一直绕强。
+                    notes.add("附近 ±" + STOP_RANGE + " 格没有能降的地，回原来挑的那条");
+                    pilot.land(chosen, chosenForDestination, false);
+                    landing = "附近没有能降的地，回原来挑的那条：" + chosen.describe();
                 } else {
-                    notes.add("附近 ±" + STOP_RANGE + " 格没有能降的平地，绕圈等");
+                    notes.add("附近 ±" + STOP_RANGE + " 格没有能降的地，回起飞的跑道");
+                    landDeparture(sample, ground);
                 }
             }
         }
@@ -186,7 +205,7 @@ final class FixedWingFlight {
 
     // 这条跑道连着 3 次落不下：接着试下一条候选（先绕圈等）；目的地附近的候选试完了飞回起飞跑道；
     // 已经是起飞跑道、迫降那片、或就近停下找的最后一条，照最后那样硬落、不再复飞（就近停下不回起飞跑道）。
-    private void nextRunway(PilotSample sample) {
+    private void nextRunway(PilotSample sample, LandingSites.Ground ground) {
         Runway current = pilot.runway();
         if (current == null) return;
         boolean last = current == departure || current.forced();
@@ -198,7 +217,7 @@ final class FixedWingFlight {
             return;
         }
         if (!last && stage != Stage.STOP) {
-            landDeparture(false);
+            landDeparture(sample, ground);
             return;
         }
         notes.add((current == departure ? "起飞跑道" : current.forced() ? "迫降的那片地" : "就近找的跑道") + "也连着 "
@@ -208,17 +227,38 @@ final class FixedWingFlight {
 
     private void use(Runway runway, boolean forDestination) {
         pilot.land(runway, forDestination, false);
+        chosen = runway;
+        chosenForDestination = forDestination;
         landing = (forDestination ? "落在目的地附近够长够平的一条：" : runway.forced() ? "迫降在最长的一片平地：" : "就近落在：")
                 + runway.describe();
     }
 
-    private void landDeparture(boolean committed) {
+    // 回起飞的跑道；空中接手的没有起飞跑道，往机头前方迫降。
+    private void landDeparture(PilotSample sample, LandingSites.Ground ground) {
         if (departure == null) {
-            notes.add("没有起飞跑道可回（空中接手的），绕圈等");
+            ditch(sample, ground);
             return;
         }
-        pilot.land(departure, false, committed);
+        pilot.land(departure, false, false);
+        chosen = departure;
+        chosenForDestination = false;
         landing = "回起飞的跑道：" + departure.describe();
+    }
+
+    // 找不到能降的地、也没有跑道可回：往机头前方迫降，水面也落。迫降那片的跑道头摆在前方一个进近距离外，
+    // 进近点就在脚下，对准了直接往下落；这是最后一次，落不好也不再复飞。
+    private void ditch(PilotSample sample, LandingSites.Ground ground) {
+        Runway probe = new Runway(sample.position(), sample.heading(), 0, span + 2, true);
+        Vec3 ahead = probe.at(Runways.APPROACH_OUT, 0);
+        Integer top = ground.top((int) Math.floor(ahead.x), (int) Math.floor(ahead.z));
+        if (top == null) top = ground.top((int) Math.floor(sample.position().x), (int) Math.floor(sample.position().z));
+        if (top == null) top = startTop;
+        Runway field = new Runway(new Vec3(ahead.x, top, ahead.z), sample.heading(), Runways.MIN_LENGTH, span + 2, true);
+        notes.add("附近没有能降的地，也没有跑道可回，往前方迫降（水面也落）");
+        pilot.land(field, false, true);
+        chosen = field;
+        chosenForDestination = false;
+        landing = "往前方迫降：" + field.describe();
     }
 
     /** 被叫先停、时间用完、动力没了：滑跑中刹住；在天上就近找跑道（原来挑的就在附近就照落），不回起飞跑道。 */
@@ -226,8 +266,8 @@ final class FixedWingFlight {
         stop(sample, ground(level));
     }
 
-    // 还在地上（滑跑、落地滑跑、停住了）交给飞控自己刹；在天上原来挑的跑道就在附近就照落，远了先绕圈、就近找。
-    private void stop(PilotSample sample, LandingSites.Ground ground) {
+    /** 同上，地面怎么读交进来。还在地上（滑跑、落地滑跑、停住了）交给飞控自己刹；在天上原来挑的跑道就在附近就照落，远了先绕圈、就近找。 */
+    void stop(PilotSample sample, LandingSites.Ground ground) {
         if (stopping) return;
         stopping = true;
         pilot.stop();
@@ -311,6 +351,11 @@ final class FixedWingFlight {
 
     boolean arrived() {
         return pilot.arrived();
+    }
+
+    /** 这一刻浮在水上（落到水面上了）：停稳确认按浮着算，和船一样。 */
+    boolean afloat() {
+        return afloat;
     }
 
     int goArounds() {

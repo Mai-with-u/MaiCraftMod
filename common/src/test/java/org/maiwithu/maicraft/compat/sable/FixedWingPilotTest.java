@@ -24,6 +24,8 @@ class FixedWingPilotTest {
     private static final class Plane {
         double x, y = 64, z, along, vy, heading, pitch, roll, turnRate;
         double ceiling = Double.MAX_VALUE;
+        /** 底下是水：y=64 是水面，浮着时接地探头照原版说悬空（水没有碰撞）。 */
+        boolean water;
         long tick;
 
         Plane(double heading) {
@@ -39,7 +41,7 @@ class FixedWingPilotTest {
             double fz = Math.cos(Math.toRadians(heading));
             return new PilotSample(tick, new Vec3(x, y, z), new Vec3(fx * along, vy, fz * along), heading,
                     Math.max(Math.abs(pitch), Math.abs(roll)), turnRate, 0,
-                    grounded() ? VehicleAttitude.GROUNDED : VehicleAttitude.AIRBORNE);
+                    grounded() && !water ? VehicleAttitude.GROUNDED : VehicleAttitude.AIRBORNE);
         }
 
         FixedWingPilot.Attitude attitude() {
@@ -217,5 +219,37 @@ class FixedWingPilotTest {
         }
         assertEquals(FixedWingPilot.Phase.CRUISE, pilot.phase());
         assertTrue(farthest < FixedWingPilot.ORBIT_RADIUS * 2.5, "一直在目的地附近绕：最远 " + farthest);
+    }
+
+    @Test
+    void 迫降在水面上_碰到水面算接地_不卡在拉平() {
+        // 海上找不到地，往前方水面迫降（最后一次、不复飞）：浮着时接地探头说悬空，船底贴着水面就算接地，刹停收场。
+        Plane plane = new Plane(180);
+        plane.water = true;
+        plane.y = 76;
+        plane.along = 11;
+        plane.z = -160;
+        Runway sea = new Runway(new Vec3(0, 64, -300), 180, Runways.MIN_LENGTH, 12, true);
+        FixedWingPilot pilot = new FixedWingPilot(ALL, 3, 10, 84, new Vec3(0, 64, -2000), true);
+        pilot.land(sea, false, true);
+        for (int i = 0; i < 20 * 300 && pilot.phase() != FixedWingPilot.Phase.LANDED; i++) {
+            plane.step(pilot.tick(plane.sample(), plane.attitude(), new FixedWingPilot.Situation(Double.NaN, 64, false, true)));
+        }
+        assertEquals(FixedWingPilot.Phase.LANDED, pilot.phase(), pilot.transitions().toString());
+        assertTrue(pilot.transitions().stream().anyMatch(line -> line.startsWith("rollout → landed")),
+                pilot.transitions().toString());
+    }
+
+    @Test
+    void 从水面起飞_离地速度按离开水面那一刻量() {
+        // 浮在水上时接地探头一直说悬空：不能把第一刻当成离地，离地速度按船底离开水面那一刻的速度记。
+        Plane plane = new Plane(270);
+        plane.water = true;
+        FixedWingPilot pilot = new FixedWingPilot(ALL, 3, 10, 84, new Vec3(2000, 64, 0), false);
+        for (int i = 0; i < 20 * 60 && !pilot.leftGround(); i++) {
+            plane.step(pilot.tick(plane.sample(), plane.attitude(), new FixedWingPilot.Situation(Double.NaN, 64, false, true)));
+        }
+        assertTrue(pilot.leftGround(), pilot.transitions().toString());
+        assertTrue(pilot.liftoffSpeed() > 7 && pilot.liftoffSpeed() < 10, "离地速度：" + pilot.liftoffSpeed());
     }
 }
