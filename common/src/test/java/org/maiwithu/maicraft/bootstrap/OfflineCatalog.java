@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
+import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
@@ -159,6 +160,8 @@ final class OfflineCatalog {
                 new FollowLighting(),
                 ShowsPreview.NONE,
                 new ItemsInUse(LiveCarryReads.itemTags()),
+                // 离线清单里没有预留，身上件数也读不到。
+                new ReservedItems(LiveCarryReads.itemTags(), Map::of),
                 new DropConfirmations(),
                 config);
     }

@@ -47,6 +47,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<List<Reminder>> reminders;
     /** 看界面要读的东西：开着的界面与交易报价；不在世界里时给 null。 */
     private final Supplier<MenuView.Reads> menus;
+    /** 调用方写下的预留与身上各有几件：observe(self) 每次都完整交出去，LLM 不用自己记。 */
+    private final Supplier<List<SelfView.Reserved>> reserved;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -61,6 +63,14 @@ public final class ObserveTool implements McpTool {
     public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
                        ClientThread clientThread, Supplier<List<Reminder>> reminders,
                        Supplier<MenuView.Reads> menus) {
+        this(scene, memory, table, clientThread, reminders, menus, List::of);
+    }
+
+    /** @param reserved 调用方写下的预留与身上各有几件；没有预留时给空 */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved) {
+        this.reserved = Objects.requireNonNull(reserved, "reserved");
         this.scene = Objects.requireNonNull(scene, "scene");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.table = Objects.requireNonNull(table, "table");
@@ -137,6 +147,8 @@ public final class ObserveTool implements McpTool {
                 main, doing, automation, tookOver);
         // 还成立的提醒原样交出：一句话、证据数值与阈值、可以考虑的做法；没有提醒时是空数组。
         view.add("reminders", REMINDER_JSON.toJsonTree(reminders.get()));
+        // 预留着什么、身上各有几件：没有预留时不写这一项。
+        SelfView.addReserved(view, reserved.get());
         return view;
     }
 }

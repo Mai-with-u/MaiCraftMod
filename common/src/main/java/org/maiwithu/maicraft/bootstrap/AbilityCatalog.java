@@ -49,6 +49,7 @@ import org.maiwithu.maicraft.ability.gather.LiveSpotReads;
 import org.maiwithu.maicraft.ability.light.LightModule;
 import org.maiwithu.maicraft.ability.quest.QuestModule;
 import org.maiwithu.maicraft.ability.remember.RememberAbility;
+import org.maiwithu.maicraft.ability.reserve.ReserveAbility;
 import org.maiwithu.maicraft.ability.sequence.SequenceModule;
 import org.maiwithu.maicraft.ability.sleep.SleepModule;
 import org.maiwithu.maicraft.ability.suicide.SuicideModule;
@@ -62,6 +63,8 @@ import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsUp;
 import org.maiwithu.maicraft.behavior.acquire.mining.LiveStairsSite;
 import org.maiwithu.maicraft.behavior.acquire.sources.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.game.world.ClientCommandTree;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -156,8 +159,10 @@ public final class AbilityCatalog {
             FollowLighting followLighting,
             /** 施工预览：design 投影的蓝图交给它画；没有画面的清单传 {@link ShowsPreview#NONE}。 */
             ShowsPreview preview,
-            /** 正要用的东西：拿东西的引擎建好后接上，走路垫脚按它留够数。 */
+            /** 正要用的东西：拿东西的引擎建好后接上。 */
             ItemsInUse itemsInUse,
+            /** 预留：调用方用 reserve 写下的"身上这几样各留够几件"，进世界已换成这个世界存着的。 */
+            ReservedItems reserved,
             /** 掉落物的事实确认：捡掉落物、战斗拾荒按服务器的拾取包认东西进没进包。 */
             DropConfirmations dropConfirmations,
             /** 启动游戏的所有者放在配置文件里的开关与上限。 */
@@ -178,8 +183,14 @@ public final class AbilityCatalog {
             Objects.requireNonNull(followLighting, "followLighting");
             Objects.requireNonNull(preview, "preview");
             Objects.requireNonNull(itemsInUse, "itemsInUse");
+            Objects.requireNonNull(reserved, "reserved");
             Objects.requireNonNull(dropConfirmations, "dropConfirmations");
             Objects.requireNonNull(config, "config");
+        }
+
+        /** 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道。 */
+        public ItemsToKeep kept() {
+            return reserved.plus(itemsInUse);
         }
     }
 
@@ -530,6 +541,9 @@ public final class AbilityCatalog {
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));
+
+        // 预留：只改预留表，当场完成；物品 ID 按物品注册表核对，写岔的一次报全。
+        registry.register(new ReserveAbility(deps.reserved(), deps.items().itemRegistry()));
 
         // 记地点：只改世界记忆，当场完成；位置从角色、场景里的观察编号与已记的地点解析。
         registry.register(new RememberAbility(deps.world().memory(), deps.character().position(),

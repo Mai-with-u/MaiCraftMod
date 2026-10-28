@@ -15,7 +15,7 @@ import java.util.Set;
 public final class ParamNames {
     private static final Map<String, String> MEANINGS = Map.ofEntries(
             Map.entry("item", "物品 ID，或 # 开头的物品标签"),
-            Map.entry("items", "多个物品 ID 或物品标签；拿东西时每项写 {item, count}，一次要几样各要几件"),
+            Map.entry("items", "多个物品 ID 或物品标签；拿东西时每项写 {item, count}，一次要几样各要几件；预留时每项写 {item, at_least}，身上各留够几件"),
             Map.entry("block", "方块 ID，或 # 开头的方块标签"),
             Map.entry("blocks", "多个方块 ID 或方块标签"),
             Map.entry("entity", "实体类型 ID，可给一个或几种"),

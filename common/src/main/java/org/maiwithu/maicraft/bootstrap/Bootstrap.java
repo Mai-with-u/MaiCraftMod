@@ -21,6 +21,7 @@ import net.minecraft.network.chat.Component;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
+import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.game.player.InputDriver;
@@ -42,6 +43,8 @@ import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
 import org.maiwithu.maicraft.behavior.perception.SkyChanges;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
+import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.hunger.EatsCarriedFood;
@@ -150,9 +153,16 @@ public final class Bootstrap {
     private static final class ClientEntry implements ClientLifecycle {
         private final PlayerControlBoundary playerControl = new PlayerControlBoundary();
         private final BlockScanService blockScans = new BlockScanService();
-        // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的；走路垫脚按它留够数，只垫多出来的。
+        // 正要用的东西一份：上一个目标拿到的、拿东西的引擎正在拿的。
         private final ItemsInUse itemsInUse = new ItemsInUse(LiveCarryReads.itemTags());
-        private final BaritoneInternals walks = new BaritoneInternals(itemsInUse);
+        // 预留一份：调用方用 reserve 写下的"身上这几样各留够几件"，进世界换成那个世界存着的，退世界清空；
+        // 身上件数读当刻的主背包与副手，标签按合计留。
+        private final ReservedItems reserved = new ReservedItems(LiveCarryReads.itemTags(), () -> CarriedItems.byItem(
+                PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
+                LiveCarryReads.offhand(() -> playerControl.activeContext().orElse(null))));
+        // 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道；走路垫脚按它留够数，只垫多出来的。
+        private final ItemsToKeep kept = reserved.plus(itemsInUse);
+        private final BaritoneInternals walks = new BaritoneInternals(kept);
         // 先下车再走的走到：走路类目标起步时角色坐在载具上，先按住潜行下来再交内嵌寻路；各路走路请求都用这一份。
         private final WalkTo walksOnFoot = new DismountsBeforeWalks(walks,
                 new LiveHoldsSneak(new InputDriver(playerControl), () -> playerControl.activeContext().orElse(null)));
@@ -378,7 +388,7 @@ public final class Bootstrap {
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
                     foods,
                     hands,
-                    useKeyProjection, itemsInUse, survivalWiring::food);
+                    useKeyProjection, kept, survivalWiring::food);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
@@ -394,7 +404,7 @@ public final class Bootstrap {
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
             controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection),
-                    survivalWiring, itemsInUse, protection, followLighting, lightLevels, hands, ranged,
+                    survivalWiring, kept, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
                     // 身上没带货时从随身无线终端现取一件（AE2）。
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
@@ -450,7 +460,7 @@ public final class Bootstrap {
             // 被别人的方块封死、挖开出来时当场报一条任务事件：宿主不等走路结束就知道挖了谁的。
             walks.reportTo(taskEvents);
             tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
-                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot());
+                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot(), reserved);
             // 随包的玩法技能按联动登记表筛：需要的模组都真的接上了才发布，没接上的不进目录。
             // 每次问登记表此刻的样子：运行中某个联动因版本对不上停用时，靠它的技能也跟着消失。
             SkillLibrary skills = new SkillLibrary(modId -> compat.installedModIds().contains(modId));
@@ -505,7 +515,7 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walksOnFoot, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, dropConfirmations,
+                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, dropConfirmations,
                         taskEvents, lightLevels, lightingWorld, followLighting, timers);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
@@ -532,8 +542,9 @@ public final class Bootstrap {
             if (hurtEpisodes != null) hurtEpisodes.forget();
             dimensionChanges.forget();
             skyChanges.forget();
-            // 没到点的计时属于刚离开的那个世界，不跟到下一个。
+            // 没到点的计时属于刚离开的那个世界，不跟到下一个；预留也换回不存，进下一个世界读那个世界的。
             timers.clear();
+            reserved.detach();
             publishingGoalRuns = null;
             if (worldScope[0] != null) {
                 goals.leaveWorld();

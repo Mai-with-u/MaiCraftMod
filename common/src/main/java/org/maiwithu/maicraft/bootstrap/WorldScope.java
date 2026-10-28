@@ -74,6 +74,8 @@ import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
+import org.maiwithu.maicraft.behavior.inventory.StoredReservations;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
@@ -156,7 +158,7 @@ public final class WorldScope {
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
-            DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
+            ReservedItems reserved, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
@@ -171,6 +173,8 @@ public final class WorldScope {
         // 吃过亏的方块：碰着就掉血的那几种记在所有世界共用的一份里，进世界读出来交给寻路绕开。
         this.pains = new PainfulBlocks(documents);
         this.goalRuns = new DocumentGoalRunStore(documents, identity.key(), abilities);
+        // 预留跟着世界存：进这个世界读出上次写下的，之后每改一次写回同一个文档库。
+        reserved.attach(new StoredReservations(documents, identity.key()));
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
         this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds, minecraft::isTextFilteringEnabled);
@@ -232,7 +236,8 @@ public final class WorldScope {
                         () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
                         events, timers, session),
                 new Stores(documents, identity.key(), configDirectory),
-                compat, survivalWiring, followLighting, preview, itemsInUse, dropConfirmations, instanceConfig), abilities);
+                compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig),
+                abilities);
     }
 
     /**

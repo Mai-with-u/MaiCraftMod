@@ -268,6 +268,13 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:reserve",
+        "summary": "预留身上攒着的东西：写下这几样各留够几件，角色自己做主时不动它们，下令的目标不够才用、用了扣掉；一直有效，不占身体",
+        "parameters": "operation: string = set, items?: array",
+        "targets": [],
+        "mode": "memory_only"
+      },
+      {
         "ability": "maicraft:remember",
         "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
         "parameters": "name: string, operation: string = remember, radius?: integer",
@@ -1569,6 +1576,34 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/chat.md"
+    },
+    {
+      "ability": "maicraft:reserve",
+      "summary": "预留身上攒着的东西：写下这几样各留够几件，角色自己做主时不动它们，下令的目标不够才用、用了扣掉；一直有效，不占身体",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "set 写下这几样各留够几件（默认，没提到的不变）；cancel 这几样不再留，不给 items 就全部撤掉",
+          "default": "set",
+          "choices": [
+            "set",
+            "cancel"
+          ]
+        },
+        {
+          "name": "items",
+          "type": "array",
+          "required": false,
+          "doc": "[{item, at_least}]：item 是物品 ID 或 # 标签；at_least 是身上要留够的件数（1 起），不写就是这一样全都留着；cancel 时只看 item，也可以直接写物品 ID 的列表"
+        }
+      ],
+      "targets": [],
+      "mode": "memory_only",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/reserve.md"
     },
     {
       "ability": "maicraft:remember",

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.util.List;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
@@ -16,6 +17,7 @@ import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ObserveTool;
 import org.maiwithu.maicraft.mcp.tool.RecentToolCalls;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
+import org.maiwithu.maicraft.mcp.view.SelfView;
 
 /**
  * MCP 的五个工具怎么接：能力注册表、目标运行表与任务事件流。LLM 用 execute 下达的目标经目标运行表
@@ -29,11 +31,14 @@ final class McpTools {
     static ToolDispatcher dispatcher(AbilityRegistry abilities, GoalRunTable goals, ClientTickWork clientWork,
                                      TaskEventLog taskEvents, ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
                                      RecentToolCalls recentCalls, LookupTool lookup,
-                                     Supplier<List<Reminder>> reminders) {
+                                     Supplier<List<Reminder>> reminders, ReservedItems reserved) {
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork,
-                        reminders, () -> worldScope.get() == null ? null : worldScope.get().menus()),
+                        reminders, () -> worldScope.get() == null ? null : worldScope.get().menus(),
+                        // 预留与身上各有几件：读的是客户端全程那一份，进世界时已换成这个世界存着的。
+                        () -> reserved.list().stream().map(entry -> new SelfView.Reserved(entry.item(),
+                                entry.atLeast(), reserved.carriedFor(entry))).toList()),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork),

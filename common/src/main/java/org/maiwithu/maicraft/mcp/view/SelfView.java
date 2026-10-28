@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -21,6 +22,30 @@ import java.util.Map;
  */
 public final class SelfView {
     private SelfView() {}
+
+    /**
+     * 预留里的一样：调用方写下要身上留够几件的东西。
+     *
+     * @param item    物品 ID 或 # 标签
+     * @param atLeast 留够几件；全都留着时为 null
+     * @param carried 身上现有几件（标签按合计）
+     */
+    public record Reserved(String item, Integer atLeast, int carried) {}
+
+    /** 把预留写进自己这一栏：每样留几件、身上几件；全都留着写 all。没有预留时不写，免得多一项空数组。 */
+    public static void addReserved(JsonObject view, List<Reserved> reserved) {
+        if (reserved.isEmpty()) return;
+        JsonArray list = new JsonArray();
+        for (Reserved entry : reserved) {
+            JsonObject json = new JsonObject();
+            json.addProperty("item", entry.item());
+            if (entry.atLeast() == null) json.addProperty("all", true);
+            else json.addProperty("at_least", entry.atLeast());
+            json.addProperty("carried", entry.carried());
+            list.add(json);
+        }
+        view.add("reserved", list);
+    }
 
     /**
      * @param dimension 所在维度；读不到时为 null
