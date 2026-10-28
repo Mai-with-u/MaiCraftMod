@@ -691,9 +691,9 @@ class GoalRunnerTest {
 
         runner.pauseGoal();
         runner.tick(new GoalTestTick(102));
-        runner.tick(new GoalTestTick(102 + GoalRunner.SAFE_STOP_TICKS - 1));
+        runner.tick(new GoalTestTick(102 + GoalWindDown.SAFE_STOP_TICKS - 1));
         assertEquals(GoalRunState.RUNNING, runner.run().state());
-        runner.tick(new GoalTestTick(102 + GoalRunner.SAFE_STOP_TICKS));
+        runner.tick(new GoalTestTick(102 + GoalWindDown.SAFE_STOP_TICKS));
 
         assertEquals(GoalRunState.PAUSED, runner.run().state());
     }

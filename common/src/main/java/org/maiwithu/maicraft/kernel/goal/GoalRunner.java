@@ -75,18 +75,8 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
     private final List<TaskResult> tempTaskFacts = new ArrayList<>();
     /** 结束后的结果；没结束时为 null。 */
     private TaskResult result;
-    /** 先收尾再停的那件事（暂停或取消）；没在收尾为 null。 */
-    private Ending ending;
-    /** 这次收尾已经叫过手上的任务（中途被生存需求打断过要再叫一次）。 */
-    private boolean endingAsked;
-    /** 收尾从哪一刻开始；还没推进过为 Long.MIN_VALUE。 */
-    private long endingSince = Long.MIN_VALUE;
-
-    /** 收尾最多等多久（刻）：两分钟还没停稳就照原先要的停。 */
-    static final long SAFE_STOP_TICKS = 20L * 120;
-
-    /** 收尾之后要做的那件事。 */
-    private enum Ending { PAUSE, CANCEL }
+    /** 先到安全的地方再暂停或取消的收尾：手上的任务停下不安全时，收尾到它停稳再停。 */
+    private final GoalWindDown windDown = new GoalWindDown();
 
     // 全关是寻死这类任务自己声明的；许可 survival_needs=off 走 routineNeedsOff 只停起居类。都在目标跑着时才关，sequence 按那一步。
     @Override public boolean survivalNeedsOff() {
@@ -158,10 +148,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         if (result != null) {
             throw new IllegalStateException("目标运行 " + run.id() + " 已经结束，不能暂停");
         }
-        if (run.state() == GoalRunState.PAUSED || ending != null) {
+        if (run.state() == GoalRunState.PAUSED || windDown.active()) {
             return;
         }
-        if (beginEnding(Ending.PAUSE)) {
+        if (windDown.begin(GoalWindDown.Ending.PAUSE, child)) {
             LOG.info("目标 {} 先收尾再暂停：{}", run.id(), child.describe());
             return;
         }
@@ -176,11 +166,11 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         if (result != null || run.state() == GoalRunState.PAUSED) {
             return false;
         }
-        if (ending != null) {
-            ending = Ending.CANCEL;
+        if (windDown.active()) {
+            windDown.cancelInstead();
             return true;
         }
-        if (!beginEnding(Ending.CANCEL)) {
+        if (!windDown.begin(GoalWindDown.Ending.CANCEL, child)) {
             return false;
         }
         LOG.info("目标 {} 先收尾再取消：{}", run.id(), child.describe());
@@ -189,7 +179,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
 
     /** 此刻在收尾（先到安全的地方再暂停或取消）。 */
     public boolean windingDown() {
-        return ending != null;
+        return windDown.active();
     }
 
     /**
@@ -197,17 +187,17 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
      * 等着取消的不收回：取消说了就算。
      */
     public void keepGoing() {
-        if (ending == Ending.CANCEL) {
+        if (windDown.ending() == GoalWindDown.Ending.CANCEL) {
             throw new IllegalStateException("目标运行 " + run.id() + " 正在收尾取消，不能恢复");
         }
-        if (ending == null) return;
-        ending = null;
+        if (!windDown.active()) return;
+        windDown.drop();
         LOG.info("目标 {} 不暂停了，接着做", run.id());
         pause();
     }
 
     private void pauseNow() {
-        ending = null;
+        windDown.drop();
         pause();
         run.pause();
         save();
@@ -225,40 +215,12 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
 
     /** 已经叫过取消、正在先收尾再取消。 */
     public boolean cancelPending() {
-        return ending == Ending.CANCEL;
+        return windDown.ending() == GoalWindDown.Ending.CANCEL;
     }
 
-    // 手上的任务说它要先收尾才记下这件事；没有任务、任务说现在就能停都是现在就停。
-    private boolean beginEnding(Ending kind) {
-        if (child == null || child.finished() || !child.stopSafely()) {
-            return false;
-        }
-        ending = kind;
-        endingAsked = true;
-        endingSince = Long.MIN_VALUE;
-        return true;
-    }
-
-    // 收尾中的一刻：被打断过就再叫一次；手上的任务停稳了、自己结束了或收尾太久，就照原先要的暂停或取消。
-    private TickResult windDown(TickContext context) {
-        if (endingSince == Long.MIN_VALUE) {
-            endingSince = context.gameTick();
-        }
-        if (child != null && !child.finished() && !endingAsked) {
-            endingAsked = true;
-            if (!child.stopSafely()) {
-                return finishEnding();
-            }
-        }
-        boolean over = child == null || child.finished() || child.stoppedSafely()
-                || context.gameTick() - endingSince >= SAFE_STOP_TICKS;
-        return over ? finishEnding() : null;
-    }
-
-    private TickResult finishEnding() {
-        Ending kind = ending;
-        ending = null;
-        if (kind == Ending.CANCEL) {
+    // 收尾到头了：照原先要的暂停或取消。取消按取消收场交代已经发生的事，暂停就挂起等恢复。
+    private TickResult finishEnding(GoalWindDown.Ending kind) {
+        if (kind == GoalWindDown.Ending.CANCEL) {
             LOG.info("目标 {} 收尾完了，取消", run.id());
             return TickResult.finished(close(CloseReason.CANCELLED));
         }
@@ -358,10 +320,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             return TickResult.RUNNING;
         }
         try {
-            if (ending != null) {
-                TickResult stopped = windDown(context);
-                if (stopped != null) {
-                    return stopped;
+            if (windDown.active()) {
+                GoalWindDown.Ending over = windDown.tick(context, child);
+                if (over != null) {
+                    return finishEnding(over);
                 }
             }
             return advance(context);
@@ -380,7 +342,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
 
     @Override public void pause() {
         // 被生存需求打断：正在跑的任务松开按键、保留进度；目标本身的处境不变。还在收尾的，回来要再叫它收尾一次。
-        endingAsked = false;
+        windDown.interrupted();
         if (child != null && !child.finished()) {
             child.pause();
         }
@@ -456,8 +418,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             case PAUSED -> "目标 " + run.id() + " " + goal.ability() + " 已暂停（第 " + run.stepIndex() + " 步）" + run.pauseNote("：");
             case FINISHED -> "目标 " + run.id() + " " + goal.ability() + " 已结束：" + result.summary();
             case RUNNING -> child != null && !child.finished()
-                    ? "目标 " + run.id() + " " + goal.ability() + (ending == null ? "" : ending == Ending.PAUSE ? "（先到安全的地方再暂停）"
-                            : "（先到安全的地方再取消）") + "：" + child.describe()
+                    ? "目标 " + run.id() + " " + goal.ability()
+                            + (!windDown.active() ? "" : windDown.ending() == GoalWindDown.Ending.PAUSE
+                                    ? "（先到安全的地方再暂停）" : "（先到安全的地方再取消）")
+                            + "：" + child.describe()
                     : waiting != null ? "目标 " + run.id() + " " + goal.ability() + " 在等：" + waiting.describe()
                     : "目标 " + run.id() + " " + goal.ability() + " 第 " + run.stepIndex() + " 步：看现场决定下一件做什么";
         };
@@ -531,7 +495,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         if (queuedInputs != null && !queuedInputs.isEmpty()) {
             finishedResults.add(taskResult);
             // 在收尾（等着暂停或取消）：下一个排好的任务先不开，暂停恢复后接着开。
-            if (ending != null) {
+            if (windDown.active()) {
                 return TickResult.RUNNING;
             }
             return startTask(queuedInputs.removeFirst().get(), false, context);
@@ -664,7 +628,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         run.advanceToStep(index + 1);
         save();
         // 在收尾（等着暂停或取消）：下一步先不开，暂停恢复后从这一步开始。
-        if (ending != null) {
+        if (windDown.active()) {
             return TickResult.RUNNING;
         }
         return beginStep(context);
