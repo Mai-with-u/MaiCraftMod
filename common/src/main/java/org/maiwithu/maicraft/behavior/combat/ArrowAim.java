@@ -17,6 +17,8 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.world.ObservedMotion;
+
 /**
  * 箭（与联动的远程武器打出的弹）往哪儿瞄：算上下坠、空气减速和目标正在走的方向，先按公式猜几个发射方向，
  * 再逐刻模拟飞行，中途撞墙、撞到别的生物的方向不要，剩下的挑离目标身体中心近、少转头、飞得快的那个。
@@ -92,8 +94,9 @@ public final class ArrowAim {
         AABB box = target.getBoundingBox();
         if (start.distanceToSqr(box.getCenter()) > maxRange * maxRange) return Optional.empty();
         Vec3 look = shooter.getViewVector(1.0f).normalize();
-        // 目标按它此刻的速度往前走，不猜它转弯、起跳和被击退。
-        Vec3 targetMotion = target.getDeltaMovement();
+        // 目标按看到的移动（这一刻比上一刻挪了多少）往前走，不猜它转弯、起跳和被击退：
+        // 别的玩家的速度服务端不同步过来，读速度对跑动的玩家总是零，箭落在他身后。
+        Vec3 targetMotion = ObservedMotion.of(target);
         List<Vec3> candidates = new ArrayList<>();
         dragAwareCandidates(candidates, start, box, targetMotion, speed, physics);
         for (Vec3 point : samples(box.move(targetMotion.scale(Math.min(30, start.distanceTo(box.getCenter()) / speed))))) {

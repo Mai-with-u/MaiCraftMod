@@ -483,13 +483,15 @@ public final class Interaction {
         if (plants.busy(context)) return false;
         Vec3 aimPoint = stableEntityAimPoint(entity);
         playerInput.lookAt(player, aimPoint);
-        if (!aimReady(aimPoint)) {
-            return attackWait("镜头还没转到");
-        }
         // 近战遵守当前身体的真实实体触及属性，不能沿用右键方块的四点五格范围。
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
-        if (!(aimed instanceof EntityHitResult entityHit)
-                || entityHit.getEntity() != entity) {
+        boolean onTarget = aimed instanceof EntityHitResult entityHit && entityHit.getEntity() == entity;
+        // 镜头到位：视线离瞄点 7° 以内，或准星已经先碰到它。对着横移的目标瞄点提前了，镜头对着的是它此刻的身体，
+        // 离提前后的瞄点还差两刻的位移（3 格外疾跑横移约 12°），只按 7° 判就一直等；准星落在它身上这一刀就打得中。
+        if (!strikeAimSettled(onTarget, player.getViewVector(1.0f), aimPoint.subtract(player.getEyePosition()))) {
+            return attackWait("镜头还没转到");
+        }
+        if (!onTarget) {
             if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草叶");
             return attackWait("准星打到的是 " + (aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
                     : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
@@ -699,12 +701,21 @@ public final class Interaction {
 
     // 实际视线与目标差不超过 7° 才算转头到位；后续射线检查还要确认没有点到别的东西。
     private boolean aimReady(Vec3 target) {
-        Vec3 direction = target.subtract(player.getEyePosition());
-        if (direction.lengthSqr() < 1.0e-8) {
-            return true;
-        }
-        return player.getViewVector(1.0f).normalize().dot(direction.normalize())
-                >= Math.cos(Math.toRadians(7.0));
+        return withinAimTolerance(player.getViewVector(1.0f), target.subtract(player.getEyePosition()));
+    }
+
+    /** 视线方向与"眼睛到瞄点"差不超过 7°：转头到位的那条线。 */
+    static boolean withinAimTolerance(Vec3 view, Vec3 toAimPoint) {
+        if (toAimPoint.lengthSqr() < 1.0e-8) return true;
+        return view.normalize().dot(toAimPoint.normalize()) >= Math.cos(Math.toRadians(7.0));
+    }
+
+    /**
+     * 近战出手前镜头算不算到位：准星射线已经先碰到它，或视线离瞄点 7° 以内。打动着的目标瞄点提前了，
+     * 镜头对着它此刻的身体时离瞄点本身还差一截，准星落在它身上就算到位。
+     */
+    static boolean strikeAimSettled(boolean crosshairOnTarget, Vec3 view, Vec3 toAimPoint) {
+        return crosshairOnTarget || withinAimTolerance(view, toAimPoint);
     }
 
     // 近战瞄点：瞄它身上离眼睛最近的那一点（按 MeleeAim 算）；相邻帧只挪一部分，怪小幅晃动时镜头不猛抖。
