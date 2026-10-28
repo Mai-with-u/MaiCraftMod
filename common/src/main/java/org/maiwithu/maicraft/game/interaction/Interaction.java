@@ -86,9 +86,6 @@ public final class Interaction {
     private static final int RIGHT_CLICK_DELAY = 4;
     /** 表示持续按住的高重复次数；拥有该操作的任务会在时限到达或行为完成后停止它。 */
     private static final int CONTINUOUS = 1_000_000;
-    /** 攻击充能到 95% 就出手：剑的冷却是 12.5 刻而计数器是整数，等满要多花一整刻反而不划算；
-     * 95% 同时高过原版判暴击的 90%，所以不影响暴击。 */
-    private static final float ATTACK_READY = 0.95f;
 
     private final LocalPlayer player;
     private final InteractionSender sender;
@@ -501,9 +498,13 @@ public final class Interaction {
         }
         boolean recovering = entity instanceof LivingEntity living
                 && living.hurtTime > 0;
-        // 刚换武器、目标还在短暂无敌期，或攻击条没恢复到位，都先等；否则伤害会被吞掉或打折。
-        if (recovering || player.getAttackStrengthScale(0.0f) < ATTACK_READY || !context.canInteractThisTick()) {
-            return attackWait(recovering ? "它刚挨过打" : "攻击条还没回满或这一刻没有交互机会");
+        // 目标还在短暂无敌期、主手这一刻才换上（这一刀会按旧东西算，下一刻原版就清冷却）、攻击条没恢复到位，
+        // 都先等；否则伤害会被吞掉或打折。够格线与换手隔一刻都按攻击充能那一份。
+        boolean handSettled = AttackCharge.handSettled(context.mainHandHeldSince(), context.clientTick());
+        if (recovering || !handSettled || player.getAttackStrengthScale(0.0f) < AttackCharge.READY
+                || !context.canInteractThisTick()) {
+            return attackWait(recovering ? "它刚挨过打" : !handSettled ? "主手这一刻才换上，隔一刻再出手"
+                    : "攻击条还没回满或这一刻没有交互机会");
         }
         PendingInteraction submitted = sender.attack(
                 context,

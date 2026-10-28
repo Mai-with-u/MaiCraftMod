@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.item.Item;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,9 @@ public final class PlayerControlBoundary {
     private long mutationClaimedTick = Long.MIN_VALUE;
     /** 自动化最近一次真的向游戏出手（占用交互机会）是哪一刻；界面打开记录靠它分辨界面是不是任务点开的。 */
     private long lastClaimedTick = Long.MIN_VALUE;
+    /** 这一刻开头主手拿着的是哪种东西、从哪一刻起拿着：原版换了种类就清攻击冷却，近战出手据此隔一刻。 */
+    private Item mainHandAtStart;
+    private long mainHandSince = Long.MIN_VALUE;
     private DefaultPlayerContext activeContext;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
@@ -141,6 +145,7 @@ public final class PlayerControlBoundary {
             }
         }
         updateWindowControl(input.effectiveAutomationRequested());
+        noteMainHand(player, playerChanged);
 
         DefaultPlayerContext context = new DefaultPlayerContext(
                 this,
@@ -293,6 +298,23 @@ public final class PlayerControlBoundary {
     /** 自动化最近一次真的向游戏出手是哪一刻（与上下文的刻号同一个钟）；还没出过手为 Long.MIN_VALUE。 */
     long lastClaimedTick() {
         return lastClaimedTick;
+    }
+
+    // 每刻开头记一次主手：换了身体、或主手换成了另一种东西（服务端换进来的、人自己换的），都从这一刻算起。
+    private void noteMainHand(LocalPlayer player, boolean playerChanged) {
+        Item held = player.getMainHandItem().getItem();
+        if (playerChanged || held != mainHandAtStart) {
+            mainHandAtStart = held;
+            mainHandSince = tickRevision;
+        }
+    }
+
+    /**
+     * 主手此刻这种东西是哪一刻拿上的：和这一刻开头记的那件不一样（自动化这一刻里刚按数字键换了手），
+     * 就按这一刻算；一样就是开头记下的那一刻。
+     */
+    long mainHandHeldSince(LocalPlayer player) {
+        return player.getMainHandItem().getItem() != mainHandAtStart ? tickRevision : mainHandSince;
     }
 
     /** 客户端停止时归还输入，并让以前发出的所有上下文失效。 */

@@ -5,6 +5,7 @@ import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
+import org.maiwithu.maicraft.game.interaction.AttackCharge;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -15,9 +16,6 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 攻击充能好了没。
  */
 public final class LiveCombatHands {
-
-    /** 攻击充能到这么多就算好了：和原生攻击出手的门槛一样。 */
-    private static final float ATTACK_READY = 0.95f;
 
     private final UseKeyProjection projection;
     private final ShieldGuard shield;
@@ -61,9 +59,10 @@ public final class LiveCombatHands {
                 != WeaponChoice.Weapon.BARE_HANDS;
     }
 
+    /** 此刻够格出手（攻击条与主手拿没拿稳，按攻击充能那一份算）；没有角色时按够格。 */
     public boolean attackReady(TickContext context) {
-        LocalPlayer self = self(context);
-        return self == null || self.getAttackStrengthScale(0.0F) >= ATTACK_READY;
+        self(context);
+        return AttackCharge.ready(context.player());
     }
 
     public void guard(TickContext context, double distance, boolean aboutToStrike) {

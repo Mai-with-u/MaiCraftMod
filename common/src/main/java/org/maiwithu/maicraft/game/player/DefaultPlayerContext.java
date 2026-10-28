@@ -75,6 +75,9 @@ final class DefaultPlayerContext implements PlayerContext {
     // 最近一次真的出手的刻号由控制边界记账：每刻新建的上下文只是转问它。
     @Override public long lastInteractionTick() { return owner.lastClaimedTick(); }
 
+    // 主手拿上的时刻由控制边界跨刻记账：这一刻里刚换的，边界按此刻的主手与这一刻开头记的那件比出来。
+    @Override public long mainHandHeldSince() { return owner.mainHandHeldSince(player); }
+
     @Override public boolean tryClaimInteraction() {
         if (!canInteractThisTick()) return false;
         owner.claimMutation(this);
