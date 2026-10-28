@@ -30,9 +30,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  */
 final class DrivePlan {
 
-    /** 开车用得上的角色。 */
+    /** 开车用得上的角色：固定翼另用抬头低头、左右横滚。 */
     static final Set<String> DRIVING = Set.of("power", "reverse", "brake", "lift", "descend",
-            "yaw_left", "yaw_right", "steer_left", "steer_right");
+            "yaw_left", "yaw_right", "steer_left", "steer_right", "pitch_up", "pitch_down", "roll_left", "roll_right");
 
     /**
      * 去哪。

@@ -146,6 +146,7 @@ final class VehicleLeg implements TravelLeg {
     private String kindName() {
         return switch (request.kind()) {
             case "airship" -> "飞艇";
+            case "plane" -> "固定翼";
             case "car" -> "车";
             case "boat" -> "船";
             default -> "载具";

@@ -97,7 +97,7 @@ public final class VehicleDriveModule implements AbilityModule {
                                 .doc("test 逐条按的输入：[{\"control\": \"打字机:W\", \"ticks\": 20}]；control 写控制件和键，"
                                         + "ticks 按住几刻（1～" + MAX_PRESS_TICKS + "），最多 " + MAX_INPUTS + " 条").build(),
                         ParamSpec.of("cruise_altitude", ParamType.INTEGER).range(-64, 320)
-                                .doc("只对飞艇：巡航高度（船底的世界 y）；不给按当前与目的地高的那个 + 32").build()),
+                                .doc("只对飞艇和固定翼：巡航高度（船底的世界 y）；不给按当前与目的地高的那个 + 32").build()),
                 Set.of(TargetKind.POSITION, TargetKind.LANDMARK, TargetKind.DIRECTION),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(RequiredMod.of(REQUIRED_MOD)),

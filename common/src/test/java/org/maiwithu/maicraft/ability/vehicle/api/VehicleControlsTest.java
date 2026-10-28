@@ -54,6 +54,19 @@ class VehicleControlsTest {
     }
 
     @Test
+    void 固定翼要动力和偏航或横滚_俯仰没有也能开() {
+        assertEquals(List.of(), VehicleControls.missing("plane", List.of(
+                new VehicleControls.Entry("打字机:W", "power", VehicleControls.TESTED, ""),
+                new VehicleControls.Entry("打字机:A", "roll_left", VehicleControls.ASSIGNED, ""))));
+        List<String> missing = VehicleControls.missing("plane", List.of(
+                new VehicleControls.Entry("打字机:W", "power", VehicleControls.TESTED, ""),
+                new VehicleControls.Entry("打字机:↑", "pitch_up", VehicleControls.ASSIGNED, ""),
+                new VehicleControls.Entry("打字机:A", "steer", VehicleControls.INFERRED, "")));
+        assertEquals(1, missing.size(), missing.toString());
+        assertTrue(missing.getFirst().contains("yaw_left") && missing.getFirst().contains("roll_left"), missing.toString());
+    }
+
+    @Test
     void 新身份整份记上_旧身份删掉() {
         VehicleControls controls = new VehicleControls(new DocumentStore(folder.resolve("world.db")), "w");
         controls.assign("old", Map.of("打字机:W", "power"), "+z");

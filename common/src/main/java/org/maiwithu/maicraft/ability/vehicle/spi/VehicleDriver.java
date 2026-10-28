@@ -72,7 +72,7 @@ public interface VehicleDriver {
      * @param destination    开到哪（世界坐标；高度不知道时按那一柱的地面）
      * @param heightKnown    目的地的高度核实过
      * @param cruiseAltitude 飞艇巡航高度（船底的世界 y）；不给为 null，按"当前与目的地高的那个 + 32"
-     * @param kind           载具种类：airship / car / boat
+     * @param kind           载具种类：airship / plane / car / boat
      * @param forward        车头朝结构自己的哪根水平轴（+x / -x / +z / -z）
      * @param roles          操纵表：角色 → 输入（power → 打字机:W）
      * @param permissions    这次的许可
@@ -179,11 +179,20 @@ public interface VehicleDriver {
      * @param parked        停稳了：松开所有键后接地（船是浮着）、每秒挪不到 0.35 格、倾斜 &lt; 8°，连着 20 个样本
      * @param parkedSamples 停稳确认连着满足了几个样本
      * @param drivenBy      怎么开的：stabilizers 设目标高度 + 给方向 / keys 按键
+     * @param takeoff       固定翼的起飞：滑了几格、离地速度、离没离地；别的载具为 null
+     * @param goArounds     固定翼复飞了几次；别的载具为 null
      */
     record Drove(List<String> phases, String landing, double traveled, double maxTilt, boolean arrived,
-                 double distanceLeft, boolean parked, int parkedSamples, String drivenBy) {
+                 double distanceLeft, boolean parked, int parkedSamples, String drivenBy, Takeoff takeoff,
+                 Integer goArounds) {
         public Drove {
             phases = List.copyOf(phases);
+        }
+
+        /** 飞艇、车、船的经过：没有起飞滑跑与复飞。 */
+        public Drove(List<String> phases, String landing, double traveled, double maxTilt, boolean arrived,
+                double distanceLeft, boolean parked, int parkedSamples, String drivenBy) {
+            this(phases, landing, traveled, maxTilt, arrived, distanceLeft, parked, parkedSamples, drivenBy, null, null);
         }
 
         /** 按键开的经过。 */
@@ -192,6 +201,15 @@ public interface VehicleDriver {
             this(phases, landing, traveled, maxTilt, arrived, distanceLeft, parked, parkedSamples, "keys");
         }
     }
+
+    /**
+     * 固定翼的起飞：从机头前方的地面滑跑，离地那一刻的速度就是这架的离地速度（量出来的，不是声明的）。
+     *
+     * @param distance     滑了几格
+     * @param liftoffSpeed 离地那一刻每秒几格；没离地、空中接手为 null
+     * @param leftGround   离地了
+     */
+    record Takeoff(double distance, Double liftoffSpeed, boolean leftGround) {}
 
     /**
      * 一次驾驶的经过：动作成没成（按了没有、松开没有）和载具怎么动分开写。
@@ -203,11 +221,19 @@ public interface VehicleDriver {
      * @param disconnected 控制件交还了（无线红石打字机断开连接）
      * @param note         经过一句话
      * @param drove        开到某处的经过；试按时为 null
+     * @param flown        飞着看出来的：输入 → 实际的角色（固定翼的舵接反了的那几个）；没有为空表
      */
     record Report(String structureId, String seat, List<Tried> tried, boolean released, boolean disconnected,
-                  String note, Drove drove) {
+                  String note, Drove drove, Map<String, String> flown) {
         public Report {
             tried = List.copyOf(tried);
+            flown = Map.copyOf(flown);
+        }
+
+        /** 没有飞着看出来的角色。 */
+        public Report(String structureId, String seat, List<Tried> tried, boolean released, boolean disconnected,
+                String note, Drove drove) {
+            this(structureId, seat, tried, released, disconnected, note, drove, Map.of());
         }
     }
 }

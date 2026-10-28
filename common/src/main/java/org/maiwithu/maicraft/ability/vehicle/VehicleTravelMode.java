@@ -34,6 +34,8 @@ public final class VehicleTravelMode implements TravelMode {
     static final TravelVia VIA = new TravelVia("vehicle", "开自己的载具（飞艇、车、船）：上船、开到目的地附近停稳，再下来走完");
     /** 估时：飞艇巡航、车、船每秒几格，起降与上下车另加几刻。 */
     static final double AIRSHIP_SPEED = 6;
+    /** 固定翼按每秒几格估：起降另有滑跑和绕进近点的一段，算在固定的开销里。C */
+    static final double PLANE_SPEED = 10;
     static final double CAR_SPEED = 4;
     static final double BOAT_SPEED = 3;
     static final int OVERHEAD_TICKS = 20 * 40;
@@ -100,6 +102,7 @@ public final class VehicleTravelMode implements TravelMode {
         double distance = Math.sqrt(request.from().distSqr(request.to()));
         double speed = switch (view.get().kind()) {
             case "airship" -> AIRSHIP_SPEED;
+            case "plane" -> PLANE_SPEED;
             case "car" -> CAR_SPEED;
             default -> BOAT_SPEED;
         };

@@ -164,7 +164,8 @@ public final class VehicleControls {
     }
 
     /**
-     * 开这一类载具必需的角色缺哪几个：飞艇要动力、升力、偏航（左右至少一个），车要动力、转向，船要动力、偏航。
+     * 开这一类载具必需的角色缺哪几个：飞艇要动力、升力、偏航（左右至少一个），固定翼要动力和偏航或横滚
+     * （俯仰、刹车没有也能开：没有俯仰键靠油门管高度），车要动力、转向，船要动力、偏航。
      * 方向没定的转向不算有；种类说不清或不是载具写明开不了。
      */
     public static List<String> missing(String kind, List<Entry> entries) {
@@ -184,7 +185,11 @@ public final class VehicleControls {
                 need(missing, roles, "动力（power）", "power");
                 need(missing, roles, "偏航（yaw_left 或 yaw_right）", "yaw_left", "yaw_right");
             }
-            case "plane" -> missing.add("固定翼还不会自动起降");
+            case "plane" -> {
+                need(missing, roles, "动力（power）", "power");
+                need(missing, roles, "转向（yaw_left、yaw_right、roll_left 或 roll_right）", "yaw_left", "yaw_right",
+                        "roll_left", "roll_right");
+            }
             case "structure" -> missing.add("没有座位或控制件，不是载具");
             default -> missing.add("种类说不清（" + kind + "），不知道开它要哪些角色");
         }

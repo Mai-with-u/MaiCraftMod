@@ -75,7 +75,7 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
     private Next<Phase> settle() {
         VehicleDriver.Report report = run.report();
         if (report == null) return Next.fail(Problem.of(Problem.Kind.INTERNAL_ERROR, "驾驶做完了却没有交代经过"));
-        if (report.drove() != null) return Next.done(TaskResult.done(drove(report)));
+        if (report.drove() != null) return Next.done(TaskResult.done(drove(report) + learn(report)));
         String recorded = record(report);
         long pressed = report.tried().stream().filter(VehicleDriver.Tried::pressed).count();
         String each = report.tried().stream()
@@ -97,6 +97,25 @@ final class VehicleDriveTask extends PhasedTask<VehicleDriveTask.Phase> {
                 + (report.disconnected() ? "，控制件已交还" : "，控制件还没交还");
         return where + "，" + still + "；一路挪了 " + drove.traveled() + " 格，最大倾斜 " + drove.maxTilt() + "°。" + ending
                 + (report.note().isBlank() ? "" : "。" + report.note());
+    }
+
+    // 固定翼的舵飞着看出接反了：推出来、试过的那行改成试过（飞着看出来的），LLM 定的那行不改，照实说要不要改由 LLM 定。
+    private String learn(VehicleDriver.Report report) {
+        if (report.flown().isEmpty() || report.structureId().isEmpty()) return "";
+        VehicleControls.Stored stored = controls.stored(report.structureId());
+        List<VehicleControls.Entry> entries = new ArrayList<>();
+        List<String> kept = new ArrayList<>();
+        report.flown().forEach((control, role) -> {
+            boolean assigned = stored.entries().stream().anyMatch(entry -> entry.control().equals(control)
+                    && entry.source().equals(VehicleControls.ASSIGNED));
+            if (assigned) kept.add(control + " 实际是 " + role);
+            else entries.add(new VehicleControls.Entry(control, role, VehicleControls.TESTED, "飞着看出来的"));
+        });
+        boolean saved = entries.isEmpty() || controls.tested(report.structureId(), entries, "");
+        String recorded = entries.isEmpty() ? "" : "。操纵表改记：" + entries.stream()
+                .map(entry -> entry.control() + " " + entry.role()).collect(Collectors.joining("、")) + (saved ? "" : "（没存住）");
+        return recorded + (kept.isEmpty() ? "" : "。LLM 定的没改：" + String.join("、", kept)
+                + "，要改用 machine_configure");
     }
 
     // 每条按过的认出角色，记进操纵表（试过的）；车头没定时按认成动力的那一条定。读不到种类按飞艇的叫法记偏航。

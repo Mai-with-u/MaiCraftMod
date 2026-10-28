@@ -37,6 +37,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 飞艇沿途每 5 刻看前方 48 格的地形，地面比巡航高度近 6 格以内就把巡航高度抬上去；只按地形抬高，不绕。
  * 装了能用的飞行稳定器时改走"设目标高度 + 给方向"：开之前打开没开的稳定器、给耦合器设上速度，飞控只给船底高度与水平速度，
  * 高度设进高度稳定器、方向按线速度耦合器的四个键；坐着够不着稳定器、读回不对时，按键开的角色齐就照旧按键开，不齐照实停。
+ * 固定翼交给它自己的那一半（{@link FixedWingFlight}）：从机头前方滑跑起飞，到了找跑道对准降落；被叫先停、时间用完都是
+ * 就近找跑道降落，滑跑中就刹住。
  */
 final class TypewriterDrive implements VehicleDriver.Run {
 
@@ -77,6 +79,9 @@ final class TypewriterDrive implements VehicleDriver.Run {
     private Set<Integer> bound;
     private AirshipPilot flying;
     private GroundPilot driving;
+    /** 开固定翼：手上那一半连着它的飞控；不是固定翼为 null。 */
+    private FixedWingFlight wing;
+    private final boolean plane;
     /** 用飞行稳定器开：手上那一半与飞控；照旧按键开时为 null。改成按键开过就不再回头。 */
     private StabilizedFlight flight;
     private StabilizedPilot steady;
@@ -113,6 +118,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
         // 装了能用的飞行稳定器就按飞行器开（推进器不在认得的名单里时种类可能说不清）。
         this.airship = request.kind().equals("airship") || request.stabilized() != null;
         this.car = request.kind().equals("car");
+        // 装了能用的飞行稳定器的固定翼能悬停，照稳定器开法开，不滑跑。
+        this.plane = request.kind().equals("plane") && request.stabilized() == null;
     }
 
     @Override public ActionStatus tick(TickContext tick) {
@@ -179,8 +186,12 @@ final class TypewriterDrive implements VehicleDriver.Run {
             parked = false;
             parkedCount = 0;
             // 就近停下的地方已经在目的地附近（最后一段降落时被叫停）：不再起飞，直接交还。
+            // 固定翼停在给目的地挑的那条跑道上就是到了，跑道离目的地可能有几十格。
             boolean down = !airship || sample.grounded();
-            if (down && sample.flatDistance(request.destination()) <= (airship ? ARRIVED_AIR : ARRIVED_GROUND)) {
+            if (wing != null) notes.addAll(wing.notes());
+            boolean there = wing != null ? wing.arrived()
+                    : down && sample.flatDistance(request.destination()) <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
+            if (there) {
                 parked = true;
                 notes.add("停下的地方已经在目的地附近，不再开");
                 return go(Step.DISCONNECT, now);
@@ -189,7 +200,9 @@ final class TypewriterDrive implements VehicleDriver.Run {
         }
         double distance = sample.flatDistance(request.destination());
         deadline = now + Math.min(12_000, Math.max(1_200, Math.round((60 + distance / 2) * 20)));
-        if (airship) {
+        if (plane) {
+            planWing(level, ship, sample);
+        } else if (airship) {
             // 接着开时人还在空中（落地前叫停又放回来）：已经离地了，不再先垂直爬 8 格，姿态稳了就走。
             double startY = sample.grounded() ? sample.position().y : sample.position().y - AirshipPilot.CLEARANCE;
             if (flight != null) steady = new StabilizedPilot(startY);
@@ -213,6 +226,19 @@ final class TypewriterDrive implements VehicleDriver.Run {
             landing = "目标 " + shortText(target) + (car ? "（车只开直线，路上的障碍不绕）" : "（船只在水面上开直线）");
         }
         return go(flight != null ? Step.PRIME : Step.MOVE, now);
+    }
+
+    // 固定翼：巡航高度同飞艇（不给取当前与目的地高的那个 + 32）；起飞时浮在水上的，前方水面也当跑道。
+    private void planWing(ClientLevel level, SableStructures.Structure ship, PilotSample sample) {
+        double ground = request.heightKnown() ? request.destination().y : surface(level, request.destination());
+        double cruise = request.cruiseAltitude() != null ? request.cruiseAltitude()
+                : Math.max(sample.position().y, ground) + 32;
+        boolean water = VehicleAttitude.onWater(ship.pose(), compat.scan(level, ship).boxes(),
+                cell -> !level.isLoaded(cell) ? null : !level.getFluidState(cell).isEmpty());
+        Map<String, Integer> keys = keys(request.roles());
+        wing = new FixedWingFlight(keys == null ? Map.of() : keys, request.roles(), ship, request.forward(), sample,
+                new Vec3(request.destination().x, ground, request.destination().z), cruise, water);
+        landing = wing.landing();
     }
 
     // 输入换成键码：认不出的跳过，有一个没绑频率就整张不能用（null），哪个没绑记在 unbound 里。
@@ -259,6 +285,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
         if ((now - stepStart) % CIRCUIT_EVERY == 0 && bound != null && !bound.equals(cockpit.bound(level))) {
             return stop(level, Problem.of(Problem.Kind.STUCK, "开着开着回路变了（绑的键不一样了），松开所有键停下"));
         }
+        if (wing != null) return moveWing(level, ship, sample, now);
         if (stopping && !stopAimed) {
             // 被叫先停：飞艇就近找落点（够平够大、不是水），找不到就落在正下方；车船就地刹住。
             stopAimed = true;
@@ -317,6 +344,29 @@ final class TypewriterDrive implements VehicleDriver.Run {
             }
         }
         cockpit.hold(mixer.tick(now, command, car));
+        return ActionStatus.running();
+    }
+
+    // 开固定翼：被叫先停、时间用完都交给手上那一半就近找跑道降（滑跑中刹住）；落下停住了去停稳确认，做不下去松键停。
+    private ActionStatus moveWing(ClientLevel level, SableStructures.Structure ship, PilotSample sample, long now) {
+        if (stopping && !stopAimed) {
+            stopAimed = true;
+            notes.add("按要求先停下，就近找跑道降落");
+            wing.stop(level, sample);
+        }
+        if (now >= deadline && !overtime && !stopping) {
+            overtime = true;
+            notes.add("开了 " + (now - stepStart) / 20 + " 秒还没到，就近找跑道降落");
+            wing.stop(level, sample);
+        }
+        Set<Integer> held = wing.fly(level, ship, sample, now);
+        if (wing.phase() == FixedWingPilot.Phase.FAILED) return stop(level, Problem.of(Problem.Kind.STUCK, wing.failure()));
+        if (wing.phase() == FixedWingPilot.Phase.LANDED) {
+            cockpit.releaseAll();
+            return go(Step.PARK, now);
+        }
+        landing = wing.landing();
+        cockpit.hold(held);
         return ActionStatus.running();
     }
 
@@ -468,15 +518,20 @@ final class TypewriterDrive implements VehicleDriver.Run {
         List<String> phases = new ArrayList<>(earlierPhases);
         phases.addAll(transitions());
         double left = last == null ? -1 : TypewriterTrial.round(last.flatDistance(request.destination()), 10);
-        boolean arrived = left >= 0 && left <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
+        // 固定翼停在给目的地挑的那条跑道上就算开到了，跑道离目的地有多远照实写在 distance_left。
+        boolean arrived = wing != null ? wing.arrived() : left >= 0 && left <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
         if ((flying != null && flying.unplannedTouchdown()) || (steady != null && steady.unplannedTouchdown())) {
             notes.add("不是按进近落的：还没到落点就碰到了地面");
         }
         if (flight != null) notes.addAll(0, flight.notes());
+        if (wing != null) notes.addAll(0, wing.notes());
+        VehicleDriver.Takeoff takeoff = wing == null ? null
+                : new VehicleDriver.Takeoff(TypewriterTrial.round(wing.rolled(), 10), wing.liftoffSpeed(), wing.leftGround());
         VehicleDriver.Drove drove = new VehicleDriver.Drove(phases, landing, TypewriterTrial.round(traveled, 10),
-                TypewriterTrial.round(maxTilt, 10), arrived, left, parked, parkedCount, flight != null ? "stabilizers" : "keys");
+                TypewriterTrial.round(maxTilt, 10), arrived, left, parked, parkedCount, flight != null ? "stabilizers" : "keys",
+                takeoff, wing == null ? null : wing.goArounds());
         report = new VehicleDriver.Report(request.structureId(), cockpit.seat(), List.of(), cockpit.released(),
-                disconnected, String.join("；", notes), drove);
+                disconnected, String.join("；", notes), drove, wing == null ? Map.of() : wing.flown());
     }
 
     @Override public VehicleDriver.Report report() {
@@ -485,6 +540,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
 
     // 这一趟飞控（或开车）的阶段变化；还没定一趟为空。
     private List<String> transitions() {
+        if (wing != null) return wing.transitions();
         if (steady != null) return steady.transitions();
         if (flying != null) return flying.transitions();
         return driving != null ? driving.transitions() : List.of();
@@ -545,7 +601,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
             case PREPARE -> cockpit.describe();
             case PLAN -> "定航线";
             case PRIME -> "打开飞行稳定器、设速度";
-            case MOVE -> (stopping ? "就近停下：" : "") + (steady != null ? "用飞行稳定器飞（"
+            case MOVE -> (stopping ? "就近停下：" : "") + (wing != null ? "开固定翼（"
+                    + wing.phase().name().toLowerCase(Locale.ROOT) + "）" : steady != null ? "用飞行稳定器飞（"
                     + steady.phase().name().toLowerCase(Locale.ROOT) + "）"
                     : airship ? "飞（" + flying.phase().name().toLowerCase(Locale.ROOT) + "）" : stopping ? "刹住" : "开过去");
             case PARK -> "停稳确认";
