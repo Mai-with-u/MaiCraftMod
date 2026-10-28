@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
+import java.util.Map;
 import java.util.List;
 import java.util.Set;
 
@@ -141,6 +142,24 @@ class SpacePlannerTest {
         assertTrue(plan.moves().isEmpty());
         assertEquals(Problem.Kind.INVENTORY_FULL, plan.problem().kind());
         assertTrue(!plan.problem().suggestion().contains("iron_ingot"), plan.problem().suggestion());
+    }
+
+    @Test
+    void 要留的东西留够件数不挪_多出来的照常存() {
+        // 预留圆石 70：三组圆石里前两组（128 件）算进留着的，第三组照常当垃圾先存；不预留时三组都能存。
+        List<BackpackStack> stacks = List.of(junk("minecraft:cobblestone", 64), junk("minecraft:cobblestone", 64),
+                junk("minecraft:cobblestone", 64));
+        SpacePlanner.Scene kept = new SpacePlanner.Scene(stacks, 0, 1, Set.of(), false, 27, List.of(), false,
+                Map.of("minecraft:cobblestone", 70));
+        SpacePlanner.Plan plan = SpacePlanner.plan(kept);
+        assertEquals(List.of(new SpaceMove.ToCarriedBackpack(stacks.get(2))), plan.moves());
+
+        SpacePlanner.Scene allKept = new SpacePlanner.Scene(stacks, 0, 1, Set.of(), false, 27, List.of(), false,
+                Map.of("minecraft:cobblestone", Integer.MAX_VALUE));
+        SpacePlanner.Plan none = SpacePlanner.plan(allKept);
+        assertTrue(none.moves().isEmpty());
+        assertEquals(Problem.Kind.INVENTORY_FULL, none.problem().kind());
+        assertTrue(!none.problem().suggestion().contains("cobblestone"), none.problem().suggestion());
     }
 
     @Test

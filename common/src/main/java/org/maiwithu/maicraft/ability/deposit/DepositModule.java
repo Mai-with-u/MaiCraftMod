@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.inventory.containers.ClientSpotsContainers;
@@ -78,13 +79,13 @@ public final class DepositModule implements AbilityModule {
     public static DepositModule live(Supplier<PlayerContext> contexts, StoresInContainer.Parts storing,
             CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
-            FacilityKinds facilities, Supplier<Optional<NetworkStorage>> network) {
+            FacilityKinds facilities, Supplier<Optional<NetworkStorage>> network, ItemsToKeep kept) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
                 storing,
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                tags, network, new LiveOffhandClearing(contexts)), backpack);
+                tags, network, new LiveOffhandClearing(contexts), kept), backpack);
     }
 
     @Override public AbilitySpec spec() {

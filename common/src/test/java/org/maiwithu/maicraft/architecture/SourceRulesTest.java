@@ -125,6 +125,23 @@ class SourceRulesTest {
     }
 
     @Test
+    void productionCodeAlwaysPassesRealItemsToKeep() {
+        // 角色自己做主花东西时全仓只过"要留的东西"一道关：生产代码里传"什么都不留"，预留的、正要用的就会被那个花法吃掉。
+        // NOTHING 只给测试摆现场；点名要用、保命时连留着的一起算，要在那个花法里写明原因，不借这个常量。
+        List<String> problems = new ArrayList<>();
+        for (JavaSource source : mainSources) {
+            if (source.path.endsWith(Path.of("behavior", "inventory", "ItemsToKeep.java"))) continue;
+            for (int i = 0; i < source.lines.size(); i++) {
+                if (source.lines.get(i).contains("ItemsToKeep.NOTHING")) {
+                    problems.add(relative(source.path) + ":" + (i + 1)
+                            + " 传了 ItemsToKeep.NOTHING：生产代码传真的要留的东西（预留加正要用的）");
+                }
+            }
+        }
+        report("生产代码绕开了要留的东西", problems);
+    }
+
+    @Test
     void everySourceFileStartsWithLicenseHeader() {
         List<String> problems = new ArrayList<>();
         for (JavaSource source : concat(mainSources, testSources)) {

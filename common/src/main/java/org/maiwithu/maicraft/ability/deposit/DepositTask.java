@@ -155,7 +155,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         if (held.isEmpty()) return Optional.empty();
         BiPredicate<String, String> taggedIn = services.tags() == null
                 ? (itemId, tagId) -> false : (itemId, tagId) -> services.tags().tagsOf(itemId).contains(tagId);
-        if (DepositDecider.choose(List.of(held.get()), input.itemIds(), input.count(), taggedIn).isEmpty()) {
+        if (DepositDecider.choose(List.of(held.get()), input.itemIds(), input.count(), taggedIn,
+                services.kept()::keep).isEmpty()) {
             return Optional.empty();
         }
         return offhand.intoBackpack();
@@ -168,7 +169,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         BiPredicate<String, String> taggedIn = services.tags() == null
                 ? (itemId, tagId) -> false : (itemId, tagId) -> services.tags().tagsOf(itemId).contains(tagId);
         for (DepositDecider.ToDeposit item : DepositDecider.choose(backpack.stacks(), input.itemIds(),
-                input.count(), taggedIn)) {
+                input.count(), taggedIn, services.kept()::keep)) {
             wanted.merge(item.stack().itemId(), item.amount(), Integer::sum);
         }
     }

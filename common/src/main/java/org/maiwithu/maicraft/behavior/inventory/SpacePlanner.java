@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +39,7 @@ final class SpacePlanner {
      * @param carriedBackpackFreeSlots  随身背包还空着几格；没有随身背包时为 0
      * @param nearbyContainers          记得的附近容器；接缝没接上时为空
      * @param networkStorage            有终端能把东西存进网络：身上绑好的无线终端，或附近能用的装着的终端
+     * @param keptCounts                要留的东西每种留几件（预留的、正要用的）：留够这么多的那几堆不挪
      */
     record Scene(
             List<BackpackStack> stacks,
@@ -47,7 +49,16 @@ final class SpacePlanner {
             boolean stackMergerAvailable,
             int carriedBackpackFreeSlots,
             List<KnownContainer> nearbyContainers,
-            boolean networkStorage) {
+            boolean networkStorage,
+            Map<String, Integer> keptCounts) {
+
+        /** 没有要留够件数的东西。 */
+        Scene(List<BackpackStack> stacks, int freeSlots, int slotsNeeded, Set<String> reservedItemIds,
+                boolean stackMergerAvailable, int carriedBackpackFreeSlots, List<KnownContainer> nearbyContainers,
+                boolean networkStorage) {
+            this(stacks, freeSlots, slotsNeeded, reservedItemIds, stackMergerAvailable, carriedBackpackFreeSlots,
+                    nearbyContainers, networkStorage, Map.of());
+        }
 
         /** 没有网络可存。 */
         Scene(List<BackpackStack> stacks, int freeSlots, int slotsNeeded, Set<String> reservedItemIds,
@@ -168,7 +179,14 @@ final class SpacePlanner {
         Map<String, Integer> totals = totalsInBackpack(scene.stacks());
         record Entry(BackpackStack stack, int worthRank, int junkOrder) {}
         List<Entry> entries = new ArrayList<>();
+        // 要留够件数的东西按背包里的格子顺序一堆堆算进留着的，留够了，后面那几堆才照常按价值排。
+        Map<String, Integer> stillToKeep = new HashMap<>(scene.keptCounts());
         for (BackpackStack stack : scene.stacks()) {
+            int keep = stillToKeep.getOrDefault(stack.itemId(), 0);
+            if (keep > 0) {
+                stillToKeep.put(stack.itemId(), keep - Math.min(keep, stack.count()));
+                continue;
+            }
             Worth worth = ItemWorth.of(stack, scene.reservedItemIds(), totals);
             if (worth == Worth.KEPT || worth == Worth.GEAR || worth == Worth.PRECIOUS) continue;
             int order = worth == Worth.JUNK ? JunkItems.dropOrder(stack.itemId())

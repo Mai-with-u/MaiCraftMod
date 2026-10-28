@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.deposit;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
@@ -23,6 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
  * @param tags    物品挂着哪些标签（玩家行为层的读法）；没接上时为 null，按什么标签都不挂算
  * @param network 网络存储（身上的无线终端）；没有联动时给空
  * @param offhand 副手：整理背包时把副手的东西放回背包一起存；没接上为 null，副手不管
+ * @param kept    要留的东西：不给物品时预留的、正要用的留够件数在身上
  */
 record DepositServices(
         SpotsContainers spots,
@@ -31,21 +33,11 @@ record DepositServices(
         DepositSeams.DigsLid digs,
         ReadsItemTags tags,
         Supplier<Optional<NetworkStorage>> network,
-        DepositSeams.ClearsOffhand offhand) {
-
-    /** 没有网络存储、不管副手。 */
-    DepositServices(SpotsContainers spots, StoresInContainer.Parts storing, DepositSeams.FindsPlaces places,
-            DepositSeams.DigsLid digs, ReadsItemTags tags) {
-        this(spots, storing, places, digs, tags, Optional::empty, null);
-    }
-
-    /** 不管副手。 */
-    DepositServices(SpotsContainers spots, StoresInContainer.Parts storing, DepositSeams.FindsPlaces places,
-            DepositSeams.DigsLid digs, ReadsItemTags tags, Supplier<Optional<NetworkStorage>> network) {
-        this(spots, storing, places, digs, tags, network, null);
-    }
+        DepositSeams.ClearsOffhand offhand,
+        ItemsToKeep kept) {
 
     DepositServices {
+        if (kept == null) throw new IllegalArgumentException("要留的东西不能为空：不给物品时预留的要留在身上");
         if (spots == null) throw new IllegalArgumentException("找容器的接缝不能为空");
         if (storing == null) throw new IllegalArgumentException("存放的现场部件不能为空");
         if (places == null) throw new IllegalArgumentException("找位置的接缝不能为空");

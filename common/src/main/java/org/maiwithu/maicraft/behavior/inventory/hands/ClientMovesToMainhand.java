@@ -22,7 +22,6 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
 /**
  * 换到主手执行接缝的读端：把身上指定的一种物品换到主手，像真人一样分步做——
@@ -94,7 +93,7 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     // 主背包里的一件换到快捷栏哪一格：按 HotbarSwapTarget 挑空格或零碎格，不挤掉手里拿着的。
     // 纯判断，离线可测：船这类不可堆叠、无工具属性的大件也走同一条挑格，没有按物品种类另设的门槛。
     static int planSwapTarget(Inventory inventory) {
-        return HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items, ItemsToKeep.NOTHING),
+        return HotbarSwapTarget.forHand(HotbarSwapTarget.hotbar(inventory.items),
                 VanillaHotbar.swapTarget(inventory.selected));
     }
 

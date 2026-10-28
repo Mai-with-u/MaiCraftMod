@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.enchant;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -159,7 +160,7 @@ class EnchantTaskTest {
     }
 
     private static EnchantTask task(EnchantInput input, FakeTables tables, FakeObtain obtain, FakePlaces places) {
-        var space = new InventorySpace(backpackWithNoFreeSlot(), Optional.empty(), Optional.empty(),
+        var space = new InventorySpace(ItemsToKeep.NOTHING, backpackWithNoFreeSlot(), Optional.empty(), Optional.empty(),
                 Optional.<KnownContainers>empty(), Optional.<StoresInContainer.Parts>empty());
         EnchantServices services = new EnchantServices(obtain, space,
                 (pos, permissions) -> null, new FakeMenuFacts(),

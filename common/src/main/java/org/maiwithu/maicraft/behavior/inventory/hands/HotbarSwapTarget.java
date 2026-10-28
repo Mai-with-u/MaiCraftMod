@@ -26,7 +26,15 @@ public final class HotbarSwapTarget {
 
     private HotbarSwapTarget() {}
 
-    /** 快捷栏九格各放着什么。 */
+    /**
+     * 拿一件东西到手上用时快捷栏九格各放着什么：只看东西本身（有耐久的、能吃的、桶、火把、图腾不换走），
+     * 不看要留的东西——换个格子什么都没花掉，留着的东西在背包里哪一格都还在。
+     */
+    public static List<Holding> hotbar(List<ItemStack> items) {
+        return hotbar(items, itemId -> 0);
+    }
+
+    /** 快捷栏九格各放着什么；要留的东西（走路要垫的料、正要用的）也不换走。 */
     public static List<Holding> hotbar(List<ItemStack> items, ItemsToKeep keeps) {
         List<Holding> hotbar = new ArrayList<>();
         for (int slot = 0; slot < HOTBAR_SIZE && slot < items.size(); slot++) hotbar.add(holding(items.get(slot), keeps));

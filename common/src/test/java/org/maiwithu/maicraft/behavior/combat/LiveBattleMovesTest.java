@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
@@ -33,7 +34,7 @@ class LiveBattleMovesTest {
                 WalkReport.onTheWay(new BlockPos(1, 65, 0), false),
                 WalkReport.stopped(new BlockPos(1, 64, 0), false));
         leg.airborne = true;
-        Action walk = new LiveBattleMoves((target, permit) -> leg, null, ModRangedWeapons.none())
+        Action walk = new LiveBattleMoves((target, permit) -> leg, null, ModRangedWeapons.none(), ItemsToKeep.NOTHING)
                 .walk(GoalCompiler.near(new BlockPos(12, 64, 0), 2.0));
         assertFalse(walk.stopSafely(), "还没开走：现在就能停");
         walk.tick(TickContext.of(1, null));
@@ -46,7 +47,7 @@ class LiveBattleMovesTest {
 
         TravelFakes.ScriptedWalk ground = new TravelFakes.ScriptedWalk(
                 WalkReport.onTheWay(new BlockPos(1, 64, 0), false));
-        Action onGround = new LiveBattleMoves((target, permit) -> ground, null, ModRangedWeapons.none())
+        Action onGround = new LiveBattleMoves((target, permit) -> ground, null, ModRangedWeapons.none(), ItemsToKeep.NOTHING)
                 .walk(GoalCompiler.near(new BlockPos(12, 64, 0), 2.0));
         onGround.tick(TickContext.of(1, null));
         assertEquals(Interruptibility.WORKING, onGround.interruptibility(), "站在地上走着是正常干活");

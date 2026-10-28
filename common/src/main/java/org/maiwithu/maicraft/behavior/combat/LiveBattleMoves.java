@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.Objects;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.OptionalInt;
@@ -39,11 +40,17 @@ public final class LiveBattleMoves implements BattleMoves {
 
     private final WalkTo walks;
     private final LiveCombatHands hands;
+    /** 要留的东西：垫柱子和走路垫脚一样只数多出来的料，预留的、正要用的不垫。 */
+    private final ItemsToKeep keeps;
 
-    /** @param weapons 联动的远程武器（土豆加农炮）：上了弦的弩之后、弓之前用 */
-    public LiveBattleMoves(WalkTo walks, UseKeyProjection projection, ModRangedWeapons weapons) {
+    /**
+     * @param weapons 联动的远程武器（土豆加农炮）：上了弦的弩之后、弓之前用
+     * @param keeps   要留的东西：垫柱子只算多出来的料
+     */
+    public LiveBattleMoves(WalkTo walks, UseKeyProjection projection, ModRangedWeapons weapons, ItemsToKeep keeps) {
         this.walks = walks;
         this.hands = new LiveCombatHands(projection, weapons);
+        this.keeps = Objects.requireNonNull(keeps, "keeps");
     }
 
     @Override
@@ -242,13 +249,15 @@ public final class LiveBattleMoves implements BattleMoves {
     public boolean canPillar(TickContext context) {
         var self = context.player() == null ? null : context.player().localPlayer();
         if (self == null || !self.level().isDay()) return false;
-        // 身上能拿去垫的废料够三块，头顶三格空着（垫上去不撞头）。
+        // 身上能拿去垫的废料够三块，头顶三格空着（垫上去不撞头）：预留的、正要用的不算，垫柱子交给走到，它也只垫多出来的。
         Map<String, Integer> carried = new HashMap<>();
         for (var stack : self.getInventory().items) {
             if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
         }
         int blocks = 0;
-        for (String id : ScaffoldBlocks.usable(id -> carried.getOrDefault(id, 0), ItemsToKeep.NOTHING)) blocks += carried.get(id);
+        for (String id : ScaffoldBlocks.usable(id -> carried.getOrDefault(id, 0), keeps)) {
+            blocks += carried.get(id) - Math.min(carried.get(id), keeps.keep(id));
+        }
         BlockPos feet = self.blockPosition();
         for (int up = 2; up <= 4; up++) {
             BlockPos cell = feet.above(up);

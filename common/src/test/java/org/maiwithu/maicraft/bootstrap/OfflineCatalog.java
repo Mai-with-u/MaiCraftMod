@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
@@ -140,7 +141,7 @@ final class OfflineCatalog {
                         new UnloadedWorld()),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary())),
-                new Travel(new BaritoneInternals(), new BaritoneInternals(), new ClientTravelWorldView(nobody),
+                new Travel(new BaritoneInternals(ItemsToKeep.NOTHING), new BaritoneInternals(ItemsToKeep.NOTHING), new ClientTravelWorldView(nobody),
                         progress -> { }),
                 new Guards(
                         new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,

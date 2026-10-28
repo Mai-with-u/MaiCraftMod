@@ -45,17 +45,20 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
     /** 点方块、换手：只读现场时为空，这时不垫。 */
     private final Interactions interactions;
     private final ClientMovesToMainhand toMainhand;
+    /** 要留的东西：填空洞只垫多出来的废料；只读现场时为空。 */
+    private final ItemsToKeep keeps;
 
     /** 只读现场、只走不垫（往上挖楼梯用）。 */
     public LiveStairsSite(WalkTo walks) {
-        this(walks, null, null);
+        this(walks, null, null, null);
     }
 
     /** 往下挖楼梯用：下一级脚下空着时能垫一块。 */
-    public LiveStairsSite(WalkTo walks, Interactions interactions, ClientMovesToMainhand toMainhand) {
+    public LiveStairsSite(WalkTo walks, Interactions interactions, ClientMovesToMainhand toMainhand, ItemsToKeep keeps) {
         this.walks = Objects.requireNonNull(walks, "walks");
         this.interactions = interactions;
         this.toMainhand = toMainhand;
+        this.keeps = keeps;
     }
 
     @Override
@@ -111,11 +114,12 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
         return level == null ? null : level.dimension().location().toString();
     }
 
-    // 能拿去垫的废料：和走路垫脚同一份先后（泥土、废石先，圆石最后），沙砾这类会往下掉的不要——垫在空洞上面会掉下去。
+    // 能拿去垫的废料：和走路垫脚同一份先后（泥土、废石先，圆石最后），沙砾这类会往下掉的不要——垫在空洞上面会掉下去；
+    // 预留的、正要用的留够数，只垫多出来的。
     @Override
     public List<String> fillers(TickContext context) {
         LocalPlayer self = self(context);
-        if (self == null || interactions == null) return List.of();
+        if (self == null || interactions == null || keeps == null) return List.of();
         Map<String, Integer> carried = new HashMap<>();
         for (ItemStack stack : self.getInventory().items) {
             if (!stack.isEmpty()) {
@@ -123,7 +127,7 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
             }
         }
         List<String> fillers = new ArrayList<>();
-        for (String itemId : ScaffoldBlocks.usable(id -> carried.getOrDefault(id, 0), ItemsToKeep.NOTHING)) {
+        for (String itemId : ScaffoldBlocks.usable(id -> carried.getOrDefault(id, 0), keeps)) {
             if (!(BuiltInRegistries.BLOCK.get(ResourceLocation.parse(itemId)) instanceof FallingBlock)) fillers.add(itemId);
         }
         return List.copyOf(fillers);

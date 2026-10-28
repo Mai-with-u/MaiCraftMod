@@ -19,8 +19,8 @@ import org.maiwithu.maicraft.kernel.result.Change;
 class ReservedItemsTest {
 
     private final FakeTags tags = new FakeTags();
-    private final Map<String, Integer> onBody = new HashMap<>();
-    private final ReservedItems reserved = new ReservedItems(tags, () -> Map.copyOf(onBody));
+    private final Map<String, Integer> carriedNow = new HashMap<>();
+    private final ReservedItems reserved = new ReservedItems(tags, () -> Map.copyOf(carriedNow));
 
     /** 存预留的替身：记下最后一次写进去的那一份。 */
     private static final class Saved implements ReservedItems.Storage {
@@ -57,8 +57,8 @@ class ReservedItemsTest {
         tags.put("minecraft:oak_planks", "minecraft:planks");
         tags.put("minecraft:spruce_planks", "minecraft:planks");
         reserved.set(List.of(keep("#minecraft:planks", 40)));
-        onBody.put("minecraft:oak_planks", 35);
-        onBody.put("minecraft:spruce_planks", 30);
+        carriedNow.put("minecraft:oak_planks", 35);
+        carriedNow.put("minecraft:spruce_planks", 30);
 
         assertEquals(10, reserved.keep("minecraft:oak_planks"), "云杉已有 30，橡木只要留 10");
         assertEquals(5, reserved.keep("minecraft:spruce_planks"));
@@ -97,7 +97,7 @@ class ReservedItemsTest {
     void 下令的目标用掉的_先算多出来的_超出部分从预留里扣并记到最后几条变化上() {
         // 预留木板 40、身上 45：盖小屋放了 30 块，5 块是多出来的，25 块动了预留，预留剩 15。
         reserved.set(List.of(keep("minecraft:oak_planks", 40)));
-        onBody.put("minecraft:oak_planks", 15);
+        carriedNow.put("minecraft:oak_planks", 15);
         List<Change> changes = List.of(
                 Change.of(Change.Kind.BLOCK_PLACED, "minecraft:oak_planks", 10),
                 Change.of(Change.Kind.ITEM_GAINED, "minecraft:dirt", 4),
@@ -112,8 +112,8 @@ class ReservedItemsTest {
     @Test
     void 扣到零就撤掉那一条_全都留着的不扣() {
         reserved.set(List.of(keep("minecraft:iron_ingot", 3), keep("minecraft:diamond", null)));
-        onBody.put("minecraft:iron_ingot", 0);
-        onBody.put("minecraft:diamond", 0);
+        carriedNow.put("minecraft:iron_ingot", 0);
+        carriedNow.put("minecraft:diamond", 0);
 
         reserved.usedByOrder(List.of(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:iron_ingot", 3),
                 Change.of(Change.Kind.ITEM_DROPPED, "minecraft:diamond", 2)));
@@ -124,7 +124,7 @@ class ReservedItemsTest {
     @Test
     void 没动到预留的不扣() {
         reserved.set(List.of(keep("minecraft:oak_planks", 20)));
-        onBody.put("minecraft:oak_planks", 22);
+        carriedNow.put("minecraft:oak_planks", 22);
         int[] fromReserved = reserved.usedByOrder(List.of(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:oak_planks", 2)));
         assertArrayEquals(new int[] {0}, fromReserved);
         assertEquals(20, reserved.keep("minecraft:oak_planks"));

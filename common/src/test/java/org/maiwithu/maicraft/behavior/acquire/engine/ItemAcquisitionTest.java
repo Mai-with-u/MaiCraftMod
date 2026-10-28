@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.engine;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -429,7 +430,7 @@ class ItemAcquisitionTest {
     void 背包只剩贵重品_如实失败带建议_不再征求同意() {
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:diamond", 1, 64, false, false, true, false));
-        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, full, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
@@ -450,7 +451,7 @@ class ItemAcquisitionTest {
         // 腾背包如实失败：一次要几样的收场把种类照实传成 INVENTORY_FULL，不再有等着回答的问句。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:diamond", 1, 64, false, false, true, false));
-        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, full, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
@@ -470,7 +471,7 @@ class ItemAcquisitionTest {
         // 背包塞满、能动的全动了也腾不出：按对外接口的约定如实报 INVENTORY_FULL，不再按缺东西算。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:coal", 64, 64, false, false, false, false));
-        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, full, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));
@@ -488,7 +489,7 @@ class ItemAcquisitionTest {
         // 身上已有 30 块圆石、背包没空格：再要 5 块能并进这一堆，不该先腾格子（这里也腾不出来）。
         FakeBackpack full = new FakeBackpack(1, new BackpackStack(
                 "minecraft:cobblestone", 30, 64, false, false, false, true));
-        InventorySpace space = new InventorySpace(full, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, full, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         ScriptedSource chest = new ScriptedSource("记得的箱子", full)
                 .answer(new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(5, 4), null));

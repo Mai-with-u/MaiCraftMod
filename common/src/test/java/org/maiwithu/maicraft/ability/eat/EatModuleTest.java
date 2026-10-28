@@ -12,6 +12,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -101,7 +102,7 @@ class EatModuleTest {
             @Override public void release(Object owner) {}
         };
         return new EatModule(backpack, Optional::empty, hunger, foods, slot -> Optional.empty(), List::of,
-                itemId -> Set.of(), projection, Optional.empty());
+                itemId -> Set.of(), projection, Optional.empty(), ItemsToKeep.NOTHING);
     }
 
     private static Goal unnamed() {

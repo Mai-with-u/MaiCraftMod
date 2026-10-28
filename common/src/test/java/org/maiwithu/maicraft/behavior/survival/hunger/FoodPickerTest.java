@@ -144,4 +144,17 @@ class FoodPickerTest {
                 List.of(carried("minecraft:chicken", 1, chicken), carried("minecraft:mutton", 1, mutton)), 11, false));
         assertEquals(Optional.empty(), FoodPicker.forHunger(List.of(carried("minecraft:chicken", 1, chicken)), 11, false));
     }
+
+    @Test
+    void 先在不留的里挑_挑不出再连留着的一起挑() {
+        // 预留着面包、身上还有一块生羊肉：随便吃点先吃生羊肉；生羊肉没了才动预留的面包。
+        ReadsFoodValues foods = id -> Optional.of(food(id, id.equals("minecraft:bread") ? 5 : 2, 1.2f));
+        ItemsToKeep breadReserved = id -> id.equals("minecraft:bread") ? 1 : 0;
+        List<BackpackStack> both = List.of(new BackpackStack("minecraft:bread", 1, 64, false, true, false, false),
+                new BackpackStack("minecraft:mutton", 1, 64, false, true, false, false));
+        assertEquals(Optional.of("minecraft:mutton"), FoodPicker.keptLast(both, foods, breadReserved, FoodPicker::autoPick));
+
+        List<BackpackStack> breadOnly = List.of(new BackpackStack("minecraft:bread", 1, 64, false, true, false, false));
+        assertEquals(Optional.of("minecraft:bread"), FoodPicker.keptLast(breadOnly, foods, breadReserved, FoodPicker::autoPick));
+    }
 }

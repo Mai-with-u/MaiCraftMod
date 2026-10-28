@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival.hunger;
 
+import java.util.function.Function;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -42,9 +43,19 @@ public final class FoodPicker {
      */
     public record Carried(String itemId, int count, ReadsFoodValues.FoodValue value) {}
 
-    /** 把身上的物品堆按游戏的食物组件筛成能吃的；不是食物的跳过。 */
-    public static List<Carried> carried(Collection<BackpackStack> stacks, ReadsFoodValues foods) {
-        return carried(stacks, foods, ItemsToKeep.NOTHING);
+    /** 把身上的物品堆按游戏的食物组件筛成能吃的，要留的也算上：点名要吃、保命时连留着的一起挑。不是食物的跳过。 */
+    public static List<Carried> everything(Collection<BackpackStack> stacks, ReadsFoodValues foods) {
+        return carried(stacks, foods, itemId -> 0);
+    }
+
+    /**
+     * 先在不留的里挑，挑不出再连留着的一起挑：下令随便吃点、饿到不能疾跑或伤得重时都先吃不留的，
+     * 身上只剩预留的、正要用的吃的才动它们。
+     */
+    public static Optional<String> keptLast(Collection<BackpackStack> stacks, ReadsFoodValues foods, ItemsToKeep keeps,
+            Function<List<Carried>, Optional<String>> choose) {
+        Optional<String> spare = choose.apply(carried(stacks, foods, keeps));
+        return spare.isPresent() ? spare : choose.apply(everything(stacks, foods));
     }
 
     /**

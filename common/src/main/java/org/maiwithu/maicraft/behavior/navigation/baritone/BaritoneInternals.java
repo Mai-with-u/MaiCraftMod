@@ -96,11 +96,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private long precisionTick = Long.MIN_VALUE;
 
     /** 不知道什么正要用（离线清单、测试）：垃圾方块照先后垫，什么都不留。 */
-    public BaritoneInternals() {
-        this(ItemsToKeep.NOTHING);
-    }
-
-    /** @param keeps 正要用的东西每种留几件：上一个目标刚拿到的、手上这件事正在拿的 */
+    /** @param keeps 要留的东西每种留几件：预留的、上一个目标刚拿到的、手上这件事正在拿的 */
     public BaritoneInternals(ItemsToKeep keeps) {
         this.keeps = keeps;
     }

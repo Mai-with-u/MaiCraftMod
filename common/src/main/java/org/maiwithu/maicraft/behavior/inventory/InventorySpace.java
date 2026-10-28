@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -43,6 +45,8 @@ public final class InventorySpace {
     /** 记得多少格以内的容器算"附近"：附近有容器时优先存放，不往地上扔。 */
     public static final int NEARBY_CONTAINER_RANGE = 16;
 
+    /** 要留的东西：预留的、正要用的留够件数，腾背包不挪不丢。 */
+    private final ItemsToKeep kept;
     private final BackpackView backpack;
     private final Optional<StackMerger> stackMerger;
     private final Optional<CarriedBackpack> carriedBackpack;
@@ -52,6 +56,7 @@ public final class InventorySpace {
     private final Supplier<Optional<NetworkStorage>> network;
 
     /**
+     * @param kept            要留的东西：留够的件数不挪不丢
      * @param backpack        背包视图：腾挪的每一步都以它读到的现场为准
      * @param stackMerger     合并散堆的接缝；没接上传 {@code Optional.empty()}
      * @param carriedBackpack 随身背包接缝；没接上传 {@code Optional.empty()}
@@ -59,22 +64,25 @@ public final class InventorySpace {
      * @param storing         存放的现场部件（与存东西能力共用）；没接上传 {@code Optional.empty()}
      */
     public InventorySpace(
+            ItemsToKeep kept,
             BackpackView backpack,
             Optional<StackMerger> stackMerger,
             Optional<CarriedBackpack> carriedBackpack,
             Optional<KnownContainers> knownContainers,
             Optional<StoresInContainer.Parts> storing) {
-        this(backpack, stackMerger, carriedBackpack, knownContainers, storing, Optional::empty);
+        this(kept, backpack, stackMerger, carriedBackpack, knownContainers, storing, Optional::empty);
     }
 
     /** @param network 网络存储（身上的无线终端、附近装着的终端）；没有联动时给空 */
     public InventorySpace(
+            ItemsToKeep kept,
             BackpackView backpack,
             Optional<StackMerger> stackMerger,
             Optional<CarriedBackpack> carriedBackpack,
             Optional<KnownContainers> knownContainers,
             Optional<StoresInContainer.Parts> storing,
             Supplier<Optional<NetworkStorage>> network) {
+        this.kept = Objects.requireNonNull(kept, "kept");
         this.network = Objects.requireNonNull(network, "network");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.stackMerger = Objects.requireNonNull(stackMerger, "stackMerger");
@@ -181,15 +189,29 @@ public final class InventorySpace {
                     .map(known -> known.within(NEARBY_CONTAINER_RANGE)).orElse(List.of()).stream()
                     .filter(container -> !failedContainers.contains(container.at()))
                     .toList();
+            List<BackpackStack> stacks = backpack.stacks();
             return new SpacePlanner.Scene(
-                    backpack.stacks(),
+                    stacks,
                     backpack.freeSlots(),
                     slotsNeeded,
                     Set.copyOf(unmovable),
                     stackMerger.isPresent() && !mergeBroken,
                     carriedBroken ? 0 : carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
                     containers,
-                    !networkBroken && network.get().map(storage -> storage.reachable(nearMe())).orElse(false));
+                    !networkBroken && network.get().map(storage -> storage.reachable(nearMe())).orElse(false),
+                    keptCounts(stacks));
+        }
+
+        // 背包里每种东西要留几件：预留的、正要用的；留够这么多的那几堆腾背包不挪，多出来的照常按价值排。
+        private Map<String, Integer> keptCounts(List<BackpackStack> stacks) {
+            Map<String, Integer> counts = new HashMap<>();
+            for (BackpackStack stack : stacks) {
+                if (counts.containsKey(stack.itemId())) continue;
+                int keep = kept.keep(stack.itemId());
+                counts.put(stack.itemId(), keep);
+            }
+            counts.values().removeIf(keep -> keep <= 0);
+            return counts;
         }
 
         // 腾地方找终端就在身边：身上绑好的无线终端优先，没带就找和记得的容器一样近（16 格内）的装着的终端。

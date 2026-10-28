@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
@@ -542,7 +543,7 @@ class DepositTaskTest {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
             }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
-                    () -> Optional.ofNullable(network), offhandClearing());
+                    () -> Optional.ofNullable(network), offhandClearing(), ItemsToKeep.NOTHING);
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;

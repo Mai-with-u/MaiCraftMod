@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -406,7 +407,7 @@ class UseTaskTest {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:lever");
         rig.hand.plans.add(new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.INVENTORY_FULL, "腾不出空手")));
-        rig.space = new InventorySpace(new BackpackView() {
+        rig.space = new InventorySpace(ItemsToKeep.NOTHING, new BackpackView() {
             @Override public List<BackpackStack> stacks() { return List.of(); }
             @Override public int usedSlots() { return 35; }
             @Override public int totalSlots() { return 36; }

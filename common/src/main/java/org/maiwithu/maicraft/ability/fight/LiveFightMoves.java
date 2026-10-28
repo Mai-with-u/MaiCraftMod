@@ -9,6 +9,7 @@ import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.combat.DragonGeometry;
@@ -35,10 +36,13 @@ public final class LiveFightMoves implements FightMoves {
     /** 捡掉落物：和采集、打猎共用的那一套。 */
     private final PicksUpDrops drops;
 
-    /** @param weapons 联动的远程武器（土豆加农炮）：点名战斗时也照样用 */
+    /**
+     * @param weapons 联动的远程武器（土豆加农炮）：点名战斗时也照样用
+     * @param keeps   要留的东西：垫柱子只算多出来的料
+     */
     public LiveFightMoves(WalkTo walks, DropConfirmations confirmations, UseKeyProjection projection,
-            ModRangedWeapons weapons, PicksUpDrops drops) {
-        this.battle = new LiveBattleMoves(walks, projection, weapons);
+            ModRangedWeapons weapons, PicksUpDrops drops, ItemsToKeep keeps) {
+        this.battle = new LiveBattleMoves(walks, projection, weapons, keeps);
         this.confirmations = confirmations;
         this.drops = drops;
     }

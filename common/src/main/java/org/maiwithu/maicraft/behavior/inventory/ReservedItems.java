@@ -129,15 +129,15 @@ public final class ReservedItems implements ItemsToKeep {
     public int keep(String itemId) {
         if (reservations.isEmpty()) return 0;
         Set<String> itemTags = tags.tagsOf(itemId);
-        Map<String, Integer> onBody = null;
+        Map<String, Integer> carriedNow = null;
         int floor = 0;
         for (Reservation reservation : reservations.values()) {
             if (!reservation.covers(itemId, itemTags)) continue;
             if (reservation.atLeast() == null) return ALL;
             int need = reservation.atLeast();
             if (reservation.tag()) {
-                if (onBody == null) onBody = carried.get();
-                need = Math.max(0, need - othersUnder(reservation, itemId, onBody));
+                if (carriedNow == null) carriedNow = carried.get();
+                need = Math.max(0, need - othersUnder(reservation, itemId, carriedNow));
             }
             floor = Math.max(floor, need);
         }
@@ -201,17 +201,17 @@ public final class ReservedItems implements ItemsToKeep {
         }
     }
 
-    private int carriedUnder(Reservation reservation, Map<String, Integer> onBody) {
+    private int carriedUnder(Reservation reservation, Map<String, Integer> carriedNow) {
         int total = 0;
-        for (var entry : onBody.entrySet()) {
+        for (var entry : carriedNow.entrySet()) {
             if (reservation.covers(entry.getKey(), tags.tagsOf(entry.getKey()))) total += entry.getValue();
         }
         return total;
     }
 
-    private int othersUnder(Reservation reservation, String itemId, Map<String, Integer> onBody) {
+    private int othersUnder(Reservation reservation, String itemId, Map<String, Integer> carriedNow) {
         int total = 0;
-        for (var entry : onBody.entrySet()) {
+        for (var entry : carriedNow.entrySet()) {
             if (!entry.getKey().equals(itemId) && reservation.covers(entry.getKey(), tags.tagsOf(entry.getKey()))) {
                 total += entry.getValue();
             }

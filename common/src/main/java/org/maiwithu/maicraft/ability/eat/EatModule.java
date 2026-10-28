@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
@@ -44,6 +45,8 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  */
 public final class EatModule implements AbilityModule {
 
+    /** 要留的东西：不点名随便吃点时先吃不留的。 */
+    private final ItemsToKeep kept;
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final ReadsHunger hunger;
@@ -64,10 +67,12 @@ public final class EatModule implements AbilityModule {
      * @param tags        物品标签：按标签点名食物时匹配用
      * @param projection  按住使用键投影：进食的按住续期靠它
      * @param toMainhand  换到主手的接缝；没接上传 {@code Optional.empty()}
+     * @param kept        要留的东西：不点名时先吃不留的
      */
     public EatModule(BackpackView backpack, OffhandContents offhand, ReadsHunger hunger,
             ReadsFoodValues foods, ReadsEquipment equipment, ReadsEffects effects,
-            ReadsItemTags tags, UseKeyProjection projection, Optional<MovesToMainhand> toMainhand) {
+            ReadsItemTags tags, UseKeyProjection projection, Optional<MovesToMainhand> toMainhand, ItemsToKeep kept) {
+        this.kept = Objects.requireNonNull(kept, "kept");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.offhand = Objects.requireNonNull(offhand, "offhand");
         this.hunger = Objects.requireNonNull(hunger, "hunger");
@@ -111,7 +116,8 @@ public final class EatModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.done(
                     "开始时已经饱了（饱食度 " + hunger.foodLevel() + "/20），没有点名要吃的东西"));
         }
-        Optional<String> picked = FoodPicker.autoPick(carried);
+        // 随便吃点：先吃不留的，身上只剩预留的、正要用的吃的才动它们。
+        Optional<String> picked = FoodPicker.keptLast(carriedStacks(), foods, kept, FoodPicker::autoPick);
         if (picked.isEmpty() && carried.isEmpty()) {
             return asFailure(Problem.Kind.NEED_ITEM, "身上没有能吃的东西");
         }
@@ -155,11 +161,15 @@ public final class EatModule implements AbilityModule {
         return foods.of(itemId).map(ReadsFoodValues.FoodValue::edibleWhenFull).orElse(false);
     }
 
-    // 身上（主背包加副手）带着的能吃的：数量累计，数值问游戏的食物组件。
+    // 身上（主背包加副手）带着的能吃的：数量累计，数值问游戏的食物组件；点名要吃时留着的也算。
     private List<FoodPicker.Carried> carriedFoods() {
+        return FoodPicker.everything(carriedStacks(), foods);
+    }
+
+    private List<BackpackStack> carriedStacks() {
         List<BackpackStack> stacks = new ArrayList<>(backpack.stacks());
         offhand.heldInOffhand().ifPresent(stacks::add);
-        return FoodPicker.carried(stacks, foods);
+        return stacks;
     }
 
     /** 直接结束的失败：问题种类写明是缺食物、时间不对，还是不支持。 */

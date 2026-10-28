@@ -317,7 +317,8 @@ public final class AbilityCatalog {
         // 腾背包不替玩家往地上扔东西，丢弃只有丢弃能力（drop）走。装备与拿东西在背包要满时先按它腾。
         // 随身背包的接缝留给随身背包的联动模组。身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
         List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
-        InventorySpace space = new InventorySpace(deps.character().backpack(),
+        // 腾背包时要留的东西（预留的、正要用的）留够件数不挪。
+        InventorySpace space = new InventorySpace(deps.kept(), deps.character().backpack(),
                 Optional.of(new ClientStackMerger(deps.character().context())),
                 Optional.empty(),
                 Optional.of(new RememberedContainers(deps.world().memory(), deps.character().position(),
@@ -331,7 +332,7 @@ public final class AbilityCatalog {
     /** 往下挖楼梯的现场部件：拿到物品在看不见石头时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
     private static ClientStairsDown stairsDown(Deps deps, Shared shared) {
         return new ClientStairsDown(
-                new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(), shared.toMainhand()),
+                new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(), shared.toMainhand(), deps.kept()),
                 shared.digging(), shared.drops(), shared.permission());
     }
 
@@ -497,7 +498,8 @@ public final class AbilityCatalog {
                         new ModRangedWeapons(deps.compat()::rangedWeapons, deps.character().foods()),
                         // 拾荒和采集、打猎共用一套捡掉落物。
                         new ClientDropPickup(deps.character().context(), deps.travel().walks(),
-                                deps.dropConfirmations())),
+                                deps.dropConfirmations()),
+                        deps.kept()),
                 permission));
 
         // 跨维度出行的现场部件一次拼好：找门、进门、建门与末地门房间，出行与跟着过门共用。
@@ -510,7 +512,8 @@ public final class AbilityCatalog {
                         deps.compat().rideAlongs(services), portals,
                         deps.senses(),
                         new LiveBattleMoves(deps.travel().walks(), deps.hands().useKeyProjection(),
-                                new ModRangedWeapons(deps.compat()::rangedWeapons, deps.character().foods())),
+                                new ModRangedWeapons(deps.compat()::rangedWeapons, deps.character().foods()),
+                                deps.kept()),
                         new LiveHoldsSneak(deps.hands().inputs(), deps.character().context())),
                 deps.channels().events()));
 
@@ -596,7 +599,7 @@ public final class AbilityCatalog {
         return new EatModule(deps.character().backpack(), deps.character().offhand(),
                 deps.character().hunger(), deps.character().foods(), deps.character().equipment(),
                 deps.character().effects(), deps.items().itemTags(), deps.hands().useKeyProjection(),
-                Optional.of(shared.toMainhand()));
+                Optional.of(shared.toMainhand()), deps.kept());
     }
 
     /** 装备能力的一份：穿卸与换手走背包界面，卸下时背包满了用和拿东西同一份背包空间先腾一格。 */
@@ -646,7 +649,7 @@ public final class AbilityCatalog {
         return DepositModule.live(deps.character().context(), storing, collects,
                 deps.items().itemTags(), deps.world().memory(), deps.character().backpack(),
                 deps.world().blockScans(), deps.guards().protection(), deps.world()::scene,
-                deps.world().facilities(), () -> networks.stream().findFirst());
+                deps.world().facilities(), () -> networks.stream().findFirst(), deps.kept());
     }
 
     /**

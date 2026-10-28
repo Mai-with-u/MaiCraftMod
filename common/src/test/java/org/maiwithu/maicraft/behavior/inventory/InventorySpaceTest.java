@@ -212,7 +212,7 @@ class InventorySpaceTest {
     @Test
     void 还有空格就什么都不做() {
         CollectedRecords records = new CollectedRecords();
-        InventorySpace space = new InventorySpace(new FakeBackpack(36), Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, new FakeBackpack(36), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
         assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
         assertTrue(records.changes.isEmpty());
@@ -224,7 +224,7 @@ class InventorySpaceTest {
                 junk("minecraft:cobblestone", 32), junk("minecraft:cobblestone", 32), junk("minecraft:dirt", 64));
         FakeMerger merger = new FakeMerger(backpack);
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.of(merger), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.of(merger), Optional.of(carried),
                 Optional.empty(), Optional.empty());
         CollectedRecords records = new CollectedRecords();
 
@@ -238,7 +238,7 @@ class InventorySpaceTest {
     void 挪最不值钱的那堆_变化记进发起任务的结果() {
         FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64));
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty());
         CollectedRecords records = new CollectedRecords();
 
@@ -253,7 +253,7 @@ class InventorySpaceTest {
         // 链条是做出来的有用东西：有网络就存进去，不丢也不问。
         FakeBackpack backpack = new FakeBackpack(1, new BackpackStack("minecraft:chain", 32, 64, false, false, false, false));
         FakeNetwork network = new FakeNetwork(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), () -> Optional.of(network));
         CollectedRecords records = new CollectedRecords();
 
@@ -267,7 +267,7 @@ class InventorySpaceTest {
         // 存进网络的挑法交给网络存储：腾地方只说"就在身边、16 格内"，身上带不带无线终端由它去认。
         FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:dirt", 64));
         FakeNetwork network = new FakeNetwork(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty(), () -> Optional.of(network));
 
         assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
@@ -283,7 +283,7 @@ class InventorySpaceTest {
         FakeNetwork network = new FakeNetwork(backpack);
         network.reachable = false;
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty(), () -> Optional.of(network));
 
         assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
@@ -298,7 +298,7 @@ class InventorySpaceTest {
         FakeNetwork network = new FakeNetwork(backpack);
         network.broken = true;
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty(), () -> Optional.of(network));
 
         assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), new CollectedRecords())));
@@ -309,7 +309,7 @@ class InventorySpaceTest {
     void 要留着的东西不往外挪() {
         FakeBackpack backpack = new FakeBackpack(2, junk("minecraft:cobblestone", 64), junk("minecraft:dirt", 64));
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty());
 
         // 正要拿圆石：腾地方不把圆石挪走，挪的是泥土。
@@ -322,7 +322,7 @@ class InventorySpaceTest {
         FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64));
         FakeCarried carried = new FakeCarried(backpack);
         carried.broken = true;
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty());
         CollectedRecords records = new CollectedRecords();
 
@@ -338,7 +338,7 @@ class InventorySpaceTest {
     void 只剩贵重品_如实失败_建议不列贵重品() {
         FakeBackpack backpack = new FakeBackpack(1, pearl());
         FakeCarried carried = new FakeCarried(backpack);
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.of(carried),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.of(carried),
                 Optional.empty(), Optional.empty());
         CollectedRecords records = new CollectedRecords();
 
@@ -358,7 +358,7 @@ class InventorySpaceTest {
     void 腾不出时建议照现场列_能存的容器带坐标() {
         FakeBackpack backpack = new FakeBackpack(1, junk("minecraft:cobblestone", 64), pearl());
         // 记得家门口有只箱子，但存箱子的部件没接上：搬不动就如实失败，建议里给出箱子的位置。
-        InventorySpace space = new InventorySpace(backpack, Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(), Optional.empty(),
                 Optional.of(known -> List.of(家门口的箱子)), Optional.empty());
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
@@ -372,7 +372,7 @@ class InventorySpaceTest {
 
     @Test
     void 连贵重品都算上也不够_如实说腾不出() {
-        InventorySpace space = new InventorySpace(new FakeBackpack(1, pearl()), Optional.empty(), Optional.empty(),
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, new FakeBackpack(1, pearl()), Optional.empty(), Optional.empty(),
                 Optional.empty(), Optional.empty());
 
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class,
