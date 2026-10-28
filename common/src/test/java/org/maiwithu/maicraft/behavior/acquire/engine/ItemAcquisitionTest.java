@@ -116,6 +116,41 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 一个来源还没看清现场_别的来源有报价也先等_看完再排做法() {
+        // 冷索引：采掘前几问"还没扫完"。这时记得的箱子虽然报得出价，也不能先定路——
+        // 眼前的树等采掘看完才看得见，先定路就会为眼前的树绕去远处的深箱。
+        ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"))
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"))
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"))
+                .answer(new SourceQuote.Unavailable("采掘", "半径 48 格内看得见的地方没有会掉出原木的"));
+        ScriptedSource chest = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 3, new AcquisitionCost(40, 3), null));
+        ActionStatus status = runToSettlement(engine(chest, mine).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 3, "施工备料"), PERMISSIONS));
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(4, mine.askedTimes(), "等采掘看完才定路，问了几次：" + mine.askedTimes());
+        assertEquals(3, countOf("minecraft:oak_log"));
+    }
+
+    @Test
+    void 等满时限来源还在看现场_如实说没看完就收场() {
+        ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)
+                .answer(new SourceQuote.NotYet("采掘", "附近的方块还没扫完"));
+        Action action = engine(mine).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), PERMISSIONS);
+        for (int tick = 1; tick <= ItemAcquisition.MAX_CONSULT_WAIT_TICKS + 5; tick++) {
+            ActionStatus status = action.tick(new StubTick(tick));
+            if (status instanceof ActionStatus.Failed failed) {
+                assertTrue(failed.problem().message().contains("还没看完现场"),
+                        failed.problem().message());
+                return;
+            }
+        }
+        throw new AssertionError("等满时限了还没如实收场");
+    }
+
+    @Test
     void 要的是再多几件_身上原有的不算() {
         // 身上已有 3 根原木，再要 3 根：照样去问来源，拿完身上是 6 根。
         backpack.add("minecraft:oak_log", 3);

@@ -33,7 +33,7 @@ public interface ScansMinables {
      */
     boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom);
 
-    /** 最近一次找可挖方块有没有把附近扫完：方块索引分刻建，没扫完时空结果不等于没有。 */
+    /** 最近一次找可挖方块有没有把附近看稳：索引报扫完、或连续多刻没有新方块入账。没看稳时空结果不等于没有。 */
     boolean scanComplete();
 
     /** 想要的东西是不是埋在脚下的石头掉的（圆石、石质工具的材料这类）：谁都知道往下挖几格就有，看不见也能去挖。 */

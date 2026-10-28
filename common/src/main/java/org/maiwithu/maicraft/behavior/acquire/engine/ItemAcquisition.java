@@ -57,8 +57,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 转圈有防环、这一次问遍没拿到的有记账，不会无限往下，放到 12 层够模组的中后期链。
      */
     public static final int DEFAULT_MAX_DEPTH = 12;
-    /** 来源还在看现场时最多等几刻再问：方块索引分刻建，几秒内扫得完附近；等太久按给不了收场。 */
-    static final int MAX_CONSULT_WAIT_TICKS = 100;
+    /**
+     * 来源还在看现场时最多等几刻再问：冷索引大半径的视野扫描要几秒到十几秒才补完，
+     * 等看稳的窗口要盖住它；等太久按给不了收场。
+     */
+    static final int MAX_CONSULT_WAIT_TICKS = 400;
     /**
      * 一个来源连着几次只坏在现场几处（这棵树够不着、那块矿挖不下来）、一件没拿到，就当它这次走不通。
      * 玩家常识：连换三处都够不着，这一带先不在这条路上耗了。
@@ -485,6 +488,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     }
                 }
             }
+            // 有来源还没看清现场（视野扫描还在补新方块）：先等它看完再排做法。冷索引时看得见的来源
+            // 要几秒才报得出价，拿着只有记忆来源的报价先定路，会为眼前的树绕去远处的深箱。
+            if (stillLooking && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
+                return ActionStatus.running();
+            }
             // 挑路只看报价本身；来源是谁在执行时用得上，一并记着。
             plan = AcquisitionSelector.choose(offers.stream().map(Planned::offer).toList(), stillNeeded)
                     .stream()
@@ -492,10 +500,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                             .orElseThrow())
                     .toList();
             if (plan.isEmpty()) {
-                // 有来源还在看现场（方块扫描没扫完）：等一会儿再问遍，不把"还没看完"当成"没有"；等太久才如实收场。
-                if (stillLooking && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
-                    return ActionStatus.running();
-                }
+                // 等满了还在看现场、或所有来源都给不了：按各自的理由如实收场。
                 return ActionStatus.failed(noWayProblem(refusals, carried));
             }
             consultWaits = 0;

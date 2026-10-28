@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
+import org.maiwithu.maicraft.game.world.ScanQuietness;
 import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.behavior.acquire.field.VanillaCropProducts;
@@ -62,6 +63,8 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     private final Supplier<PlayerContext> context;
     /** 每次要找的方块都不一样（要煤找煤矿、要土豆找土豆地）：每次查询前按维度补登记。 */
     private final ScanTargets registered;
+    /** 附近索引的视野账安静了没有：补账没停时空的结果只是"还没看清"，来源要回答"再问"。 */
+    private final ScanQuietness quietness = new ScanQuietness();
     /** 最近一次查索引有没有把附近扫完；没扫完时空结果不等于没有。 */
     private boolean lastScanComplete = true;
 
@@ -173,7 +176,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
 
     @Override
     public boolean scanComplete() {
-        return lastScanComplete;
+        // 索引报扫完、或连续多刻没有新方块入账，都算这一片看稳了：刚清空或刚登记新目标时
+        // 查询很快能"走完"已建的部分，但补账还没停，这时空的答案是"还没看清"，不是"没有"。
+        return lastScanComplete || quietness.quiet();
     }
 
     @Override
@@ -270,6 +275,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             return List.of();
         }
         registered.ensure(level, targets);
+        // 视野账还在补新方块（刚清空、刚登记新目标、刚走到的冷索引）时，这一刻的空结果说不准有没有：
+        // 记下入账进度，安静之前来源对"附近有没有"只回答"再问"。
+        quietness.observe(scans.sectionsBuilt(level));
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
         var result = exposedOnly
                 ? scans.query(level, at, targets, want,
