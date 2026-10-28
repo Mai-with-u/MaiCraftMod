@@ -108,6 +108,8 @@ final class TypewriterDrive implements VehicleDriver.Run {
     private boolean replan;
     /** 之前几趟飞控的阶段变化：重新定过一趟时接在前面。 */
     private final List<String> earlierPhases = new ArrayList<>();
+    /** 停下过再接着开时发现已经在目的地、直接交还：这一趟的阶段和经过已经挪进前面那几趟里，结算时不再抄一遍。 */
+    private boolean harvested;
 
     TypewriterDrive(SimulatedCompat compat, PlayerServices services, VehicleDriver.DriveRequest request,
             TypewriterDriver.Station station) {
@@ -194,6 +196,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
             if (there) {
                 parked = true;
                 notes.add("停下的地方已经在目的地附近，不再开");
+                harvested = true;
                 return go(Step.DISCONNECT, now);
             }
             notes.add("从 " + shortText(sample.position()) + " 接着开");
@@ -517,7 +520,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
 
     private void writeReport() {
         List<String> phases = new ArrayList<>(earlierPhases);
-        phases.addAll(transitions());
+        if (!harvested) phases.addAll(transitions());
         double left = last == null ? -1 : TypewriterTrial.round(last.flatDistance(request.destination()), 10);
         // 固定翼停在给目的地挑的那条跑道上就算开到了，跑道离目的地有多远照实写在 distance_left。
         boolean arrived = wing != null ? wing.arrived() : left >= 0 && left <= (airship ? ARRIVED_AIR : ARRIVED_GROUND);
@@ -525,7 +528,7 @@ final class TypewriterDrive implements VehicleDriver.Run {
             notes.add("不是按进近落的：还没到落点就碰到了地面");
         }
         if (flight != null) notes.addAll(0, flight.notes());
-        if (wing != null) notes.addAll(0, wing.notes());
+        if (wing != null && !harvested) notes.addAll(0, wing.notes());
         VehicleDriver.Takeoff takeoff = wing == null ? null
                 : new VehicleDriver.Takeoff(TypewriterTrial.round(wing.rolled(), 10), wing.liftoffSpeed(), wing.leftGround());
         VehicleDriver.Drove drove = new VehicleDriver.Drove(phases, landing, TypewriterTrial.round(traveled, 10),
