@@ -18,6 +18,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 public interface DigsBlocks {
 
+    /** 挖一格的耐心：动手挖了这么久（刻）还没挖下来就当这一格挖不动，换下一格。类别：玩家常识。 */
+    int DIG_PATIENCE_TICKS = 20 * 15;
+
     /** 为挖掉一格生成动作；做完时这一格已经是空气。 */
     Optional<Action> dig(BlockPos target);
 

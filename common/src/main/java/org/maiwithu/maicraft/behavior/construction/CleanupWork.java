@@ -57,7 +57,7 @@ final class CleanupWork extends ConstructionWork {
         return all;
     }
 
-    @Override protected long maxActionTicks() {
+    @Override protected long maxActionTicks(Action current) {
         return PER_BLOCK_TICKS;
     }
 

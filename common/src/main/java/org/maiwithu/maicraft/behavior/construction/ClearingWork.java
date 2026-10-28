@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
@@ -45,6 +46,8 @@ final class ClearingWork extends ConstructionWork {
     private Map<BlockPos, String> around = Map.of();
     /** 这一格挑的是一整片的中心：对准它的顶面挖，连锁的 3×3 正好是这一片；不是为 null，哪面看得见挖哪面。 */
     private Direction chainFace;
+    /** 挖到一半被自卫、吃饭这类事叫走过：人已离了跟前，回来先重新走近再挖。 */
+    private boolean interrupted;
 
     ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, List<PlannedCell> cells) {
         super(services, site, records);
@@ -53,9 +56,19 @@ final class ClearingWork extends ConstructionWork {
     }
 
     @Override protected ActionStatus advance(TickContext context) {
-        if (cell != null && step == Step.APPROACH) return clear();
-        if (cell != null) return settle();
-        return nextCell();
+        if (cell == null) return nextCell();
+        if (step == Step.APPROACH) {
+            // 挖到一半被叫走回来过：先重新走到这一格跟前再出手，不隔着老远接着挖
+            // （挖掘射线够不着，一格吃满施工的停滞闸）。
+            if (interrupted) {
+                interrupted = false;
+                begin(services.close().toward(digTarget(), permissions),
+                        "走回 " + cell.pos().toShortString() + " 跟前");
+                return ActionStatus.progressed();
+            }
+            return clear();
+        }
+        return settle();
     }
 
     // 挑下一格：没加载的跳过；现场已经对上的收下；受保护的、挖不动的记下来；都没问题就走过去。
@@ -85,12 +98,35 @@ final class ClearingWork extends ConstructionWork {
                 continue;
             }
             step = Step.APPROACH;
-            ApproachTarget target = chainFace == null ? ApproachTarget.ofBlock(pos) : ApproachTarget.ofBlockFace(pos, chainFace);
-            begin(services.close().toward(target, permissions), "走到 " + pos.toShortString() + " 跟前");
+            begin(services.close().toward(digTarget(), permissions), "走到 " + pos.toShortString() + " 跟前");
             return ActionStatus.progressed();
         }
         cell = null;
         return ActionStatus.done();
+    }
+
+    // 走近的目标与采掘挖格是同一份：普通格按「会被拆掉的方块」靠近——不把要挖的那格上面当站位，
+    // 下面是岩浆或看不见底的洞也不站上去挖。连锁挖的中心格例外：要对准顶面连成一片，靠近按那一面挑位。
+    private ApproachTarget digTarget() {
+        return chainFace == null ? ApproachTarget.ofBlockToDig(cell.pos())
+                : ApproachTarget.ofBlockFace(cell.pos(), chainFace);
+    }
+
+    // 挖的这一下有限时：够不着、被挡住这类挖不下来的格到点记做不了、换下一格，
+    // 不让一格吃满施工的停滞闸（耐心与采掘挖一格同一条）。
+    @Override protected long maxActionTicks(Action current) {
+        return step == Step.DIG || step == Step.DISMANTLE ? DigsBlocks.DIG_PATIENCE_TICKS : Long.MAX_VALUE;
+    }
+
+    // 挖到一半被自卫、吃饭这类事插队叫走：人会被带离跟前，手上那一下也早松了。
+    // 把挖的那一下收掉，回来时重新走近再挖；走近那一步被叫走的，走到动作自己接着走，不用重走。
+    @Override public void pause() {
+        super.pause();
+        if (cell != null && step != Step.APPROACH) {
+            discardCurrent();
+            interrupted = true;
+            step = Step.APPROACH;
+        }
     }
 
     // 走到跟前后出手：先问模组工具认不认领，不认领就连锁挖这一格。

@@ -83,9 +83,6 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
 
         private enum Stage { APPROACH, DIG, PICK_UP, DONE }
 
-        /** 一格挖了这么久（刻）还没挖下来就跳过它挖下一格：看不着、够不着的那一格不把整批卡住。 */
-        private static final int DIG_GIVE_UP_TICKS = 20 * 15;
-
         private final List<BlockPos> cells;
         private final Permissions permissions;
         /** 连锁挖到的格能不能挖；为空时一格一格普通地挖。 */
@@ -146,7 +143,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
             ActionStatus status = step.tick(context);
             // 一格挖了十五秒还没下来（树冠里的原木看不着又开不出路、高处够不着）：跳过这一格挖下一格，
             // 整批挖完照样去捡。原先一直挖同一格，一分钟没进展整个拿东西失败，前面挖下的也没捡。
-            if (status instanceof ActionStatus.Running && stage == Stage.DIG && ++digTicks > DIG_GIVE_UP_TICKS) {
+            if (status instanceof ActionStatus.Running && stage == Stage.DIG && ++digTicks > DigsBlocks.DIG_PATIENCE_TICKS) {
                 return giveUp(Problem.of(Problem.Kind.STUCK, cell().toShortString()
                         + " 挖了十五秒都没挖下来（看不着或够不着）", null));
             }

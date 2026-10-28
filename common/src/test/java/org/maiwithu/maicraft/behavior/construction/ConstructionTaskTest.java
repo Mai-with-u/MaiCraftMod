@@ -178,8 +178,16 @@ class ConstructionTaskTest {
 
         @Override public Optional<Action> dig(BlockPos target) {
             digCalls++;
+            if (nextDig != null) {
+                Action given = nextDig;
+                nextDig = null;
+                return Optional.of(given);
+            }
             return Optional.of(new Immediate(() -> world.put(target, AIR)));
         }
+
+        /** 下一次挖交出的动作，只用一次；没给就一刻挖掉。用来演挖着不动的格。 */
+        Action nextDig;
         // 连锁挖替身：模组那一批每一格清障都同意才整批挖掉，不然和普通地挖一样只挖触发格。
         @Override public boolean chains() { return chain != null; }
         @Override public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
@@ -209,7 +217,10 @@ class ConstructionTaskTest {
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         /** 下一次走近交出的动作，只用一次；没给就一刻走到。用来演"施工正悬空走在半路"。 */
         Action approach;
+        /** 走近被叫了几次：清障挖到一半被打断，回来要先重新走近再挖。 */
+        int towardCalls;
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
+            towardCalls++;
             if (approach == null) return new Immediate(() -> { });
             Action given = approach;
             approach = null;
@@ -291,6 +302,12 @@ class ConstructionTaskTest {
     private record Failing(String why) implements Action {
         @Override public ActionStatus tick(TickContext context) { return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, why)); }
         @Override public String describe() { return "替身失败"; }
+    }
+
+    /** 一直挖着不下来的动作：演够不着、被挡住的格。 */
+    private static final class 挖着不动 implements Action {
+        @Override public ActionStatus tick(TickContext context) { return ActionStatus.running(); }
+        @Override public String describe() { return "挖着不动"; }
     }
 
     private static TaskResult run(Fake fake, Blueprint blueprint) {
@@ -713,6 +730,49 @@ class ConstructionTaskTest {
         assertEquals(0, fake.digCalls, "认领了就用工具拆，不挖");
         assertEquals(1, count(result, Change.Kind.BLOCK_BROKEN));
         assertEquals(1, fake.carried("minecraft:dirt"), "拆下的东西进了背包");
+    }
+
+    @Test
+    void 清障挖到一半被打断_回来先重新走到跟前再挖() {
+        // 自卫、吃饭这类事插队把人带离了跟前：回来不能隔着老远接着挖（挖掘射线够不着，一格吃满施工的停滞闸），
+        // 先重新走近这一格再挖，这一格照常清掉。
+        Fake fake = new Fake().ground(63);
+        fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.carried.put("minecraft:stone", 1);
+        fake.nextDig = new 挖着不动();
+        Task task = new ConstructionTask(new ConstructionInput(
+                wall(STONE, new BlockPos(0, 64, 0)), Permissions.DEFAULT, "施工"), fake.services());
+        long tick = 1;
+        for (; tick <= 100 && fake.digCalls == 0; tick++) task.tick(at(tick++));
+        assertTrue(fake.digCalls > 0, "挖已经开始了");
+        int towardBeforePause = fake.towardCalls;
+        task.pause();
+        // 恢复推进：先看到重新走近的这一趟，再轮到第二次挖。
+        for (; tick <= 5000 && fake.towardCalls <= towardBeforePause; tick++) task.tick(at(tick++));
+        assertEquals(towardBeforePause + 1, fake.towardCalls, "回来先重新走近了一趟");
+        TaskResult result = null;
+        for (; tick <= 5000 && result == null; tick++) {
+            if (task.tick(at(tick++)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertTrue(result != null, "五千刻还没做完");
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(2, fake.digCalls, "回来后重新挖");
+        assertEquals(STONE, fake.state(new BlockPos(0, 64, 0)), "这一格清掉后砌上了");
+        assertEquals(1, count(result, Change.Kind.BLOCK_PLACED), "清完照常砌上");
+    }
+
+    @Test
+    void 挖不下来的格限时让路_换下一格不再吃满停滞闸() {
+        // 够不着也挖不下来的一格：到点记做不了，整阶段收场交出问题，不在这一格上耗到停滞闸熔断。
+        Fake fake = new Fake().ground(63);
+        fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());
+        fake.nextDig = new 挖着不动();
+        fake.unobtainable.add("minecraft:stone");
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Blocks.DIRT, fake.state(new BlockPos(0, 64, 0)).getBlock(), "挖不动的格没动");
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("做了 300 刻还没做成")),
+                details(result).problems().toString());
     }
 
     /** 放置规则替身：认一种方块，说拿什么放、对着哪一格放、要等哪几格。 */

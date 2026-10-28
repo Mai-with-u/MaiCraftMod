@@ -41,8 +41,16 @@ abstract class ConstructionWork implements Action {
         if (stopping) action.stopSafely();
     }
 
-    /** 一个小动作最多做多少刻，到点按没做成交给 {@link #failed}；默认不限。 */
-    protected long maxActionTicks() {
+    /** 把手上那一下收掉、不再推进：被打断后要换一步重做时用，收尾与记账由各阶段自己定。 */
+    protected final void discardCurrent() {
+        if (current != null) {
+            current.close();
+            current = null;
+        }
+    }
+
+    /** 手上这个小动作最多做多少刻，到点按没做成交给 {@link #failed}；默认不限。 */
+    protected long maxActionTicks(Action current) {
         return Long.MAX_VALUE;
     }
 
@@ -57,12 +65,13 @@ abstract class ConstructionWork implements Action {
         if (current == null) return stopping ? ActionStatus.running() : advance(context);
         // 一个小动作卡在原地太久（例如收临时方块时人已经不在跟前，挖掘一直"还没开始挖"）：
         // 收掉它按没做成交给本阶段换下一个，不让整个施工被外层的卡住判定掐掉。
-        if (++currentTicks > maxActionTicks()) {
+        long limit = maxActionTicks(current);
+        if (++currentTicks > limit) {
             String stalled = doing;
             current.close();
             current = null;
             return failed(context, new ActionStatus.Failed(Problem.of(Problem.Kind.STUCK,
-                    stalled + "做了 " + maxActionTicks() + " 刻还没做成")));
+                    stalled + "做了 " + limit + " 刻还没做成")));
         }
         ActionStatus status = current.tick(context);
         return switch (status) {
