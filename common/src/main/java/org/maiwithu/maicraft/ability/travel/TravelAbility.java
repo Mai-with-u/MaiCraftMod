@@ -208,7 +208,7 @@ public final class TravelAbility implements AbilityModule {
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
             TravelDestination destination = roomy(ready.destination());
             if (walksOnly(via)) {
-                return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit));
+                return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit, goal.permissions()));
             }
             return new StepDecision.Run(new JourneyInput(new JourneyTask.Journey(destination, via,
                     choice.options(), goal.permissions(), maxSeconds(goal)), permit));
@@ -330,7 +330,8 @@ public final class TravelAbility implements AbilityModule {
     @Override
     public void registerTasks(TaskFactories factories) {
         // 每次运行新建出行任务；走到与垫方块记录通过闭包交给任务，不经全局单例。
-        factories.register(TravelInput.class, input -> travelTask(input.destination(), input.maxSeconds(), input.permit()));
+        factories.register(TravelInput.class,
+                input -> travelTask(input.destination(), input.maxSeconds(), input.permit(), input.permissions()));
         factories.register(JourneyInput.class, input -> journeyTask(input.journey(), input.permit()));
         factories.register(OpenSkyInput.class, input -> {
             // 回露天：旁边见天先走出去，许可动土时挖楼梯上去，再不行找路走到远处的露天落脚处。
@@ -345,15 +346,17 @@ public final class TravelAbility implements AbilityModule {
         });
     }
 
-    // 只走路的一趟：挖垫、泅渡、落地救援、脱困照出行任务的那一套。
-    private Task travelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit) {
-        return new TravelTask(destination, maxSeconds, permit, walks, placedBlocks, progressListener, world);
+    // 只走路的一趟：挖垫、泅渡、落地救援、脱困照出行任务的那一套；许可原件带上，长爬升拆爬升段挖楼梯时用。
+    private Task travelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
+            Permissions permissions) {
+        return new TravelTask(destination, maxSeconds, permit, walks, placedBlocks, progressListener,
+                world, stairsUp, permissions);
     }
 
     // 换交通的行程：走路的几段每段新建一个出行任务，挖垫、泅渡、落地救援照只走路的那一套。
     private Task journeyTask(JourneyTask.Journey journey, TerrainPermit permit) {
         return new JourneyTask(journey, world, modes,
-                destination -> travelTask(destination, journey.maxSeconds(), permit));
+                destination -> travelTask(destination, journey.maxSeconds(), permit, journey.permissions()));
     }
 
     /** 跨维度那一程前后在同一个维度里的那段怎么建；离线测试从这里拿来直接看它建出什么任务。 */
@@ -369,7 +372,7 @@ public final class TravelAbility implements AbilityModule {
         @Override public Task toward(TravelDestination destination, Permissions permissions, int maxSeconds) {
             TerrainPermit permit = TerrainPermit.of(permissions);
             if (walksOnly(null)) {
-                return travelTask(destination, maxSeconds, permit);
+                return travelTask(destination, maxSeconds, permit, permissions);
             }
             return journeyTask(new JourneyTask.Journey(destination, null, Map.of(), permissions, maxSeconds), permit);
         }

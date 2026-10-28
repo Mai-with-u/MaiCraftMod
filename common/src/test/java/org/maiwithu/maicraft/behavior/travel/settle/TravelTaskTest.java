@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel.settle;
 
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
@@ -15,17 +16,23 @@ import org.maiwithu.maicraft.behavior.travel.TravelFakes.FakeWorld;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.ProgressRecorder;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.ScriptedWalk;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes.TestTick;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,6 +67,46 @@ class TravelTaskTest {
         DestinationResolver resolver = new DestinationResolver(world, places, seen);
         var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
         return new TravelTask(ready.destination(), 0, taskPermit, walks, placed, progress);
+    }
+
+    /** 往上挖楼梯替身：爬到摆好的落脚点（或按给的问题挖不下去），记下被叫了几次。 */
+    private final class Stairs implements DigsStairsUp {
+        int calls;
+        /** 这一段爬升爬到的落脚点；爬升的停点判断在这一点上算，真就算爬完了。 */
+        BlockPos climbedTo = new BlockPos(0, 105, 0);
+        /** 摆了就是楼梯挖不下去，如实报这个失败。 */
+        Problem stops;
+
+        @Override public Action digUp(Predicate<BlockPos> outside, Permissions permissions, TaskRecords records) {
+            calls++;
+            return new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    if (stops != null) return ActionStatus.failed(stops);
+                    // 楼梯挖掉的方块经记账口进变化，替身摆一格石头的账。
+                    records.change(new Change(Change.Kind.BLOCK_BROKEN, "minecraft:stone", 61, "往上挖楼梯挖掉的"));
+                    world.spot = WorldPosition.here(climbedTo.getX(), climbedTo.getY(), climbedTo.getZ());
+                    return outside.test(climbedTo) ? ActionStatus.done() : ActionStatus.running();
+                }
+
+                @Override public String describe() {
+                    return "往上挖楼梯";
+                }
+            };
+        }
+    }
+
+    private final Stairs stairs = new Stairs();
+
+    /** 接上挖楼梯的出行任务：给全 y 的台地坐标当目的地，角色摆在坑底。 */
+    private TravelTask taskWithStairs(Target target, Permissions permissions) {
+        DestinationResolver resolver = new DestinationResolver(world, places, seen);
+        var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, stairs, permissions);
+    }
+
+    /** 演一段一直走不动的路：报告取完后留在原地，空转计时到点就判卡住。 */
+    private void stallAt(BlockPos feet) {
+        walks.enqueue(new ScriptedWalk(WalkReport.onTheWay(feet, false)));
     }
 
     /** 推进到出结果为止（最多几十刻），返回最终结果。 */
@@ -427,5 +474,57 @@ class TravelTaskTest {
         TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
         assertTrue(details.crossedWater());
         assertTrue(result.summary().contains("泅渡"));
+    }
+
+    @Test
+    void longClimbSplitsIntoStairsLegThenWalksOn() {
+        // 坑底直上台地（高差 88）一次规划算不出：空转要收场前拆一段爬升，挖楼梯爬到中途落脚点，
+        // 再从新落脚点重新算路走完；不在崖壁下空转几百刻就判死整趟。
+        world.spot = WorldPosition.here(-12, 44, 49);
+        stairs.climbedTo = new BlockPos(0, 105, 0);
+        stallAt(new BlockPos(-12, 44, 49));
+        walks.enqueue(new ScriptedWalk(WalkReport.arrived(new BlockPos(2, 132, -7), false)));
+        TravelTask travel = taskWithStairs(new Target.Position(2, 132, -7, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 2000);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(1, stairs.calls, "拆了一段爬升");
+        assertEquals(2, walks.started.size(), "爬完从落脚点重新开始一段走到");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_BROKEN),
+                "楼梯挖掉的方块进变化");
+    }
+
+    @Test
+    void stairsThatNeverWorkEndsWithReachedHeightAfterAllLegs() {
+        // 楼梯每个方向都挖不下去：拆满几段都原地不动，最后如实收场，说明带拆了几段、爬到多高。
+        world.spot = WorldPosition.here(-12, 44, 49);
+        stairs.stops = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "楼梯挨着水，挖开会灌进楼梯");
+        stallAt(new BlockPos(-12, 44, 49));
+        TravelTask travel = taskWithStairs(new Target.Position(2, 132, -7, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 3200);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("爬了 3 段"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("爬到 (-12, 44, 49)"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("还高 88 级"), () -> result.problem().message());
+    }
+
+    @Test
+    void temporaryPermitDoesNotSplitClimbLegs() {
+        // 只许垫临时方块不许挖：拆不了爬升段，长爬升照旧按走不通收场，不去动不许动的地形。
+        world.spot = WorldPosition.here(-12, 44, 49);
+        stallAt(new BlockPos(-12, 44, 49));
+        Permissions temporary = Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY,
+                null, null, null, null, null);
+        TravelTask travel = taskWithStairs(new Target.Position(2, 132, -7, null), temporary);
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(0, stairs.calls, "没拆爬升段");
+        assertFalse(result.problem().message().contains("爬"), () -> result.problem().message());
     }
 }

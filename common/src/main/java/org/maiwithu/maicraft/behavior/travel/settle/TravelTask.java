@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel.settle;
 
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -11,6 +12,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.calc.StandingDry;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -38,6 +40,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
  * <p>到达以走到运行的结论为准（站实落地才算到），出行不另写一套判断。
  * 进展以剩余距离为信号：离目的地更近了才算前进，在原地打转会按卡住收场，
  * 收场说明带上现场——停在哪、离目的地还差多少、许可能不能动土；目标高度够不着时写明高度。
+ * 目的地高得一次规划算不收敛时（坑底直上台地这类长爬升），空转要收场前拆出一段爬升：
+ * 交往上挖楼梯爬到中途落脚点，再从新落脚点接着算路，拆满还没到就带着已爬到的高度如实收场。
  * 中途停下分两步：先向走到请求停，等落到安全边界（落地、走完正在跨的一步）才真停，
  * 停下后按取消结算，写明实测停在哪、离目的地还差多远；被生存需求打断时走到运行先把自己停稳，
  * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；路上捡进背包与从背包用掉的
@@ -45,8 +49,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
  */
 public final class TravelTask extends PhasedTask<TravelTask.Phase> implements TorchesAlongTheWay {
 
-    /** 出行的阶段：在路上。 */
-    public enum Phase { WALK }
+    /** 出行的阶段：在路上，或一段爬升（挖楼梯往上爬到中途落脚点）。 */
+    public enum Phase { WALK, CLIMB }
 
     /** 连续半分钟离目的地没有更近，就算在原地打转。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
@@ -59,6 +63,14 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private final WalkTo walks;
     private final ReadsPlacedBlocks placedBlocks;
     private final TravelProgressListener progressListener;
+    /** 往上挖楼梯；连同许可一起给了，长爬升规划不收敛时才拆得出爬升段。没给为 null。 */
+    private final DigsStairsUp stairsUp;
+    /** 这次任务的许可：爬升段上每一格动之前都过它。 */
+    private final Permissions permissions;
+    /** 已经拆出去的爬升段数。 */
+    private int climbLegs;
+    /** 这段爬升里离目的地最近的一次还差多少级：再近一级以上才算爬升里的进展。 */
+    private int bestClimbRemaining = Integer.MAX_VALUE;
 
     /** 读地表高度与角色在哪：远程出行按地表一段一段走；没有为 null（只按目的地走一整段）。 */
     private final TravelWorldView world;
@@ -97,6 +109,17 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
             WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
             TravelWorldView world) {
+        this(destination, maxSeconds, permit, walks, placedBlocks, progressListener, world, null, null);
+    }
+
+    /**
+     * @param world       读地表高度与角色位置；给了就把远程出行分成地表上的一小段一小段
+     * @param stairsUp    往上挖楼梯；连同下面的许可一起给了，长爬升规划不收敛时才拆得出爬升段
+     * @param permissions 这次任务的许可：爬升段上每一格动之前都过它
+     */
+    public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
+            WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            TravelWorldView world, DigsStairsUp stairsUp, Permissions permissions) {
         super("出行", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS,
                 maxSeconds > 0 ? maxSeconds * 20L : Long.MAX_VALUE));
         this.world = world;
@@ -105,6 +128,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         this.walks = walks;
         this.placedBlocks = placedBlocks;
         this.progressListener = progressListener;
+        this.stairsUp = stairsUp;
+        this.permissions = permissions;
     }
 
     /** 请求中途停下：先向走到请求，落到安全边界才真停，随后按取消结算。 */
@@ -114,7 +139,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     @Override
     protected Action enter(Phase phase) {
-        return startWalk();
+        // 爬升段交往上挖楼梯：爬到离目的地近到一次规划接得住就停，剩下的交回走路重新算。
+        return phase == Phase.CLIMB
+                ? stairsUp.digUp(ClimbSegments.stopWhenClose(destination), permissions, records())
+                : startWalk();
     }
 
     /** 把目的地编译成导航目标交给走到；出行不碰寻路内部。 */
@@ -159,7 +187,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
-        return tickWalk(context);
+        return phase == Phase.CLIMB ? tickClimb(context) : tickWalk(context);
     }
 
     private Next<Phase> tickWalk(TickContext context) {
@@ -198,8 +226,62 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         return switch (status) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> settleArrival(report);
-            case ActionStatus.Failed failed -> failWithJourney(failed.problem());
+            case ActionStatus.Failed failed -> afterWalkFailed(failed.problem());
         };
+    }
+
+    /** 这段走路失败了：目的地还高得远、许能动土就先拆一段爬升再重新算路；不然如实失败。 */
+    private Next<Phase> afterWalkFailed(Problem problem) {
+        if (maySplitLeg()) {
+            return Next.go(Phase.CLIMB, "一次算不出整条路，先挖楼梯爬一段");
+        }
+        return failWithJourney(problem);
+    }
+
+    /** 推进一段爬升：挖楼梯逐刻往上走，爬到哪、离目的地还差几级如实记账；爬完或爬不动都交回走路重新算路。 */
+    private Next<Phase> tickClimb(TickContext context) {
+        if (stopRequested) {
+            // 中途叫停：先交回走路，下一步的停下流程照旧走走到那套，不在崖壁的楼梯上另写一套停下。
+            return Next.go(Phase.WALK, "叫停了，先回到走路再停");
+        }
+        ActionStatus status = runAction(context);
+        noteClimbSpot();
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        climbLegs++;
+        if (status instanceof ActionStatus.Failed failed) {
+            // 楼梯挖不下去（挨着液体、头顶压着会掉的方块、几个方向都不行）：记下经过，从现在站的地方接着走路。
+            recordAttempt("挖楼梯爬一段", failed.problem().message());
+        } else {
+            recordProgress("爬升段爬到 " + shortSpot(lastFeet));
+        }
+        return Next.go(Phase.WALK, "从爬升落脚点重新算路");
+    }
+
+    /** 爬升这一刻的现场：人爬到哪了；离目的地再近一级以上才算进展，空转计时据此刷新。 */
+    private void noteClimbSpot() {
+        if (world == null) return;
+        WorldPosition spot = world.currentSpot();
+        if (spot == null) return;
+        BlockPos feet = new BlockPos(spot.x(), spot.y(), spot.z());
+        lastFeet = feet;
+        int left = ClimbSegments.remaining(destination, feet);
+        if (bestClimbRemaining - left >= 1) {
+            bestClimbRemaining = left;
+            recordProgress("爬升段：离目的地还高 " + left + " 级");
+        }
+        progressListener.onTravelProgress(new TravelProgress("挖楼梯爬升", feet, remainingFromHere(), crossedWater));
+    }
+
+    /** 要不要拆一段爬升：接得上挖楼梯、许能动土、还没拆满、目的地确实还高出一次规划盖得住的范围。 */
+    private boolean maySplitLeg() {
+        return stairsUp != null && mayDig() && climbLegs < ClimbSegments.MAX_LEGS
+                && lastFeet != null && ClimbSegments.needsLeg(destination, lastFeet);
+    }
+
+    /** 挖楼梯要能挖天然方块：只许垫临时方块（temporary）不算。 */
+    private boolean mayDig() {
+        return permissions != null && (permissions.changeBlocks() == Permissions.BlockChanges.NATURAL
+                || permissions.changeBlocks() == Permissions.BlockChanges.ANY);
     }
 
     /** 中途停下：先请求停，继续逐刻推进走到让它落到安全边界，停稳后按取消结算。 */
@@ -239,7 +321,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         return Next.fail(problem);
     }
 
-    /** 空转满时限的收尾：换成本领域的现场说明，只给不出更好解释时沿用进度跟踪的通用说法。 */
+    /** 空转满时限的收尾：换成本领域的现场说明，只给不出更好解释时沿用进度跟踪的通用说法；
+     *  拆过爬升段还是到不了时，说明带上拆了几段、爬到多高。 */
     @Override
     protected Problem noProgressProblem(ProgressTracker.Status status) {
         Problem generic = super.noProgressProblem(status);
@@ -251,7 +334,17 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
             default -> 0;
         };
         Problem judged = TravelStuckCheck.judge(destination, permit, lastFeet, lastProgress, idleTicks);
-        return judged == null ? generic : judged;
+        Problem underlying = judged == null ? generic : judged;
+        return climbLegs == 0 || lastFeet == null
+                ? underlying
+                : ClimbSegments.stillShort(destination, lastFeet, climbLegs, underlying);
+    }
+
+    /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走，不把长爬升一次判死。 */
+    @Override
+    protected Next<Phase> beforeGivingUp(Problem problem) {
+        if (stopRequested || !maySplitLeg()) return null;
+        return Next.go(Phase.CLIMB, "长时间没有走近，先挖楼梯爬一段");
     }
 
     /** 记录这一刻的行程观察：泅渡、剩余距离、逐刻进展，垫块与背包的变化逐刻记账。 */
@@ -400,6 +493,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     @Override
     protected String describePhase(Phase value) {
+        if (value == Phase.CLIMB) return "在路上：挖楼梯爬一段，去" + destination.describe();
         return stopRequested ? "正在安全停下" : "在路上：去" + destination.describe();
     }
 

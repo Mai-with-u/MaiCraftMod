@@ -235,7 +235,8 @@ class TravelAbilityTest {
         TaskFactories factories = new TaskFactories();
         ability.registerTasks(factories);
         TravelInput input = new TravelInput(
-                TravelDestination.confirmed(new WorldPosition(1, 2, 3, null), 2.0), 0, TerrainPermit.NATURAL);
+                TravelDestination.confirmed(new WorldPosition(1, 2, 3, null), 2.0), 0, TerrainPermit.NATURAL,
+                Permissions.DEFAULT);
 
         assertTrue(factories.supports(TravelInput.class));
         Task task = factories.create(input);
