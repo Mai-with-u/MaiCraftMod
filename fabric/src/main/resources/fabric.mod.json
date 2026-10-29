@@ -15,7 +15,8 @@
       "org.maiwithu.maicraft.fabric.MaiCraftFabricClient"
     ],
     "fabric-gametest": [
-      "org.maiwithu.maicraft.fabric.gametest.BlockOwnershipGameTests"
+      "org.maiwithu.maicraft.fabric.gametest.BlockOwnershipGameTests",
+      "org.maiwithu.maicraft.fabric.gametest.ServerLinkGameTests"
     ]
   },
   "mixins": [

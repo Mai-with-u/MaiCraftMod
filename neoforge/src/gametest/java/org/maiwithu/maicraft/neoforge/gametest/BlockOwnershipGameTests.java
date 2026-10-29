@@ -33,4 +33,19 @@ public final class BlockOwnershipGameTests {
     public static void bedBothHalvesRecorded(GameTestHelper helper) {
         BlockOwnershipGameChecks.bedBothHalvesRecorded(helper);
     }
+
+    @GameTest(template = "empty9x7x9", timeoutTicks = 200)
+    public static void saveAndReloadKeepsOwners(GameTestHelper helper) {
+        BlockOwnershipGameChecks.saveAndReloadKeepsOwners(helper);
+    }
+
+    @GameTest(template = "empty9x7x9", timeoutTicks = 100)
+    public static void brokenOwnershipFileStartsEmpty(GameTestHelper helper) {
+        BlockOwnershipGameChecks.brokenOwnershipFileStartsEmpty(helper);
+    }
+
+    @GameTest(template = "empty9x7x9", timeoutTicks = 100)
+    public static void queryRejectsFarChunksAndBadRequests(GameTestHelper helper) {
+        BlockOwnershipGameChecks.queryRejectsFarChunksAndBadRequests(helper);
+    }
 }

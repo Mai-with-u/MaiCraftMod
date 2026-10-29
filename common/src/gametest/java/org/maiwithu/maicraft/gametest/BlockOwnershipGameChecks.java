@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.gametest;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
@@ -10,21 +15,21 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.gametest.framework.GameTestHelper;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BedPart;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.level.storage.LevelResource;
 
+import org.maiwithu.maicraft.network.ServerOperationException;
 import org.maiwithu.maicraft.server.BlockOwnershipRecord;
+import org.maiwithu.maicraft.server.OwnershipFile;
 import org.maiwithu.maicraft.server.OwnershipQuery;
 import org.maiwithu.maicraft.server.ServerLinkServices;
 
@@ -96,23 +101,99 @@ public final class BlockOwnershipGameChecks {
         helper.succeed();
     }
 
-    /** 造一个真实的服务端玩家并挪进测试区的角落：只读查询只答角色附近的区块，玩家得站在要问的格子旁。
-     * 站角落而不是格子本身：玩家的碰撞箱盖住放置目标格时，原版判定无处可放，链路走不下去。 */
+    /** 造一个真实的服务端玩家并挪进测试区的角落。 */
     private static ServerPlayer mockPlayerInside(GameTestHelper helper) {
-        @SuppressWarnings("removal")
-        ServerPlayer player = helper.makeMockServerPlayerInLevel();
-        BlockPos at = helper.absolutePos(new BlockPos(1, 1, 1));
-        player.teleportTo(helper.getLevel(), at.getX() + 0.5, at.getY(), at.getZ() + 0.5, 0.0F, 0.0F);
-        return player;
+        return GameTestPlayers.inside(helper);
     }
 
-    /** 让玩家像右键放置一样走一遍原版的方块物品放置路径，放置钩子就在这条路上。
-     * 服务端上放置成功返回的是 CONSUME 而非 SUCCESS（sidedSuccess 按端取值），只认"这次动作成立"。 */
+    /** 让玩家走一遍原版的方块物品放置路径，放置钩子就在这条路上。 */
     private static boolean placeBlockAs(ServerPlayer player, Item item, BlockPos support, Direction face) {
-        ItemStack held = new ItemStack(item);
-        BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(support.relative(face)), face, support, false);
-        BlockPlaceContext context = new BlockPlaceContext(player, InteractionHand.MAIN_HAND, held, hit);
-        return ((BlockItem) item).place(context).consumesAction();
+        return GameTestPlayers.placeAs(player, item, support, face);
+    }
+
+    /** 归属记录跟着存档走：放置后存盘，像重启后的首刻一样从盘上读回，人还是那个人。 */
+    public static void saveAndReloadKeepsOwners(GameTestHelper helper) {
+        ServerPlayer player = mockPlayerInside(helper);
+        helper.setBlock(4, 2, 4, Blocks.STONE);
+        BlockPos target = helper.absolutePos(new BlockPos(4, 3, 4));
+        if (!placeBlockAs(player, Items.STONE, target.below(), Direction.UP)) {
+            helper.fail("原版放置没有成功，链路没走到记录那一步");
+        }
+        MinecraftServer server = helper.getLevel().getServer();
+        String dimension = helper.getLevel().dimension().location().toString();
+        // 与 OwnershipSaver 拍快照后写盘走同一段代码；这里在服务器线程上同步存，不等后台写盘线程。
+        OwnershipFile file = OwnershipFile.of(server);
+        file.saveIfDirty(ServerLinkServices.ownership(server));
+        BlockOwnershipRecord reloaded = file.load();
+        Optional<BlockOwnershipRecord.Owner> owner = reloaded.ownerOf(dimension, target);
+        if (owner.isEmpty() || !owner.get().playerId().equals(player.getUUID())) {
+            helper.fail("存盘读回后这格的归属丢了或记成了别人：" + target);
+        }
+        BlockPos neverPlaced = target.above(3);
+        if (reloaded.ownerOf(dimension, neverPlaced).isPresent()) {
+            helper.fail("没放过方块的一格在读回的记录里有了归属：" + neverPlaced);
+        }
+        helper.succeed();
+    }
+
+    /** 存档文件坏掉不挡开服：读不出来按空记录开始，不猜、不崩；内存里的记录不受坏文件影响。 */
+    public static void brokenOwnershipFileStartsEmpty(GameTestHelper helper) {
+        MinecraftServer server = helper.getLevel().getServer();
+        String dimension = helper.getLevel().dimension().location().toString();
+        // 先经真实放置确保盘上有一份有效文件，再把它写坏。
+        ServerPlayer player = mockPlayerInside(helper);
+        helper.setBlock(4, 2, 4, Blocks.STONE);
+        BlockPos target = helper.absolutePos(new BlockPos(4, 3, 4));
+        if (!placeBlockAs(player, Items.STONE, target.below(), Direction.UP)) {
+            helper.fail("原版放置没有成功，链路没走到记录那一步");
+        }
+        OwnershipFile file = OwnershipFile.of(server);
+        file.saveIfDirty(ServerLinkServices.ownership(server));
+        // 与 OwnershipFile 的存盘文件同名：名字改了这里要一起改，测试会大声失败提醒。
+        Path fileLocation = server.getWorldPath(LevelResource.ROOT).resolve("data").resolve("maicraft_block_owners.dat");
+        try {
+            Files.writeString(fileLocation, "这不是 NBT", StandardCharsets.UTF_8);
+        } catch (IOException writeFailure) {
+            helper.fail("写坏存档文件失败：" + writeFailure);
+        }
+        BlockOwnershipRecord reloaded = file.load();
+        if (reloaded.ownerOf(dimension, target).isPresent()) {
+            helper.fail("坏文件读出来不该有任何归属记录");
+        }
+        if (ServerLinkServices.ownership(server).ownerOf(dimension, target).isEmpty()) {
+            helper.fail("内存里的归属记录不该被坏文件影响");
+        }
+        helper.succeed();
+    }
+
+    /** 查询的边界：远区块连有没有记录都不透露；坏请求按"没执行"回，不猜。 */
+    public static void queryRejectsFarChunksAndBadRequests(GameTestHelper helper) {
+        ServerPlayer player = mockPlayerInside(helper);
+        OwnershipQuery query = new OwnershipQuery();
+        int playerChunkX = player.getBlockX() >> 4;
+        int playerChunkZ = player.getBlockZ() >> 4;
+        assertRejected(helper, () -> query.apply(player, chunkBody(playerChunkX + 17, playerChunkZ)), "too_far");
+        assertRejected(helper, () -> query.apply(player, new JsonObject()), "bad_request");
+        assertRejected(helper, () -> query.apply(player, chunkBody(2_000_000, 0)), "bad_request");
+        helper.succeed();
+    }
+
+    private static JsonObject chunkBody(int chunkX, int chunkZ) {
+        JsonObject body = new JsonObject();
+        body.addProperty("chunk_x", chunkX);
+        body.addProperty("chunk_z", chunkZ);
+        return body;
+    }
+
+    private static void assertRejected(GameTestHelper helper, Supplier<JsonObject> call, String expectedCode) {
+        try {
+            call.get();
+            helper.fail("这次调用应该按「" + expectedCode + "」拒绝，却成功了");
+        } catch (ServerOperationException rejected) {
+            if (!expectedCode.equals(rejected.code())) {
+                helper.fail("拒绝码应是 " + expectedCode + "，实际是 " + rejected.code());
+            }
+        }
     }
 
     private static void assertOwnerIs(GameTestHelper helper, BlockOwnershipRecord ownership,
@@ -128,10 +209,7 @@ public final class BlockOwnershipGameChecks {
 
     /** 按这格所在区块问一次只读查询操作，走与客户端相同的入口与分页回答。 */
     private static JsonObject chunkAnswerFor(GameTestHelper helper, ServerPlayer player, BlockPos target) {
-        JsonObject body = new JsonObject();
-        body.addProperty("chunk_x", target.getX() >> 4);
-        body.addProperty("chunk_z", target.getZ() >> 4);
-        return new OwnershipQuery().apply(player, body);
+        return new OwnershipQuery().apply(player, chunkBody(target.getX() >> 4, target.getZ() >> 4));
     }
 
     private static void assertChunkAnswerNamesOwner(GameTestHelper helper, JsonObject answer,
