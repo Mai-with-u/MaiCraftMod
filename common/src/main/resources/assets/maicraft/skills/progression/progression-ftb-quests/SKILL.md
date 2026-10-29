@@ -31,7 +31,7 @@ metadata: {"requires-mods": "ftbquests"}
 ## 把任务做完
 
 - **自动完成的要求**（拿到某物品但不交、到某维度、杀生物、看着某样东西、拿到进度）：用正常玩法去做，任务书自己会检测，不用 `quest`；对这类要求下达 `quest` 会以 `NOT_POSSIBLE_HERE` 结束并说明该怎么完成。
-- **交物品**：先用 `obtain` 把要交的东西弄够，再下达 `quest`（`operation=submit`，`quest` 填任务编号，`requirement` 填那条要求的编号）。身上不够会以 `NEED_ITEM` 结束写清差多少，不会自己去弄。
+- **交物品**：先用 `obtain` 把要交的东西弄够（中间要隔几件别的事，就先用 `reserve` 把它预留下来，免得路上被垫掉、吃掉），再下达 `quest`（`operation=submit`，`quest` 填任务编号，`requirement` 填那条要求的编号）。身上不够会以 `NEED_ITEM` 结束写清差多少，不会自己去弄。
 - **手动勾选**：`operation=confirm`，同样给 `quest` 和 `requirement`。
 - **领奖**：`operation=claim`，`reward` 填本任务的根奖励编号（奖池里的子奖励不能单独领）。选择奖励不给 `choice` 时 Mod 会提问并列出候选，按对当前目标最有用的选；拿不准、两样差别很大时先确认。
 - 任务还不能开始（前置没完成、被屏蔽）时 `quest` 会带回任务书给的原因（`REFUSED_BY_GAME`），先去做前置。

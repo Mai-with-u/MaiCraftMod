@@ -36,6 +36,7 @@ description: 采矿：为铁、煤、钻石等矿物选对高度、找露出来�
 ## 安全线
 
 - 带足食物、备用镐再下深处；生命低于一半先退回亮处恢复。
+- 挖楼梯、长程挖矿时身上没镐，角色会先用身上的木板（或圆石）现做一把最便宜的再挖，石头挖一格就回本；攒着要用的木板、圆石先用 `reserve` 预留，现做和垫脚都不会动它们。
 - 岩浆附近不挖脚下与头顶的未知格，挖穿隔挡前看流向（`maicraft://knowledge/game_mechanics/fluid-flow`）。
 - 砾石、沙子会塌，挖下方方块前留意（`maicraft://knowledge/game_mechanics/gravity-blocks`）。
 - 以上资料用 `lookup`（`topic=knowledge`）按 `id` 读。
