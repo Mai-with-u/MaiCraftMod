@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.ToolFirstDigging;
 import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.machine.MachineVehicles;
@@ -264,7 +266,7 @@ public final class AbilityCatalog {
      * 清单里好几处共用的现场部件：靠近与换手、挖一格与捡掉落物、拿到物品的内需入口、
      * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢东西与存放的现场部件，以及腾地方。
      */
-    private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, LiveBlockDigging digging,
+    private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, DigsBlocks digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
             DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space,
@@ -298,8 +300,10 @@ public final class AbilityCatalog {
                 deps.character().backpack(), deps.hands().digTools());
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
         // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
-        LiveBlockDigging digging = new LiveBlockDigging(deps.hands().digging(),
-                deps.compat().breakAccelerators(playerServices));
+        // 现做工具包在外面：挖楼梯、清障、采掘带着这一趟的规模挖时，身上没有对路的工具、划算又有料就先做一把。
+        DigsBlocks digging = new ToolFirstDigging(new LiveBlockDigging(deps.hands().digging(),
+                deps.compat().breakAccelerators(playerServices)), deps.hands().digTools(), innerNeeds, deps.kept(),
+                deps.items().itemTags());
         ClientDropPickup drops = new ClientDropPickup(deps.character().context(), deps.travel().walks(),
                 deps.dropConfirmations());
         ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);

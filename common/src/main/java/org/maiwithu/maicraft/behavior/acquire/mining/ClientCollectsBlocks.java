@@ -191,8 +191,10 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                     // 连锁时整条矿脉、整根树干一起挖掉，掉落物集中在这一格，整批挖完一起捡。
                     // 收概率掉落的不连锁，挖的时候不拿剪刀和精准采集（拿了只掉方块自己）。
                     if (chanceDrops) yield digs.digForChanceDrops(cell());
-                    yield chainable == null ? digs.dig(cell())
-                            : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable);
+                    // 带上这一趟还要挖几格：身上没有对路的工具时按它算现做一把划不划算。
+                    DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(cells.size() - index, permissions, null);
+                    yield chainable == null ? digs.dig(cell(), prep)
+                            : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable, prep);
                 }
                 // 一下都没挖（每一格都被连锁或别人挖掉了）：没有这一下掉出来的东西要捡。
                 case PICK_UP -> dropsBefore == null ? Optional.empty() : Optional.of(drops.pickUpNewSince(dropsBefore));

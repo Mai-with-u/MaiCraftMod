@@ -164,8 +164,10 @@ final class ClearingWork extends ConstructionWork {
     // 挖这一格：装了连锁挖就按命中面 3×3 连锁（整片都是要清的格才连）；挖之前记下四周还排着的格，挖完复查。
     private ActionStatus dig() {
         around = queuedAround(cell.pos());
+        // 带上这一趟还要清几格：身上没有对路的工具时按它算现做一把划不划算，做了什么记进施工结果。
         Optional<Action> digging = services.digs().digChained(cell.pos(), chainFace,
-                BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable);
+                BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable,
+                new DigsBlocks.ToolPrep(queue.size() + 1, permissions, records));
         if (digging.isEmpty()) {
             site.unreachable(cell.pos(), "挖掘没接上，清不了");
             cell = null;

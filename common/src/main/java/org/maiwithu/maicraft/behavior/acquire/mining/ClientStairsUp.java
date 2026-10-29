@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
+import java.util.OptionalInt;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -250,7 +251,7 @@ public final class ClientStairsUp implements DigsStairsUp {
                 Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                         position(context, cell), blockType);
                 if (refused.isPresent()) return turnOrFinish(refused.get());
-                Optional<Action> dig = digs.dig(cell);
+                Optional<Action> dig = digs.dig(cell, toolPrep(context));
                 if (dig.isEmpty()) return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
                 step = dig.get();
                 diggingType = blockType;
@@ -261,6 +262,14 @@ public final class ClientStairsUp implements DigsStairsUp {
             stepTarget = nextFeet(feet, heading);
             step = site.stepTo(stepTarget);
             return ActionStatus.progressed();
+        }
+
+        // 这一趟大概还要挖几格：头顶露天的地面还高几格就还有几级、每级三格，读不到地面按这一级三格算。
+        // 身上没有对路的工具时按它算现做一把划不划算（石头一格就回本，泥土要挖一片才值得做锹）。
+        private DigsBlocks.ToolPrep toolPrep(TickContext context) {
+            OptionalInt surface = feet == null ? OptionalInt.empty() : site.surfaceY(context, feet);
+            int levels = surface.isPresent() ? Math.max(1, surface.getAsInt() - feet.getY()) : 1;
+            return new DigsBlocks.ToolPrep(3 * levels, permissions == null ? Permissions.DEFAULT : permissions, records);
         }
 
         // 挖完一格：挖掉了就记一格；挖不下来（够不着、被拒）这个方向记作挖不了，换个方向再挖。

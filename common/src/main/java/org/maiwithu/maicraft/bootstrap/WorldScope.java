@@ -2,7 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import net.minecraft.world.level.block.state.BlockState;
-import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -159,7 +159,7 @@ public final class WorldScope {
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
-            ReservedItems reserved, DigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
+            ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)

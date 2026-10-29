@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.util.Objects;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -21,7 +21,7 @@ record Hands(
         Supplier<BlockBreaking> digging,
         InputDriver inputs,
         /** 挖之前拿哪件工具：挑工具一份，挖格、走近站位、船上挖块都照它换手。 */
-        DigToolRule digTools) {
+        LiveDigToolRule digTools) {
 
     Hands {
         Objects.requireNonNull(interactions, "interactions");

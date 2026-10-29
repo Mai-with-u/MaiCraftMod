@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
+import java.util.OptionalInt;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -95,6 +96,11 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
         Action stepTo(BlockPos feet);
+
+        /** 这一列头顶露天的地面在多高（地表的世界 y）；读不到为空。往上挖楼梯按它估还要挖几级。 */
+        default OptionalInt surfaceY(TickContext context, BlockPos feet) {
+            return OptionalInt.empty();
+        }
     }
 
     /** 一直没挖到想要的方块时最多往下挖几级：沙漠、恶地底下的沙子和陶瓦可能很厚，不一直挖下去。 */
@@ -404,7 +410,7 @@ public final class ClientStairsDown implements DigsStairsDown {
                 Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                         position(context, cell), blockType);
                 if (refused.isPresent()) return turnOrFinish(refused.get());
-                Optional<Action> dig = tunnel == null ? digs.dig(cell) : chainDig(context, cell, row, way);
+                Optional<Action> dig = tunnel == null ? digs.dig(cell, toolPrep()) : chainDig(context, cell, row, way);
                 if (dig.isEmpty()) {
                     return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
                 }
@@ -479,7 +485,15 @@ public final class ClientStairsDown implements DigsStairsDown {
             chainTrigger = trigger;
             chainedRow = line;
             return digs.digChained(trigger, face, way.down() ? BreakAccelerator.ChainShape.DOWNWARD_LINE
-                    : BreakAccelerator.ChainShape.STRAIGHT_LINE, line::containsKey);
+                    : BreakAccelerator.ChainShape.STRAIGHT_LINE, line::containsKey, toolPrep());
+        }
+
+        // 这一趟大概还要挖几格：长程挖矿按到目标高度还剩几级、每级三格；采矿按还要的格数，至少一级三格。
+        // 身上没有对路的工具时按它算现做一把划不划算。
+        private DigsBlocks.ToolPrep toolPrep() {
+            int left = tunnel != null && feet != null ? 3 * Math.max(1, feet.getY() - tunnel.targetY())
+                    : Math.max(3, wantedCells - yielded);
+            return new DigsBlocks.ToolPrep(left, permissions == null ? Permissions.DEFAULT : permissions, null);
         }
 
         // 从触发格顺着挖的方向排下去的那一行：往下的不出这种矿的生成范围，横着的不超过通道长度；到第一格不合适的为止。

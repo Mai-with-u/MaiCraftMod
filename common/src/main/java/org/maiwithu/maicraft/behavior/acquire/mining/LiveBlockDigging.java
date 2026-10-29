@@ -53,6 +53,25 @@ public final class LiveBlockDigging implements DigsBlocks {
     }
 
     @Override
+    public Optional<Action> dig(BlockPos target, ToolPrep prep) {
+        // 带着这一趟的规模挖：挑工具按预计的格数算徒手也掉的方块换不换锹。
+        BlockBreaking digging = diggings.get();
+        digging.aimAt(target.immutable());
+        digging.expectBlocks(prep.expectedBlocks());
+        return Optional.of(new UntilGone(target.immutable(), digging));
+    }
+
+    @Override
+    public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
+            Predicate<BlockPos> mayBreak, ToolPrep prep) {
+        if (accelerators.isEmpty()) return dig(trigger, prep);
+        BlockBreaking digging = diggings.get();
+        digging.expectBlocks(prep.expectedBlocks());
+        return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, digging,
+                (context, cell) -> gone(context.player(), cell)));
+    }
+
+    @Override
     public Optional<Action> digForChanceDrops(BlockPos target) {
         // 要的是概率掉落：挖掘器挑工具时绕开剪刀和精准采集，有时运的先拿；其余和普通地挖一样。
         BlockBreaking digging = diggings.get();

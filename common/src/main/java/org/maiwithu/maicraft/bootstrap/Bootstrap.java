@@ -11,7 +11,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
-import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
@@ -165,7 +164,7 @@ public final class Bootstrap {
         // 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道；走路垫脚按它留够数，只垫多出来的。
         private final ItemsToKeep kept = reserved.plus(itemsInUse);
         // 挑工具一份：挖楼梯、清障、采掘、换气挖顶、走路挖路都照它换手；预留的工具不挑，掉落敏感按原版对照认。
-        private final DigToolRule digTools = new LiveDigToolRule(reserved, VanillaBlockDrops::dropSensitive);
+        private final LiveDigToolRule digTools = new LiveDigToolRule(reserved, VanillaBlockDrops::dropSensitive);
         private final BaritoneInternals walks = new BaritoneInternals(kept, digTools);
         // 先下车再走的走到：走路类目标起步时角色坐在载具上，先按住潜行下来再交内嵌寻路；各路走路请求都用这一份。
         private final WalkTo walksOnFoot = new DismountsBeforeWalks(walks,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
+import java.util.OptionalInt;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -19,6 +20,7 @@ import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
@@ -59,6 +61,14 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
         this.interactions = interactions;
         this.toMainhand = toMainhand;
         this.keeps = keeps;
+    }
+
+    @Override
+    public OptionalInt surfaceY(TickContext context, BlockPos feet) {
+        // 客户端区块带着高度图：这一列最高的挡路方块（不算树叶）就是头顶露天的地面。没加载的列读不到。
+        ClientLevel level = level(context);
+        if (level == null || !level.isLoaded(feet)) return OptionalInt.empty();
+        return OptionalInt.of(ClientSurfaceHeight.motionBlockingNoLeaves(level, feet.getX(), feet.getZ()));
     }
 
     @Override

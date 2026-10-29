@@ -43,13 +43,17 @@ public final class LiveDigToolRule implements DigToolRule {
 
     @Override
     public int slotFor(LocalPlayer player, BlockState state, int minimumDurability, int expectedBlocks) {
-        DigToolChoice.Block block = block(player, state);
-        // 挖不动的（基岩这类）不换工具，换了也挖不动。
-        if (block == null) return -1;
-        Inventory inventory = player.getInventory();
-        DigToolChoice.Verdict verdict = DigToolChoice.choose(candidates(inventory, state), inventory.selected, block,
-                expectedBlocks, minimumDurability);
+        DigToolChoice.Verdict verdict = verdict(player, state, minimumDurability, expectedBlocks);
         return verdict instanceof DigToolChoice.Verdict.Swap swap ? swap.slot() : -1;
+    }
+
+    /** 挑工具的结论三态；挖不动的（基岩这类）当主手合适、不换，换了也挖不动。现做工具按"没有合适的"那一态算账。 */
+    public DigToolChoice.Verdict verdict(LocalPlayer player, BlockState state, int minimumDurability, int expectedBlocks) {
+        DigToolChoice.Block block = block(player, state);
+        if (block == null) return new DigToolChoice.Verdict.Keep();
+        Inventory inventory = player.getInventory();
+        return DigToolChoice.choose(candidates(inventory, state), inventory.selected, block, expectedBlocks,
+                minimumDurability);
     }
 
     /** 要挖的这一格的事实：硬度、要不要够格工具、掉落敏感不敏感；挖不动的为 null。 */
