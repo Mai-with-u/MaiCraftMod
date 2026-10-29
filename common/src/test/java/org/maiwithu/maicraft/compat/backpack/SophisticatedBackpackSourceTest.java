@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.backpack;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -73,7 +74,7 @@ class SophisticatedBackpackSourceTest {
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null,
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
                         GuessesPlayerMade.NOTHING, "self"),
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, backpack);
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, backpack, DigToolRule.HELD);
         return new SophisticatedBackpackSource(compat, services, MENUS, seen, () -> NOW);
     }
 

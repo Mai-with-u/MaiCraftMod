@@ -54,6 +54,11 @@ public final class BlockDigger {
     private int pendingToolSlot = -1;
     private int minimumToolDurability;
     public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
+    /** 挖之前拿哪件工具：玩家行为层的挑工具，从构造函数传入。 */
+    private final DigToolRule tools;
+    /** 这一趟预计还要挖几格：徒手也掉的方块按它算换不换工具；没说就当只挖这一格。 */
+    private int expectedBlocks = 1;
+    public void expectedBlocks(int blocks) { expectedBlocks = Math.max(1, blocks); }
     /** 挖的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和精准采集，时运高的优先。 */
     private boolean forChanceDrops;
     public void forChanceDrops(boolean on) { forChanceDrops = on; }
@@ -78,8 +83,10 @@ public final class BlockDigger {
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private ItemStack destroyingItem;
 
+    /** @param tools 挖之前拿哪件工具的规矩；照准星点一下的原始点击给 {@link DigToolRule#HELD} */
     public BlockDigger(LocalPlayer player, InteractionSender sender, MenuActions menuActions,
-                       PlayerInput playerInput) {
+                       PlayerInput playerInput, DigToolRule tools) {
+        this.tools = Objects.requireNonNull(tools, "tools");
         this.player = player;
         this.sender = sender;
         this.menuActions = menuActions;
@@ -334,9 +341,10 @@ public final class BlockDigger {
         reset();
         pos = target.immutable();
         // 挖概率掉落时换一套挑法：拿剪刀、精准采集挖树叶和砾石，只会掉它自己，树苗、燧石一件都出不来。
+        // 别的都照玩家行为层的挑工具：能掉落先于不掉落、最省优先，改掉落的附魔与预留的工具不掺和。
         pendingToolSlot = !selectTool || !player.level().isLoaded(pos) ? -1
                 : forChanceDrops ? ToolSelect.bestSlotForChanceDrops(player, player.level().getBlockState(pos))
-                : ToolSelect.bestSlot(player, player.level().getBlockState(pos), minimumToolDurability);
+                : tools.slotFor(player, player.level().getBlockState(pos), minimumToolDurability, expectedBlocks);
         if (Minecraft.getInstance().screen != null || player.containerMenu != player.inventoryMenu) {
             toolClosePending = menuActions.close(context, TOOL_TIMEOUT_TICKS);
         } else {

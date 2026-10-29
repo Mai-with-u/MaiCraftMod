@@ -17,6 +17,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
@@ -168,7 +169,7 @@ class MeNetworkReaderTest {
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), reads, emptyBackpack());
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), reads, emptyBackpack(), DigToolRule.HELD);
     }
 
     /** 空的联动读写端：读数链路碰不到终端界面。 */

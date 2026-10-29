@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.mekanism;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -322,7 +323,7 @@ class MekanismCompatTest {
                     @Override public Optional<Action> wear(String itemId, GearSlotName slot) { return Optional.empty(); }
                     @Override public Optional<Action> takeOff(GearSlotName slot) { return Optional.empty(); }
                 }, inner -> inner, (request, permissions) -> null, nobodyOwns, itemId -> Set.of(),
-                MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack());
+                MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack(), DigToolRule.HELD);
     }
 
     /** 背包视图的替身：身上什么都没有，通用机械的测试用不到它。 */

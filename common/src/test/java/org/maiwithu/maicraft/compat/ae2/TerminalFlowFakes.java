@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -379,7 +380,7 @@ final class TerminalFlowFakes {
                     @Override public List<BackpackStack> stacks() { return List.of(); }
                     @Override public int usedSlots() { return 0; }
                     @Override public int totalSlots() { return 36; }
-                });
+                }, DigToolRule.HELD);
     }
 
     /** 一件装备都不穿、不取。 */

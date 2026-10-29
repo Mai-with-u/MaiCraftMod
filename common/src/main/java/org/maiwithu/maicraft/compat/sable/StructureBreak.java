@@ -17,7 +17,6 @@ import org.maiwithu.maicraft.behavior.interaction.AimCheck;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
-import org.maiwithu.maicraft.game.interaction.ToolSelect;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -74,10 +73,11 @@ final class StructureBreak implements Action {
         return aimAndStart(context, scene, player);
     }
 
-    // 挖之前把最合适的工具换到主手：已经在手上、或身上没有更合适的就空手（拿什么挖什么）。
+    // 挖之前照挑工具把那把换到主手（和地上挖格同一份：最省优先、改掉落的附魔与预留的不掺和）；
+    // 挑工具说不换、或身上没有更合适的就拿手上的挖。
     private ActionStatus chooseTool(TickContext tick, LocalPlayer player, BlockState state) {
         if (toMainhand == null) {
-            int slot = ToolSelect.bestSlot(player, state);
+            int slot = services.digTools().slotFor(player, state, 0, 1);
             ItemStack best = slot < 0 ? ItemStack.EMPTY : player.getInventory().getItem(slot);
             if (best.isEmpty() || ItemStack.isSameItem(best, player.getMainHandItem())) {
                 toolChosen = true;

@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
-import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
@@ -73,6 +73,7 @@ final class SurvivalNeedCatalog {
             InteractionSender interactionSender, MenuActions menuActions, Interactions interactions,
             CombatSenses combatSenses, WalkTo walks,
             EatSoonTask.FoodMoves foodMoves, ReadsFoodValues foods, LiveCeilingDigs ceilings,
+            Supplier<BlockBreaking> diggings,
             SurvivalWiring survivalWiring, ItemsToKeep keeps, Supplier<Protection> protection,
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues,
@@ -80,8 +81,8 @@ final class SurvivalNeedCatalog {
             PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         ControlLoop loop = new ControlLoop(List.of(
-                new DigOutNeed(new SurvivalSituation.FromPlayer(),
-                        () -> new NativeBlockBreaking(interactionSender, menuActions)),
+                // 被埋挖开头顶：和换气挖顶、挖格同一份原生挖掘，工具照挑工具换。
+                new DigOutNeed(new SurvivalSituation.FromPlayer(), diggings),
                 new BreathNeed(new SurvivalSituation.FromPlayer(), ceilings, new LiveAirRoutes()),
                 // 走路里的落地救援、喷气背包飞的那一段、寻路"飞上去"那一步自己管着上下时，落地防护让开。
                 // 喷气背包飞的那一段只有还在隔三差五说"我管着"才算在管：被打断、出岔子没收尾时让落地防护兜底。

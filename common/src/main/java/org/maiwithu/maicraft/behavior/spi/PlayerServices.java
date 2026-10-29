@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.spi;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
@@ -36,12 +37,13 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
  * @param blockScans   在已加载的区块里按方块找东西
  * @param serverReads  向服务端问只读操作：客户端读不到的网络汇总（ME 网络的控制器、频道、能量）经它问
  * @param backpack     角色的背包视图：随身背包的来源认身上哪几格放的是包
+ * @param digTools     挖之前拿哪件工具：和自带能力挖格同一份挑工具
  */
 public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose approach,
                              Interactions interactions, MovesToMainhand toMainhand, GearChanges gear,
                              HoldsSneak sneak, ItemNeeds needs, Protection protection, ReadsItemTags itemTags,
                              MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads,
-                             BackpackView backpack) {
+                             BackpackView backpack, DigToolRule digTools) {
 
     public PlayerServices {
         Objects.requireNonNull(context, "context");
@@ -57,5 +59,6 @@ public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose 
         Objects.requireNonNull(blockScans, "blockScans");
         Objects.requireNonNull(serverReads, "serverReads");
         Objects.requireNonNull(backpack, "backpack");
+        Objects.requireNonNull(digTools, "digTools");
     }
 }

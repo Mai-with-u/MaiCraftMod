@@ -277,7 +277,8 @@ public final class AbilityCatalog {
         // 许可检查点：保护判断是这个世界的那一份（生存需求要挖开的也用它），来源、采集、站位补救都用这一份。
         PermissionCheck permission = new PermissionCheck(deps.guards().protection(), deps.guards().creatures());
         LiveApproaches bringsClose = new LiveApproaches(deps.character().context(),
-                new LiveApproachWorld(deps.character().context()), deps.travel().walks(), permission);
+                new LiveApproachWorld(deps.character().context()), deps.travel().walks(), permission,
+                deps.hands().digTools());
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.character().context());
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
@@ -294,7 +295,7 @@ public final class AbilityCatalog {
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), innerNeeds,
                 deps.guards().protection(), deps.items().itemTags(), deps.compat().menuLayouts(),
                 deps.world().blockScans(), new SessionServerReads(deps.channels().session()),
-                deps.character().backpack());
+                deps.character().backpack(), deps.hands().digTools());
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
         // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
         LiveBlockDigging digging = new LiveBlockDigging(deps.hands().digging(),

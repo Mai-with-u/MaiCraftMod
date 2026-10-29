@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.createjetpack;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -109,7 +110,7 @@ class CreateJetpackCompatTest {
         };
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), noGear, inner -> inner, (request, permissions) -> null, nobodyOwns,
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, empty);
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, empty, DigToolRule.HELD);
     }
 
     private static LoaderEnvironment loaderWith(String version) {

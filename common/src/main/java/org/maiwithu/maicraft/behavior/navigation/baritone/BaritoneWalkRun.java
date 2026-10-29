@@ -76,7 +76,7 @@ final class BaritoneWalkRun implements WalkRun {
     /** 这段路垫上的临时方块；逐格进结算结果，不自动收回。 */
     private final List<BlockPos> placements = new ArrayList<>();
     /** 引擎在路上按下的左右键：挖开挡路的、垫方块、开门，都经它交给原生交互并等确认。 */
-    private final EngineClicks clicks = new EngineClicks();
+    private final EngineClicks clicks;
     /** 走路镜头的航向：偏差大才转、小修正不动、每刻最多转几度，不逐格点头。 */
     private final NavigationCameraCourse course = new NavigationCameraCourse();
     /** 共用的换手：垫料只在主背包时经背包界面挪到快捷栏，引擎才垫得上。 */
@@ -122,6 +122,7 @@ final class BaritoneWalkRun implements WalkRun {
 
     BaritoneWalkRun(BaritoneInternals owner, GoalCompiler.Compiled target, TerrainPermit permit) {
         this.owner = owner;
+        this.clicks = new EngineClicks(owner.digTools());
         this.target = target;
         this.permit = permit;
         this.goal = target.goal();

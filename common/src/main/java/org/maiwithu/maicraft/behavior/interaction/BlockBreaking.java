@@ -32,6 +32,9 @@ public interface BlockBreaking extends Action {
      * 这一格要的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和带精准采集的（拿了只掉方块自己），
      * 时运高的优先。不调用时照旧挑最快的。
      */
+    /** 这一趟预计还要挖几格同样的：挑工具按它算徒手也掉的方块换不换；不说就当只挖这一格。 */
+    default void expectBlocks(int blocks) {}
+
     default void forChanceDrops() {
     }
 

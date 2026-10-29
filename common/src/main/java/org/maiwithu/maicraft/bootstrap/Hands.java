@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.util.Objects;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -18,12 +19,15 @@ record Hands(
         UseKeyProjection useKeyProjection,
         /** 挖一格的动作供给：原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。 */
         Supplier<BlockBreaking> digging,
-        InputDriver inputs) {
+        InputDriver inputs,
+        /** 挖之前拿哪件工具：挑工具一份，挖格、走近站位、船上挖块都照它换手。 */
+        DigToolRule digTools) {
 
     Hands {
         Objects.requireNonNull(interactions, "interactions");
         Objects.requireNonNull(useKeyProjection, "useKeyProjection");
         Objects.requireNonNull(digging, "digging");
         Objects.requireNonNull(inputs, "inputs");
+        Objects.requireNonNull(digTools, "digTools");
     }
 }

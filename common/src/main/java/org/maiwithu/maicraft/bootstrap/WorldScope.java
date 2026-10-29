@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -158,7 +159,7 @@ public final class WorldScope {
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
-            ReservedItems reserved, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
+            ReservedItems reserved, DigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
@@ -210,7 +211,7 @@ public final class WorldScope {
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
         this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
-        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
         // 依赖按领域用途分组传进去：当刻角色读端、物品事实、世界与观察、动手、走到与出行、
         // 许可与保护、对外通道、存放位置，外加几样只属于一件事的接缝与实例配置。
@@ -228,7 +229,7 @@ public final class WorldScope {
                         new RegistryToolRequirements(), furnaceFuels),
                 new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld),
                 senses,
-                new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl)),
+                new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress),
                 new Guards(protection, new ClientCreatureSituations(now)),
                 new Channels(new ChatChannel(now),

@@ -11,6 +11,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
+import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
 import org.maiwithu.maicraft.debug.BlueprintOverlay;
 import org.maiwithu.maicraft.debug.DebugPanel;
@@ -161,7 +164,9 @@ public final class Bootstrap {
         private final ReservedItems reserved = new ReservedItems(LiveCarryReads.itemTags(), this::carriedNow);
         // 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道；走路垫脚按它留够数，只垫多出来的。
         private final ItemsToKeep kept = reserved.plus(itemsInUse);
-        private final BaritoneInternals walks = new BaritoneInternals(kept);
+        // 挑工具一份：挖楼梯、清障、采掘、换气挖顶、走路挖路都照它换手；预留的工具不挑，掉落敏感按原版对照认。
+        private final DigToolRule digTools = new LiveDigToolRule(reserved, VanillaBlockDrops::dropSensitive);
+        private final BaritoneInternals walks = new BaritoneInternals(kept, digTools);
         // 先下车再走的走到：走路类目标起步时角色坐在载具上，先按住潜行下来再交内嵌寻路；各路走路请求都用这一份。
         private final WalkTo walksOnFoot = new DismountsBeforeWalks(walks,
                 new LiveHoldsSneak(new InputDriver(playerControl), () -> playerControl.activeContext().orElse(null)));
@@ -413,9 +418,9 @@ public final class Bootstrap {
             // 交互动作入口与按住使用键投影：生存需求的落地放水、能力清单在进世界时都用它们。
             interactions = new Interactions(useKeyProjection);
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions);
+            Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
             controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection),
+                    combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection), diggings,
                     survivalWiring, kept, protection, followLighting, lightLevels, hands, ranged,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
                     // 身上没带货时从随身无线终端现取一件（AE2）。
@@ -527,7 +532,8 @@ public final class Bootstrap {
                 WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walksOnFoot, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, dropConfirmations,
+                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
+                        dropConfirmations,
                         taskEvents, lightLevels, lightingWorld, followLighting, timers);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。

@@ -8,6 +8,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -140,8 +141,10 @@ final class OfflineCatalog {
                         },
                         new UnloadedWorld()),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
-                new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary())),
-                new Travel(new BaritoneInternals(ItemsToKeep.NOTHING), new BaritoneInternals(ItemsToKeep.NOTHING), new ClientTravelWorldView(nobody),
+                new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary()),
+                        DigToolRule.HELD),
+                new Travel(new BaritoneInternals(ItemsToKeep.NOTHING, DigToolRule.HELD),
+                        new BaritoneInternals(ItemsToKeep.NOTHING, DigToolRule.HELD), new ClientTravelWorldView(nobody),
                         progress -> { }),
                 new Guards(
                         new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,

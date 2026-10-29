@@ -11,15 +11,14 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
-import net.minecraft.world.level.block.Blocks;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
 /**
- * 挖路的工具只在主背包时挪到快捷栏：主背包里的那把比快捷栏里的顺手才挪，挪到空格或零碎东西那格；
- * 快捷栏里已经有一样好的就不挪。
+ * 挖路的工具只在主背包时挪到快捷栏：挑工具挑中的在主背包才挪，挪到空格或零碎东西那格；
+ * 挑中的已经在快捷栏、或挑工具说不换，就不挪。
  */
 class ToolStagingTest {
 
@@ -35,7 +34,6 @@ class ToolStagingTest {
         return items;
     }
 
-    // 单元测试里方块标签没有绑定，镐挖石头的速度读不出来；剪刀剪蜘蛛网写死在剪刀里，用它来演示。
     @Test
     void theBetterToolInTheMainBackpackComesToTheHotbar() {
         // 快捷栏里是火把和几样零碎；剪刀在主背包：挪到快捷栏的零碎格去。
@@ -44,7 +42,7 @@ class ToolStagingTest {
         items.set(1, new ItemStack(Items.WHEAT_SEEDS, 3));
         for (int slot = 2; slot < 9; slot++) items.set(slot, new ItemStack(Items.TORCH, 1));
         items.set(29, new ItemStack(Items.SHEARS));
-        var swap = ToolStaging.plan(items, 0, Blocks.COBWEB.defaultBlockState(), ItemsToKeep.NOTHING);
+        var swap = ToolStaging.plan(items, 0, 29, ItemsToKeep.NOTHING);
         assertTrue(swap.isPresent());
         assertEquals(29, swap.get().sourceSlot());
         assertEquals(1, swap.get().hotbarSlot(), "换掉零碎的种子，火把不挪");
@@ -55,6 +53,7 @@ class ToolStagingTest {
         List<ItemStack> items = backpack();
         items.set(3, new ItemStack(Items.SHEARS));
         items.set(20, new ItemStack(Items.SHEARS));
-        assertTrue(ToolStaging.plan(items, 0, Blocks.COBWEB.defaultBlockState(), ItemsToKeep.NOTHING).isEmpty());
+        assertTrue(ToolStaging.plan(items, 0, 3, ItemsToKeep.NOTHING).isEmpty(), "挑中的已经在快捷栏");
+        assertTrue(ToolStaging.plan(items, 0, -1, ItemsToKeep.NOTHING).isEmpty(), "挑工具说不换");
     }
 }

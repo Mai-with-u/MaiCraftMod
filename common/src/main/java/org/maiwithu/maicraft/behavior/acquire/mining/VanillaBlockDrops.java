@@ -173,6 +173,17 @@ public final class VanillaBlockDrops {
         return BLOCK_TO_DROP.getOrDefault(blockTypeId, blockTypeId);
     }
 
+    /**
+     * 精准采集、时运会不会改这种方块的掉落：挖掉掉的不是自己（石头掉圆石、矿石掉矿物）、碎了什么都不掉（玻璃、冰）、
+     * 有概率掉落的（树叶、砾石、草）都会改。挖方块挑工具时它们"掉落敏感"：带这两种附魔的不自动换上来。
+     * 对照只认原版；认不出的模组方块当会改——拿不准就不替调用方动它的掉落。
+     */
+    public static boolean dropSensitive(String blockTypeId) {
+        if (!blockTypeId.startsWith("minecraft:")) return true;
+        return BLOCK_TO_DROP.containsKey(blockTypeId) || DROPS_NOTHING.contains(blockTypeId)
+                || !chanceDropsOf(blockTypeId).isEmpty();
+    }
+
     /** 挖了有机会掉出这件东西的方块：燧石问砾石，种子问草，树苗问树叶；没有为空。 */
     public static List<ChanceDrop> chanceSources(String itemId) {
         return CHANCE_DROPS.stream().filter(drop -> drop.itemId().equals(itemId)).toList();

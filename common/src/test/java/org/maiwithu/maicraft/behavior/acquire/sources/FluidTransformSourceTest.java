@@ -14,6 +14,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransform;
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
@@ -145,7 +146,7 @@ class FluidTransformSourceTest {
                         asked.add(request);
                         return new Done();
                     }, nobodyOwns, itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE,
-                    backpack);
+                    backpack, DigToolRule.HELD);
         }
     }
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,7 +67,8 @@ class Ae2TerminalSourceTest {
                 name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
-                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack());
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack(),
+                DigToolRule.HELD);
     }
 
     /** 背包视图的替身：身上什么都没有，AE2 的测试用不到它。 */

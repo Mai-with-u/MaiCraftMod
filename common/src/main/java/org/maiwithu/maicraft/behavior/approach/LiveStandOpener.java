@@ -20,6 +20,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -59,8 +60,12 @@ final class LiveStandOpener implements StandOpener {
     private final TerrainPermit permit;
     private final ProtectedCells guarded;
 
+    /** 挖遮挡之前拿哪件工具：和挖格同一份挑工具。 */
+    private final DigToolRule tools;
+
     LiveStandOpener(Supplier<PlayerContext> context, PermissionCheck permission, Permissions permissions,
-                    ReachRules reach, WalkTo walks, TerrainPermit permit, ProtectedCells guarded) {
+                    ReachRules reach, WalkTo walks, TerrainPermit permit, ProtectedCells guarded, DigToolRule tools) {
+        this.tools = Objects.requireNonNull(tools, "tools");
         this.context = Objects.requireNonNull(context, "context");
         this.permission = Objects.requireNonNull(permission, "permission");
         this.permissions = Objects.requireNonNull(permissions, "permissions");
@@ -169,7 +174,7 @@ final class LiveStandOpener implements StandOpener {
             if (index >= cells.size()) return ActionStatus.done();
             if (digger == null) {
                 digger = new BlockDigger(player.localPlayer(), player.interactionSender(), player.menuActions(),
-                        player.input());
+                        player.input(), tools);
             }
             return switch (digger.digTargetStep(player, cells.get(index))) {
                 case BROKE_TARGET, BROKE_OCCLUDER -> {

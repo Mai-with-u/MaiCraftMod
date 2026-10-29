@@ -141,8 +141,9 @@ public final class Interaction {
         this.entity = entity;
         this.hand = hand;
         this.timing = timing;
+        // 照准星点一下的原始左键：手上拿着什么就用什么挖，不替点的人换工具。
         this.digger = (button == Button.ATTACK && block != null)
-                ? new BlockDigger(player, sender, menuActions, playerInput) : null;
+                ? new BlockDigger(player, sender, menuActions, playerInput, DigToolRule.HELD) : null;
     }
 
     /** 左键破坏方块：按住直至方块消失；创造模式立即破坏，生存模式按时间推进。 */

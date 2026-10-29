@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.mekanism;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -199,6 +200,6 @@ class PipeNetworkReaderTest {
                     @Override public List<BackpackStack> stacks() { return List.of(); }
                     @Override public int usedSlots() { return 0; }
                     @Override public int totalSlots() { return 36; }
-                });
+                }, DigToolRule.HELD);
     }
 }

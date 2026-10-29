@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import java.util.Objects;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
@@ -30,13 +32,25 @@ public final class NativeBlockBreaking implements BlockBreaking {
     private Direction face;
     /** 挖概率掉落：挖掘器挑工具时不拿剪刀和精准采集。 */
     private boolean forChanceDrops;
+    /** 挖之前拿哪件工具。 */
+    private final DigToolRule tools;
+    /** 这一趟预计还要挖几格：挑工具按它算徒手也掉的方块换不换。 */
+    private int expectedBlocks = 1;
     private Predicate<BlockHitResult> gate = hit -> true;
     /** 最近一刻的角色上下文；收尾时还属于本刻就用它停手，过期了就把停手留到下一刻。 */
     private PlayerContext lastContext;
 
-    public NativeBlockBreaking(InteractionSender sender, MenuActions menuActions) {
+    /** @param tools 挖之前拿哪件工具：玩家行为层的挑工具 */
+    public NativeBlockBreaking(InteractionSender sender, MenuActions menuActions, DigToolRule tools) {
         this.sender = sender;
         this.menuActions = menuActions;
+        this.tools = Objects.requireNonNull(tools, "tools");
+    }
+
+    @Override
+    public void expectBlocks(int blocks) {
+        expectedBlocks = Math.max(1, blocks);
+        if (digger != null) digger.expectedBlocks(expectedBlocks);
     }
 
     @Override
@@ -75,7 +89,8 @@ public final class NativeBlockBreaking implements BlockBreaking {
             return ActionStatus.running();
         }
         if (digger == null) {
-            digger = new BlockDigger(player.localPlayer(), sender, menuActions, player.input());
+            digger = new BlockDigger(player.localPlayer(), sender, menuActions, player.input(), tools);
+            digger.expectedBlocks(expectedBlocks);
             digger.requiredFace(face);
             digger.beforeBreak(gate);
             digger.forChanceDrops(forChanceDrops);

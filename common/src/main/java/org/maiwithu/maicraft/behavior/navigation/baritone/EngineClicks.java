@@ -14,6 +14,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.interaction.Interaction;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -37,10 +38,16 @@ final class EngineClicks {
     /** 一次右键等游戏确认的上限。 */
     private static final int USE_CONFIRM_TICKS = 20;
 
+    EngineClicks(DigToolRule tools) {
+        this.tools = tools;
+    }
+
     /** 这一刻动手的结果：没动手、正在动（挖掘推进或等确认）、真改了一格（垫上、开关门）、挖开了一格。 */
     enum Doing { NOTHING, WORKING, CHANGED_A_BLOCK, BROKE_A_BLOCK }
 
     private BlockDigger digger;
+    /** 挖之前拿哪件工具：和挖格同一份挑工具。 */
+    private final DigToolRule tools;
     /** 挖掘器认的那个角色对象；重生或换世界后角色换了，挖掘器跟着换。 */
     private LocalPlayer diggerPlayer;
     /** 在等确认的那一次右键，以及点之前两格的样子：确认后据此认出垫上的方块。 */
@@ -69,7 +76,7 @@ final class EngineClicks {
     Doing tick(PlayerContext context, boolean left, boolean right, boolean aimed) {
         LocalPlayer player = context.localPlayer();
         if (digger == null || diggerPlayer != player) {
-            digger = new BlockDigger(player, context.interactionSender(), context.menuActions(), context.input());
+            digger = new BlockDigger(player, context.interactionSender(), context.menuActions(), context.input(), tools);
             diggerPlayer = player;
         }
         if (use != null) {

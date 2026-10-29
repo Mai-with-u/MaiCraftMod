@@ -6,6 +6,7 @@ import java.util.OptionalDouble;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -30,9 +31,12 @@ public final class LiveApproaches implements BringsPlayerClose {
     private final ApproachWorldView world;
     private final WalkTo walks;
     private final PermissionCheck permission;
+    private final DigToolRule tools;
 
+    /** @param tools 站位补救挖遮挡时拿哪件工具 */
     public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
-                          PermissionCheck permission) {
+                          PermissionCheck permission, DigToolRule tools) {
+        this.tools = Objects.requireNonNull(tools, "tools");
         this.context = Objects.requireNonNull(context, "context");
         this.world = Objects.requireNonNull(world, "world");
         this.walks = Objects.requireNonNull(walks, "walks");
@@ -61,7 +65,7 @@ public final class LiveApproaches implements BringsPlayerClose {
         // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
         ReachRules reach = reachNow();
         TerrainPermit permit = TerrainPermit.of(permissions);
-        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid);
+        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
                 avoid, walks, permit, opener, permissions, records);
     }

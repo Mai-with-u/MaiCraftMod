@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ftbquests;
 
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.junit.jupiter.api.Test;
@@ -331,7 +332,7 @@ class FtbQuestBookOperationsTest {
                 LiveCarryReads.itemTags(),
                 new MenuLayouts(List.of()),
                 new BlockScanService(), ServerReads.NONE,
-                emptyBackpack());
+                emptyBackpack(), DigToolRule.HELD);
     }
 
     /** 背包视图的替身：身上什么都没有，任务书操作的测试用不到它。 */

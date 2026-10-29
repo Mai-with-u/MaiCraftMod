@@ -29,6 +29,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -80,6 +81,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private TaskEventSink events = TaskEventSink.NONE;
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
+    /** 挖路之前拿哪件工具。 */
+    private final DigToolRule digTools;
     /** 走路前要收起来的东西（联动登记，误开的喷气背包）；进世界、联动加载后接上，之前没有。 */
     private Supplier<List<StowBeforeWalking>> stows = List::of;
     /** 能直接飞上高处的装备（联动登记，喷气背包）；进世界、联动加载后接上，之前没有。 */
@@ -95,10 +98,29 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private Float precisionPitch;
     private long precisionTick = Long.MIN_VALUE;
 
-    /** 不知道什么正要用（离线清单、测试）：垃圾方块照先后垫，什么都不留。 */
-    /** @param keeps 要留的东西每种留几件：预留的、上一个目标刚拿到的、手上这件事正在拿的 */
-    public BaritoneInternals(ItemsToKeep keeps) {
+    /**
+     * @param keeps    要留的东西每种留几件：预留的、上一个目标刚拿到的、手上这件事正在拿的
+     * @param digTools 挖路之前拿哪件工具：和挖格同一份挑工具，引擎自己挑的最快那把不算数
+     */
+    public BaritoneInternals(ItemsToKeep keeps, DigToolRule digTools) {
         this.keeps = keeps;
+        this.digTools = digTools;
+    }
+
+    /** 挖路之前拿哪件工具：走路挖开挡路的那一格时，挖掘器照它换手。 */
+    DigToolRule digTools() {
+        return digTools;
+    }
+
+    /**
+     * 引擎要挖一格前换工具时问这里：照挑工具选快捷栏那一格；挑中的在主背包里就先不动，由挪工具那一步挪上来；
+     * 挑工具说不换就不换。没接上时照引擎自己挑的那格（离线、测试）。
+     */
+    public static void selectDigTool(LocalPlayer player, BlockState state, int engineChoice) {
+        BaritoneInternals internals = ATTACHED.get();
+        int slot = internals == null || player == null ? engineChoice
+                : internals.digTools.slotFor(player, state, 0, 1);
+        ensureHotbarSelected(player, slot);
     }
 
     /** 接上联动登记的走路前要收起来的东西。 */
@@ -406,7 +428,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 挖路的工具只在主背包时挪到快捷栏哪一格的打算；快捷栏已经有顺手的、或挪不了为空。 */
     Optional<ScaffoldStaging.Swap> toolStaging(LocalPlayer self, BlockState toBreak) {
         var inventory = self.getInventory();
-        return ToolStaging.plan(inventory.items, inventory.selected, toBreak, keeps);
+        return ToolStaging.plan(inventory.items, inventory.selected, digTools.slotFor(self, toBreak, 0, 1), keeps);
     }
 
     /** 垫料只在主背包时挪到快捷栏哪一格的打算；不用挪或挪不了为空。 */

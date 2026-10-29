@@ -717,8 +717,8 @@ public interface MovementHelper extends ActionCosts, Helper {
      */
     static void switchToBestToolFor(IPlayerContext ctx, BlockState b, ToolSet ts, boolean preferSilkTouch) {
         if (Baritone.settings().autoTool.value && !Baritone.settings().assumeExternalAutoTool.value) {
-            BaritoneInternals.ensureHotbarSelected(
-                    ctx.player(), ts.getBestSlot(b.getBlock(), preferSilkTouch));
+            // MaiCraft：换哪把问挑工具（最省优先、改掉落的附魔不掺和），引擎自己挑的最快那把只在没接上时用。
+            BaritoneInternals.selectDigTool(ctx.player(), b, ts.getBestSlot(b.getBlock(), preferSilkTouch));
         }
     }
 
