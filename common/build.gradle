@@ -61,3 +61,12 @@ artifacts {
     commonJava sourceSets.main.java.sourceDirectories.singleFile
     commonResources sourceSets.main.resources.sourceDirectories.singleFile
 }
+
+// 游戏内测试的共享部分：核对动作在真实服务端世界里跑，两个加载器的测试入口各自登记它们。
+// 单独一个源集，不进发布的 Jar；编译类路径沿用主源码的（Minecraft 值类型与 GameTest 框架都在里面），类路径带上主源码的产物。
+sourceSets.register('gametest') {
+    it.compileClasspath += sourceSets.main.compileClasspath
+    it.compileClasspath += sourceSets.main.output
+    it.runtimeClasspath += sourceSets.main.compileClasspath
+    it.runtimeClasspath += sourceSets.main.output
+}

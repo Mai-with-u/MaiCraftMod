@@ -47,5 +47,21 @@ loom {
             ideConfigGenerated(true)
             runDir('runs/server')
         }
+        // headless 的游戏内测试：fabric-api 的 gametest 开关把专用服务器入口换成测试服务端，
+        // 跑完注册的全部 GameTest 自动退出，有失败构建变红。共用 common 的共享核对动作与结构模板。
+        gametest {
+            server()
+            setConfigName('Fabric GameTest')
+            ideConfigGenerated(true)
+            runDir('runs/gametest')
+            vmArg '-Dfabric-api.gametest=true'
+        }
     }
 }
+
+// 游戏内测试的 Fabric 入口与共享核对动作、结构模板一起编译进主 Jar（Fabric 的 entrypoint 在
+// 生产环境也要能解析，测试类随 Jar 发布是 Fabric 的惯例，没有被测试运行用到时不做事）。
+tasks.named('compileJava', JavaCompile) {
+    source project(':common').file('src/gametest/java')
+}
+sourceSets.main.resources.srcDir project(':common').file('src/gametest/resources')

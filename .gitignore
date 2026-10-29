@@ -28,6 +28,7 @@ eclipse
 run
 runs
 runB
+run-gametest
 logs/
 
 # 本地 AI 工作文件
