@@ -107,9 +107,56 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  gametest:
+    name: In-game tests (GameTest)
+    needs: version
+    if: needs.version.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.version.outputs.commit }}
+          persist-credentials: false
+
+      - name: Set up Java 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle and validate wrapper
+        uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+          # 构建只来自已集成的 main，保存依赖供后续集成复用。
+          cache-read-only: false
+
+      - name: Run in-game tests on both loaders
+        # 无画面服务端逐个跑注册的 GameTest，退出码是失败的测试数，gradle 据此判红。
+        # 只放 ubuntu：游戏内测试是纯 Java 服务端逻辑，没有构建矩阵要防的原生库差异。
+        run: bash ./gradlew :neoforge:runGameTestServer :fabric:runGametest --no-daemon --console=plain --stacktrace
+
+      - name: Upload in-game test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gametest-diagnostics-${{ github.sha }}
+          # GameTest 服务端的运行日志与崩溃报告在各自的测试世界目录里。
+          path: |
+            neoforge/run-gametest/logs/
+            fabric/runs/gametest/logs/
+            **/build/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
   release:
     name: Publish release
-    needs: [version, build]
+    needs: [version, build, gametest]
     if: needs.version.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
