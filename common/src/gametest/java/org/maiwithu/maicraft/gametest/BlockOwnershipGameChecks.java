@@ -73,8 +73,14 @@ public final class BlockOwnershipGameChecks {
             helper.fail("方块拆掉后归属记录还在，查到的人对不上任何方块");
         }
         JsonObject answer = chunkAnswerFor(helper, player, target);
-        if (!answer.getAsJsonArray("cells").isEmpty()) {
-            helper.fail("方块拆掉后按区块问归属还答出了这格");
+        // 只看自己拆掉的那格：同区块里其他测试放的方块答出来是正常的，归属记录是世界共享的状态。
+        JsonArray cells = answer.getAsJsonArray("cells");
+        for (int i = 0; i < cells.size(); i += 4) {
+            if (cells.get(i).getAsInt() == target.getX()
+                    && cells.get(i + 1).getAsInt() == target.getY()
+                    && cells.get(i + 2).getAsInt() == target.getZ()) {
+                helper.fail("方块拆掉后按区块问归属还答出了这格");
+            }
         }
         helper.succeed();
     }
