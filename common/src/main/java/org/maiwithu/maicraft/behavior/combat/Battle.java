@@ -99,6 +99,8 @@ public final class Battle {
     private final Set<Integer> unreachable = new HashSet<>();
     /** 其中因为走不到跟前记下的（不是挥了被拒的）：它自己贴上来就不再算走不到。 */
     private final Set<Integer> walkedOut = new HashSet<>();
+    /** 寻路到站了却还够不着的那些：当时的现场（在哪一侧、差几格），收场时如实交代。实体编号到一句话。 */
+    private final Map<Integer, String> outOfReachScenes = new HashMap<>();
     /** 上一刻每只的距离：估它冲过来多快，拉弓的距离带按它留。 */
     private final Map<Integer, Double> lastDistance = new HashMap<>();
     private String doing = "观察战场";
@@ -169,6 +171,7 @@ public final class Battle {
             if (walkedOut.contains(foe.id()) && foe.threat().visible() && foe.threat().withinReach(field.me().reach())) {
                 walkedOut.remove(foe.id());
                 unreachable.remove(foe.id());
+                outOfReachScenes.remove(foe.id());
             }
         }
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
@@ -460,7 +463,17 @@ public final class Battle {
             Vec3 focus = new Vec3(threat.x(), threat.y(), threat.z());
             moved = limbs.follow(context, "逼近 " + target.id(), threat.x(), threat.z(),
                     () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, 0, band.outer()), threats));
-            if (limbs.lastWalkFailed()) cannotWalkTo(target.id());
+            if (limbs.lastWalkFailed()) {
+                cannotWalkTo(target.id());
+            } else if (limbs.lastWalkArrived() && !inReach && !outOfReachScenes.containsKey(target.id())) {
+                // 近身打的进入判据：寻路说到站了（水平上已经在近身的带里）人却还够不着它——它在另一层（头顶、脚下、
+                // 台上）或隔着方块，从这儿走不出更近的站位，再寻路也只会原地"到站"。到站这一刻算一次差几格、在哪一侧，
+                // 记成够不着如实早停；不站着每刻重新寻路，空耗半分钟等停滞判定来收。它自己贴上来（看得见、够得着）会再打。
+                String scene = outOfReachScene(me, threat);
+                outOfReachScenes.put(target.id(), threat.type() + "（实体 " + target.id() + "）" + scene);
+                cannotWalkTo(target.id());
+                LOG.info("[战斗] 够不着 {} #{}：{}", threat.type(), target.id(), scene);
+            }
         }
         String what = (inReach ? "打 " : "逼近 ") + threat.type();
         return new Moment(State.FIGHTING, what, struck || moved, struck, false, target.id(), null, cornered);
@@ -611,6 +624,27 @@ public final class Battle {
         return moved;
     }
 
+    /**
+     * 到站了却够不着的现场：它在高处还是低处（差多少格）、水平离几格、看不看得见、看得见时眼睛到它还差几格。
+     * 纯函数，点名战斗的结果与自卫的收场话共用。
+     */
+    static String outOfReachScene(Battlefield.Me me, CombatSenses.Threat threat) {
+        double dy = threat.y() - me.y();
+        double flat = Math.hypot(threat.x() - me.x(), threat.z() - me.z());
+        String where;
+        if (dy > CombatGeometry.LEVEL_GAP) where = "在高处，高出 " + tenths(dy) + " 格";
+        else if (dy < -CombatGeometry.LEVEL_GAP) where = "在低处，低 " + tenths(-dy) + " 格";
+        else where = "差不多同一层";
+        String sight = threat.visible()
+                ? "看得见，眼睛到它还差 " + tenths(Math.max(0, threat.reachGap() - me.reach())) + " 格"
+                : "隔着方块看不见";
+        return where + "、水平 " + tenths(flat) + " 格，" + sight + "；已经站在能走到的最近处";
+    }
+
+    private static String tenths(double value) {
+        return String.format("%.1f", value);
+    }
+
     // 走不到它跟前（寻路走不通、收紧站位也够不着、苦力怕隔着坑）：记成够不着，有弓去射、没弓换下一只。
     private void cannotWalkTo(int id) {
         unreachable.add(id);
@@ -694,6 +728,11 @@ public final class Battle {
     /** 寻路说走不到、或出手连着被拒的那些：结果里写够不着谁，自卫记一阵不再为它插进来。 */
     public Set<Integer> unreachable() {
         return Set.copyOf(unreachable);
+    }
+
+    /** 其中寻路到站了却还够不着的：谁、当时在哪一侧、差几格，一只一句；收场时如实交代。 */
+    public Map<Integer, String> outOfReachScenes() {
+        return Map.copyOf(outOfReachScenes);
     }
 
     /** 撤离连着走不通，正在背水一战。 */

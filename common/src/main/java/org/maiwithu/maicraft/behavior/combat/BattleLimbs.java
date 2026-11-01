@@ -45,6 +45,8 @@ public final class BattleLimbs {
     private boolean lastWalkFailed;
     /** 脚上这段路的进展观察：脚位挪一格算走了一步（走到进展，与任务侧的进展记录共用同一份判断）。 */
     private final WalkProgress walkProgress = new WalkProgress();
+    /** 上一段寻路走到了（目标已满足、这一趟收掉）：到站了还够不着的由引擎记账。 */
+    private boolean lastWalkArrived;
     /** 手上这一下出手；没在出手为 null。 */
     private Action strike;
     /** 这一下打的是谁；换人先收手。 */
@@ -68,6 +70,7 @@ public final class BattleLimbs {
     public boolean follow(TickContext context, String key, double anchorX, double anchorZ,
                           Supplier<GoalCompiler.Compiled> goal) {
         lastWalkFailed = false;
+        lastWalkArrived = false;
         // 换了事、目标挪开三格以上，或是没带锚点起的那段（撤离），都不沿用，重新算路。
         if (walk != null && (!key.equals(walkKey) || walkAnchor == null
                 || Math.hypot(anchorX - walkAnchor[0], anchorZ - walkAnchor[1]) > REPLAN_AFTER)) {
@@ -84,7 +87,10 @@ public final class BattleLimbs {
             dropWalk();
             return false;
         }
-        if (status instanceof ActionStatus.Done) dropWalk();
+        if (status instanceof ActionStatus.Done) {
+            lastWalkArrived = true;
+            dropWalk();
+        }
         return legMoved(walk, status);
     }
 
@@ -109,6 +115,11 @@ public final class BattleLimbs {
     /** 上一段寻路走通了没有：follow 走不通为真，收掉后由引擎记账（记成走不到、换站位）。 */
     public boolean lastWalkFailed() {
         return lastWalkFailed;
+    }
+
+    /** 上一段寻路到站了没有：follow 这一刻报走到为真；到站了人却还够不着它，由引擎记成够不着。 */
+    public boolean lastWalkArrived() {
+        return lastWalkArrived;
     }
 
     /** 一下出手的结算：哪几样有了结果一看便知；都不占就是这一刀没递进去（交互入口被上一下占着），下一刻再挥。 */

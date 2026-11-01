@@ -450,6 +450,45 @@ class BattleTest {
     }
 
     @Test
+    void targetOverheadThatPathingCannotGetUnderIsReportedOutOfReachAtOnce() {
+        // 实机：尸壳在头顶三格，空着手自卫选了近身打；寻路到它正下方就报"到站"，人却够不着，
+        // 每刻重新寻路再"到站"，六百刻一点进展没有，直到停滞判定才收场。
+        // 到站了还够不着就当场记成够不着，带上现场（在高处、差几格），不再原地空耗。
+        Senses senses = new Senses();
+        senses.threats.add(new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 0.3, 67, 0, 3.1,
+                ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false));
+        Moves moves = new Moves();
+        moves.walkStatus = ActionStatus.done();
+        Battle fight = battle(senses, moves);
+        Battle.Moment first = fight.tick(new Tick(0));
+
+        assertEquals(1, moves.walks.size(), "不在同一层：先交给寻路");
+        assertEquals(0, moves.strikes, "够不着不挥空拳");
+        assertTrue(fight.unreachable().contains(1), "到站了还够不着：当场记成够不着，不等停滞判定");
+        String scene = fight.outOfReachScenes().get(1);
+        assertTrue(scene != null && scene.contains("minecraft:husk") && scene.contains("在高处，高出 3.0 格")
+                && scene.contains("还差 0.4 格"), String.valueOf(scene));
+        assertFalse(first.progressed(), "没有真实进展就不冒充进展");
+
+        fight.tick(new Tick(1));
+        assertEquals(1, moves.walks.size(), "记成够不着后不再为它每刻重新寻路");
+    }
+
+    @Test
+    void outOfReachSceneTellsWhichSideAndHowFar() {
+        Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, 0, true, false, 7, 4);
+        CombatSenses.Threat above = new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 0.3, 67, 0.4, 3.1,
+                ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false);
+        assertEquals("在高处，高出 3.0 格、水平 0.5 格，看得见，眼睛到它还差 0.4 格；已经站在能走到的最近处",
+                Battle.outOfReachScene(me, above));
+
+        CombatSenses.Threat belowBehindBlocks = new CombatSenses.Threat(2, UUID.randomUUID(), "minecraft:zombie", 2, 60, 0,
+                4.5, ThreatAssessment.Kind.MELEE, false, false, true, 0.3, 4.2, false, 2.02, false);
+        assertEquals("在低处，低 4.0 格、水平 2.0 格，隔着方块看不见；已经站在能走到的最近处",
+                Battle.outOfReachScene(me, belowBehindBlocks));
+    }
+
+    @Test
     void standingInTheBandButOutOfReachClosesInThenGivesUp() {
         // 它在坑里低一截：中心距 3 格在带里，眼睛到它碰撞箱却有 3.4 格，够不着——往里凑，凑到底还不行就换。
         Senses senses = new Senses();

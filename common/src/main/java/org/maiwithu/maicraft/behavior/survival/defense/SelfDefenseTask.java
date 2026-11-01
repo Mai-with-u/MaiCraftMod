@@ -301,7 +301,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     @Override
     public String finishedNote(TaskResult result) {
         String facts = finishFacts == null ? "" : finishFacts + "；";
-        return "自卫插曲收场：" + result.summary() + "；" + facts + tally.describe();
+        // 寻路到站了却够不着的（在头顶、崖上、隔着方块）：说清在哪一侧、差几格，读事件的一方知道为什么没打成。
+        String outOfReach = battle.outOfReachScenes().isEmpty() ? ""
+                : "够不着：" + String.join("；", battle.outOfReachScenes().values()) + "；";
+        return "自卫插曲收场：" + result.summary() + "；" + facts + outOfReach + tally.describe();
     }
 
     // 主任务暂停说明里的那半句：离打点几格、人停在哪、打点在哪。

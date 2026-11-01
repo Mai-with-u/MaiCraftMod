@@ -104,6 +104,9 @@ class FightTaskTest {
             return action("打 " + entityId, ActionStatus.done());
         }
 
+        /** 普通替身走到每刻回什么；默认一直在走。 */
+        ActionStatus walkStatus = ActionStatus.running();
+
         @Override public Action walk(GoalCompiler.Compiled goal) {
             if (nextWalkScript != null) {
                 TravelFakes.ScriptedWalk walk = nextWalkScript;
@@ -111,7 +114,7 @@ class FightTaskTest {
                 return walk;
             }
             BlockPos center = goal.goal().center();
-            return action("走向 " + center.getX() + "," + center.getZ(), ActionStatus.running());
+            return action("走向 " + center.getX() + "," + center.getZ(), walkStatus);
         }
 
         final List<Footwork.Step> steps = new ArrayList<>();
@@ -255,6 +258,22 @@ class FightTaskTest {
         FightTask.FightDetails details = (FightTask.FightDetails) result.details();
         assertEquals(1, details.defeated().size());
         assertTrue(details.lostTrack().isEmpty());
+    }
+
+    @Test
+    void namedTargetOverheadIsReportedOutOfReachWithTheSceneInsteadOfStalling() {
+        // 点名打一只在头顶三格的僵尸：寻路到它正下方就"到站"，人够不着；当场按够不着收场，
+        // 问题里写清它在高处、高出几格、还差几格，不空耗半分钟等停滞判定。
+        targets.now = new SeenTargets.Observed(0.5, 67, 0.5, 3.6, false);
+        moves.walkStatus = ActionStatus.done();
+        TaskResult result = run(10);
+
+        assertNotNull(result, "到站了还够不着就当场收场");
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("在高处，高出 3.0 格"), result.problem().message());
+        assertTrue(result.problem().message().contains("minecraft:zombie（实体 7）"), result.problem().message());
+        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightTask.FightDetails) result.details()).reachIssue());
     }
 
     @Test

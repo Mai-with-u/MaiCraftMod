@@ -626,8 +626,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                     .details(details()).build();
         }
         String far = String.join("、", unreached);
+        // 够不着的带上当时的现场（在高处还是低处、差几格、看不看得见）：寻路到站了却够不着的引擎记了一句，
+        // 没记的（寻路走不通、挥了连着被拒）按走不到说。
+        List<String> scenes = new ArrayList<>();
+        for (SeenTargets.Locked locked : named) {
+            if (!remainingNamed().contains(locked.entityId())) continue;
+            String scene = battle == null ? null : battle.outOfReachScenes().get(locked.entityId());
+            scenes.add(scene != null ? scene : describeOf(locked) + " 走不到跟前、也射不到（隔着悬崖、水或墙）");
+        }
         return TaskResult.builder(status, summary + "；够不着 " + far)
-                .problem(Problem.of(Problem.Kind.UNREACHABLE, far + " 走不到跟前、也射不到（隔着悬崖、水或墙）",
+                .problem(Problem.of(Problem.Kind.UNREACHABLE, String.join("；", scenes),
                         "先搭路或绕到它那边；身上有弓的走到它二十格内再射"))
                 .remaining(unreached)
                 .details(details()).build();

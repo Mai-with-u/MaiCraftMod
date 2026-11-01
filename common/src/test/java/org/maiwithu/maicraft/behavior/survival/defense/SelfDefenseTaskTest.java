@@ -193,6 +193,29 @@ class SelfDefenseTaskTest {
     }
 
     @Test
+    void husksOverheadAreGivenUpAtOnceAndTheSceneIsInTheFinishNote() {
+        // 实机：尸壳在头顶三格，空着手自卫选了近身打，六百刻挥不到一下直到停滞判定收场。
+        // 寻路到它正下方就"到站"而人够不着：当场记成够不着，收场的话里说清它在高处、差几格。
+        Senses senses = new Senses();
+        senses.threats.add(new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 0.3, 67, 0, 3.1,
+                ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false));
+        Moves moves = new Moves();
+        moves.walkStatus = ActionStatus.done();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        assertEquals(0, moves.strikes, "够不着不挥空拳");
+        assertEquals(1, moves.walks, "到站了还够不着：不再为它每刻重新寻路");
+        senses.threats.clear();
+        TickResult result = run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS + 5);
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
+
+        String note = task.finishedNote(finished);
+        assertTrue(note.contains("够不着：minecraft:husk（实体 1）在高处，高出 3.0 格"), note);
+    }
+
+    @Test
     void arrowsGoneFromTheBackpackAreReportedEvenWhenNoShotWasConfirmed() {
         // 实机：两场自卫都报 0 箭，箭却从 27 支变成 0——拉弓中途被原版松手放出去的没人报"射出"。
         // 箭少了几支按背包数写进结果；和射出的数对不上时收场的话里也说出来。
