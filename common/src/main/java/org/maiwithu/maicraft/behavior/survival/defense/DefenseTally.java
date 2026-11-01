@@ -27,6 +27,8 @@ final class DefenseTally {
     private final Map<Integer, String> engaged = new LinkedHashMap<>();
     /** 见到倒下的：种类 → 只数。 */
     private final Map<String, Integer> defeated = new LinkedHashMap<>();
+    /** 这一场新见到倒下的、还没交给任务记成变化的种类，按先后。 */
+    private final List<String> unrecordedDefeats = new ArrayList<>();
     private String weapon = "空手";
     private int hits;
     private int shots;
@@ -55,6 +57,7 @@ final class DefenseTally {
                 it.remove();
             } else if (entity instanceof LivingEntity living && living.isDeadOrDying()) {
                 defeated.merge(entry.getValue(), 1, Integer::sum);
+                unrecordedDefeats.add(entry.getValue());
                 it.remove();
             }
         }
@@ -84,9 +87,26 @@ final class DefenseTally {
         arrows.note(moves.arrowsCarried(context));
     }
 
-    /** 箭少了几支；读不到背包为 null。 */
+    /** 箭净少了几支；读不到背包为 null。 */
     Integer arrowsSpent() {
         return arrows.spentOrNull();
+    }
+
+    /** 离开背包的箭合计（射出去的，不管确认没确认）。 */
+    int arrowsTaken() {
+        return arrows.taken();
+    }
+
+    /** 捡回的箭合计。 */
+    int arrowsPickedUp() {
+        return arrows.pickedUp();
+    }
+
+    /** 上次问过之后新见到倒下的种类（一只一条）：任务拿去记成变化，问过就清。 */
+    List<String> takeNewDefeats() {
+        List<String> fresh = List.copyOf(unrecordedDefeats);
+        unrecordedDefeats.clear();
+        return fresh;
     }
 
     /** 收场事件里的一句；一下没出手、箭也没少（只躲开、只撤离）为空。 */
@@ -95,8 +115,11 @@ final class DefenseTally {
         if (hits == 0 && shots == 0 && (spent == null || spent == 0)) return "";
         String who = defeated.isEmpty() ? "没见打倒哪只" : "打掉了 " + String.join("、", defeated());
         String how = "拿 " + weapon + (hits > 0 ? " 挥中 " + hits + " 下" : "") + (shots > 0 ? " 射了 " + shots + " 箭" : "");
-        // 箭少的数和射的数对不上时把背包的数也说出来：读事件的一方不用翻结果细节就知道箭去哪了。
-        if (spent != null && spent != shots) how += "，箭少了 " + spent + " 支";
+        // 背包的账和射的数对不上时把背包的数也说出来：离开背包几支、捡回几支分开说，读事件的一方一眼能对上
+        // （"射了 5 箭"和"净少 3 支"并不矛盾，中间有 2 支捡回来了）。
+        if (spent != null && (arrows.taken() != shots || arrows.pickedUp() > 0)) {
+            how += "，箭少了 " + arrows.taken() + " 支" + (arrows.pickedUp() > 0 ? "、捡回 " + arrows.pickedUp() + " 支" : "");
+        }
         return who + "（" + how + "）；";
     }
 }

@@ -97,6 +97,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private int shots;
     /** 这一仗箭少了几支：按背包里箭的只数开打与打着时的差算，和射出去几箭各记各的。 */
     private final ArrowsSpent arrows = new ArrowsSpent();
+    /** 已经记进变化的箭的消耗（支）：每多少一支就补记一支，中途按卡住、撤离收场的结果里也有这笔。 */
+    private int arrowsRecorded;
     /** 为什么撤的：撤离收场时写进结果。 */
     private String retreatWhy;
     private Battle battle;
@@ -359,6 +361,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     }
 
     private Next<Phase> fight(TickContext context) {
+        // 被自卫插曲、吃饭占过一段回来接着打：那段里射的箭、捡的箭由插进来的那件事自己交代，这一仗的账从此刻重新起算。
+        if (battle.resumedAfterPause()) arrows.resumeAt(moves.arrowsCarried(context));
         noteDefeats(context);
         if (dragonEntity >= 0) {
             Next<Phase> ending = dragonEnding(context);
@@ -379,7 +383,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             LOG.info("[战斗] 射出第 {} 箭，游戏确认了放箭", shots);
         }
         // 箭少了几支按背包数，不按射了几箭推：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
-        arrows.note(moves.arrowsCarried(context));
+        noteArrows(context);
         if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
         if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
@@ -532,7 +536,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 收没收进包按服务器的拾取包认；走不到、捡不到的如实写进结果，不影响击败判定，不站着等尸体刷掉落。
     private Next<Phase> loot(TickContext context) {
         // 最后一箭的扣减服务器要隔一两刻才同步到背包：拾荒这几秒接着记，收场的"箭少了几支"才把它算进去。
-        arrows.note(moves.arrowsCarried(context));
+        noteArrows(context);
         if (lastKillSpot == null) {
             return Next.done(settled());
         }
@@ -611,6 +615,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     // 收场：点名目标有跟丢的、够不着的就不算全打完——一个都没确认击败是没做成，打掉一部分是做成一部分。
     private TaskResult settled() {
+        if (currentContext != null) noteArrows(currentContext);
         String summary = defeated.isEmpty() ? "打完了，没有确认击败的目标"
                 : "击败了 " + defeated.size() + " 个目标" + (lootGained.isEmpty() ? "，没捡到掉落物" : "，捡到 " + lootGained.size() + " 组掉落物");
         // 打龙：龙不掉东西，不说"没捡到掉落物"；另外顺手打倒的照数。
@@ -694,20 +699,31 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         }
     }
 
+    // 记一笔此刻背包里的箭；离开背包的箭随手记成消耗（各种箭合在一起按 minecraft:arrow 记），调用方拿结果对背包的账
+    // 时能对上；捡回的由拾荒按服务器的拾取包另记，不在这里重复。
+    private void noteArrows(TickContext context) {
+        arrows.note(moves.arrowsCarried(context));
+        int unrecorded = arrows.taken() - arrowsRecorded;
+        if (unrecorded > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", unrecorded));
+            arrowsRecorded = arrows.taken();
+        }
+    }
+
     @Override
     protected ResultDetails details() {
-        if (currentContext != null) arrows.note(moves.arrowsCarried(currentContext));
+        if (currentContext != null) noteArrows(currentContext);
         List<String> unreached = new ArrayList<>();
         for (SeenTargets.Locked locked : named) {
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
         }
         return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots,
-                arrows.spentOrNull(), unreached,
+                arrows.spentOrNull(), arrows.pickedUp(), unreached,
                 retreatWhy, lootGained, dragonDetails());
     }
 
     // 打龙这一节：射掉几颗、没打掉的在哪为什么、龙的血、死的证据、出口门、经验、回血与躲闪次数。不打龙为 null。
-    private DragonDetails dragonDetails() {
+    private FightDetails.DragonDetails dragonDetails() {
         if (dragonEntity < 0 || battle == null) return null;
         DragonCombat.Report report = battle.dragonReport().orElse(null);
         if (report == null) return null;
@@ -723,9 +739,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         FightMoves.Experience now = currentContext == null ? null : moves.experience(currentContext);
         String experience = experienceBefore == null || now == null ? null
                 : "+" + (now.level() - experienceBefore.level()) + " 级（+" + (now.points() - experienceBefore.points()) + " 点）";
-        return new DragonDetails(report.crystalsDestroyed(), report.crystalsLeft(), report.crystalsGoneOtherwise(),
+        return new FightDetails.DragonDetails(report.crystalsDestroyed(), report.crystalsLeft(), report.crystalsGoneOtherwise(),
                 health, defeat, portal, experience, report.rests(),
-                new Dodges(report.breathDodges(), report.sweepDodges(), report.fireballDodges()));
+                new FightDetails.Dodges(report.breathDodges(), report.sweepDodges(), report.fireballDodges()));
     }
 
     /**
@@ -742,51 +758,4 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (current != null) return current.interruptibility();
         return battle != null ? battle.interruptibility() : Interruptibility.WORKING;
     }
-
-    /**
-
-    /**
-     * 战斗的结果细节。
-     *
-     * @param weapon      这场实际拿着打的那件
-     * @param hits        确认打中的下数
-     * @param shots       游戏确认了放箭的箭数（弓、弩、联动远程各算一发）
-     * @param arrowsSpent 这一仗箭少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null
-     * @param reachIssue  点名目标里走不到跟前、也射不到的
-     * @param retreat     撤离收场时为什么撤；没撤为空
-     */
-    record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
-                        String weapon, int hits, int shots, Integer arrowsSpent, List<String> reachIssue, String retreat,
-                        List<String> lootGained, DragonDetails dragon) implements ResultDetails {
-        FightDetails {
-            defeated = List.copyOf(defeated);
-            lostTrack = List.copyOf(lostTrack);
-            reachIssue = List.copyOf(reachIssue);
-            lootGained = List.copyOf(lootGained);
-        }
-    }
-
-    /**
-     * 打龙这一节。
-     *
-     * @param crystalsDestroyed     确认是我射掉的水晶数
-     * @param crystalsLeft          没打掉的水晶：在哪、为什么
-     * @param crystalsGoneOtherwise 不是我射掉却没了的水晶数
-     * @param health                最后看到的龙血量与上限
-     * @param defeat                龙死的证据（有几样写几样）
-     * @param exitPortal            出口门的坐标与亮没亮
-     * @param experience            这一仗得到的经验
-     * @param rests                 退开回血了几次
-     * @param dodges                躲开龙息、冲撞、火球各几次
-     */
-    record DragonDetails(int crystalsDestroyed, List<String> crystalsLeft, int crystalsGoneOtherwise, String health,
-                         List<String> defeat, String exitPortal, String experience, int rests, Dodges dodges) {
-        DragonDetails {
-            crystalsLeft = List.copyOf(crystalsLeft);
-            defeat = List.copyOf(defeat);
-        }
-    }
-
-    /** 躲开龙息、冲撞、火球各几次。 */
-    record Dodges(int breath, int charge, int fireball) {}
 }

@@ -174,7 +174,7 @@ class FightDragonTest {
         assertNotNull(result);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(result.summary().startsWith("打败了末影龙"), result.summary());
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertEquals(List.of("minecraft:ender_dragon（实体 1）"), details.defeated());
         assertEquals(List.of("看到了死亡动画", "死亡动画后龙消失了"), details.dragon().defeat());
     }
@@ -189,7 +189,7 @@ class FightDragonTest {
         assertNotNull(result);
         assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
         assertEquals(Problem.Kind.TARGET_GONE, result.problem().kind());
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertTrue(details.defeated().isEmpty());
         assertEquals(List.of("minecraft:ender_dragon（实体 1）"), details.lostTrack());
     }

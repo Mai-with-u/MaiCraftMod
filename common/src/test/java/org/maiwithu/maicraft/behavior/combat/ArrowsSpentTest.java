@@ -38,6 +38,34 @@ class ArrowsSpentTest {
     }
 
     @Test
+    void shotAndPickedUpAreCountedSeparately() {
+        // 射出去 5 支、捡回 2 支：净少 3，离开背包的 5、捡回的 2 各自有数。
+        ArrowsSpent arrows = new ArrowsSpent();
+        arrows.note(OptionalInt.of(10));
+        arrows.note(OptionalInt.of(5));
+        arrows.note(OptionalInt.of(7));
+        assertEquals(5, arrows.taken());
+        assertEquals(2, arrows.pickedUp());
+        assertEquals(OptionalInt.of(3), arrows.spent());
+    }
+
+    @Test
+    void changesWhileSomethingElseHadTheBodyAreLeftToThatThing() {
+        // 实机：fight 跑到一半自卫插进来射了 7 支；回来接着打时起点挪到当时的只数，那 7 支由自卫自己交代。
+        ArrowsSpent arrows = new ArrowsSpent();
+        arrows.note(OptionalInt.of(50));
+        arrows.note(OptionalInt.of(49));
+        arrows.resumeAt(OptionalInt.of(42));
+        arrows.note(OptionalInt.of(40));
+        assertEquals(OptionalInt.of(3), arrows.spent(), "自己射的 1 + 2 支");
+        assertEquals(3, arrows.taken());
+        // 没读过第一笔就回来：什么都不做。
+        ArrowsSpent fresh = new ArrowsSpent();
+        fresh.resumeAt(OptionalInt.of(9));
+        assertTrue(fresh.spent().isEmpty());
+    }
+
+    @Test
     void unreadableTicksAreSkippedAndNoReadingMeansNoNumber() {
         // 没接上角色的刻不记；一次都没读到背包就不给数，结果里不写。
         ArrowsSpent arrows = new ArrowsSpent();

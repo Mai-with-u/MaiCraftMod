@@ -102,6 +102,8 @@ public final class LiveCombatSenses implements CombatSenses {
             if (self.distanceTo(hostile) > radius) {
                 continue;
             }
+            // 倒下还在死亡动画里的那一秒不算威胁：它打不了人，再对它拉弓只会每刻起一箭又收一箭。
+            if (hostile.isDeadOrDying()) continue;
             threats.add(threatOf(self, hostile));
         }
         // 十秒内真打过她的别的玩家也算威胁：自卫不还手，但要退开、举盾、停下手上的事。

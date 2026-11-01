@@ -378,6 +378,8 @@ public final class DefaultInteractionSender implements InteractionSender {
         int replacement = UseCancelSlot.pick(context.localPlayer().getInventory());
         LOG.info("[主手停手] 切槽停手：从 {} 格（{}）切到 {} 格，正在用 {}", context.localPlayer().getInventory().selected,
                 context.localPlayer().getMainHandItem(), replacement, context.localPlayer().getUseItem());
+        // 这次切槽就是在结清欠着的停手：先把欠账销掉，免得下面登记等待时把它当成被新动作顶掉。
+        mainHandStop.drop();
         // 切槽和本地停止是同步动作；这里确认的是已提交的取消操作，不是箭命中或服务器确认。
         InteractionConfirmation stopped = new InteractionConfirmation() {
             public Verdict observe(PlayerContext c) {

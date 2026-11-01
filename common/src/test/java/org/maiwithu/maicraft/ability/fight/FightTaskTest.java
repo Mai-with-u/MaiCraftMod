@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -241,7 +242,7 @@ class FightTaskTest {
         assertNotNull(result);
         assertTrue(moves.started.contains("捡掉落物"), "拾荒交给共用的捡掉落物：" + moves.started);
         assertEquals(Set.of(41), moves.pickupSkipped, "开打前就躺着的不碰");
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertEquals(List.of("minecraft:mutton"), details.lootGained(), result.summary());
     }
 
@@ -258,7 +259,7 @@ class FightTaskTest {
 
         assertNotNull(result);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertEquals(1, details.defeated().size());
         assertTrue(details.lostTrack().isEmpty());
     }
@@ -277,7 +278,7 @@ class FightTaskTest {
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
         assertTrue(result.problem().message().contains("出手连着 3 次没打出去，最后一次：够得着却打不到：准星打到的是 方块 0, 65, 2"),
                 result.problem().message());
-        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightTask.FightDetails) result.details()).reachIssue());
+        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightDetails) result.details()).reachIssue());
     }
 
     @Test
@@ -293,7 +294,7 @@ class FightTaskTest {
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
         assertTrue(result.problem().message().contains("在高处，高出 3.0 格"), result.problem().message());
         assertTrue(result.problem().message().contains("minecraft:zombie（实体 7）"), result.problem().message());
-        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightTask.FightDetails) result.details()).reachIssue());
+        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightDetails) result.details()).reachIssue());
     }
 
     @Test
@@ -312,9 +313,35 @@ class FightTaskTest {
         TaskResult result = run(20);
 
         assertNotNull(result);
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertEquals(22, details.arrowsSpent(), "箭少了几支按背包数");
         assertEquals(0, details.shots(), "没有一箭得到游戏确认就不冒充射出");
+    }
+
+    @Test
+    void arrowsShotBySelfDefenceWhileTheFightWasPausedAreNotCountedAsTheFights() {
+        // 实机：fight 跑到一半自卫插进来射了 7 支，fight 自己一支没射；自卫的箭由自卫的结果交代，
+        // fight 回来接着打时从当时的只数重新起算，结果里只有自己的消耗。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        moves.arrows = 50;
+        task.start(new Tick(0));
+        for (long t = 0; t < 3; t++) task.tick(new Tick(t));
+        task.pause();
+        moves.arrows = 43;
+        task.tick(new Tick(3));
+        moves.arrows = 41;
+        task.tick(new Tick(4));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        TaskResult result = null;
+        for (long t = 5; t < 30 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(2, details.arrowsSpent(), "只算回来之后自己射的");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && change.what().equals("minecraft:arrow") && change.count() == 2), result.changes().toString());
     }
 
     @Test
@@ -339,7 +366,7 @@ class FightTaskTest {
         }
 
         assertNotNull(result);
-        assertEquals(22, ((FightTask.FightDetails) result.details()).arrowsSpent(), "拾荒时同步到的那一支也算");
+        assertEquals(22, ((FightDetails) result.details()).arrowsSpent(), "拾荒时同步到的那一支也算");
     }
 
     @Test
@@ -354,7 +381,7 @@ class FightTaskTest {
         TaskResult result = run(20);
 
         assertNotNull(result);
-        assertNull(((FightTask.FightDetails) result.details()).arrowsSpent());
+        assertNull(((FightDetails) result.details()).arrowsSpent());
     }
 
     @Test
@@ -389,7 +416,7 @@ class FightTaskTest {
 
         assertNotNull(result);
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary() + " / " + result.problem());
-        assertEquals("outmatched", ((FightTask.FightDetails) result.details()).threatVerdict());
+        assertEquals("outmatched", ((FightDetails) result.details()).threatVerdict());
         assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("开打前评估")
                 && attempt.result().contains("照打") && attempt.result().contains("武器")), result.attempts().toString());
     }
@@ -449,7 +476,7 @@ class FightTaskTest {
         assertNotNull(result);
         assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
         assertEquals(Problem.Kind.TARGET_GONE, result.problem().kind());
-        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        FightDetails details = (FightDetails) result.details();
         assertTrue(details.defeated().isEmpty(), details.defeated().toString());
         assertEquals(List.of("minecraft:zombie（实体 7）"), details.lostTrack());
     }

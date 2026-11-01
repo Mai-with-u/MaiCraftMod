@@ -322,7 +322,7 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         LocalPlayer self = player == null ? null : player.localPlayer();
         if (self == null || pending == null || !self.isUsingItem()
                 || self.getUsedItemHand() != InteractionHand.MAIN_HAND) {
-            LOG.info("[射箭] 停手时没在拉弓（阶段 {}，拉弓 {} 刻），只交还投影", stage, held);
+            LOG.debug("[射箭] 停手时没在拉弓（阶段 {}，拉弓 {} 刻），只交还投影", stage, held);
             projection.release(this);
             return;
         }

@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -237,6 +238,36 @@ class SelfDefenseTaskTest {
         assertEquals(0, details.shots());
         String note = task.finishedNote(finished);
         assertTrue(note.contains("箭少了 27 支"), note);
+        // 离开背包的箭记成消耗：自卫插在主任务身上，这笔随主任务的结果一起交代，调用方对背包的账才对得上。
+        assertTrue(finished.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && change.what().equals("minecraft:arrow") && change.count() == 27), finished.changes().toString());
+    }
+
+    @Test
+    void arrowsPickedBackUpAreToldApartFromArrowsShot() {
+        // 实机：收场句"射了 5 箭，箭少了 3 支"看着自相矛盾——其实射出去 5 支、捡回 2 支。离开背包的和捡回的分开说。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        moves.arrows = 10;
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        moves.arrows = 5;
+        run(task, 3, 5);
+        moves.arrows = 7;
+        senses.threats.clear();
+        TickResult result = run(task, 5, 5 + SelfDefenseTask.WATCH_TICKS + 5);
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
+
+        var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
+        assertEquals(3, details.arrowsSpent(), "净少 3 支");
+        assertEquals(2, details.arrowsPickedUp());
+        String note = task.finishedNote(finished);
+        assertTrue(note.contains("箭少了 5 支、捡回 2 支"), note);
+        assertTrue(finished.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && change.what().equals("minecraft:arrow") && change.count() == 2), finished.changes().toString());
     }
 
     @Test

@@ -135,6 +135,8 @@ public final class Battle {
     private boolean dragonActive;
     /** 被叫先到安全处再停、走位的寻路或垫高说要先落地：只推进它们到落地站稳；暂停时清掉。 */
     private boolean stopping;
+    /** 上一次推进之后被暂停过（别的事插进来占了一段）：任务回来接着打的第一刻问一次，问过就清。 */
+    private boolean pausedSinceTick;
 
     /** @param radius 看多远的战场：自卫用警戒半径，区域清扫用清扫半径；撤离时自动看四十格 */
     public Battle(CombatSenses senses, BattleMoves moves, Battlefield.Roster roster, double radius) {
@@ -144,6 +146,13 @@ public final class Battle {
         this.radius = radius;
         this.limbs = new BattleLimbs(moves, MAX_REJECTS);
         this.dragon = roster.fightsDragon() ? new DragonCombat(moves) : null;
+    }
+
+    /** 上一次推进之后被暂停过（吃饭、自卫插曲占了一段）：读一次就清，任务用它把那段的账分开。 */
+    public boolean resumedAfterPause() {
+        boolean resumed = pausedSinceTick;
+        pausedSinceTick = false;
+        return resumed;
     }
 
     public Moment tick(TickContext context) {
@@ -704,6 +713,7 @@ public final class Battle {
     /** 暂停：寻路、垫高与出手停在原处，弓取消；之后照原样接着打，不用再收尾。 */
     public void pause() {
         stopping = false;
+        pausedSinceTick = true;
         limbs.pause();
         if (pillar != null) pillar.pause();
         bow.close();

@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
 import org.maiwithu.maicraft.kernel.interrupt.DisplacedTask;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -161,6 +162,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         }
         Battle.Moment moment = battle.tick(context);
         tally.note(context, moment, senses, moves);
+        recordTally();
         if (moment.progressed()) recordProgress(moment.doing());
         if (moment.cornered() && !reportedCornered) {
             reportedCornered = true;
@@ -203,6 +205,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         Battle.Moment moment = battle.tick(context);
         // 最后一只刚倒下时引擎已经收手：观察期里接着看它倒没倒，别漏记。
         tally.note(context, moment, senses, moves);
+        recordTally();
         if (moment.state() != Battle.State.FINISHED) {
             return go(Phase.ENGAGE, "又有威胁出现，继续打");
         }
@@ -221,6 +224,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private Next<Phase> pickUp(TickContext context) {
         Battle.Moment moment = battle.tick(context);
         tally.noteArrows(context, moves);
+        recordTally();
         if (moment.state() != Battle.State.FINISHED) {
             closePickup();
             return go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
@@ -244,6 +248,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         // 走回打点的路上照样盯着：又有怪冲过来（尤其苦力怕）就回去打、去躲。原先这一段不看威胁，
         // 自卫"还在做"、需求又插不进来，实机 10-14 撤离后往回走，苦力怕走到跟前点着引信，一下没躲被炸死。
         tally.noteArrows(context, moves);
+        recordTally();
         if (battle.tick(context).state() != Battle.State.FINISHED) {
             if (walkBack != null) walkBack.close();
             walkBack = null;
@@ -409,17 +414,37 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         }
     }
 
+    /** 已经记进变化的箭：离开背包的、捡回的各几支；每多一支补记一支。 */
+    private int arrowsTakenRecorded;
+    private int arrowsPickedUpRecorded;
+
+    // 这一场打掉的、射掉的、捡回的箭随手记成变化：自卫插在主任务身上，收场后结果并进主任务，
+    // 调用方拿主任务的结果对背包和世界的账时，这一段的变化也在里面（各种箭合在一起按 minecraft:arrow 记）。
+    private void recordTally() {
+        for (String type : tally.takeNewDefeats()) recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, type, 1));
+        int taken = tally.arrowsTaken() - arrowsTakenRecorded;
+        if (taken > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", taken));
+            arrowsTakenRecorded = tally.arrowsTaken();
+        }
+        int pickedUp = tally.arrowsPickedUp() - arrowsPickedUpRecorded;
+        if (pickedUp > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, "minecraft:arrow", pickedUp));
+            arrowsPickedUpRecorded = tally.arrowsPickedUp();
+        }
+    }
+
     private DefenseDetails details(double drift, double heartsLost) {
         return new DefenseDetails(drift, heartsLost, tally.defeated(), tally.weapon(), tally.hits(), tally.shots(),
-                tally.arrowsSpent());
+                tally.arrowsSpent(), tally.arrowsPickedUp());
     }
 
     /**
      * 自卫的结果细节：位移、红心差，打掉了谁（"种类 ×只数"）、拿什么打、确认挥中几下、射了几箭、
-     * 箭少了几支（按背包数，捡回的已抵掉；读不到背包为 null）。
+     * 箭净少了几支（按背包数，捡回的已抵掉；读不到背包为 null）、捡回几支。
      */
     record DefenseDetails(double driftBlocks, double heartsLost, List<String> defeated, String weapon, int hits,
-                          int shots, Integer arrowsSpent) implements ResultDetails {
+                          int shots, Integer arrowsSpent, int arrowsPickedUp) implements ResultDetails {
         DefenseDetails {
             defeated = List.copyOf(defeated);
         }
