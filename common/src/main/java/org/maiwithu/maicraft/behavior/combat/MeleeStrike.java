@@ -11,6 +11,8 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
@@ -30,6 +32,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 原先挑好的武器只拿来算"打不打得过"，从没换到手上，结果里还写成用的是它。
  */
 public final class MeleeStrike implements Action {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MeleeStrike.class);
 
     /** 对手离这么远以上，才为换武器打开背包。 */
     private static final double INVENTORY_SWAP_DISTANCE = 4.0;
@@ -71,6 +75,9 @@ public final class MeleeStrike implements Action {
             Interaction swing = Interaction.attackEntity(player, player.interactionSender(), player.menuActions(),
                     player.input(), target);
             attack = new InteractionAction(swing, "攻击 " + EntityType.getKey(target.getType()));
+            LOG.info("[近战] 出手一次：主手 {}，眼睛到它碰撞箱 {} 格", player.localPlayer().getMainHandItem(),
+                    String.format("%.2f", CombatGeometry.distanceToBox(player.localPlayer().getEyePosition(),
+                            target.getBoundingBox())));
         }
         return attack.tick(context);
     }

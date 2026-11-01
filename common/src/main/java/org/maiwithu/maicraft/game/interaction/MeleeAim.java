@@ -9,6 +9,8 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -71,6 +73,24 @@ public final class MeleeAim {
             if (eye.distanceTo(inset) <= reach && clear.test(inset)) return inset;
         }
         return nearest;
+    }
+
+    /** 准星落在了什么上、眼睛离瞄点几格：出手等着的原因与打不到的收场话共用这一句。 */
+    static String aimBlockedBy(HitResult aimed, double eyeToAim) {
+        return "准星打到的是 " + hitName(aimed) + "，眼睛离瞄点 " + String.format("%.2f", eyeToAim) + " 格";
+    }
+
+    /** 这一刻瞄准的一句话诊断：打谁、瞄点在哪（离眼睛几格）、准星打到了什么、镜头到没到位。 */
+    static String describe(LocalPlayer player, Entity target, Vec3 aimPoint, HitResult aimed, boolean settled) {
+        return "打 " + target.getType().getDescriptionId() + "：瞄点 " + aimPoint + "（离眼睛 "
+                + String.format("%.2f", player.getEyePosition().distanceTo(aimPoint)) + "），准星 " + hitName(aimed)
+                + "，镜头到位 " + settled;
+    }
+
+    private static String hitName(HitResult aimed) {
+        return aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
+                : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                ? "方块 " + hit.getBlockPos().toShortString() : "空气";
     }
 
     /** 它的身体框按它相对我的移动往前提。 */

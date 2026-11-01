@@ -244,6 +244,8 @@ public final class DefaultInteractionSender implements InteractionSender {
         }
         // 本刻不收时交回 null，槽位保持原样，由调用方下一刻再选。
         if (!acceptSubmission(context)) return null;
+        LOG.info("[换手] 选快捷栏 {} 格（{}），原来 {} 格（{}）", slot, context.localPlayer().getInventory().getItem(slot),
+                context.localPlayer().getInventory().selected, context.localPlayer().getMainHandItem());
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.SELECT_HOTBAR,
                 context,
@@ -351,21 +353,31 @@ public final class DefaultInteractionSender implements InteractionSender {
         // 只能接收提交入口自己认下的主手持用；欠账连手上是什么一起冻结，下一刻按原物停。
         // 上下文过了刻也收（任务在两刻之间被打断时手上只有上一刻的上下文）：结清时按同一个玩家核对。
         if (context == null || context.localPlayer() == null || !ownsItemUse(pending)
-                || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
+                || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) {
+            LOG.info("[主手停手] 不收欠账：{}", context == null || context.localPlayer() == null ? "没有角色"
+                    : !ownsItemUse(pending) ? "这次持用不是提交入口认下的（active=" + diagnosticState() + "）" : "用的不是主手");
+            return false;
+        }
         mainHandStop.owe(context, pending);
+        LOG.info("[主手停手] 欠下一次停手：手上 {}，下一刻切槽", context.localPlayer().getUseItem());
         return true;
     }
 
     @Override
     public PendingInteraction cancelMainHandUse(PlayerContext context, PendingInteraction pending) {
         // 本刻没有交互机会时交回 null：取消下一刻再发，持用中的物品由原版按松键收场。
-        if (!claimSubmission(context)) return null;
+        if (!claimSubmission(context)) {
+            LOG.info("[主手停手] 本刻没有交互机会，切槽没发");
+            return null;
+        }
         requireActive(pending, PendingInteraction.Kind.USE_ITEM);
         if (context.localPlayer().isUsingItem()
                 && context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND)
             throw new IllegalStateException("main-hand cancellation cannot stop an offhand action");
         // 切到剑斧、空格这类，别切到挨着弓的那格箭上（停手后一直拿着箭走）。
         int replacement = UseCancelSlot.pick(context.localPlayer().getInventory());
+        LOG.info("[主手停手] 切槽停手：从 {} 格（{}）切到 {} 格，正在用 {}", context.localPlayer().getInventory().selected,
+                context.localPlayer().getMainHandItem(), replacement, context.localPlayer().getUseItem());
         // 切槽和本地停止是同步动作；这里确认的是已提交的取消操作，不是箭命中或服务器确认。
         InteractionConfirmation stopped = new InteractionConfirmation() {
             public Verdict observe(PlayerContext c) {
@@ -542,6 +554,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     /** 换角色或交还控制权时结束旧等待：旧结果不再可信，这里只改等待记录，不再次发世界操作。 */
     @Override public void revokeForBoundary(String reason) {
+        if (mainHandStop.owed()) LOG.info("[主手停手] 控制权边界（{}）：欠着的停手作废", reason);
         mainHandStop.drop(); // 交还角色后，旧取消不得切换新操作者的槽位。
         if (active != null && !active.terminal()) {
             active.finish(PendingInteraction.Status.UNCERTAIN, reason);
@@ -581,6 +594,9 @@ public final class DefaultInteractionSender implements InteractionSender {
     }
 
     void install(PendingInteraction pending) {
+        if (mainHandStop.owed()) {
+            LOG.info("[主手停手] 新动作 {} 接手，欠着的停手作废（弓若还拉着会被原版松手）", pending.kind());
+        }
         mainHandStop.drop(); // 新原生动作接管时丢弃旧欠账，不替后来者松手或换物。
         active = pending;
         // 新的一次点击不继承上一次举盾的持用状态，避免无线终端被当作已经松开的盾牌。
@@ -628,7 +644,10 @@ public final class DefaultInteractionSender implements InteractionSender {
      */
     private boolean idleForNewSubmission(PlayerContext context) {
         // 欠着一次主手停手（拉到一半的弓等下一刻切槽）：先停稳再收新动作，新动作一接手旧欠账就作废，弓会被原版松手放出一箭。
-        if (mainHandStop.owed()) return false;
+        if (mainHandStop.owed()) {
+            LOG.debug("[主手停手] 欠着停手，这一刻不收新动作");
+            return false;
+        }
         if (active == null || active.terminal()) return true;
         if (context.clientTick() >= active.deadlineTick() || !active.fromSamePlayer(context)) {
             PendingInteraction stale = active;

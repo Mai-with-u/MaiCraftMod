@@ -10,6 +10,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.BowItem;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemStack;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
@@ -32,6 +34,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 射没射出去按游戏确认认（弓确认停止使用、弩确认手里的弩不再上弦），中没中不在这里认。
  */
 public final class RangedShot implements Action, RangedCombat.Fires {
+
+    private static final Logger LOG = LoggerFactory.getLogger(RangedShot.class);
 
     /** 弓拉满的刻数：拉满才有满速和暴击。 */
     static final int FULL_DRAW_TICKS = 20;
@@ -200,6 +204,7 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         if (pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
             return fail("拉弓（装弩）没开始：" + pending.detail());
         }
+        LOG.info("[射箭] 开始{}：主手 {}，目标 #{}", crossbow ? "装弩" : "拉弓", heldAtStart, targetId);
         stage = crossbow ? Stage.LOAD : Stage.DRAW;
         return ActionStatus.progressed();
     }
@@ -296,6 +301,7 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         if (pending != null && pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED) {
             fired = true;
             stage = Stage.DONE;
+            LOG.info("[射箭] 放箭得到确认（拉弓 {} 刻）", held);
             return ActionStatus.done();
         }
         return fail("放箭没得到游戏确认：" + (pending == null ? "" : pending.detail()));
@@ -316,22 +322,28 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         LocalPlayer self = player == null ? null : player.localPlayer();
         if (self == null || pending == null || !self.isUsingItem()
                 || self.getUsedItemHand() != InteractionHand.MAIN_HAND) {
+            LOG.info("[射箭] 停手时没在拉弓（阶段 {}，拉弓 {} 刻），只交还投影", stage, held);
             projection.release(this);
             return;
         }
         // 两刻之间被别的事打断（换气、吃饭插进来）时手上的上下文已经过了刻，本刻没法切槽：一样欠给提交入口。
         if (!player.isCurrent() || !player.canInteractThisTick()) {
-            if (player.interactionSender().deferMainHandUseCancellation(player, pending)) return;
+            boolean deferred = player.interactionSender().deferMainHandUseCancellation(player, pending);
+            LOG.info("[射箭] 停手：拉弓 {} 刻，{}，{}", held, player.isCurrent() ? "本刻没有交互机会" : "上下文已过刻",
+                    deferred ? "停手欠给提交入口，投影留着" : "提交入口不认这次持用，投影交还（原版可能松手放箭）");
+            if (deferred) return;
             // 提交入口不认这次持用：投影交还，原版两刻内按松手收场，弓可能因此放出一箭，如实留在世界里。
             projection.release(this);
             return;
         }
         projection.release(this);
         PendingInteraction cancelled = player.interactionSender().cancelMainHandUse(player, pending);
+        LOG.info("[射箭] 停手：拉弓 {} 刻，本刻切槽{}", held, cancelled == null ? "没发出去（提交入口没收）" : "已发出");
         if (cancelled != null) pending = cancelled;
     }
 
     private ActionStatus fail(String reason) {
+        LOG.info("[射箭] 这一箭没成：{}（阶段 {}，拉弓 {} 刻）", reason, stage, held);
         projection.release(this);
         failure = Problem.of(Problem.Kind.REFUSED_BY_GAME, reason);
         stage = Stage.DONE;

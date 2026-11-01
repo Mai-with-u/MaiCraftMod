@@ -15,6 +15,8 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.combat.ArrowsSpent;
 import org.maiwithu.maicraft.behavior.combat.Battle;
@@ -55,6 +57,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 连着五分钟龙都没趴下也没打到什么，都如实收场。
  */
 final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatResponder {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FightTask.class);
 
     /** 战斗的阶段：核实目标 → 评估 → 打（撤离在打的阶段里由引擎做）→ 捡。 */
     enum Phase { CHECK, ASSESS, FIGHT, LOOT }
@@ -370,7 +374,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
         if (moment.struck()) hits++;
         // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里（实机 10-14 拿弓清掉三只尸壳，hits 写 0 看着像没打）。
-        if (moment.fired()) shots++;
+        if (moment.fired()) {
+            shots++;
+            LOG.info("[战斗] 射出第 {} 箭，游戏确认了放箭", shots);
+        }
         // 箭少了几支按背包数，不按射了几箭推：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
         arrows.note(moves.arrowsCarried(context));
         if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());

@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.game.interaction;
 
 import net.minecraft.world.item.ItemStack;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
@@ -13,6 +15,8 @@ import java.util.function.Consumer;
  * 后来者不继承旧欠账：换身体、换世界或新的一次性动作接手时旧账作废。
  */
 final class PendingMainHandStop {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PendingMainHandStop.class);
 
     private record Held(PendingInteraction pending, ItemStack item) {}
 
@@ -41,12 +45,15 @@ final class PendingMainHandStop {
         Held current = held;
         if (current == null) return false;
         if (!current.pending().fromSamePlayer(context)) {
+            LOG.info("[主手停手] 欠账不属于这个身体了，作废（手上原是 {}）", current.item());
             drop();
             return false;
         }
         // 只读看一眼本刻还有没有机会；真正发出取消时由取消入口自己占用。
         if (context.canInteractThisTick()) {
             cancel.accept(current.pending());
+        } else {
+            LOG.info("[主手停手] 本刻开头没有交互机会，停手再欠一刻（手上 {}）", current.item());
         }
         return true;
     }

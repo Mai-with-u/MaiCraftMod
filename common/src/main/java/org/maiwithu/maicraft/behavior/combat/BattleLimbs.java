@@ -5,6 +5,9 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
@@ -23,6 +26,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 每次传入。锚点只取水平位置：走位只看目标在平面上挪没挪远。
  */
 public final class BattleLimbs {
+
+    private static final Logger LOG = LoggerFactory.getLogger(BattleLimbs.class);
 
     /** 目标在平面上挪开这么远才重新寻路（格）。 */
     private static final double REPLAN_AFTER = 3.0;
@@ -148,11 +153,13 @@ public final class BattleLimbs {
         // 整场自卫不能因此判成出错收场。
         ActionStatus status = strike.tick(context);
         if (status instanceof ActionStatus.Done) {
+            LOG.debug("[出手] 打 #{}：这一刀递进去了（游戏确认）", targetId);
             dropStrike();
             rejects = 0;
             return new Swing(true, false, false);
         }
         if (status instanceof ActionStatus.Failed failed) {
+            LOG.debug("[出手] 打 #{}：被拒第 {} 次，{}", targetId, rejects + 1, failed.problem().message());
             lastRejectReason = failed.problem().message();
             dropStrike();
             markSidestep(standX, standZ);

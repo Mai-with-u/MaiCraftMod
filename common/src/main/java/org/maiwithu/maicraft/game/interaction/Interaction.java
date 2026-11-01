@@ -491,6 +491,8 @@ public final class Interaction {
         // 近战遵守当前身体的真实实体触及属性，不能沿用右键方块的四点五格范围。
         HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
         boolean onTarget = aimed instanceof EntityHitResult entityHit && entityHit.getEntity() == entity;
+        LOG.debug("[近战瞄点] {}", MeleeAim.describe(player, entity, aimPoint, aimed,
+                strikeAimSettled(onTarget, player.getViewVector(1.0f), aimPoint.subtract(player.getEyePosition()))));
         // 镜头到位：视线离瞄点 7° 以内，或准星已经先碰到它。对着横移的目标瞄点提前了，镜头对着的是它此刻的身体，
         // 离提前后的瞄点还差两刻的位移（3 格外疾跑横移约 12°），只按 7° 判就一直等；准星落在它身上这一刀就打得中。
         if (!strikeAimSettled(onTarget, player.getViewVector(1.0f), aimPoint.subtract(player.getEyePosition()))) {
@@ -498,7 +500,7 @@ public final class Interaction {
         }
         if (!onTarget) {
             if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草叶");
-            String blocked = aimBlockedBy(aimed, player.getEyePosition().distanceTo(aimPoint));
+            String blocked = MeleeAim.aimBlockedBy(aimed, player.getEyePosition().distanceTo(aimPoint));
             // 镜头到位了准星还落不到它身上（它站在柱顶、台沿上被台面挡着，或离得差一点）：等几刻给镜头收尾，
             // 还不行就按打不到收场交回去，让走位换个方位或记成够不着——不在这儿无限等，等到任务的停滞判定来收。
             if (++aimBlockedTicks >= AIM_BLOCKED_GIVE_UP_TICKS) {
@@ -530,14 +532,6 @@ public final class Interaction {
         }
         pending = submitted;
         return false;
-    }
-
-    /** 准星落在了什么上、眼睛离瞄点几格：出手等着的原因与打不到的收场话共用这一句。 */
-    static String aimBlockedBy(HitResult aimed, double eyeToAim) {
-        String what = aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
-                : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
-                ? "方块 " + hit.getBlockPos().toShortString() : "空气";
-        return "准星打到的是 " + what + "，眼睛离瞄点 " + String.format("%.2f", eyeToAim) + " 格";
     }
 
     // 近战这一下为什么还没出手：换了原因才记一行，实机对得上卡在哪一关（10-14 点名杀羊三十秒没挥，看不出原因）。

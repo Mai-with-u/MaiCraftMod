@@ -106,6 +106,8 @@ public final class Battle {
     private String doing = "观察战场";
     /** 上一行日志对着的那只。 */
     private int loggedTarget = -1;
+    /** 近身打上一刻的几项判定（够不够得着、挥不挥、在不在换武器……）：换了才记一行诊断。 */
+    private String loggedMelee = "";
     /** 撤离往哪一侧靠：家（没记过家就是打点）的水平位置 {x, z}；不知道时为空，只按追兵反方向跑。 */
     private Function<TickContext, double[]> homeSide = context -> null;
     /** 就地垫高：试过了没有（一仗只垫一次）、站没站上柱顶、柱顶多高。 */
@@ -416,7 +418,7 @@ public final class Battle {
         boolean jumpNow = jump.jumpNow();
         boolean holdSwing = jump.holdSwing();
         // 手上还在换武器（开背包换进快捷栏、按数字键选中）：这几刻不挥，换完再砍。
-        boolean swinging = inReach && !holdSwing && !swapping;
+        boolean swinging = swingNow(me, threat, inReach, strikeIn, stepIn, jump);
         swingSettled = false;
         boolean struck = false;
         if (swinging) {
@@ -469,7 +471,7 @@ public final class Battle {
                 // 近身打的进入判据：寻路说到站了（水平上已经在近身的带里）人却还够不着它——它在另一层（头顶、脚下、
                 // 台上）或隔着方块，从这儿走不出更近的站位，再寻路也只会原地"到站"。到站这一刻算一次差几格、在哪一侧，
                 // 记成够不着如实早停；不站着每刻重新寻路，空耗半分钟等停滞判定来收。它自己贴上来（看得见、够得着）会再打。
-                String scene = outOfReachScene(me, threat, "已经站在能走到的最近处");
+                String scene = CombatLogLines.outOfReachScene(me, threat, "已经站在能走到的最近处");
                 outOfReachScenes.put(target.id(), threat.type() + "（实体 " + target.id() + "）" + scene);
                 cannotWalkTo(target.id());
                 LOG.info("[战斗] 够不着 {} #{}：{}", threat.type(), target.id(), scene);
@@ -624,32 +626,24 @@ public final class Battle {
         return moved;
     }
 
-    /**
-     * 够不着的现场：它在高处还是低处（差多少格）、水平离几格、看不看得见、看得见时眼睛到它还差几格，再带上为什么
-     * 到此为止（已站在能走到的最近处、出手连着没打出去）。纯函数，点名战斗的结果与自卫的收场话共用。
-     */
-    static String outOfReachScene(Battlefield.Me me, CombatSenses.Threat threat, String why) {
-        double dy = threat.y() - me.y();
-        double flat = Math.hypot(threat.x() - me.x(), threat.z() - me.z());
-        String where;
-        if (dy > CombatGeometry.LEVEL_GAP) where = "在高处，高出 " + tenths(dy) + " 格";
-        else if (dy < -CombatGeometry.LEVEL_GAP) where = "在低处，低 " + tenths(-dy) + " 格";
-        else where = "差不多同一层";
-        String sight = threat.visible()
-                ? "看得见，眼睛到它还差 " + tenths(Math.max(0, threat.reachGap() - me.reach())) + " 格"
-                : "隔着方块看不见";
-        return where + "、水平 " + tenths(flat) + " 格，" + sight + "；" + why;
-    }
 
-    private static String tenths(double value) {
-        return String.format("%.1f", value);
+    // 近身打这一刻的判定换了才记一行：实机对得上"站着不挥"卡在哪一项。
+    private boolean swingNow(Battlefield.Me me, CombatSenses.Threat threat, boolean inReach, int strikeIn,
+                             boolean stepIn, JumpStrike.Move jump) {
+        boolean swinging = inReach && !jump.holdSwing() && !swapping;
+        String state = CombatLogLines.meleeState(me, threat, inReach, strikeIn, stepIn, jump, swapping, swinging);
+        if (!state.equals(loggedMelee)) {
+            loggedMelee = state;
+            LOG.info("[近身打] {}", state);
+        }
+        return swinging;
     }
 
     // 看得见、按距离也够得着，可出手连着几次都没打出去（它站在柱顶、台沿上，准星被台面挡着）：
     // 记成够不着并记下现场，不再对着它一遍遍瞄；这一仗里不再近身打它。
     private void cannotHit(Battlefield.Me me, int id, CombatSenses.Threat threat) {
         unreachable.add(id);
-        outOfReachScenes.put(id, threat.type() + "（实体 " + id + "）" + outOfReachScene(me, threat,
+        outOfReachScenes.put(id, threat.type() + "（实体 " + id + "）" + CombatLogLines.outOfReachScene(me, threat,
                 "出手连着 " + MAX_REJECTS + " 次没打出去，最后一次：" + limbs.lastRejectReason()));
         LOG.info("[战斗] 打不到 {} #{}：{}", threat.type(), id, outOfReachScenes.get(id));
     }

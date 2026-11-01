@@ -6,6 +6,8 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
@@ -25,8 +27,12 @@ import org.maiwithu.maicraft.game.interaction.PendingInteraction;
  * 提交方（持续使用物品的确认与松手）接入后调用 {@link #renew} 与 {@link #release}。
  */
 public final class UseKeyHold {
+    private static final Logger LOG = LoggerFactory.getLogger(UseKeyHold.class);
+
     /** 当前被占用的一次持用投影；没有任务占用时为 null。 */
     private Hold active;
+    /** 上一刻投影有没有替任务按着：从按着变成没按着的那一刻记一行，原版紧接着就会按松手处理（弓会放箭）。 */
+    private boolean wasHolding;
 
     private record Hold(
             Object owner, Minecraft minecraft, LocalPlayer player, ClientLevel level,
@@ -75,12 +81,50 @@ public final class UseKeyHold {
     /** 原版只在正在使用同一物品时获得按住投影；吃完后返回真实键值，不触发下一块面包。 */
     public boolean project(Minecraft minecraft, boolean actual) {
         Hold hold = active;
-        if (hold == null || hold.minecraft != minecraft) return actual;
-        if (!valid(hold)) {
-            active = null;
+        if (hold == null || hold.minecraft != minecraft) {
+            noteDropped(minecraft, actual, hold == null ? "没有任务占着投影" : "投影属于另一个客户端实例");
             return actual;
         }
-        return actual || sameUse(hold);
+        if (!valid(hold)) {
+            active = null;
+            noteDropped(minecraft, actual, "投影失效：" + invalidWhy(hold));
+            return actual;
+        }
+        boolean same = sameUse(hold);
+        if (!same) noteDropped(minecraft, actual, "手上的持用变了：" + differentWhy(hold));
+        else wasHolding = true;
+        return actual || same;
+    }
+
+    // 投影从按着变成没按着、人却还在用主手的东西：原版这一刻起当成松手（拉着的弓会放箭）。只在变化的那一刻记一行。
+    private void noteDropped(Minecraft minecraft, boolean actual, String why) {
+        boolean usingNow = minecraft.player != null && minecraft.player.isUsingItem();
+        if (wasHolding && !actual && usingNow) {
+            LocalPlayer player = minecraft.player;
+            LOG.info("[按住使用键] 投影不再按着，人还在用 {}（用了 {} 刻）：{}", player.getUseItem(),
+                    player.getTicksUsingItem(), why);
+        }
+        wasHolding = false;
+    }
+
+    private static String invalidWhy(Hold hold) {
+        if (hold.minecraft.player != hold.player) return "换了玩家";
+        if (hold.minecraft.level != hold.level) return "换了世界";
+        if (hold.minecraft.screen != null) return "开着界面 " + hold.minecraft.screen.getClass().getSimpleName();
+        if (!hold.input.automationOwnsControls()) return "控制权不在自动化";
+        if (!hold.sender.ownsItemUse(hold.pending)) return "提交入口不再认这次持用";
+        if (hold.player.level().getGameTime() > hold.throughTick) return "续期到期（游戏刻）";
+        return "续期到期（真实时间）";
+    }
+
+    private static String differentWhy(Hold hold) {
+        if (!hold.player.isUsingItem()) return "没在用东西";
+        if (hold.player.getUsedItemHand() != hold.hand) return "换了手";
+        if (hold.player.getUseItemRemainingTicks() > hold.remaining) return "持用计时回退（像是重新开始用）";
+        if (hold.hand == InteractionHand.MAIN_HAND && hold.player.getInventory().selected != hold.selected) {
+            return "换了快捷栏格（" + hold.selected + " -> " + hold.player.getInventory().selected + "）";
+        }
+        return "手上的东西不是开始时那件";
     }
 
     /** 停止动作也必须仍拥有同一次提交和手中物品，不能用旧吃饭任务松掉后来开始的持用。 */
