@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.travel.settle.OpenSkySpots;
 import org.maiwithu.maicraft.behavior.travel.settle.ReachOpenSkyTask;
 import org.maiwithu.maicraft.behavior.travel.settle.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.planning.SameDimensionTravel;
+import org.maiwithu.maicraft.behavior.travel.planning.StandableWidening;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelTask;
@@ -52,9 +53,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import net.minecraft.core.BlockPos;
-
-import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 /**
  * 出行能力：走到一个地方，包括去别的维度。能力只做薄皮——做决定时用玩家行为层的目的地解析器
@@ -80,8 +78,6 @@ public final class TravelAbility implements AbilityModule {
     private final TravelProgressListener progressListener;
     private final DimensionTravelServices dimensionServices;
     private final TravelWorldView world;
-    /** 目的地附近一格能站的都没有时最多再放宽几格。 */
-    private static final int ROOMY_EXTRA = 3;
     private final List<TravelMode> modes;
     /** 往上挖楼梯回地面；没接上为 null，回露天只走路。 */
     private final DigsStairsUp stairsUp;
@@ -284,35 +280,12 @@ public final class TravelAbility implements AbilityModule {
     /** 用什么方式、给它的话；参数自相矛盾时带问题。 */
     private record Choice(String via, Map<String, String> options, Problem problem) {}
 
-    // 目的地附近 radius 格里一格能站的都没有（床、桌子、墙、实心方块里）：放宽到最近有能站的那一圈，最多再放三格。
+    // 目的地附近 radius 格里一格能站的都没有（床、桌子、墙、实心方块里）：放宽到最近有能站的那一圈。
     // 不然走路找不到终点，换喷气背包在屋顶上来回绕（实机 10-13 去床边 1 格，床四周不是墙就是床本身）。
-    // 读不到现场（没加载、没给高度）照原样。
+    // 读不到现场（没加载、没给高度）照原样；判断收在容差放宽一份里，收场时重判同一份。
     private TravelDestination roomy(TravelDestination destination) {
         if (world == null || !destination.heightConfirmed()) return destination;
-        WorldPosition at = destination.position();
-        for (int extra = 0; extra <= ROOMY_EXTRA; extra++) {
-            double radius = Math.max(0, destination.radius()) + extra;
-            if (anyStandable(at, radius)) {
-                // 放宽容差重建目的地时把偏差说明原样带上：开阔水挪到岸格的目的地也可能被放宽，
-                // 丢了这句话收场就写不出"目标在水中央、偏了几格"。
-                return extra == 0 ? destination
-                        : TravelDestination.confirmed(at, radius, destination.arrivalNote());
-            }
-        }
-        return destination;
-    }
-
-    private boolean anyStandable(WorldPosition at, double radius) {
-        // 立方体存在性扫描交给环扫内核：圆球范围折进谓词里卡，找到一格能站就放行。
-        BlockPos center = new BlockPos(at.x(), at.y(), at.z());
-        int span = (int) Math.floor(radius);
-        return SpotScan.exists(center, span, span, cell -> {
-            int dx = cell.getX() - at.x();
-            int dy = cell.getY() - at.y();
-            int dz = cell.getZ() - at.z();
-            return dx * dx + dy * dy + dz * dz <= radius * radius
-                    && world.standable(cell.getX(), cell.getY(), cell.getZ());
-        });
+        return StandableWidening.widen(destination, (x, y, z) -> world.standable(x, y, z));
     }
 
     // via 与各方式自己的参数凑一起：给了哪种方式的参数就是那种方式，via 给了别的就说清对不上。

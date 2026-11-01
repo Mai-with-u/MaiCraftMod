@@ -33,6 +33,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -700,5 +701,72 @@ class TravelTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(0, stairsDownLeg.calls, "浅下掘没拆下掘段");
         assertFalse(result.problem().message().contains("下掘"), () -> result.problem().message());
+    }
+
+    @Test
+    void walkFailedBesideTargetArrivesOnWidenedTolerance() {
+        // 掘到离目标 4 格处走不动收场：目标那一格在实心方块里站不上，一路挖出来后附近才有能站的格子，
+        // 收场时重判容差放宽，按"目的地那一格站不上、停在了附近"结算到达——与此刻重新下达同一位置
+        // 会得出的结论一致，不出现同一位置先判走不到、重发一次又判到了。
+        world.standableCells = Set.of("12,34,-2");
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 34, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 34, -2), false)));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), "站在放宽后容差盖得住的一圈里算到了");
+        assertTrue(result.summary().contains("按放宽的容差"), () -> result.summary());
+        assertTrue(result.summary().contains("(12, 34, -2)"), () -> result.summary());
+        TravelSettlement details = assertInstanceOf(TravelSettlement.class, result.details());
+        assertEquals(new WorldPosition(12, 34, -2, null), details.arrivedAt());
+        assertEquals(1, walks.started.size(), "没到续挖条件就没有重开段");
+    }
+
+    @Test
+    void stallBesideTargetSettlesArrivalOnWidenedTolerance() {
+        // 空转熔断也走同一份放宽重判：身体停在目标附近能站的一圈里，空转满时限按到达收场，不是一句通用走不到。
+        world.standableCells = Set.of("12,34,-2");
+        stallAt(new BlockPos(12, 34, -2));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("按放宽的容差"), () -> result.summary());
+    }
+
+    @Test
+    void bodyBeyondWidenedToleranceStillFailsUnreachable() {
+        // 身体离目标 8 格，放宽的 5 格盖不住：不冒充到达，照旧按走不到收场。
+        world.standableCells = Set.of("12,38,-2");
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 38, -2), false),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 38, -2), false)));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertFalse(result.summary().contains("按放宽的容差"), () -> result.summary());
+    }
+
+    @Test
+    void standingInWaterDoesNotCountAsWidenedArrival() {
+        // 泡在水里不算站到了：放宽重判放过水里这一格，照旧按走不到收场。
+        world.standableCells = Set.of("12,34,-2");
+        world.inWaterNow = true;
+        walks.enqueue(new ScriptedWalk(
+                WalkReport.onTheWay(new BlockPos(12, 34, -2), true),
+                WalkReport.failed(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展"),
+                        new BlockPos(12, 34, -2), true)));
+        TravelTask travel = taskWithPermit(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
     }
 }

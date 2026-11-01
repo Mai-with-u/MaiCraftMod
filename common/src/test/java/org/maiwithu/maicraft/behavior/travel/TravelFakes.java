@@ -35,6 +35,7 @@ import java.util.OptionalInt;
 import java.util.Optional;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
@@ -155,6 +156,20 @@ public final class TravelFakes {
         @Override public ColumnSample column(int x, int z) {
             ColumnSample byColumn = columnSamples.get(x + "," + z);
             return byColumn != null ? byColumn : ColumnSample.unloaded();
+        }
+
+        /** 摆了就只认这些格子能站（"x,y,z"）；没摆（null）时沿默认——读不到现场答能。 */
+        public Set<String> standableCells;
+
+        @Override public boolean standable(int x, int y, int z) {
+            return standableCells == null || standableCells.contains(x + "," + y + "," + z);
+        }
+
+        /** 人泡在水里：摆下判"泡在水里不算到"。 */
+        public boolean inWaterNow;
+
+        @Override public boolean inWater() {
+            return inWaterNow;
         }
     }
 

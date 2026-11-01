@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
+import org.maiwithu.maicraft.behavior.travel.planning.StandableWidening;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
 
 /**
@@ -260,7 +261,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     }
 
     /** 这段走路失败了：目的地还高得远、许能动土就先拆一段爬升再重新算路；
-     *  目的地在脚下深处、这一段真的往下挖深了，就从挖到的地方重开一段走路接着去；不然如实失败。 */
+     *  目的地在脚下深处、这一段真的往下挖深了，就从挖到的地方重开一段走路接着去；
+     *  身体已经站在目的地附近能站的一圈里，就按放宽的容差结算到达；不然如实失败。 */
     private Next<Phase> afterWalkFailed(Problem problem) {
         if (maySplitLeg()) {
             return Next.go(Phase.CLIMB, "一次算不出整条路，先挖楼梯爬一段");
@@ -269,6 +271,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
             descentLegs++;
             return Next.go(Phase.WALK, "这一段没走完，从挖到的地方重新算路接着去");
         }
+        Next<Phase> arrivedNearby = settleOnWidenedTolerance();
+        if (arrivedNearby != null) return arrivedNearby;
         return failWithJourney(problem);
     }
 
@@ -430,7 +434,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     }
 
     /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走；深得走路起步不了、许能动土
-     *  就先挖台阶往下走一段；都不接得上才把长爬升长下掘一次判死。 */
+     *  就先挖台阶往下走一段；身体已经站在目的地附近能站的一圈里就按放宽的容差结算到达；都不接得上才判死。 */
     @Override
     protected Next<Phase> beforeGivingUp(Problem problem) {
         if (stopRequested) return null;
@@ -443,7 +447,26 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
             pendingDescentLeg = leg.get();
             return Next.go(Phase.DESCENT, "长时间没有走近，先挖台阶往下走一段");
         }
+        Next<Phase> arrivedNearby = settleOnWidenedTolerance();
+        if (arrivedNearby != null) return arrivedNearby;
         return null;
+    }
+
+    /** 身体已经站在目的地附近能站的一圈里：把容差放宽到那一圈按到达结算，与此刻重新下达同一位置
+     *  会得出的结论一致——能站的格子常是一路挖开造出来的，下达那一刻判不了，收场时重看现场才不出现
+     *  同一位置先判走不到、重发一次又判到了的口径不一致。放宽盖不住脚下（还在够不着的深度）时不结算，
+     *  照原来的路走：要么接着挖，要么如实收场带差多远。 */
+    private Next<Phase> settleOnWidenedTolerance() {
+        if (world == null || !destination.heightConfirmed() || lastFeet == null) return null;
+        TravelDestination widened = StandableWidening.widen(destination, (x, y, z) -> world.standable(x, y, z));
+        if (widened.radius() <= destination.radius()) return null;
+        if (!world.standable(lastFeet.getX(), lastFeet.getY(), lastFeet.getZ()) || world.inWater()) return null;
+        if (!widened.navGoal().isAt(lastFeet)) return null;
+        buildSettlement(lastFeet, true, null);
+        String water = crossedWater ? "，途中泅渡过水" : "";
+        String detour = destination.arrivalNote();
+        return Next.done(TaskResult.done("出行：" + (detour != null ? detour + "；" : "")
+                + "目的地那一格站不上，按放宽的容差停在了附近：实测位置 " + shortSpot(lastFeet) + water));
     }
 
     /** 记录这一刻的行程观察：泅渡、剩余距离、逐刻进展，垫块与背包的变化逐刻记账。 */
