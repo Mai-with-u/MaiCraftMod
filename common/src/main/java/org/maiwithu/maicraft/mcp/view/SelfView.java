@@ -51,7 +51,7 @@ public final class SelfView {
      * @param dimension 所在维度；读不到时为 null
      * @param backpack  背包视图；读不到时为 null
      * @param mainGoal  手上的主任务；没有时为 null
-     * @param doing     主任务此刻在做什么的一句话；没有时为 null
+     * @param doing     主任务此刻在做什么的一句话；没有主任务时是身体被哪件临时任务占着的说明，真闲着为 null
      * @param automationControls 自动化此刻是否拿着角色；读不到时为 null
      * @param playerTookOver     玩家按 F8 收回了角色、还没交回
      */
@@ -148,11 +148,14 @@ public final class SelfView {
         return food;
     }
 
-    /** 手上在做的目标（主任务）一句话；没有时说"空闲"，免得 LLM 以为没读到。 */
+    /**
+     * 手上在做的目标（主任务）一句话；没有主任务时，身体被生存需求的临时任务占着就说被哪件占着，
+     * 真闲着才说"空闲"，免得 LLM 以为没读到。
+     */
     private static JsonObject goal(GoalRun mainGoal, String doing) {
         JsonObject json = new JsonObject();
         if (mainGoal == null) {
-            json.addProperty("doing", "空闲，没有在做的目标");
+            json.addProperty("doing", doing != null ? doing : "空闲，没有在做的目标");
             return json;
         }
         json.addProperty("goal_id", mainGoal.id());

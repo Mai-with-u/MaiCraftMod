@@ -34,9 +34,16 @@ import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.PlayerControlHandover;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.kernel.task.TickResult;
+import org.maiwithu.maicraft.kernel.task.Urgency;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
@@ -104,6 +111,57 @@ class ObserveToolTest {
         @Override public Optional<TradeOffers.SlotContent> slot(int index) { return Optional.empty(); }
         @Override public OptionalInt stashSlot() { return OptionalInt.empty(); }
     };
+    /** 控制循环：只登记一个自卫替身需求，测试要它插进来时才把它叫急。 */
+    private ControlLoop loop;
+    /** 自卫替身需求：默认不急；叫急后创建的临时任务一直占着身体，直到测试叫它收场。 */
+    private final OccupyingNeed defense = new OccupyingNeed();
+
+    /** 占着身体不走的临时任务替身：一直推进、不给结果；叫它收场才结束。 */
+    private static final class HoldingTask implements Task {
+        private boolean finishing;
+
+        void finishNow() {
+            finishing = true;
+        }
+
+        @Override public void start(TickContext context) {}
+
+        @Override public TickResult tick(TickContext context) {
+            return finishing ? TickResult.finished(TaskResult.done("自卫结束")) : TickResult.RUNNING;
+        }
+
+        @Override public void pause() {}
+
+        @Override public TaskResult close(CloseReason reason) {
+            return TaskResult.done("自卫收尾");
+        }
+
+        @Override public Interruptibility interruptibility(TickContext context) {
+            return Interruptibility.WORKING;
+        }
+
+        @Override public String describe() {
+            return "自卫：正在打僵尸";
+        }
+    }
+
+    /** 自卫的生存需求替身：测试把它叫急时才插进来，创建的任务是同一份占着身体的。 */
+    private static final class OccupyingNeed implements SurvivalNeed {
+        private final HoldingTask task = new HoldingTask();
+        private boolean urgent;
+
+        @Override public String name() {
+            return "自卫";
+        }
+
+        @Override public Urgency urgency(TickContext context) {
+            return urgent ? Urgency.SOON : null;
+        }
+
+        @Override public Task createTask(TickContext context) {
+            return task;
+        }
+    }
 
     @BeforeEach
     void world() {
@@ -122,8 +180,9 @@ class ObserveToolTest {
         AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
         registry.register(new RememberAbility(memory, () -> new WorldPosition(0, 64, 0, "minecraft:overworld"),
                 new SceneSeenTargets(() -> scene)));
+        loop = new ControlLoop(List.of(defense));
         GoalRunTable table = new GoalRunTable(registry, new InMemoryGoalRunStore(),
-                memory, new ControlLoop(List.of()), new PlayerControlHandover() {
+                memory, loop, new PlayerControlHandover() {
                     @Override public boolean automationOwnsControls() {
                         return true;
                     }
@@ -188,6 +247,26 @@ class ObserveToolTest {
         assertEquals("minecraft:stone_pickaxe", self.get("held").getAsString());
         assertEquals("空闲，没有在做的目标", self.getAsJsonObject("goal").get("doing").getAsString());
         assertEquals("natural", self.getAsJsonObject("permissions").get("change_blocks").getAsString());
+    }
+
+    @Test
+    void selfSaysWhichTemporaryTaskHoldsTheBodyWhenThereIsNoGoal() {
+        // 没有主目标时角色闲着被打了，自卫的临时任务占着身体，角色在跑动、战斗：
+        // doing 要写明被哪件临时任务占着，不能一直显示空闲，否则对面只能靠事件流猜。
+        defense.urgent = true;
+        loop.tick(new Tick(10));
+
+        String doing = data(observe("{\"what\": \"self\"}")).getAsJsonObject("goal").get("doing").getAsString();
+        assertTrue(doing.contains("占着身体"), doing);
+        assertTrue(doing.contains("自卫：正在打僵尸"), doing);
+        assertTrue(doing.contains("没有在做的目标"), doing);
+
+        // 自卫做完弹出：身体空出来，doing 回到空闲。
+        defense.task.finishNow();
+        loop.tick(new Tick(11));
+        defense.urgent = false;
+        assertEquals("空闲，没有在做的目标",
+                data(observe("{\"what\": \"self\"}")).getAsJsonObject("goal").get("doing").getAsString());
     }
 
     @Test

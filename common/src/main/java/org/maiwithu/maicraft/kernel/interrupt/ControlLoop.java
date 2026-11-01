@@ -236,11 +236,13 @@ public final class ControlLoop {
     }
 
     /**
-     * 压在主任务上面、此刻占着角色身体的临时任务；主任务自己在推进、或没有插着的临时任务时为 null。
-     * 查询端据此说清"目标为什么迟迟不动"：主任务没被推进不是卡住，是身体被生存需求借走了。
+     * 此刻占着角色身体的临时任务：栈顶是生存需求插进来的那一层时就是它；主任务自己在推进、
+     * 或者栈上一个任务都没有时为 null。没有主任务时临时任务照样能占身（角色闲着被打了就自卫），
+     * 所以不要求它下面压着主任务。查询端据此说清"目标为什么迟迟不动"与"没有目标时角色在干什么"：
+     * 不是卡住也不是空闲，是身体被生存需求借走了。
      */
     public Task occupyingTemporaryTask() {
-        if (stack.size() < 2 || stack.getFirst().from != null) {
+        if (stack.isEmpty()) {
             return null;
         }
         Frame topFrame = stack.getLast();

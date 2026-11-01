@@ -298,6 +298,30 @@ class GoalRunTableTest {
         assertFalse(occupied.doing(id).orElseThrow().contains("占着角色"));
     }
 
+    @Test
+    void withoutMainGoalDoingSaysWhichTemporaryTaskHoldsTheBody() {
+        // 没有主目标时角色闲着被打了，自卫的临时任务照样占着身体：角色在跑动、战斗，
+        // 没有主目标的查询要如实说被哪件临时任务占着，不说空闲；它做完弹出后才回到空闲。
+        HoldingTask holding = new HoldingTask("自卫：正在打僵尸");
+        ControlLoop occupiedLoop = new ControlLoop(List.of(new OccupyingNeed(holding)));
+        GoalRunTable occupied = new GoalRunTable(registry, store, (name, position) -> {
+            throw new IllegalStateException("用不到");
+        }, occupiedLoop, handover, new DeathRecovery(new TaskEventLog()), new RecordingDeathActions());
+        assertTrue(occupied.occupiedByTemporaryTask().isEmpty(), "没人占着身体就是空");
+
+        // 手上没有主目标，生存需求直接插进来占住身体。
+        occupiedLoop.tick(new GoalTestTick(tick++));
+        String doing = occupied.occupiedByTemporaryTask().orElseThrow();
+        assertTrue(doing.contains("占着身体"), doing);
+        assertTrue(doing.contains("自卫：正在打僵尸"), doing);
+        assertTrue(doing.contains("没有在做的目标"), "照样说清没有主目标：" + doing);
+
+        // 临时任务做完弹出：身体空出来，查询回到空。
+        holding.finishNow();
+        occupiedLoop.tick(new GoalTestTick(tick++));
+        assertTrue(occupied.occupiedByTemporaryTask().isEmpty(), "临时任务做完，身体空出来");
+    }
+
     /** 占着身体不走的临时任务替身：一直推进、不给结果，一熬就是很久；叫它收场才结束。 */
     private static final class HoldingTask implements Task {
         private final String name;

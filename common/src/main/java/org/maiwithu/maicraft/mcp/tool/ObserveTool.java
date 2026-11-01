@@ -138,7 +138,9 @@ public final class ObserveTool implements McpTool {
         String dimension = player == null || player.level() == null
                 ? null : player.level().dimension().location().toString();
         GoalRun main = table.mainGoal().orElse(null);
-        String doing = main == null ? null : table.doing(main.id()).orElse(null);
+        // 没有主目标时身体也可能被生存需求的临时任务占着（闲着被打了在自卫）：doing 写明被哪件占着，
+        // 不写"空闲"，对面才不用靠事件流猜角色为什么在跑动、战斗。
+        String doing = main == null ? table.occupiedByTemporaryTask().orElse(null) : table.doing(main.id()).orElse(null);
         Boolean automation = player == null || player.input() == null ? null : player.input().automationOwnsControls();
         boolean tookOver = player != null && player.input() != null && player.input().humanTookOver();
         // 背包里的吃的按游戏的食物组件写上补多少、有什么效果。

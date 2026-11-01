@@ -235,6 +235,21 @@ public final class GoalRunTable {
         return Optional.of(describe);
     }
 
+    /**
+     * 没有主目标时角色此刻在做什么：生存需求的临时任务占着身体（闲着被打了在自卫、饿了在吃饭）就写明
+     * 是哪件临时任务；它做完弹出后又为空。observe(self) 没有主目标时用它代替"空闲"，
+     * 对面才不用靠事件流猜角色为什么在跑动、战斗。
+     */
+    public Optional<String> occupiedByTemporaryTask() {
+        Task occupying = loop.occupyingTemporaryTask();
+        return occupying == null ? Optional.empty() : Optional.of(occupiedWithoutMainGoal(occupying.describe()));
+    }
+
+    /** 没有主目标、身体被临时任务占着时 doing 的一句话：先说被谁占着，再说清没有在做的目标。 */
+    private static String occupiedWithoutMainGoal(String temporaryTask) {
+        return "生存需求的临时任务「" + temporaryTask + "」占着身体，没有在做的目标";
+    }
+
     // 存盘里的目标在做什么：它随角色离开世界停成暂停，没有推进器，说明就说到这里。
     private String storedRunDoing(GoalRun run) {
         String purpose = run.goal().purpose();
