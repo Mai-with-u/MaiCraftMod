@@ -120,7 +120,7 @@ final class LiveFinder implements FindsAround {
         registered.ensure(level, targets);
         // 视野账还在补新方块（刚清空、刚登记新目标、刚走到的冷索引）时，这一刻的空结果说不准有没有：
         // 记下入账进度，等它安静了任务才把"没扫到"收成"没有"。
-        quietness.observe(scans.sectionsBuilt(level));
+        quietness.observe(scans.sectionsBuilt(level), level.getGameTime());
         // 账本跟着查询走：位置、目标、数量、半径任一变了就清账重来。
         blocked.followQuery(center, input.selectors(), input.count(), input.radius());
         var result = scans.query(level, center, targets, input.count(),
@@ -143,7 +143,7 @@ final class LiveFinder implements FindsAround {
             confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
         boolean complete = blocked.settle(result.complete(), hits.size(), input.count(), rejected);
-        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet());
+        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet(level.getGameTime()));
     }
 
     /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；没过的返回 false。 */

@@ -178,7 +178,12 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     public boolean scanComplete() {
         // 索引报扫完、或连续多刻没有新方块入账，都算这一片看稳了：刚清空或刚登记新目标时
         // 查询很快能"走完"已建的部分，但补账还没停，这时空的答案是"还没看清"，不是"没有"。
-        return lastScanComplete || quietness.quiet();
+        // 安静按游戏刻算：问价的等扫描窗只有五秒、隔一两百毫秒才轮询一次，刻到了就算停了，
+        // 不要求轮询者把二十次间隔全喂满——扫描早停了就该落报价。
+        if (lastScanComplete) return true;
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return false;
+        return quietness.quiet(current.level().getGameTime());
     }
 
     @Override
@@ -277,7 +282,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         registered.ensure(level, targets);
         // 视野账还在补新方块（刚清空、刚登记新目标、刚走到的冷索引）时，这一刻的空结果说不准有没有：
         // 记下入账进度，安静之前来源对"附近有没有"只回答"再问"。
-        quietness.observe(scans.sectionsBuilt(level));
+        quietness.observe(scans.sectionsBuilt(level), level.getGameTime());
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
         var result = exposedOnly
                 ? scans.query(level, at, targets, want,

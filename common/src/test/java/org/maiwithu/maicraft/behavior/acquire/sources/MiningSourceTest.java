@@ -440,6 +440,20 @@ class MiningSourceTest {
     }
 
     @Test
+    void 扫完之后不再答再问_附近没有就落报价() {
+        // 实机：raw_iron 问价跨三次调用约 70 秒都答"附近还没看完"，扫描早停了报价落不了地。
+        // 同一处现场、补账停了（complete）：附近真没有就答明确的没有，长程挖矿的给长程挖矿的报价，
+        // 不再按"还没扫完"拖着重估。
+        FakeMinables minables = new FakeMinables(List.of(), true, false, true);
+        SourceQuote quote = source(minables, new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:raw_iron"), 4, "铁锭"), CONTEXT);
+        assertInstanceOf(SourceQuote.Offer.class, quote, "附近看不见铁矿但知道生成层，落成长程挖矿的报价");
+        SourceQuote stone = source(new FakeMinables(List.of(), true, true, true), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "石镐"), CONTEXT);
+        assertInstanceOf(SourceQuote.Offer.class, stone, "埋在脚下谁都有的石头，落成往下挖楼梯的报价");
+    }
+
+    @Test
     void 附近没有的回答写明半径() {
         SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
                 .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
