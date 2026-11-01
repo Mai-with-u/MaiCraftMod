@@ -27,6 +27,8 @@ final class ConstructionSite {
     private final Map<BlockPos, CellEnding> endings = new LinkedHashMap<>();
     private final Map<String, List<BlockPos>> problems = new LinkedHashMap<>();
     private final Map<String, Integer> materialsUsed = new LinkedHashMap<>();
+    /** 施工中自己补进来的材料：备料一趟下来每样实际多出几件；其余材料来自开工时的背包。 */
+    private final Map<String, Integer> materialsSupplemented = new LinkedHashMap<>();
     /** 这次不再碰的格：受保护、做不了、够不着、交给机器。 */
     private final Set<BlockPos> excluded = new HashSet<>();
 
@@ -245,6 +247,15 @@ final class ConstructionSite {
         return Map.copyOf(materialsUsed);
     }
 
+    /** 备料收场时对一笔账：这一样身上的库存比去备前多出几件，就是这次自己补进来的。 */
+    void supplemented(String itemId, int count) {
+        if (count > 0) materialsSupplemented.merge(itemId, count, Integer::sum);
+    }
+
+    Map<String, Integer> materialsSupplemented() {
+        return Map.copyOf(materialsSupplemented);
+    }
+
     List<ConstructionDetails.ProblemGroup> problemGroups() {
         List<ConstructionDetails.ProblemGroup> groups = new ArrayList<>();
         problems.forEach((reason, cells) -> groups.add(new ConstructionDetails.ProblemGroup(reason, cells.size(), cells)));
@@ -262,7 +273,8 @@ final class ConstructionSite {
         Blueprint.Bounds bounds = blueprint.bounds();
         BlockPos anchor = blueprint.anchor();
         return new ConstructionDetails(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), dimension),
-                bounds.min(), bounds.max(), counts(), problemGroups(), materialsUsed(), temporariesLeft, fixturesSkipped);
+                bounds.min(), bounds.max(), counts(), problemGroups(), materialsUsed(), materialsSupplemented(),
+                temporariesLeft, fixturesSkipped);
     }
 
     /** 蓝图里声明的全部格位置：垫临时方块时避开它们（那些格本来就要有方块或要空着）。 */

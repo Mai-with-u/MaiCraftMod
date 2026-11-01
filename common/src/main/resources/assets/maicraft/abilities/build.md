@@ -41,6 +41,7 @@
 | `cells` | 每种结局几格：`matches` / `placed` / `cleared` / `poured` / `wrong_block` / `wrong_state` / `missing` / `unknown` / `impossible` / `protected` / `checked_by_machine` |
 | `problems[]` | 没做成的格按原因分组：原因、几格、全部坐标 |
 | `materials_used` | 用掉的材料（物品 → 件数） |
+| `materials_supplemented` | 施工中自己去拿补进来的材料（物品 → 件数）；没补的样不写，其余材料来自开工时的背包 |
 | `temporary_blocks_left[]` | 没收回的临时方块，下一次施工接着收 |
 | `fixtures_skipped` | 结构文件里没装的摆设实体数（只有 `file` 施工才有） |
 | `archive` | 这一栋的档案：`name`、`anchor`、`rotation`、`design_id`；存不进去时有 `problem` |

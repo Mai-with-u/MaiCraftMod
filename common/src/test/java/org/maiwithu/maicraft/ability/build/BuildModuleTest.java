@@ -117,7 +117,7 @@ class BuildModuleTest {
     private static BuildDetails settle(BuildInput input, Map<BlockPos, BlockState> blocks) {
         BlockPos anchor = input.construction().blueprint().anchor();
         ConstructionDetails engine = new ConstructionDetails(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), DIM),
-                anchor, anchor, Map.of(), List.of(), Map.of(), List.of(), null);
+                anchor, anchor, Map.of(), List.of(), Map.of(), Map.of(), List.of(), null);
         return assertInstanceOf(BuildDetails.class, input.construction().recorder().record(engine, world(blocks)));
     }
 

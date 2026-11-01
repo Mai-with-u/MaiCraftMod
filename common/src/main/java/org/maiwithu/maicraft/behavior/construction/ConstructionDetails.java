@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param cells               每种结局几格，键是结局的小写名
  * @param problems            没做成的格按原因分组
  * @param materialsUsed       用掉的材料（物品 → 件数）
+ * @param materialsSupplemented 施工中自己补进来的材料（物品 → 件数）；没补的样不写，其余材料来自开工时的背包
  * @param temporaryBlocksLeft 没收回的临时方块
  * @param fixturesSkipped     结构文件里没装的摆设实体数；不是从结构文件来的不写
  */
@@ -28,6 +29,7 @@ public record ConstructionDetails(
         Map<String, Integer> cells,
         List<ProblemGroup> problems,
         Map<String, Integer> materialsUsed,
+        Map<String, Integer> materialsSupplemented,
         List<BlockPos> temporaryBlocksLeft,
         Integer fixturesSkipped) implements ResultDetails {
 
@@ -35,6 +37,7 @@ public record ConstructionDetails(
         cells = Map.copyOf(cells);
         problems = List.copyOf(problems);
         materialsUsed = Map.copyOf(materialsUsed);
+        materialsSupplemented = Map.copyOf(materialsSupplemented);
         temporaryBlocksLeft = List.copyOf(temporaryBlocksLeft);
     }
 

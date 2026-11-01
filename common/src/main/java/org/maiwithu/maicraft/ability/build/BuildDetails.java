@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param cells               每种结局几格
  * @param problems            没做成的格按原因分组
  * @param materialsUsed       用掉的材料
+ * @param materialsSupplemented 施工中自己补进来的材料；没补的样不写，其余材料来自开工时的背包
  * @param temporaryBlocksLeft 没收回的临时方块
  * @param fixturesSkipped     结构文件里没装的摆设实体数
  * @param archive             这一栋的档案：名字、锚点、朝向、图纸版本；存不进去时写一句
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  */
 public record BuildDetails(WorldPosition anchor, BlockPos boundsMin, BlockPos boundsMax, Map<String, Integer> cells,
                            List<ConstructionDetails.ProblemGroup> problems, Map<String, Integer> materialsUsed,
+                           Map<String, Integer> materialsSupplemented,
                            List<BlockPos> temporaryBlocksLeft, Integer fixturesSkipped, Archive archive,
                            BlueprintCheck.Report check, BuildingLayout layout) implements ResultDetails {
 
@@ -46,7 +48,7 @@ public record BuildDetails(WorldPosition anchor, BlockPos boundsMin, BlockPos bo
     /** 施工引擎的细节原样带上，再加档案、整栋比对与布局。 */
     static BuildDetails of(ConstructionDetails construction, Archive archive, BlueprintCheck.Report check, BuildingLayout layout) {
         return new BuildDetails(construction.anchor(), construction.boundsMin(), construction.boundsMax(), construction.cells(),
-                construction.problems(), construction.materialsUsed(), construction.temporaryBlocksLeft(),
-                construction.fixturesSkipped(), archive, check, layout);
+                construction.problems(), construction.materialsUsed(), construction.materialsSupplemented(),
+                construction.temporaryBlocksLeft(), construction.fixturesSkipped(), archive, check, layout);
     }
 }

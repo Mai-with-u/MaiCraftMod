@@ -437,6 +437,21 @@ class ConstructionTaskTest {
         assertEquals(2, details(result).cells().get("placed"));
         assertEquals(2, details(result).materialsUsed().get("minecraft:stone"));
         assertEquals(0, fake.carried("minecraft:stone"));
+        assertTrue(details(result).materialsSupplemented().isEmpty(), "开工料够，结果里不写补料");
+    }
+
+    @Test
+    void 缺的料自己去拿_补进来的件数写进结果() {
+        // 包里只有 2 块石头，蓝图要 4 格：备料去补 2 块，收场把"这 2 块是施工中自己补的"写进结果，
+        // 用掉合计照旧 4 块——补料与开工背包里的料在结果里分得开。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 2);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(0, 65, 0),
+                new BlockPos(0, 66, 0), new BlockPos(0, 67, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(4, details(result).materialsUsed().get("minecraft:stone"), "用掉的合计不变");
+        assertEquals(Map.of("minecraft:stone", 2), details(result).materialsSupplemented(), "补进来几件如实记");
+        assertEquals(0, fake.carried("minecraft:stone"));
     }
 
     @Test
