@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.level.ClipContext;
@@ -173,6 +174,12 @@ final class BoatCrossingLeg implements TravelLeg {
         if (plan.boatItem() != null) {
             Optional<Action> move = services.toMainhand().moveToMainhand(plan.boatItem());
             if (move.isEmpty()) {
+                // 换手动作给空分两种：船物品已在主手，照常去放；开跑这一刻身上已经没有它（报价与开跑之间背包变了）
+                // 就如实早停、说明现场，不走到岸边对着别的东西空站到停滞闸。身上有没有它，
+                // 与报价用同一份身上清单认，两条路径认的是同一批东西。
+                Optional<String> reason = prepFailureReason(plan.boatItem(),
+                        stillCarried(plan.boatItem()), mainHandItemId(live));
+                if (reason.isPresent()) return failed(reason.get(), Problem.Kind.UNSUPPORTED, null);
                 return walkTo(plan.launchFeet(), List.of(plan.launchFeet()));
             }
             current = move.get();
@@ -436,6 +443,32 @@ final class BoatCrossingLeg implements TravelLeg {
             if (BoatCrossing.isBoatItem(stack.itemId())) count += stack.count();
         }
         return count;
+    }
+
+    /**
+     * 备船这一步拦不拦路（纯判断）：换手动作给空有两种含义——船物品已在主手（身上还有它，照常去放），
+     * 与开跑这一刻身上已经没有报价认下的船物品（报价与开跑之间背包变了）。后者如实拦下，
+     * 把现场说明白：船物品不在身上、手上拿的是什么、岸边也没有停着的空船；不走到岸边空站到停滞闸。
+     */
+    static Optional<String> prepFailureReason(String boatItem, boolean stillCarried, String mainHandItemId) {
+        if (stillCarried) return Optional.empty();
+        return Optional.of("开跑时身上已经没有船物品（" + boatItem + "），手上拿着的是 " + mainHandItemId
+                + "，岸边也没有停着的空船，放不了船");
+    }
+
+    /** 这种物品此刻还在不在身上：与报价的备船办法用同一份身上清单，两条路径认的是同一批东西。 */
+    private boolean stillCarried(String itemId) {
+        for (BackpackStack stack : services.world().carriedStacks()) {
+            if (stack.itemId().equals(itemId)) return true;
+        }
+        return false;
+    }
+
+    /** 主手上此刻拿的物品 id；读不到给 "minecraft:air"。 */
+    private String mainHandItemId(PlayerContext live) {
+        var stack = live.localPlayer().getMainHandItem();
+        if (stack == null || stack.isEmpty()) return "minecraft:air";
+        return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 
     /** 站到船旁的落脚格：四邻加上船所在那格，走得到哪个算哪个。 */

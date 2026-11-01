@@ -318,6 +318,33 @@ class JourneyTaskTest {
     }
 
     @Test
+    void 停滞收场引用的进展话与现场一致_还没坐上载具不说载着人到了() {
+        // 备船走到岸边、放船前的那几步也算这一段在靠近，进展话照记；但人还没坐上载具，
+        // 话里不能说"载着人到了"——停滞收场引用的就是最近这句，说错了会与现场对不上。
+        FakeMode grounded = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(),
+                100, List.of(), List.of(), ""), null);
+        grounded.legTicks = Integer.MAX_VALUE;
+        grounded.quietStart = true;
+        JourneyTask task = journey(at(42, 64, 0), null, grounded);
+        task.start(tick);
+        for (int i = 0; i < 20 && grounded.started == 0; i++) {
+            task.tick(tick);
+            tick.nextTick();
+        }
+        TaskResult result = null;
+        for (int t = 0; t < 4200; t++) {
+            if (task.tick(tick) instanceof TickResult.Finished finished) {
+                result = finished.result();
+                break;
+            }
+            tick.nextTick();
+        }
+        String reported = assertResult(result).problem().message() + " " + assertResult(result).summary();
+        assertTrue(reported.contains("这一段挪到了"), "停滞话引用最近的进展：" + reported);
+        assertFalse(reported.contains("载着人到了"), "没坐上载具时不说载着人到了：" + reported);
+    }
+
+    @Test
     void 坐着的一段原地来回晃不靠近_照样按整趟时限判卡住() {
         // 船顶着岸来回晃（每刻在两格之间换）：每次都"挪了"，却一点没往终点靠；整趟照样按卡住收场，
         // 不再出现同一片水域拉锯几小时（审计 A47，和走路的"真近一格才算进展"同一条判据）。
@@ -429,6 +456,8 @@ class JourneyTaskTest {
         boolean drift;
         /** 坐的这一段一路往终点靠（船在划、车在开）：每 90 刻往 x 正方向挪一格，最远到 41。 */
         boolean approach;
+        /** 第一刻不报进展（真实的一段备船走路时就是这样）：进展话由离终点更近的那条账说了算。 */
+        boolean quietStart;
 
         @Override public boolean claims(TravelRequest request) {
             return claims && started == 0;
@@ -466,7 +495,7 @@ class JourneyTaskTest {
                                     ? WorldPosition.here(10, 64, 0) : WorldPosition.here(11, 64, 0);
                         }
                         if (approach) world.spot = WorldPosition.here(Math.min(41, ticks / 90), 64, 0);
-                        return ticks == 1 ? ActionStatus.progressed() : ActionStatus.running();
+                        return ticks == 1 && !quietStart ? ActionStatus.progressed() : ActionStatus.running();
                     }
                     if (failure != null) return ActionStatus.failed(failure);
                     if (dropOff != null) world.spot = dropOff;

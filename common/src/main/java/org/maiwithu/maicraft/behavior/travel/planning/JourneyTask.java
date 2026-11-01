@@ -493,7 +493,9 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
                 double toEnd = Math.sqrt(feet.distSqr(offer.to()));
                 if (closerToLegEnd(bestToLegEnd, toEnd)) {
                     bestToLegEnd = toEnd;
-                    recordProgress(offer.via().name() + " 载着人到了 " + feet.toShortString()
+                    // 进展话只说现场事实：这一段的位置挪近了。还没坐上载具（备船走到岸边、放船前的几步）也算靠近，
+                    // 但不能说"载着人到了"——停滞收场引用的就是最近这句进展话，说错了会与现场对不上。
+                    recordProgress(offer.via().name() + " 这一段挪到了 " + feet.toShortString()
                             + "，离这一段的终点还有 " + Math.round(toEnd) + " 格");
                 }
             }

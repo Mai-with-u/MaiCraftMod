@@ -345,4 +345,22 @@ class BoatCrossingTest {
         assertFalse(BoatSteering.approachingLanding(7.8, 8.0), "近了不到四分之三格不算前进");
         assertTrue(BoatSteering.approachingLanding(7.2, 8.0), "真近了四分之三格以上算前进");
     }
+
+    @Test
+    void 开跑时船物品还在身上_备船不拦路() {
+        // 换手动作给空而身上还有这件船物品：它已在主手，照常去放。
+        assertTrue(BoatCrossingLeg.prepFailureReason("minecraft:oak_boat", true, "minecraft:cobblestone").isEmpty());
+    }
+
+    @Test
+    void 开跑时船物品已不在身上_如实早停并说明现场() {
+        // 报价认了身上的船，开跑那一刻背包里已经没有它：拦下这一段，话说清船不在哪、手上拿着什么，
+        // 不走到岸边对着别的物品空站到停滞闸。
+        Optional<String> reason = BoatCrossingLeg.prepFailureReason("minecraft:oak_boat", false, "minecraft:cobblestone");
+        assertTrue(reason.isPresent());
+        String message = reason.get();
+        assertTrue(message.contains("minecraft:oak_boat"), "说明缺的是哪条船物品：" + message);
+        assertTrue(message.contains("手上拿着的是 minecraft:cobblestone"), "说明手上现在是什么：" + message);
+        assertTrue(message.contains("放不了船"), "说明这一段做不成：" + message);
+    }
 }
