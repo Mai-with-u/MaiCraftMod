@@ -39,7 +39,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 站位补救的生产实现：候选站位全不过时，挑一个站得稳、够得着、只是视线被一两格挡住的位置，
- * 走过去把挡在视线上的那一两格（树叶、草、天然的土石）挖开，再让靠近重新核对。
+ * 走过去把挡在视线上的那一两格（树叶、草、天然的土石）挖开，再让靠近重新核对；
+ * 或者挑一个埋在土里、只差脚格与头格两块的位置，挖进去站（目标格比地面低时坑边同层的站位都是这样）。
  * 要挖的格受保护、超出这次任务的许可、比深板岩还硬，或要挖三格以上，就不救。
  * 原先这里没有接上：砍树时上面的原木被一片树叶挡住，所有站位都按"看不见"拒掉，那几格永远砍不下来。
  */
@@ -77,9 +78,10 @@ final class LiveStandOpener implements StandOpener {
 
     @Override
     public Optional<Action> rescue(RejectedSpot blocked, ApproachTarget target) {
-        if (!"看不见".equals(blocked.failedItem())) return Optional.empty();
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null) return Optional.empty();
+        if ("头顶没空间".equals(blocked.failedItem())) return digIn(current, blocked.feet(), target);
+        if (!"看不见".equals(blocked.failedItem())) return Optional.empty();
         Level level = current.level();
         BlockPos feet = blocked.feet();
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
@@ -90,7 +92,28 @@ final class LiveStandOpener implements StandOpener {
             if (best == null || cells.size() < best.size()) best = cells;
         }
         if (best == null || best.size() > MAX_OCCLUDERS) return Optional.empty();
-        return Optional.of(new ClearSight(feet, best));
+        return Optional.of(new ClearSight(feet, best, "挡住视线的"));
+    }
+
+    /**
+     * 挖进埋着的站位：脚格、头格里挡着的只是一两块能挖的天然方块，站进去够得着、除了这两块再没有别的挡着视线时，
+     * 走过去挖开站进去（走到带着这次的地形许可，路上该挖的由走路自己挖；到了还没挖开的从上往下挖）。
+     * 目标格比地面低时坑边同层的站位都埋在土里，不挖进去就没有能放坑底那一格的站位。
+     * 被拒为"头顶没空间"时够不够得着、看不看得见都还没问过，这里补问：挖开了也够不着、看不见的位置不挖。
+     */
+    private Optional<Action> digIn(PlayerContext current, BlockPos feet, ApproachTarget target) {
+        Level level = current.level();
+        if (level == null || StandSpots.reachFailureAt(feet, target, reach) != null) return Optional.empty();
+        List<BlockPos> cells = BuriedSpots.cellsToDig(feet,
+                cell -> level.isLoaded(cell) && !level.getBlockState(cell).getCollisionShape(level, cell).isEmpty(),
+                cell -> level.isLoaded(cell) && breakable(level, cell, level.getBlockState(cell)));
+        if (cells.isEmpty()) return Optional.empty();
+        Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
+        for (Vec3 point : aimPoints(target)) {
+            List<BlockPos> blocking = occluders(level, current.localPlayer(), eye, point, target);
+            if (blocking != null && cells.containsAll(blocking)) return Optional.of(new ClearSight(feet, cells, "站位里埋着的"));
+        }
+        return Optional.empty();
     }
 
     // 往哪几点看：方块试中心与六个面内侧，实体试包围盒中心。
@@ -141,10 +164,12 @@ final class LiveStandOpener implements StandOpener {
         return permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK, position, type).isEmpty();
     }
 
-    /** 走到那个站位，从近到远把挡住视线的格子挖开。 */
+    /** 走到那个站位，从近到远把要挖开的格子挖开：挡住视线的，或站位里埋着的（走到时多半已被走路挖开）。 */
     private final class ClearSight implements Action {
         private final BlockPos feet;
         private final List<BlockPos> cells;
+        /** 挖的是什么样的格子：说明里用。 */
+        private final String what;
         private int index;
         /** 手上去补救站位的这一趟；被打断时收掉，回来重新上路去同一格。 */
         private WalkRun walk;
@@ -153,9 +178,10 @@ final class LiveStandOpener implements StandOpener {
         private BlockDigger digger;
         private PlayerContext last;
 
-        ClearSight(BlockPos feet, List<BlockPos> cells) {
+        ClearSight(BlockPos feet, List<BlockPos> cells, String what) {
             this.feet = feet;
             this.cells = cells;
+            this.what = what;
         }
 
         @Override
@@ -219,8 +245,8 @@ final class LiveStandOpener implements StandOpener {
 
         @Override
         public String describe() {
-            return arrived && index < cells.size() ? "挖开挡住视线的 " + cells.get(index).toShortString()
-                    : "走到 " + feet.toShortString() + " 去挖开挡住视线的一两格";
+            return arrived && index < cells.size() ? "挖开" + what + " " + cells.get(index).toShortString()
+                    : "走到 " + feet.toShortString() + " 去挖开" + what + "一两格";
         }
     }
 }

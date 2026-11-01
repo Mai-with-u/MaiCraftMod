@@ -324,6 +324,15 @@ public final class StandSpots {
         return null;
     }
 
+    /**
+     * 站在候选格上够不够得着：和挑站位时的判法一样，按格子中心估、床距留出停在格子边上的余量；
+     * 站位补救挖进埋着的位置之前先问一句，够不着的位置挖开了也白挖。够得着返回 null。
+     */
+    static String reachFailureAt(BlockPos feet, ApproachTarget target, ReachRules reach) {
+        Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
+        return reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, eye);
+    }
+
     /** 包围盒上离给定点最近的点：把点的三个坐标各自夹进盒子的范围。 */
     private static Vec3 nearestPoint(AABB box, Vec3 point) {
         return new Vec3(

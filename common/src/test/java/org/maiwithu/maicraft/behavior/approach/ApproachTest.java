@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
@@ -9,12 +10,15 @@ import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -352,5 +356,105 @@ class ApproachTest {
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, approach.tick(new StubTick(2)));
         assertTrue(failed.problem().message().contains("只剩泡水的位置"), failed.problem().message());
         assertFalse(failed.problem().message().contains("泡在液体里"), failed.problem().message());
+    }
+
+    @Test
+    void 目标格比地面低时挖进坑边同层埋着的站位去站() {
+        // 立墙的锚点落在地面下两格，四格已清成坑（y 62、63），要往坑底 (3,62,0) 放：得点坑底方块 (3,61,0) 的顶面。
+        // 地面（脚位 64）上的位置看不进坑底，坑边与坑底同层的格子都埋在土里、被拒为"头顶没空间"；
+        // 只差脚格与头格两块时挖进去站，站进去就看得见、够得着。
+        ApproachTarget target = PlacementSpots.faceTarget(new BlockPos(3, 61, 0), Direction.UP);
+        List<BlockPos> cleared = List.of(new BlockPos(3, 62, 0), new BlockPos(3, 63, 0),
+                new BlockPos(4, 62, 0), new BlockPos(4, 63, 0));
+        // 只看坑边这一小片地：别处当没加载，候选少到补救问得到坑边那一格。
+        for (int x = -2; x <= 8; x++) {
+            for (int z = -5; z <= 5; z++) {
+                for (int y = 55; y <= 65; y++) {
+                    BlockPos at = new BlockPos(x, y, z);
+                    if (x < 2 || x > 4 || z < 0 || z > 2) world.unloaded.add(at);
+                    else if (y <= 63 && !cleared.contains(at)) world.lowCeiling.add(at);
+                }
+            }
+        }
+        cleared.forEach(guarded::add);
+        world.hidden = (eye, t) -> eye.y > 64.5;
+        world.feet = new BlockPos(3, 64, 1);
+        BlockPos pitSide = new BlockPos(3, 62, 1);
+        DigsIntoOneSpot opener = new DigsIntoOneSpot(pitSide);
+        StubMoves moves = new StubMoves(world);
+        Approach approach = approach(target, moves, opener, Permissions.DEFAULT, null);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 10 && !(status instanceof ActionStatus.Done) && !(status instanceof ActionStatus.Failed); tick++) {
+            status = approach.tick(new StubTick(tick));
+        }
+        assertEquals(ActionStatus.done(), status, "挖进坑边站位后核对通过：" + approach.tried());
+        assertEquals(pitSide, world.feet);
+        assertTrue(opener.asked.stream().anyMatch(spot -> spot.failedItem().equals("头顶没空间")),
+                "埋着的站位也拿去问补救：" + opener.asked);
+        assertEquals(pitSide, opener.asked.getLast().feet(), "问到坑边那一格就救");
+        // 地面上看不见的位置先问（补救替身不肯救），再问埋着的。
+        assertEquals("看不见", opener.asked.getFirst().failedItem());
+    }
+
+    @Test
+    void 补救完人还在往下掉就等落地再核对() {
+        // 补救常是挖开自己脚下那一块（坑边看不见坑底就挖掉坑沿）：挖完人掉下去的那几刻还没落地，
+        // 等站稳了再核对，不把这几刻当成补救没用。
+        world.hidden = (eye, t) -> true;
+        StubOpener opener = new StubOpener(true);
+        Approach approach = approach(new StubMoves(world), opener, Permissions.DEFAULT);
+        approach.tick(new StubTick(1));
+        world.grounded = false;
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)), "补救开始");
+        assertEquals(ActionStatus.running(), approach.tick(new StubTick(3)), "补救做完、人还在掉：等着");
+        assertEquals(ActionStatus.running(), approach.tick(new StubTick(4)));
+        // 落地了，挡板也没了：核对通过。
+        world.grounded = true;
+        world.hidden = (eye, t) -> false;
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(5)));
+        assertEquals(1, opener.asked.size(), "等落地期间不再问补救");
+    }
+
+    @Test
+    void 补救完一直落不了地就如实按到不了结束() {
+        world.hidden = (eye, t) -> true;
+        Approach approach = approach(new StubMoves(world), new StubOpener(true), Permissions.DEFAULT);
+        approach.tick(new StubTick(1));
+        world.grounded = false;
+        approach.tick(new StubTick(2));
+        ActionStatus status = ActionStatus.running();
+        int ticks = 0;
+        while (status instanceof ActionStatus.Running && ticks < 100) {
+            status = approach.tick(new StubTick(3 + ticks++));
+        }
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertTrue(ticks > 30 && ticks <= 45, "等了 " + ticks + " 刻");
+        assertTrue(failed.problem().message().contains("还没落地"), failed.problem().message());
+    }
+
+    /** 站位补救替身：只肯挖进指定的那一格（模拟生产实现对够不着、挖开了也看不见的位置说不），挖完把人放进去。 */
+    private final class DigsIntoOneSpot implements StandOpener {
+        final List<RejectedSpot> asked = new ArrayList<>();
+        private final BlockPos spot;
+
+        DigsIntoOneSpot(BlockPos spot) {
+            this.spot = spot;
+        }
+
+        @Override public Optional<Action> rescue(RejectedSpot blocked, ApproachTarget target) {
+            asked.add(blocked);
+            if (!blocked.feet().equals(spot)) return Optional.empty();
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    world.lowCeiling.remove(spot);
+                    world.feet = spot;
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "挖进坑边站位";
+                }
+            });
+        }
     }
 }

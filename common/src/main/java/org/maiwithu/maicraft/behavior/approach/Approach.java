@@ -29,7 +29,8 @@ import java.util.Set;
  * 靠近动作：把角色带到一个对目标够得着、看得见、站得稳的位置。
  *
  * <p>走到第一个候选站位，到了再核对；核对不过就换下一个候选。
- * 候选用尽而许可允许改方块时，请站位补救挖开遮挡或垫一块，作最后一次尝试。
+ * 候选用尽而许可允许改方块时，请站位补救挖开遮挡、垫一块或挖进埋着的站位，作最后一次尝试；
+ * 补救完人可能还在往下掉，落地了再核对。
  * 要挖的方块就在脚下、旁边一格都站不了时，就地挖不算到不了，下面是什么随任务结果交代。
  * 仍不成功按"到不了"结束，问题里带着试过几个站位、各自败在哪一项；
  * 换站位的过程是本动作的内部事务，不作为独立失败上报。
@@ -267,25 +268,39 @@ public final class Approach implements Action {
     }
 
     private ActionStatus openStep(TickContext context) {
-        return switch (rescueAction.tick(context)) {
-            case ActionStatus.Running running -> running;
-            // 补救做完再核对一次；还不行就没有更多办法了，把经过如实交代出去，不再回头换站位。
-            case ActionStatus.Done done -> {
-                Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded);
-                if (failure.isEmpty()) yield ActionStatus.done();
-                recordTried("补救后的位置", failure.get());
-                yield giveUp(null, true);
+        if (!rescueDone) {
+            switch (rescueAction.tick(context)) {
+                case ActionStatus.Running running -> {
+                    return running;
+                }
+                case ActionStatus.Failed failed -> {
+                    recordTried("补救站位", "挖开遮挡或垫方块没有做成：" + failed.problem().message());
+                    return giveUp(null, true);
+                }
+                case ActionStatus.Done done -> rescueDone = true;
             }
-            case ActionStatus.Failed failed -> {
-                recordTried("补救站位", "挖开遮挡或垫方块没有做成：" + failed.problem().message());
-                yield giveUp(null, true);
-            }
-        };
+        }
+        // 补救常常是挖开自己脚下那一块（坑边看不见坑底时挖掉坑沿）或挖进地里的站位，挖完人还在往下掉：
+        // 落地前核对必然是"还没落地"，等它站稳再核对，不把掉落的几刻当成补救没用。
+        if (!world.onGround() && ++landingTicks <= LANDING_WAIT_TICKS) return ActionStatus.running();
+        // 补救做完再核对一次；还不行就没有更多办法了，把经过如实交代出去，不再回头换站位。
+        Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded);
+        if (failure.isEmpty()) return ActionStatus.done();
+        recordTried("补救后的位置", failure.get());
+        return giveUp(null, true);
     }
 
-    // 只差一点的位置才值得补救：被挡住的、差一点够到的、脚下悬空的（垫一块就平了）；
-    // 头顶没空间、落差太深、泡在液体里、旁边有岩浆、受保护的格子，挖与垫都救不回来或不应去救。
-    private static final Set<String> RESCUABLE = Set.of("看不见", "够不着", "到不了", "脚下悬空");
+    /** 补救做完后等落地最多这么多刻：挖开脚下一块最多掉几格，再久就是真的没落在能站的地方。 */
+    private static final int LANDING_WAIT_TICKS = 40;
+    /** 补救动作已经做完，正在等落地、核对。 */
+    private boolean rescueDone;
+    /** 补救做完后已经等了几刻落地。 */
+    private int landingTicks;
+
+    // 只差一点的位置才值得补救：被挡住的、差一点够到的、脚下悬空的（垫一块就平了）、头顶没空间的
+    // （埋在土里，只差脚格与头格两块时挖进去站——目标格比地面低时坑边同层的站位都是这样）；
+    // 落差太深、泡在液体里、旁边有岩浆、受保护的格子，挖与垫都救不回来或不应去救。
+    private static final Set<String> RESCUABLE = Set.of("看不见", "够不着", "到不了", "脚下悬空", "头顶没空间");
 
     /** 一次补救最多试这么多个位置，免得几百个被拒位置挨个算视线。 */
     private static final int RESCUE_TRIES = 24;
