@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import java.util.List;
+import java.util.function.Predicate;
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.game.world.ObservedMotion;
 
 /**
@@ -19,6 +25,10 @@ import org.maiwithu.maicraft.game.world.ObservedMotion;
  * 出手的瞄点每刻又只跟过去 55%（再落后约 1 刻），合起来提前 3 刻。3 格外疾跑横移的玩家（每刻 0.28 格）不提前，
  * 视线落在他身后 0.8 格左右，是半个身宽的两倍多，一刀都砍不到。镜头落后的是双方之间的相对移动，所以减掉我自己的移动；
  * 移动按看到的位置变化读（别的玩家的速度客户端读不到）。
+ *
+ * <p>最近的那一点被方块挡着（它站在柱顶、台沿上，眼睛到它脚边的射线擦过台面）就像玩家一样改瞄它露出来的部位：
+ * 先抬到身体中间、再抬到头顶那一截，够得着又看得见的第一点就是瞄点；哪一点都挡着就还瞄最近那点，
+ * 由出手那边如实报准星打到了方块，不在这儿假装打得到。
  */
 public final class MeleeAim {
 
@@ -33,9 +43,34 @@ public final class MeleeAim {
 
     private MeleeAim() {}
 
-    /** 此刻该瞄它身上的哪一点。 */
+    /** 此刻该瞄它身上的哪一点：离眼睛最近、够得着、没被方块挡住的那一点。 */
     public static Vec3 point(LocalPlayer player, Entity target) {
-        return insetClamp(player.getEyePosition(), leadBox(player, target));
+        return visiblePoint(player, leadBox(player, target));
+    }
+
+    /** 这个身体框上该瞄的那一点：最近点被方块挡着就改瞄露出来的部位（够得着的里面挑）。 */
+    static Vec3 visiblePoint(LocalPlayer player, AABB box) {
+        Vec3 eye = player.getEyePosition();
+        double reach = InteractionRange.entityReach(player);
+        return visiblePoint(eye, box, reach, point -> player.level().clip(new ClipContext(eye, point,
+                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player)).getType() == HitResult.Type.MISS);
+    }
+
+    /**
+     * 挑瞄点的纯函数：最近点没被挡就是它；挡着就按身体中间、头顶那一截的顺序找，够得着（眼睛到那点不超过
+     * 交互距离）又没被挡的第一点；都不行还回最近点。
+     *
+     * @param clear 眼睛到这一点之间有没有方块挡着（没挡为真）
+     */
+    static Vec3 visiblePoint(Vec3 eye, AABB box, double reach, Predicate<Vec3> clear) {
+        Vec3 nearest = insetClamp(eye, box);
+        if (clear.test(nearest)) return nearest;
+        double middle = (box.minY + box.maxY) / 2.0;
+        for (Vec3 candidate : List.of(new Vec3(nearest.x, middle, nearest.z), new Vec3(nearest.x, box.maxY, nearest.z))) {
+            Vec3 inset = insetClamp(candidate, box);
+            if (eye.distanceTo(inset) <= reach && clear.test(inset)) return inset;
+        }
+        return nearest;
     }
 
     /** 它的身体框按它相对我的移动往前提。 */

@@ -100,8 +100,11 @@ class FightTaskTest {
             return arrows < 0 ? OptionalInt.empty() : OptionalInt.of(arrows);
         }
 
+        /** 出手动作每刻回什么；默认一挥就中。 */
+        ActionStatus strikeStatus = ActionStatus.done();
+
         @Override public Action strike(TickContext context, int entityId) {
-            return action("打 " + entityId, ActionStatus.done());
+            return action("打 " + entityId, strikeStatus);
         }
 
         /** 普通替身走到每刻回什么；默认一直在走。 */
@@ -258,6 +261,23 @@ class FightTaskTest {
         FightTask.FightDetails details = (FightTask.FightDetails) result.details();
         assertEquals(1, details.defeated().size());
         assertTrue(details.lostTrack().isEmpty());
+    }
+
+    @Test
+    void namedTargetThatCannotBeHitIsReportedOutOfReachWithWhyTheStrikeFailed() {
+        // 实机：尸壳立在三格高石柱顶，按距离够得着、看得见，出手的准星却一直落在柱子顶面上——
+        // 原生攻击等到上限按打不到收场，连着三次就记成够不着并收场，问题里写清最后一次为什么没打出去。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
+        moves.strikeStatus = ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                "够得着却打不到：准星打到的是 方块 0, 65, 2，眼睛离瞄点 2.27 格"));
+        TaskResult result = run(30);
+
+        assertNotNull(result, "出手连着没打出去就当场收场，不等停滞判定");
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("出手连着 3 次没打出去，最后一次：够得着却打不到：准星打到的是 方块 0, 65, 2"),
+                result.problem().message());
+        assertEquals(List.of("minecraft:zombie（实体 7）"), ((FightTask.FightDetails) result.details()).reachIssue());
     }
 
     @Test

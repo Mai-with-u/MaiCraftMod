@@ -480,12 +480,12 @@ class BattleTest {
         CombatSenses.Threat above = new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 0.3, 67, 0.4, 3.1,
                 ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false);
         assertEquals("在高处，高出 3.0 格、水平 0.5 格，看得见，眼睛到它还差 0.4 格；已经站在能走到的最近处",
-                Battle.outOfReachScene(me, above));
+                Battle.outOfReachScene(me, above, "已经站在能走到的最近处"));
 
         CombatSenses.Threat belowBehindBlocks = new CombatSenses.Threat(2, UUID.randomUUID(), "minecraft:zombie", 2, 60, 0,
                 4.5, ThreatAssessment.Kind.MELEE, false, false, true, 0.3, 4.2, false, 2.02, false);
         assertEquals("在低处，低 4.0 格、水平 2.0 格，隔着方块看不见；已经站在能走到的最近处",
-                Battle.outOfReachScene(me, belowBehindBlocks));
+                Battle.outOfReachScene(me, belowBehindBlocks, "已经站在能走到的最近处"));
     }
 
     @Test
@@ -532,6 +532,9 @@ class BattleTest {
         assertTrue(Math.abs(moves.lastStep().dz()) > 0.5, "绕到侧面再出手，实际 " + moves.lastStep());
         fight.tick(new Tick(2));
         assertTrue(fight.unreachable().contains(1), "连着被拒三次：这只打不出去，换下一只");
+        String scene = fight.outOfReachScenes().get(1);
+        assertTrue(scene != null && scene.contains("minecraft:zombie（实体 1）") && scene.contains("差不多同一层")
+                && scene.contains("出手连着 3 次没打出去，最后一次：没确认"), String.valueOf(scene));
     }
 
     @Test

@@ -124,6 +124,10 @@ public final class Interaction {
     private String lastUseResult = "not fired";
     /** 近战上一次记下的"还没出手"原因。 */
     private String lastAttackWait = "";
+    /** 镜头已经转到位、准星却连着落在方块或空气上的刻数：到了上限这一下按打不到收场，不无限等。 */
+    private int aimBlockedTicks;
+    /** 镜头到位后准星连着这么多刻落不到它身上，就当这一下打不到（它站在台沿上被台面挡着、离得差一点）。 */
+    static final int AIM_BLOCKED_GIVE_UP_TICKS = 10;
     private final PlantClearing plants;
     /** 仅在单次实体交互实例中保留并平滑瞄准点。 */
     private Vec3 trackedEntityAim;
@@ -494,11 +498,17 @@ public final class Interaction {
         }
         if (!onTarget) {
             if (plants.clear(context, aimed)) return attackWait("先砍掉挡在前面的草叶");
-            return attackWait("准星打到的是 " + (aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
-                    : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
-                    ? "方块 " + hit.getBlockPos().toShortString() : "空气") + "，眼睛离瞄点 "
-                    + String.format("%.2f", player.getEyePosition().distanceTo(aimPoint)) + " 格");
+            String blocked = aimBlockedBy(aimed, player.getEyePosition().distanceTo(aimPoint));
+            // 镜头到位了准星还落不到它身上（它站在柱顶、台沿上被台面挡着，或离得差一点）：等几刻给镜头收尾，
+            // 还不行就按打不到收场交回去，让走位换个方位或记成够不着——不在这儿无限等，等到任务的停滞判定来收。
+            if (++aimBlockedTicks >= AIM_BLOCKED_GIVE_UP_TICKS) {
+                failReason = "够得着却打不到：" + blocked;
+                hardFail = true;
+                return false;
+            }
+            return attackWait(blocked);
         }
+        aimBlockedTicks = 0;
         boolean recovering = entity instanceof LivingEntity living
                 && living.hurtTime > 0;
         // 目标还在短暂无敌期、主手这一刻才换上（这一刀会按旧东西算，下一刻原版就清冷却）、攻击条没恢复到位，
@@ -520,6 +530,14 @@ public final class Interaction {
         }
         pending = submitted;
         return false;
+    }
+
+    /** 准星落在了什么上、眼睛离瞄点几格：出手等着的原因与打不到的收场话共用这一句。 */
+    static String aimBlockedBy(HitResult aimed, double eyeToAim) {
+        String what = aimed instanceof EntityHitResult hit ? hit.getEntity().getType().getDescriptionId()
+                : aimed instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK
+                ? "方块 " + hit.getBlockPos().toShortString() : "空气";
+        return "准星打到的是 " + what + "，眼睛离瞄点 " + String.format("%.2f", eyeToAim) + " 格";
     }
 
     // 近战这一下为什么还没出手：换了原因才记一行，实机对得上卡在哪一关（10-14 点名杀羊三十秒没挥，看不出原因）。
@@ -722,7 +740,8 @@ public final class Interaction {
     // 近战瞄点：瞄它身上离眼睛最近的那一点（按 MeleeAim 算）；相邻帧只挪一部分，怪小幅晃动时镜头不猛抖。
     private Vec3 stableEntityAimPoint(Entity target) {
         AABB box = MeleeAim.leadBox(player, target);
-        Vec3 wanted = MeleeAim.insetClamp(player.getEyePosition(), box);
+        // 最近的那一点被台面挡着就瞄它露出来的部位（同一份近战瞄点）。
+        Vec3 wanted = MeleeAim.visiblePoint(player, box);
         if (trackedEntityAim == null || trackedEntityAim.distanceToSqr(wanted) > 4.0) {
             trackedEntityAim = wanted;
         } else {

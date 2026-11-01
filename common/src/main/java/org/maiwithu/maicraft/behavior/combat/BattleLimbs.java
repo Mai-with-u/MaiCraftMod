@@ -53,6 +53,8 @@ public final class BattleLimbs {
     private int strikeTarget = -1;
     /** 连着被拒了几次；打中一次清零。 */
     private int rejects;
+    /** 最近一次被拒的原因（出手动作报的那句）：连着被拒到放弃时写进够不着的现场。 */
+    private String lastRejectReason = "";
     /** 被拒的那个站位 {x, z}，还要绕开它几刻。 */
     private double[] sidestepFrom;
     private int sidestepTicks;
@@ -150,7 +152,8 @@ public final class BattleLimbs {
             rejects = 0;
             return new Swing(true, false, false);
         }
-        if (status instanceof ActionStatus.Failed) {
+        if (status instanceof ActionStatus.Failed failed) {
+            lastRejectReason = failed.problem().message();
             dropStrike();
             markSidestep(standX, standZ);
             if (++rejects >= maxRejects) {
@@ -161,6 +164,11 @@ public final class BattleLimbs {
             return new Swing(false, true, false);
         }
         return new Swing(false, false, false);
+    }
+
+    /** 最近一次出手被拒的原因；没被拒过为空串。 */
+    public String lastRejectReason() {
+        return lastRejectReason;
     }
 
     /** 被拒或要换角度了：记下此刻站的位，接下来 SIDESTEP_TICKS 刻里绕开它。 */

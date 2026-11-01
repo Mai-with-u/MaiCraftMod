@@ -423,7 +423,7 @@ public final class Battle {
             BattleLimbs.Swing attempt = limbs.swing(context, target.id(), me.x(), me.z(), moves::strike);
             swingSettled = attempt.settled();
             struck = attempt.struck();
-            if (attempt.givenUp()) unreachable.add(target.id());
+            if (attempt.givenUp()) cannotHit(me, target.id(), threat);
         }
         if (swingSettled) leap.swung();
         if (!inReach) {
@@ -469,7 +469,7 @@ public final class Battle {
                 // 近身打的进入判据：寻路说到站了（水平上已经在近身的带里）人却还够不着它——它在另一层（头顶、脚下、
                 // 台上）或隔着方块，从这儿走不出更近的站位，再寻路也只会原地"到站"。到站这一刻算一次差几格、在哪一侧，
                 // 记成够不着如实早停；不站着每刻重新寻路，空耗半分钟等停滞判定来收。它自己贴上来（看得见、够得着）会再打。
-                String scene = outOfReachScene(me, threat);
+                String scene = outOfReachScene(me, threat, "已经站在能走到的最近处");
                 outOfReachScenes.put(target.id(), threat.type() + "（实体 " + target.id() + "）" + scene);
                 cannotWalkTo(target.id());
                 LOG.info("[战斗] 够不着 {} #{}：{}", threat.type(), target.id(), scene);
@@ -625,10 +625,10 @@ public final class Battle {
     }
 
     /**
-     * 到站了却够不着的现场：它在高处还是低处（差多少格）、水平离几格、看不看得见、看得见时眼睛到它还差几格。
-     * 纯函数，点名战斗的结果与自卫的收场话共用。
+     * 够不着的现场：它在高处还是低处（差多少格）、水平离几格、看不看得见、看得见时眼睛到它还差几格，再带上为什么
+     * 到此为止（已站在能走到的最近处、出手连着没打出去）。纯函数，点名战斗的结果与自卫的收场话共用。
      */
-    static String outOfReachScene(Battlefield.Me me, CombatSenses.Threat threat) {
+    static String outOfReachScene(Battlefield.Me me, CombatSenses.Threat threat, String why) {
         double dy = threat.y() - me.y();
         double flat = Math.hypot(threat.x() - me.x(), threat.z() - me.z());
         String where;
@@ -638,11 +638,20 @@ public final class Battle {
         String sight = threat.visible()
                 ? "看得见，眼睛到它还差 " + tenths(Math.max(0, threat.reachGap() - me.reach())) + " 格"
                 : "隔着方块看不见";
-        return where + "、水平 " + tenths(flat) + " 格，" + sight + "；已经站在能走到的最近处";
+        return where + "、水平 " + tenths(flat) + " 格，" + sight + "；" + why;
     }
 
     private static String tenths(double value) {
         return String.format("%.1f", value);
+    }
+
+    // 看得见、按距离也够得着，可出手连着几次都没打出去（它站在柱顶、台沿上，准星被台面挡着）：
+    // 记成够不着并记下现场，不再对着它一遍遍瞄；这一仗里不再近身打它。
+    private void cannotHit(Battlefield.Me me, int id, CombatSenses.Threat threat) {
+        unreachable.add(id);
+        outOfReachScenes.put(id, threat.type() + "（实体 " + id + "）" + outOfReachScene(me, threat,
+                "出手连着 " + MAX_REJECTS + " 次没打出去，最后一次：" + limbs.lastRejectReason()));
+        LOG.info("[战斗] 打不到 {} #{}：{}", threat.type(), id, outOfReachScenes.get(id));
     }
 
     // 走不到它跟前（寻路走不通、收紧站位也够不着、苦力怕隔着坑）：记成够不着，有弓去射、没弓换下一只。
