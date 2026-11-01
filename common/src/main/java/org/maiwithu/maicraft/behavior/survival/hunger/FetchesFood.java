@@ -110,9 +110,13 @@ final class FetchesFood implements Action {
 
     // 排先后只问弄到一件要走多远：弄到第一件就会被叫停先吃，按一次要的件数去估，身边两只羊只够两件、
     // 凑满还得把远处箱子里的算上，整条路最远就被远箱子抬成和面包一样远，近处的羊反而排不到前面。去拿时仍按一次要的件数要。
+    // 估得出整条路的（含不用离开的）排在只问得出第一步距离的前面：第一步距离里"身边放熔炉"是 0 格，和真估出来的
+    // 0 格打平就会靠排在前面抢走，羊在三格内也去做面包。身边几格就有的已经是最近，不为别类还没看完再等。
     private Pick nearestOf(List<String> kinds, boolean waitedOut) {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
+        ItemRequest bestFallback = null;
+        double bestFallbackDistance = Double.MAX_VALUE;
         boolean stillLooking = false;
         List<String> considered = new ArrayList<>();
         for (String kind : kinds) {
@@ -127,10 +131,22 @@ final class FetchesFood implements Action {
             Optional<Double> firstStep = firstStepBlocks(estimate, request.just(1));
             Optional<Double> distance = walkingDistance(estimate, firstStep);
             considered.add(describeCandidate(request, estimate, firstStep, distance));
-            if (distance.isPresent() && distance.get() < bestDistance) {
+            if (distance.isEmpty()) continue;
+            if (firstStep.isPresent()) {
+                if (distance.get() < bestFallbackDistance) {
+                    bestFallback = request;
+                    bestFallbackDistance = distance.get();
+                }
+            } else if (distance.get() < bestDistance) {
                 best = request;
                 bestDistance = distance.get();
             }
+        }
+        if (best == null) {
+            best = bestFallback;
+            bestDistance = bestFallbackDistance;
+        } else if (bestDistance == 0) {
+            stillLooking = false;
         }
         logPick(best, bestDistance, stillLooking, waitedOut, considered);
         return new Pick(Optional.ofNullable(best), stillLooking);
