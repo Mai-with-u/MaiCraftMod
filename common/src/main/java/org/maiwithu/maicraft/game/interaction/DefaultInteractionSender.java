@@ -346,8 +346,9 @@ public final class DefaultInteractionSender implements InteractionSender {
         return poll(context, pending);
     }
 
-    public boolean deferMainHandUseCancellation(Object owner, PlayerContext context, PendingInteraction pending) {
-        // 只能接收当前任务确实持有的主手动作；租借继续绑定原角色、确认、槽位、物品和递减的持用计时。
+    @Override
+    public boolean deferMainHandUseCancellation(PlayerContext context, PendingInteraction pending) {
+        // 只能接收当前任务确实持有的主手动作；欠账连手上是什么一起冻结，下一刻按原物停。
         requireCurrent(context);
         if (!ownsItemUse(pending)
                 || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;

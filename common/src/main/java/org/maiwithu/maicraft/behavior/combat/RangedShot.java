@@ -308,16 +308,25 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         }
     }
 
-    // 取消拉弓、装弩：切一下快捷栏让原版停止使用，不松手（松开弓就是放箭）；本刻没有交互机会就只交还投影。
+    // 取消拉弓、装弩：切一下快捷栏让原版停止使用，不松手（松开弓就是放箭）。
+    // 本刻没有交互机会（同一刻先换过武器、举过盾）就把停手欠给提交入口，下一刻开头先切槽；按住的投影这两刻留着不交还，
+    // 原版看不到松键，不会替角色放出一箭。这时要是直接交还投影，怪贴近换近战、目标倒下换目标时拉到一半的弓就会被
+    // 原版按松手放出去：没人报"射出"，背包却少了箭，一仗下来少的比报的多出十几支。
     private void cancelDraw(PlayerContext player) {
-        projection.release(this);
-        if (player == null || pending == null || !player.localPlayer().isUsingItem()
-                || player.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND
-                || !player.canInteractThisTick()) {
+        LocalPlayer self = player == null ? null : player.localPlayer();
+        if (self == null || pending == null || !player.isCurrent() || !self.isUsingItem()
+                || self.getUsedItemHand() != InteractionHand.MAIN_HAND) {
+            projection.release(this);
             return;
         }
+        if (!player.canInteractThisTick()) {
+            if (player.interactionSender().deferMainHandUseCancellation(player, pending)) return;
+            // 提交入口不认这次持用：投影交还，原版两刻内按松手收场，弓可能因此放出一箭，如实留在世界里。
+            projection.release(this);
+            return;
+        }
+        projection.release(this);
         PendingInteraction cancelled = player.interactionSender().cancelMainHandUse(player, pending);
-        // 交互入口此刻不收：投影已交还，原版两刻内松开；弓可能因此放出一箭，如实留在世界里。
         if (cancelled != null) pending = cancelled;
     }
 

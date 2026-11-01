@@ -22,6 +22,11 @@ public interface BattleMoves {
     /** 身上有没有能射的。 */
     boolean canShoot(TickContext context);
 
+    /** 此刻背包与副手里箭的总只数：开打到打完的差就是这一仗箭少了几支。没接上角色时为空。 */
+    default OptionalInt arrowsCarried(TickContext context) {
+        return OptionalInt.empty();
+    }
+
     /** 身上有没有剑斧这类近战武器。 */
     boolean hasMeleeWeapon(TickContext context);
 

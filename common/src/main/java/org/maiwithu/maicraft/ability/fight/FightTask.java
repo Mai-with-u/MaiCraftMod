@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.combat.ArrowsSpent;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
@@ -88,8 +89,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private String weaponUsed = "空手";
     /** 确认打中的下数（原生攻击得到服务器确认才算）。 */
     private int hits;
-    /** 射出去几箭（弓、弩、联动远程）。 */
+    /** 射出去几箭（弓、弩、联动远程）：只数游戏确认了放箭的。 */
     private int shots;
+    /** 这一仗箭少了几支：按背包里箭的只数开打与打着时的差算，和射出去几箭各记各的。 */
+    private final ArrowsSpent arrows = new ArrowsSpent();
     /** 为什么撤的：撤离收场时写进结果。 */
     private String retreatWhy;
     private Battle battle;
@@ -226,6 +229,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         battleHand = battle.asAction();
         hold(battleHand);
         fightCursor = moves.dropCursor(context);
+        // 开打前先数一遍身上的箭：打完拿同一个数对，少了几支就是几支。
+        arrows.note(moves.arrowsCarried(context));
         return Next.go(Phase.FIGHT, switch (verdict) {
             case OUTMATCHED -> "看着打不过，照打，盯着血线";
             case RISKY -> "有风险，打的时候盯着血线";
@@ -269,6 +274,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         battleHand = battle.asAction();
         hold(battleHand);
         fightCursor = moves.dropCursor(context);
+        arrows.note(moves.arrowsCarried(context));
         return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");
     }
 
@@ -365,6 +371,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (moment.struck()) hits++;
         // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里（实机 10-14 拿弓清掉三只尸壳，hits 写 0 看着像没打）。
         if (moment.fired()) shots++;
+        // 箭少了几支按背包数，不按射了几箭推：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
+        arrows.note(moves.arrowsCarried(context));
         if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
         if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
@@ -675,7 +683,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         for (SeenTargets.Locked locked : named) {
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
         }
-        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots, unreached,
+        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots,
+                arrows.spentOrNull(), unreached,
                 retreatWhy, lootGained, dragonDetails());
     }
 
@@ -721,13 +730,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /**
      * 战斗的结果细节。
      *
-     * @param weapon     这场实际拿着打的那件
-     * @param hits       确认打中的下数
-     * @param reachIssue 点名目标里走不到跟前、也射不到的
-     * @param retreat    撤离收场时为什么撤；没撤为空
+     * @param weapon      这场实际拿着打的那件
+     * @param hits        确认打中的下数
+     * @param shots       游戏确认了放箭的箭数（弓、弩、联动远程各算一发）
+     * @param arrowsSpent 这一仗箭少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null
+     * @param reachIssue  点名目标里走不到跟前、也射不到的
+     * @param retreat     撤离收场时为什么撤；没撤为空
      */
     record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
-                        String weapon, int hits, int shots, List<String> reachIssue, String retreat,
+                        String weapon, int hits, int shots, Integer arrowsSpent, List<String> reachIssue, String retreat,
                         List<String> lootGained, DragonDetails dragon) implements ResultDetails {
         FightDetails {
             defeated = List.copyOf(defeated);

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.fight;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -50,6 +51,7 @@ public final class LiveFightMoves implements FightMoves {
     @Override public Action strike(TickContext context, int entityId) { return battle.strike(context, entityId); }
     @Override public Action shoot(TickContext context, int entityId) { return battle.shoot(context, entityId); }
     @Override public boolean canShoot(TickContext context) { return battle.canShoot(context); }
+    @Override public OptionalInt arrowsCarried(TickContext context) { return battle.arrowsCarried(context); }
     @Override public boolean hasMeleeWeapon(TickContext context) { return battle.hasMeleeWeapon(context); }
     @Override public int ticksToReady(TickContext context) { return battle.ticksToReady(context); }
     @Override public int hurtFlashTicks(TickContext context, int entityId) { return battle.hurtFlashTicks(context, entityId); }

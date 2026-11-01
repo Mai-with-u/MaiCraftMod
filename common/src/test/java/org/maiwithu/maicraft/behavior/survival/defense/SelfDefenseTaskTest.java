@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -88,6 +89,12 @@ class SelfDefenseTaskTest {
         GoalCompiler.Compiled firstWalk;
         /** 下一趟寻路照这段脚本演（长路，脚位逐刻挪一格、路上只说「还在走」）。 */
         TravelFakes.ScriptedWalk nextWalkScript;
+        /** 此刻背包里箭的只数；测试摆，-1 为读不到。 */
+        int arrows = -1;
+
+        @Override public OptionalInt arrowsCarried(TickContext context) {
+            return arrows < 0 ? OptionalInt.empty() : OptionalInt.of(arrows);
+        }
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Fixed(strikeStatus);
@@ -183,6 +190,49 @@ class SelfDefenseTaskTest {
         var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
         assertEquals(moves.strikes, details.hits());
         assertEquals("minecraft:iron_sword", details.weapon());
+    }
+
+    @Test
+    void arrowsGoneFromTheBackpackAreReportedEvenWhenNoShotWasConfirmed() {
+        // 实机：两场自卫都报 0 箭，箭却从 27 支变成 0——拉弓中途被原版松手放出去的没人报"射出"。
+        // 箭少了几支按背包数写进结果；和射出的数对不上时收场的话里也说出来。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        moves.arrows = 27;
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        moves.arrows = 0;
+        senses.threats.clear();
+        TickResult result = run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS + 5);
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
+
+        var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
+        assertEquals(27, details.arrowsSpent());
+        assertEquals(0, details.shots());
+        String note = task.finishedNote(finished);
+        assertTrue(note.contains("箭少了 27 支"), note);
+    }
+
+    @Test
+    void arrowsSpentStaysQuietWhenTheBackpackDidNotChange() {
+        // 箭一支没少：收场的话里不提箭，结果里写 0。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        moves.arrows = 12;
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        senses.threats.clear();
+        TickResult result = run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS + 5);
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
+
+        assertEquals(0, assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details()).arrowsSpent());
+        assertFalse(task.finishedNote(finished).contains("箭少了"), task.finishedNote(finished));
     }
 
     @Test

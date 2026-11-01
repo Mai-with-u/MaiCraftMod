@@ -11,13 +11,14 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 
+import org.maiwithu.maicraft.behavior.combat.ArrowsSpent;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 自卫这一场的账：打掉了谁、拿什么打、挥中几下、射了几箭。收场的事件和结果里交代，和点名战斗的结果一个口径。
+ * 自卫这一场打了什么：打掉了谁、拿什么打、挥中几下、射了几箭、箭少了几支。收场的事件和结果里交代，和点名战斗的结果一样。
  * 实机 10-14 自卫射掉一只骷髅、少了三支箭，事件里只有"自卫结束，位移 1 格"，看不出打了谁、用的什么。
  */
 final class DefenseTally {
@@ -29,6 +30,8 @@ final class DefenseTally {
     private String weapon = "空手";
     private int hits;
     private int shots;
+    /** 箭少了几支：按背包里箭的只数算，和射了几箭各记各的。 */
+    private final ArrowsSpent arrows = new ArrowsSpent();
 
     /** 每刻记一笔：这一刻挥中、射出就记下对着谁和手上拿的什么；出过手的逐个看倒没倒。 */
     void note(TickContext context, Battle.Moment moment, CombatSenses senses, BattleMoves moves) {
@@ -42,6 +45,8 @@ final class DefenseTally {
         }
         if (moment.struck()) hits++;
         if (moment.fired()) shots++;
+        // 箭少了几支按背包数：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
+        arrows.note(moves.arrowsCarried(context));
         for (Iterator<Map.Entry<Integer, String>> it = engaged.entrySet().iterator(); it.hasNext(); ) {
             Map.Entry<Integer, String> entry = it.next();
             Entity entity = senses.entityById(context, entry.getKey());
@@ -74,11 +79,19 @@ final class DefenseTally {
         return shots;
     }
 
-    /** 收场事件里的一句；一下没出手（只躲开、只撤离）为空。 */
+    /** 箭少了几支；读不到背包为 null。 */
+    Integer arrowsSpent() {
+        return arrows.spentOrNull();
+    }
+
+    /** 收场事件里的一句；一下没出手、箭也没少（只躲开、只撤离）为空。 */
     String describe() {
-        if (hits == 0 && shots == 0) return "";
+        Integer spent = arrows.spentOrNull();
+        if (hits == 0 && shots == 0 && (spent == null || spent == 0)) return "";
         String who = defeated.isEmpty() ? "没见打倒哪只" : "打掉了 " + String.join("、", defeated());
         String how = "拿 " + weapon + (hits > 0 ? " 挥中 " + hits + " 下" : "") + (shots > 0 ? " 射了 " + shots + " 箭" : "");
+        // 箭少的数和射的数对不上时把背包的数也说出来：读事件的一方不用翻结果细节就知道箭去哪了。
+        if (spent != null && spent != shots) how += "，箭少了 " + spent + " 支";
         return who + "（" + how + "）；";
     }
 }

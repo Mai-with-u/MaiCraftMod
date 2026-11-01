@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
@@ -92,6 +93,12 @@ class FightTaskTest {
         Set<Integer> pickupSkipped;
         /** 服务器说本玩家收进包的（开打后才冒出来的）；测试摆。 */
         final List<Gained> gained = new ArrayList<>();
+        /** 此刻背包里箭的只数；测试摆，-1 为读不到。 */
+        int arrows = -1;
+
+        @Override public OptionalInt arrowsCarried(TickContext context) {
+            return arrows < 0 ? OptionalInt.empty() : OptionalInt.of(arrows);
+        }
 
         @Override public Action strike(TickContext context, int entityId) {
             return action("打 " + entityId, ActionStatus.done());
@@ -248,6 +255,42 @@ class FightTaskTest {
         FightTask.FightDetails details = (FightTask.FightDetails) result.details();
         assertEquals(1, details.defeated().size());
         assertTrue(details.lostTrack().isEmpty());
+    }
+
+    @Test
+    void arrowsSpentIsReadFromTheBackpackNotFromTheShotCount() {
+        // 实机：结果写"射了 22 箭"，背包却少了 37 支；另两场写 0 箭，27 支箭全没了——射出几箭只数游戏确认了放箭的，
+        // 拉弓中途被原版松手放出去的没人报。箭少了几支改按背包里箭的只数开打与打着时的差算，两个数各写各的。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        moves.arrows = 27;
+        task.start(new Tick(0));
+        task.tick(new Tick(0));
+        task.tick(new Tick(1));
+        task.tick(new Tick(2));
+        moves.arrows = 5;
+        task.tick(new Tick(3));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        TaskResult result = run(20);
+
+        assertNotNull(result);
+        FightTask.FightDetails details = (FightTask.FightDetails) result.details();
+        assertEquals(22, details.arrowsSpent(), "箭少了几支按背包数");
+        assertEquals(0, details.shots(), "没有一箭得到游戏确认就不冒充射出");
+    }
+
+    @Test
+    void arrowsSpentIsLeftOutWhenTheBackpackCannotBeRead() {
+        // 没接上角色（替身世界）：读不到背包就不写这一项，不写 0 冒充没少。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        task.start(new Tick(0));
+        task.tick(new Tick(0));
+        task.tick(new Tick(1));
+        task.tick(new Tick(2));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        TaskResult result = run(20);
+
+        assertNotNull(result);
+        assertNull(((FightTask.FightDetails) result.details()).arrowsSpent());
     }
 
     @Test

@@ -70,12 +70,17 @@ public final class WeaponCarriedReader {
 
     /** 背包里有没有箭：弓要用它才拉得开。 */
     public static boolean hasArrows(LocalPlayer player) {
+        return arrowCount(player) > 0;
+    }
+
+    /** 背包与副手里箭的总只数（各种箭都算）：开打时和打着时各读，差值就是这一仗箭少了几支。 */
+    public static int arrowCount(LocalPlayer player) {
+        int count = 0;
         for (ItemStack stack : player.getInventory().items) {
-            if (isArrow(stack)) {
-                return true;
-            }
+            if (isArrow(stack)) count += stack.getCount();
         }
-        return isArrow(player.getOffhandItem());
+        if (isArrow(player.getOffhandItem())) count += player.getOffhandItem().getCount();
+        return count;
     }
 
     private static WeaponChoice.Carried asCarried(ItemStack stack, int slot) {

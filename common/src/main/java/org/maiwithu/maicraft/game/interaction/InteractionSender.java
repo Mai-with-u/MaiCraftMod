@@ -64,6 +64,15 @@ public interface InteractionSender extends BoundaryLifecycle {
     /** 通过切换主手槽取消蓄力，不发送会让弓发射的 RELEASE_USE_ITEM。 */
     PendingInteraction cancelMainHandUse(PlayerContext context, PendingInteraction pending);
 
+    /**
+     * 拉弓、装弩这类主手持用要停手、本刻却没有交互机会时：把停手欠给提交入口，下一刻开头先切槽停下，
+     * 不发会让弓放箭的松手。欠下期间这次持用仍归提交入口认管，按住使用键的投影到期前照旧算数，原版看不到松键。
+     * 只收提交入口自己认下、正在主手持用的那一次；收下返回真，没收下返回假，由调用方自己收场。
+     */
+    default boolean deferMainHandUseCancellation(PlayerContext context, PendingInteraction pending) {
+        return false;
+    }
+
     PendingInteraction selectHotbar(PlayerContext context, int slot, int timeoutTicks);
 
     /** 原生 Q 投掷只接受出手前完整主手快照；落点与实际扣减由调用方提供的只读确认一起核验。 */

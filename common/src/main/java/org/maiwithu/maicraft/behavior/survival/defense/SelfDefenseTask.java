@@ -405,14 +405,16 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     }
 
     private DefenseDetails details(double drift, double heartsLost) {
-        return new DefenseDetails(drift, heartsLost, tally.defeated(), tally.weapon(), tally.hits(), tally.shots());
+        return new DefenseDetails(drift, heartsLost, tally.defeated(), tally.weapon(), tally.hits(), tally.shots(),
+                tally.arrowsSpent());
     }
 
     /**
-     * 自卫的结果细节：位移、红心差，打掉了谁（"种类 ×只数"）、拿什么打、确认挥中几下、射了几箭。
+     * 自卫的结果细节：位移、红心差，打掉了谁（"种类 ×只数"）、拿什么打、确认挥中几下、射了几箭、
+     * 箭少了几支（按背包数，捡回的已抵掉；读不到背包为 null）。
      */
     record DefenseDetails(double driftBlocks, double heartsLost, List<String> defeated, String weapon, int hits,
-                          int shots) implements ResultDetails {
+                          int shots, Integer arrowsSpent) implements ResultDetails {
         DefenseDetails {
             defeated = List.copyOf(defeated);
         }

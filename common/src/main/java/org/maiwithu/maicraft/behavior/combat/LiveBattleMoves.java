@@ -129,6 +129,13 @@ public final class LiveBattleMoves implements BattleMoves {
         return hands.canShoot(context);
     }
 
+    // 背包与副手里箭的只数：结果里"箭少了几支"按它开打与打着时的差算，不按射击次数推。
+    @Override
+    public OptionalInt arrowsCarried(TickContext context) {
+        var self = context.player() == null ? null : context.player().localPlayer();
+        return self == null ? OptionalInt.empty() : OptionalInt.of(WeaponCarriedReader.arrowCount(self));
+    }
+
     @Override
     public boolean hasMeleeWeapon(TickContext context) {
         return hands.hasMeleeWeapon(context);
