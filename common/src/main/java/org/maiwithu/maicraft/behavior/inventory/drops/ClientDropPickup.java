@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory.drops;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -33,8 +35,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 一件件走过去让原版拾取吸进包。自己射出去插在近处地上的箭也算这一下带出来的，一起捡回来。
  *
  * <p>只捡这一下带出来的：动手前就躺在地上的东西不是这次的，不去碰。走路交给走到（不挖不垫，
- * 不会为捡一团羊毛走下悬崖）；东西进没进包以地上那件消失为准，限时没捡到如实失败，
- * 不把"走过去了"当成"捡到了"。
+ * 不会为捡一团羊毛走下悬崖）；人已经站在原版拾取范围内时不再寻路，原地等它吸进包。
+ * 东西进没进包以地上那件消失为准，限时没捡到如实失败，不把"走过去了"当成"捡到了"；
+ * 放弃哪一件都把现场（离几格、怎么失败的）留进收场话，不拿一句「走不过去」盖掉矛盾。
  */
 public final class ClientDropPickup implements PicksUpDrops {
 
@@ -42,6 +45,31 @@ public final class ClientDropPickup implements PicksUpDrops {
     private static final double NEARBY_BLOCKS = 8.0;
     /** 走到离掉落物这么近就停：原版拾取范围比角色身体每边宽一格，挨着站就吸得进来。 */
     private static final double PICKUP_REACH_BLOCKS = 1.0;
+
+    // 原版拾取的真实判据（Player.tick）：玩家包围盒向外扩横向 1.0 格、纵向 0.5 格后，与掉落物的
+    // 包围盒相交就吸进包。玩家身体半宽 0.3、高一格半多，掉落物是四分之一格的小盒子；按中心距折算，
+    // 横向各轴差到 1.425 格以内、纵向比脚低不到 0.625 格（或高到 2.425 格以内）都吸得着。
+    private static final double PLAYER_HALF_WIDTH = 0.3;
+    private static final double PICKUP_BOX_INFLATE = 1.0;
+    private static final double ITEM_HALF_WIDTH = 0.125;
+    private static final double PICKUP_HORIZONTAL_REACH = PLAYER_HALF_WIDTH + PICKUP_BOX_INFLATE + ITEM_HALF_WIDTH;
+    private static final double PICKUP_VERTICAL_REACH_BELOW = 0.5 + ITEM_HALF_WIDTH;
+    private static final double PLAYER_HEIGHT = 1.8;
+    private static final double PICKUP_VERTICAL_REACH_ABOVE = PLAYER_HEIGHT + 0.5 + ITEM_HALF_WIDTH;
+
+    /**
+     * 角色此刻站着不动、原版会不会把这件掉落物吸进包（纯函数）：横向各轴的中心距都在拾取范围内，
+     * 且掉落物不比脚低过半格多、不比头高出半格。挖下的东西就落在旁边时先看这一条，
+     * 吸得着就不必为它寻路——走一趟可能按「走不过去」收场，把吸一下就能捡到的贴身东西放弃掉。
+     */
+    static boolean withinPickupReach(double playerX, double playerFeetY, double playerZ,
+            double itemX, double itemY, double itemZ) {
+        if (Math.abs(itemX - playerX) > PICKUP_HORIZONTAL_REACH) return false;
+        if (Math.abs(itemZ - playerZ) > PICKUP_HORIZONTAL_REACH) return false;
+        return itemY >= playerFeetY - PICKUP_VERTICAL_REACH_BELOW
+                && itemY <= playerFeetY + PICKUP_VERTICAL_REACH_ABOVE;
+    }
+
     /** 动手后等新掉落物冒出来的耐心（刻）；过了还没有就是这一下没掉东西。 */
     private static final int APPEAR_TICKS = 10;
     /** 每件东西的耐心；到点没捡到就放弃这一件，不在一件东西上耗着。 */
@@ -96,15 +124,18 @@ public final class ClientDropPickup implements PicksUpDrops {
      * 一件都没捡到、又有东西确实没进包，就如实说没捡到，不按做完收——做完却零收获的收场让上层对不上账，
      * 拆了方块却报「做完了但一件都没拿到」就是这么来的（实机 10-21 收床与采掘的空手结果）。
      */
-    static ActionStatus conclude(int picked, int missed, int vanished) {
+    static ActionStatus conclude(int picked, int missed, int vanished, List<String> giveUpReasons) {
         if (picked > 0 || missed == 0) return ActionStatus.done();
         if (missed == vanished) {
             return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "有 " + vanished
                     + " 件掉出的东西不见了，但服务器没有记到是本玩家收的（被别人捡走、烧毁或消失了），没捡到", null));
         }
+        // 放弃时留了现场（离几格、中间怎么失败的）就带上：attempts 只剩一句「走不过去」会跟现场矛盾。
+        String evidence = giveUpReasons.isEmpty() ? "" : "当时：" + String.join("；", giveUpReasons) + "。";
         return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                 "有 " + (missed - vanished) + " 件掉出的东西没捡到（走不过去，或走到了还在地上）"
-                        + (vanished > 0 ? "，另有 " + vanished + " 件不见了但不是自己收的" : "") + "，先不捡了", null));
+                        + (vanished > 0 ? "，另有 " + vanished + " 件不见了但不是自己收的" : "")
+                        + "，先不捡了" + evidence, null));
     }
 
     private LocalPlayer player() {
@@ -132,6 +163,8 @@ public final class ClientDropPickup implements PicksUpDrops {
         private int vanished;
         /** 背包装不下、没去捡的那几样（按名字）。 */
         private final LinkedHashSet<String> noRoom = new LinkedHashSet<>();
+        /** 放弃每一件时留下的现场（离几格、怎么失败的）；收场话里带给上层。 */
+        private final List<String> giveUpReasons = new ArrayList<>();
         /** 开始捡那一刻的确认序号；只认这之后本玩家的拾取。 */
         private Long cursor;
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
@@ -169,7 +202,8 @@ public final class ClientDropPickup implements PicksUpDrops {
             } else if (current != null && ++waited > (clearingLeaves ? OPEN_UP_GIVE_UP_TICKS
                     : only != null ? ONE_GIVE_UP_TICKS : GIVE_UP_TICKS)) {
                 skip.add(current);
-                gaveUp(drop);
+                gaveUp(drop, "等了 " + waited / 20 + " 秒它还在地上，人离它 "
+                        + (drop == null ? "?" : round1(drop.distanceTo(player))) + " 格");
                 current = null;
             }
             if (current == null && !pickNext(player)) {
@@ -181,7 +215,8 @@ public final class ClientDropPickup implements PicksUpDrops {
                 // 点名捡的那一件没进包：走不过去、被别人捡走或消失了，如实说没捡到。
                 if (only != null && picked == 0) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                            "那一件没捡到（走不过去，或被别人捡走、消失了）", null));
+                            "那一件没捡到（走不过去，或被别人捡走、消失了）"
+                                    + (giveUpReasons.isEmpty() ? "" : "：" + String.join("；", giveUpReasons)), null));
                 }
                 // 只有走过去了还躺在地上的才算没捡到；"不见了"多半是几块原木落地并成了一堆、并进去的那堆随后被收进包，
                 // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
@@ -192,9 +227,9 @@ public final class ClientDropPickup implements PicksUpDrops {
                     return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL, "背包满了，掉出的 "
                             + String.join("、", noRoom) + " 装不下，没捡", "腾出几格再捡"));
                 }
-                return conclude(picked, missed, vanished);
+                return conclude(picked, missed, vanished, giveUpReasons);
             }
-            return walkToward(player.clientLevel.getEntity(current), tick);
+            return walkToward(player, player.clientLevel.getEntity(current), tick);
         }
 
         // 挑下一件这次新掉出来的、离得最近的东西；点名捡一件时只看那一件还在不在。没有了返回假。
@@ -231,7 +266,15 @@ public final class ClientDropPickup implements PicksUpDrops {
         }
 
         // 东西还在滚动：它换了格子就重新起步走向新的那一格。
-        private ActionStatus walkToward(Entity drop, TickContext tick) {
+        private ActionStatus walkToward(LocalPlayer player, Entity drop, TickContext tick) {
+            // 人已经站在原版拾取范围内：不再寻路，原地等它吸进包。挖下的东西就落在旁边时，
+            // 走一趟寻路可能按「走不过去」收场，把吸一下就能捡到的贴身东西放弃掉（实机收回临时合成台，
+            // 掉落物就在 1-2 格外的平地上，attempts 只说走不过去）。
+            if (drop != null && withinPickupReach(player.getX(), player.getY(), player.getZ(),
+                    drop.getX(), drop.getY(), drop.getZ())) {
+                stopWalking();
+                return ActionStatus.progressed();
+            }
             BlockPos cell = drop.blockPosition();
             if (walk == null || !cell.equals(walkingTo)) {
                 stopWalking();
@@ -265,19 +308,34 @@ public final class ClientDropPickup implements PicksUpDrops {
                 stopWalking();
                 return ActionStatus.progressed();
             }
-            if (walked instanceof ActionStatus.Failed) {
-                // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件。
+            if (walked instanceof ActionStatus.Failed failed) {
+                // 寻路说走不过去，但人此刻已经站在拾取范围里：吸一下就捡到了，站着等，不放弃这一件。
+                if (withinPickupReach(player.getX(), player.getY(), player.getZ(),
+                        drop.getX(), drop.getY(), drop.getZ())) {
+                    stopWalking();
+                    return ActionStatus.progressed();
+                }
+                // 走不过去就别指望它自己吸过来了：放弃这一件，挑下一件；把走到给的真实原因与离几格带出去。
                 skip.add(current);
-                gaveUp(drop);
+                gaveUp(drop, "离它 " + round1(drop.distanceTo(player)) + " 格，走过去失败：" + failed.problem().headline());
                 current = null;
                 stopWalking();
             }
             return ActionStatus.progressed();
         }
 
-        // 放弃这一件：掉落物记成没捡到；自己的箭够不着就算了，不让这一批算没捡完。
-        private void gaveUp(Entity drop) {
-            if (drop == null || drop instanceof ItemEntity) missed++;
+        // 放弃这一件：掉落物记成没捡到并留下现场；自己的箭够不着就算了，不让这一批算没捡完。
+        private void gaveUp(Entity drop, String why) {
+            if (drop == null) missed++;
+            if (drop instanceof ItemEntity) {
+                missed++;
+                giveUpReasons.add(why);
+            }
+        }
+
+        // 一位小数的距离：写进收场话里的现场证据，不长串小数。
+        private static String round1(double value) {
+            return String.valueOf(Math.round(value * 10.0) / 10.0);
         }
 
         // 地上那件是一整堆（两件以上并在一起）。
