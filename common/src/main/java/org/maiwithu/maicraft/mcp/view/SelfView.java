@@ -71,7 +71,8 @@ public final class SelfView {
         if (dimension != null) position.addProperty("dimension", dimension);
         json.add("position", position);
         json.addProperty("facing", self.facingWord());
-        json.addProperty("health", self.health());
+        // 血量保留一位小数、向上取：还活着就不会显示成 0。
+        json.addProperty("health", self.shownHealth());
         json.addProperty("food", self.food());
         json.addProperty("air", self.air());
         json.addProperty("max_air", self.maxAir());

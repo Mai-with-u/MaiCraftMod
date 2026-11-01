@@ -26,7 +26,7 @@ public final class SelfBrief {
         if (dimension != null) text.append(dimension).append(' ');
         text.append((int) Math.floor(self.x())).append(", ").append((int) Math.floor(self.y())).append(", ")
                 .append((int) Math.floor(self.z()));
-        text.append("；血 ").append(self.health()).append("，饱食 ").append(self.food());
+        text.append("；血 ").append(healthText(self.shownHealth())).append("，饱食 ").append(self.food());
         // 氧气只在水里写：陆上总是满的，写了也是噪音；水里憋着气时是要不要先上浮的依据。
         if (self.inWater()) {
             text.append("；在水里，氧气 ").append(self.air()).append('/').append(self.maxAir());
@@ -34,6 +34,11 @@ public final class SelfBrief {
         text.append("；").append(hands(self));
         screen.ifPresent(open -> text.append("；").append(MenuView.phrase(open)));
         return text.toString();
+    }
+
+    // 整数血照旧写成"18"，带小数的写一位（"0.9"）：低于 1 的存活血量不写成 0，免得读成已死。
+    static String healthText(double shown) {
+        return shown == Math.rint(shown) ? Long.toString((long) shown) : Double.toString(shown);
     }
 
     // 手上拿着的按主手优先、主手空着算副手（和 observe(self) 的 held 一样）；副手另有别的东西时一并写上。

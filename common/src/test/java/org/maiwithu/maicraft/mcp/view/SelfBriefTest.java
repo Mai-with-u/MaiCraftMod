@@ -50,4 +50,15 @@ class SelfBriefTest {
         assertEquals("在 minecraft:the_nether 12, 64, -8；血 18，饱食 15；两手空着；"
                 + "开着储物界面（minecraft:generic_9x3，任务点开的）", line);
     }
+
+    @Test
+    void 血不到一点时写一位小数不写成零() {
+        SceneSelf dying = new SceneSelf(12.7, 64.0, -7.2, 180f, "北", 0.83f, 15, 300, 300, null, List.of(), List.of(),
+                true, false, List.of(), null);
+
+        String line = SelfBrief.line(dying, "minecraft:overworld", Optional.empty());
+
+        assertTrue(line.contains("；血 0.9，饱食 15"), line);
+        assertEquals(0.9, SelfView.of(dying, null, null, null, null, null, false).get("health").getAsDouble());
+    }
 }

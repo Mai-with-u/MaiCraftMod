@@ -51,7 +51,8 @@ public final class ClientSelfSight implements SelfSight {
         }
         return new Facts(
                 player.getX(), player.getY(), player.getZ(), player.getYRot(),
-                (int) player.getHealth(), player.getFoodData().getFoodLevel(),
+                // 血量原样带小数传上去：低于 1 的存活血量取整会变成 0，被读成已死。
+                player.getHealth(), player.getFoodData().getFoodLevel(),
                 player.getAirSupply(), player.getMaxAirSupply(),
                 heldItem(player), armor, effects,
                 player.onGround(), player.isInWater(), gearBars(player),
