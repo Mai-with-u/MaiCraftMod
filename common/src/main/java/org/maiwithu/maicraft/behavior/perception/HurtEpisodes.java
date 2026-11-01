@@ -21,7 +21,8 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 /**
  * 挨打的片段（事件 hurt）：同一个来源（同一个攻击者，没有攻击者时同一种伤害）连着挨的算一段，
  * 5 秒没再挨这个来源的打就把这一段发出去；一直挨着打不停时每 10 秒发一条，只算这 10 秒里的。
- * 每条都是自成一体的"刚才这阵"，不分开始与结束。服务器伤害包确认的命中直接算；没收到伤害包、
+ * 每条都是自成一体的"刚才这阵"，不分开始与结束；「还剩多少血」写最后一下扣完当刻的血，不写发出去时回了血的数。
+ * 服务器伤害包确认的命中直接算；没收到伤害包、
  * 只看到血掉了的，单独一段写明"只看到血掉了"。只看血量，黄心（伤害吸收）到期掉的不算挨打。
  * 死了的时候没发出的段丢掉（角色死了已有自己的事件），换世界、断线时也丢掉。被玩家打照样只发一条，不替 LLM 决定怎么回应。
  */
@@ -102,6 +103,9 @@ public final class HurtEpisodes implements DamageObserver {
         Episode episode = open.computeIfAbsent(hit.key(), key -> new Episode(hit, tick));
         episode.hits++;
         episode.lastTick = tick;
+        // 这一下还没看到血掉：先按挨打前的血记，等下一刻真掉了再改成掉完的；
+        // 要是始终没掉（0 伤的轻摔），发出去时写的就是这一下当刻没变的血。
+        if (lastHealth != null) episode.healthAfter = lastHealth;
         lastHitKey = hit.key();
         lastHitTick = tick;
     }
@@ -120,6 +124,9 @@ public final class HurtEpisodes implements DamageObserver {
                 episode.lastTick = tick;
             }
             episode.lost += lost;
+            // 「还剩」记这一下扣完当刻的血：这段要等 5 秒没再挨打才发，吃饱了的角色这 5 秒能回好几点，
+            // 发出去时再读血量就会写成回血以后的数，和当时掉完的对不上。
+            episode.healthAfter = health;
         }
         lastHealth = health;
         flush(health, tick);
@@ -144,7 +151,9 @@ public final class HurtEpisodes implements DamageObserver {
 
     private void publish(Episode episode, float health) {
         if (episode.hits == 0 && episode.lost <= 0f) return;
-        String line = describe(episode.hit, episode.hits, episode.lost, health);
+        // 「还剩」写最后一下扣完当刻的血，不写发出去这一刻的；没记到的（还没看过血量就挨了打）才用当前的。
+        float remaining = episode.healthAfter != null ? episode.healthAfter : health;
+        String line = describe(episode.hit, episode.hits, episode.lost, remaining);
         // 没人打、碰着方块扎的：说出是哪种方块、记没记下绕开，LLM 不用再猜"biomesoplenty.bramble 伤"是什么。
         if (episode.hit.attacker() == null && !episode.hit.key().equals(UNSEEN)) {
             line += culpritOf.apply(episode.hit.damageType()).map(culprit -> "（" + culprit + "）").orElse("");
@@ -207,11 +216,13 @@ public final class HurtEpisodes implements DamageObserver {
         return value == Math.rint(value) ? String.valueOf((int) value) : String.format(Locale.ROOT, "%.1f", value);
     }
 
-    /** 一个来源这一段的账：来源、几下、掉了多少、最后一下在哪刻、这一条从哪刻算起。 */
+    /** 一个来源这一段的账：来源、几下、掉了多少、最后一下扣完还剩多少、最后一下在哪刻、这一条从哪刻算起。 */
     private static final class Episode {
         final Hit hit;
         int hits;
         float lost;
+        /** 最后一下扣完当刻的血；还没看过血量就挨了打时为 null。 */
+        Float healthAfter;
         long lastTick;
         long windowStart;
 

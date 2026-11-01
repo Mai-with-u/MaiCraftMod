@@ -86,6 +86,38 @@ class HurtEpisodesTest {
     }
 
     @Test
+    void 还剩的血写摔完当刻的_不写发出去时回了血的数() {
+        hurts.health(20f, false, 0);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall"), 10);
+        hurts.health(12f, false, 10);
+        // 吃饱了的角色等发事件的这 5 秒里一路回血，发出去时已经回满。
+        hurts.health(16f, false, 60);
+        hurts.health(20f, false, 110);
+        assertEquals("摔了一下，掉了 8 点血，还剩 12 点", messages.getFirst());
+    }
+
+    @Test
+    void 连着挨几下中间回了血_还剩按最后一下扣完的算() {
+        hurts.health(20f, false, 0);
+        hurts.hit(SKELETON, 10);
+        hurts.health(17f, false, 10);
+        hurts.health(19f, false, 50);
+        hurts.hit(SKELETON, 60);
+        hurts.health(16f, false, 60);
+        hurts.health(20f, false, 160);
+        assertEquals("被骷髅（e3）射中 2 下，掉了 6 点血，还剩 16 点", messages.getFirst());
+    }
+
+    @Test
+    void 没掉血的轻摔_还剩写摔那一刻的血() {
+        hurts.health(15f, false, 0);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall"), 10);
+        hurts.health(15f, false, 10);
+        hurts.health(18f, false, 110);
+        assertEquals("摔了一下，掉了 0 点血，还剩 15 点", messages.getFirst());
+    }
+
+    @Test
     void 换维度发一条_刚进世界不算() {
         DimensionChanges changes = new DimensionChanges(sink);
         changes.observe("minecraft:overworld", new BlockPos(0, 64, 0));
