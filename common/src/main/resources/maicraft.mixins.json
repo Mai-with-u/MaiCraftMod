@@ -27,7 +27,8 @@
     "EquipmentConfirmationMixin",
     "DamageEventMixin",
     "DeathMessageMixin",
-    "AwardStatsMixin"
+    "AwardStatsMixin",
+    "BackpackContentsMixin"
   ],
   "server": [],
   "injectors": {

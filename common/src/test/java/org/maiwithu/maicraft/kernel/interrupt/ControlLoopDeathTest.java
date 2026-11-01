@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.kernel.interrupt.ControlLoopTest.FakeNeed;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoopTest.FakeTask;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 
@@ -32,7 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 角色死亡时控制循环停摆：不再插生存需求的临时任务、不推进任务，插着的临时任务按"角色没了"收尾，
- * 只发一条死亡事件；重生后（同一个上下文替身改回活着）循环照常推进。
+ * 只发一条死亡事件；重生后（同一个上下文替身改回活着）循环照常推进，但要等新身体的背包从服务器发来才开始判。
  */
 class ControlLoopDeathTest {
 
@@ -167,6 +168,61 @@ class ControlLoopDeathTest {
         assertSame(main, advanced.task(), "主任务接着做");
     }
 
+    @Test
+    void respawnedBodyWaitsForItsBackpackBeforeAskingNeeds() {
+        // 重生后的新身体背包从空的起，服务器整包发来之前身上看着什么都没有：这一刻问夜晚需求，它会把包里的铁剑当没有，
+        // 插进"备武器"；包真到了（铁剑在）就不该插。循环在背包到之前不问需求、不推进主任务，到了才接着判。
+        FakeTask main = new FakeTask("挖矿", Interruptibility.WORKING);
+        DyingPlayer body = new DyingPlayer();
+        // 夜晚需求的替身：只看身上有没有剑——背包没到时读到空背包，判"打不过、备武器"；到了看见铁剑就不插。
+        AsksAboutBackpack night = new AsksAboutBackpack(body);
+        ControlLoop loop = new ControlLoop(List.of(night), new RecordingEvents());
+        loop.setMainTask(main);
+
+        body.dead = true;
+        assertInstanceOf(ControlLoop.Decision.WaitingRespawn.class, loop.tick(new Tick(body)));
+
+        // 重生：身体活了，但背包还没发来。
+        body.dead = false;
+        body.backpackReceived = false;
+        ControlLoop.Decision.WaitingBackpack waiting = assertInstanceOf(
+                ControlLoop.Decision.WaitingBackpack.class, loop.tick(new Tick(body)));
+        assertSame(main, waiting.mainTask(), "等背包时主任务还在手上");
+        assertEquals(0, night.asked, "背包没到不问生存需求");
+        assertEquals(0, main.ticks, "背包没到不推进主任务");
+
+        // 背包到了（铁剑在包里）：问了需求，它看见剑不插备武器，轮到主任务。
+        body.backpackReceived = true;
+        ControlLoop.Decision.Advanced advanced = assertInstanceOf(
+                ControlLoop.Decision.Advanced.class, loop.tick(new Tick(body)));
+        assertSame(main, advanced.task());
+        assertEquals(1, night.asked);
+        assertEquals(0, night.created, "包里有剑，不插备武器");
+    }
+
+    /** 夜晚需求替身：背包没到时读到的是空背包（没剑→备武器），到了就看见剑、不插；记下被问了几次、建了几次任务。 */
+    private static final class AsksAboutBackpack implements SurvivalNeed {
+        private final DyingPlayer body;
+        int asked;
+        int created;
+
+        AsksAboutBackpack(DyingPlayer body) {
+            this.body = body;
+        }
+
+        @Override public String name() { return "夜晚"; }
+
+        @Override public Urgency urgency(TickContext context) {
+            asked++;
+            return body.backpackReceived ? null : Urgency.SOON;
+        }
+
+        @Override public Task createTask(TickContext context) {
+            created++;
+            return new FakeTask("备武器", Interruptibility.WORKING);
+        }
+    }
+
     /** 记下死亡决策挂载口被叫了几次：断言一个死亡过程只挂一次、活过来才了结。 */
     private static final class RecordingDeathDecisions implements DeathDecisionHost {
         int deaths;
@@ -185,10 +241,12 @@ class ControlLoopDeathTest {
         }
     }
 
-    /** 只回答"死没死"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
+    /** 只回答"死没死、背包到没到"的角色上下文替身；其他入口这些测试用不到，如实报缺。 */
     private static final class DyingPlayer implements PlayerContext {
         boolean dead;
         long respawns;
+        /** 这具身体的背包服务器发来没有：默认当作到了，只有换身体的测试把它拨回去。 */
+        boolean backpackReceived = true;
         DeathFacts facts = new DeathFacts(12, "minecraft:overworld", 1, 64, 2, false, null);
 
         @Override public LocalPlayer localPlayer() { return null; }
@@ -210,6 +268,7 @@ class ControlLoopDeathTest {
         @Override public boolean isDeadOrDying() { return dead; }
         @Override public DeathFacts deathFacts() { return facts; }
         @Override public long respawns() { return respawns; }
+        @Override public boolean backpackReceived() { return backpackReceived; }
     }
 
     /** 本刻上下文替身：把身体递给循环。 */

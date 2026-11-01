@@ -306,6 +306,11 @@ public final class ControlLoop {
         if (player != null && player.isDeadOrDying()) {
             return waitForRespawn(context);
         }
+        if (player != null && !player.backpackReceived()) {
+            // 刚换了身体（进世界、重生、过传送门），服务器还没把背包整包发来：这一刻身上看着什么都没有，那不是事实。
+            // 按它判生存需求会把包里的剑当没有去备武器、把口粮当没有去弄吃的，所以等背包到了再判、再推进。
+            return new Decision.WaitingBackpack(stack.isEmpty() ? null : stack.getFirst().task);
+        }
         if (player != null) {
             // 重生次数变了却没经过死亡停摆：服务器开着立即重生，死亡落在两刻之间。
             long respawns = player.respawns();
@@ -773,5 +778,12 @@ public final class ControlLoop {
          * @param mainTask 停在原地的主任务；手上没有主任务时为 null
          */
         record WaitingRespawn(Task mainTask) implements Decision {}
+
+        /**
+         * 刚换了身体，服务器还没把背包整包发来：本刻不判生存需求、不推进任务，等背包到了再说。
+         *
+         * @param mainTask 手上的主任务；没有时为 null
+         */
+        record WaitingBackpack(Task mainTask) implements Decision {}
     }
 }

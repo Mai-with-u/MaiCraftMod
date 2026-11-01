@@ -44,6 +44,8 @@ public final class PlayerControlBoundary {
     /** 这一刻开头主手拿着的是哪种东西、从哪一刻起拿着：原版换了种类就清攻击冷却，近战出手据此隔一刻。 */
     private Item mainHandAtStart;
     private long mainHandSince = Long.MIN_VALUE;
+    /** 服务器最近一次整包发来背包的是哪具身体：换了身体要等新身体自己的那一包，才知道身上真有什么。 */
+    private LocalPlayer backpackReceivedFor;
     private DefaultPlayerContext activeContext;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
@@ -317,6 +319,20 @@ public final class PlayerControlBoundary {
         return player.getMainHandItem().getItem() != mainHandAtStart ? tickRevision : mainHandSince;
     }
 
+    /**
+     * 服务器把这具身体的背包整包发来了（原版的背包内容同步包，由 Mixin 在处理完后转来）。
+     * 只记是哪具身体的：进世界、重生、过传送门换出来的新身体要等它自己的那一包，旧身体收到过不算。
+     */
+    public void noteBackpackReceived(LocalPlayer player) {
+        requireClientThread();
+        if (player != null) backpackReceivedFor = player;
+    }
+
+    /** 这具身体的背包服务器发来过没有：没发来之前身上看着什么都没有，那不是事实。 */
+    boolean backpackReceived(LocalPlayer player) {
+        return player != null && backpackReceivedFor == player;
+    }
+
     /** 客户端停止时归还输入，并让以前发出的所有上下文失效。 */
     public void shutdown() {
         requireClientThread();
@@ -327,6 +343,7 @@ public final class PlayerControlBoundary {
         updateWindowControl(false);
         activeContext = null;
         observedPlayer = null;
+        backpackReceivedFor = null;
         mutationClaimedTick = Long.MIN_VALUE;
         playerEpoch = nextRevision(playerEpoch, "body epoch");
         controlRevision = nextRevision(controlRevision, "control revision");
