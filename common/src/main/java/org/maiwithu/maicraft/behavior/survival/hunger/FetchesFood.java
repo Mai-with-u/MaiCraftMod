@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.game.player.EverydayFood;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -21,7 +22,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 饿了身上没吃的：像玩家一样去弄点现成的口粮。面包、熟肉、熟鱼、蔬菜、水果几类和"能吃的口粮"一大类
- * （含生肉、模组食物）同一轮问拿东西的引擎哪类最近（网络里、箱子里有就拿，没有再做、再打猎），
+ * （含生肉、模组食物）同一轮问拿东西的估算哪类整条路走得最近（网络里、箱子里有就拿，没有再做、再打猎），
  * 挑最近的那类拿几件，一样近时熟食优先；有预算，超时或哪儿都没有如实说。
  * 没弄满也不要紧：吃饭任务每刻看身上，弄到第一件这会儿能吃的（打到的生肉、烤好的第一块熟肉）就把这里叫停、先吃。
  */
@@ -79,7 +80,7 @@ final class FetchesFood implements Action {
         return status;
     }
 
-    // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮问价，挑报价最近的去拿：
+    // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮问价，挑整条路最远走多远最近的去拿：
     // 面包虽常有小麦合成报价，但远处有羊有鸡时打猎更近，不该绕远去做面包；一样近时按 KINDS 的顺序挑，
     // 熟的、不用再加工的排前面，生肉是饿急了的备选。
     private Optional<ItemRequest> nearestKind() {
@@ -94,13 +95,36 @@ final class FetchesFood implements Action {
         for (String kind : kinds) {
             if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
             ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
-            Optional<Double> distance = needs.nearestDistanceBlocks(request, Permissions.DEFAULT);
+            Optional<Double> distance = walkingDistance(request);
             if (distance.isPresent() && distance.get() < bestDistance) {
                 best = request;
                 bestDistance = distance.get();
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    // 这一类口粮要走多远：先按拿东西的估算看整条路，估不出整条路再问第一步的距离。
+    private Optional<Double> walkingDistance(ItemRequest request) {
+        GoalEstimate estimate = needs.estimate(request, Permissions.DEFAULT);
+        Optional<Double> firstStep = estimate.farthestBlocks() == null && estimate.effort() != GoalEstimate.Effort.READY
+                && estimate.effort() != GoalEstimate.Effort.BLOCKED
+                ? needs.nearestDistanceBlocks(request, Permissions.DEFAULT) : Optional.empty();
+        return walkingDistance(estimate, firstStep);
+    }
+
+    /**
+     * 排口粮远近用的距离：角色为这一类口粮实际要走多远。
+     * 来源自报代价里的距离只是第一步的（烧炼、合成报"身边放一个"是 0 格），缺的原料要去多远的箱子取不在里面；
+     * 按它排，面包链第一步 0 格永远压过 57 格外的羊，角色饿着直奔百格外的深箱子。拿东西的估算会沿原料链往下估，
+     * 最远走多远才是整条路的数，排序按它；东西在身上或身边几格的不用离开，按 0 格算；弄不到的不参与；
+     * 估不出整条路的（附近还没扫完）退回第一步的距离，不因为估不了就说哪儿都没有。
+     */
+    static Optional<Double> walkingDistance(GoalEstimate estimate, Optional<Double> firstStepBlocks) {
+        if (estimate.effort() == GoalEstimate.Effort.BLOCKED) return Optional.empty();
+        if (estimate.effort() == GoalEstimate.Effort.READY) return Optional.of(0d);
+        if (estimate.farthestBlocks() != null) return Optional.of(estimate.farthestBlocks());
+        return firstStepBlocks;
     }
 
     @Override public void pause() {

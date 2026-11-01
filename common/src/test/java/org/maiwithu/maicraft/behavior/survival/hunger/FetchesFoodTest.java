@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -113,6 +114,46 @@ class FetchesFoodTest {
         FetchesFood fetch = new FetchesFood(needs, 1200);
         assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
+    void 按整条路最远走多远排_不按第一步的距离() {
+        // 面包要烧炼：第一步"身边放熔炉"报 0 格，但缺的面团要去 239 格外的深箱子取；羊就在近处，打猎报 57 格。
+        // 只看第一步面包反倒最近，实机就这样三轮直奔深箱子不猎 2 格外的羊；按估算里整条路最远走多远排，打猎在前。
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 0d, "#maicraft:foods/edible", 57d)) {
+            @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+                String kind = request.wanted().specifier();
+                Double farthest = switch (kind) {
+                    case "#c:foods/bread" -> 239d;
+                    case "#maicraft:foods/edible" -> 57d;
+                    default -> null;
+                };
+                if (farthest == null) {
+                    return new GoalEstimate(GoalEstimate.Effort.BLOCKED, kind, "没有来路", null, null, List.of(), false);
+                }
+                return new GoalEstimate(GoalEstimate.Effort.NEARBY, kind, "", farthest, 60, List.of(), false);
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
+    void 估算给不出最远多远时退回第一步的距离() {
+        // 估不了（附近还没扫完）：没有整条路的数，先按来源自报的第一步距离排，不因为估不了就说哪儿都没有。
+        assertEquals(Optional.of(12d), FetchesFood.walkingDistance(
+                GoalEstimate.unknown("x", "附近还没看完"), Optional.of(12d)));
+        // 东西在身上或身边几格：不用离开，按 0 格算，比哪条要走路的都近。
+        assertEquals(Optional.of(0d), FetchesFood.walkingDistance(
+                new GoalEstimate(GoalEstimate.Effort.READY, "x", "", null, 5, List.of(), false), Optional.of(12d)));
+        // 弄不到：这一类不参与排序。
+        assertEquals(Optional.empty(), FetchesFood.walkingDistance(
+                new GoalEstimate(GoalEstimate.Effort.BLOCKED, "x", "没有来路", null, null, List.of(), false),
+                Optional.of(12d)));
+        // 估出了最远多远：以它为准，第一步的距离不看。
+        assertEquals(Optional.of(239d), FetchesFood.walkingDistance(
+                new GoalEstimate(GoalEstimate.Effort.NEARBY, "x", "", 239d, 60, List.of(), false), Optional.of(0d)));
     }
 
     @Test
