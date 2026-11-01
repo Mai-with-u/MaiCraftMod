@@ -305,6 +305,65 @@ class SelfDefenseTaskTest {
     }
 
     @Test
+    void watchCountsToZeroBeforeSettling() {
+        // 观察期还差 1 刻时不收口，倒计时归零的那一拍才转收场：人就在打点上，归零当刻之后立刻按「回到打点」完成。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        senses.threats.clear();
+        // 打完进观察期；还剩 1 刻时还在观察，不收口。
+        assertInstanceOf(TickResult.Running.class,
+                run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS), "还差 1 刻时不收口");
+        assertEquals("观察期还剩 1 刻", task.currentProgress().orElseThrow().lastProgress());
+        // 归零那一拍转收场：回到打点（人就在打点上）当场完成。
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, 3 + SelfDefenseTask.WATCH_TICKS, 3 + SelfDefenseTask.WATCH_TICKS + 2)).result();
+        assertEquals(TaskResult.Status.DONE, finished.status());
+        assertTrue(finished.summary().contains("回到打点"), finished.summary());
+    }
+
+    @Test
+    void longWalkBackFeedsProgressWhileItIsMoving() {
+        // 撤离被甩到几十格外，走回打点是一趟长路：走到在路上不逐刻自报进展（只说「还在走」），
+        // 进展要从脚位挪格读——不读的话走得好好的也会在半路被停滞判定按
+        // 「自『观察期还剩 1 刻』没有新进展」收掉，交还身体后接着重开自卫。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 6, 6));
+        senses.health = 4;
+        Moves moves = new Moves();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 2);
+        moves.at[0] = -60;
+        senses.threats.clear();
+        // 甩开、观察期过去，起了走回打点的路：六百多刻的长路，脚位逐刻挪一格。
+        List<WalkReport> leg = new ArrayList<>();
+        for (int i = 0; i < 620; i++) {
+            leg.add(WalkReport.onTheWay(new BlockPos(-60 + i, 64, 0), false));
+        }
+        moves.nextWalk = new TravelFakes.ScriptedWalk(leg.toArray(WalkReport[]::new));
+        assertInstanceOf(TickResult.Running.class,
+                run(task, 2, 2 + 80 + SelfDefenseTask.WATCH_TICKS), "甩开之后还在走回打点");
+        assertEquals(2, moves.walks, "观察期过了，起了走回打点的路");
+        long walkStart = 2 + 80 + SelfDefenseTask.WATCH_TICKS;
+        assertInstanceOf(TickResult.Running.class, run(task, walkStart, walkStart + 620),
+                "走回打点的长路不半途按卡住收场");
+        assertTrue(task.currentProgress().orElseThrow().lastProgress().contains("走回打点"),
+                task.currentProgress().orElseThrow().lastProgress());
+        // 走到打点旁：当场收好。
+        moves.at[0] = 1;
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, walkStart + 620, walkStart + 630)).result();
+        assertEquals(TaskResult.Status.DONE, finished.status());
+        assertTrue(finished.summary().contains("回到打点"), finished.summary());
+    }
+
+    @Test
     void retreatRunsTowardHome() {
         // 僵尸在东边，记过的家在北边一百格：背离僵尸的左右九十度里往离家最近的北边跑，不往正西越跑越远。
         Senses senses = new Senses();
