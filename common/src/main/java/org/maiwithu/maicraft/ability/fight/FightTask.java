@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.DragonArena;
 import org.maiwithu.maicraft.behavior.combat.DragonCombat;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -112,6 +114,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 拾荒正在做的那一步（走向某件掉落物）。 */
     private Action current;
     private String currentKey;
+    /** 回倒下点这一趟的进展观察：脚位挪一格记一次前进。 */
+    private final WalkProgress walkProgress = new WalkProgress();
     /** 开打那一刻的掉落物确认序号：这之后冒出来的掉落才是这一仗带出来的。 */
     private long fightCursor;
     /** 拾荒先回到最后一只倒下的地方：远处的掉落进不了"身边"的名单。 */
@@ -524,7 +528,15 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 keep("回到倒下的地方", () -> moves.walk(GoalCompiler.near(
                         BlockPos.containing(lastKillSpot[0], lastKillSpot[1], lastKillSpot[2]), KILL_SPOT_NEAR)));
                 if (current.tick(context) instanceof ActionStatus.Running running) {
-                    if (running.progressed()) recordProgress("回到倒下的地方捡掉落");
+                    // 回倒下点的进展从走到运行的脚位读（走到进展 WalkProgress，与自卫走回打点共用）：
+                    // 几十格的回程靠 progressed 攒不出进展记录，走得好好的也会被停滞判定按卡住收掉。
+                    // 测试里的替身动作不是走到运行，退回按动作状态记进展。
+                    if (current instanceof WalkRun walk) {
+                        walkProgress.note(walk).ifPresent(feet ->
+                                recordProgress("回到倒下的地方：走到 " + feet.toShortString()));
+                    } else if (running.progressed()) {
+                        recordProgress("回到倒下的地方捡掉落");
+                    }
                     return Next.stay();
                 }
                 // 收尾途中落地报的"已停下"不是走到了：站着等外层停下，接着做时再看离倒下的地方多远。

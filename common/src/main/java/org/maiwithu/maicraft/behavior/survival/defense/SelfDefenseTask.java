@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
+import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -77,8 +78,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private int watchTicksLeft;
     private boolean reportedCornered;
     private Action walkBack;
-    /** 走回打点这一趟最近一次报到的脚位：脚位挪了格子才算前进了一步。 */
-    private BlockPos lastWalkFeet;
+    /** 走回打点这一趟的进展观察：脚位挪一格记一次前进。 */
+    private final WalkProgress walkProgress = new WalkProgress();
     /** 刚决定换去的阶段：外壳在换阶段时被基类收尾，靠它分清是换阶段还是任务真结束。 */
     private Phase goingTo;
     /** 收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
@@ -259,7 +260,6 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             if (stopping()) return Next.stay();
             BlockPos cell = BlockPos.containing(anchor[0], anchor[1], anchor[2]);
             walkBack = moves.walk(GoalCompiler.near(cell, 1.0));
-            lastWalkFeet = null;
         }
         ActionStatus status = walkBack.tick(context);
         if (status instanceof ActionStatus.Failed) {
@@ -276,16 +276,11 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
                             "自卫结束；人停在了 " + where + "，回不去原来的打点")
                     .details(details(drift, heartsLost)).build());
         }
-        // 走回打点的进展从走到运行的脚位读：走到在路上不逐刻自报进展（动作状态只说「还在走」），
+        // 走回打点的进展从走到运行的脚位读（走到进展 WalkProgress，与点名战斗回倒下点共用）：
         // 撤离后几十格的长路靠 progressed 永远攒不出进展记录，人走得好好的也会被停滞判定按
-        // 「自『观察期还剩 1 刻』没有新进展」收掉。脚挪了格子就是真在前进；真走不动时这里不刷新，
-        // 停滞判定照常把这场收掉。测试里的替身动作不是走到运行，退回按动作状态记进展。
+        // 「自『观察期还剩 1 刻』没有新进展」收掉。测试里的替身动作不是走到运行，退回按动作状态记进展。
         if (walkBack instanceof WalkRun walk) {
-            BlockPos feet = walk.report().feet();
-            if (feet != null && !feet.equals(lastWalkFeet)) {
-                lastWalkFeet = feet;
-                recordProgress("走回打点：走到 " + feet.toShortString());
-            }
+            walkProgress.note(walk).ifPresent(feet -> recordProgress("走回打点：走到 " + feet.toShortString()));
         } else if (status instanceof ActionStatus.Running running && running.progressed()) {
             recordProgress(walkBack.describe());
         }

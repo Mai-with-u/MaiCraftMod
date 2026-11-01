@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.fight;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -16,7 +17,9 @@ import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
@@ -79,6 +82,10 @@ class FightTaskTest {
 
         final List<String> started = new ArrayList<>();
         int closed;
+        /** 此刻人在哪（拾荒回倒下点的测试用它挪人）；默认打点原地。 */
+        double[] at = {0, 64, 0};
+        /** 下一趟寻路照这段脚本演（长回程，脚位逐刻挪一格）；为 null 时按普通替身回。 */
+        TravelFakes.ScriptedWalk nextWalkScript;
         /** 开打前就躺在身边的掉落物；测试摆。 */
         final Set<Integer> lyingBefore = new HashSet<>();
         /** 捡掉落物时交给它的"不碰"名单。 */
@@ -91,6 +98,11 @@ class FightTaskTest {
         }
 
         @Override public Action walk(GoalCompiler.Compiled goal) {
+            if (nextWalkScript != null) {
+                TravelFakes.ScriptedWalk walk = nextWalkScript;
+                nextWalkScript = null;
+                return walk;
+            }
             BlockPos center = goal.goal().center();
             return action("走向 " + center.getX() + "," + center.getZ(), ActionStatus.running());
         }
@@ -107,7 +119,7 @@ class FightTaskTest {
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) { steps.add(step); }
         @Override public boolean standable(TickContext context, int x, int y, int z) { return true; }
 
-        @Override public double[] selfPosition(TickContext context) { return new double[] {0, 64, 0}; }
+        @Override public double[] selfPosition(TickContext context) { return at.clone(); }
 
         @Override public long dropCursor(TickContext context) { return 0; }
 
@@ -286,6 +298,34 @@ class FightTaskTest {
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
         assertTrue(moves.started.isEmpty(), moves.started.toString());
+    }
+
+    @Test
+    void longWalkBackToTheKillSpotKeepsProgressWhileItIsMoving() {
+        // 倒下的地方离人几十格：走回去是一趟长路。走到在路上不逐刻自报进展（只说「还在走」），
+        // 进展要从脚位挪格读——不读的话走得好好的也会半路被停滞判定按卡住收掉，捡回就此作废。
+        targets.now = new SeenTargets.Observed(60, 64, 60, 85, false);
+        task.start(new Tick(0));
+        for (long t = 0; t < 3; t++) task.tick(new Tick(t));
+        targets.now = new SeenTargets.Observed(60, 64, 60, 85, true);
+        // 回倒下点的路：六百多刻的长路，脚位逐刻挪一格。
+        List<WalkReport> leg = new ArrayList<>();
+        for (int i = 0; i < 620; i++) leg.add(WalkReport.onTheWay(new BlockPos(i, 64, i), false));
+        moves.nextWalkScript = new TravelFakes.ScriptedWalk(leg.toArray(WalkReport[]::new));
+        TaskResult result = null;
+        for (long t = 3; t < 3 + 620 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertNull(result, "回倒下点的长路不半途按卡住收场");
+        assertTrue(task.currentProgress().orElseThrow().lastProgress().contains("回到倒下的地方"),
+                task.currentProgress().orElseThrow().lastProgress());
+        // 走到倒下点跟前：开始捡（替身直接捡完），当场收场。
+        moves.at = new double[] {60, 64, 60};
+        for (long t = 3 + 620; t < 3 + 640 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
     }
 
     @Test
