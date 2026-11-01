@@ -86,6 +86,8 @@ class SelfDefenseTaskTest {
         };
         /** 交给寻路的第一段：撤离往哪跑看它。 */
         GoalCompiler.Compiled firstWalk;
+        /** 下一趟寻路照这段脚本演（长路，脚位逐刻挪一格、路上只说「还在走」）。 */
+        TravelFakes.ScriptedWalk nextWalkScript;
 
         @Override public Action strike(TickContext context, int entityId) {
             return new Fixed(strikeStatus);
@@ -102,7 +104,7 @@ class SelfDefenseTaskTest {
         }
         @Override public void step(TickContext context, int faceEntityId, Footwork.Step step) {}
 
-        /** 下一趟寻路照这段脚本演（悬在半空、落地）；为 null 时按 walkStatus 回。 */
+        /** 下一趟寻路照这段脚本演（悬在半空、落地、长路脚位）；为 null 时按 walkStatus 回。 */
         Action nextWalk;
 
         @Override public Action walk(GoalCompiler.Compiled goal) {
@@ -111,6 +113,11 @@ class SelfDefenseTaskTest {
             if (nextWalk != null) {
                 Action walk = nextWalk;
                 nextWalk = null;
+                return walk;
+            }
+            if (nextWalkScript != null) {
+                Action walk = nextWalkScript;
+                nextWalkScript = null;
                 return walk;
             }
             return new Fixed(() -> walkStatus);
@@ -302,6 +309,30 @@ class SelfDefenseTaskTest {
         String note = task.finishedNote(finished);
         assertTrue(note != null && note.contains("自卫插曲收场"), String.valueOf(note));
         assertTrue(note.contains("位移"), note);
+    }
+
+    @Test
+    void approachingAWayOffFoeKeepsProgressWhileItIsMoving() {
+        // 追一只够不着的远怪是一趟长路：逼近交给寻路走，走到在路上不逐刻自报进展（只说「还在走」），
+        // 进展要从脚位挪格读——不读的话追得好好的也会半路被停滞判定按卡住收掉，交还身体后接着重开自卫。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 12, 12));
+        Moves moves = new Moves();
+        List<WalkReport> leg = new ArrayList<>();
+        for (int i = 0; i < 620; i++) leg.add(WalkReport.onTheWay(new BlockPos(1 + i, 64, 0), false));
+        moves.nextWalkScript = new TravelFakes.ScriptedWalk(leg.toArray(WalkReport[]::new));
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        assertInstanceOf(TickResult.Running.class, run(task, 0, 620), "逼近的长路不半途按卡住收场");
+        assertTrue(task.currentProgress().orElseThrow().lastProgress().contains("逼近"),
+                task.currentProgress().orElseThrow().lastProgress());
+        // 怪没了：照常收场（观察一阵，回到打点——人还在打点上）。
+        senses.threats.clear();
+        TickResult finished = run(task, 620, 620 + SelfDefenseTask.WATCH_TICKS + 5);
+        TaskResult result = assertInstanceOf(TickResult.Finished.class, finished).result();
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("回到打点"), result.summary());
     }
 
     @Test

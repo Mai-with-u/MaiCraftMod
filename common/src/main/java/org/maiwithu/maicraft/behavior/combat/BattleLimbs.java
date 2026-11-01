@@ -5,6 +5,8 @@ import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -41,6 +43,8 @@ public final class BattleLimbs {
     private double[] walkAnchor;
     /** 上一段寻路走不通：交给引擎按它的规矩记账（记成走不到、换站位）。 */
     private boolean lastWalkFailed;
+    /** 脚上这段路的进展观察：脚位挪一格算走了一步（走到进展，与任务侧的进展记录共用同一份判断）。 */
+    private final WalkProgress walkProgress = new WalkProgress();
     /** 手上这一下出手；没在出手为 null。 */
     private Action strike;
     /** 这一下打的是谁；换人先收手。 */
@@ -81,6 +85,17 @@ public final class BattleLimbs {
             return false;
         }
         if (status instanceof ActionStatus.Done) dropWalk();
+        return legMoved(walk, status);
+    }
+
+    /**
+     * 这一刻脚上的路有没有真在走：走到运行在路上不逐刻自报进展（动作状态只说「还在走」），
+     * 进展从走到情况报的脚位读，脚挪一格算走了一步，换了新的一趟从头看——不这样记，
+     * 追够不着的远怪、撤离赶路这类长走路一路在走也会被停滞判定按卡住收掉。
+     * 替身动作不是走到运行（测试），退回按动作状态记。
+     */
+    boolean legMoved(Action leg, ActionStatus status) {
+        if (leg instanceof WalkRun walk) return walkProgress.note(walk).isPresent();
         return status instanceof ActionStatus.Running running && running.progressed();
     }
 

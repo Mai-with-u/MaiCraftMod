@@ -336,7 +336,8 @@ public final class Battle {
             return new Moment(State.RETREATING, "撤离走不通，换个方向再试", false, false, false, -1, retreat.why(), cornered);
         }
         if (status instanceof ActionStatus.Done) limbs.dropWalk();
-        boolean moved = status instanceof ActionStatus.Running running && running.progressed();
+        // 撤离赶路的进展同样从走到情况的脚位读（脚上的路 BattleLimbs.legMoved）：路上不逐刻自报进展。
+        boolean moved = limbs.legMoved(retreatWalk, status);
         return new Moment(State.RETREATING, "撤离：" + retreat.why(), moved, false, false, -1, retreat.why(), cornered);
     }
 
