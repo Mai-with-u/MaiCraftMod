@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel.settle;
 
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -31,6 +32,7 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.function.Predicate;
 
@@ -101,15 +103,55 @@ class TravelTaskTest {
     private TravelTask taskWithStairs(Target target, Permissions permissions) {
         DestinationResolver resolver = new DestinationResolver(world, places, seen);
         var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
-        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, stairs, permissions);
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, stairs, null, permissions);
     }
 
     /** 接上许可、没接挖楼梯的出行任务：下掘重走段只看许可能不能动土，不用楼梯。 */
     private TravelTask taskWithPermit(Target target, Permissions permissions) {
         DestinationResolver resolver = new DestinationResolver(world, places, seen);
         var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
-        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, null, permissions);
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, null, null, permissions);
     }
+
+    /** 接上往下挖台阶的出行任务：目的地摆在台地崖下的深处，角色摆在崖顶。 */
+    private TravelTask taskWithStairsDown(Target target, Permissions permissions) {
+        DestinationResolver resolver = new DestinationResolver(world, places, seen);
+        var ready = assertInstanceOf(DestinationResolver.Resolution.Ready.class, resolver.resolve(target, 2));
+        return new TravelTask(ready.destination(), 0, permit, walks, placed, progress, world, null, stairsDownLeg, permissions);
+    }
+
+    /** 往下挖台阶替身：挖到摆好的落脚点（或按给的问题挖不下去），记下被叫了几次。 */
+    private final class StairsDownLeg implements DigsStairsDown {
+        int calls;
+        /** 这一段下掘挖到的落脚点；下掘的停点判断在这一点上算，真就算挖够了。 */
+        BlockPos dugTo = new BlockPos(12, 58, -2);
+        /** 摆了就是台阶挖不下去，如实报这个失败。 */
+        Problem stops;
+
+        @Override public Action digDown(Predicate<String> yields, int wantedCells, Permissions permissions) {
+            throw new AssertionError("出行的下掘段不该用按格数停的挖法");
+        }
+
+        @Override public Optional<Action> digDown(Predicate<BlockPos> reached, int plannedCells,
+                Permissions permissions, TaskRecords records) {
+            calls++;
+            return Optional.of(new Action() {
+                @Override public ActionStatus tick(TickContext context) {
+                    if (stops != null) return ActionStatus.failed(stops);
+                    // 台阶挖掉的方块经记账口进变化，替身摆一条石头的账。
+                    records.change(new Change(Change.Kind.BLOCK_BROKEN, "minecraft:stone", 66, "往下挖台阶挖掉的"));
+                    world.spot = WorldPosition.here(dugTo.getX(), dugTo.getY(), dugTo.getZ());
+                    return reached.test(dugTo) ? ActionStatus.done() : ActionStatus.running();
+                }
+
+                @Override public String describe() {
+                    return "往下挖台阶";
+                }
+            });
+        }
+    }
+
+    private final StairsDownLeg stairsDownLeg = new StairsDownLeg();
 
     /** 演一段一直走不动的路：报告取完后留在原地，空转计时到点就判卡住。 */
     private void stallAt(BlockPos feet) {
@@ -591,6 +633,72 @@ class TravelTaskTest {
 
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(1, walks.started.size(), "没重开下掘段");
+        assertFalse(result.problem().message().contains("下掘"), () -> result.problem().message());
+    }
+
+    @Test
+    void cliffEdgeDescentDigsStairsWhenWalkingCannotStart() {
+        // 崖边下探 50 级：走路在崖顶起步不了、一格没挖就空转，收场前拆一段下掘，挖台阶下到走路接得住的
+        // 深度再从那里重新算路走完；不站在崖顶空转到熔断、一格不挖就判死整趟。
+        world.spot = WorldPosition.here(12, 80, -2);
+        stairsDownLeg.dugTo = new BlockPos(12, 58, -2);
+        stallAt(new BlockPos(12, 80, -2));
+        walks.enqueue(new ScriptedWalk(WalkReport.arrived(new BlockPos(12, 30, -2), false)));
+        TravelTask travel = taskWithStairsDown(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 2000);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(1, stairsDownLeg.calls, "拆了一段下掘");
+        assertEquals(2, walks.started.size(), "挖到深度后从落脚点重新开始一段走到");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_BROKEN),
+                "下掘段挖掉的方块进变化");
+    }
+
+    @Test
+    void stairsDownThatNeverWorkEndsWithDepthFactsAfterAllLegs() {
+        // 台阶每个方向都挖不下去：拆满几段都原地不动，最后如实收场，说明带拆了几段、挖到哪、还差多深。
+        world.spot = WorldPosition.here(12, 80, -2);
+        stairsDownLeg.stops = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "台阶挨着水，挖开会灌进楼梯井");
+        stallAt(new BlockPos(12, 80, -2));
+        TravelTask travel = taskWithStairsDown(new Target.Position(12, 30, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 4000);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.problem().message().contains("下掘分了 3 段"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("挖到 (12, 80, -2)"), () -> result.problem().message());
+        assertTrue(result.problem().message().contains("还深 50 格"), () -> result.problem().message());
+    }
+
+    @Test
+    void temporaryPermitDoesNotBootDescentLegs() {
+        // 只许垫临时方块不许挖：拆不了下掘段，崖边下探照旧按走不通收场，不去动不许动的地形。
+        world.spot = WorldPosition.here(12, 80, -2);
+        stallAt(new BlockPos(12, 80, -2));
+        Permissions temporary = Permissions.DEFAULT.mergedWith(Permissions.BlockChanges.TEMPORARY,
+                null, null, null, null, null);
+        TravelTask travel = taskWithStairsDown(new Target.Position(12, 30, -2, null), temporary);
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(0, stairsDownLeg.calls, "没拆下掘段");
+        assertFalse(result.problem().message().contains("下掘"), () -> result.problem().message());
+    }
+
+    @Test
+    void shallowDescentStallDoesNotBootDiggingLeg() {
+        // 只差几级的下掘走路自己到得了：空转收场就按走不通收场，不用挖台阶来接。
+        world.spot = WorldPosition.here(12, 62, -2);
+        stallAt(new BlockPos(12, 62, -2));
+        TravelTask travel = taskWithStairsDown(new Target.Position(12, 58, -2, null), Permissions.DEFAULT);
+
+        TaskResult result = runToFinish(travel, 900);
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(0, stairsDownLeg.calls, "浅下掘没拆下掘段");
         assertFalse(result.problem().message().contains("下掘"), () -> result.problem().message());
     }
 }

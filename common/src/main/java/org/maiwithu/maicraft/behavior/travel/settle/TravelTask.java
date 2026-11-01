@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.travel.settle;
 
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.OptionalInt;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
@@ -44,6 +46,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
  * 交往上挖楼梯爬到中途落脚点，再从新落脚点接着算路，拆满还没到就带着已爬到的高度如实收场。
  * 目的地在脚下深处时，下掘靠一路挖天然方块推进：一段走路半途收场、只要这一段真的挖深了，
  * 就从挖到的地方重开一段走路接着算路接着挖；有一段没能更深，带着挖到哪、还差多深如实收场。
+ * 深出一次走路接得住的范围、走路又迟迟起步不了时（崖边下探几十级，搜索给不出第一段），
+ * 空转要收场前也拆出一段下掘：往下挖台阶到走路接得住的深度，再从那里重新算路。
  * 中途停下分两步：先向走到请求停，等落到安全边界（落地、走完正在跨的一步）才真停，
  * 停下后按取消结算，写明实测停在哪、离目的地还差多远；被生存需求打断时走到运行先把自己停稳，
  * 处理完从原地接着走。路上垫的临时方块逐格进结果，不自动收回；路上捡进背包与从背包用掉的
@@ -51,8 +55,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelDestination;
  */
 public final class TravelTask extends PhasedTask<TravelTask.Phase> implements TorchesAlongTheWay {
 
-    /** 出行的阶段：在路上，或一段爬升（挖楼梯往上爬到中途落脚点）。 */
-    public enum Phase { WALK, CLIMB }
+    /** 出行的阶段：在路上、一段爬升（挖楼梯往上爬到中途落脚点）或一段下掘（挖台阶往下挖到走路接得住的深度）。 */
+    public enum Phase { WALK, CLIMB, DESCENT }
 
     /** 连续半分钟离目的地没有更近，就算在原地打转。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
@@ -67,6 +71,10 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private final TravelProgressListener progressListener;
     /** 往上挖楼梯；连同许可一起给了，长爬升规划不收敛时才拆得出爬升段。没给为 null。 */
     private final DigsStairsUp stairsUp;
+    /** 往下挖台阶；连同许可一起给了，长下掘起步没有进展时才拆得出下掘段。没给为 null。 */
+    private final DigsStairsDown stairsDown;
+    /** 拆下掘段时向往下挖台阶要来的那一段动作；进下掘阶段时开跑。 */
+    private Action pendingDescentLeg;
     /** 这次任务的许可：爬升段上每一格动之前都过它。 */
     private final Permissions permissions;
     /** 已经拆出去的爬升段数。 */
@@ -77,6 +85,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private int descentLegs;
     /** 这一段走路出发时的脚位：段末比它挖得更深，才允许再拆一段下掘。 */
     private BlockPos legStartFeet;
+    /** 这一段下掘里离目的地最近的一次还差多少级：再近一级以上才算下掘里的进展。 */
+    private int bestDescentRemaining = Integer.MAX_VALUE;
 
     /** 读地表高度与角色在哪：远程出行按地表一段一段走；没有为 null（只按目的地走一整段）。 */
     private final TravelWorldView world;
@@ -115,17 +125,18 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
             WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
             TravelWorldView world) {
-        this(destination, maxSeconds, permit, walks, placedBlocks, progressListener, world, null, null);
+        this(destination, maxSeconds, permit, walks, placedBlocks, progressListener, world, null, null, null);
     }
 
     /**
      * @param world       读地表高度与角色位置；给了就把远程出行分成地表上的一小段一小段
      * @param stairsUp    往上挖楼梯；连同下面的许可一起给了，长爬升规划不收敛时才拆得出爬升段
-     * @param permissions 这次任务的许可：爬升段上每一格动之前都过它
+     * @param stairsDown  往下挖台阶；连同下面的许可一起给了，长下掘起步没有进展时才拆得出下掘段
+     * @param permissions 这次任务的许可：爬升段与下掘段上每一格动之前都过它
      */
     public TravelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
             WalkTo walks, ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
-            TravelWorldView world, DigsStairsUp stairsUp, Permissions permissions) {
+            TravelWorldView world, DigsStairsUp stairsUp, DigsStairsDown stairsDown, Permissions permissions) {
         super("出行", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS,
                 maxSeconds > 0 ? maxSeconds * 20L : Long.MAX_VALUE));
         this.world = world;
@@ -135,6 +146,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         this.placedBlocks = placedBlocks;
         this.progressListener = progressListener;
         this.stairsUp = stairsUp;
+        this.stairsDown = stairsDown;
         this.permissions = permissions;
     }
 
@@ -146,9 +158,14 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     @Override
     protected Action enter(Phase phase) {
         // 爬升段交往上挖楼梯：爬到离目的地近到一次规划接得住就停，剩下的交回走路重新算。
-        return phase == Phase.CLIMB
-                ? stairsUp.digUp(ClimbSegments.stopWhenClose(destination), permissions, records())
-                : startWalk();
+        if (phase == Phase.CLIMB) {
+            return stairsUp.digUp(ClimbSegments.stopWhenClose(destination), permissions, records());
+        }
+        // 下掘段交往下挖台阶：挖到离目的地近到走路接得住就停，一格没挖也要不到了就按拆段如实收场。
+        if (phase == Phase.DESCENT) {
+            return pendingDescentLeg;
+        }
+        return startWalk();
     }
 
     /** 把目的地编译成导航目标交给走到；出行不碰寻路内部。 */
@@ -195,7 +212,11 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
-        return phase == Phase.CLIMB ? tickClimb(context) : tickWalk(context);
+        return switch (phase) {
+            case CLIMB -> tickClimb(context);
+            case DESCENT -> tickDescent(context);
+            default -> tickWalk(context);
+        };
     }
 
     private Next<Phase> tickWalk(TickContext context) {
@@ -299,6 +320,46 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
                 && lastFeet != null && ClimbSegments.needsLeg(destination, lastFeet);
     }
 
+    /** 推进一段下掘：挖台阶逐刻往下走，挖到哪、离目的地还差几级如实记账；挖完或挖不动都交回走路重新算路。 */
+    private Next<Phase> tickDescent(TickContext context) {
+        if (stopRequested) {
+            // 中途叫停：先交回走路，下一步的停下流程照旧走走到那套，不在楼梯井里另写一套停下。
+            return Next.go(Phase.WALK, "叫停了，先回到走路再停");
+        }
+        ActionStatus status = runAction(context);
+        noteDescentSpot();
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        descentLegs++;
+        if (status instanceof ActionStatus.Failed failed) {
+            // 台阶挖不下去（挨着液体、几个方向都不行、脚下垫不了）：记下经过，从现在站的地方接着走路。
+            recordAttempt("挖台阶下掘一段", failed.problem().message());
+        } else {
+            recordProgress("下掘段挖到 " + shortSpot(lastFeet));
+        }
+        return Next.go(Phase.WALK, "从下掘落脚点重新算路");
+    }
+
+    /** 下掘这一刻的现场：人挖到哪了；离目的地再近一级以上才算进展，空转计时据此刷新。 */
+    private void noteDescentSpot() {
+        if (world == null) return;
+        WorldPosition spot = world.currentSpot();
+        if (spot == null) return;
+        BlockPos feet = new BlockPos(spot.x(), spot.y(), spot.z());
+        lastFeet = feet;
+        int left = DescentSegments.remaining(destination, feet);
+        if (bestDescentRemaining - left >= 1) {
+            bestDescentRemaining = left;
+            recordProgress("下掘段：离目的地还深 " + left + " 格");
+        }
+        progressListener.onTravelProgress(new TravelProgress("挖台阶下掘", feet, remainingFromHere(), crossedWater));
+    }
+
+    /** 要不要空转收场前拆一段下掘：接得上往下挖台阶、许能动土、还没拆满、目的地深出一次走路接得住的范围。 */
+    private boolean mayBootDescentLeg() {
+        return stairsDown != null && mayDig() && descentLegs < ClimbSegments.MAX_LEGS
+                && lastFeet != null && DescentSegments.needsBootLeg(destination, lastFeet);
+    }
+
     /** 挖楼梯要能挖天然方块：只许垫临时方块（temporary）不算。 */
     private boolean mayDig() {
         return permissions != null && (permissions.changeBlocks() == Permissions.BlockChanges.NATURAL
@@ -368,11 +429,21 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
                 : underlying;
     }
 
-    /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走，不把长爬升一次判死。 */
+    /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走；深得走路起步不了、许能动土
+     *  就先挖台阶往下走一段；都不接得上才把长爬升长下掘一次判死。 */
     @Override
     protected Next<Phase> beforeGivingUp(Problem problem) {
-        if (stopRequested || !maySplitLeg()) return null;
-        return Next.go(Phase.CLIMB, "长时间没有走近，先挖楼梯爬一段");
+        if (stopRequested) return null;
+        if (maySplitLeg()) return Next.go(Phase.CLIMB, "长时间没有走近，先挖楼梯爬一段");
+        if (mayBootDescentLeg()) {
+            Optional<Action> leg = stairsDown.digDown(DescentSegments.stopWhenClose(destination),
+                    DescentSegments.remaining(destination, lastFeet) * 3, permissions, records());
+            // 往下挖台阶没接上就照旧收场，不把"没有这一段"当成已经挖过了。
+            if (leg.isEmpty()) return null;
+            pendingDescentLeg = leg.get();
+            return Next.go(Phase.DESCENT, "长时间没有走近，先挖台阶往下走一段");
+        }
+        return null;
     }
 
     /** 记录这一刻的行程观察：泅渡、剩余距离、逐刻进展，垫块与背包的变化逐刻记账。 */
@@ -526,6 +597,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     @Override
     protected String describePhase(Phase value) {
         if (value == Phase.CLIMB) return "在路上：挖楼梯爬一段，去" + destination.describe();
+        if (value == Phase.DESCENT) return "在路上：挖台阶往下走一段，去" + destination.describe();
         return stopRequested ? "正在安全停下" : "在路上：去" + destination.describe();
     }
 

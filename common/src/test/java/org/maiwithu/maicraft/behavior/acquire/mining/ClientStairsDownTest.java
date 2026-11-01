@@ -31,7 +31,9 @@ import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -210,6 +212,62 @@ class ClientStairsDownTest {
             if (!(status instanceof ActionStatus.Running)) return status;
         }
         throw new AssertionError("挖楼梯一直没收场");
+    }
+
+    /** 记账替身：收下动作报上来的变化。 */
+    private static final class ChangeLog implements TaskRecords {
+        final List<Change> changes = new ArrayList<>();
+
+        @Override public void change(Change change) {
+            changes.add(change);
+        }
+        @Override public void unconfirmed(Change change) {
+            changes.add(change);
+        }
+        @Override public void attempt(String tried, String whatHappened) {}
+    }
+
+    private ActionStatus run(Action action) {
+        for (long t = 0; t < 20000; t++) {
+            ActionStatus status = action.tick(new Tick(t));
+            if (!(status instanceof ActionStatus.Running)) return status;
+        }
+        throw new AssertionError("挖台阶一直没收场");
+    }
+
+    @Test
+    void 挖到够深的地方就停_挖掉的方块按种类合并记进变化() {
+        // 出行的下掘段：站到的地方满足停点判断就收工，挖掉的方块按种类合成一条记进这次的变化。
+        ChangeLog log = new ChangeLog();
+        Action action = stairs().digDown(feet -> feet.getY() <= 60, 18, Permissions.DEFAULT, log).orElseThrow();
+
+        assertInstanceOf(ActionStatus.Done.class, run(action));
+        assertEquals(60, world.feet.getY(), "挖到够深的那一级就停");
+        assertFalse(log.changes.isEmpty(), "挖掉的方块进了变化");
+        long booked = log.changes.stream().filter(change -> change.kind() == Change.Kind.BLOCK_BROKEN)
+                .mapToLong(Change::count).sum();
+        assertEquals(digs.dug.size(), booked, "挖掉的每一格都记了账");
+        assertTrue(log.changes.stream().allMatch(change -> change.note().contains("往下挖台阶挖掉的")),
+                "账目说明写明是下掘段挖掉的");
+    }
+
+    @Test
+    void 台阶挖到挖不动的层级就停下_挖到过的照样记进变化() {
+        // y=58 整层是基岩：挖到基岩上一层几个方向都过不去，带着挖到过的深度收工；已挖掉的土和石头照样记进变化。
+        for (int x = -3; x <= 3; x++) {
+            for (int z = -8; z <= 3; z++) {
+                world.placed.put(new BlockPos(x, 58, z), "minecraft:bedrock");
+            }
+        }
+        ChangeLog log = new ChangeLog();
+        Action action = stairs().digDown(feet -> feet.getY() <= 40, 72, Permissions.DEFAULT, log).orElseThrow();
+
+        assertInstanceOf(ActionStatus.Done.class, run(action));
+        assertEquals(59, world.feet.getY(), "挖到基岩上一层就停，不再往下");
+        assertFalse(digs.dug.isEmpty(), "够不着的层级之前已经挖掉了一些");
+        long booked = log.changes.stream().filter(change -> change.kind() == Change.Kind.BLOCK_BROKEN)
+                .mapToLong(Change::count).sum();
+        assertEquals(digs.dug.size(), booked, "挖掉过的每一格都记了账");
     }
 
     @Test

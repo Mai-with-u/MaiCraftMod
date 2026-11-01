@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.travel;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
@@ -84,6 +85,8 @@ public final class TravelAbility implements AbilityModule {
     private final List<TravelMode> modes;
     /** 往上挖楼梯回地面；没接上为 null，回露天只走路。 */
     private final DigsStairsUp stairsUp;
+    /** 往下挖台阶下探；没接上为 null，长下掘起步不了时拆不了下掘段。 */
+    private final DigsStairsDown stairsDown;
     /** 跨维度那一程前后在同一个维度里的那段怎么建：和下达同维度出行同一个取舍。 */
     private final SameDimensionTravel sameDimension = new SameDimensionTrips();
 
@@ -109,7 +112,19 @@ public final class TravelAbility implements AbilityModule {
             ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
             DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes,
             DigsStairsUp stairsUp) {
+        this(walks, resolver, placedBlocks, progressListener, dimensionServices, world, modes, stairsUp, null);
+    }
+
+    /**
+     * @param stairsUp   往上挖楼梯回地面；为 null 时回露天只走路
+     * @param stairsDown 往下挖台阶下探；为 null 时长下掘起步不了就照旧按走不通收场
+     */
+    public TravelAbility(WalkTo walks, DestinationResolver resolver,
+            ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes,
+            DigsStairsUp stairsUp, DigsStairsDown stairsDown) {
         this.stairsUp = stairsUp;
+        this.stairsDown = stairsDown;
         this.walks = walks;
         this.resolver = resolver;
         this.placedBlocks = placedBlocks;
@@ -346,11 +361,12 @@ public final class TravelAbility implements AbilityModule {
         });
     }
 
-    // 只走路的一趟：挖垫、泅渡、落地救援、脱困照出行任务的那一套；许可原件带上，长爬升拆爬升段挖楼梯时用。
+    // 只走路的一趟：挖垫、泅渡、落地救援、脱困照出行任务的那一套；许可原件带上，长爬升拆爬升段挖楼梯、
+    // 长下掘拆下掘段挖台阶时用。
     private Task travelTask(TravelDestination destination, int maxSeconds, TerrainPermit permit,
             Permissions permissions) {
         return new TravelTask(destination, maxSeconds, permit, walks, placedBlocks, progressListener,
-                world, stairsUp, permissions);
+                world, stairsUp, stairsDown, permissions);
     }
 
     // 换交通的行程：走路的几段每段新建一个出行任务，挖垫、泅渡、落地救援照只走路的那一套。

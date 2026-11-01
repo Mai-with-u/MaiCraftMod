@@ -39,8 +39,7 @@ class DescentSegmentsTest {
     }
 
     @Test
-    void givingUpAfterLegsStatesDepthReachedAndKeepsUnderlyingHeadlineOnly() {
-        // 拆满还没到：说明带拆了几段、最深挖到哪、还差多深；下一层的说明只取结论句，不整段重抄。
+    void givingUpAfterLegsStatesDepthReachedAndKeepsUnderlyingHeadlineOnly() {        // 拆满还没到：说明带拆了几段、最深挖到哪、还差多深；下一层的说明只取结论句，不整段重抄。
         BlockPos feet = new BlockPos(-2970, 58, -836);
         Problem underlying = Problem.of(Problem.Kind.STUCK,
                 "沿路线行走时长时间没有进展；现场：起点 (-2970,58,-836)，脚下 minecraft:stone",
@@ -54,5 +53,25 @@ class DescentSegmentsTest {
         assertTrue(judged.message().contains("长时间没有进展"), () -> "带下一层的结论句：" + judged.message());
         assertFalse(judged.message().contains("minecraft:stone"), () -> "不整段重抄下一层的说明：" + judged.message());
         assertEquals("看看脚下挡着什么，或把 change_blocks 放开再走", judged.suggestion());
+    }
+
+    @Test
+    void bootLegOnlyForDestinationsDeeperThanWalkingRange() {
+        // 崖边下探 50 级：深出一次走路接得住的范围，空转收场前值得拆一段下掘先挖台阶下去；
+        // 只差几级的走路自己到得了，高度没核实的也不拆。
+        assertTrue(DescentSegments.needsBootLeg(MINE_LEVEL, new BlockPos(-2972, 80, -836)));
+        assertFalse(DescentSegments.needsBootLeg(MINE_LEVEL, new BlockPos(-2972, 55, -836)));
+        assertFalse(DescentSegments.needsBootLeg(MINE_LEVEL, new BlockPos(-2972, 30, -836)));
+        TravelDestination column = TravelDestination.anyHeight(-2972, -836, 2, null);
+        assertFalse(DescentSegments.needsBootLeg(column, new BlockPos(-2972, 80, -836)));
+    }
+
+    @Test
+    void bootLegStopsOnceCloseEnoughForWalking() {
+        // 下掘段的停点：挖到离目的地还差 30 级以内就停，剩下的交回走路重新算路；还差 31 级就接着挖。
+        var stop = DescentSegments.stopWhenClose(MINE_LEVEL);
+        assertFalse(stop.test(new BlockPos(-2972, 61, -836)));
+        assertTrue(stop.test(new BlockPos(-2972, 60, -836)));
+        assertTrue(stop.test(new BlockPos(-2972, 30, -836)));
     }
 }

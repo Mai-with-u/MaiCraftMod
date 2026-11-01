@@ -21,10 +21,12 @@ import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -136,6 +138,12 @@ public final class ClientStairsDown implements DigsStairsDown {
     }
 
     @Override
+    public Optional<Action> digDown(Predicate<BlockPos> reached, int plannedCells,
+            Permissions permissions, TaskRecords records) {
+        return Optional.of(new Digging(reached, plannedCells, permissions, records));
+    }
+
+    @Override
     public Optional<Action> tunnelToward(Tunnel tunnel, Permissions permissions) {
         return Optional.of(new Digging(tunnel.yields(), tunnel.wantedCells(), permissions, tunnel));
     }
@@ -187,7 +195,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         return "(" + cell.getX() + ", " + cell.getY() + ", " + cell.getZ() + ")";
     }
 
-    /** 一次往下挖楼梯（或长程挖矿）：看清下一级 → 从上往下挖开 → 走下去 → 捡起这一级掉的东西，循环到挖够或该停。 */
+        /** 一次往下挖楼梯（或长程挖矿、或挖到够深为止）：看清下一级 → 从上往下挖开 → 走下去 → 捡起这一级掉的东西，循环到挖够、下到够深的地方或该停。 */
     private final class Digging implements Action {
 
         private enum Stage { LOOK, DIG, FILL, STEP_DOWN, PICK_UP, MINE }
@@ -197,10 +205,18 @@ public final class ClientStairsDown implements DigsStairsDown {
         private final Permissions permissions;
         /** 长程挖矿往哪挖；挖楼梯找石头时为空。 */
         private final Tunnel tunnel;
+        /** 站到这一格（脚的位置）就算下够了，提前停；按挖的格数停的挖法为空。 */
+        private final Predicate<BlockPos> reached;
+        /** 这一段大概还要挖几格：按格数停的挖法给 wantedCells，够深就停的挖法给规划时估的格数。 */
+        private final int plannedCells;
+        /** 挖掉的方块按种类记进这份变化；不给账本（采掘自己数）的挖法为空。 */
+        private final TaskRecords records;
         private Stage stage = Stage.LOOK;
         private Direction heading;
         private BlockPos feet;
         private Action step;
+        /** 手上正挖的这一格是什么：挖完记账、判掉不掉想要的东西都要用。 */
+        private String diggingType;
         /** 手上正挖的这一格挖掉会不会掉想要的东西：挖完才算数。 */
         private boolean diggingYields;
         private int digsThisStep;
@@ -229,14 +245,29 @@ public final class ClientStairsDown implements DigsStairsDown {
         private final Set<Direction> refusedHere = EnumSet.noneOf(Direction.class);
         /** 这一级第一个挖不了的原因：几个方向都不行时照它说。 */
         private Problem firstRefusal;
+        /** 挖掉的方块按种类计数：一段台阶几十格石头，结果里合成一条，不一格一条。 */
+        private final Map<String, Integer> dugByType = new LinkedHashMap<>();
+        private boolean booked;
         /** 被叫先到安全处再停、手上那一下（走下一级、挖、垫、捡）说要先收尾：只推进它到停稳；暂停时清掉。 */
         private boolean stopping;
 
         Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel) {
+            this(yields, wantedCells, permissions, tunnel, null, null, wantedCells);
+        }
+
+        Digging(Predicate<BlockPos> reached, int plannedCells, Permissions permissions, TaskRecords records) {
+            this(null, 0, permissions, null, reached, records, plannedCells);
+        }
+
+        private Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel,
+                Predicate<BlockPos> reached, TaskRecords records, int plannedCells) {
             this.yields = yields;
             this.wantedCells = wantedCells;
             this.permissions = permissions;
             this.tunnel = tunnel;
+            this.reached = reached;
+            this.records = records;
+            this.plannedCells = plannedCells;
         }
 
         @Override public ActionStatus tick(TickContext context) {
@@ -285,16 +316,20 @@ public final class ClientStairsDown implements DigsStairsDown {
         // 挖下一级之前：够数就收工；先站稳，再看这一级能不能挖。第一级先朝脸对着的方向，
         // 那边挖不了就转个方向，四面都挖不了才放弃；之后沿同一个方向一路往下。
         private ActionStatus look(TickContext context) {
-            if (yielded >= wantedCells) return finish(null);
+            // 挖够想要的方块就收工；够深就停的挖法没有格数指标，站到停点判断的地方才收工。
+            if (reached == null && yielded >= wantedCells) return finish(null);
             if (!site.onGround(context)) return ActionStatus.running();
             Optional<BlockPos> standing = site.feet(context);
             if (standing.isEmpty()) return ActionStatus.running();
             feet = standing.get();
+            // 够深就停的挖法：站到的地方满足停点判断就收工，一格不挖也算做完（出发时就已经够深）。
+            if (reached != null && reached.test(feet)) return finish(null);
             if (tunnel == null) {
                 if (steps >= MAX_STEPS) {
                     return finish(Problem.of(Problem.Kind.STUCK, "往下挖了 " + steps + " 级楼梯，先停在这里"));
                 }
-                if (yielded == 0 && steps >= MAX_DRY_STEPS) {
+                // 数想要的方块算停点的挖法才有"一直挖不到"一说；够深就停的挖法每一格都算数。
+                if (reached == null && yielded == 0 && steps >= MAX_DRY_STEPS) {
                     return finish(Problem.of(Problem.Kind.NOT_FOUND, "往下挖了 " + steps
                             + " 级楼梯还没挖到想要的方块，这一带地下可能是很厚的沙子或陶瓦，换个地方再挖"));
                 }
@@ -415,7 +450,9 @@ public final class ClientStairsDown implements DigsStairsDown {
                     return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
                 }
                 step = dig.get();
-                diggingYields = yields.test(blockType);
+                diggingType = blockType;
+                // 数想要的方块算停点的挖法只数想要的；够深就停的挖法挖掉的每一格都算进展。
+                diggingYields = yields == null || yields.test(blockType);
                 digsThisStep++;
                 return ActionStatus.progressed();
             }
@@ -488,12 +525,12 @@ public final class ClientStairsDown implements DigsStairsDown {
                     : BreakAccelerator.ChainShape.STRAIGHT_LINE, line::containsKey, toolPrep());
         }
 
-        // 这一趟大概还要挖几格：长程挖矿按到目标高度还剩几级、每级三格；采矿按还要的格数，至少一级三格。
+        // 这一趟大概还要挖几格：长程挖矿按到目标高度还剩几级、每级三格；其余按还要的格数，至少一级三格。
         // 身上没有对路的工具时按它算现做一把划不划算。
         private DigsBlocks.ToolPrep toolPrep() {
             int left = tunnel != null && feet != null ? 3 * Math.max(1, feet.getY() - tunnel.targetY())
-                    : Math.max(3, wantedCells - yielded);
-            return new DigsBlocks.ToolPrep(left, permissions == null ? Permissions.DEFAULT : permissions, null);
+                    : Math.max(3, plannedCells - yielded);
+            return new DigsBlocks.ToolPrep(left, permissions == null ? Permissions.DEFAULT : permissions, records);
         }
 
         // 从触发格顺着挖的方向排下去的那一行：往下的不出这种矿的生成范围，横着的不超过通道长度；到第一格不合适的为止。
@@ -529,6 +566,7 @@ public final class ClientStairsDown implements DigsStairsDown {
             chainTrigger = null;
             // 这一格挖不下来（够不着、被拒）：这个方向记作挖不了，换个方向再挖。
             if (status instanceof ActionStatus.Failed failed) return turnOrFinish(failed.problem());
+            if (records != null) dugByType.merge(diggingType, 1, Integer::sum);
             if (diggingYields) yielded++;
             for (Map.Entry<BlockPos, String> cell : row.entrySet()) {
                 if (cell.getKey().equals(trigger) || !yields.test(cell.getValue())) continue;
@@ -572,10 +610,20 @@ public final class ClientStairsDown implements DigsStairsDown {
             return ActionStatus.progressed();
         }
 
-        // 停下：挖到过想要的方块（或看见的矿挖完了）就算做完，交给引擎重新清点；一格都没挖到就以原因失败。
+        // 停下：挖到过想要的方块（或看见的矿挖完了、站到够深的地方）就算做完，交给引擎重新清点；
+        // 一格都没挖到就以原因失败。要记账的挖法这时把挖掉的方块按种类合并进变化。
         private ActionStatus finish(Problem why) {
+            book();
             ended = why == null || yielded > 0 ? ActionStatus.done() : ActionStatus.failed(why);
             return ended;
+        }
+
+        /** 挖掉的方块按种类合并记账；不给账本的挖法（采掘自己数）不记。 */
+        private void book() {
+            if (records == null || booked) return;
+            booked = true;
+            dugByType.forEach((type, count) -> records.change(new Change(Change.Kind.BLOCK_BROKEN, type, count,
+                    "往下挖台阶挖掉的（" + steps + " 级）")));
         }
 
         private Problem blocked(TickContext context, BlockPos cell, Ground ground) {
@@ -627,6 +675,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         }
 
         @Override public String describe() {
+            if (reached != null) return "往下挖台阶（第 " + (steps + 1) + " 级）";
             if (tunnel == null) return "往下挖楼梯（第 " + (steps + 1) + " 级，已挖到 " + yielded + "/" + wantedCells + " 格）";
             if (stage == Stage.MINE) return "长程挖矿：去挖看见的矿";
             if (feet != null && !down()) {

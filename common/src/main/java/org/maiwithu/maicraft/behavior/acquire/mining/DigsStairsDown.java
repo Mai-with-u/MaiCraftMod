@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 往下挖楼梯找东西：附近看不见石头时，像玩家一样从脚下斜着往下挖一段楼梯，
@@ -24,6 +25,17 @@ public interface DigsStairsDown {
      * @param permissions 这次任务的许可：楼梯上每一格动之前都过许可检查
      */
     Action digDown(Predicate<String> yields, int wantedCells, Permissions permissions);
+
+    /**
+     * 往下挖台阶到够深为止：像玩家一样斜着往下挖，每下一级先挖开前面三格再走下去，挖出来的东西捡起来；
+     * 站到的格子满足 reached 就停（例如离目的地近到一次走路接得住的时候），这一段大概要挖几格由
+     * plannedCells 估着说（给现做工具算工作量，数不准没关系），挖掉的方块按种类记进 records。
+     * 实现还不支持时返回空，调用方如实按没有这一段收场。
+     */
+    default Optional<Action> digDown(Predicate<BlockPos> reached, int plannedCells,
+            Permissions permissions, TaskRecords records) {
+        return Optional.empty();
+    }
 
     /**
      * 长程挖矿：在 targetY 之上就往下挖三格高的台阶，到了这一层横着挖两格高的通道；每走一步看一眼，

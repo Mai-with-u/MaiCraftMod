@@ -539,7 +539,8 @@ public final class AbilityCatalog {
                         new SceneSeenTargets(deps.world()::scene)),
                 deps.travel().walkInternals(), deps.travel().travelProgress(), portals,
                 deps.travel().travelWorld(), VehicleWiring.travelModes(deps, services, portals),
-                new ClientStairsUp(new LiveStairsSite(deps.travel().walks()), shared.digging(), permission)));
+                new ClientStairsUp(new LiveStairsSite(deps.travel().walks()), shared.digging(), permission),
+                stairsDown(deps, shared)));
 
         registerFind(registry, deps, shared);
 

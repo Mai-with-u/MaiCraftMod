@@ -41,10 +41,10 @@ public interface SameDimensionTravel {
     static SameDimensionTravel walkingOnly(DimensionTravelServices services) {
         return new SameDimensionTravel() {
             @Override public Task toward(TravelDestination destination, Permissions permissions, int maxSeconds) {
-                // 跟着别人过门的那一程没有接往上挖楼梯（要接时把楼梯随 DimensionTravelServices 传进来），
-                // 长爬升拆不了爬升段，照旧一次走算不出就如实收场。
+                // 跟着别人过门的那一程没有接往上挖楼梯与往下挖台阶（要接时随 DimensionTravelServices 传进来），
+                // 长爬升长下掘都拆不了段，照旧一次走算不出就如实收场。
                 return new TravelTask(destination, maxSeconds, TerrainPermit.of(permissions), services.walks(),
-                        services.placedBlocks(), services.progressListener(), null, null, permissions);
+                        services.placedBlocks(), services.progressListener(), null, null, null, permissions);
             }
 
             @Override public Optional<Task> only(TravelVia via, Permissions permissions, int maxSeconds) {
