@@ -140,6 +140,86 @@ class FetchesFoodTest {
     }
 
     @Test
+    void 按弄到第一件的远近排_不按凑满一次要的件数() {
+        // 身边两只羊只够打 2 件，凑满 8 件要把 239 格外箱子里的模组食物也算上，整条路最远就成了 239，和面包一样远；
+        // 弄到第一件就会被叫停先吃，排先后只问弄到一件要走多远：打猎 2 格，面包 239 格，打猎在前。去拿时仍按一次要的件数要。
+        List<Integer> pricedCounts = new ArrayList<>();
+        FakeNeeds needs = new FakeNeeds(Map.of()) {
+            @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+                pricedCounts.add(request.count());
+                String kind = request.wanted().specifier();
+                Double farthest = switch (kind) {
+                    case "#c:foods/bread" -> 239d;
+                    case "#maicraft:foods/edible" -> request.count() == 1 ? 2d : 239d;
+                    default -> null;
+                };
+                if (farthest == null) {
+                    return new GoalEstimate(GoalEstimate.Effort.BLOCKED, kind, "没有来路", null, null, List.of(), false);
+                }
+                return new GoalEstimate(GoalEstimate.Effort.NEARBY, kind, "", farthest, 60, List.of(), false);
+            }
+
+            @Override public Action actionFor(ItemRequest request, Permissions permissions) {
+                assertEquals(FetchesFood.COUNT, request.count());
+                return super.actionFor(request, permissions);
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+        assertEquals(List.of(1), pricedCounts.stream().distinct().toList());
+    }
+
+    @Test
+    void 估算说附近还没看完时先等一等_看完再排() {
+        // 刚到一处附近方块还没扫完：各类口粮的估算都说还没看完、给不出整条路多远。这时不按第一步的距离硬排
+        // （面包"身边放熔炉"0 格会压过 2 格外的羊），和拿东西的引擎问价一样先等它看完；看完按整条路排，打猎在前。
+        int[] settledAt = {3};
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 0d, "#maicraft:foods/edible", 2d)) {
+            int asks;
+
+            @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+                String kind = request.wanted().specifier();
+                if (asks++ < settledAt[0] * 6) return GoalEstimate.stillLooking(kind, "附近还没看完");
+                Double farthest = switch (kind) {
+                    case "#c:foods/bread" -> 239d;
+                    case "#maicraft:foods/edible" -> 2d;
+                    default -> null;
+                };
+                if (farthest == null) {
+                    return new GoalEstimate(GoalEstimate.Effort.BLOCKED, kind, "没有来路", null, null, List.of(), false);
+                }
+                return new GoalEstimate(GoalEstimate.Effort.NEARBY, kind, "", farthest, 60, List.of(), false);
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        for (int tick = 0; tick < settledAt[0]; tick++) {
+            ActionStatus waiting = fetch.tick(at(tick));
+            assertInstanceOf(ActionStatus.Running.class, waiting);
+            assertEquals(List.of(), needs.asked);
+        }
+        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(settledAt[0])));
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
+    void 等太久还没看完就按问得出的第一步距离排() {
+        // 一直说还没看完：不能一直等着饿着，等满了按来源自报的第一步距离排。
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 20d, "#maicraft:foods/edible", 2d)) {
+            @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+                return GoalEstimate.stillLooking(request.wanted().specifier(), "附近还没看完");
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 0; tick <= FetchesFood.MAX_ESTIMATE_WAIT_TICKS && !(status instanceof ActionStatus.Done); tick++) {
+            status = fetch.tick(at(tick));
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
+    }
+
+    @Test
     void 估算给不出最远多远时退回第一步的距离() {
         // 估不了（附近还没扫完）：没有整条路的数，先按来源自报的第一步距离排，不因为估不了就说哪儿都没有。
         assertEquals(Optional.of(12d), FetchesFood.walkingDistance(

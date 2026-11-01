@@ -33,12 +33,19 @@ final class FetchesFood implements Action {
             "c:foods/vegetable", "c:foods/fruit");
     /** 一次问几件：箱子、网络里一把拿够吃一阵，不囤；要打猎、烧炼的弄到第一件就会被叫停先吃。 */
     static final int COUNT = 8;
+    /**
+     * 估算说附近还没看完时最多等几刻再排先后：冷索引大半径的视野扫描要几秒到十几秒才补完，
+     * 和拿东西的引擎问价等看清现场的窗口一样长；等太久按问得出的排，不一直等着饿着。
+     */
+    static final int MAX_ESTIMATE_WAIT_TICKS = 400;
 
     private final ItemNeeds needs;
     private final long budgetTicks;
     private long deadline = -1;
     private Action current;
     private String chosen;
+    /** 已经为"附近还没看完"等了几刻；挑定一类就清零。 */
+    private int estimateWaits;
     /** 已经去弄过、没弄成的几类：换下一类，不在同一类上反复。 */
     private final Set<String> tried = new HashSet<>();
     private Problem lastFailure;
@@ -57,13 +64,19 @@ final class FetchesFood implements Action {
                     "给角色一些普通食物"));
         }
         if (current == null) {
-            Optional<ItemRequest> nearest = nearestKind();
+            Pick pick = nearestKind();
+            // 有的口粮估算说附近还没看完（刚换地方，方块扫描还在补）：和拿东西的引擎问价一样先等它看完再排，
+            // 不拿第一步的距离硬排——那会让"身边放熔炉"0 格的面包压过 2 格外的羊。等着看清现场算真实进展，
+            // 等有上限，等满了按问得出的排。
+            if (pick.stillLooking() && ++estimateWaits <= MAX_ESTIMATE_WAIT_TICKS) return ActionStatus.progressed();
+            Optional<ItemRequest> nearest = pick.request();
             if (nearest.isEmpty()) {
                 if (lastFailure != null) return ActionStatus.failed(lastFailure);
                 return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
                         "饿了，身上没有口粮，附近、箱子里、网络里也都没找到现成的面包、熟肉、熟鱼、蔬菜、水果或别的能吃的",
                         "给角色一些普通食物，或种地、养殖"));
             }
+            estimateWaits = 0;
             tried.add(nearest.get().wanted().specifier());
             chosen = nearest.get().wanted().describe();
             current = needs.actionFor(nearest.get(), Permissions.DEFAULT);
@@ -80,37 +93,46 @@ final class FetchesFood implements Action {
         return status;
     }
 
+    /** 挑口粮的结果：挑中的那一类（哪类都没有为空），以及有没有哪类的估算还在等附近看完。 */
+    private record Pick(Optional<ItemRequest> request, boolean stillLooking) {}
+
     // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮问价，挑整条路最远走多远最近的去拿：
     // 面包虽常有小麦合成报价，但远处有羊有鸡时打猎更近，不该绕远去做面包；一样近时按 KINDS 的顺序挑，
     // 熟的、不用再加工的排前面，生肉是饿急了的备选。
-    private Optional<ItemRequest> nearestKind() {
+    private Pick nearestKind() {
         List<String> all = new ArrayList<>(KINDS);
         all.add(EverydayFood.TAG);
-        return nearestOf(all);
+        return nearestOf(all, estimateWaits >= MAX_ESTIMATE_WAIT_TICKS);
     }
 
-    private Optional<ItemRequest> nearestOf(List<String> kinds) {
+    // 排先后只问弄到一件要走多远：弄到第一件就会被叫停先吃，按一次要的件数去估，身边两只羊只够两件、
+    // 凑满还得把远处箱子里的算上，整条路最远就被远箱子抬成和面包一样远，近处的羊反而排不到前面。去拿时仍按一次要的件数要。
+    private Pick nearestOf(List<String> kinds, boolean waitedOut) {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
+        boolean stillLooking = false;
         for (String kind : kinds) {
             if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
             ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
-            Optional<Double> distance = walkingDistance(request);
+            GoalEstimate estimate = needs.estimate(request.just(1), Permissions.DEFAULT);
+            if (estimate.stillLooking() && estimate.farthestBlocks() == null && !waitedOut) {
+                stillLooking = true;
+                continue;
+            }
+            Optional<Double> distance = walkingDistance(estimate, firstStepBlocks(estimate, request.just(1)));
             if (distance.isPresent() && distance.get() < bestDistance) {
                 best = request;
                 bestDistance = distance.get();
             }
         }
-        return Optional.ofNullable(best);
+        return new Pick(Optional.ofNullable(best), stillLooking);
     }
 
-    // 这一类口粮要走多远：先按拿东西的估算看整条路，估不出整条路再问第一步的距离。
-    private Optional<Double> walkingDistance(ItemRequest request) {
-        GoalEstimate estimate = needs.estimate(request, Permissions.DEFAULT);
-        Optional<Double> firstStep = estimate.farthestBlocks() == null && estimate.effort() != GoalEstimate.Effort.READY
-                && estimate.effort() != GoalEstimate.Effort.BLOCKED
-                ? needs.nearestDistanceBlocks(request, Permissions.DEFAULT) : Optional.empty();
-        return walkingDistance(estimate, firstStep);
+    // 估不出整条路（附近还没看完、引擎没接上）时才问第一步的距离；估得出、不用离开、弄不到的都不必再问一遍价。
+    private Optional<Double> firstStepBlocks(GoalEstimate estimate, ItemRequest request) {
+        boolean needed = estimate.farthestBlocks() == null && estimate.effort() != GoalEstimate.Effort.READY
+                && estimate.effort() != GoalEstimate.Effort.BLOCKED;
+        return needed ? needs.nearestDistanceBlocks(request, Permissions.DEFAULT) : Optional.empty();
     }
 
     /**
