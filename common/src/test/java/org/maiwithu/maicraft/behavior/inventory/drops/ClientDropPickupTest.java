@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -93,5 +94,18 @@ class ClientDropPickupTest {
     @Test
     void 东西悬在头顶一格_也算在拾取范围里() {
         assertTrue(ClientDropPickup.withinPickupReach(PX, FEET_Y, PZ, 10.5, 65.2, 10.5));
+    }
+
+    @Test
+    void 服务器说收下了背包还没涨上来_不算跟上() {
+        // 贴身等吸一块煤：拾取包先到、背包格子下一刻才同步，此刻身上还是 2 块，确认后该有 3 块。
+        assertFalse(ClientDropPickup.inventoryCaughtUp(Map.of("minecraft:coal", 3), Map.of("minecraft:coal", 2)));
+        assertFalse(ClientDropPickup.inventoryCaughtUp(Map.of("minecraft:coal", 1), Map.of()));
+    }
+
+    @Test
+    void 背包涨到确认的数就算跟上() {
+        assertTrue(ClientDropPickup.inventoryCaughtUp(Map.of("minecraft:coal", 3), Map.of("minecraft:coal", 3)));
+        assertTrue(ClientDropPickup.inventoryCaughtUp(Map.of(), Map.of()));
     }
 }

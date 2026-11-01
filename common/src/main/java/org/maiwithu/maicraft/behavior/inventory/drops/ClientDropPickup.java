@@ -2,15 +2,18 @@
 package org.maiwithu.maicraft.behavior.inventory.drops;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -80,6 +83,26 @@ public final class ClientDropPickup implements PicksUpDrops {
     private static final int OPEN_UP_GIVE_UP_TICKS = 400;
     /** 走到了旁边、它还躺着这么多刻（刻）：多半钻在树冠底下够不着，扒开树叶走进那一格。 */
     private static final int STUCK_BESIDE_TICKS = 20;
+
+    /**
+     * 服务器说收下了、背包里却还没涨上来时最多等几刻：原版先发「捡起」包、背包格子的变化下一刻才同步过来，
+     * 不等这一下，上层按背包变化结算会把刚吸进来的那件漏掉。
+     */
+    private static final int INVENTORY_SYNC_TICKS = 10;
+
+    /**
+     * 背包是否已经跟上服务器确认收下的数（纯函数）：每样东西此刻身上的件数都不少于确认那一刻的件数加收下的件数。
+     * 捡到的东西要等背包同步过来才算数，上层收场时按背包前后的变化逐样记账。
+     *
+     * @param expected 每样物品（注册 ID）至少该有几件
+     * @param now      每样物品此刻身上有几件，没有的不在表里
+     */
+    static boolean inventoryCaughtUp(Map<String, Integer> expected, Map<String, Integer> now) {
+        for (Map.Entry<String, Integer> entry : expected.entrySet()) {
+            if (now.getOrDefault(entry.getKey(), 0) < entry.getValue()) return false;
+        }
+        return true;
+    }
 
     private final Supplier<PlayerContext> context;
     private final WalkTo walks;
@@ -169,6 +192,12 @@ public final class ClientDropPickup implements PicksUpDrops {
         private Long cursor;
         /** 还没看到新东西冒出来时已经等了几刻：掉落物要过一两刻才同步到客户端。 */
         private int appearWaited;
+        /** 正在捡的那一件是什么（物品注册 ID）：它从地上消失后靠这个知道背包里该涨哪样。 */
+        private String currentItem;
+        /** 服务器确认收下的每样东西，背包里至少该有几件；收场前等背包同步到这个数。 */
+        private final Map<String, Integer> expectedCounts = new HashMap<>();
+        /** 东西都捡完后，等背包同步已经等了几刻。 */
+        private int syncWaited;
         /** 被叫先到安全处再停、走过去的路上悬在半空：只推进这一趟走路到落地站稳；暂停时清掉。 */
         private boolean stopping;
 
@@ -192,8 +221,13 @@ public final class ClientDropPickup implements PicksUpDrops {
             Entity drop = current == null ? null : player.clientLevel.getEntity(current);
             if (current != null && (drop == null || !drop.isAlive())) {
                 // 地上那件不在了：服务器的拾取包说是本玩家收的才算捡到；没说就是别人拿走或消失了，不冒充捡到。
-                if (confirmations.pickedUpEntity(player, current, cursor) > 0) {
+                int amount = confirmations.pickedUpEntity(player, current, cursor);
+                if (amount > 0) {
                     picked++;
+                    // 记下背包里这样东西至少该有几件：拾取包先到、背包格子后到，收场前要等背包涨上来。
+                    if (currentItem != null) {
+                        expectedCounts.merge(currentItem, count(player, currentItem) + amount, (was, fresh) -> was + amount);
+                    }
                 } else {
                     vanished++;
                     missed++;
@@ -212,6 +246,11 @@ public final class ClientDropPickup implements PicksUpDrops {
                     return ActionStatus.running();
                 }
                 stopWalking();
+                // 服务器说收下了、背包还没同步过来：再等几刻，让上层按背包变化结算时记得上刚吸进来的这件。
+                if (!expectedCounts.isEmpty() && ++syncWaited <= INVENTORY_SYNC_TICKS
+                        && !inventoryCaughtUp(expectedCounts, counts(player, expectedCounts))) {
+                    return ActionStatus.running();
+                }
                 // 点名捡的那一件没进包：走不过去、被别人捡走或消失了，如实说没捡到。
                 if (only != null && picked == 0) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
@@ -252,6 +291,7 @@ public final class ClientDropPickup implements PicksUpDrops {
             }
             if (best == null) return false;
             current = best.getId();
+            currentItem = best instanceof ItemEntity item ? itemId(item.getItem()) : itemId(ArrowPickups.item(best));
             waited = 0;
             clearingLeaves = false;
             return true;
@@ -350,6 +390,27 @@ public final class ClientDropPickup implements PicksUpDrops {
                 if (ItemStack.isSameItemSameComponents(held, stack) && held.getCount() < held.getMaxStackSize()) return true;
             }
             return false;
+        }
+
+        // 物品注册 ID；空的给 null（不知道该涨哪样就不等背包同步）。
+        private static String itemId(ItemStack stack) {
+            return stack.isEmpty() ? null : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        }
+
+        // 主背包和快捷栏里这样东西一共几件（拾取只往这里放）。
+        private static int count(LocalPlayer player, String id) {
+            int total = 0;
+            for (ItemStack held : player.getInventory().items) {
+                if (!held.isEmpty() && id.equals(itemId(held))) total += held.getCount();
+            }
+            return total;
+        }
+
+        // 只数要等的那几样此刻身上各几件。
+        private static Map<String, Integer> counts(LocalPlayer player, Map<String, Integer> wanted) {
+            Map<String, Integer> now = new HashMap<>();
+            for (String id : wanted.keySet()) now.put(id, count(player, id));
+            return now;
         }
 
         // 这一格头顶（上面一格）是树叶。
