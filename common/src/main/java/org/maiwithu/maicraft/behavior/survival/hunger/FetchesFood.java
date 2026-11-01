@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 饿了身上没吃的：像玩家一样去弄点现成的口粮。面包、熟肉、熟鱼、蔬菜、水果几类和"能吃的口粮"一大类
@@ -28,6 +30,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class FetchesFood implements Action {
 
+    private static final Logger LOG = LoggerFactory.getLogger(FetchesFood.class);
     /** 口粮按这几类找（通用物品标签）；一样近时排前面的先。 */
     static final List<String> KINDS = List.of("c:foods/bread", "c:foods/cooked_meat", "c:foods/cooked_fish",
             "c:foods/vegetable", "c:foods/fruit");
@@ -111,21 +114,59 @@ final class FetchesFood implements Action {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
         boolean stillLooking = false;
+        List<String> considered = new ArrayList<>();
         for (String kind : kinds) {
             if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
             ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
             GoalEstimate estimate = needs.estimate(request.just(1), Permissions.DEFAULT);
             if (estimate.stillLooking() && estimate.farthestBlocks() == null && !waitedOut) {
                 stillLooking = true;
+                considered.add(request.wanted().describe() + "：附近还没看完，等着（" + estimate.how() + "）");
                 continue;
             }
-            Optional<Double> distance = walkingDistance(estimate, firstStepBlocks(estimate, request.just(1)));
+            Optional<Double> firstStep = firstStepBlocks(estimate, request.just(1));
+            Optional<Double> distance = walkingDistance(estimate, firstStep);
+            considered.add(describeCandidate(request, estimate, firstStep, distance));
             if (distance.isPresent() && distance.get() < bestDistance) {
                 best = request;
                 bestDistance = distance.get();
             }
         }
+        logPick(best, bestDistance, stillLooking, waitedOut, considered);
         return new Pick(Optional.ofNullable(best), stillLooking);
+    }
+
+    // 一类口粮这一轮是怎么算的：估算档位、距离按什么来（整条路最远、不用离开、退回第一步）、算出来几格。
+    private static String describeCandidate(ItemRequest request, GoalEstimate estimate, Optional<Double> firstStep,
+            Optional<Double> distance) {
+        String basis;
+        if (estimate.effort() == GoalEstimate.Effort.BLOCKED) basis = "弄不到";
+        else if (estimate.effort() == GoalEstimate.Effort.READY) basis = "不用离开";
+        else if (estimate.farthestBlocks() != null) basis = "整条路最远";
+        else if (firstStep.isPresent()) basis = "估不出整条路，退回第一步距离";
+        else basis = "估不出整条路，第一步也问不出";
+        return request.wanted().describe() + "：" + estimate.effort().wireName() + "，" + basis
+                + distance.map(blocks -> " " + Math.round(blocks) + " 格").orElse("，不参与")
+                + "（" + estimate.how() + "）";
+    }
+
+    // 挑定或开始等时各写一行，等着的每一刻不重复写：方便实机对照 doing 里选了哪类、为什么。
+    private void logPick(ItemRequest best, double bestDistance, boolean stillLooking, boolean waitedOut,
+            List<String> considered) {
+        if (!LOG.isDebugEnabled()) return;
+        // 这一刻会不会继续等：和 tick 里的判断同一条——有的还没看完、等的刻数还没满。
+        boolean waiting = stillLooking && estimateWaits < MAX_ESTIMATE_WAIT_TICKS;
+        if (waiting && estimateWaits > 0) return;
+        String outcome;
+        if (waiting) {
+            outcome = "有的还没看完，先等" + (best == null ? "" : "（此刻最近的是 " + best.wanted().describe() + "）");
+        } else if (best == null) {
+            outcome = "哪类都弄不到";
+        } else {
+            outcome = "选 " + best.wanted().describe() + "（" + Math.round(bestDistance) + " 格，最近"
+                    + (waitedOut ? "；等满了按问得出的排" : "") + "）";
+        }
+        LOG.debug("[弄吃的] {}；各类：{}", outcome, String.join("；", considered));
     }
 
     // 估不出整条路（附近还没看完、引擎没接上）时才问第一步的距离；估得出、不用离开、弄不到的都不必再问一遍价。
