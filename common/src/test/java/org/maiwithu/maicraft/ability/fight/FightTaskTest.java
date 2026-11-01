@@ -318,6 +318,31 @@ class FightTaskTest {
     }
 
     @Test
+    void arrowSubtractedAfterTheKillIsStillCountedDuringLoot() {
+        // 实机：三场里两场 arrows_spent 比背包净少少 1 支——最后一箭射出时游戏只确认了放箭，
+        // 背包里那一支的扣减要等服务器隔一两刻同步过来；目标一倒下战斗阶段就换成拾荒，最后一次记数在它入账前。
+        // 拾荒那几刻接着记，收场时那一支也算进去。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        moves.arrows = 27;
+        task.start(new Tick(0));
+        task.tick(new Tick(0));
+        task.tick(new Tick(1));
+        moves.arrows = 6;
+        task.tick(new Tick(2));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        // 倒下的同一刻服务器还没把最后一箭扣掉；下一刻（已经在拾荒）才扣。
+        task.tick(new Tick(3));
+        moves.arrows = 5;
+        TaskResult result = null;
+        for (long t = 4; t < 30 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        assertEquals(22, ((FightTask.FightDetails) result.details()).arrowsSpent(), "拾荒时同步到的那一支也算");
+    }
+
+    @Test
     void arrowsSpentIsLeftOutWhenTheBackpackCannotBeRead() {
         // 没接上角色（替身世界）：读不到背包就不写这一项，不写 0 冒充没少。
         targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);

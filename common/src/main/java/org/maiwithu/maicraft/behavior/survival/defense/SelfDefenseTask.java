@@ -220,6 +220,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     // 捡不到的（走不过去、够不着）不算自卫没做成，照样走回打点。实机 10-14 一晚上自卫射掉二十多支箭，一支没捡。
     private Next<Phase> pickUp(TickContext context) {
         Battle.Moment moment = battle.tick(context);
+        tally.noteArrows(context, moves);
         if (moment.state() != Battle.State.FINISHED) {
             closePickup();
             return go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
@@ -242,6 +243,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private Next<Phase> back(TickContext context) {
         // 走回打点的路上照样盯着：又有怪冲过来（尤其苦力怕）就回去打、去躲。原先这一段不看威胁，
         // 自卫"还在做"、需求又插不进来，实机 10-14 撤离后往回走，苦力怕走到跟前点着引信，一下没躲被炸死。
+        tally.noteArrows(context, moves);
         if (battle.tick(context).state() != Battle.State.FINISHED) {
             if (walkBack != null) walkBack.close();
             walkBack = null;

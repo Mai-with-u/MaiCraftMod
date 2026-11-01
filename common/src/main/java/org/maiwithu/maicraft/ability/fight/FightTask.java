@@ -524,6 +524,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 拾荒：先回到最后一只倒下的地方，再交给共用的捡掉落物捡这一仗新冒出来的东西（开打前就躺着的不碰），
     // 收没收进包按服务器的拾取包认；走不到、捡不到的如实写进结果，不影响击败判定，不站着等尸体刷掉落。
     private Next<Phase> loot(TickContext context) {
+        // 最后一箭的扣减服务器要隔一两刻才同步到背包：拾荒这几秒接着记，收场的"箭少了几支"才把它算进去。
+        arrows.note(moves.arrowsCarried(context));
         if (lastKillSpot == null) {
             return Next.done(settled());
         }
@@ -687,6 +689,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     @Override
     protected ResultDetails details() {
+        if (currentContext != null) arrows.note(moves.arrowsCarried(currentContext));
         List<String> unreached = new ArrayList<>();
         for (SeenTargets.Locked locked : named) {
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));

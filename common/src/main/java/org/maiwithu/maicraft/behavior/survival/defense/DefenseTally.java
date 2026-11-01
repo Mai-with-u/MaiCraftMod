@@ -79,6 +79,11 @@ final class DefenseTally {
         return shots;
     }
 
+    /** 打完后的那几刻（捡东西、走回打点）接着记箭数：最后一箭的扣减服务器要隔一两刻才同步到背包。 */
+    void noteArrows(TickContext context, BattleMoves moves) {
+        arrows.note(moves.arrowsCarried(context));
+    }
+
     /** 箭少了几支；读不到背包为 null。 */
     Integer arrowsSpent() {
         return arrows.spentOrNull();

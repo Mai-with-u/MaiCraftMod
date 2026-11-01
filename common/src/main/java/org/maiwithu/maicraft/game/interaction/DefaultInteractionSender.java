@@ -348,9 +348,9 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     @Override
     public boolean deferMainHandUseCancellation(PlayerContext context, PendingInteraction pending) {
-        // 只能接收当前任务确实持有的主手动作；欠账连手上是什么一起冻结，下一刻按原物停。
-        requireCurrent(context);
-        if (!ownsItemUse(pending)
+        // 只能接收提交入口自己认下的主手持用；欠账连手上是什么一起冻结，下一刻按原物停。
+        // 上下文过了刻也收（任务在两刻之间被打断时手上只有上一刻的上下文）：结清时按同一个玩家核对。
+        if (context == null || context.localPlayer() == null || !ownsItemUse(pending)
                 || context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND) return false;
         mainHandStop.owe(context, pending);
         return true;
@@ -627,6 +627,8 @@ public final class DefaultInteractionSender implements InteractionSender {
      * 不能让一次悬挂升级成会话级瘫痪。
      */
     private boolean idleForNewSubmission(PlayerContext context) {
+        // 欠着一次主手停手（拉到一半的弓等下一刻切槽）：先停稳再收新动作，新动作一接手旧欠账就作废，弓会被原版松手放出一箭。
+        if (mainHandStop.owed()) return false;
         if (active == null || active.terminal()) return true;
         if (context.clientTick() >= active.deadlineTick() || !active.fromSamePlayer(context)) {
             PendingInteraction stale = active;

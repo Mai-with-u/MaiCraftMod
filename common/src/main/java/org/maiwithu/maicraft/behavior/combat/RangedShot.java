@@ -314,12 +314,13 @@ public final class RangedShot implements Action, RangedCombat.Fires {
     // 原版按松手放出去：没人报"射出"，背包却少了箭，一仗下来少的比报的多出十几支。
     private void cancelDraw(PlayerContext player) {
         LocalPlayer self = player == null ? null : player.localPlayer();
-        if (self == null || pending == null || !player.isCurrent() || !self.isUsingItem()
+        if (self == null || pending == null || !self.isUsingItem()
                 || self.getUsedItemHand() != InteractionHand.MAIN_HAND) {
             projection.release(this);
             return;
         }
-        if (!player.canInteractThisTick()) {
+        // 两刻之间被别的事打断（换气、吃饭插进来）时手上的上下文已经过了刻，本刻没法切槽：一样欠给提交入口。
+        if (!player.isCurrent() || !player.canInteractThisTick()) {
             if (player.interactionSender().deferMainHandUseCancellation(player, pending)) return;
             // 提交入口不认这次持用：投影交还，原版两刻内按松手收场，弓可能因此放出一箭，如实留在世界里。
             projection.release(this);
