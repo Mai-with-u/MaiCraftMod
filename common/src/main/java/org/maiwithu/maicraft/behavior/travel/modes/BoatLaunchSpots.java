@@ -10,25 +10,61 @@ import java.util.function.Function;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing.Kind;
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing.Top;
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
+import org.maiwithu.maicraft.game.world.BoatSize;
 
 /**
  * 挑放船的岸边站位（纯函数）：脚下这一格站得住（地面是实地、脚和头两格是空的），
  * 前面一格是能放下船的水面（顶上是水、上面两格没有实遮挡、没冻住）。
  * 水面挨着站位的才算：隔着沟坎、垫高了的够不着水面不放。
+ * 站好了准星对哪一点也在这里算：船放在准星命中的那一点，得离岸边那条线够远，船体才不压回岸方块和自己身上。
  */
 public final class BoatLaunchSpots {
 
     /** 站位脚下到水面最多隔几格高：放船要够得着水面，太高够不着。 */
     static final int MAX_DROP = 3;
+    /**
+     * 准星落点离岸边那条线往水里多深（格）：船体半宽加一点余量。
+     * 对着水格正中心放，射线从站位斜着打下去，命中点离岸只有三分之一格，船体伸回岸方块里、
+     * 也压到站在岸边的自己，服务端判碰撞不放、什么也不说。
+     */
+    static final double AIM_INTO_WATER = BoatSize.HALF_WIDTH + 0.2;
+    /** 准星实际落点与打算的那一点在水平面上差这么多以内（格）才出手：转头没到位时落点偏向岸边。 */
+    static final double AIM_TOLERANCE = 0.15;
+    /** 满格活水的水面高度（格内）：读不到流体时按它。 */
+    static final double SOURCE_WATER_SURFACE = 8.0 / 9;
 
     /** 一个放船的站位：站在哪一格，对着哪一格水面放船。 */
     public record Spot(BlockPos feet, BlockPos water) {}
 
     private BoatLaunchSpots() {}
+
+    /**
+     * 放船的准星落点：站位对着的那格水面上，离岸边那条线往水里 {@link #AIM_INTO_WATER} 格、左右居中、高度在水面。
+     * 站位与水格不相邻（勘测挑不出站位、按报价的起点凑的）就对水格正中心。
+     *
+     * @param surfaceHeight 水面在水格里的高度（0~1）
+     */
+    public static Vec3 launchAim(BlockPos feet, BlockPos water, double surfaceHeight) {
+        int dx = Integer.signum(water.getX() - feet.getX());
+        int dz = Integer.signum(water.getZ() - feet.getZ());
+        double y = water.getY() + surfaceHeight;
+        if (Math.abs(dx) + Math.abs(dz) != 1) return new Vec3(water.getX() + 0.5, y, water.getZ() + 0.5);
+        double x = dx == 0 ? water.getX() + 0.5
+                : dx > 0 ? water.getX() + AIM_INTO_WATER : water.getX() + 1 - AIM_INTO_WATER;
+        double z = dz == 0 ? water.getZ() + 0.5
+                : dz > 0 ? water.getZ() + AIM_INTO_WATER : water.getZ() + 1 - AIM_INTO_WATER;
+        return new Vec3(x, y, z);
+    }
+
+    /** 准星实际落点够不够准：与打算的那一点在水平面上差不过 {@link #AIM_TOLERANCE} 格。 */
+    public static boolean aimedWell(Vec3 hit, Vec3 aim) {
+        return Math.hypot(hit.x - aim.x, hit.z - aim.z) <= AIM_TOLERANCE;
+    }
 
     /**
      * 在一柱岸的附近找放船的站位，近目的地方向的排前面。

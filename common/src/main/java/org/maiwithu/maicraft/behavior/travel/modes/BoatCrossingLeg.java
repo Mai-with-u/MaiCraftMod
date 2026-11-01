@@ -56,6 +56,8 @@ final class BoatCrossingLeg implements TravelLeg {
 
     /** 放船等服务器确认的期限。 */
     private static final int CONFIRM_TIMEOUT_TICKS = 30;
+    /** 放船前转头对准最多等这么多刻（2 秒）；再对不准就照当前落点出手，让原版自己结算，不替它预判。 */
+    private static final int AIM_PATIENCE_TICKS = 40;
     /** 下了船这么多刻还站不到地上（也没站得住的地方）就按落水收场。 */
     private static final int DISMOUNT_SETTLE_LIMIT_TICKS = 60;
     /** 离靠岸点这么近（格）就开始贴岸下船。 */
@@ -78,6 +80,8 @@ final class BoatCrossingLeg implements TravelLeg {
     private PendingInteraction pending;
     private long lastTick = Long.MIN_VALUE;
     private int afterDismountTicks;
+    /** 放船前转头对准已经等了几刻。 */
+    private int aimTicks;
     /** 这一窗的进展账：离靠岸点记过的最好成绩；刚开划或刚换靠岸点为负，第一个观察窗先立账。 */
     private double bestDistance = -1;
     private long windowStart;
@@ -154,6 +158,8 @@ final class BoatCrossingLeg implements TravelLeg {
         Problem problem = status instanceof ActionStatus.Failed failed ? failed.problem() : null;
         if (step == Step.PREP) return afterPrep(problem, live);
         if (step == Step.WALK) return afterWalk(problem, live);
+        // 放船前补的那次换手：换好了下一刻接着放，换不成如实说。
+        if (step == Step.PLACE) return afterRearm(problem);
         // 坐上船、潜行下船的动作自己有了结论：没做成如实把原因交上去，做成了下一步由各自的步骤接着看。
         if (problem != null) return failed(problem.message(), problem.kind(), problem.suggestion());
         return ActionStatus.running();
@@ -177,7 +183,7 @@ final class BoatCrossingLeg implements TravelLeg {
                 // 换手动作给空分两种：船物品已在主手，照常去放；开跑这一刻身上已经没有它（报价与开跑之间背包变了）
                 // 就如实早停、说明现场，不走到岸边对着别的东西空站到停滞闸。身上有没有它，
                 // 与报价用同一份身上清单认，两条路径认的是同一批东西。
-                Optional<String> reason = prepFailureReason(plan.boatItem(),
+                Optional<String> reason = missingBoatReason(plan.boatItem(),
                         stillCarried(plan.boatItem()), mainHandItemId(live));
                 if (reason.isPresent()) return failed(reason.get(), Problem.Kind.UNSUPPORTED, null);
                 return walkTo(plan.launchFeet(), List.of(plan.launchFeet()));
@@ -194,6 +200,23 @@ final class BoatCrossingLeg implements TravelLeg {
             return failed("船物品换不到主手：" + problem.message(), problem.kind(), problem.suggestion());
         }
         return walkTo(plan.launchFeet(), List.of(plan.launchFeet()));
+    }
+
+    // 到了岸边发现船不在手上补的那次换手：换好了下一刻接着放船，换不成如实说。
+    private ActionStatus afterRearm(Problem problem) {
+        if (problem != null) {
+            return failed("到岸边后船物品换不到主手：" + problem.message(), problem.kind(), problem.suggestion());
+        }
+        return ActionStatus.running();
+    }
+
+    /** 这格水面在格内的高度：读得到流体就按它的，读不到按满格活水的。 */
+    private double surfaceHeight(BlockPos water) {
+        return services.world().stateAt(water)
+                .map(BlockState::getFluidState)
+                .filter(fluid -> !fluid.isEmpty())
+                .map(fluid -> (double) fluid.getOwnHeight())
+                .orElse(BoatLaunchSpots.SOURCE_WATER_SURFACE);
     }
 
     // 走到岸边站位（或停着的船旁）：交给走到；被让路停稳后由运行自己从原地接着走。
@@ -221,11 +244,29 @@ final class BoatCrossingLeg implements TravelLeg {
         return plan.existingBoat() != null ? mount(live) : place(live);
     }
 
-    // 放船：对准勘测好的那格水面，准星真落在水面上才出手；附近恰好新出现一条普通船才算放成了。
+    // 放船：先确认船真在主手，再对准勘测好的那格水面上离岸够远的一点，准星真落到那一点附近才出手；
+    // 附近恰好新出现一条普通船才算放成了。
     private ActionStatus place(PlayerContext live) {
         step = Step.PLACE;
         var player = live.localPlayer();
-        Vec3 aim = Vec3.atCenterOf(plan.launchWater());
+        // 走到岸边这一路，寻路引擎垫路、挖路会切快捷栏、把备好的船顶回背包，到了岸边手上拿的是圆石：
+        // 放船前先看主手是不是船，不是就再换一次手；船已经不在身上了如实说，不拿着别的东西对水面右键等一个不会来的确认。
+        if (!BoatCrossing.isBoatItem(mainHandItemId(live))) {
+            Optional<Action> move = services.toMainhand().moveToMainhand(plan.boatItem());
+            if (move.isEmpty()) {
+                Optional<String> reason = missingBoatReason(plan.boatItem(),
+                        stillCarried(plan.boatItem()), mainHandItemId(live));
+                if (reason.isPresent()) return failed(reason.get(), Problem.Kind.UNSUPPORTED, null);
+                return failed("船物品（" + plan.boatItem() + "）在身上却换不到主手，手上拿着的是 " + mainHandItemId(live),
+                        Problem.Kind.INTERNAL_ERROR, null);
+            }
+            current = move.get();
+            return ActionStatus.progressed();
+        }
+        // 原版把船放在准星命中的那一点，船体 1.375 宽：对着水格正中心放，命中点离岸只有三分之一格，
+        // 船体压回脚下的岸方块、也压到自己，服务端判碰撞不放、什么也不说，这边只等到确认窗到期。
+        // 落点要离岸边那条线够远，船体才落在水里。
+        Vec3 aim = BoatLaunchSpots.launchAim(plan.launchFeet(), plan.launchWater(), surfaceHeight(plan.launchWater()));
         look(live, aim, false);
         Vec3 eye = player.getEyePosition();
         if (eye.distanceTo(aim) > player.blockInteractionRange()) return ActionStatus.running();
@@ -233,6 +274,10 @@ final class BoatCrossingLeg implements TravelLeg {
         var hit = live.level().clip(new ClipContext(eye, eye.add(player.getViewVector(1)
                 .scale(player.blockInteractionRange())), ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, player));
         if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(plan.launchWater())) {
+            return ActionStatus.running();
+        }
+        // 转头还没转到位时落点偏向岸边，出手船体会压到岸：再等一刻；等得太久就照现在的落点出手，让原版自己结算。
+        if (!BoatLaunchSpots.aimedWell(hit.getLocation(), aim) && ++aimTicks < AIM_PATIENCE_TICKS) {
             return ActionStatus.running();
         }
         if (!live.canInteractThisTick()) return ActionStatus.running();
@@ -446,13 +491,13 @@ final class BoatCrossingLeg implements TravelLeg {
     }
 
     /**
-     * 备船这一步拦不拦路（纯判断）：换手动作给空有两种含义——船物品已在主手（身上还有它，照常去放），
-     * 与开跑这一刻身上已经没有报价认下的船物品（报价与开跑之间背包变了）。后者如实拦下，
-     * 把现场说明白：船物品不在身上、手上拿的是什么、岸边也没有停着的空船；不走到岸边空站到停滞闸。
+     * 船不在主手时拦不拦路（纯判断）：换手动作给空有两种含义——船物品已在主手（身上还有它，照常去放），
+     * 与这一刻身上已经没有报价认下的船物品（报价与开跑之间、或走到岸边的路上背包变了）。后者如实拦下，
+     * 把现场说明白：船物品不在身上、手上拿的是什么、岸边也没有停着的空船；不对着别的东西空等确认。
      */
-    static Optional<String> prepFailureReason(String boatItem, boolean stillCarried, String mainHandItemId) {
+    static Optional<String> missingBoatReason(String boatItem, boolean stillCarried, String mainHandItemId) {
         if (stillCarried) return Optional.empty();
-        return Optional.of("开跑时身上已经没有船物品（" + boatItem + "），手上拿着的是 " + mainHandItemId
+        return Optional.of("身上已经没有船物品（" + boatItem + "），手上拿着的是 " + mainHandItemId
                 + "，岸边也没有停着的空船，放不了船");
     }
 

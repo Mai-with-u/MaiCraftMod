@@ -214,6 +214,48 @@ class JourneyTaskTest {
     }
 
     @Test
+    void 指定方式坐了一段没送到_再问又说送不了_收场先说那一段停下的原因() {
+        // 坐过一段失败（放船没得到确认）后人换了地方，再问这种方式它说送不了（岸边挑不出站位）：
+        // 收场的结论句得先说上一段停在哪、为什么，再规划时的原因接在后面——不然 summary 只剩"没有能放船的站位"，
+        // 与 attempts 里记的"没得到服务器确认"对不上。
+        FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
+                List.of(), List.of(), ""), null);
+        elevator.failure = Problem.of(Problem.Kind.UNREACHABLE, "轿厢门没开；等了 10 秒");
+        elevator.declineAfterStart = "这一层没有电梯口";
+        TaskResult result = run(journey(at(0, 120, 0), "elevator", elevator), 50);
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        String headline = result.problem().headline();
+        assertTrue(headline.contains("上一段") && headline.contains("轿厢门没开"), "结论句先说上一段为什么停：" + headline);
+        assertFalse(headline.contains("等了 10 秒"), "上一段的原因只引它的结论句：" + headline);
+        assertTrue(result.problem().message().contains("这一层没有电梯口"), "再规划时的原因接在后面：" + result.problem().message());
+        assertTrue(result.summary().contains("轿厢门没开"), "summary 引的结论句与 attempts 对得上：" + result.summary());
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("轿厢门没开")));
+    }
+
+    @Test
+    void 指定方式坐了一段没送到_再问还是同一份报价_收场也说那一段停下的原因() {
+        // 坐过一段失败后再问它给的还是同一份报价（这一趟不再试）：收场不只说"能试的都试过了"，
+        // 也把那一段停下的原因说出来。
+        FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
+                List.of(), List.of(), ""), null);
+        elevator.failure = Problem.of(Problem.Kind.STUCK, "轿厢 10 秒没动");
+        TaskResult result = run(journey(at(0, 120, 0), "elevator", elevator), 50);
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(1, elevator.started, "同一份报价这一趟只试一次");
+        String headline = result.problem().headline();
+        assertTrue(headline.contains("轿厢 10 秒没动"), "结论句说上一段为什么停：" + headline);
+        assertTrue(result.problem().message().contains("能试的都试过了"), result.problem().message());
+    }
+
+    @Test
+    void 没坐过失败的一段_死胡同照规划的原话() {
+        assertEquals("指定的 boat 送不了：岸边没站位", JourneyTask.deadEndMessage("boat", null, "指定的 boat 送不了：岸边没站位"));
+        String merged = JourneyTask.deadEndMessage("boat", "boat 停在 1, 2, 3：放船没得到服务器确认",
+                "指定的 boat 送不了：岸边没站位");
+        assertEquals("指定的 boat 没送到：上一段 boat 停在 1, 2, 3：放船没得到服务器确认；再规划时指定的 boat 送不了：岸边没站位", merged);
+    }
+
+    @Test
     void 方式可以分几刻答完() {
         FakeMode elevator = new FakeMode(request -> new TravelOffer(ELEVATOR, request.from(), request.to(), 100,
                 List.of(), List.of(), ""), WorldPosition.here(0, 120, 0));
@@ -458,6 +500,8 @@ class JourneyTaskTest {
         boolean approach;
         /** 第一刻不报进展（真实的一段备船走路时就是这样）：进展话由离终点更近的那条账说了算。 */
         boolean quietStart;
+        /** 坐过一段之后再问就说送不了（人落水后岸边挑不出站位）：之前照常给报价。 */
+        String declineAfterStart;
 
         @Override public boolean claims(TravelRequest request) {
             return claims && started == 0;
@@ -478,6 +522,10 @@ class JourneyTaskTest {
             if (asked <= silentAsks) return;
             if (decline != null) {
                 sink.decline(Problem.Kind.UNSUPPORTED, decline);
+                return;
+            }
+            if (declineAfterStart != null && started > 0) {
+                sink.decline(Problem.Kind.UNREACHABLE, declineAfterStart);
                 return;
             }
             sink.offer(answer.apply(request));

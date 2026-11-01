@@ -347,20 +347,61 @@ class BoatCrossingTest {
     }
 
     @Test
-    void 开跑时船物品还在身上_备船不拦路() {
+    void 船物品还在身上_换手给空就是已在主手_不拦路() {
         // 换手动作给空而身上还有这件船物品：它已在主手，照常去放。
-        assertTrue(BoatCrossingLeg.prepFailureReason("minecraft:oak_boat", true, "minecraft:cobblestone").isEmpty());
+        assertTrue(BoatCrossingLeg.missingBoatReason("minecraft:oak_boat", true, "minecraft:cobblestone").isEmpty());
     }
 
     @Test
-    void 开跑时船物品已不在身上_如实早停并说明现场() {
-        // 报价认了身上的船，开跑那一刻背包里已经没有它：拦下这一段，话说清船不在哪、手上拿着什么，
-        // 不走到岸边对着别的物品空站到停滞闸。
-        Optional<String> reason = BoatCrossingLeg.prepFailureReason("minecraft:oak_boat", false, "minecraft:cobblestone");
+    void 船物品已不在身上_如实早停并说明现场() {
+        // 报价认了身上的船，开跑那一刻（或走到岸边的路上）背包里已经没有它：拦下这一段，
+        // 话说清船不在哪、手上拿着什么，不对着别的物品空等一个不会来的确认。
+        Optional<String> reason = BoatCrossingLeg.missingBoatReason("minecraft:oak_boat", false, "minecraft:cobblestone");
         assertTrue(reason.isPresent());
         String message = reason.get();
         assertTrue(message.contains("minecraft:oak_boat"), "说明缺的是哪条船物品：" + message);
         assertTrue(message.contains("手上拿着的是 minecraft:cobblestone"), "说明手上现在是什么：" + message);
         assertTrue(message.contains("放不了船"), "说明这一段做不成：" + message);
+    }
+
+    @Test
+    void 放船准星落点离岸够远_船体不压回岸方块() {
+        // 站在 (10,63,20)，对着东边 (11,62,20) 那格水放船：落点在水格里离岸边那条线 x=11 往东超过船体半宽，
+        // 船体西缘落在水里；左右居中、高度在水面（满格活水 8/9）。
+        BlockPos feet = new BlockPos(10, 63, 20);
+        BlockPos water = new BlockPos(11, 62, 20);
+        Vec3 aim = BoatLaunchSpots.launchAim(feet, water, BoatLaunchSpots.SOURCE_WATER_SURFACE);
+        assertTrue(aim.x - 11 > 0.6875, "落点离岸边那条线要超过船体半宽：" + aim);
+        assertTrue(aim.x < 12, "落点还在这格水里：" + aim);
+        assertEquals(20.5, aim.z, 1e-9);
+        assertEquals(62 + 8.0 / 9, aim.y, 1e-9);
+        // 其余三个方向同理：西边的水往西深入、北边的水往北深入、南边的水往南深入。
+        Vec3 west = BoatLaunchSpots.launchAim(feet, new BlockPos(9, 62, 20), 8.0 / 9);
+        assertTrue(10 - west.x > 0.6875 && west.x > 9, "西边：" + west);
+        assertEquals(20.5, west.z, 1e-9);
+        Vec3 north = BoatLaunchSpots.launchAim(feet, new BlockPos(10, 62, 19), 8.0 / 9);
+        assertTrue(20 - north.z > 0.6875 && north.z > 19, "北边：" + north);
+        assertEquals(10.5, north.x, 1e-9);
+        Vec3 south = BoatLaunchSpots.launchAim(feet, new BlockPos(10, 62, 21), 8.0 / 9);
+        assertTrue(south.z - 21 > 0.6875 && south.z < 22, "南边：" + south);
+        assertEquals(10.5, south.x, 1e-9);
+    }
+
+    @Test
+    void 站位与水格不相邻时准星对水格正中心() {
+        // 勘测挑不出站位、按报价的起点凑的打算：站位与水格是同一格或隔着格子，没有"岸边那条线"可言，对正中心。
+        Vec3 same = BoatLaunchSpots.launchAim(new BlockPos(10, 62, 20), new BlockPos(10, 62, 20), 8.0 / 9);
+        assertEquals(new Vec3(10.5, 62 + 8.0 / 9, 20.5), same);
+        Vec3 diagonal = BoatLaunchSpots.launchAim(new BlockPos(10, 63, 20), new BlockPos(11, 62, 21), 8.0 / 9);
+        assertEquals(new Vec3(11.5, 62 + 8.0 / 9, 21.5), diagonal);
+    }
+
+    @Test
+    void 准星落点偏向岸边就不出手_到位了才出手() {
+        // 转头还没转到位时射线先落在水格靠岸的那一侧：差得远不出手；落点与打算的那一点差在容差内才出手。
+        Vec3 aim = BoatLaunchSpots.launchAim(new BlockPos(10, 63, 20), new BlockPos(11, 62, 20), 8.0 / 9);
+        assertFalse(BoatLaunchSpots.aimedWell(new Vec3(11.3, aim.y, 20.5), aim), "落点离岸只有三分之一格，船体会压回岸");
+        assertTrue(BoatLaunchSpots.aimedWell(new Vec3(aim.x - 0.1, aim.y, 20.55), aim), "差在容差内就出手");
+        assertTrue(BoatLaunchSpots.aimedWell(aim, aim));
     }
 }

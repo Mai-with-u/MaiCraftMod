@@ -110,6 +110,8 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
     private Problem walkProblem;
     /** 指定的方式已经送过一段：剩下的就是首尾的步行。 */
     private boolean rodeAlready;
+    /** 这一趟最后一段坐着没送到的那一笔：哪种方式、停在哪、为什么；没有坐过失败的一段为 null。 */
+    private String lastRideFailure;
     private BlockPos lastFeet;
     private WorldPosition arrivedAt;
     /** 这一轮问报价用的请求：开跑那一段时原样交给方式（许可、给方式的话）。 */
@@ -299,18 +301,40 @@ public final class JourneyTask extends PhasedTask<JourneyTask.Phase> implements 
         if (failure == null) {
             // 指定的方式送过一段，剩下的就是首尾的步行；先下船、先上船这种不算。
             if (offer.via().name().equals(journey.via())) rodeAlready = true;
+            lastRideFailure = null;
         } else {
             recordAttempt(offer.via().name() + " 从 " + offer.from().toShortString() + " 到 " + offer.to().toShortString(),
                     failure.headline());
+            lastRideFailure = offer.via().name() + " 停在 " + shortSpot(lastFeet) + "：" + failure.headline();
         }
         return Next.go(Phase.PLAN, "这一段结束，从当前位置接着规划");
     }
 
-    // 哪都去不了：刚才是走路走不通，就以走路的问题结束，并写上别的方式为什么送不了。
+    // 哪都去不了：刚才是走路走不通，就以走路的问题结束，并写上别的方式为什么送不了；
+    // 这一趟坐过的一段没送到（放船没得到确认、轿厢没动），结论句先说那一段停在哪、为什么，
+    // 再规划时为什么送不了接在后面——收场的一句话与 attempts 里记的那一段对得上。
     private Problem deadEnd(Problem planned) {
-        if (walkProblem == null) return planned;
-        return Problem.of(walkProblem.kind(), walkProblem.message() + "；也没有别的方式能送"
-                + TravelPlanner.reasons(declined), walkProblem.suggestion());
+        if (walkProblem != null) {
+            return Problem.of(walkProblem.kind(), walkProblem.message() + "；也没有别的方式能送"
+                    + TravelPlanner.reasons(declined), walkProblem.suggestion());
+        }
+        return Problem.of(planned.kind(), deadEndMessage(journey.via(), lastRideFailure, planned.message()),
+                planned.suggestion());
+    }
+
+    /**
+     * 哪都去不了时收场的说明（纯函数）：坐过一段没送到的，结论句写那一段停在哪、为什么，
+     * 再规划时的原因接在"；"后面展开——summary 引的是结论句，不只剩再规划时的那句"送不了"，
+     * 与 attempts 里记的那一段对得上。没坐过失败的一段，照规划的原话。
+     *
+     * @param via             指定的方式；没指定为 null
+     * @param lastRideFailure 最后一段坐着没送到的那一笔（方式、停在哪、为什么）；没有为 null
+     * @param planned         再规划时给出的送不了的原因
+     */
+    static String deadEndMessage(String via, String lastRideFailure, String planned) {
+        if (lastRideFailure == null) return planned;
+        String head = via == null ? "没送到" : "指定的 " + via + " 没送到";
+        return head + "：上一段 " + lastRideFailure + "；再规划时" + planned;
     }
 
     // 量距离、问报价用的终点：高度没核实时按脚下这层算，只比水平远近；没有目的地为 null。
