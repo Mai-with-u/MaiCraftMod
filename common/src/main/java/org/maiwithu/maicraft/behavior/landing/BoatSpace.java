@@ -22,6 +22,7 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BoatSize;
 import org.maiwithu.maicraft.game.world.BucketWater;
 
 /**
@@ -30,17 +31,12 @@ import org.maiwithu.maicraft.game.world.BucketWater;
  */
 final class BoatSpace {
 
-    /** 船的碰撞箱半宽与高。 */
-    private static final double HALF_WIDTH = 0.6875;
-    static final double HEIGHT = 0.5625;
-    /** 原版船的宽度。 */
-    private static final double BOAT_WIDTH = 1.375;
-
     private BoatSpace() {}
 
+    /** 船放在这一点时的碰撞箱：底面抬一点，贴着支撑面不算压到它。 */
     static AABB boatBox(Vec3 at) {
-        return new AABB(at.x - HALF_WIDTH, at.y + 0.001, at.z - HALF_WIDTH, at.x + HALF_WIDTH, at.y + HEIGHT,
-                at.z + HALF_WIDTH);
+        return new AABB(at.x - BoatSize.HALF_WIDTH, at.y + 0.001, at.z - BoatSize.HALF_WIDTH,
+                at.x + BoatSize.HALF_WIDTH, at.y + BoatSize.HEIGHT, at.z + BoatSize.HALF_WIDTH);
     }
 
     /** 船放在落点那一格的哪一点：落点下面一格碰撞面的中心；那一格没加载、没碰撞面或伤人时为 null。 */
@@ -120,7 +116,7 @@ final class BoatSpace {
     /** 坐在船里、身体朝四个方向任一个能下得了船。 */
     static boolean hasExit(BlockGetter view, Predicate<BlockPos> loaded, Vec3 spawn, double width, double height) {
         for (int yaw = 0; yaw < 360; yaw += 90) {
-            if (exit(view, loaded, spawn, BOAT_WIDTH, width, height, yaw) != null) return true;
+            if (exit(view, loaded, spawn, BoatSize.WIDTH, width, height, yaw) != null) return true;
         }
         return false;
     }
@@ -129,7 +125,7 @@ final class BoatSpace {
     static boolean hasExit(BlockGetter view, Predicate<BlockPos> loaded, Vec3 spawn, double width, double height,
                            float boatYaw) {
         for (int offset = -90; offset <= 90; offset += 30) {
-            if (exit(view, loaded, spawn, BOAT_WIDTH, width, height, boatYaw + offset) != null) return true;
+            if (exit(view, loaded, spawn, BoatSize.WIDTH, width, height, boatYaw + offset) != null) return true;
         }
         return false;
     }

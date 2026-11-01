@@ -16,6 +16,8 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.world.BoatSize;
+
 /**
  * 船落地这时候能怎么用：身上带着哪种普通船、附近有哪些停着的空船、够得着方块与实体的距离、身体多大。
  * 算路时在出发前取一份冻结下来（最多记三十二条船），搜索线程上只用它判断。
@@ -124,9 +126,9 @@ public record BoatOptions(BlockPos source, Vec3 eye, double blockReach, double e
         int placed = -1;
         int mounted = -1;
         for (int tick = 0; tick < 200; tick++) {
-            if (y <= BoatSpace.HEIGHT) return false;
+            if (y <= BoatSize.HEIGHT) return false;
             if (mounted >= 0 && tick > mounted) return true;
-            if (placed >= 0 && tick > placed && y + eyeHeight - BoatSpace.HEIGHT <= entityReach) mounted = tick;
+            if (placed >= 0 && tick > placed && y + eyeHeight - BoatSize.HEIGHT <= entityReach) mounted = tick;
             if (placed < 0 && y + eyeHeight <= blockReach) placed = tick;
             y -= speed;
             speed = (speed + gravity) * .98;
