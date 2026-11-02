@@ -17,6 +17,7 @@ import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.api.stack.TagEmiIngredient;
 import dev.emi.emi.runtime.EmiReloadManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
@@ -112,6 +113,18 @@ public final class EmiClientReads implements EmiReads {
         float chance = stack.getChance();
         return new ShownStack(kind, stack.getId().toString(), stack.getName().getString(), Math.max(0, stack.getAmount()),
                 chance > 0 && chance <= 1 ? chance : 1);
+    }
+
+    // 和玩家对着物品按 R、按 U 一样走 EMI 的公开接口：EMI 自己开配方界面（没开着界面时先垫一个背包），
+    // 已经开着配方页时直接换成这一样的；界面换了就算翻开了，EMI 里没有这一样的配方时它什么都不开。
+    @Override public boolean showRecipes(String itemId, boolean uses) {
+        Optional<ItemStack> item = item(itemId);
+        if (item.isEmpty() || !EmiReloadManager.isLoaded()) return false;
+        Screen before = Minecraft.getInstance().screen;
+        if (uses) EmiApi.displayUses(EmiStack.of(item.get()));
+        else EmiApi.displayRecipes(EmiStack.of(item.get()));
+        Screen after = Minecraft.getInstance().screen;
+        return after != null && after != before;
     }
 
     private static Optional<ItemStack> item(String itemId) {

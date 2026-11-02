@@ -19,6 +19,7 @@ import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
@@ -150,6 +151,19 @@ public final class JeiClientReads implements JeiReads {
                 : typed.getType() == NeoForgeTypes.FLUID_STACK ? ShownStack.Kind.FLUID : ShownStack.Kind.OTHER;
         return Optional.of(new ShownStack(kind, id.toString(), helper.getDisplayName(ingredient),
                 Math.max(0, helper.getAmount(ingredient)), 1));
+    }
+
+    // 和玩家对着物品按 R、按 U 一样走 JEI 的公开接口：做出它是产出焦点、用到它是原料焦点。
+    // JEI 的配方界面开着时翻页不换界面对象，所以按"眼前是不是 JEI 的配方界面"算翻开了没有。
+    @Override public boolean showRecipes(String itemId, boolean uses) {
+        IJeiRuntime runtime = JeiRuntimeHandoff.current();
+        Optional<ItemStack> item = item(itemId);
+        if (runtime == null || item.isEmpty()) return false;
+        RecipeIngredientRole role = uses ? RecipeIngredientRole.INPUT : RecipeIngredientRole.OUTPUT;
+        IFocus<ItemStack> focus = runtime.getJeiHelpers().getFocusFactory().createFocus(role, VanillaTypes.ITEM_STACK, item.get());
+        runtime.getRecipesGui().show(focus);
+        Screen after = Minecraft.getInstance().screen;
+        return after != null && (Object) after == runtime.getRecipesGui();
     }
 
     private static IJeiRuntime runtime() {

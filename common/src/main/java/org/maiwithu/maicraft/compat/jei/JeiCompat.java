@@ -38,6 +38,8 @@ public final class JeiCompat extends CompatModule {
 
     @Override public void contribute(CompatRegistry registry) {
         registry.recipeViewer(this, new Viewer());
+        // LLM 查过配方、角色闲着时，闲时看让 JEI 把那一页翻开给观众看。
+        registry.recipePage(this, (itemId, uses) -> call("翻开 JEI 的配方页", () -> reads.showRecipes(itemId, uses)));
     }
 
     /** 一格的候选都是物品、不止一样时，找装的物品与候选完全相同的物品标签；找不到原样返回。 */

@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
+import org.maiwithu.maicraft.behavior.recipe.OpensRecipePage;
 import org.maiwithu.maicraft.behavior.recipe.RecipeViewer;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
@@ -79,6 +80,7 @@ public final class CompatRegistry {
     private final Slot<MenuLayoutProof> menuLayouts = slot("界面布局证明", CompatMenuLayoutProof::new);
     private final Slot<KnowledgeSource> knowledgeSources = slot("知识来源", CompatKnowledgeSource::new);
     private final Slot<RecipeViewer> recipeViewers = slot("配方查看器", CompatRecipeViewer::new);
+    private final Slot<OpensRecipePage> recipePages = slot("翻开配方页", CompatRecipePage::new);
     private final Slot<ClientOperation> serverReads = slot("只读操作声明");
     private final Slot<PlacementRules> placementRules = slot("放置规则", CompatPlacementRules::new);
     private final Slot<RangedWeapon> rangedWeapons = slot("远程武器", CompatRangedWeapon::new);
@@ -232,6 +234,14 @@ public final class CompatRegistry {
      */
     public void recipeViewer(CompatModule module, RecipeViewer viewer) {
         recipeViewers.add(module, viewer);
+    }
+
+    /**
+     * 联动入口交一个"翻开配方页"（EMI、JEI 这类查看器能把配方页翻开给人看）：LLM 查过配方、角色闲着时，
+     * 闲时看用它把那一页翻开给观众看。登记表包一层，模组停用后翻不开；只在客户端线程上用。
+     */
+    public void recipePage(CompatModule module, OpensRecipePage page) {
+        recipePages.add(module, page);
     }
 
     /**
@@ -440,6 +450,11 @@ public final class CompatRegistry {
     /** 联动模组提供的配方查看器，按联动清单的顺序；配方查询自己决定先问谁。 */
     public List<RecipeViewer> recipeViewers() {
         return recipeViewers.ready();
+    }
+
+    /** 联动模组提供的翻开配方页，按联动清单的顺序；闲时看用第一个翻得开的。 */
+    public List<OpensRecipePage> recipePages() {
+        return recipePages.ready();
     }
 
     /** 联动模组的放置规则，按联动清单的顺序；施工取第一个非空的答案。 */

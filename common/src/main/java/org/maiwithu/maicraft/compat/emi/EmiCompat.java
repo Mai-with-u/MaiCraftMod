@@ -26,6 +26,8 @@ public final class EmiCompat extends CompatModule {
 
     @Override public void contribute(CompatRegistry registry) {
         registry.recipeViewer(this, new Viewer());
+        // LLM 查过配方、角色闲着时，闲时看让 EMI 把那一页翻开给观众看。
+        registry.recipePage(this, (itemId, uses) -> call("翻开 EMI 的配方页", () -> reads.showRecipes(itemId, uses)));
     }
 
     /** EMI 当配方查看器：碰 EMI 的每一下都经联动入口，接口对不上时联动停用。 */

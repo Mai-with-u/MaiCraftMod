@@ -23,4 +23,12 @@ public interface JeiReads {
 
     /** 这件物品是工作站的那些类别里的全部配方。 */
     List<ShownRecipe> atWorkstation(String itemId);
+
+    /**
+     * 打开 JEI 的配方界面翻到这样东西的配方页（uses 为真翻用途页），像玩家按 R、按 U；
+     * 翻开了返回真，JEI 的运行时还没交出来时为假。替身默认翻不开。
+     */
+    default boolean showRecipes(String itemId, boolean uses) {
+        return false;
+    }
 }
