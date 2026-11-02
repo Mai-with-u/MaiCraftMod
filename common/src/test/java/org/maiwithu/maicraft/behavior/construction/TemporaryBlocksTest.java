@@ -9,10 +9,12 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -106,5 +108,47 @@ class TemporaryBlocksTest {
     @Test
     void 暂时做不了的格轮到最后() {
         assertEquals(List.of("c", "a"), TemporaryBlocks.defer(List.of("a", "b", "c"), 1, item -> !item.equals("b")));
+    }
+
+    // 一片石头地面（脚底 y=65），中间一根两格高的墙柱，墙顶在 y=66。
+    private static FakeWorld wallOnGround() {
+        FakeWorld world = new FakeWorld();
+        for (int x = -5; x <= 5; x++) {
+            for (int z = -5; z <= 5; z++) world.put(new BlockPos(x, 64, z), Blocks.STONE.defaultBlockState());
+        }
+        return world.put(new BlockPos(0, 65, 0), Blocks.OAK_PLANKS.defaultBlockState())
+                .put(new BlockPos(0, 66, 0), Blocks.OAK_PLANKS.defaultBlockState());
+    }
+
+    @Test
+    void 站在地上看不见墙顶_在墙边垫一级台阶() {
+        FakeWorld world = wallOnGround();
+        BlockPos roof = new BlockPos(0, 67, 0);
+        var wallTop = List.of(new PlacementAttempt.Candidate(new BlockPos(0, 66, 0), Direction.UP, false));
+        var step = TemporaryBlocks.step(world, roof, wallTop, new BlockPos(3, 65, 0), pos -> true, Set.of(roof));
+        assertEquals(Optional.of(new BlockPos(1, 65, 0)), step,
+                "眼睛 66.6 够不过墙顶 67，紧挨墙、离人最近的那格垫一块站上去");
+    }
+
+    @Test
+    void 站在地上本来就点得到_不垫台阶() {
+        FakeWorld world = wallOnGround();
+        BlockPos onWall = new BlockPos(0, 66, 0);
+        world.put(onWall, Blocks.AIR.defaultBlockState());
+        var wallTop = List.of(new PlacementAttempt.Candidate(new BlockPos(0, 65, 0), Direction.UP, false));
+        assertTrue(TemporaryBlocks.step(world, onWall, wallTop, new BlockPos(3, 65, 0), pos -> true, Set.of(onWall)).isEmpty(),
+                "墙顶 66 在眼睛 66.6 下面，站在地上就看得见");
+    }
+
+    @Test
+    void 不许放或要留空的格_不拿来当台阶() {
+        FakeWorld world = wallOnGround();
+        BlockPos roof = new BlockPos(0, 67, 0);
+        var wallTop = List.of(new PlacementAttempt.Candidate(new BlockPos(0, 66, 0), Direction.UP, false));
+        var step = TemporaryBlocks.step(world, roof, wallTop, new BlockPos(3, 65, 0),
+                pos -> !pos.equals(new BlockPos(1, 65, 0)), Set.of(roof));
+        assertTrue(step.isPresent() && !step.get().equals(new BlockPos(1, 65, 0)), "受保护的那格换旁边的");
+        assertTrue(TemporaryBlocks.step(world, roof, wallTop, new BlockPos(3, 65, 0), pos -> false, Set.of(roof)).isEmpty(),
+                "哪儿都不许放就没有台阶");
     }
 }

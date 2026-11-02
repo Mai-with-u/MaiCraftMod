@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -13,10 +14,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 /**
- * 临时方块的找链与收回顺序：某格够不着或没有可点击面时，从目标六向的空气格向外找到最近的已有方块，
- * 垫一条可拆的链接到目标旁边；收回时先收站着够得着的，再沿自己的柱逐格下撤，每格拆前确认下一格落得稳。
+ * 临时方块的找台阶、找链与收回顺序：某格只差站高一格才点得到时，在地上垫一级台阶站上去；
+ * 没有可点击面时，从目标六向的空气格向外找到最近的已有方块，垫一条可拆的链接到目标旁边；收回时先收站着够得着的，再沿自己的柱逐格下撤，每格拆前确认下一格落得稳。
  * 纯函数，只读世界；放与拆由施工任务做，账记在世界记忆里。
  */
 public final class TemporaryBlocks {
@@ -65,6 +67,75 @@ public final class TemporaryBlocks {
             }
         }
         return List.of();
+    }
+
+    /** 找一级台阶时水平看多远：站上去还得够得着目标，再远没有用。 */
+    private static final int STEP_RADIUS = 3;
+    /** 站在台阶上要点的那一面离眼睛最远多少格：原版交互距离 4.5。 */
+    private static final double STEP_REACH = 4.5;
+    /** 眼睛比脚底高多少格。 */
+    private static final double EYE_HEIGHT = 1.62;
+
+    /**
+     * 找一级台阶：在地上垫一块、人站上去就能点到目标某一面的位置。只挑"站在地上点不到、高出这一格才点得到"的地方——
+     * 人站在地上眼睛够不过墙顶，看不见墙顶朝上的那一面，垫一块站上去就看得见了；站在地上本来就点得到的面不靠台阶解决。
+     * 台阶要垫在已有的实心方块上，台阶上面两格空着能站人，不占要放的那几格，也不垫在人脚下；
+     * 紧挨着目标的先挑（像人在墙边垫一块），一样近的挑离人近的。
+     * 纯函数，只读世界；找不到返回空。
+     *
+     * @param faces    目标此刻能从哪几面点
+     * @param feet     人现在站在哪（不知道时为 null，就只按离目标远近挑）
+     * @param mayPlace 这一格允不允许放临时方块（许可与保护说了算）
+     * @param keepFree 放下目标会占住的格：台阶和站上去的身体都不能在里面
+     */
+    static Optional<BlockPos> step(ReadsBlocks world, BlockPos target, List<PlacementAttempt.Candidate> faces, BlockPos feet,
+                                   Predicate<BlockPos> mayPlace, Set<BlockPos> keepFree) {
+        BlockPos best = null;
+        double bestNear = Double.MAX_VALUE, bestWalk = Double.MAX_VALUE;
+        for (BlockPos pos : BlockPos.betweenClosed(target.offset(-STEP_RADIUS, -3, -STEP_RADIUS),
+                target.offset(STEP_RADIUS, -1, STEP_RADIUS))) {
+            BlockPos step = pos.immutable();
+            BlockPos standing = step.above();
+            if (!world.loaded(step.below()) || !world.loaded(step) || !world.loaded(standing) || !world.loaded(standing.above())) continue;
+            if (!solid(world, step.below()) || !world.state(step).isAir() || !passable(world, standing) || !passable(world, standing.above())) continue;
+            if (keepFree.contains(step) || keepFree.contains(standing) || keepFree.contains(standing.above()) || !mayPlace.test(step)) continue;
+            if (step.equals(feet) || !raisedReach(faces, step)) continue;
+            double near = step.distSqr(target);
+            double walk = feet == null ? 0 : step.distSqr(feet);
+            if (near < bestNear || near == bestNear && walk < bestWalk) {
+                best = step;
+                bestWalk = walk;
+                bestNear = near;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    // 站在台阶上（脚在 step 上面一格）能点到某一面，而站在台阶这格的地上点不到：高出这一格正是缺的那一点。
+    private static boolean raisedReach(List<PlacementAttempt.Candidate> faces, BlockPos step) {
+        Vec3 ground = new Vec3(step.getX() + 0.5, step.getY() + EYE_HEIGHT, step.getZ() + 0.5);
+        Vec3 raised = ground.add(0, 1, 0);
+        boolean fromGround = false, fromStep = false;
+        for (PlacementAttempt.Candidate face : faces) {
+            fromGround |= facesEye(face, ground);
+            fromStep |= facesEye(face, raised);
+        }
+        return fromStep && !fromGround;
+    }
+
+    // 那一面朝着眼睛（眼睛在面的外侧），而且在交互距离内：正对着、够得着才点得到。
+    private static boolean facesEye(PlacementAttempt.Candidate candidate, Vec3 eye) {
+        Direction face = candidate.face();
+        Vec3 center = Vec3.atCenterOf(candidate.clicked()).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
+        Vec3 out = eye.subtract(center);
+        double front = out.x * face.getStepX() + out.y * face.getStepY() + out.z * face.getStepZ();
+        return front > 0.05 && out.lengthSqr() <= STEP_REACH * STEP_REACH;
+    }
+
+    // 人能站进去的格：没有碰撞外形，也不是液体。
+    private static boolean passable(ReadsBlocks world, BlockPos pos) {
+        BlockState state = world.state(pos);
+        return state.getFluidState().isEmpty() && state.getCollisionShape(EmptyBlockGetter.INSTANCE, pos).isEmpty();
     }
 
     /** 已有的、站得住或点得了的方块：不是空气、不可替换、有形状。 */

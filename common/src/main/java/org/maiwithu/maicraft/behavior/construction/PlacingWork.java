@@ -36,7 +36,7 @@ import org.slf4j.LoggerFactory;
 /**
  * 砌筑：按施工顺序一格一格放。每格先看能从哪几面点，走到能点那一面的站位，用原版放置预测核对落下来是不是要的样子，
  * 把材料换到手上，点下去，按放置确认看结果。放不上的格先做别的，情况变了（旁边新放了方块、人换了一层站、
- * 挡着的生物过一会儿可能走开）再回头；什么都没变就垫一条临时方块链再试；
+ * 挡着的生物过一会儿可能走开）再回头；什么都没变就想别的办法：只差站高一格就垫一级台阶站上去，没有能点的面就垫一条临时方块链；
  * 垫不了的记"够不着"。材料用完就停在材料尽头，缺的格如实记下。
  *
  * <p>像真人一样站一处把够得着的都放完再挪：同一层同一阶段里挑离人最近的那格先放，点哪一面先挑站着不动就够得着的。
@@ -199,8 +199,8 @@ final class PlacingWork extends ConstructionWork {
         return near;
     }
 
-    // 主队列空了：情况变了的放一放的格排回来再试；什么都没变，就给最早放不上的那格垫一条临时方块链；
-    // 垫不了如实记下放不成。
+    // 主队列空了：情况变了的放一放的格排回来再试；什么都没变，就给最早放不上的那格想别的办法——
+    // 只差站高一格就垫一级台阶站上去，没有能点的面就垫一条临时方块链；都不行如实记下放不成。
     private Refill refill() {
         if (deferred.isEmpty()) return Refill.DONE;
         List<PlannedCell> changed = deferred.changed(services.site().feet(), now, cell -> !waiting(cell).isEmpty());
@@ -224,9 +224,15 @@ final class PlacingWork extends ConstructionWork {
             site.unreachable(stuck.pos(), "够不着，在物理结构上不垫临时方块（会改船的重量和样子）");
             return Refill.REFILLED;
         }
-        List<BlockPos> blocks = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
-                : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true);
         Optional<String> material = services.site().temporaryMaterial();
+        boolean mayPlace = permissions.changeBlocks() != Permissions.BlockChanges.NONE;
+        // 先看是不是只差站高一格：人站在地上眼睛够不过墙顶、看不见墙顶朝上那一面，就在墙边垫一块站上去。
+        BlockPos placeAt = site.placements().placeAt(stuck, services.site());
+        Optional<BlockPos> step = !mayPlace ? Optional.empty() : TemporaryBlocks.step(services.site(), stuck.pos(),
+                PlacementAttempt.candidates(services.site(), stuck, placeAt), services.site().feet(), this::mayPlaceTemporary,
+                new PlacementAttempt(stuck, placeAt, false, List.of()).occupied());
+        List<BlockPos> blocks = step.map(List::of).orElseGet(() -> !mayPlace ? List.of()
+                : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true));
         if (blocks.isEmpty() || material.isEmpty() || !services.site().creative() && services.site().carried(material.get()) < blocks.size()) {
             site.unreachable(stuck.pos(), blocks.isEmpty() ? "够不着，也找不到能垫临时方块接过去的路" : "够不着，身上的建材不够垫临时方块");
             return Refill.REFILLED;
@@ -237,7 +243,9 @@ final class PlacingWork extends ConstructionWork {
             queue.add(PlannedCell.block(pos, state, Set.of()));
         }
         queue.add(stuck);
-        records.attempt("为 " + stuck.pos().toShortString() + " 垫临时方块", "找到一条 " + blocks.size() + " 块的链");
+        records.attempt("为 " + stuck.pos().toShortString() + " 垫临时方块", step.isPresent()
+                ? "站在地上点不到，在 " + step.get().toShortString() + " 垫一级台阶站上去"
+                : "找到一条 " + blocks.size() + " 块的链");
         return Refill.REFILLED;
     }
 
