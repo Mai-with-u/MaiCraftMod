@@ -109,12 +109,11 @@ public final class PlayerControlBoundary {
                     && (respawned || samePlayerNewDimension(previousPlayer, player));
             input.playerReplaced(player, preserveControl);
             // 换了身体（重生、过门、换世界、退出）：旧身体上还在等确认的点击与菜单操作按不确定结清，
-            // 不让旧结果落到新身体上，也不让一条没人推进的等待挡住新身体的第一次出手。
+            // 不让旧结果落到新身体上，也不让一条没人推进的等待挡住新身体的第一次出手；站定朝向也从头算。
             forBoundaryEntry(entry -> entry.revokeForBoundary("the local player was replaced"));
+            standingFacing.forget();
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
-            // 新身体从头算朝向：上一具身体站定朝哪与它无关。
-            standingFacing.forget();
         }
         input.beginTick(tickRevision);
         updateWindowControl(input.effectiveAutomationRequested());

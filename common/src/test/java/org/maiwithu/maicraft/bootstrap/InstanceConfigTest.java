@@ -84,6 +84,20 @@ class InstanceConfigTest {
     }
 
     @Test
+    void idleLookingSwitchReadFromFile() throws IOException {
+        // 没有文件时开着，默认文件里写出这一项，所有者照着改。
+        assertTrue(InstanceConfig.read(configDir).idleLooking(), "默认开着闲时看，直播里闲着不干站着");
+        assertTrue(Files.readString(configDir.resolve("maicraft.json"), StandardCharsets.UTF_8).contains("idleLooking"));
+
+        Files.writeString(configDir.resolve("maicraft.json"), "{\"idleLooking\": false}", StandardCharsets.UTF_8);
+        assertFalse(InstanceConfig.read(configDir).idleLooking(), "关掉后闲着就站着");
+
+        // 缺键按开着收场，不算坏文件。
+        Files.writeString(configDir.resolve("maicraft.json"), "{}", StandardCharsets.UTF_8);
+        assertTrue(InstanceConfig.read(configDir).idleLooking(), "缺键按开着");
+    }
+
+    @Test
     void trustedPlayersReadFromFile() throws IOException {
         // 名字两头的空白去掉、空条目跳过；名字和编号都收，交给保护判断去对人。
         Files.writeString(configDir.resolve("maicraft.json"),

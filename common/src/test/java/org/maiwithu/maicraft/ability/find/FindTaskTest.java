@@ -102,7 +102,10 @@ class FindTaskTest {
     }
 
     private TaskResult run(FindInput input) {
-        FindTask task = new FindTask(input, scene, finder, memory, eyes);
+        return run(new FindTask(input, scene, finder, memory, eyes));
+    }
+
+    private TaskResult run(FindTask task) {
         tick = 0;
         task.start(tick());
         for (int i = 0; i < 400; i++) {
@@ -142,6 +145,34 @@ class FindTaskTest {
         assertTrue(details.searchComplete() || true, "找满即收工，没扫完也可以收");
         assertEquals(2, memory.sites.size(), "视线验证过的方块命中写进世界记忆");
         assertEquals(List.of("minecraft:coal_ore"), memory.sites.get(0).roughlyThere());
+    }
+
+    /** 扫描时的环顾替身：记下被推了几刻、收尾了没有；一直不做完，像真的环顾一样只转头。 */
+    private static final class CountingLook implements Action {
+        int ticks;
+        boolean closed;
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            return ActionStatus.running();
+        }
+        @Override public void close() { closed = true; }
+        @Override public String describe() { return "原地环顾"; }
+    }
+
+    @Test
+    void 扫描时原地环顾_扫完当场收场不等环顾() {
+        // 读端分三刻扫完：这三刻里环顾每刻都推，扫完找满就收场，环顾跟着收尾，结果不受它影响。
+        finder.script.add(new FindsAround.Round(List.of(), false, false));
+        finder.script.add(new FindsAround.Round(List.of(), false, false));
+        finder.script.add(new FindsAround.Round(List.of(block(0, 64, -8, "minecraft:coal_ore")), true, false));
+        CountingLook look = new CountingLook();
+        FindInput input = new FindInput(FindInput.FindKind.BLOCK, List.of("minecraft:coal_ore"), 1, 48);
+        TaskResult result = run(new FindTask(input, scene, finder, memory, eyes, () -> look));
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(look.ticks >= 3, "扫描的每一刻都在环顾：" + look.ticks);
+        assertTrue(look.closed, "收场时环顾跟着收尾，不留着转头");
     }
 
     @Test

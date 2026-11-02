@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.maiwithu.maicraft.behavior.explore.endereye.EnderEyeSearch;
 import org.maiwithu.maicraft.behavior.explore.endereye.FollowsEnderEyes;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -33,6 +34,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 同一次运行里每样只数一次，读端重复给出的不再收；扫完了还不足就按结算如实交账。
  * 视线验证过的方块命中顺路写进世界记忆（来源=亲眼看到），后续采集与出行不再被重复质疑。
  *
+ * <p>扫描附近时角色站着等读端分刻推进，这一段像玩家一样原地环顾（转头只给观众看，扫到什么和镜头朝哪无关，
+ * 环顾不算进展、也不拖时间：扫完了、找满了当场收场）；闲时看关着时站着不动。
+ *
  * <p>找要塞时附近扫完也没有线索：要塞在地下，像真人一样扔末影之眼指路（玩家行为层的一趟扔眼），
  * 找到的位置照样领一个结构线索的编号；身上没眼按缺东西说。
  */
@@ -52,6 +56,8 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
     private final FindsAround finder;
     private final RemembersSightings memory;
     private final FollowsEnderEyes eyes;
+    /** 扫描时的环顾：每次进扫描阶段取一个；闲时看关着时给 null，站着扫。 */
+    private final Supplier<Action> lookWhileScanning;
     /** 扔眼找要塞的那一趟；没走到这一步为 null。 */
     private EnderEyeSearch eyeSearch;
 
@@ -63,6 +69,11 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
     private boolean scanQuiet = true;
 
     FindTask(FindInput input, Scene scene, FindsAround finder, RemembersSightings memory, FollowsEnderEyes eyes) {
+        this(input, scene, finder, memory, eyes, () -> null);
+    }
+
+    FindTask(FindInput input, Scene scene, FindsAround finder, RemembersSightings memory, FollowsEnderEyes eyes,
+            Supplier<Action> lookWhileScanning) {
         super("寻找", Phase.SCAN, new ProgressTracker(STUCK_AFTER_TICKS,
                 input.followsEyes() ? EYES_MAX_TICKS : MAX_TICKS));
         this.input = input;
@@ -70,16 +81,17 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
         this.finder = finder;
         this.memory = memory;
         this.eyes = eyes;
+        this.lookWhileScanning = lookWhileScanning;
     }
 
     @Override
     protected Action enter(Phase phase) {
-        // 扫描读端自己分刻推进，这里没有要先动手准备的东西；扔眼那一趟按这次任务的许可走。
+        // 扔眼那一趟按这次任务的许可走；扫描读端自己分刻推进，等的这一段原地环顾，闲时看关着时站着扫。
         if (phase == Phase.EYES) {
             eyeSearch = new EnderEyeSearch(eyes, memory, TerrainPermit.of(input.permissions()), records());
             return eyeSearch;
         }
-        return null;
+        return lookWhileScanning.get();
     }
 
     @Override
@@ -87,6 +99,8 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
         if (phase == Phase.EYES) {
             return runActionThen(context, () -> foundByEyes(context));
         }
+        // 环顾只是转头：先推它一刻，扫描照常往下走，扫完找满当场收场，环顾跟着阶段一起收尾。
+        if (action() != null) runAction(context);
         FindsAround.Round round = finder.scan(input);
         if (round.worldChanged()) {
             // 扫描中换了世界：这一轮的命中作废，如实结束，不冒充任何找没找到的结论。

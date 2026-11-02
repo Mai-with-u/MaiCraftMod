@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
@@ -51,6 +52,8 @@ public final class FindModule implements AbilityModule {
     private final Scene scene;
     private final RemembersSightings memory;
     private final FollowsEnderEyes eyes;
+    /** 扫描时的环顾：闲时看关着时给 null，站着扫。 */
+    private final Supplier<Action> lookWhileScanning;
 
     /**
      * @param worldTypes 游戏类型目录：开局校验写岔的方块与实体 ID
@@ -62,18 +65,24 @@ public final class FindModule implements AbilityModule {
     /** 生产用：读端在这里接上真实客户端，能力包内可见的实现类不出包。实体的类型、可见与特征读感知的同一份实体观察。 */
     public static FindModule live(Supplier<PlayerContext> context, BlockScanService scans,
             EntitySight entities, ReadsCreatureSituation creatures, WorldMemory memory, Scene scene,
-            FollowsEnderEyes eyes) {
+            FollowsEnderEyes eyes, Supplier<Action> lookWhileScanning) {
         return new FindModule(new LiveWorldTypes(), new LiveFinder(scans, context, entities, creatures, memory),
-                scene, memory, eyes);
+                scene, memory, eyes, lookWhileScanning);
     }
 
     FindModule(ReadsWorldTypes worldTypes, FindsAround finder, Scene scene,
             RemembersSightings memory, FollowsEnderEyes eyes) {
+        this(worldTypes, finder, scene, memory, eyes, () -> null);
+    }
+
+    FindModule(ReadsWorldTypes worldTypes, FindsAround finder, Scene scene,
+            RemembersSightings memory, FollowsEnderEyes eyes, Supplier<Action> lookWhileScanning) {
         this.worldTypes = worldTypes;
         this.finder = finder;
         this.scene = scene;
         this.memory = memory;
         this.eyes = eyes;
+        this.lookWhileScanning = lookWhileScanning;
     }
 
     private final AbilitySpec spec = new AbilitySpec(
@@ -162,6 +171,6 @@ public final class FindModule implements AbilityModule {
 
     @Override
     public void registerTasks(TaskFactories factories) {
-        factories.register(FindInput.class, input -> new FindTask(input, scene, finder, memory, eyes));
+        factories.register(FindInput.class, input -> new FindTask(input, scene, finder, memory, eyes, lookWhileScanning));
     }
 }

@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
  * 文件不存在就生成默认内容；读不出来（不是 JSON、缺键、键值类型不对）按默认值收场并记警告，
  * 不让一份坏配置挡住启动。LLM 的任何工具都触不到这里的开关：它不经参数面，只经这个文件。
  *
- * <p>现在有四项：
+ * <p>现在有五项：
  * <ul>
  * <li>「聊天逐字打字」（chatTypewriter，默认 true）：开着时说话像真人一样逐字打进聊天框、
  *     打完停顿再提交；关掉时整句瞬间提交，调试时省时间。</li>
@@ -34,6 +34,8 @@ import org.slf4j.LoggerFactory;
  *     角色可以取用、存放；拆、改照旧当别人的。</li>
  * <li>「每台机器的方块上限」（machineBlockLimits，默认链条输送机 create:chain_conveyor 最多 1 个）：方块 ID 到个数，
  *     按蓝图建机器、接网络时整台机器里这种方块不超过这个数；全都铺链条太丑，近处用传动杆接得上的就别用链条。</li>
+ * <li>「闲时看」（idleLooking，默认 true）：开着时角色闲着不干站着，LLM 读了什么就转头看过去、打开背包或手边的箱子、
+ *     翻开配方页，LLM 在想的时候看看身边的人、生物和声音来处，找东西扫描时原地环顾；关掉时闲着就站着不动，调试时画面不晃。</li>
  * </ul>
  */
 public final class InstanceConfig {
@@ -51,19 +53,32 @@ public final class InstanceConfig {
     private final boolean chatTypewriter;
     private final List<String> trustedPlayers;
     private final Map<String, Integer> machineBlockLimits;
+    /** 闲时看开关：开着时闲着会转头看东西、开界面看几秒；默认开，保持直播效果。 */
+    private final boolean idleLooking;
 
     // 包私有是给总装测试的接缝：测试从这里拼一份摆好开关的配置，生产路径只走 read 与 defaults。
     InstanceConfig(boolean allowGameCommands, boolean chatTypewriter, List<String> trustedPlayers,
             Map<String, Integer> machineBlockLimits) {
+        this(allowGameCommands, chatTypewriter, trustedPlayers, machineBlockLimits, true);
+    }
+
+    InstanceConfig(boolean allowGameCommands, boolean chatTypewriter, List<String> trustedPlayers,
+            Map<String, Integer> machineBlockLimits, boolean idleLooking) {
         this.allowGameCommands = allowGameCommands;
         this.chatTypewriter = chatTypewriter;
         this.trustedPlayers = List.copyOf(trustedPlayers);
         this.machineBlockLimits = Map.copyOf(machineBlockLimits);
+        this.idleLooking = idleLooking;
     }
 
-    /** 默认一份：管理员命令不放、逐字打字开着、没有自家人，链条输送机每台机器最多一个。 */
+    /** 默认一份：管理员命令不放、逐字打字开着、没有自家人，链条输送机每台机器最多一个，闲时看开着。 */
     public static InstanceConfig defaults() {
-        return new InstanceConfig(false, true, List.of(), DEFAULT_BLOCK_LIMITS);
+        return new InstanceConfig(false, true, List.of(), DEFAULT_BLOCK_LIMITS, true);
+    }
+
+    /** 闲时看开着没有：开着时闲着会转头看东西、开界面看几秒，关掉时闲着就站着。 */
+    public boolean idleLooking() {
+        return idleLooking;
     }
 
     /** 每台机器里某种方块最多几个：方块 ID → 上限；没列的不限。 */
@@ -99,6 +114,8 @@ public final class InstanceConfig {
             boolean allow = json.has("allowGameCommands") && json.get("allowGameCommands").getAsBoolean();
             // 这一项缺了按开着收场：默认行为是逐字打字，关掉是所有者主动要的效果。
             boolean typewriter = !json.has("chatTypewriter") || json.get("chatTypewriter").getAsBoolean();
+            // 闲时看缺了也按开着：它是给直播用的默认效果，关掉是所有者主动要的。
+            boolean idleLooking = !json.has("idleLooking") || json.get("idleLooking").getAsBoolean();
             // 自家人名单缺了就是没有；写成别的类型或里面混了非字符串，按坏配置收场。
             List<String> trusted = new ArrayList<>();
             if (json.has("trustedPlayers")) {
@@ -111,7 +128,7 @@ public final class InstanceConfig {
                     if (!name.isEmpty()) trusted.add(name);
                 }
             }
-            return new InstanceConfig(allow, typewriter, trusted, blockLimits(json));
+            return new InstanceConfig(allow, typewriter, trusted, blockLimits(json), idleLooking);
         } catch (Exception exception) {
             // 坏配置不挡启动：按全关的默认值跑，并把原因记下来让所有者能发现。
             LOG.warn("{} 配置文件读不出来，按默认值运行：{}", ModIdentity.NAME, file, exception);
@@ -138,6 +155,7 @@ public final class InstanceConfig {
         JsonObject json = new JsonObject();
         json.addProperty("allowGameCommands", false);
         json.addProperty("chatTypewriter", true);
+        json.addProperty("idleLooking", true);
         json.add("trustedPlayers", new JsonArray());
         JsonObject limits = new JsonObject();
         DEFAULT_BLOCK_LIMITS.forEach(limits::addProperty);

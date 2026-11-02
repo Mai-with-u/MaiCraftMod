@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.random.RandomGenerator;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ToolFirstDigging;
@@ -38,6 +40,7 @@ import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.explore.endereye.ClientEnderEyes;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
+import org.maiwithu.maicraft.behavior.perception.looking.LookAround;
 import org.maiwithu.maicraft.behavior.interaction.ClientItemFrameHits;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
 import org.maiwithu.maicraft.ability.follow.FollowModule;
@@ -125,6 +128,7 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
@@ -484,11 +488,16 @@ public final class AbilityCatalog {
     /** 寻找：方块与实体扫已加载区，结构查记过的产地线索；要塞附近没有线索时扔末影之眼指路。
      *  实体的类型、可见与特征读感知的同一份实体观察，命中直接在场景的观察编号表上领编号。 */
     private static void registerFind(AbilityRegistry registry, Deps deps, Shared shared) {
+        // 扫描附近时原地环顾给观众看；所有者在实例配置里关了闲时看就站着扫。
+        Supplier<Action> lookWhileScanning = deps.config().idleLooking()
+                ? () -> LookAround.whileWaiting(RandomGenerator.getDefault())
+                : () -> null;
         registry.register(FindModule.live(deps.character().context(), deps.world().blockScans(),
                 new ClientEntitySight(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
                 deps.world().scene(),
                 new ClientEnderEyes(deps.character().context(), deps.travel().walks(), shared.toMainhand(),
-                        shared.drops())));
+                        shared.drops()),
+                lookWhileScanning));
     }
 
     /** 不和别的能力共用现场部件的那些能力：战斗、跟随、等待、计时、钓鱼、出行、聊天、记地点、按顺序做事、任务书。 */
