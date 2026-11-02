@@ -255,8 +255,8 @@
       },
       {
         "ability": "maicraft:explore",
-        "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
-        "parameters": "target: string, direction?: string, angle_degrees?: integer, min_distance?: integer, max_distance: integer = 768, max_seconds?: integer, interests?: array",
+        "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面；也能钻进附近的矿洞顺着走，一路看洞壁上露出来的矿",
+        "parameters": "target: string, direction?: string, angle_degrees?: integer, min_distance?: integer, max_distance?: integer, max_seconds?: integer, interests?: array",
         "targets": [],
         "mode": "controls_player"
       },
@@ -1493,19 +1493,19 @@
     },
     {
       "ability": "maicraft:explore",
-      "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面",
+      "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面；也能钻进附近的矿洞顺着走，一路看洞壁上露出来的矿",
       "parameters": [
         {
           "name": "target",
           "type": "string",
           "required": true,
-          "doc": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天；探索不接受已定位终点，找海岸给 minecraft:beach"
+          "doc": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天 / cave 钻洞（钻进附近的矿洞顺着走、一路看矿）；探索不接受已定位终点，找海岸给 minecraft:beach"
         },
         {
           "name": "direction",
           "type": "string",
           "required": false,
-          "doc": "扇形朝向；platform 必配，其余可选，出发时按当时朝向固定",
+          "doc": "扇形朝向；platform 必配，其余可选，出发时按当时朝向固定；钻洞时只用来挑哪个洞口，进了洞是偏向那边，洞往哪拐由洞定",
           "choices": [
             "forward",
             "backward",
@@ -1529,7 +1529,7 @@
           "name": "min_distance",
           "type": "integer",
           "required": false,
-          "doc": "忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0",
+          "doc": "忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0；钻洞时用在挑洞口上，默认 0",
           "min": 0,
           "max": 2048
         },
@@ -1537,8 +1537,7 @@
           "name": "max_distance",
           "type": "integer",
           "required": false,
-          "doc": "探索半径（格），默认 768；到范围边上就收工",
-          "default": 768,
+          "doc": "探索半径（格），默认 768；钻洞是离洞口的直线距离，默认 128；到范围边上就收工",
           "min": 64,
           "max": 2048
         },
@@ -1552,7 +1551,7 @@
           "name": "interests",
           "type": "array",
           "required": false,
-          "doc": "途中留意清单：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型；看见了记下来并发一条发现事件，不改路线、不算抵达"
+          "doc": "途中留意清单：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型；看见了记下来并发一条发现事件，不改路线、不算抵达；钻洞时只认方块与 lava_pool，看见就走到跟前收场（例如 #c:ores/iron）"
         }
       ],
       "targets": [],

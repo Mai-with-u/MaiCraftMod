@@ -11,8 +11,8 @@ import java.util.List;
  */
 public final class ExploreObjective {
 
-    /** 探索目标的四种写法。 */
-    public enum Kind { SURVEY, BIOME, FLAT_GROUND, SURFACE }
+    /** 探索目标的五种写法；钻洞（CAVE）由钻洞任务做，跑图不接。 */
+    public enum Kind { SURVEY, BIOME, FLAT_GROUND, SURFACE, CAVE }
 
     private final Kind target;
     private final List<String> selectors;
@@ -26,7 +26,7 @@ public final class ExploreObjective {
         return new ExploreObjective(Kind.SURVEY, List.of());
     }
 
-    /** 探索目标：自由跑图、找群系（带选择器）、找平台、回露天。 */
+    /** 探索目标：自由跑图、找群系（带选择器）、找平台、回露天、钻洞。 */
     public Kind target() {
         return target;
     }

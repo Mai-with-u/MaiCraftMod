@@ -52,6 +52,24 @@ public final class CaveOpenings {
 
     private CaveOpenings() {}
 
+    /** 暗处：天空光不到 8 的格。认洞口往里量、钻洞判断"已经在洞里"用同一条。 */
+    public static boolean dark(int skyLight) {
+        return skyLight < DARK_SKY_LIGHT;
+    }
+
+    /** 头顶有遮挡：天空光不到露天的 15。钻洞只往头顶有遮挡的地方走，走回见天的洞外不算往洞里钻。 */
+    public static boolean underCover(int skyLight) {
+        return skyLight < OPEN_SKY_LIGHT;
+    }
+
+    /**
+     * 已经在洞里：脚下这一格头顶有遮挡，从脚下量得到的暗处够一个洞（与认洞口的往里量同一个数）。
+     * 钻洞起步时在洞里就地开始，不再去找洞口。
+     */
+    public static boolean insideCave(int feetSkyLight, int darkCellsAround) {
+        return underCover(feetSkyLight) && darkCellsAround >= DARK_CELLS;
+    }
+
     /** 只读现场：洞口判断要的几样世界事实。生产读端读客户端世界，测试用替身。 */
     public interface Ground {
 
@@ -287,7 +305,7 @@ public final class CaveOpenings {
             int below = 0;
             while (!pending.isEmpty() && seen.size() < MAX_FLOOD) {
                 BlockPos cell = pending.poll();
-                if (ground.skyLight(cell.getX(), cell.getY(), cell.getZ()) < DARK_SKY_LIGHT) {
+                if (dark(ground.skyLight(cell.getX(), cell.getY(), cell.getZ()))) {
                     dark++;
                     if (cell.getY() < mouthY - DOWNWARD) below++;
                 }
@@ -295,7 +313,7 @@ public final class CaveOpenings {
                         cell.above(), cell.below())) {
                     if (seen.contains(next) || !ground.loaded(next.getX(), next.getZ())) continue;
                     if (!ground.roomy(next.getX(), next.getY(), next.getZ())) continue;
-                    if (ground.skyLight(next.getX(), next.getY(), next.getZ()) >= OPEN_SKY_LIGHT) continue;
+                    if (!underCover(ground.skyLight(next.getX(), next.getY(), next.getZ()))) continue;
                     seen.add(next);
                     pending.add(next);
                 }

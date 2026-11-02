@@ -7,6 +7,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
@@ -77,7 +78,13 @@ public final class ClientCaveOpeningSight implements CaveOpenings.Ground {
 
     @Override
     public boolean roomy(int x, int y, int z) {
-        BlockPos cell = new BlockPos(x, y, z);
+        return roomy(level, new BlockPos(x, y, z));
+    }
+
+    /**
+     * 能进人：碰撞外形为空、不是液体。门关着开着都挡（有门的房子不会被当成洞）；认洞口往里量、钻洞量路共用这一条。
+     */
+    public static boolean roomy(BlockGetter level, BlockPos cell) {
         BlockState state = level.getBlockState(cell);
         return state.getFluidState().isEmpty() && state.getCollisionShape(level, cell).isEmpty();
     }

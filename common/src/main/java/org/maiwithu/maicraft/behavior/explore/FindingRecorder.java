@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.explore;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryOrigin;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -13,27 +14,26 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 /**
  * 探索途中的发现落账：一条发现先记进这次探索的发现账，新的或从远望升级成到访的落进世界记忆，
  * 新的再发一条 discovered 事件（是什么、在身体哪个方向多远）；留意清单的结构线索与实体按间隔扫一轮也从这里记。
- * 角色不停不问，照常跑图。
+ * 角色不停不问，照常跑图、照常钻洞。跑图与钻洞共用这一份。
  */
-final class FindingRecorder {
+public final class FindingRecorder {
 
     private final ExploreFindings findings;
-    private final ExplorationWorld world;
-    private final ExploreObjective.Interests interests;
+    /** 角色此刻在哪：发现事件说"在身体哪个方向多远"按它算。 */
+    private final Supplier<WorldPosition> whereNow;
     private final WorldMemory memory;
     private final TaskEventSink events;
 
-    FindingRecorder(ExploreFindings findings, ExplorationWorld world, ExploreObjective.Interests interests,
+    public FindingRecorder(ExploreFindings findings, Supplier<WorldPosition> whereNow,
             WorldMemory memory, TaskEventSink events) {
         this.findings = findings;
-        this.world = world;
-        this.interests = interests;
+        this.whereNow = whereNow;
         this.memory = memory;
         this.events = events;
     }
 
     /** 留意清单的结构线索与实体：按间隔扫一轮；走到结构跟前的线索升级成到访，不降级。 */
-    void scanInterests() {
+    void scanInterests(ExplorationWorld world, ExploreObjective.Interests interests) {
         for (ExplorationWorld.Spotted spotted : world.structureClues(interests.structures())) {
             if (world.sightClear(spotted.position().x(), spotted.position().y(), spotted.position().z())) {
                 record(new ExploreFinding(ExploreFinding.Kind.STRUCTURE_CLUE, spotted.id(),
@@ -62,7 +62,7 @@ final class FindingRecorder {
     }
 
     /** 记一条发现：落进世界记忆，新发现发一条事件；角色不停不问，照常跑图。 */
-    void record(ExploreFinding finding) {
+    public void record(ExploreFinding finding) {
         if (finding.targetId() == null) {
             return;
         }
@@ -83,13 +83,14 @@ final class FindingRecorder {
 
     /** 发现的一句话：是什么、在身体哪个方向多远。 */
     private String describe(ExploreFinding finding) {
-        WorldPosition spot = world.currentSpot();
+        WorldPosition spot = whereNow.get();
         String word = switch (finding.kind()) {
             case BIOME -> "群系";
             case TERRAIN -> "地形要素";
             case STRUCTURE_CLUE -> "结构线索";
             case BLOCK -> "留意方块";
             case ENTITY -> "留意实体";
+            case ORE_VEIN -> "矿脉";
         };
         if (spot == null) {
             return "发现" + word + " " + finding.targetId();

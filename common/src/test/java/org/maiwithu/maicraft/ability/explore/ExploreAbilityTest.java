@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.explore.ExploreObjective;
 import org.maiwithu.maicraft.behavior.explore.ExploreTask;
+import org.maiwithu.maicraft.behavior.explore.cave.CaveWalkPlan;
+import org.maiwithu.maicraft.behavior.explore.cave.CaveWalkTask;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -37,7 +39,7 @@ import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
-/** 探索能力：四种目标写法、参数互斥一次报全、认不出的 ID 不进游戏；能力本身不走路。 */
+/** 探索能力：五种目标写法、参数互斥一次报全、认不出的 ID 不进游戏；能力本身不走路。 */
 class ExploreAbilityTest {
 
     @TempDir
@@ -49,7 +51,7 @@ class ExploreAbilityTest {
             throw new AssertionError("探索能力不应自己开始走到");
         }, () -> null, new BlockScanService(),
                 new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "key"),
-                (kind, message) -> { });
+                (kind, message) -> { }, List::of);
     }
 
     /** 推进一刻用的决定上下文：只有目标。 */
@@ -230,6 +232,46 @@ class ExploreAbilityTest {
         assertInstanceOf(ExploreTask.class, task);
         assertNotNull(task.describe());
         assertFalse(task.describe().isBlank());
+    }
+
+    @Test
+    void 钻洞默认离洞口128格_有方向起找距离也从脚边算() {
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability().decide(step(goal("{\"target\":\"cave\",\"direction\":\"north\","
+                        + "\"interests\":[\"#minecraft:logs\",\"lava_pool\"]}"))));
+        ExploreInput input = assertInstanceOf(ExploreInput.class, run.input());
+        assertEquals(ExploreObjective.Kind.CAVE, input.objective().target());
+        assertEquals(128, input.maxDistance(), "钻洞默认离洞口 128 格");
+        assertEquals(0, input.minDistance(), "钻洞挑洞口从脚边挑起");
+        CaveWalkPlan plan = ExploreAbility.caveWalkPlan(input);
+        assertEquals(List.of("#minecraft:logs"), plan.interestBlocks());
+        assertTrue(plan.watchLava(), "留意 lava_pool 时看见岩浆也停");
+
+        StepDecision.Run longer = assertInstanceOf(StepDecision.Run.class,
+                ability().decide(step(goal("{\"target\":\"cave\",\"max_distance\":300}"))));
+        assertEquals(300, assertInstanceOf(ExploreInput.class, longer.input()).maxDistance());
+    }
+
+    @Test
+    void 钻洞的留意清单不认实体和结构() {
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class,
+                ability().decide(step(goal("{\"target\":\"cave\",\"interests\":"
+                        + "[\"minecraft:chest\",\"minecraft:zombie\",\"minecraft:village_plains\"]}"))));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+        String message = finish.result().problem().message();
+        assertTrue(message.contains("minecraft:zombie") && message.contains("minecraft:village_plains"), message);
+        assertFalse(message.contains("minecraft:chest"), "方块认得：" + message);
+    }
+
+    @Test
+    void 工厂对钻洞创建钻洞任务() {
+        TaskFactories factories = new TaskFactories();
+        ability().registerTasks(factories);
+        ExploreInput input = new ExploreInput(new ExploreObjective(ExploreObjective.Kind.CAVE, List.of()),
+                ExploreObjective.Interests.NONE, null, 360, 0, 128, 0, TerrainPermit.NATURAL);
+        Task task = factories.create(input);
+        assertInstanceOf(CaveWalkTask.class, task);
+        assertTrue(task.describe().startsWith("钻洞"), task.describe());
     }
 
     @Test

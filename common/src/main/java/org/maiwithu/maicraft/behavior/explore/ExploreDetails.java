@@ -31,7 +31,11 @@ public record ExploreDetails(List<Item> findings, WorldPosition reached, StopRea
         /** 越过了探索半径的硬边界，截停。 */
         LEFT_BOUND,
         /** 受阻：换出发点与轮换方位都试过，还是走不出去。 */
-        BLOCKED
+        BLOCKED,
+        /** 钻洞这一趟走满了说好的路程：再钻一次接着走，走过的不重走。 */
+        WALK_LIMIT,
+        /** 钻洞时看见了留意清单里的东西，走到了它跟前。 */
+        INTEREST_SEEN
     }
 
     /** 一条发现对外的样子。 */

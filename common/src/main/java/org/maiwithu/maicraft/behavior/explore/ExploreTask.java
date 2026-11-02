@@ -82,7 +82,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         this.permit = permit;
         this.world = world;
         this.walks = walks;
-        this.recorder = new FindingRecorder(findings, world, interests, memory, events);
+        this.recorder = new FindingRecorder(findings, world::currentSpot, memory, events);
         this.radius = new RadiusVerdict(maxDistance);
         WorldPosition spot = world.currentSpot();
         this.origin = spot == null ? BlockPos.ZERO : new BlockPos(spot.x(), spot.y(), spot.z());
@@ -145,7 +145,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
         }
         if (++sampling.sinceInterestScan >= ObservationSampling.INTEREST_SCAN_INTERVAL) {
             sampling.sinceInterestScan = 0;
-            recorder.scanInterests();
+            recorder.scanInterests(world, interests);
         }
         if (observed) {
             recordProgress("观察到 " + sampling.uniqueColumns + " 列");
@@ -480,7 +480,8 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             case WITHIN -> { }
         }
         return switch (objective.target()) {
-            case SURVEY -> SelfConclusion.NONE;
+            // 钻洞由钻洞任务做，跑图接不到；接到了也和自由跑图一样不核实什么。
+            case SURVEY, CAVE -> SelfConclusion.NONE;
             case BIOME -> biomeUnderFeet(spot, distance)
                     ? SelfConclusion.TARGET_CONFIRMED : SelfConclusion.NONE;
             case FLAT_GROUND -> LevelGroundCheck.holds(
@@ -565,6 +566,7 @@ public final class ExploreTask extends PhasedTask<ExploreTask.Phase> implements 
             case FLAT_GROUND -> "一块能站的平台";
             case SURFACE -> "露天的地面";
             case SURVEY -> "外围";
+            case CAVE -> "洞";
         };
     }
 

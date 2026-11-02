@@ -214,4 +214,15 @@ class CaveOpeningsTest {
 
         assertTrue(sweep().isEmpty(), "沟底沟里都看不见就不报");
     }
+
+    @Test
+    void insideCaveNeedsCoverAndEnoughDarkCells() {
+        assertTrue(CaveOpenings.insideCave(0, 24));
+        assertFalse(CaveOpenings.insideCave(15, 400), "露天站着，旁边洞再大也不算在洞里");
+        assertFalse(CaveOpenings.insideCave(3, 23), "屋檐下几格暗处不够一个洞");
+        assertTrue(CaveOpenings.dark(7));
+        assertFalse(CaveOpenings.dark(8));
+        assertTrue(CaveOpenings.underCover(14));
+        assertFalse(CaveOpenings.underCover(15));
+    }
 }

@@ -10,12 +10,12 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * 一次探索的任务输入：解析并校验过的目标、留意清单、扇形与半径，和这次被允许动多少地形。
  * 不可变；运行中会变的进度都在探索任务里。
  *
- * @param objective   探索目标（自由跑图、群系选择器、找平台、回露天）
+ * @param objective   探索目标（自由跑图、群系选择器、找平台、回露天、钻洞）
  * @param interests   途中留意清单（地形要素、结构、方块、实体，已按注册表分好类）
  * @param direction   扇形朝向（八向词）；全向为 null
  * @param angleDegrees 扇形开口角（度），有方向默认 90，全向 360
  * @param minDistance 起找距离（格），有方向默认 16，全向 0
- * @param maxDistance 探索半径（格）
+ * @param maxDistance 探索半径（格）；钻洞是离洞口的直线距离
  * @param maxSeconds  最多做多久（秒）；不超过 0 表示不设时限
  * @param permit      这次被允许动多少地形（走行能不能挖垫、被埋能不能上掘）
  */
@@ -30,7 +30,9 @@ record ExploreInput(ExploreObjective objective, ExploreObjective.Interests inter
             case BIOME -> "去找群系 " + String.join("、", objective.selectors());
             case FLAT_GROUND -> "朝前找一块能站的平台";
             case SURFACE -> "回露天的地面";
+            case CAVE -> "钻进附近的矿洞顺着走、一路看矿";
         };
-        return what + "，半径 " + maxDistance + " 格";
+        return what + (objective.target() == ExploreObjective.Kind.CAVE ? "，离洞口最远 " : "，半径 ")
+                + maxDistance + " 格";
     }
 }

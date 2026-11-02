@@ -1,20 +1,28 @@
 # explore — 往某个方向勘察地形
 
-朝某个方向把外面的地形跑一遍：自由看看这一片有什么，或去找一种群系、一块能站的平地、回露天的地面。说好跑多大范围，到了范围边上就收工；路过的群系、岩浆湖、村庄线索都会记下来（`observe(what="world_memory")` 看得到），之后叫得出名字、去得了。途中每有发现会发一条 `discovered` 事件，角色不停不问照常跑图，想改主意随时暂停或取消。地形走不动会自己换地方（横移换出发点）、换方向（每次 45°），都试过才如实说卡住。找具体的东西用 find（只看附近已加载区）；附近没有时先 explore 再 find。
+朝某个方向把外面的地形跑一遍：自由看看这一片有什么，或去找一种群系、一块能站的平地、回露天的地面；也能钻进附近的矿洞顺着走，一路看洞壁上露出来的矿。说好跑多大范围，到了范围边上就收工；路过的群系、岩浆湖、村庄线索、洞口、矿都会记下来（`observe(what="world_memory")` 看得到），之后叫得出名字、去得了。途中每有发现会发一条 `discovered` 事件，角色不停不问照常跑图，想改主意随时暂停或取消。地形走不动会自己换地方（横移换出发点）、换方向（每次 45°），都试过才如实说卡住。找具体的东西用 find（只看附近已加载区）；附近没有时先 explore 再 find。
 
-`target` 四种写法一次只给一种：`survey` 自由跑图（走到范围边算完成）；群系 ID 或 `#` 标签（走到该群系里、核实脚下群系才算到）；`platform` 找平台（脚下与四邻至少 3 格同高支撑，站上后复查）；`surface` 回露天（许可动土且被埋时先沿脚下这列竖直上掘到顶）。探索不接受目标对象——要去某个具体地方用 travel。
+`target` 五种写法一次只给一种：`survey` 自由跑图（走到范围边算完成）；群系 ID 或 `#` 标签（走到该群系里、核实脚下群系才算到）；`platform` 找平台（脚下与四邻至少 3 格同高支撑，站上后复查）；`surface` 回露天（许可动土且被埋时先沿脚下这列竖直上掘到顶）；`cave` 钻洞（见下）。探索不接受目标对象——要去某个具体地方用 travel。
+
+## 钻洞（`target=cave`）
+
+已经在洞里就地开始；在地面上先走到最近的看得见的洞口（场景里报成"洞口"的那几处，给了 `direction` 就只挑那个方向的）。进了洞反复做三件事：停下转头看一圈（约两秒），挑眼前看得见的最远的新地方，走过去。岔路先走没走过的，眼前没有新地方就去最近的没走的岔路；水、岩浆、跳不下去的深坑不往那边走，记在结果的 `branches` 里。一路插火把；看见的矿只认眼睛真看得见的，同种相连的算一条矿脉。
+
+找矿给 `interests`（比如 `["#c:ores/iron"]`）：看见了就走到够得着、看得见它的地方停下收场，接着 `obtain` 就挖得到。没给就走到收场，一路看见的矿都记下。附近看不见洞口时如实说看了多大范围，先 explore 跑一跑再看，或用 obtain 长程挖矿；峡谷不当洞口挑，要下峡谷用 `travel(f#)`。
+
+钻洞收场时留在原地（多半就在矿跟前）。回地面用 `travel(here)`：离洞口不到 48 格会寻路走回洞口；远了就近找见天的地方或往上挖楼梯，都不行才去洞口。
 
 ## 参数
 
 | 名字 | 必填 | 说明 |
 | --- | :---: | --- |
-| `target` | ✅ | 探索目标：`survey` / 群系 ID 或 `#` 标签 / `platform` / `surface`。找海岸给 `minecraft:beach`；拿不准群系 ID 时 `lookup(topic=knowledge, id=biomes)` 看本实例的群系目录 |
-| `direction` | platform 必配 | 扇形朝向：`forward` / `backward` / `left` / `right` / `north` / `south` / `east` / `west`；出发时按当时朝向固定，之后转头不改搜索方向 |
+| `target` | ✅ | 探索目标：`survey` / 群系 ID 或 `#` 标签 / `platform` / `surface` / `cave`。找海岸给 `minecraft:beach`；拿不准群系 ID 时 `lookup(topic=knowledge, id=biomes)` 看本实例的群系目录 |
+| `direction` | platform 必配 | 扇形朝向：`forward` / `backward` / `left` / `right` / `north` / `south` / `east` / `west`；出发时按当时朝向固定，之后转头不改搜索方向。钻洞时只用来挑哪个洞口，进了洞是偏向那边，洞往哪拐由洞定 |
 | `angle_degrees` | | 扇形开口角（度）1..360；有方向默认 90，无方向必须省略或 360。要斜向就给相邻方位加大开口角 |
-| `min_distance` | | 忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0 |
-| `max_distance` | | 探索半径（格）64..2048，默认 768 |
+| `min_distance` | | 忽略更近的目标匹配（格）；有方向默认 16，无方向默认 0；钻洞时用在挑洞口上，默认 0 |
+| `max_distance` | | 探索半径（格）64..2048，默认 768；钻洞是离洞口的直线距离，默认 128 |
 | `max_seconds` | | 最多做多久（秒）；观察与走行有真实进展就续期 |
-| `interests` | | 途中留意清单：地形要素（`lava_pool`）、结构 ID、方块 ID 或 `#` 标签、实体类型 ID，可给几样；看见了记入世界记忆与结果并发一条发现事件，不改路线、不算抵达；认得出哪些结构看 `lookup(topic=knowledge, id=structures)` |
+| `interests` | | 途中留意清单：地形要素（`lava_pool`）、结构 ID、方块 ID 或 `#` 标签、实体类型 ID，可给几样；看见了记入世界记忆与结果并发一条发现事件，不改路线、不算抵达；认得出哪些结构看 `lookup(topic=knowledge, id=structures)`。钻洞时只认方块与 `lava_pool`，看见就走到跟前收场 |
 
 可给 `permissions`：`change_blocks` 决定走行能不能挖开挡路的方块、垫方块，以及回露天被埋时能不能上掘（默认 `natural`）；目标探测本身永不改方块。
 
@@ -22,12 +30,14 @@
 
 | 字段 | 含义 |
 | --- | --- |
-| `findings` | 途中的发现：种类 `biome` / `terrain` / `structure_clue` / `block` / `entity`、目标 `target_id`、位置 `position`、到访 `visited` 还是远望 `seen` |
+| `findings` | 途中的发现：种类 `biome` / `terrain` / `structure_clue` / `block` / `entity` / `ore_vein`（矿脉，带看见了几块 `blocks`）、目标 `target_id`、位置 `position`、到访 `visited` 还是远望 `seen`；钻洞进过的洞口是 `terrain` 的"洞口"（到访） |
 | `reached` | 定向探索核实到的位置（x/y/z 与维度）；没核实不给 |
-| `stop_reason` | 怎么收的尾：`radius_reached` 到达半径 / `frontiers_exhausted` 能走到的外围都走过了 / `left_bound` 越界截停 / `blocked` 受阻 |
+| `stop_reason` | 怎么收的尾：`radius_reached` 到达半径 / `frontiers_exhausted` 能走到的外围都走过了 / `left_bound` 越界截停 / `blocked` 受阻 / `walk_limit` 钻洞这一趟走满了 256 格路（再钻一次接着走，走过的不重走）/ `interest_seen` 钻洞看见了留意的东西、停在它跟前 |
+| `entrance` | 钻洞：从哪个洞口进的；就地开始又不在洞口附近时是出发点 |
+| `branches` | 钻洞：没走的岔路（方位 `compass`、水平距离 `distance`、高低 `dy`）；过不去的方向带上挡着的是什么（`blocked_by`：水、岩浆、往下几格的落差） |
 | `coverage` | 观察统计：观察列数、最远的身体与观察距离、未加载边界的样本 |
 | `origin`、`sector_history` | 出发点与实际生效过的扇形方位（含换出发点与轮换的方位历史） |
-| `legs` | 走行段统计：几段、失败几段 |
+| `legs` | 走行段统计：几段、失败几段；钻洞还有这一趟走了多少格（`walked_blocks`） |
 
 ## 边界与注意
 

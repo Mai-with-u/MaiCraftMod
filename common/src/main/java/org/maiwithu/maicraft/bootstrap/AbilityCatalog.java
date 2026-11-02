@@ -553,9 +553,11 @@ public final class AbilityCatalog {
 
         registerFind(registry, deps, shared);
 
-        // 探索：观察推进与走行段在探索走行里，发现落进世界记忆并经事件出口告诉宿主。
+        // 探索：观察推进与走行段在探索走行里，发现落进世界记忆并经事件出口告诉宿主；
+        // 钻洞挑洞口挑的是场景此刻报的那几处，与 observe 看到的一致。
         registry.register(ExploreAbility.live(deps.character().context(), deps.world().blockScans(),
-                deps.travel().walks(), deps.world().memory(), deps.channels().events()));
+                deps.travel().walks(), deps.world().memory(), deps.channels().events(),
+                () -> deps.world().scene().caveOpenings()));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));

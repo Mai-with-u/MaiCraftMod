@@ -25,7 +25,9 @@ public record ExploreFinding(Kind kind, String targetId, WorldPosition position,
         /** 方块留意：留意清单上的方块（或标签）露头了。 */
         BLOCK,
         /** 实体留意：留意清单上的实体类型看得见了。 */
-        ENTITY
+        ENTITY,
+        /** 矿脉：钻洞时洞壁上看得见的矿，同种相连的算一条。 */
+        ORE_VEIN
     }
 
     /** 同一条发现的合并键：群系按 ID 合并（群系是一片，望见几处也是同一片）；
