@@ -445,8 +445,7 @@ public final class Battle {
         // 往里走了就放下盾：举着盾走路只有两成速度，算好的刻数就不对了；冷却带里等着时举着。
         if (threat.dangerRadius() > 0) moves.guard(context, threat.distance(), stepIn);
         else moves.lowerGuard();
-        Footwork.Band band = trimmed(stepIn ? readyBand : meleeBand(me, threat, false), target.id(), inReach,
-                threat.visible(), threat.distance());
+        Footwork.Band band = trimmed(stepIn ? readyBand : meleeBand(me, threat, false), me, threat, inReach);
         boolean moved;
         limbs.sidestepTick();
         if (perched) {
@@ -475,15 +474,12 @@ public final class Battle {
             moved = limbs.follow(context, "逼近 " + target.id(), threat.x(), threat.z(),
                     () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, 0, band.outer()), threats));
             if (limbs.lastWalkFailed()) {
-                cannotWalkTo(target.id());
+                cannotWalkTo(me, threat, "寻路说走不到能打到它的地方");
             } else if (limbs.lastWalkArrived() && !inReach && !outOfReachScenes.containsKey(target.id())) {
                 // 近身打的进入判据：寻路说到站了（水平上已经在近身的带里）人却还够不着它——它在另一层（头顶、脚下、
                 // 台上）或隔着方块，从这儿走不出更近的站位，再寻路也只会原地"到站"。到站这一刻算一次差几格、在哪一侧，
                 // 记成够不着如实早停；不站着每刻重新寻路，空耗半分钟等停滞判定来收。它自己贴上来（看得见、够得着）会再打。
-                String scene = CombatLogLines.outOfReachScene(me, threat, "已经站在能走到的最近处");
-                outOfReachScenes.put(target.id(), threat.type() + "（实体 " + target.id() + "）" + scene);
-                cannotWalkTo(target.id());
-                LOG.info("[战斗] 够不着 {} #{}：{}", threat.type(), target.id(), scene);
+                cannotWalkTo(me, threat, "已经站在能走到的最近处");
             }
         }
         String what = (inReach ? "打 " : "逼近 ") + threat.type();
@@ -555,10 +551,11 @@ public final class Battle {
      * 补站位：站在带里却够不着（被方块边角挡着、它在坑里低一截）时，外沿每过几刻往里收一点，凑近到真够得着；
      * 收到底还够不着就当这只走不到——有弓去射，没弓换下一只，不原地空转。
      */
-    private Footwork.Band trimmed(Footwork.Band band, int targetId, boolean inReach, boolean visible, double distance) {
+    private Footwork.Band trimmed(Footwork.Band band, Battlefield.Me me, CombatSenses.Threat threat, boolean inReach) {
+        int targetId = threat.entityId();
         // 只在已经站到带子跟前时才数：还在走过去的路上（离带子外沿还远）不算"站在带里够不着"，
         // 不然走向十几格外、还在朝我来的那只走上三秒就被记成走不到，这一仗当场"打完了"。
-        if (targetId != trimTarget || inReach || !visible || distance > band.outer() + IN_BAND_SLACK) {
+        if (targetId != trimTarget || inReach || !threat.visible() || threat.distance() > band.outer() + IN_BAND_SLACK) {
             trimTarget = targetId;
             trimTicks = 0;
             return band;
@@ -566,7 +563,7 @@ public final class Battle {
         trimTicks++;
         double trim = Math.min(band.outer() - Math.max(band.inner() + 0.1, MIN_OUTER), (trimTicks / TRIM_EVERY) * TRIM_STEP);
         if (trimTicks > TRIM_GIVE_UP) {
-            cannotWalkTo(targetId);
+            cannotWalkTo(me, threat, "站在跟前把站位收到底还够不着");
             trimTicks = 0;
         }
         return trim <= 0 ? band : new Footwork.Band(band.x(), band.z(), band.inner(), band.outer() - trim);
@@ -619,7 +616,7 @@ public final class Battle {
             moved = limbs.follow(context, "走近射 " + target.id(), threat.x(), threat.z(),
                     () -> GoalCompiler.approachAvoiding(GoalCompiler.band(focus, walk.band().inner(),
                             walk.band().outer()), threats));
-            if (limbs.lastWalkFailed()) cannotWalkTo(target.id());
+            if (limbs.lastWalkFailed()) cannotWalkTo(me, threat, "寻路说走不到能射到它的地方");
         } else {
             // 守在它的点火距离外：苦力怕不在眼前同一层的平地上（隔着坑、差着高、要绕路搭桥）不寻路凑过去——
             // 绕路、搭桥时人慢，它一贴近就点火。原地守着等它走到平地跟前再砍。
@@ -630,7 +627,9 @@ public final class Battle {
                     moves.ground(context));
             moves.step(context, target.id(), step);
             moved = !step.standing();
-            if (approach instanceof Tactic.HoldOutsideIgnite hold && hold.unreachable()) cannotWalkTo(target.id());
+            if (approach instanceof Tactic.HoldOutsideIgnite hold && hold.unreachable()) {
+                cannotWalkTo(me, threat, "苦力怕不在眼前同一层的平地上，不凑过去");
+            }
         }
         return moved;
     }
@@ -657,10 +656,16 @@ public final class Battle {
         LOG.info("[战斗] 打不到 {} #{}：{}", threat.type(), id, outOfReachScenes.get(id));
     }
 
-    // 走不到它跟前（寻路走不通、收紧站位也够不着、苦力怕隔着坑）：记成够不着，有弓去射、没弓换下一只。
-    private void cannotWalkTo(int id) {
+    // 走不到它跟前（寻路走不通、到站了还够不着、收紧站位也够不着、苦力怕隔着坑）：记成够不着并记下现场
+    // （在哪一侧、高出几格、为什么到此为止），有弓去射、没弓换下一只；它自己贴上来（看得见、够得着）会再打。
+    private void cannotWalkTo(Battlefield.Me me, CombatSenses.Threat threat, String why) {
+        int id = threat.entityId();
         unreachable.add(id);
         walkedOut.add(id);
+        if (outOfReachScenes.containsKey(id)) return;
+        String scene = CombatLogLines.outOfReachScene(me, threat, why);
+        outOfReachScenes.put(id, threat.type() + "（实体 " + id + "）" + scene);
+        LOG.info("[战斗] 够不着 {} #{}：{}", threat.type(), id, scene);
     }
 
     private void retarget(int id) {

@@ -213,7 +213,7 @@ class SelfDefenseTaskTest {
         TaskResult finished = assertInstanceOf(TickResult.Finished.class, result).result();
 
         String note = task.finishedNote(finished);
-        assertTrue(note.contains("够不着：minecraft:husk（实体 1）在高处，高出 3.0 格"), note);
+        assertTrue(note.contains("够不着：minecraft:husk（实体 1）近战够不着：在高处，高出 3.0 格"), note);
     }
 
     @Test

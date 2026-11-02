@@ -311,6 +311,10 @@ class BattleTest {
         Battle.Moment next = fight.tick(new Tick(1));
         assertEquals(Battle.State.FINISHED, next.state(), "走不到、不能射、又没打我：不再追，收手");
         assertTrue(fight.unreachable().contains(1), "记着它走不到，交代给调用方");
+        // 寻路走不通这条路也带现场：收场话里说清它在哪、为什么到此为止，不只一句"隔着悬崖、水或墙"。
+        String scene = fight.outOfReachScenes().get(1);
+        assertTrue(scene != null && scene.contains("近战够不着：差不多同一层、水平 12.0 格")
+                && scene.contains("寻路说走不到能打到它的地方"), String.valueOf(scene));
     }
 
     @Test
@@ -479,12 +483,12 @@ class BattleTest {
         Battlefield.Me me = new Battlefield.Me(0, 64, 0, 0.3, 20, 0, 3.0, 0, true, false, 7, 4);
         CombatSenses.Threat above = new CombatSenses.Threat(1, UUID.randomUUID(), "minecraft:husk", 0.3, 67, 0.4, 3.1,
                 ThreatAssessment.Kind.MELEE, false, true, true, 0.3, 3.4, false, 2.02, false);
-        assertEquals("在高处，高出 3.0 格、水平 0.5 格，看得见，眼睛到它还差 0.4 格；已经站在能走到的最近处",
+        assertEquals("近战够不着：在高处，高出 3.0 格、水平 0.5 格，看得见，眼睛到它还差 0.4 格；已经站在能走到的最近处",
                 CombatLogLines.outOfReachScene(me, above, "已经站在能走到的最近处"));
 
         CombatSenses.Threat belowBehindBlocks = new CombatSenses.Threat(2, UUID.randomUUID(), "minecraft:zombie", 2, 60, 0,
                 4.5, ThreatAssessment.Kind.MELEE, false, false, true, 0.3, 4.2, false, 2.02, false);
-        assertEquals("在低处，低 4.0 格、水平 2.0 格，隔着方块看不见；已经站在能走到的最近处",
+        assertEquals("近战够不着：在低处，低 4.0 格、水平 2.0 格，隔着方块看不见；已经站在能走到的最近处",
                 CombatLogLines.outOfReachScene(me, belowBehindBlocks, "已经站在能走到的最近处"));
     }
 

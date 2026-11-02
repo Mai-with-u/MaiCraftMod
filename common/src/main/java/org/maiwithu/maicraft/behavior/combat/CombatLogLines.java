@@ -23,7 +23,7 @@ final class CombatLogLines {
         String sight = threat.visible()
                 ? "看得见，眼睛到它还差 " + tenths(Math.max(0, threat.reachGap() - me.reach())) + " 格"
                 : "隔着方块看不见";
-        return where + "、水平 " + tenths(flat) + " 格，" + sight + "；" + why;
+        return "近战够不着：" + where + "、水平 " + tenths(flat) + " 格，" + sight + "；" + why;
     }
 
     /**
