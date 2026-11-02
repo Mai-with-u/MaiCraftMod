@@ -75,4 +75,14 @@ class WaterFillSourceTest {
         world.put(1, 65, 1, Blocks.OAK_PLANKS.defaultBlockState());
         assertFalse(WaterFillSource.refills(world, new BlockPos(1, 64, 1)));
     }
+
+    @Test
+    void 装水瓶孤零零一格水源也行_头顶盖着的不装() {
+        World world = new World();
+        world.put(0, 63, 0, Blocks.COBBLESTONE.defaultBlockState());
+        world.put(0, 64, 0, Blocks.WATER.defaultBlockState());
+        assertTrue(WaterFillSource.bottleFills(world, new BlockPos(0, 64, 0)), "装水瓶不会把水装少，一格也行");
+        world.put(0, 65, 0, Blocks.OAK_PLANKS.defaultBlockState());
+        assertFalse(WaterFillSource.bottleFills(world, new BlockPos(0, 64, 0)), "头顶盖着对不准水面");
+    }
 }

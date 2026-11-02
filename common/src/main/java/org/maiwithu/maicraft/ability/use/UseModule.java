@@ -24,7 +24,11 @@ import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -49,6 +53,8 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 public final class UseModule implements AbilityModule {
 
     private final UseServices services;
+    /** 药水种类注册了哪些：potion 写错的不进世界，报相近的名字。 */
+    private final ReadsRegisteredIds registeredIds;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":use",
             "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
@@ -56,6 +62,9 @@ public final class UseModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                             .doc("手上拿什么；不给就空手。标签表示其中任意一种，例如 #minecraft:hoes").build(),
+                    ParamSpec.of("potion", ParamType.TEXT)
+                            .doc("拿哪种药水（药水种类 ID，例如 minecraft:fire_resistance）：身上几瓶药水长得一样时挑对得上的那瓶喝、扔；"
+                                    + "配 item 写三种药水瓶之一，不给 item 当普通药水瓶").build(),
                     ParamSpec.of("block", ParamType.BLOCK_OR_TAG)
                             .doc("没指定是哪一个时按它找最近的；指定了时核对目标是不是它").build(),
                     ParamSpec.of("entity", ParamType.ENTITY_TYPE)
@@ -80,8 +89,9 @@ public final class UseModule implements AbilityModule {
             List.of(),
             Listing.LISTED);
 
-    UseModule(UseServices services) {
+    UseModule(UseServices services, ReadsRegisteredIds registeredIds) {
         this.services = services;
+        this.registeredIds = registeredIds;
     }
 
     /**
@@ -109,7 +119,7 @@ public final class UseModule implements AbilityModule {
                 memory,
                 new LiveOthersThings(context, protection, creatures),
                 space,
-                facilities));
+                facilities), ClientRegisteredIds.builtIn());
     }
 
     @Override public AbilitySpec spec() {
@@ -120,6 +130,9 @@ public final class UseModule implements AbilityModule {
     @Override public StepDecision decide(StepContext step) {
         var params = step.goal().params();
         String item = params.has("item") ? params.text("item") : null;
+        // 点名了药水种类：瓶子不写当普通药水瓶；拿在手上的是写着这种药水的那一瓶，不随手拿第一瓶。
+        String potion = params.has("potion") ? lower(params.text("potion").trim()) : null;
+        if (potion != null && item == null) item = StackKey.PLAIN_POTION;
         String block = params.has("block") ? params.text("block") : null;
         String entity = params.has("entity") ? params.text("entity") : null;
         List<String> textLines = linesOf(params.has("text") ? params.text("text") : null);
@@ -127,6 +140,13 @@ public final class UseModule implements AbilityModule {
                 item, block, entity, textLines);
         if (textLines.size() > 4) {
             invalid.add("告示牌最多写 4 行，现在给了 " + textLines.size() + " 行");
+        }
+        if (potion != null && !StackKey.POTION_BOTTLES.contains(lower(item))) {
+            invalid.add("potion 只配药水瓶用（item 写 minecraft:potion、minecraft:splash_potion 或 "
+                    + "minecraft:lingering_potion，不写当普通药水瓶），这里配的是 " + item);
+        }
+        if (potion != null && !registeredIds.ids(IdKind.POTION).contains(potion)) {
+            invalid.add(registeredIds.missing(IdKind.POTION, potion));
         }
         if (!invalid.isEmpty()) {
             return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.FAILED, "参数用得不对")
@@ -146,7 +166,8 @@ public final class UseModule implements AbilityModule {
         // 点哪一面：只对方块有意义，对实体给了也不用。
         Direction face = params.has("face") ? Direction.byName(params.text("face")) : null;
         int keepTrying = params.has("keep_trying") ? (int) params.integer("keep_trying") : 0;
-        return new StepDecision.Run(new UseInput(step.goal().target(), lower(item), lower(block), lower(entity),
+        String held = potion == null ? lower(item) : new StackKey(lower(item), potion).written();
+        return new StepDecision.Run(new UseInput(step.goal().target(), held, lower(block), lower(entity),
                 count, radius, textLines, step.goal().permissions(), face, keepTrying));
     }
 

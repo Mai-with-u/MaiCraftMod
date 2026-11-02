@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.ability.use;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -14,8 +16,11 @@ import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
+import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
@@ -52,6 +57,15 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
         }
         if (matches(player.getMainHandItem(), item)) {
             return new UseSeams.HandPlan.Ready();
+        }
+        // 点名了药水种类：换到主手的是写着这种药水的那一格，几瓶长得一样也不拿错。
+        if (StackKey.parse(item).potion() != null) {
+            OptionalInt slot = carriedSlot(player.getInventory(), item);
+            if (slot.isEmpty()) return new UseSeams.HandPlan.NotCarried();
+            return toMainhand.actionToMainhandFrom(slot.getAsInt(), "把 " + item + " 换到主手")
+                    .<UseSeams.HandPlan>map(UseSeams.HandPlan.Move::new)
+                    .orElseGet(() -> new UseSeams.HandPlan.Cannot(Problem.of(Problem.Kind.STUCK,
+                            item + " 在身上却换不到主手", null)));
         }
         Optional<String> carried = carriedOutsideArmor(player.getInventory(), item);
         if (carried.isEmpty()) {
@@ -90,6 +104,14 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
         return Optional.empty();
     }
 
+    // 主背包与快捷栏（0–35）里第一格对得上的；副手的不在这里换，按身上没有处理，交给去拿。
+    private static OptionalInt carriedSlot(Inventory inventory, String item) {
+        for (int slot = 0; slot < FIRST_ARMOR_SLOT; slot++) {
+            if (matches(inventory.getItem(slot), item)) return OptionalInt.of(slot);
+        }
+        return OptionalInt.empty();
+    }
+
     private static boolean wornOnly(Inventory inventory, String item) {
         for (int slot = FIRST_ARMOR_SLOT; slot <= LAST_ARMOR_SLOT; slot++) {
             if (matches(inventory.getItem(slot), item)) return true;
@@ -97,13 +119,17 @@ final class LiveHandPreparation implements UseSeams.PreparesHand {
         return false;
     }
 
-    // 物品 ID 按注册名比；标签按物品自己挂没挂这个标签比，模组加进标签的物品也认。
+    // 物品 ID 按注册名比；标签按物品自己挂没挂这个标签比，模组加进标签的物品也认；
+    // 点名了药水种类的按这一格写着的种类比，和拿东西认药水同一个规矩。
     private static boolean matches(ItemStack stack, String item) {
         if (stack.isEmpty()) return false;
         String spec = item.toLowerCase(Locale.ROOT);
         if (spec.startsWith("#")) {
             ResourceLocation tagId = ResourceLocation.tryParse(spec.substring(1));
             return tagId != null && stack.is(TagKey.create(Registries.ITEM, tagId));
+        }
+        if (StackKey.parse(spec).potion() != null) {
+            return WantedItem.ofItem(spec).matches(ClientBackpackView.keyOf(stack), Set.of());
         }
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(spec);
     }
