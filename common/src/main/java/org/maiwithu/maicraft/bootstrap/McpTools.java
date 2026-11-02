@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
+import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
@@ -32,17 +33,26 @@ final class McpTools {
                                      TaskEventLog taskEvents, ChatEventLog chatEvents, Supplier<WorldScope> worldScope,
                                      RecentToolCalls recentCalls, LookupTool lookup,
                                      Supplier<List<Reminder>> reminders, ReservedItems reserved) {
+        LooksAfterReading looks = looksInWorld(worldScope);
         return new ToolDispatcher(List.of(
                 new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
                         () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork,
                         reminders, () -> worldScope.get() == null ? null : worldScope.get().menus(),
                         // 预留与身上各有几件：读的是客户端全程那一份，进世界时已换成这个世界存着的。
                         () -> reserved.list().stream().map(entry -> new SelfView.Reserved(entry.item(),
-                                entry.atLeast(), reserved.carriedFor(entry))).toList()),
+                                entry.atLeast(), reserved.carriedFor(entry))).toList(), looks),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
-                new ExecuteTool(abilities, goals, clientWork),
+                new ExecuteTool(abilities, goals, clientWork, looks),
                 new GoalTool(goals, clientWork),
                 new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);
+    }
+
+    /** 读完告诉当前世界的闲时看读了什么；不在世界里时没有角色可演，什么都不做。 */
+    static LooksAfterReading looksInWorld(Supplier<WorldScope> worldScope) {
+        return what -> {
+            WorldScope scope = worldScope.get();
+            if (scope != null) scope.idleLooking().justRead(what);
+        };
     }
 }

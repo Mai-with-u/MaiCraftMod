@@ -7,6 +7,8 @@ import com.google.gson.Gson;
 import com.google.gson.FieldNamingPolicy;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
+import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.ClientFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -49,6 +51,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<MenuView.Reads> menus;
     /** 调用方写下的预留与身上各有几件：observe(self) 每次都完整交出去，LLM 不用自己记。 */
     private final Supplier<List<SelfView.Reserved>> reserved;
+    /** 读完告诉闲时看读了什么：角色闲着时顺着看过去，读到的内容不变。 */
+    private final LooksAfterReading looks;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -70,6 +74,15 @@ public final class ObserveTool implements McpTool {
     public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
                        ClientThread clientThread, Supplier<List<Reminder>> reminders,
                        Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, LooksAfterReading.NONE);
+    }
+
+    /** @param looks 读完告诉闲时看读了什么；不演的给 {@link LooksAfterReading#NONE} */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks) {
+        this.looks = Objects.requireNonNull(looks, "looks");
         this.reserved = Objects.requireNonNull(reserved, "reserved");
         this.scene = Objects.requireNonNull(scene, "scene");
         this.memory = Objects.requireNonNull(memory, "memory");
@@ -114,13 +127,24 @@ public final class ObserveTool implements McpTool {
         if (currentScene == null || currentMemory == null) {
             throw new ClientThread.NotInWorld();
         }
-        return switch (what) {
+        JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
             case "detail" -> DetailView.of(currentScene, currentMemory, id).orElse(null);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self());
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid);
         };
+        // 看了自己、周围或某样东西：角色闲着时顺着看过去（开背包、转头、开手边的箱子）。
+        // 记忆、界面在世界里没有对应的东西可看，不演；读到的内容照旧当场返回，不等角色看完。
+        if (view != null) {
+            switch (what) {
+                case "self" -> looks.justRead(WhatWasRead.self());
+                case "scene" -> looks.justRead(WhatWasRead.surroundings());
+                case "detail" -> looks.justRead(WhatWasRead.seen(id));
+                default -> { }
+            }
+        }
+        return view;
     }
 
     // 此刻开着的界面：在客户端线程上当场读，读不到界面读端说明不在世界里。

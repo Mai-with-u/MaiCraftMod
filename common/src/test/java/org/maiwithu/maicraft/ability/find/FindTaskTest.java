@@ -145,6 +145,9 @@ class FindTaskTest {
         assertTrue(details.searchComplete() || true, "找满即收工，没扫完也可以收");
         assertEquals(2, memory.sites.size(), "视线验证过的方块命中写进世界记忆");
         assertEquals(List.of("minecraft:coal_ore"), memory.sites.get(0).roughlyThere());
+        // 读完结果，角色闲着时盯着最近的那个看：结果指着的只有它。
+        assertEquals(List.of(WorldPosition.here(0, 64, -8)), details.pointsAt());
+        assertFalse(details.sweep());
     }
 
     /** 扫描时的环顾替身：记下被推了几刻、收尾了没有；一直不做完，像真的环顾一样只转头。 */

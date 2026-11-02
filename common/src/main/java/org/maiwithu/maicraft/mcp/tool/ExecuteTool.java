@@ -2,6 +2,9 @@
 package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
+import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
+import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
@@ -42,6 +45,8 @@ public final class ExecuteTool implements McpTool {
     private final GoalRunTable table;
     private final ClientThread clientThread;
     private final GoalEstimates estimates;
+    /** 只读能力出完报告告诉闲时看：报告指着世界里的地方（看的那片机器、读的那一栋），角色闲着时顺着看过去。 */
+    private final LooksAfterReading looks;
     private final Map<String, Goal> plans = new LinkedHashMap<>() {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Goal> eldest) {
             return size() > KEPT_PLANS;
@@ -49,6 +54,12 @@ public final class ExecuteTool implements McpTool {
     };
 
     public ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread) {
+        this(registry, table, clientThread, LooksAfterReading.NONE);
+    }
+
+    /** @param looks 只读能力出完报告告诉闲时看；不演的给 {@link LooksAfterReading#NONE} */
+    public ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks) {
+        this.looks = Objects.requireNonNull(looks, "looks");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.reader = new GoalReader(registry);
         this.table = Objects.requireNonNull(table, "table");
@@ -110,7 +121,15 @@ public final class ExecuteTool implements McpTool {
     private JsonObject start(Goal goal, String requestKey, List<String> notes) {
         if (!controlsPlayer(goal)) {
             // 只读分析、只改记忆：当场做完，不交给控制循环，手上的主任务照常进行。
-            GoalRun run = clientThread.call(context -> table.runAside(goal, context));
+            GoalRun run = clientThread.call(context -> {
+                GoalRun aside = table.runAside(goal, context);
+                // 报告指着世界里的地方：角色闲着时从左到右扫过那片机器、那一栋，报告照旧当场返回。
+                if (aside.result() != null && aside.result().details() instanceof PointsAt points) {
+                    WhatWasRead pointed = WhatWasRead.pointedAt(points);
+                    if (pointed != null) looks.justRead(pointed);
+                }
+                return aside;
+            });
             return ToolReply.ok(ResultJson.goalRun(run, null, null), notes, null);
         }
         String key = requestKey == null ? UUID.randomUUID().toString() : requestKey;

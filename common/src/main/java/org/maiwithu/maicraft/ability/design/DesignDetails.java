@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.design;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -8,6 +9,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.ability.design.api.CompiledDesign;
 import org.maiwithu.maicraft.behavior.construction.BlueprintCheck;
 import org.maiwithu.maicraft.behavior.construction.BuildingLayout;
+import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
@@ -50,7 +52,10 @@ public record DesignDetails(
         JsonObject site,
         BuildingLayout layout,
         BlueprintCheck.Report check,
-        String archive) implements ResultDetails {
+        String archive) implements ResultDetails, PointsAt {
+
+    /** 读现场的那一栋高过这么多格，扫过去时再抬头看一眼顶。 */
+    static final int TALL_BLOCKS = 6;
 
     /** 包围盒的两个角。 */
     public record Bounds(List<Integer> min, List<Integer> max) {}
@@ -77,6 +82,32 @@ public record DesignDetails(
     static DesignDetails inspection(String id, String parentId, JsonObject text, BuildingLayout layout) {
         return new DesignDetails(id, parentId, null, null, null, null, null, null, text, null, null,
                 null, null, null, layout, null, null);
+    }
+
+    // LLM 读完现场，角色闲着时扫过那一栋：长的那一边两头与中间，高的再抬头看一眼顶；
+    // 读的是图纸（没落在现场）时没有可看的。
+    @Override public List<WorldPosition> pointsAt() {
+        if (site == null || anchor == null || bounds == null) return List.of();
+        int minX = anchor.x() + bounds.min().get(0);
+        int minY = anchor.y() + bounds.min().get(1);
+        int minZ = anchor.z() + bounds.min().get(2);
+        int maxX = anchor.x() + bounds.max().get(0);
+        int maxY = anchor.y() + bounds.max().get(1);
+        int maxZ = anchor.z() + bounds.max().get(2);
+        int midX = (minX + maxX) / 2;
+        int midY = (minY + maxY) / 2;
+        int midZ = (minZ + maxZ) / 2;
+        boolean alongX = maxX - minX >= maxZ - minZ;
+        List<WorldPosition> places = new ArrayList<>();
+        places.add(alongX ? at(minX, midY, midZ) : at(midX, midY, minZ));
+        places.add(at(midX, midY, midZ));
+        if (maxY - minY + 1 > TALL_BLOCKS) places.add(at(midX, maxY, midZ));
+        places.add(alongX ? at(maxX, midY, midZ) : at(midX, midY, maxZ));
+        return places;
+    }
+
+    private WorldPosition at(int x, int y, int z) {
+        return new WorldPosition(x, y, z, anchor.dimension());
     }
 
     DesignDetails withFile(String path, List<Integer> shift) {

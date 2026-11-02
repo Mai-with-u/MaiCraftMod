@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
 import org.maiwithu.maicraft.behavior.menu.OpenScreen;
@@ -55,6 +56,7 @@ import net.minecraft.core.BlockPos;
 
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -163,6 +165,9 @@ class ObserveToolTest {
         }
     }
 
+    /** observe 告诉闲时看的读：按顺序收着。 */
+    private final List<WhatWasRead> reads = new ArrayList<>();
+
     @BeforeEach
     void world() {
         memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "a".repeat(64));
@@ -197,7 +202,7 @@ class ObserveToolTest {
         };
         tools = new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
                 () -> inWorld ? memory : null, table, direct, () -> reminders,
-                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null),
+                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null, List::of, reads::add),
                 new ExecuteTool(registry, table, direct)));
     }
 
@@ -322,6 +327,17 @@ class ObserveToolTest {
         assertEquals(8, cobble.get("count").getAsInt(), "两格圆石合并成 8 件");
         assertEquals("minecraft:iron_sword", inventory.get(1).getAsJsonObject().get("item").getAsString());
         assertEquals(33, self.get("free_slots").getAsInt());
+    }
+
+    @Test
+    void readingTellsIdleLookingWhatWasReadButMemoryAndMistakesDoNot() {
+        // 看了自己、周围、某样东西：告诉闲时看，角色闲着时顺着看过去；记忆、界面、找不到的编号不演。
+        data(observe("{\"what\": \"self\"}"));
+        data(observe("{\"what\": \"scene\"}"));
+        data(observe("{\"what\": \"detail\", \"id\": \"e1\"}"));
+        data(observe("{\"what\": \"world_memory\"}"));
+        errorCode(observe("{\"what\": \"detail\", \"id\": \"e99\"}"));
+        assertEquals(List.of(WhatWasRead.self(), WhatWasRead.surroundings(), WhatWasRead.seen("e1")), reads);
     }
 
     @Test

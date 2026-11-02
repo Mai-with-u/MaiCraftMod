@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,8 @@ import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
 /**
@@ -36,7 +39,10 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  */
 record MachineDetails(List<NetworkView> networks, List<DeviceView> devices, List<Connection> connections,
                       List<UnrecognizedBlock> unrecognized, int unloadedCells, boolean scanComplete, String archive,
-                      ArchiveCheck.Result check, String note, SiteRead site) implements ResultDetails {
+                      ArchiveCheck.Result check, String note, SiteRead site) implements ResultDetails, PointsAt {
+
+    /** 读完看机器的结果，角色闲着时从左到右扫过的设备最多几台。 */
+    static final int GLANCED_DEVICES = 5;
 
     MachineDetails {
         networks = List.copyOf(networks);
@@ -44,6 +50,20 @@ record MachineDetails(List<NetworkView> networks, List<DeviceView> devices, List
         connections = List.copyOf(connections);
         unrecognized = List.copyOf(unrecognized);
         note = note == null ? "" : note;
+    }
+
+    // LLM 读完看机器的结果，角色闲着时顺着看过去：一台就看着它，一片就从左到右扫过其中几台设备。
+    @Override public List<WorldPosition> pointsAt() {
+        List<WorldPosition> places = new ArrayList<>();
+        for (DeviceView device : devices) {
+            if (places.size() >= GLANCED_DEVICES) break;
+            // 一格的看那一格，几格合成的看包围盒中间，装在线缆上的部件看它装的那一格。
+            BlockPos cell = device.at() != null ? device.at()
+                    : device.box() != null ? BlockPos.containing(device.box().min().getCenter().add(device.box().max().getCenter()).scale(0.5))
+                    : device.host();
+            if (cell != null) places.add(WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()));
+        }
+        return places;
     }
 
     /**

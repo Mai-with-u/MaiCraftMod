@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipes;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
@@ -40,9 +41,10 @@ final class LookupSources {
      * @param clientWork 读游戏现场的部分交给客户端线程
      * @param wikiOnline 启动开关：联网查 Wiki 开不开
      * @param minecraftVersion 本实例的 Minecraft 版本：联网查到的网页随回答带上它，版本对不上时一眼看得出
+     * @param looks      查完配方告诉闲时看：角色闲着时翻开那一页给观众看
      */
     static LookupTool lookupTool(AbilityRegistry abilities, CompatRegistry compat, Supplier<PlayerContext> now,
-            ClientThread clientWork, boolean wikiOnline, String minecraftVersion) {
+            ClientThread clientWork, boolean wikiOnline, String minecraftVersion, LooksAfterReading looks) {
         RecipeLookup recipes = new RecipeLookup(compat.recipeViewers(), new GameRecipeTable(GameRecipes.fromPlayer(now)));
         ReadsItemDescriptions items = new ClientItemDescriptions(now);
         // 群系与结构目录、配方里物品 ID 写错时挑相近的名字，都读这一份：群系从角色当刻所在世界的注册表读。
@@ -58,6 +60,6 @@ final class LookupSources {
                 : WebKnowledgeService.off();
         // 列能力时顶上那一行装了哪些联动模组，照登记表此刻的样子给：进没进世界都一样。
         return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork,
-                compat::installedModIds, wiki);
+                compat::installedModIds, wiki, looks);
     }
 }

@@ -11,6 +11,11 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.kernel.goal.GoalRunState;
+import org.maiwithu.maicraft.kernel.goal.GoalRun;
+import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
+import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
+import org.maiwithu.maicraft.behavior.perception.looking.IdleLooking;
 import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
@@ -451,7 +456,7 @@ public final class Bootstrap {
         // 查资料与查配方：来源与配方查看器按联动登记表拼，读游戏现场都按当刻的角色。
         private LookupTool lookupTool() {
             return LookupSources.lookupTool(abilities, compat, () -> playerControl.activeContext().orElse(null), clientWork,
-                    wikiOnline, loader.modVersion("minecraft").orElse("unknown"));
+                    wikiOnline, loader.modVersion("minecraft").orElse("unknown"), McpTools.looksInWorld(() -> worldScope[0]));
         }
 
         /** 建与服务端的会话，并在入服前登记客户端知道的操作清单。 */
@@ -625,18 +630,43 @@ public final class Bootstrap {
                 if (!owned) walks.humanTookPlayer();
                 else walks.automationTookPlayer();
             }
+            // 闲时看在控制循环之前推进：新目标或临时任务这一刻要用角色，它先收手，任务这一刻照常开始。
+            if (scope != null) {
+                tickGuard.run("闲时看", () -> scope.idleLooking().tick(new ClientTickContext(gameTick, current),
+                        lookingAvailability(owned)));
+            }
             if (owned) {
                 // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。
                 // 控制循环外面也兜一层：任务里的异常内核自己收，需求判断这类出错只跳过这一刻。
                 tickGuard.run("控制循环", () -> {
-                    if (controlLoop.tick(new ClientTickContext(gameTick, current)) instanceof ControlLoop.Decision.Parked parked
-                            && goals != null) {
+                    ControlLoop.Decision decision = controlLoop.tick(new ClientTickContext(gameTick, current));
+                    if (decision instanceof ControlLoop.Decision.Parked parked && goals != null) {
                         goals.mainParked(parked.where());
                     }
+                    if (scope != null) pointAtFinished(scope, decision);
                 });
             }
             // 本刻输入无论前面谁出错都要写进角色并收尾这一刻的控制边界。
             playerControl.endTick(current);
+        }
+
+        // 闲时看此刻能不能用角色：人按了 F8、临时任务占着、主任务在推进都不行；栈空着转头、开界面都行；
+        // 主目标在等回答或被暂停时只能转头，手上的任务停在哪就是哪。
+        private IdleLooking.Availability lookingAvailability(boolean owned) {
+            if (!owned || controlLoop.occupyingTemporaryTask() != null) return IdleLooking.Availability.TAKEN;
+            if (controlLoop.currentTask() == null) return IdleLooking.Availability.FREE;
+            GoalRunState state = goals == null ? null : goals.mainGoal().map(GoalRun::state).orElse(null);
+            return state == GoalRunState.AWAITING_ANSWER || state == GoalRunState.PAUSED
+                    ? IdleLooking.Availability.HEAD_ONLY : IdleLooking.Availability.TAKEN;
+        }
+
+        // 主目标这一刻做完、结果指着世界里的地方（find 找到的东西）：角色闲下来时顺着看过去。
+        private static void pointAtFinished(WorldScope scope, ControlLoop.Decision decision) {
+            if (decision instanceof ControlLoop.Decision.Advanced advanced && advanced.interrupting() == null
+                    && advanced.finished() != null && advanced.finished().details() instanceof PointsAt points) {
+                WhatWasRead pointed = WhatWasRead.pointedAt(points);
+                if (pointed != null) scope.idleLooking().justRead(pointed);
+            }
         }
 
         @Override public void stopping() {
@@ -660,6 +690,10 @@ public final class Bootstrap {
                                                  String sender, ChatType.Bound chatType) {
             if (minecraft.player == null) return;
             ClientReceivedChat.player(minecraft, line, content, senderId, sender, chatType).ifPresent(chatEvents::append);
+            // 有人在聊天里说话：角色闲着时转过去看他；自己说的回显不算。
+            if (worldScope[0] != null && senderId != null && !senderId.equals(minecraft.player.getUUID())) {
+                worldScope[0].idleLooking().someoneSpoke(senderId);
+            }
         }
 
         // 服务器的系统消息全收（进出、死亡播报、公告、命令反馈），动作栏提示不算聊天。

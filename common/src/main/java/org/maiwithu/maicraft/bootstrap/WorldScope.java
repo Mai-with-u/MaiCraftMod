@@ -83,6 +83,7 @@ import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.behavior.perception.looking.IdleLooking;
 import org.maiwithu.maicraft.game.world.RegistryBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfBrief;
@@ -131,6 +132,8 @@ public final class WorldScope {
     /** 模组的东西在角色周围多大范围里看（格）。 */
     private static final int THINGS_RADIUS = 64;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
+    /** 闲时看：闲着时像人一样看看；看什么从这个世界的场景来，开箱看到的记进这个世界的记忆。 */
+    private final IdleLooking idleLooking;
     /** 看界面要读的东西：开着的界面按这个世界认得出的界面（原版加联动模组的证明）读，交易界面再读报价。 */
     private final MenuView.Reads menus;
 
@@ -199,6 +202,9 @@ public final class WorldScope {
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
         this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
+        // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
+        this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
+                compat::recipePages, instanceConfig.idleLooking());
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
@@ -339,6 +345,11 @@ public final class WorldScope {
     /** observe(menu) 读的界面：开着的界面与交易报价。 */
     public MenuView.Reads menus() {
         return menus;
+    }
+
+    /** 闲时看：启动每刻在控制循环之前推进它，读信息的路径读完告诉它读了什么。 */
+    public IdleLooking idleLooking() {
+        return idleLooking;
     }
 
     public Scene scene() {

@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.find;
 
 import java.util.List;
 import java.util.Map;
+import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
@@ -16,11 +17,20 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param countByType     给了多种类型时，按类型分别找到几个
  */
 public record FindDetails(List<Found> found, int searchedRadius, boolean searchComplete,
-        Map<String, Integer> countByType) implements ResultDetails {
+        Map<String, Integer> countByType) implements ResultDetails, PointsAt {
 
     public FindDetails {
         found = List.copyOf(found);
         countByType = Map.copyOf(countByType);
+    }
+
+    // LLM 读完找的结果，角色闲着时看向最近的那个命中（命中由近到远排），盯着它看一会儿。
+    @Override public List<WorldPosition> pointsAt() {
+        return found.isEmpty() ? List.of() : List.of(found.get(0).position());
+    }
+
+    @Override public boolean sweep() {
+        return false;
     }
 
     /**

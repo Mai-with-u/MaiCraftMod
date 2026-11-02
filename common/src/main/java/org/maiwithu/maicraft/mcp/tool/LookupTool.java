@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
+import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.game.ModIdentity;
@@ -63,6 +65,8 @@ public final class LookupTool implements McpTool {
     private final ClientThread clientThread;
     private final Supplier<List<String>> installedMods;
     private final WikiTopic wiki;
+    /** 查完配方告诉闲时看：角色闲着时翻开那一页给观众看，查到的内容不变。 */
+    private final LooksAfterReading looks;
 
     /**
      * @param knowledge    知识库：随包常识、物品资料页与联动模组的资料来源
@@ -76,6 +80,14 @@ public final class LookupTool implements McpTool {
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
                       ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
                       Supplier<List<String>> installedMods, WebKnowledgeService web) {
+        this(registry, knowledge, recipes, items, registered, clientThread, installedMods, web, LooksAfterReading.NONE);
+    }
+
+    /** @param looks 查完配方告诉闲时看；不演的给 {@link LooksAfterReading#NONE} */
+    public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
+                      ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
+                      Supplier<List<String>> installedMods, WebKnowledgeService web, LooksAfterReading looks) {
+        this.looks = Objects.requireNonNull(looks, "looks");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
         this.recipes = Objects.requireNonNull(recipes, "recipes");
@@ -293,6 +305,8 @@ public final class LookupTool implements McpTool {
                 notes.add("在 " + making.readFrom() + " 里没有做出它的配方；这不代表拿不到，可能要挖、打、交易或在世界里找");
             }
         }
+        // 查了这一样的配方：角色闲着时翻开查看器的那一页（没装查看器就对着背包盘算一会儿）。
+        looks.justRead(WhatWasRead.recipe(itemId, uses));
         return ToolReply.ok(data, notes, null);
     }
 
