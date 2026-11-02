@@ -50,7 +50,8 @@ public final class ClientSelfSight implements SelfSight {
             effects.add(effect.getEffect().value().getDisplayName().getString());
         }
         return new Facts(
-                player.getX(), player.getY(), player.getZ(), player.getYRot(),
+                // 朝向按角色朝哪边读：闲着转头看东西时仍是站定的那个方向，前后左右不跟着头走。
+                player.getX(), player.getY(), player.getZ(), current.facingYaw(),
                 // 血量原样带小数传上去：低于 1 的存活血量取整会变成 0，被读成已死。
                 player.getHealth(), player.getFoodData().getFoodLevel(),
                 player.getAirSupply(), player.getMaxAirSupply(),

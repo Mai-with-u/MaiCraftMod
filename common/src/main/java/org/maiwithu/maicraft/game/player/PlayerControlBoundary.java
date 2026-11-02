@@ -46,6 +46,8 @@ public final class PlayerControlBoundary {
     private long mainHandSince = Long.MIN_VALUE;
     /** 服务器最近一次整包发来背包的是哪具身体：换了身体要等新身体自己的那一包，才知道身上真有什么。 */
     private LocalPlayer backpackReceivedFor;
+    /** 只为看东西转头时角色朝哪边：跨刻保管，换了身体清掉。 */
+    private final StandingFacing standingFacing = new StandingFacing();
     private DefaultPlayerContext activeContext;
     private boolean windowControlActive;
     private boolean restoreMouseOnRelease;
@@ -111,6 +113,8 @@ public final class PlayerControlBoundary {
             forBoundaryEntry(entry -> entry.revokeForBoundary("the local player was replaced"));
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
+            // 新身体从头算朝向：上一具身体站定朝哪与它无关。
+            standingFacing.forget();
         }
         input.beginTick(tickRevision);
         updateWindowControl(input.effectiveAutomationRequested());
@@ -317,6 +321,11 @@ public final class PlayerControlBoundary {
      */
     long mainHandHeldSince(LocalPlayer player) {
         return player.getMainHandItem().getItem() != mainHandAtStart ? tickRevision : mainHandSince;
+    }
+
+    /** 这具身体的站定朝向。 */
+    StandingFacing standingFacing() {
+        return standingFacing;
     }
 
     /**

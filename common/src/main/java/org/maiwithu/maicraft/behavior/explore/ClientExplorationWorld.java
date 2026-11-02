@@ -66,8 +66,9 @@ public final class ClientExplorationWorld implements ExplorationWorld {
 
     @Override
     public Float facingYaw() {
-        LocalPlayer player = player();
-        return player == null ? null : player.getYRot();
+        // 扇形朝向按角色朝哪边固定：闲着转头看东西时仍是站定的那个方向。
+        PlayerContext current = context.get();
+        return current == null || current.localPlayer() == null ? null : current.facingYaw();
     }
 
     @Override

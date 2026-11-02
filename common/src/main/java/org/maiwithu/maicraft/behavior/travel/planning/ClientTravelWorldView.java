@@ -88,7 +88,8 @@ public final class ClientTravelWorldView implements TravelWorldView {
         if (current == null || current.localPlayer() == null) {
             return null;
         }
-        return towardOf(current.localPlayer().getYRot());
+        // "往前"按角色朝哪边解析：闲着转头看东西时仍是站定的那个方向，LLM 读观察时的前方不变。
+        return towardOf(current.facingYaw());
     }
 
     /**
