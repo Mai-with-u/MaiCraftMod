@@ -90,6 +90,17 @@ class CaveWalkTaskTest {
     }
 
     @Test
+    void 站在半砖上脚下读成下面一格_照常量路开走() {
+        cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(40, 64, 1));
+        cave.feet = new BlockPos(5, 63, 0);
+
+        TaskResult result = run(task(plan(2048)), 2000);
+
+        assertEquals(ExploreDetails.StopReason.FRONTIERS_EXHAUSTED, details(result).stopReason(), result.summary());
+        assertFalse(walks.started.isEmpty(), "量完路就走，不在原地反复重量");
+    }
+
+    @Test
     void 在地面上走到最近的看得见的洞口_记成到访过的洞口() {
         cave.openGround(new BlockPos(-20, 64, -1), new BlockPos(-1, 64, 1));
         cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(30, 64, 1));

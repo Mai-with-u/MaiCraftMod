@@ -83,6 +83,8 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
 
     private BlockPos entrance;
     private WalkableArea area;
+    /** 这一份量路是在哪一格量的（角色脚下）。 */
+    private BlockPos areaFrom;
     private Leg leg;
     /** 下一次"看一眼"要不要转头：走到新地方转一圈；一段没走到、原地重挑就不再转。 */
     private boolean turnHead = true;
@@ -149,9 +151,7 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
 
     /** 起步：先从脚下量一圈；头顶有遮挡、量得到一片暗处就是已经在洞里，就地开始，不然去最近的看得见的洞口。 */
     private Next<Phase> tickStart(BlockPos feet) {
-        if (area == null || !area.start().equals(feet)) {
-            area = new WalkableArea(world, feet, plan.permit().mayChangeTerrain());
-        }
+        measureFrom(feet);
         if (!area.tick()) {
             return Next.stay();
         }
@@ -242,10 +242,17 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
         waitedTicks = 0;
         WorldPosition spot = world.currentSpot();
         BlockPos feet = spot == null ? origin : feetOf(spot);
-        if (area == null || !area.start().equals(feet)) {
-            area = new WalkableArea(world, feet, plan.permit().mayChangeTerrain());
-        }
+        measureFrom(feet);
         return turning;
+    }
+
+    // 从脚下量路；脚还在上次量的那一格就接着用那一份。站在半砖上时量路从上面一格量起，
+    // 所以按"从哪一格开始量的"比，不按量路自己的起点比，免得每刻重量、永远量不完。
+    private void measureFrom(BlockPos feet) {
+        if (area == null || !feet.equals(areaFrom)) {
+            area = new WalkableArea(world, feet, plan.permit().mayChangeTerrain());
+            areaFrom = feet;
+        }
     }
 
     /** 看一眼：转头的同时量路、补矿的索引；三样都好了才挑下一段，不让人转完头再站着等。 */
