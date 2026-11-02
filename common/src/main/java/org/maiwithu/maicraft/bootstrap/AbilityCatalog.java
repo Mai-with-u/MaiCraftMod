@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
+import org.maiwithu.maicraft.behavior.explore.cave.RememberedCaveEntrances;
 import org.maiwithu.maicraft.behavior.explore.endereye.ClientEnderEyes;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.looking.LookAround;
@@ -542,14 +543,15 @@ public final class AbilityCatalog {
         // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；走到由内嵌 Baritone 执行，
         // 路上垫的方块从走到实现方读回。跨维度的现场部件一次拼好：找门、进门、建门与末地门房间共用。
         // 联动登记的出行方式（电梯、喷气背包、火车）进世界时建好交给出行：远处或走不通时比它们的报价。
-        // 回露天往上挖楼梯和往下挖楼梯读同一份现场、挖一格用同一套原生挖掘。
+        // 回露天往上挖楼梯和往下挖楼梯读同一份现场、挖一格用同一套原生挖掘；钻洞进过的洞口从世界记忆里读，
+        // 离得近先寻路走回去。
         registry.register(new TravelAbility(deps.travel().walks(),
                 new DestinationResolver(deps.travel().travelWorld(), deps.world().memory(),
                         new SceneSeenTargets(deps.world()::scene)),
                 deps.travel().walkInternals(), deps.travel().travelProgress(), portals,
                 deps.travel().travelWorld(), VehicleWiring.travelModes(deps, services, portals),
                 new ClientStairsUp(new LiveStairsSite(deps.travel().walks()), shared.digging(), permission),
-                stairsDown(deps, shared)));
+                stairsDown(deps, shared), new RememberedCaveEntrances(deps.world().memory())));
 
         registerFind(registry, deps, shared);
 

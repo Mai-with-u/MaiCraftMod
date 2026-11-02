@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.travel.modes.DimensionTravelTask;
 import org.maiwithu.maicraft.behavior.travel.planning.JourneyTask;
 import org.maiwithu.maicraft.behavior.travel.settle.OpenSkySpots;
 import org.maiwithu.maicraft.behavior.travel.settle.ReachOpenSkyTask;
+import org.maiwithu.maicraft.behavior.explore.cave.CaveEntrances;
 import org.maiwithu.maicraft.behavior.travel.settle.ReadsPlacedBlocks;
 import org.maiwithu.maicraft.behavior.travel.planning.SameDimensionTravel;
 import org.maiwithu.maicraft.behavior.travel.planning.StandableWidening;
@@ -83,6 +84,8 @@ public final class TravelAbility implements AbilityModule {
     private final DigsStairsUp stairsUp;
     /** 往下挖台阶下探；没接上为 null，长下掘起步不了时拆不了下掘段。 */
     private final DigsStairsDown stairsDown;
+    /** 钻洞进过的洞口：回露天离得近就走回去，远了排在最后。 */
+    private final CaveEntrances caveEntrances;
     /** 跨维度那一程前后在同一个维度里的那段怎么建：和下达同维度出行同一个取舍。 */
     private final SameDimensionTravel sameDimension = new SameDimensionTrips();
 
@@ -119,6 +122,16 @@ public final class TravelAbility implements AbilityModule {
             ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
             DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes,
             DigsStairsUp stairsUp, DigsStairsDown stairsDown) {
+        this(walks, resolver, placedBlocks, progressListener, dimensionServices, world, modes, stairsUp, stairsDown,
+                CaveEntrances.NONE);
+    }
+
+    /** @param caveEntrances 钻洞进过的洞口：回露天离得近就寻路走回去，远了排在挖楼梯、找远处露天之后 */
+    public TravelAbility(WalkTo walks, DestinationResolver resolver,
+            ReadsPlacedBlocks placedBlocks, TravelProgressListener progressListener,
+            DimensionTravelServices dimensionServices, TravelWorldView world, List<TravelMode> modes,
+            DigsStairsUp stairsUp, DigsStairsDown stairsDown, CaveEntrances caveEntrances) {
+        this.caveEntrances = caveEntrances;
         this.stairsUp = stairsUp;
         this.stairsDown = stairsDown;
         this.walks = walks;
@@ -322,8 +335,9 @@ public final class TravelAbility implements AbilityModule {
                 input -> travelTask(input.destination(), input.maxSeconds(), input.permit(), input.permissions()));
         factories.register(JourneyInput.class, input -> journeyTask(input.journey(), input.permit()));
         factories.register(OpenSkyInput.class, input -> {
-            // 回露天：旁边见天先走出去，许可动土时挖楼梯上去，再不行找路走到远处的露天落脚处。
-            return new ReachOpenSkyTask(input.maxSeconds(), input.permissions(), world, walks, stairsUp, placedBlocks);
+            // 回露天：旁边见天先走出去，进来的洞口近就走回去，许可动土时挖楼梯上去，再不行找路走到远处的露天落脚处。
+            return new ReachOpenSkyTask(input.maxSeconds(), input.permissions(), world, walks, stairsUp, placedBlocks,
+                    caveEntrances);
         });
         factories.register(DimensionTravelInput.class, input -> {
             // 跨维度行程：找门、进门、建门与末地门房间都从这个任务里按阶段走；到了接着去坐标、

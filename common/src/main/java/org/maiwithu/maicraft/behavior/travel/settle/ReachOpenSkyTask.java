@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
+import org.maiwithu.maicraft.behavior.explore.cave.CaveEntrances;
 import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -31,25 +32,32 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
 
 /**
  * 回露天：人在地下、屋里、崖檐下时回到头顶见天的地面上。
  *
- * <p>先看一眼：旁边几步就见天就直接走出去；不行、许可又能动土，就斜着往上挖楼梯；楼梯挖不下去或不许动土，
- * 再找远处的露天落脚处交给走到去找路，最多换三回。脚下露天（忽略树叶的最高遮挡物就在脚底）才算到。
+ * <p>先看一眼：旁边几步就见天就直接走出去；钻洞进来的洞口离得近（48 格内），寻路走回洞口；不行、许可又能动土，
+ * 就斜着往上挖楼梯；楼梯挖不下去或不许动土，再找远处的露天落脚处交给走到去找路，最多换三回；都不行，
+ * 进来的洞口还在已加载区里，最后寻路去一趟。只去洞口这一个地方，不倒着重放来时走过的格子。
+ * 脚下露天（忽略树叶的最高遮挡物就在脚底）才算到。
  * 走路那几段垫的方块、挖开的方块、路上捡的东西和楼梯挖掉的方块都如实进结果；都不行就说清找了多大范围。
  */
 public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> implements TorchesAlongTheWay {
 
-    /** 回露天的阶段：看一眼该怎么出去 → 走出去，或挖楼梯上去。 */
-    public enum Phase { LOOK, WALK, CLIMB }
+    /** 回露天的阶段：看一眼该怎么出去 → 走出去、走回进来的洞口，或挖楼梯上去。 */
+    public enum Phase { LOOK, WALK, TO_ENTRANCE, CLIMB }
 
     /** 连续半分钟没有真实进展（挖掉一格、上一级、离露天落脚处更近）算卡住。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
     /** 找路走到远处露天落脚处最多换几回：走到了却没见天、走不到，都换一回。 */
     static final int FAR_WALKS = 3;
+    /** 进来的洞口离脚下直线不超过这么多格算近：洞里两三段路，寻路回去不到半分钟，排在挖楼梯前面。 */
+    static final int NEAR_ENTRANCE = 48;
+    /** 远了的洞口最多找这么远（格），还要在已加载区里：前面的办法都不行才去。 */
+    static final int FAR_ENTRANCE = 512;
 
     private final TerrainPermit permit;
     private final Permissions permissions;
@@ -57,8 +65,14 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
     private final WalkTo walks;
     private final DigsStairsUp stairs;
     private final ReadsPlacedBlocks placedBlocks;
+    /** 钻洞进来时记下的洞口：近了先走回去，远了排在最后。 */
+    private final CaveEntrances entrances;
 
     private boolean triedNear;
+    private boolean triedNearEntrance;
+    private boolean triedFarEntrance;
+    private final Set<BlockPos> triedEntrances = new HashSet<>();
+    private BlockPos entrance;
     private boolean triedClimb;
     private int farWalks;
     private boolean climbed;
@@ -86,9 +100,10 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
      * @param maxSeconds  最多做多久（秒）；不超过 0 表示不设时限
      * @param permissions 这次的许可：能不能挖楼梯、走路能动多少地形都按它
      * @param stairs      往上挖楼梯；没接上为 null，只走路
+     * @param entrances   钻洞进过的洞口；不记得的给 {@link CaveEntrances#NONE}，回露天照旧
      */
     public ReachOpenSkyTask(int maxSeconds, Permissions permissions, TravelWorldView world, WalkTo walks,
-            DigsStairsUp stairs, ReadsPlacedBlocks placedBlocks) {
+            DigsStairsUp stairs, ReadsPlacedBlocks placedBlocks, CaveEntrances entrances) {
         super("回露天", Phase.LOOK, new ProgressTracker(STUCK_AFTER_TICKS,
                 maxSeconds > 0 ? maxSeconds * 20L : Long.MAX_VALUE));
         this.permissions = permissions;
@@ -97,6 +112,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         this.walks = walks;
         this.stairs = stairs;
         this.placedBlocks = placedBlocks;
+        this.entrances = entrances;
     }
 
     @Override
@@ -104,6 +120,11 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         return switch (phase) {
             case LOOK -> null;
             case WALK -> startWalk();
+            case TO_ENTRANCE -> {
+                // 一次只给走到洞口这一个目的地，正常寻路过去；到洞口附近站定就行。
+                walk = walks.start(GoalCompiler.near(entrance, 2), permit);
+                yield walk;
+            }
             case CLIMB -> stairs.digUp(feet -> OpenSkySpots.underOpenSky(world, feet), permissions, records());
         };
     }
@@ -121,11 +142,13 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         return switch (phase) {
             case LOOK -> look();
             case WALK -> tickWalk(context);
+            case TO_ENTRANCE -> tickToEntrance(context);
             case CLIMB -> tickClimb(context);
         };
     }
 
-    // 看一眼：露天了就到了；旁边几步见天先走出去；许可能动土就挖楼梯；再不行找路走到远处的露天落脚处；都试过如实收场。
+    // 看一眼：露天了就到了；旁边几步见天先走出去；进来的洞口近就走回去；许可能动土就挖楼梯；
+    // 再不行找路走到远处的露天落脚处；还不行去远一点的洞口；都试过如实收场。
     private Next<Phase> look() {
         BlockPos feet = feetNow();
         if (feet == null) return Next.stay();
@@ -138,6 +161,10 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
                 walkingFar = false;
                 return Next.go(Phase.WALK, "旁边几步就见天，先走出去");
             }
+        }
+        if (!triedNearEntrance) {
+            triedNearEntrance = true;
+            if (pickEntrance(NEAR_ENTRANCE)) return Next.go(Phase.TO_ENTRANCE, "进来的洞口离得近，寻路走回洞口");
         }
         if (!triedClimb && stairs != null && mayDig()) {
             triedClimb = true;
@@ -152,7 +179,52 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
                 return Next.go(Phase.WALK, "找路走到远处的露天落脚处");
             }
         }
+        if (!triedFarEntrance) {
+            triedFarEntrance = true;
+            if (pickEntrance(FAR_ENTRANCE)) return Next.go(Phase.TO_ENTRANCE, "前面的办法都不行，寻路去进来的洞口");
+        }
         return Next.fail(giveUp());
+    }
+
+    // 找一个进过的洞口：在这么远以内、没去过、所在那一列加载着（没加载的走到也认不出路）。
+    private boolean pickEntrance(int within) {
+        WorldPosition here = world.currentSpot();
+        if (here == null) return false;
+        Optional<BlockPos> found = entrances.nearestEntered(here, within)
+                .map(position -> new BlockPos(position.x(), position.y(), position.z()))
+                .filter(position -> !triedEntrances.contains(position))
+                .filter(position -> world.column(position.getX(), position.getZ()).loaded());
+        if (found.isEmpty()) return false;
+        entrance = found.get();
+        triedEntrances.add(entrance);
+        spots = List.of(entrance);
+        bestGap = Double.MAX_VALUE;
+        return true;
+    }
+
+    // 走回洞口：走到了脚下露天就到了；洞口外面还盖着（崖檐下的洞口）就回去再看一眼旁边；走不到记一笔换下一个办法。
+    private Next<Phase> tickToEntrance(TickContext context) {
+        ActionStatus status = runAction(context);
+        WalkReport report = walk.report();
+        observeWalk(report);
+        if (report.state() == WalkReport.State.STOPPED) {
+            if (stopping()) return Next.stay();
+            walk.resume();
+            return Next.stay();
+        }
+        if (status instanceof ActionStatus.Running) return Next.stay();
+        settleWalkFacts();
+        BlockPos feet = feetNow();
+        if (feet != null) lastFeet = feet;
+        String tried = "走回进来的洞口 " + shortSpot(entrance);
+        if (status instanceof ActionStatus.Failed failed) {
+            recordAttempt(tried, failed.problem().message());
+            return Next.go(Phase.LOOK, "洞口没走到，换个办法");
+        }
+        if (lastFeet != null && OpenSkySpots.underOpenSky(world, lastFeet)) return arrived();
+        recordAttempt(tried, "走到了洞口，头顶还盖着");
+        triedNear = false;
+        return Next.go(Phase.LOOK, "到了洞口头顶还盖着，再看一眼旁边");
     }
 
     private Next<Phase> tickWalk(TickContext context) {
@@ -318,6 +390,7 @@ public final class ReachOpenSkyTask extends PhasedTask<ReachOpenSkyTask.Phase> i
         return switch (value) {
             case LOOK -> "回露天：看怎么出去";
             case WALK -> walkingFar ? "回露天：找路走出去" : "回露天：走到旁边见天的地方";
+            case TO_ENTRANCE -> "回露天：走回进来的洞口";
             case CLIMB -> "回露天：往上挖楼梯";
         };
     }

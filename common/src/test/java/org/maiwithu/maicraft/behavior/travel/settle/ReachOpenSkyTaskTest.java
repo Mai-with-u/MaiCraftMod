@@ -11,6 +11,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
@@ -18,6 +19,7 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsUp;
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
+import org.maiwithu.maicraft.behavior.explore.cave.CaveEntrances;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
@@ -39,8 +41,8 @@ import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 
 /**
- * 回露天：露天落脚处按远近找；旁边几步见天先走出去；地下许可动土就挖楼梯；楼梯挖不下去或不许动土找路走；
- * 都不行如实说找了多大范围。
+ * 回露天：露天落脚处按远近找；旁边几步见天先走出去；钻洞进来的洞口近就寻路走回去；地下许可动土就挖楼梯；
+ * 楼梯挖不下去或不许动土找路走；还不行才去远处的洞口；都不行如实说找了多大范围。
  */
 class ReachOpenSkyTaskTest {
 
@@ -132,9 +134,19 @@ class ReachOpenSkyTaskTest {
     private final Sky sky = new Sky();
     private final Stairs stairs = new Stairs();
     private final Walks walks = new Walks();
+    /** 进过的洞口：没摆就是什么都不记得。 */
+    private WorldPosition entrance;
+    private final CaveEntrances entrances = (from, within) -> {
+        if (entrance == null) return Optional.empty();
+        double dx = entrance.x() - from.x();
+        double dy = entrance.y() - from.y();
+        double dz = entrance.z() - from.z();
+        return Math.sqrt(dx * dx + dy * dy + dz * dz) <= within ? Optional.of(entrance) : Optional.empty();
+    };
 
     private TaskResult run(Permissions permissions) {
-        ReachOpenSkyTask task = new ReachOpenSkyTask(0, permissions, sky, walks, stairs, new TravelFakes.FakePlaced());
+        ReachOpenSkyTask task = new ReachOpenSkyTask(0, permissions, sky, walks, stairs, new TravelFakes.FakePlaced(),
+                entrances);
         TravelFakes.TestTick tick = new TravelFakes.TestTick();
         task.start(tick);
         for (int i = 0; i < 2000; i++) {
@@ -235,5 +247,74 @@ class ReachOpenSkyTaskTest {
         run(changes(Permissions.BlockChanges.TEMPORARY));
 
         assertEquals(0, stairs.calls);
+    }
+
+    @Test
+    void 进来的洞口离得近_寻路走回洞口_只给洞口这一个目的地() {
+        entrance = WorldPosition.here(20, 60, 0);
+        walks.enqueue(WalkReport.arrived(new BlockPos(20, 70, 0), false));
+
+        TaskResult result = run(changes(Permissions.BlockChanges.NONE));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, walks.started.size());
+        assertEquals(new BlockPos(20, 60, 0), walks.started.getFirst().goal().center(), "只去洞口，不倒着重放来时的路");
+        assertFalse(walks.started.getFirst().goal() instanceof NavGoal.Composite);
+        assertEquals(0, stairs.calls, "洞口近，排在挖楼梯前面");
+    }
+
+    @Test
+    void 洞口外面还盖着_回去再看一眼旁边() {
+        entrance = WorldPosition.here(0, 70, 0);
+        for (int z = -8; z <= 8; z++) for (int x = -8; x <= 2; x++) sky.top(x, z, 74);
+        walks.enqueue(WalkReport.arrived(new BlockPos(0, 70, 0), false));
+        walks.enqueue(WalkReport.arrived(new BlockPos(3, 70, 0), false));
+
+        TaskResult result = run(Permissions.DEFAULT);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(2, walks.started.size(), "先到洞口，再走到旁边见天的地方");
+        assertTrue(walks.started.get(1).goal() instanceof NavGoal.Composite);
+        assertEquals(0, stairs.calls);
+    }
+
+    @Test
+    void 洞口离得远_先照平常的出法挖楼梯() {
+        entrance = WorldPosition.here(100, 60, 0);
+
+        TaskResult result = run(Permissions.DEFAULT);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, stairs.calls);
+        assertTrue(walks.started.isEmpty(), "远了不往回走");
+    }
+
+    @Test
+    void 远了前面都不行_最后才去洞口() {
+        entrance = WorldPosition.here(100, 60, 0);
+        Problem blocked = Problem.of(Problem.Kind.UNREACHABLE, "找不到路");
+        for (int i = 0; i < ReachOpenSkyTask.FAR_WALKS; i++) {
+            walks.enqueue(WalkReport.failed(blocked, new BlockPos(0, 40, 0), false));
+        }
+        walks.enqueue(WalkReport.arrived(new BlockPos(100, 70, 0), false));
+
+        TaskResult result = run(changes(Permissions.BlockChanges.NONE));
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(ReachOpenSkyTask.FAR_WALKS + 1, walks.started.size());
+        assertEquals(new BlockPos(100, 60, 0), walks.started.getLast().goal().center());
+    }
+
+    @Test
+    void 洞口走不到_接着照平常的出法() {
+        entrance = WorldPosition.here(20, 60, 0);
+        walks.enqueue(WalkReport.failed(Problem.of(Problem.Kind.UNREACHABLE, "洞里塌了"), new BlockPos(0, 40, 0), false));
+
+        TaskResult result = run(Permissions.DEFAULT);
+
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, stairs.calls, "洞口走不到就挖楼梯");
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().startsWith("走回进来的洞口")
+                && attempt.result().contains("洞里塌了")), result.attempts().toString());
     }
 }
