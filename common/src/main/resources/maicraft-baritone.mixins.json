@@ -9,7 +9,8 @@
     "MixinClientChunkProvider",
     "MixinPlayerController",
     "MixinEntity",
-    "MixinLivingEntity"
+    "MixinLivingEntity",
+    "MixinLocalPlayerMinorCollision"
   ],
   "injectors": {
     "defaultRequire": 1
