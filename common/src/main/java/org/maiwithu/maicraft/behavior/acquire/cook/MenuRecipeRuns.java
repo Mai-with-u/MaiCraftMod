@@ -6,7 +6,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.function.ToIntFunction;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -17,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.SmithingRecipe;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
@@ -54,6 +57,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *       就逐格摆（见 {@link CraftingGridFill}），一次摆几份、一下取走；</li>
  *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取（见 {@link FurnaceRun}）；</li>
  *   <li>锻造台：模板、要升级的物品、升级材料依次 shift 点进三格，一件一件升级（见 {@link SmithingRun}）；</li>
+ *   <li>酿造台：燃料、瓶子、材料各放一件，看见冒泡就关上界面等，酿完一步回来放下一步的材料（见 {@link BrewingRun}）；</li>
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
  *       多的放回原格；再按下这条配方的按钮，取走产出。关界面时原版会把投入口剩下的还回背包。</li>
  * </ul>
@@ -62,7 +66,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 每一下点击都等游戏确认再点下一下；设施到现场不在、点不开、界面认不出都如实失败，引擎换别的路。
  * 做完把这台设施记成"亲手用过的工作站"。
  */
-public final class MenuRecipeRuns implements RecipeRuns {
+public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
 
     /** 一下点击等游戏确认的期限（刻）。 */
     private static final int CLICK_TIMEOUT_TICKS = 100;
@@ -82,6 +86,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
     private static final String STONECUTTER_MENU = "minecraft:stonecutter";
     /** 锻造台界面的类型注册 ID。 */
     private static final String SMITHING_MENU = "minecraft:smithing";
+    /** 酿造台界面的类型注册 ID。 */
+    private static final String BREWING_MENU = "minecraft:brewing_stand";
 
     // 容器侧格子的次序（原版界面布局）：石切台 0 投入口、1 产出格；工作台 0 产出格、1 到 9 合成格。
     private static final int CUTTER_INPUT = 0;
@@ -138,19 +144,36 @@ public final class MenuRecipeRuns implements RecipeRuns {
         });
     }
 
+    // 照一整条酿药水：酿造台关着界面等、回来接着放，单独一个动作；备料与清点身上由来源交进来。
+    @Override
+    public Optional<Action> brew(BrewPlan plan, List<WorldPosition> stands, Permissions permissions, TaskRecords records,
+            ItemNeeds needs, ToIntFunction<String> carried, Consumer<WorldPosition> occupied) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null || stands.isEmpty()) return Optional.empty();
+        String doing = "酿" + plan.target().written();
+        return Optional.of(new BrewingRun(plan, stands,
+                at -> visit(WorkstationRecipe.Kind.BREWING, doing, at, permissions),
+                needs, carried, occupied, permissions, memory, records));
+    }
+
     // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。
     private StationVisit visit(WorkstationRecipe recipe, WorldPosition station, Permissions permissions) {
         String doing = (recipe.kind().cooks() ? "烧" : "做") + recipe.result().describe();
-        String menuType = switch (recipe.kind()) {
+        return visit(recipe.kind(), doing, station, permissions);
+    }
+
+    private StationVisit visit(WorkstationRecipe.Kind kind, String doing, WorldPosition station, Permissions permissions) {
+        String menuType = switch (kind) {
             case CRAFTING -> CRAFTING_MENU;
             case SMELTING -> FURNACE_MENU;
             case BLASTING -> BLAST_FURNACE_MENU;
             case SMOKING -> SMOKER_MENU;
             case STONECUTTING -> STONECUTTER_MENU;
             case SMITHING -> SMITHING_MENU;
+            case BREWING -> BREWING_MENU;
         };
         return new StationVisit(close, interactions, context, station, permissions,
-                workstationName(recipe.kind()), doing, reading -> menuTypeIs(reading, menuType));
+                workstationName(kind), doing, reading -> menuTypeIs(reading, menuType));
     }
 
     // 界面类型对得上这种设施才动手。

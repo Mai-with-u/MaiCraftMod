@@ -24,12 +24,13 @@ import org.maiwithu.maicraft.behavior.acquire.engine.BackpackWithArmor;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHunts;
+import org.maiwithu.maicraft.behavior.acquire.cook.ClientBrewingReads;
+import org.maiwithu.maicraft.behavior.acquire.sources.BrewingSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveTransformSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveWorkTools;
 import org.maiwithu.maicraft.behavior.acquire.cook.MenuRecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.trade.MerchantTradeTakes;
 import org.maiwithu.maicraft.behavior.acquire.sources.MiningSource;
-import org.maiwithu.maicraft.behavior.acquire.cook.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.sources.RecipeSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.TakesOffWornGear;
 import org.maiwithu.maicraft.behavior.acquire.sources.ReclaimSource;
@@ -73,7 +74,7 @@ final class AcquisitionWiring {
             ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
-        RecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
+        MenuRecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
                 recipeReads, deps.world().memory(), deps.character().context());
         ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context());
         // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
@@ -94,6 +95,10 @@ final class AcquisitionWiring {
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission,
                 new TakesOffWornGear(deps.character().equipment(), playerServices.gear(), deps.character().backpack(),
                         deps.items().itemTags()));
+        // 酿造台一条路：照客户端那份酿造表一步一步酿药水，等的时候顺手备后面几炉的料；就地摆的酿造台放下就留着。
+        BrewingSource brewSource = new BrewingSource(new ClientBrewingReads(deps.character().context()),
+                deps.world().memory(), recipeRuns, placer, innerNeeds, deps.character().backpack(),
+                deps.character().offhand(), deps.items().itemTags());
         // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
         MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
                 permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
@@ -107,7 +112,7 @@ final class AcquisitionWiring {
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags());
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                containerSource, craftSource, smeltSource, smithSource, miningSource, harvestSource,
+                containerSource, craftSource, smeltSource, smithSource, brewSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
                 new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags()),
                 new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
@@ -116,7 +121,7 @@ final class AcquisitionWiring {
                         deps.items().itemTags(), hunts),
                 // 缺水桶时拿空桶去池塘、河边舀（只舀舀了会自己补回来的水，不碰机器里的）。
                 new WaterFillSource(playerServices),
-                // 自己放下的床、工作台、熔炉按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
+                // 自己放下的床、工作台、熔炉、酿造台按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
                 new ReclaimSource(deps.world().memory(), placer, deps.guards().protection(), permission, collects, deps.items().itemTags())));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));

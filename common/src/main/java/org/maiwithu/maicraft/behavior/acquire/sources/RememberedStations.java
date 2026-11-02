@@ -46,7 +46,7 @@ public final class RememberedStations {
     }
 
     // 记得的这种设施里眼下还在的，离角色近的在前：世界记忆按记下的先后排，最新记的不一定最近。
-    private List<MemoryRecord> standing(WorkstationRecipe.Kind kind, WorldPosition characterAt) {
+    List<MemoryRecord> standing(WorkstationRecipe.Kind kind, WorldPosition characterAt) {
         String blockType = kind.blockType();
         List<MemoryRecord> remembered = memory.recordsNear(characterAt, radiusBlocks).stream()
                 .filter(record -> record.kind() == MemoryKind.WORKSTATION)

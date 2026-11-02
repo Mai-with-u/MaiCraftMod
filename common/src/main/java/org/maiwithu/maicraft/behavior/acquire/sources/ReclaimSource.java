@@ -49,6 +49,7 @@ public final class ReclaimSource implements ItemSource {
     public static final double SEARCH_RADIUS_BLOCKS = 128.0;
     private static final String CRAFTING_TABLE = "minecraft:crafting_table";
     private static final String FURNACE = "minecraft:furnace";
+    private static final String BREWING_STAND = "minecraft:brewing_stand";
 
     private final WorldMemory memory;
     private final ReadsBlockTypes blocks;
@@ -75,9 +76,10 @@ public final class ReclaimSource implements ItemSource {
         return AcquireVia.RECLAIM;
     }
 
-    /** 收得回的方块：床（各色）、工作台、熔炉；拆下来掉的就是同名物品。 */
+    /** 收得回的方块：床（各色）、工作台、熔炉、酿造台；拆下来掉的就是同名物品（酿造台里的瓶子、材料一并掉出来捡起）。 */
     static boolean reclaimable(String blockType) {
-        return blockType.endsWith("_bed") || CRAFTING_TABLE.equals(blockType) || FURNACE.equals(blockType);
+        return blockType.endsWith("_bed") || CRAFTING_TABLE.equals(blockType) || FURNACE.equals(blockType)
+                || BREWING_STAND.equals(blockType);
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {

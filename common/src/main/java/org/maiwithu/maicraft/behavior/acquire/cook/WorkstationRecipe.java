@@ -59,7 +59,12 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
          * 锻造台升级：升级模板、要升级的物品、升级材料各一件出一件新的（钻石装备加下界合金锭变成下界合金的）。
          * 附近没有会就地摆一张，做完挖回来，和工作台、石切台一样。
          */
-        SMITHING("minecraft:smithing_table", "锻造台", 0, true);
+        SMITHING("minecraft:smithing_table", "锻造台", 0, true),
+        /**
+         * 酿造台：上一步的药水加一样材料酿成下一种，烈焰粉当燃料，一炉二十秒。不走配方表，拿东西时由酿药水的来源单独用，
+         * 这里只给记得的酿造台、就地摆一个用。附近没有会就地摆一个，放下就留着。
+         */
+        BREWING("minecraft:brewing_stand", "酿造台", 400, true);
 
         private final String blockType;
         private final String displayName;
@@ -78,7 +83,7 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
             return blockType;
         }
 
-        /** 给人看的名字：工作台、熔炉、高炉、烟熏炉、石切台、锻造台。 */
+        /** 给人看的名字：工作台、熔炉、高炉、烟熏炉、石切台、锻造台、酿造台。 */
         public String displayName() {
             return displayName;
         }

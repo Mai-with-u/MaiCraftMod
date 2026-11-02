@@ -41,7 +41,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 
 /**
- * 收回自己放下的床、工作台、熔炉：按路程报价，走过去挖下来；别人放的、家附近的、归属没问到的、
+ * 收回自己放下的床、工作台、熔炉、酿造台：按路程报价，走过去挖下来；别人放的、家附近的、归属没问到的、
  * 已经不在原处的都不收；许可不让挖就说要哪项许可。
  */
 class ReclaimSourceTest {
@@ -243,6 +243,17 @@ class ReclaimSourceTest {
         assertInstanceOf(SourceQuote.Offer.class,
                 quote(WantedItem.ofItem("minecraft:crafting_table"), Permissions.DEFAULT));
         assertInstanceOf(SourceQuote.Unavailable.class, quote(WantedItem.ofItem("minecraft:chest"), Permissions.DEFAULT));
+    }
+
+    @Test
+    void 野外摆下留着的酿造台也收() {
+        // 酿药水时就地摆下留着的酿造台：要酿造台时先拆回这台，不为一台酿造台再去打烈焰人。
+        WorldPosition stand = WorldPosition.here(27, 63, 30);
+        memory().rememberWorkstationUsed(stand, "minecraft:brewing_stand", Instant.now());
+        world.put(stand, "minecraft:brewing_stand");
+        owners.put(stand, "self");
+        assertInstanceOf(SourceQuote.Offer.class,
+                quote(WantedItem.ofItem("minecraft:brewing_stand"), Permissions.DEFAULT));
     }
 
     @Test
