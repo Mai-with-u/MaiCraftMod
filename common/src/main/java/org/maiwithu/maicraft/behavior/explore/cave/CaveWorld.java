@@ -40,7 +40,7 @@ public interface CaveWorld {
      */
     boolean prepareSight(int radius, List<String> interestBlocks);
 
-    /** 半径内眼睛看得见的矿、岩浆与留意清单里的方块：露在外面、过视线闸；近的在前。 */
+    /** 半径内视线没被挡住的矿、岩浆与留意清单里的方块：露在外面、过视线闸，带上那一块有多亮；近的在前。 */
     List<Sighting> blocksInSight(int radius, List<String> interestBlocks);
 
     /** 液体：钻洞不往水里、岩浆里走，过不去的地方要说清挡着的是什么。 */
@@ -54,8 +54,9 @@ public interface CaveWorld {
      * @param ore      是矿（挂在 #c:ores 下的，原版矿与模组矿都算）
      * @param lava     是岩浆
      * @param interest 是留意清单里的
+     * @param light    这一块露出来的那几面挨着的空气格里最亮的亮度（0..15，方块光与天空光取大）：暗处远的矿看不清
      */
-    record Sighting(String blockId, BlockPos pos, boolean ore, boolean lava, boolean interest) {
+    record Sighting(String blockId, BlockPos pos, boolean ore, boolean lava, boolean interest, int light) {
 
         public Sighting {
             pos = pos.immutable();

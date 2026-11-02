@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -35,7 +36,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
  * 钻洞现场的生产读端：量路读客户端世界的方块与天空光，看矿走方块扫描服务按 #c:ores 标签找露在外面的矿，
- * 再一格一格过视线闸——索引里有、但被墙挡着的不算看见。只读，不动身体、不改方块。
+ * 再一格一格过视线闸——索引里有、但被墙挡着的不算看见——并带上那一块有多亮。只读，不动身体、不改方块。
  */
 public final class ClientCaveWorld implements CaveWorld {
 
@@ -155,9 +156,22 @@ public final class ClientCaveWorld implements CaveWorld {
             }
             Block block = level.getBlockState(hit).getBlock();
             seen.add(new Sighting(BuiltInRegistries.BLOCK.getKey(block).toString(), hit,
-                    ores.contains(block), block == Blocks.LAVA, interests.contains(block)));
+                    ores.contains(block), block == Blocks.LAVA, interests.contains(block), lightAround(level, hit)));
         }
         return seen;
+    }
+
+    // 这一块有多亮：露出来的那几面挨着的格（不是整块挡光的方块）里最亮的那一格，方块光与天空光取大，
+    // 夜里天空光按天色减。火把、岩浆、发光方块照到的都算。
+    private static int lightAround(ClientLevel level, BlockPos block) {
+        int light = 0;
+        for (Direction face : Direction.values()) {
+            BlockPos beside = block.relative(face);
+            if (!level.getBlockState(beside).isSolidRender(level, beside)) {
+                light = Math.max(light, level.getMaxLocalRawBrightness(beside));
+            }
+        }
+        return light;
     }
 
     // 查索引：先登记，只要露在外面的，半径换成区块圈数。

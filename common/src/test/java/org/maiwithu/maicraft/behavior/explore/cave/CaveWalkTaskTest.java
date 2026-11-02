@@ -149,8 +149,8 @@ class CaveWalkTaskTest {
         cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(40, 64, 1));
         cave.feet = new BlockPos(5, 64, 0);
         BlockPos ore = new BlockPos(20, 66, 0);
-        cave.sightings.add(new CaveWorld.Sighting("minecraft:iron_ore", ore, true, false, true));
-        cave.sightings.add(new CaveWorld.Sighting("minecraft:coal_ore", new BlockPos(12, 63, 1), true, false, false));
+        cave.sightings.add(new CaveWorld.Sighting("minecraft:iron_ore", ore, true, false, true, 10));
+        cave.sightings.add(new CaveWorld.Sighting("minecraft:coal_ore", new BlockPos(12, 63, 1), true, false, false, 10));
 
         TaskResult result = run(task(new CaveWalkPlan(List.of("#c:ores/iron"), false, null, 360, 0, 128, 0,
                 TerrainPermit.NATURAL)), 500);
@@ -168,7 +168,7 @@ class CaveWalkTaskTest {
         cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(30, 64, 1));
         cave.feet = new BlockPos(5, 64, 0);
         BlockPos behindCorner = new BlockPos(9, 63, 1);
-        cave.sightings.add(new CaveWorld.Sighting("minecraft:diamond_ore", behindCorner, true, false, true));
+        cave.sightings.add(new CaveWorld.Sighting("minecraft:diamond_ore", behindCorner, true, false, true, 15));
         cave.hidden.add(behindCorner);
 
         TaskResult result = run(task(new CaveWalkPlan(List.of("minecraft:diamond_ore"), false, null, 360, 0, 2048, 0,
@@ -177,6 +177,41 @@ class CaveWalkTaskTest {
         assertEquals(ExploreDetails.StopReason.FRONTIERS_EXHAUSTED, details(result).stopReason(),
                 "看不见的留意方块不算看见");
         assertTrue(details(result).findings().stream().noneMatch(finding -> finding.kind() == ExploreFinding.Kind.ORE_VEIN));
+    }
+
+    @Test
+    void 暗处远的矿不算看见_插了火把照亮以后算() {
+        cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(30, 64, 1));
+        cave.feet = new BlockPos(5, 64, 0);
+        BlockPos diamond = new BlockPos(14, 63, 1);
+        cave.sightings.add(new CaveWorld.Sighting("minecraft:diamond_ore", diamond, true, false, true, 0));
+        CaveWalkPlan wantDiamond = new CaveWalkPlan(List.of("minecraft:diamond_ore"), false, null, 360, 0, 2048, 0,
+                TerrainPermit.NATURAL);
+
+        TaskResult dark = run(task(wantDiamond), 2000);
+        assertEquals(ExploreDetails.StopReason.FRONTIERS_EXHAUSTED, details(dark).stopReason(),
+                "黑地方的矿屏幕上看不见，不去挖、不记");
+        assertTrue(details(dark).findings().stream().noneMatch(finding -> finding.kind() == ExploreFinding.Kind.ORE_VEIN));
+
+        // 旁边插了火把：那一面亮到 12，从出发点一眼就看见了。
+        cave.feet = new BlockPos(5, 64, 0);
+        cave.sightings.set(0, new CaveWorld.Sighting("minecraft:diamond_ore", diamond, true, false, true, 12));
+        walks.started.clear();
+        TaskResult lit = run(task(wantDiamond), 2000);
+        assertEquals(ExploreDetails.StopReason.INTEREST_SEEN, details(lit).stopReason());
+        assertTrue(walks.goals.getLast().sacred().contains(diamond.asLong()));
+    }
+
+    @Test
+    void 黑着也认得出贴在跟前的矿() {
+        cave.tunnel(new BlockPos(0, 64, -1), new BlockPos(30, 64, 1));
+        cave.feet = new BlockPos(5, 64, 0);
+        cave.sightings.add(new CaveWorld.Sighting("minecraft:coal_ore", new BlockPos(6, 66, 0), true, false, false, 0));
+
+        TaskResult result = run(task(plan(2048)), 2000);
+
+        assertTrue(details(result).findings().stream().anyMatch(finding -> finding.kind() == ExploreFinding.Kind.ORE_VEIN
+                && "minecraft:coal_ore".equals(finding.targetId())), "头顶斜上方一格的矿贴脸看得清");
     }
 
     @Test

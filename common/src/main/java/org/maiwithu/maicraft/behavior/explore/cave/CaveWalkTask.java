@@ -37,7 +37,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 钻洞：从脚下或最近的看得见的洞口进去，顺着洞走，一路看洞壁上露出来的矿。
  * 在洞里就地开始，在地面上先走到洞口；之后反复"站定转头看一圈 → 挑下一段 → 走过去"。
  *
- * <p>看一圈的同时量路（泛洪知道哪里连着、哪里走过）、看矿（只认过视线闸的）；下一段只挑眼睛看得见的新地方，
+ * <p>看一圈的同时量路（泛洪知道哪里连着、哪里走过）、看矿（只认过视线闸、又够亮或够近看得清的）；下一段只挑眼睛看得见的新地方，
  * 不拿泛洪偷看拐角后面哪边有矿、哪边是死胡同。眼前没有新地方就去最近的没走的岔路，岔路也没了这片洞就走完了。
  * 看见留意清单里的东西就走到跟前收场；收场时留在原地，回地面交给回露天（离洞口近会走回洞口）。
  * 钻洞自己不改方块：走路挖垫交给走到，按这次的许可。
@@ -276,7 +276,11 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
 
     /** 看完了：记下看见的，看见留意的就过去，走够了就收场，不然挑下一段。 */
     private Next<Phase> decide(BlockPos feet) {
-        List<CaveWorld.Sighting> sightings = world.blocksInSight(SIGHT_RADIUS, plan.interestBlocks());
+        // 视线没被挡住还不够：黑地方远处的矿屏幕上是一片黑，等火把照亮了或贴到跟前才算看见；岩浆自己发光不受限。
+        List<CaveWorld.Sighting> sightings = world.blocksInSight(SIGHT_RADIUS, plan.interestBlocks()).stream()
+                .filter(sighting -> sighting.lava()
+                        || SeeingInTheDark.canMakeOut(sighting.light(), feet.above(), sighting.pos()))
+                .toList();
         noteSightings(sightings, feet);
         trip.noteBlocked(area.blocked());
         Optional<CaveWorld.Sighting> interest = sightings.stream()
@@ -301,7 +305,7 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
         return chooseLeg(feet);
     }
 
-    // 这一眼看见的：矿按格记，聚成矿脉落账；岩浆按岩浆湖落账。只认过了视线闸的。
+    // 这一眼看见的：矿按格记，聚成矿脉落账；岩浆按岩浆湖落账。只认过了视线闸、看得清的。
     private void noteSightings(List<CaveWorld.Sighting> sightings, BlockPos feet) {
         if (trip.noteOres(sightings)) {
             recordProgress("看见了新的矿");
