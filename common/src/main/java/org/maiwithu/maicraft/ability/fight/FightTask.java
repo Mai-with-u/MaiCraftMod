@@ -98,8 +98,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private int shots;
     /** 这一仗箭少了几支：按背包里箭的只数开打与打着时的差算，和射出去几箭各记各的。 */
     private final ArrowsSpent arrows = new ArrowsSpent();
-    /** 已经记进变化的箭的消耗（支）：每多少一支就补记一支，中途按卡住、撤离收场的结果里也有这笔。 */
+    /** 已经记进变化的箭：消耗、捡回各几支；每多一支就补记一支，中途按卡住、撤离收场的结果里也有这笔。 */
     private int arrowsRecorded;
+    private int arrowsPickedUpRecorded;
     /** 插进来的事（自卫插曲、吃饭）自己认下的箭：消耗、捡回各几支；回来接着打时拿它把那段的账分开，用过就清。 */
     private int interludeArrowsTaken;
     private int interludeArrowsPickedUp;
@@ -592,7 +593,10 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         pickup = null;
         for (FightMoves.Gained gained : moves.pickedUpSince(context, fightCursor)) {
             lootGained.add(gained.item());
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, gained.item(), gained.count()));
+            // 箭由背包的箭账逐支记成收获（noteArrows），这里不重复记；其余东西按服务器的拾取包记。
+            if (!moves.countsAsArrow(gained.item())) {
+                recordChange(Change.of(Change.Kind.ITEM_GAINED, gained.item(), gained.count()));
+            }
         }
         return Next.done(settled());
     }
@@ -711,10 +715,17 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 时能对上；捡回的由拾荒按服务器的拾取包另记，不在这里重复。
     private void noteArrows(TickContext context) {
         arrows.note(moves.arrowsCarried(context));
+        // 离开背包的、捡回的逐支配平：离开的记消耗，捡回的记收获（各种箭合在一起按 minecraft:arrow 记），
+        // 调用方拿结果对背包的账时两本都对得上。拾荒那边按服务器拾取包记的收获不含箭，不重复。
         int unrecorded = arrows.taken() - arrowsRecorded;
         if (unrecorded > 0) {
             recordChange(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", unrecorded));
             arrowsRecorded = arrows.taken();
+        }
+        int unrecordedPickup = arrows.pickedUp() - arrowsPickedUpRecorded;
+        if (unrecordedPickup > 0) {
+            recordChange(Change.of(Change.Kind.ITEM_GAINED, "minecraft:arrow", unrecordedPickup));
+            arrowsPickedUpRecorded = arrows.pickedUp();
         }
     }
 

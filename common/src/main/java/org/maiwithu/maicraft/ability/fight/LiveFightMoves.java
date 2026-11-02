@@ -8,7 +8,10 @@ import java.util.OptionalInt;
 import java.util.Set;
 
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.item.ArrowItem;
 
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
@@ -52,6 +55,13 @@ public final class LiveFightMoves implements FightMoves {
     @Override public Action shoot(TickContext context, int entityId) { return battle.shoot(context, entityId); }
     @Override public boolean canShoot(TickContext context) { return battle.canShoot(context); }
     @Override public OptionalInt arrowsCarried(TickContext context) { return battle.arrowsCarried(context); }
+
+    // 各种箭（普通、药水、光灵与模组的）都按物品类认，和背包数箭用同一条标准。
+    @Override
+    public boolean countsAsArrow(String itemId) {
+        ResourceLocation id = ResourceLocation.tryParse(itemId);
+        return id != null && BuiltInRegistries.ITEM.getOptional(id).map(item -> item instanceof ArrowItem).orElse(false);
+    }
     @Override public boolean hasMeleeWeapon(TickContext context) { return battle.hasMeleeWeapon(context); }
     @Override public int ticksToReady(TickContext context) { return battle.ticksToReady(context); }
     @Override public int hurtFlashTicks(TickContext context, int entityId) { return battle.hurtFlashTicks(context, entityId); }

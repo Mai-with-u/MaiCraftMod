@@ -371,6 +371,34 @@ class FightTaskTest {
     }
 
     @Test
+    void arrowsPickedBackUpDuringLootAreRecordedOneByOneWithoutDoubleCounting() {
+        // 实机：打完回倒下点捡回 4 支箭，结果 arrows_picked_up 4，变化里却只有 1 条 item_gained arrow，净值和背包差 3——
+        // 捡回的箭按背包数逐支记成收获；拾荒按服务器拾取包记的收获里箭不再重复记，别的东西照记。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        moves.arrows = 10;
+        task.start(new Tick(0));
+        for (long t = 0; t < 3; t++) task.tick(new Tick(t));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        moves.gained.add(new FightMoves.Gained("minecraft:arrow", 1));
+        moves.gained.add(new FightMoves.Gained("minecraft:mutton", 1));
+        task.tick(new Tick(3));
+        moves.arrows = 14;
+        TaskResult result = null;
+        for (long t = 4; t < 30 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(4, details.arrowsPickedUp());
+        assertEquals(4, result.changes().stream().filter(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && change.what().equals("minecraft:arrow")).mapToInt(Change::count).sum(), result.changes().toString());
+        assertEquals(1, result.changes().stream().filter(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && change.what().equals("minecraft:mutton")).mapToInt(Change::count).sum());
+        assertEquals(List.of("minecraft:arrow", "minecraft:mutton"), details.lootGained(), "捡到的概览照旧列出箭");
+    }
+
+    @Test
     void arrowSubtractedAfterTheKillIsStillCountedDuringLoot() {
         // 实机：三场里两场 arrows_spent 比背包净少少 1 支——最后一箭射出时游戏只确认了放箭，
         // 背包里那一支的扣减要等服务器隔一两刻同步过来；目标一倒下战斗阶段就换成拾荒，最后一次记数在它入账前。

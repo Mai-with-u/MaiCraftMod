@@ -31,6 +31,11 @@ interface FightMoves extends BattleMoves {
     /** 收进包的一样东西：物品 ID 与件数。 */
     record Gained(String item, int count) {}
 
+    /** 这个物品是不是箭（各种箭都算）：箭的收获由背包的箭账逐支记，拾荒按拾取包记的收获里不再重复。 */
+    default boolean countsAsArrow(String itemId) {
+        return "minecraft:arrow".equals(itemId);
+    }
+
     /** 此刻的经验：打龙前后各读一次，结果写这一仗得了多少。没接上为 null。 */
     default Experience experience(TickContext context) {
         return null;
