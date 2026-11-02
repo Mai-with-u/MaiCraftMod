@@ -11,8 +11,9 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param weapon      这场实际拿着打的那件
  * @param hits        确认打中的下数
  * @param shots       游戏确认了放箭的箭数（弓、弩、联动远程各算一发）
- * @param arrowsSpent 这一仗箭净少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null
- * @param arrowsPickedUp 这一仗捡回几支箭（射出去插在近处又捡起来的）
+ * @param arrowsSpent 这一仗箭净少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null。
+ *                    只算这一仗自己的；插进来的自卫射的、捡的在结果的变化（changes）里按它自己那一笔记
+ * @param arrowsPickedUp 这一仗自己捡回几支箭（射出去插在近处又捡起来的）
  * @param reachIssue  点名目标里走不到跟前、也射不到的
  * @param retreat     撤离收场时为什么撤；没撤为空
  */

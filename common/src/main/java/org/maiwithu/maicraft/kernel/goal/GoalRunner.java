@@ -94,6 +94,14 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
     @Override
     public void keepTempTaskFacts(TaskResult tempResult) {
         tempTaskFacts.add(tempResult);
+        // 正在跑的任务也收一份：临时任务插在它身上的那段里，谁射的箭、谁打的怪由谁自己记账（如战斗结果里"插进来的那段"）。
+        if (runningTask() instanceof KeepsTempTaskFacts own) own.keepTempTaskFacts(tempResult);
+    }
+
+    /** 这条目标此刻在跑的任务（sequence 时是当前那一步的）；没有为 null。 */
+    private Task runningTask() {
+        if (stepRunner != null) return stepRunner.runningTask();
+        return child != null && !child.finished() ? child.running() : null;
     }
 
     private GoalRunner(GoalRun run, AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers) {

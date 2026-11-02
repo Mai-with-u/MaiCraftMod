@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeedsOff;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
@@ -41,8 +42,10 @@ final class GoalTestAbility implements AbilityModule {
     }
 
     /** 替身任务：逐刻返回约定结局；被提前收尾时如实交代被取消；可以约定启动就出错。 */
-    static final class ScriptedGoalTask implements Task, SurvivalNeedsOff {
+    static final class ScriptedGoalTask implements Task, SurvivalNeedsOff, KeepsTempTaskFacts {
         private final TickResult ending;
+        /** 目标转交进来的临时任务结果，按先后。 */
+        final List<TaskResult> keptFacts = new ArrayList<>();
         private final RuntimeException startError;
         /** 被提前收尾时交出的结果；没设过按取消交代。 */
         private TaskResult closedResult;
@@ -95,6 +98,10 @@ final class GoalTestAbility implements AbilityModule {
 
         @Override public boolean survivalNeedsOff() {
             return needsOff;
+        }
+
+        @Override public void keepTempTaskFacts(TaskResult result) {
+            keptFacts.add(result);
         }
 
         @Override public TaskResult close(CloseReason reason) {

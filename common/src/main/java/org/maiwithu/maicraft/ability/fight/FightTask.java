@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -56,7 +57,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 再等它消失、出口门亮起（最多二十秒）收经验；只看到龙不见了不算。回血一分钟不涨、打到一半箭用完而水晶还在、
  * 连着五分钟龙都没趴下也没打到什么，都如实收场。
  */
-final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatResponder {
+final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatResponder, KeepsTempTaskFacts {
 
     private static final Logger LOG = LoggerFactory.getLogger(FightTask.class);
 
@@ -99,6 +100,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private final ArrowsSpent arrows = new ArrowsSpent();
     /** 已经记进变化的箭的消耗（支）：每多少一支就补记一支，中途按卡住、撤离收场的结果里也有这笔。 */
     private int arrowsRecorded;
+    /** 插进来的事（自卫插曲、吃饭）自己认下的箭：消耗、捡回各几支；回来接着打时拿它把那段的账分开，用过就清。 */
+    private int interludeArrowsTaken;
+    private int interludeArrowsPickedUp;
     /** 为什么撤的：撤离收场时写进结果。 */
     private String retreatWhy;
     private Battle battle;
@@ -361,8 +365,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     }
 
     private Next<Phase> fight(TickContext context) {
-        // 被自卫插曲、吃饭占过一段回来接着打：那段里射的箭、捡的箭由插进来的那件事自己交代，这一仗的账从此刻重新起算。
-        if (battle.resumedAfterPause()) arrows.resumeAt(moves.arrowsCarried(context));
+        // 被自卫插曲、吃饭占过一段回来接着打：那段里插进来的事认下的箭归它，剩下的（走开前最后一箭隔一两刻才同步的扣减）归这一仗。
+        if (battle.resumedAfterPause()) {
+            arrows.resumeAt(moves.arrowsCarried(context), interludeArrowsTaken, interludeArrowsPickedUp);
+            interludeArrowsTaken = 0;
+            interludeArrowsPickedUp = 0;
+        }
         noteDefeats(context);
         if (dragonEntity >= 0) {
             Next<Phase> ending = dragonEnding(context);
@@ -742,6 +750,16 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return new FightDetails.DragonDetails(report.crystalsDestroyed(), report.crystalsLeft(), report.crystalsGoneOtherwise(),
                 health, defeat, portal, experience, report.rests(),
                 new FightDetails.Dodges(report.breathDodges(), report.sweepDodges(), report.fireballDodges()));
+    }
+
+    /** 插进来的事收场交代的结果：记下它认下的箭（消耗、捡回），回来接着打时那段的账按它认下的分。 */
+    @Override
+    public void keepTempTaskFacts(TaskResult result) {
+        for (Change change : result.changes()) {
+            if (!"minecraft:arrow".equals(change.what())) continue;
+            if (change.kind() == Change.Kind.ITEM_CONSUMED) interludeArrowsTaken += change.count();
+            else if (change.kind() == Change.Kind.ITEM_GAINED) interludeArrowsPickedUp += change.count();
+        }
     }
 
     /**

@@ -328,6 +328,9 @@ class FightTaskTest {
         for (long t = 0; t < 3; t++) task.tick(new Tick(t));
         task.pause();
         moves.arrows = 43;
+        // 自卫收场交代：射了 7 支；目标把这份结果同样转给正在跑的战斗任务。
+        task.keepTempTaskFacts(TaskResult.builder(TaskResult.Status.DONE, "自卫结束")
+                .change(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", 7)).build());
         task.tick(new Tick(3));
         moves.arrows = 41;
         task.tick(new Tick(4));
@@ -342,6 +345,29 @@ class FightTaskTest {
         assertEquals(2, details.arrowsSpent(), "只算回来之后自己射的");
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
                 && change.what().equals("minecraft:arrow") && change.count() == 2), result.changes().toString());
+    }
+
+    @Test
+    void arrowStillInFlightWhenEatingInterruptsIsCountedAsTheFights() {
+        // 实机：fight 射出一箭，扣减还没同步就被吃饭插队；吃饭不射箭、不认箭，回来后那一支要算这一仗的。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        moves.arrows = 10;
+        task.start(new Tick(0));
+        for (long t = 0; t < 3; t++) task.tick(new Tick(t));
+        task.pause();
+        moves.arrows = 9;
+        task.keepTempTaskFacts(TaskResult.builder(TaskResult.Status.DONE, "吃了一口").build());
+        task.tick(new Tick(3));
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true);
+        TaskResult result = null;
+        for (long t = 4; t < 30 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        assertEquals(1, ((FightDetails) result.details()).arrowsSpent(), "没人认下的那一支归这一仗");
+        assertEquals(1, result.changes().stream().filter(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && change.what().equals("minecraft:arrow")).mapToInt(Change::count).sum());
     }
 
     @Test

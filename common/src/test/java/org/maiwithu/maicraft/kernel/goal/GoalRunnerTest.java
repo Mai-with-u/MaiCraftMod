@@ -139,6 +139,25 @@ class GoalRunnerTest {
     }
 
     @Test
+    void tempTaskFactsAreAlsoHandedToTheRunningTask() {
+        // 战斗跑到一半自卫插进来射了几箭：目标收下自卫的结果之外，正在跑的战斗任务也要收一份，回来接着打时
+        // 才分得清那段里哪些箭是自卫射的、哪些是自己走开前射出去隔一两刻才扣的。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:test");
+        ability.shared().keepRunning("打尸壳");
+        ability.next(new StepDecision.Run(new TestInput("打尸壳")));
+        GoalRunner runner = launch(Goal.of("maicraft:test", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        TaskResult defence = TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
+                .change(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", 3)).build();
+
+        runner.keepTempTaskFacts(defence);
+
+        assertEquals(List.of(defence), ability.shared().created.get("打尸壳").keptFacts, "正在跑的任务同样收到这份结果");
+    }
+
+    @Test
     void stepFailurePropagatesAsGoalFailure() {
         GoalTestAbility ability = new GoalTestAbility("maicraft:test");
         ability.ending("修水泵", TaskResult.failed("缺扳手",

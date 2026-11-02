@@ -44,7 +44,7 @@
 | `hits` | 确认打中的下数（近战，服务器确认了才算） |
 | `shots` | 射出去几箭（弓、弩、联动远程武器；箭中没中服务器不单独回话，不算进 `hits`） |
 | `arrowsSpent` | 这一仗箭少了几支：开打与打着时背包里箭的只数之差，路上捡回的已抵掉；和 `shots` 各记各的，拉弓中途被原版松手放出去的箭、无限附魔不耗的箭、联动远程武器不用的箭只会让两个数不一样；读不到背包时没有这一项 |
-| `arrowsPickedUp` | 这一仗捡回几支箭（射出去插在近处又捡起来的）；`shots` 大致等于 `arrowsSpent` + `arrowsPickedUp` |
+| `arrowsPickedUp` | 这一仗自己捡回几支箭（射出去插在近处又捡起来的）；`shots` 大致等于 `arrowsSpent` + `arrowsPickedUp`。这两项只算这一仗自己的，插进来的自卫射的、捡的在结果的变化（`item_consumed`/`item_gained`）里按它自己那一笔记 |
 | `reachIssue` | 点名目标里走不到跟前、也射不到的 |
 | `lootGained` | 拾荒捡到的物品 |
 | `dragon` | 打末影龙时才有，见下表 |
