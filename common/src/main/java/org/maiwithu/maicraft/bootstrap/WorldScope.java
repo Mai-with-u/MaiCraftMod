@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.permission.RegionsSnapshot;
+import org.maiwithu.maicraft.behavior.perception.ClientCaveOpeningSight;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
@@ -123,6 +124,8 @@ public final class WorldScope {
      * 客户端开着文字过滤时读过滤后的那一份。
      */
     private final ClientNearbyBlocksSight facilitySight;
+    /** 洞口观察的读端：扫一圈要两秒上下，跨刻接着扫，只建一个。 */
+    private final ClientCaveOpeningSight openingSight = new ClientCaveOpeningSight();
     /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
     private final List<ModSight> modSights;
     /** 模组的东西在角色周围多大范围里看（格）。 */
@@ -274,6 +277,8 @@ public final class WorldScope {
         scene.updateFacilities(gameTick, when, facilitySight.nearby(facilities));
         // 看得见的告示牌连同牌子上的字：主播在基地立的路牌、留言，observe 里读得到。
         scene.updateSigns(gameTick, facilitySight.signs());
+        // 洞口与峡谷：每刻扫一小段，扫完一圈才换上这一圈看到的；看见的顺路记进世界记忆。
+        openingSight.tick(current).ifPresent(found -> scene.updateOpenings(gameTick, when, found));
         // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
         List<ModThing> things = new ArrayList<>();
         AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);

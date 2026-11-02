@@ -154,6 +154,38 @@ class SceneTest {
     }
 
     @Test
+    void caveOpeningsGetFeatureIdsAtTheirRealHeightAndAreRemembered() {
+        // 北边 12 格、低 6 格处一个往下的洞口：领 f# 编号，位置带真实高度，记一条"洞口"线索。
+        scene.updateOpenings(10, NOW, List.of(new CaveOpenings.Opening(CaveOpenings.Kind.CAVE_MOUTH,
+                new BlockPos(0, 58, -12), true, 0, 0, 0, -12, 1, -12)));
+
+        TerrainFeature mouth = scene.features().getFirst();
+        assertTrue(mouth.id().startsWith("f"));
+        assertEquals("洞口", mouth.kind());
+        assertEquals(58, mouth.center().y(), "位置是能站的开口格，真实高度");
+        assertEquals("前方", mouth.direction());
+        assertEquals("往下，连着一片暗处，比你低6格", mouth.size());
+        assertEquals(List.of("洞口"), memory.calls.getFirst().roughlyThere());
+        assertEquals(1, scene.caveOpenings().size(), "钻洞起步挑的是同一份");
+    }
+
+    @Test
+    void dropInsideARavineIsReportedOnlyAsTheRavine() {
+        // 网格在北边聚出一片落差，正好落在峡谷占的范围里：只报峡谷，网格的另外两路特征照报。
+        scene.updateOpenings(10, NOW, List.of(new CaveOpenings.Opening(CaveOpenings.Kind.RAVINE,
+                new BlockPos(0, 50, -4), false, 20, 14, -1, -14, 1, 6)));
+        char[][] cells = {
+                {'v', 'v', 'v'},
+                {'.', '.', '.'},
+                {'~', '~', '~'}};
+        scene.updateGrid(new OverheadGrid.View(new BlockPos(0, 64, -4), 1, cells), 11, NOW);
+
+        List<String> kinds = scene.features().stream().map(TerrainFeature::kind).toList();
+        assertEquals(List.of("峡谷", "水体"), kinds);
+        assertEquals("长约20格、深约14格，比你低14格", scene.features().getFirst().size());
+    }
+
+    @Test
     void summaryCountsWithoutRepeatingTheLists() {
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null, null,

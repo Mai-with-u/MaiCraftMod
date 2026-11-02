@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 /**
  * 场景：角色此刻的观察事实，一份、按需增量更新，所有观察视图都从它整理出来。
  *
- * <p>各路读取接缝（角色自己、实体、声音、俯视网格、设施、环境）各自送来原始观察，
+ * <p>各路读取接缝（角色自己、实体、声音、俯视网格、洞口观察、设施、环境）各自送来原始观察，
  * 这里统一整理成方位说法并发观察编号；带编号的条目（实体、地形特征、设施、告示牌、模组的东西）
  * 收在一份列表里，按编号查条目、失效撤下、列出与远处计数都走这一份。
  * 实体与地形特征、设施在保留期内没再见到的编号由 {@link #expire} 报失效，最后一次方位一并交代。
@@ -45,6 +45,11 @@ public final class Scene {
     // 五路带编号的条目收在一份列表里：按编号查条目、失效撤下、列出与远处计数都走这一份。
     private List<SceneSighting> sightings = List.of();
     private List<HeardSound> heard = List.of();
+    // 地形特征有两路来源：俯视网格就近聚出来的，和洞口观察扫一圈认出来的洞口、峡谷；各自更新，合成一路发 f#。
+    private List<TerrainFeature> gridFeatures = List.of();
+    private List<TerrainFeature> openingFeatures = List.of();
+    /** 最近一圈认出来的洞口与峡谷：钻洞起步挑洞口就挑这几处，和场景报的是同一份。 */
+    private List<CaveOpenings.Opening> openings = List.of();
 
     /**
      * @param kinds 设施分类：看见的功能方块是容器还是工作设施，按它写进世界记忆
@@ -144,7 +149,54 @@ public final class Scene {
                 memory.siteSeen(marked.center(), marked.resources(), when);
             }
         }
-        replace(TerrainFeature.class, next);
+        gridFeatures = List.copyOf(next);
+        publishFeatures();
+    }
+
+    /**
+     * 更新洞口观察：扫完一圈认出来的洞口、峡谷各领一个观察编号 f#，位置是能站的那一格（真实高度），
+     * travel 拿编号就走到洞口站定；看见的同时按产地线索写进世界记忆（内容"洞口""峡谷"，来源亲眼看到）。
+     */
+    public void updateOpenings(long nowTick, Instant when, List<CaveOpenings.Opening> found) {
+        openings = List.copyOf(found);
+        if (self == null) {
+            return;
+        }
+        List<TerrainFeature> next = new ArrayList<>();
+        for (CaveOpenings.Opening opening : found) {
+            WorldPosition at = WorldPosition.here(opening.at().getX(), opening.at().getY(), opening.at().getZ());
+            DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlockFlat(self.x(), self.z(), self.facingYaw(),
+                    at.x(), at.z());
+            String id = ids.feature(at, bearing.direction(), nowTick);
+            next.add(new TerrainFeature(id, opening.kind().word(), at, bearing.direction(), bearing.compass(),
+                    bearing.distance(), sizeOf(opening)));
+            memory.siteSeen(at, List.of(opening.kind().word()), when);
+        }
+        openingFeatures = List.copyOf(next);
+        publishFeatures();
+    }
+
+    // 洞口说往下还是往里、连着一片暗处（往里只量到一定格数，说不出整个洞多大）；峡谷说长、深；都带上比角色高低几格。
+    private String sizeOf(CaveOpenings.Opening opening) {
+        String shape = opening.kind() == CaveOpenings.Kind.RAVINE
+                ? "长约" + opening.length() + "格、深约" + opening.depth() + "格"
+                : (opening.goesDown() ? "往下" : "往里") + "，连着一片暗处";
+        int dy = opening.at().getY() - (int) Math.floor(self.y());
+        if (dy > 1) return shape + "，比你高" + dy + "格";
+        if (dy < -1) return shape + "，比你低" + (-dy) + "格";
+        return shape;
+    }
+
+    // 两路地形特征合成一路：落在某处峡谷范围里的落差就是这道峡谷，只报峡谷。
+    private void publishFeatures() {
+        List<TerrainFeature> merged = new ArrayList<>(openingFeatures);
+        for (TerrainFeature feature : gridFeatures) {
+            boolean insideRavine = FeatureSpotter.DROP_KIND.equals(feature.kind()) && openings.stream()
+                    .anyMatch(opening -> opening.kind() == CaveOpenings.Kind.RAVINE
+                            && opening.covers(feature.center().x(), feature.center().z(), 2));
+            if (!insideRavine) merged.add(feature);
+        }
+        replace(TerrainFeature.class, merged);
     }
 
     /**
@@ -290,6 +342,11 @@ public final class Scene {
     /** 地形特征视图。 */
     public List<TerrainFeature> features() {
         return ofKind(TerrainFeature.class);
+    }
+
+    /** 最近一圈认出来的看得见的洞口与峡谷，近的在前；钻洞起步从这里挑洞口。 */
+    public List<CaveOpenings.Opening> caveOpenings() {
+        return openings;
     }
 
     /** 设施视图。 */
