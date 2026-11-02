@@ -48,7 +48,7 @@ public final class KnowledgeLibrary {
             {"tool-tiers", "工具等级与挖掘资格", "等级不够挖不动或不掉落；黑曜石要钻石镐",
                     "tool tier 工具等级 镐 pickaxe 黑曜石 obsidian 远古残骸 挖不动 不掉落 挖掘资格 深板岩"},
             {"ore-heights", "矿物生成高度", "各种矿在哪一层最多；采掘只在角色附近找，先到对应高度再要",
-                    "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸"},
+                    "ore 矿 矿石 找矿 高度 生成 分布 层 钻石 diamond 铁 iron 煤 coal 铜 copper 金 gold 红石 redstone 青金石 lapis 绿宝石 emerald 深板岩 deepslate 粗铁 raw_iron 远古残骸 ancient_debris 下界 nether 下界金矿 下界石英 quartz 下界合金 netherite"},
             {"food", "食物与饥饿", "饥饿与回血规则、食物从哪来、耕地保湿",
                     "food eat 食物 吃 饿 饥饿 饱和度 saturation 回血 饿死 打猎 狩猎 生肉 熟食 烧熟 耕种 耕地 锄头 种植 小麦 胡萝卜 马铃薯 甜菜 面包 骨粉"},
             {"sleep-night", "睡眠与夜晚", "黑暗处刷怪、床跳夜与重设重生点、同色羊毛、3 天不睡刷幻翼",

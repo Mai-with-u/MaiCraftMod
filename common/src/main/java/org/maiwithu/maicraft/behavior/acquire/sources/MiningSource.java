@@ -55,8 +55,9 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 /**
  * 采掘的来源：挖掉会掉出想要的东西的方块（矿石、地表的石头这类），只算看得见的——不透视，埋在石头里的不算。
  * 石头是例外：谁都知道它埋在脚下，附近看不见时就从脚下往下挖楼梯去找，挖够了停在楼梯底。
- * 知道在哪几层生成的矿（铁、钻石这类，见 OreHeights）附近看不见时长程挖矿：往下挖台阶到矿最多的那层，
- * 再横着挖通道，看见了就挖；装了连锁挖时台阶、通道一行一行连锁挖，矿整脉连锁挖。
+ * 知道在哪几层生成的矿（铁、钻石、下界的远古残骸这类，见 OreHeights）附近看不见时长程挖矿：往下挖台阶到矿最多的那层
+ * （各层一样多的下界金矿、石英就地横挖），再横着挖通道，看见了就挖；装了连锁挖时台阶、通道一行一行连锁挖，矿整脉连锁挖。
+ * 那种矿只在别的维度生成（在主世界要远古残骸）就说清在哪个维度哪几层，先过去再要。
  * 做出来的加工品（铁锭、木板这类）没有方块直接掉它，明确回答"这里给不了"，
  * 不装作能挖；模组矿掉什么客户端读不到，LLM 用掉落线索（drops_from）点名的方块也当作会掉它去挖，
  * 掉没掉以挖完进包的为准；挖矿要的工具（合用的镐）缺了就先按同一套需求去弄，用途标签写清是采掘要用的。
@@ -169,6 +170,16 @@ public final class MiningSource implements ItemSource {
                             + " 分钟内先不挑它们；换个站位、垫脚或挖开路再试");
         }
         if (spots.isEmpty()) {
+            // 要的矿只在别的维度生成（在主世界要远古残骸）：说清它在哪个维度哪几层、先过去再要，不让 LLM 在这边白挖。
+            Optional<OreHeights.Band> elsewhere = bandElsewhere(request, context);
+            if (elsewhere.isPresent()) {
+                OreHeights.Band band = elsewhere.get();
+                return new SourceQuote.Unavailable(describe(),
+                        "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
+                                + "的方块；" + band.name() + "只在 " + band.dimension() + " 生成（" + band.describe()
+                                + "），角色现在在 " + context.characterAt().dimension() + "，先用 travel 去 "
+                                + band.dimension() + " 再要");
+            }
             return new SourceQuote.Unavailable(describe(),
                     "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
                             + "的方块（只算地图上自然长的：机器零件、房子、平台这些搭出来的不拆）；埋在石头里的看不见，"
@@ -438,6 +449,14 @@ public final class MiningSource implements ItemSource {
         return Optional.of(new Deposit(ore.get(), band.get(), workingY.getAsInt()));
     }
 
+    // 要的矿知道在哪几层生成、却在另一个维度：给出那个范围，说清先过去；同一个维度、不知道在哪层的为空。
+    private Optional<OreHeights.Band> bandElsewhere(ItemRequest request, SourceContext context) {
+        String dimension = context.characterAt().dimension();
+        if (dimension == null) return Optional.empty();
+        return minables.depositOre(request.wanted()).flatMap(OreHeights::of)
+                .filter(band -> !dimension.equals(band.dimension()));
+    }
+
     // 长程挖矿的报价：要挖天然方块，change_blocks 不到 natural 就说清要开哪一档；代价按往下几级加一段通道估。
     private SourceQuote prospectQuote(ItemRequest request, SourceContext context, Deposit deposit) {
         Permissions.BlockChanges changes = context.permissions().changeBlocks();
@@ -456,8 +475,7 @@ public final class MiningSource implements ItemSource {
 
     // 说给 LLM 听的打算：往下挖到哪层、还是在这一层横着挖。
     private static String prospectPlan(SourceContext context, Deposit deposit) {
-        OreHeights.Band band = deposit.band();
-        String where = band.name() + "在 Y " + band.minY() + " 到 " + band.maxY() + " 生成，Y=" + band.peakY() + " 最多";
+        String where = deposit.band().describe();
         return deposit.workingY() < context.characterAt().y()
                 ? "附近看不见；" + where + "，往下挖三格高的台阶到 Y=" + deposit.workingY() + "，再横着挖两格高的通道找"
                 : "附近看不见；" + where + "，就在这一层（Y=" + deposit.workingY() + "）横着挖两格高的通道找";

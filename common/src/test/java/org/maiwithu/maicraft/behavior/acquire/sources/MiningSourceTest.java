@@ -97,8 +97,9 @@ class MiningSourceTest {
         @Override public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
             return blockTypeId.equals("minecraft:stone");
         }
-        // 粗铁是铁矿掉的，知道铁矿在哪几层生成：附近看不见时长程挖矿。
+        // 粗铁是铁矿掉的，知道铁矿在哪几层生成：附近看不见时长程挖矿。远古残骸掉自己，在下界的那几层。
         @Override public Optional<String> depositOre(WantedItem wanted) {
+            if ("minecraft:ancient_debris".equals(wanted.itemId())) return Optional.of("minecraft:ancient_debris");
             return "minecraft:raw_iron".equals(wanted.itemId()) ? Optional.of("minecraft:iron_ore") : Optional.empty();
         }
         // 连锁逐格核：64 层都是天然煤矿，只有 x=4 那格是搭出来的。
@@ -368,6 +369,29 @@ class MiningSourceTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
         assertTrue(offer.risk().contains("往下挖三格高的台阶到 Y=16"), offer.risk());
         assertTrue(offer.risk().contains("两格高的通道"), offer.risk());
+    }
+
+    @Test
+    void 在主世界要远古残骸_说清只在下界生成_先过去再要() {
+        SourceContext overworld = SourceContext.unscoped(new WorldPosition(0, 64, 0, "minecraft:overworld"),
+                Permissions.DEFAULT);
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:ancient_debris"), 1, "下界合金"), overworld);
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class, quote);
+        assertTrue(unavailable.reason().contains("只在 minecraft:the_nether 生成"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("Y=15 最多"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("travel"), unavailable.reason());
+    }
+
+    @Test
+    void 在下界要远古残骸_往下挖台阶到Y15横着挖() {
+        SourceContext nether = SourceContext.unscoped(new WorldPosition(0, 32, 0, "minecraft:the_nether"),
+                Permissions.DEFAULT);
+        SourceQuote quote = source(new FakeMinables(List.of(), true, false), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:ancient_debris"), 1, "下界合金"), nether);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertTrue(offer.risk().contains("远古残骸在 Y 8 到 119 生成，Y=15 最多"), offer.risk());
+        assertTrue(offer.risk().contains("往下挖三格高的台阶到 Y=15"), offer.risk());
     }
 
     @Test

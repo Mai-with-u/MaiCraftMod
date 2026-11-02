@@ -33,4 +33,26 @@ class OreHeightsTest {
         OreHeights.Band coal = OreHeights.of("minecraft:coal_ore").orElseThrow();
         assertEquals(OptionalInt.of(64), OreHeights.workingY(coal, 64), "煤最多在 95，人在 64 就原地横挖");
     }
+
+    @Test
+    void 远古残骸_在下界挖到Y15() {
+        OreHeights.Band debris = OreHeights.of("minecraft:ancient_debris").orElseThrow();
+        assertEquals(OreHeights.NETHER, debris.dimension());
+        assertEquals(OptionalInt.of(15), OreHeights.workingY(debris, 32), "岩浆海岸边往下挖台阶到 Y15");
+        assertEquals(OptionalInt.empty(), OreHeights.workingY(debris, 5), "在 Y8 以下要往上爬，不挖");
+        assertEquals("远古残骸在 Y 8 到 119 生成，Y=15 最多", debris.describe());
+    }
+
+    @Test
+    void 下界金矿与石英各层一样多_范围里原地横挖_范围以上挖到范围顶() {
+        for (String ore : new String[] {"minecraft:nether_gold_ore", "minecraft:nether_quartz_ore"}) {
+            OreHeights.Band band = OreHeights.of(ore).orElseThrow();
+            assertEquals(OreHeights.NETHER, band.dimension(), ore);
+            assertTrue(band.even(), ore);
+            assertEquals(OptionalInt.of(70), OreHeights.workingY(band, 70), "在范围里哪层都一样，不往下挖");
+            assertEquals(OptionalInt.of(117), OreHeights.workingY(band, 125), "下界顶上往下挖到范围顶");
+            assertEquals(OptionalInt.empty(), OreHeights.workingY(band, 9), "范围以下不往上爬");
+            assertTrue(band.describe().endsWith("各层一样多"), band.describe());
+        }
+    }
 }
