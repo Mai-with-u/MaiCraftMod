@@ -201,9 +201,17 @@ public final class BlockPassability {
             return true;
         }
         // 岩浆块和蜂蜜块虽然是完整方块，但会造成伤害或粘滞，因此不能作为地面。
-        if (state.is(Blocks.MAGMA_BLOCK) || state.is(Blocks.HONEY_BLOCK)) return false;
+        if (hurtsToStandOn(state) || state.is(Blocks.HONEY_BLOCK)) return false;
         // 其他情况按普通完整碰撞方块处理。
         return state.isCollisionShapeFullBlock(level, pos);
+    }
+
+    /**
+     * 站在这种方块上面会掉血：岩浆块不潜行时每刻烫一下。下界 Y27–36 成团生成，往下挖台阶、横挖通道时下一级脚下
+     * 是它就换个方向，不站上去；寻路也不把它当地面。
+     */
+    public static boolean hurtsToStandOn(BlockState state) {
+        return state.is(Blocks.MAGMA_BLOCK);
     }
 
     /**

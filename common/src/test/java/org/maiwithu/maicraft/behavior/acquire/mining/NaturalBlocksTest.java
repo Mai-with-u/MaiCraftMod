@@ -59,6 +59,14 @@ class NaturalBlocksTest {
     }
 
     @Test
+    void 下界的岩浆块和萤石是地形() {
+        // 往下挖台阶穿过岩浆块层照常挖，不当成搭出来的拐开；要萤石粉能挖洞顶的萤石。
+        World world = new World();
+        assertTrue(grown(world, Blocks.MAGMA_BLOCK.defaultBlockState(), 0, 30, 0));
+        assertTrue(grown(world, Blocks.GLOWSTONE.defaultBlockState(), 1, 100, 0));
+    }
+
+    @Test
     void 搭出来的不挖() {
         World world = new World();
         assertFalse(grown(world, Blocks.COBBLESTONE.defaultBlockState(), 0, 64, 0), "刷石机、墙里的圆石");

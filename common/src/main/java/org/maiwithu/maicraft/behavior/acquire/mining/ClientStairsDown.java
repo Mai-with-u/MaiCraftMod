@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 再走下去，把这一级挖出来的东西捡起来；挖够了就停在楼梯底，回地面顺着楼梯走上去，不用垫方块。
  *
  * <p>挖之前先看清这一级：要挖的三格不能是液体、挖不动的、不许动的；三格四周、头顶和下一级脚下
- * 不能挨着水或岩浆（挖开就灌进来）。这一级朝原方向挖不了、或挖到一半挖不动，就往左、往右拐着挖
+ * 不能挨着水或岩浆（挖开就灌进来）；下一级脚下不能是岩浆块（站上去烫脚，走路也不肯站）。这一级朝原方向挖不了、或挖到一半挖不动，就往左、往右拐着挖
  * （第一级四面都试），不往回挖；这一级几个方向都不行才如实停下。挖完再看下一级脚下踩不踩得住：下面是空洞时，
  * 许可准放方块、身上有不会往下掉的废料（泥土、圆石这类），就在下一级脚下垫一块接着往下挖；不许放、没垫料、
  * 旁边没有能对着垫的实地才不走下去，洞壁上露出来的石头已经看得见了，下回按采掘直接挖。这些都是现场是什么样，不是猜结果。
@@ -94,6 +94,11 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 在 cell 垫一块 filler：换到主手，对着旁边的实地点一下放进去，那一格有了实心方块才算；旁边没有能对着放的为空。 */
         default Optional<Action> placeFiller(TickContext context, BlockPos cell, String filler) {
             return Optional.empty();
+        }
+
+        /** 站在这一格上面会不会掉血（岩浆块）：下一级脚下是它就不往这边挖，走路也不肯站上去。 */
+        default boolean hurtsToStandOn(TickContext context, BlockPos cell) {
+            return false;
         }
 
         /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
@@ -423,12 +428,22 @@ public final class ClientStairsDown implements DigsStairsDown {
                             + site.blockType(context, cell) + "，挖开会灌进来，停在这里"));
                 }
             }
+            // 下一级脚下是岩浆块：挖开了也站不上去（烫脚，走路不肯站），这个方向当挖不了，往左右拐。
+            BlockPos floor = nextFeet(feet, way).below();
+            if (site.hurtsToStandOn(context, floor)) return Optional.of(hotFloor(context, floor));
             return Optional.empty();
+        }
+
+        // 下一级脚下站上去会掉血：写明是哪一格、什么方块。
+        private Problem hotFloor(TickContext context, BlockPos floor) {
+            return Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(floor.above()) + " 脚下是 "
+                    + site.blockType(context, floor) + "，站上去会烫脚，不往这边走");
         }
 
         // 从上往下挖这一级还没通的格子：上面掉下沙砾、流进液体都照现场重新判断。都通了，
         // 下一级脚下踩得住就走下去；脚下空着、再往下一两格有实地（站在比地面高一格的地方开挖就是这样）就落到那上面；
-        // 往下三格都空（洞）就在下一级脚下垫一块再走下去，垫不了才停；是液体就停在这里。
+        // 往下三格都空（洞）就在下一级脚下垫一块再走下去，垫不了才停；落下去是液体、落脚的是岩浆块，
+        // 和挨着岩浆一样换个方向挖，几个方向都不行才停。
         private ActionStatus digNext(TickContext context) {
             Heading way = new Heading(heading, down());
             List<BlockPos> cells = stepCells(feet, heading, way.down());
@@ -463,12 +478,14 @@ public final class ClientStairsDown implements DigsStairsDown {
                 floor = site.ground(context, landing.below());
             }
             if (floor == Ground.OPEN || floor == Ground.FLUID) {
-                // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再垫一块或停。
+                // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再垫一块或拐开。
                 if (tunnel != null && tunnel.inSight().test(feet)) return mineInSight();
                 if (floor == Ground.OPEN) return fillUnder(context, nextFeet(feet, way).below());
-                return finish(Problem.of(Problem.Kind.DANGER,
-                        "往下挖楼梯：下一级 " + at(nextFeet(feet, way)) + " 脚下是液体，不往下走了"));
+                // 下界挖穿进洞，洞底多半是岩浆海：这个方向不走，往左右拐着接着挖。
+                return turnOrFinish(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(nextFeet(feet, way))
+                        + " 脚下落下去是 " + site.blockType(context, landing.below()) + "，不往这边走"));
             }
+            if (site.hurtsToStandOn(context, landing.below())) return turnOrFinish(hotFloor(context, landing.below()));
             stage = Stage.STEP_DOWN;
             stepTarget = landing;
             steppingLevel = !way.down();

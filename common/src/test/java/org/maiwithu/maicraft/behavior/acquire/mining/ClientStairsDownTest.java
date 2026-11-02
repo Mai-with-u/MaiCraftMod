@@ -95,6 +95,10 @@ class ClientStairsDownTest {
         @Override public String dimension(TickContext context) {
             return "minecraft:overworld";
         }
+        // 岩浆块站上去烫脚：生产实现问通行判断，替身按方块名认。
+        @Override public boolean hurtsToStandOn(TickContext context, BlockPos cell) {
+            return type(cell).equals("minecraft:magma_block");
+        }
         @Override public List<String> fillers(TickContext context) {
             return fillers;
         }
@@ -343,6 +347,40 @@ class ClientStairsDownTest {
         assertTrue(failed.problem().message().contains("minecraft:lava"), failed.problem().message());
         assertTrue(digs.dug.stream().allMatch(cell -> cell.getZ() == -1 && cell.getX() == 0),
                 "第二级哪个方向都没挖：" + digs.dug);
+    }
+
+    @Test
+    void 下一级脚下是岩浆块_不往那边挖_转个方向() {
+        // 下界往下挖台阶穿过 Y27–36 的岩浆块层：北边第一级脚下是岩浆块，挖开了也站不上去，转到东边挖。
+        world.placed.put(new BlockPos(0, 62, -1), "minecraft:magma_block");
+
+        assertInstanceOf(ActionStatus.Done.class, run(1));
+        assertEquals(new BlockPos(1, 63, 0), digs.dug.getFirst(), "北边脚下是岩浆块，转到东边");
+        assertFalse(world.walkedTo.contains(new BlockPos(0, 63, -1)), "不站到岩浆块上：" + world.walkedTo);
+    }
+
+    @Test
+    void 四面下一级脚下都是岩浆块_一格不挖_写明岩浆块停下() {
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            world.placed.put(new BlockPos(0, 62, 0).relative(side), "minecraft:magma_block");
+        }
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
+        assertEquals(Problem.Kind.DANGER, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("minecraft:magma_block"), failed.problem().message());
+        assertTrue(digs.dug.isEmpty(), "哪个方向都没挖：" + digs.dug);
+    }
+
+    @Test
+    void 下一级落一格下去是岩浆_不往那边走_拐开接着挖() {
+        // 挖开第一级才看清：脚下空着，再往下一格是岩浆（下界挖穿进洞，洞底是岩浆海）。不停下整趟，换个方向挖。
+        world.placed.put(new BlockPos(0, 62, -1), "minecraft:air");
+        world.placed.put(new BlockPos(0, 61, -1), "minecraft:lava");
+
+        assertInstanceOf(ActionStatus.Done.class, run(1));
+        assertTrue(world.walkedTo.stream().noneMatch(cell -> cell.getX() == 0 && cell.getZ() == -1),
+                "不往岩浆那边走下去：" + world.walkedTo);
+        assertEquals(1, digs.types.stream().filter("minecraft:stone"::equals).count());
     }
 
     @Test

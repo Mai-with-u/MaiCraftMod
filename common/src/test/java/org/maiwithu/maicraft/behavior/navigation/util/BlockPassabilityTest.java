@@ -139,6 +139,18 @@ class BlockPassabilityTest {
         assertEquals(new BlockPos(8, 65, 0), BlockPassability.playerFeet(world, 8.5, 64.5, 0.5), "下半砖");
     }
 
+    @Test
+    void magmaBlockHurtsToStandOnAndIsNotGround() {
+        // 岩浆块站上去烫脚：挖台阶的下一级脚下是它就拐开，寻路也不把它当地面；同是下界方块的下界岩照常能站。
+        Grid world = new Grid();
+        world.put(new BlockPos(0, 64, 0), Blocks.MAGMA_BLOCK.defaultBlockState());
+        world.put(new BlockPos(2, 64, 0), Blocks.NETHERRACK.defaultBlockState());
+        assertTrue(BlockPassability.hurtsToStandOn(Blocks.MAGMA_BLOCK.defaultBlockState()));
+        assertFalse(BlockPassability.hurtsToStandOn(Blocks.NETHERRACK.defaultBlockState()));
+        assertFalse(BlockPassability.canWalkOn(world, new BlockPos(0, 64, 0)), "岩浆块不当地面");
+        assertTrue(BlockPassability.canWalkOn(world, new BlockPos(2, 64, 0)), "下界岩照常能站");
+    }
+
     private static final class Grid implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
 

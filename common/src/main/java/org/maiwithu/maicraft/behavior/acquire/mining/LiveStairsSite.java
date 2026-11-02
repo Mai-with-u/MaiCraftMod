@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -109,6 +110,13 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
             return ClientStairsDown.Ground.BUILT;
         }
         return ClientStairsDown.Ground.DIGGABLE;
+    }
+
+    // 下一级脚下这一格站上去会不会烫脚（岩浆块）：寻路也不肯站，挖开了走不下去。没加载的不算，交给挖不动那条。
+    @Override
+    public boolean hurtsToStandOn(TickContext context, BlockPos cell) {
+        ClientLevel level = level(context);
+        return level != null && level.isLoaded(cell) && BlockPassability.hurtsToStandOn(level.getBlockState(cell));
     }
 
     @Override
