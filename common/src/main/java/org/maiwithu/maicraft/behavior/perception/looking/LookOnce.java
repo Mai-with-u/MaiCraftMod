@@ -31,7 +31,10 @@ final class LookOnce implements Action {
     static final float JITTER_DEGREES = 3f;
     static final float DRIFT_DEGREES = 1.5f;
     /** 远处只朝方位看时视线压在平视上下多少度以内。 */
-    static final float FAR_PITCH_LIMIT = 20f;
+    static final float ROUGH_PITCH_LIMIT = 20f;
+    /** 只朝大致方位瞥时左右偏开的度数范围：看不见的东西不对准那一格，免得盯着一面墙、那里过会儿挖出矿来像透视。 */
+    static final float ROUGH_YAW_MIN = 6f;
+    static final float ROUGH_YAW_MAX = 12f;
 
     private enum Stage { TURN, OPEN, HOLD, CLOSE, BACK, DONE }
 
@@ -187,6 +190,11 @@ final class LookOnce implements Action {
         boolean exact = step().target() instanceof LookTarget.Standing;
         jitterYaw = exact ? 0f : (random.nextFloat() * 2f - 1f) * JITTER_DEGREES;
         jitterPitch = exact ? 0f : (random.nextFloat() * 2f - 1f) * JITTER_DEGREES;
+        if (step().target() instanceof LookTarget.Spot spot && spot.roughly()) {
+            // 看不见的、太远的只朝那一边瞥：左右偏开六到十二度，随机往一边偏。
+            float off = ROUGH_YAW_MIN + random.nextFloat() * (ROUGH_YAW_MAX - ROUGH_YAW_MIN);
+            jitterYaw = random.nextBoolean() ? off : -off;
+        }
         driftYaw = 0f;
         driftPitch = 0f;
         nextDrift = 0;
@@ -218,8 +226,8 @@ final class LookOnce implements Action {
         if (aim == null) return Optional.empty();
         lastAim = aim;
         float pitch = aim.pitch() + jitterPitch + driftPitch;
-        if (target instanceof LookTarget.Spot spot && spot.far()) {
-            pitch = Mth.clamp(pitch, -FAR_PITCH_LIMIT, FAR_PITCH_LIMIT);
+        if (target instanceof LookTarget.Spot spot && spot.roughly()) {
+            pitch = Mth.clamp(pitch, -ROUGH_PITCH_LIMIT, ROUGH_PITCH_LIMIT);
         }
         return Optional.of(new Aim(Aim.wrap(aim.yaw() + jitterYaw + driftYaw), Mth.clamp(pitch, -90f, 90f)));
     }

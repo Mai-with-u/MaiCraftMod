@@ -12,9 +12,10 @@ sealed interface LookTarget {
     /**
      * 世界里的一个点。
      *
-     * @param far 远（六十四格外）：只朝那个方位看，视线压在平视上下二十度以内
+     * @param roughly 只朝大致方位瞥一眼：此刻看不见（隔着墙、在地下）或在六十四格外的东西，
+     *                视线压在平视上下二十度以内、左右偏开几度，不精确对准那一格
      */
-    record Spot(double x, double y, double z, boolean far) implements LookTarget {}
+    record Spot(double x, double y, double z, boolean roughly) implements LookTarget {}
 
     /** 一个方向：偏航与俯仰（俯仰正数是低头）。 */
     record Direction(float yaw, float pitch) implements LookTarget {}

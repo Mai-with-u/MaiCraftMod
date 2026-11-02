@@ -99,6 +99,26 @@ class LookOnceTest {
     }
 
     @Test
+    void 看不见的只朝大致方位瞥_看得见的照旧对准() {
+        // 正东十格平视处：看得见的对准那一格，只带三度以内的偏开与一度半以内的漂移。
+        LookOnce exact = look(new LookPlans.Step(new LookTarget.Spot(10, 1.62, 0, false), 40, new LookPlans.Screen.None()));
+        for (int i = 0; i < 30; i++) exact.tick(clock.next());
+        float exactYaw = Aim.between(0, 1.62, 0, 10, 1.62, 0).yaw();
+        assertEquals(exactYaw, head.yaw, 3f + 1.5f + 0.01f, "看得见的对准那一格");
+        exact.close();
+
+        // 同一处隔着墙、在地下（低头五十度的位置）：左右偏开六到十二度，俯仰压在平视上下二十度以内。
+        head.yaw = 0f;
+        head.pitch = 0f;
+        LookOnce rough = look(new LookPlans.Step(new LookTarget.Spot(10, -10, 0, true), 40, new LookPlans.Screen.None()));
+        for (int i = 0; i < 30; i++) rough.tick(clock.next());
+        float roughYaw = Aim.between(0, 1.62, 0, 10, -10, 0).yaw();
+        float off = Math.abs(Aim.wrap(head.yaw - roughYaw));
+        assertTrue(off >= 6f - 1.5f - 0.01f && off <= 12f + 1.5f + 0.01f, "不精确对准，偏开几度：" + off);
+        assertTrue(Math.abs(head.pitch) <= 20f + 0.01f, "不低头盯着地下：" + head.pitch);
+    }
+
+    @Test
     void 被收手时界面关上_镜头不往回甩() {
         LookOnce look = look(new LookPlans.Step(new LookTarget.Direction(90f, 0f), 200, new LookPlans.Screen.None()),
                 new LookPlans.Step(new LookTarget.Standing(), 60, new LookPlans.Screen.Inventory()));
