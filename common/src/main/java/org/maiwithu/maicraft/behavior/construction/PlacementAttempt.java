@@ -30,6 +30,8 @@ final class PlacementAttempt {
     PlacementPrediction.Placement placement;
     PlacementConfirmation confirmation;
     int uses;
+    /** 有一面站位、朝向都对，原版却说落不下来（多半是有生物站在那一格里）：这格过一会儿再回头。 */
+    boolean refusedByGame;
     /** 原版放出来朝向不对、能拿扳手转到位：照放，放下后转。 */
     boolean turnAfter;
     /** 还能拿扳手点几下。 */
@@ -69,6 +71,11 @@ final class PlacementAttempt {
         placement = null;
         confirmation = null;
         return candidates.get(index);
+    }
+
+    /** 下一面是哪一面，不往前挪。 */
+    Candidate peek() {
+        return candidates.get(index + 1);
     }
 
     Candidate current() {

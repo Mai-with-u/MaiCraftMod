@@ -35,7 +35,8 @@ import org.slf4j.LoggerFactory;
 
 /**
  * 砌筑：按施工顺序一格一格放。每格先看能从哪几面点，走到能点那一面的站位，用原版放置预测核对落下来是不是要的样子，
- * 把材料换到手上，点下去，按放置确认看结果。放不上的格先做别的，回头再试；回头仍放不上就垫一条临时方块链再试；
+ * 把材料换到手上，点下去，按放置确认看结果。放不上的格先做别的，情况变了（旁边新放了方块、人换了一层站、
+ * 挡着的生物过一会儿可能走开）再回头；什么都没变就垫一条临时方块链再试；
  * 垫不了的记"够不着"。材料用完就停在材料尽头，缺的格如实记下。
  *
  * <p>像真人一样站一处把够得着的都放完再挪：同一层同一阶段里挑离人最近的那格先放，点哪一面先挑站着不动就够得着的。
@@ -52,7 +53,11 @@ final class PlacingWork extends ConstructionWork {
     private final Permissions permissions;
     private final String purpose;
     private final Deque<PlannedCell> queue;
-    private final List<PlannedCell> deferred = new ArrayList<>();
+    private final DeferredPlacements deferred = new DeferredPlacements();
+    /** 走过去没走到之后人停在哪、要点的是哪一面：人没挪、附近也没新放方块之前，不再从同一处为同一面算路。 */
+    private final Set<FailedApproach> failedApproaches = new HashSet<>();
+    /** 现在第几刻：按时回头的格拿它算时候到没到。 */
+    private long now;
     /** 已经为它垫过临时方块的格：同一格只垫一回。 */
     private final Set<BlockPos> scaffolded = new HashSet<>();
     /** 这次垫的临时方块：不在蓝图里，放好记进账本而不是工地。 */
@@ -66,7 +71,6 @@ final class PlacingWork extends ConstructionWork {
     private ConstructionSeams.Clicks.Click click;
     private int materialBefore;
     private int consumed;
-    private boolean progressThisRound;
 
     PlacingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, String purpose,
                 List<PlannedCell> cells) {
@@ -76,7 +80,14 @@ final class PlacingWork extends ConstructionWork {
         this.queue = new ArrayDeque<>(cells);
     }
 
+    /** 一次没走到的走近：人停在哪一格，要去点哪一格的哪一面。 */
+    private record FailedApproach(BlockPos from, BlockPos clicked, Direction face) {}
+
+    /** 补一轮队列的结果：补上了、这一阶段做完了、或者只剩按时回头的格要等一会儿。 */
+    private enum Refill { REFILLED, DONE, WAIT }
+
     @Override protected ActionStatus advance(TickContext context) {
+        now = context.gameTick();
         if (attempt != null) {
             return switch (step) {
                 case APPROACH -> arrived();
@@ -94,17 +105,19 @@ final class PlacingWork extends ConstructionWork {
         while (true) {
             // 主队列空了就补一轮；补不出来（都放一放的格也处理完了）就是这一阶段做完。
             while (queue.isEmpty()) {
-                if (!refill()) return ActionStatus.done();
+                switch (refill()) {
+                    case DONE -> { return ActionStatus.done(); }
+                    // 剩下的格都在等挡着的生物走开、别处又没活可干：站着等一会儿再回头。
+                    case WAIT -> { return ActionStatus.running(); }
+                    case REFILLED -> { }
+                }
             }
             PlannedCell cell = pollNearest();
             boolean temporary = temporaries.contains(cell.pos());
             if (temporary ? TemporaryBlocks.solid(services.site(), cell.pos()) : !site.needsWork(cell.pos())) continue;
             // 先认这一格已经对上了再问别的：上一下其实放成了（确认说不清、被打断又回来），就不再缺料、问保护或再去点，
             // 免得自己刚装好的门被当成"玩家放的"记成受保护，还在旁边垫临时方块。
-            if (!temporary && site.alreadyMatches(cell, services.site())) {
-                progressThisRound = true;
-                continue;
-            }
+            if (!temporary && site.alreadyMatches(cell, services.site())) continue;
             String itemId = itemId(cell);
             if (!services.site().creative() && services.site().carried(itemId) <= 0) {
                 if (!temporary) site.problem("缺 " + itemId, cell.pos());
@@ -117,7 +130,7 @@ final class PlacingWork extends ConstructionWork {
             }
             // 联动规则说要等别的格先放好（带漏斗等下面的带子）：等的格还没好就先放一放，做别的再回头。
             if (!waiting(cell).isEmpty()) {
-                deferred.add(cell);
+                defer(cell, DeferredPlacements.Reason.WAITS_ON_OTHERS);
                 continue;
             }
             // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
@@ -129,7 +142,7 @@ final class PlacingWork extends ConstructionWork {
             List<PlacementAttempt.Candidate> candidates = reachableFirst(
                     PlacementAttempt.candidates(services.site(), cell, placeAt));
             if (candidates.isEmpty()) {
-                deferred.add(cell);
+                defer(cell, DeferredPlacements.Reason.NO_FACE_WORKED);
                 continue;
             }
             attempt = new PlacementAttempt(cell, placeAt, temporary, candidates);
@@ -186,48 +199,57 @@ final class PlacingWork extends ConstructionWork {
         return near;
     }
 
-    // 主队列空了：这一轮有进展就把放一放的格再排一轮；没进展就给第一个放不上的格垫临时方块链。
-    private boolean refill() {
-        if (deferred.isEmpty()) return false;
-        if (progressThisRound) {
-            queue.addAll(deferred);
-            deferred.clear();
-            progressThisRound = false;
-            return true;
+    // 主队列空了：情况变了的放一放的格排回来再试；什么都没变，就给最早放不上的那格垫一条临时方块链；
+    // 垫不了如实记下放不成。
+    private Refill refill() {
+        if (deferred.isEmpty()) return Refill.DONE;
+        List<PlannedCell> changed = deferred.changed(services.site().feet(), now, cell -> !waiting(cell).isEmpty());
+        if (!changed.isEmpty()) {
+            queue.addAll(changed);
+            return Refill.REFILLED;
         }
-        // 没进展：先挑第一个不是在等别的格的放不上的格去垫；剩下全在等别的格，等的那些格都没放成，如实记下。
-        PlannedCell stuck = deferred.stream().filter(cell -> waiting(cell).isEmpty()).findFirst().orElse(null);
+        PlannedCell stuck = deferred.takeStuck(cell -> !waiting(cell).isEmpty()).orElse(null);
         if (stuck == null) {
-            for (PlannedCell cell : deferred) site.unreachable(cell.pos(), "要等别的格先放好，那些格没放成");
-            deferred.clear();
-            return true;
+            if (deferred.waitingForTime()) return Refill.WAIT;
+            for (PlannedCell cell : deferred.drain()) site.unreachable(cell.pos(), "要等别的格先放好，那些格没放成");
+            return Refill.REFILLED;
         }
-        deferred.remove(stuck);
         // 垫过一回临时方块还是放不上：再垫也一样（实机放一张工作台垫了四块圆石、试了八千多次），如实记下这格放不成。
         if (!scaffolded.add(stuck.pos().immutable())) {
             site.unreachable(stuck.pos(), "垫了临时方块，每一面还是放不上");
-            return true;
+            return Refill.REFILLED;
         }
         // 这个工地不许垫（组装好的物理结构上，垫上去就成了船的一部分）：够不着就照实记够不着。
         if (!services.site().temporaryBlocksAllowed()) {
             site.unreachable(stuck.pos(), "够不着，在物理结构上不垫临时方块（会改船的重量和样子）");
-            return true;
+            return Refill.REFILLED;
         }
-        List<BlockPos> chain = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
+        List<BlockPos> blocks = permissions.changeBlocks() == Permissions.BlockChanges.NONE ? List.of()
                 : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true);
         Optional<String> material = services.site().temporaryMaterial();
-        if (chain.isEmpty() || material.isEmpty() || !services.site().creative() && services.site().carried(material.get()) < chain.size()) {
-            site.unreachable(stuck.pos(), chain.isEmpty() ? "够不着，也找不到能垫临时方块接过去的路" : "够不着，身上的建材不够垫临时方块");
-            return true;
+        if (blocks.isEmpty() || material.isEmpty() || !services.site().creative() && services.site().carried(material.get()) < blocks.size()) {
+            site.unreachable(stuck.pos(), blocks.isEmpty() ? "够不着，也找不到能垫临时方块接过去的路" : "够不着，身上的建材不够垫临时方块");
+            return Refill.REFILLED;
         }
         BlockState state = BuiltInRegistries.BLOCK.get(ResourceLocation.parse(material.get())).defaultBlockState();
-        for (BlockPos pos : chain) {
+        for (BlockPos pos : blocks) {
             temporaries.add(pos.immutable());
             queue.add(PlannedCell.block(pos, state, Set.of()));
         }
         queue.add(stuck);
-        records.attempt("为 " + stuck.pos().toShortString() + " 垫临时方块", "找到一条 " + chain.size() + " 块的链");
-        return true;
+        records.attempt("为 " + stuck.pos().toShortString() + " 垫临时方块", "找到一条 " + blocks.size() + " 块的链");
+        return Refill.REFILLED;
+    }
+
+    // 放一放这一格：记下此刻人站在哪、已经放成了几块，情况变了再回头。
+    private void defer(PlannedCell cell, DeferredPlacements.Reason reason) {
+        deferred.defer(cell, reason, services.site().feet(), now);
+    }
+
+    // 放成了一块：放一放的格拿它判断情况变没变；附近有了新方块，没走到过的站位也值得再试。
+    private void blockPlaced(BlockPos pos) {
+        deferred.placed(pos);
+        failedApproaches.clear();
     }
 
     // 这一格要等的、蓝图里写了而且还没做好的格。
@@ -262,18 +284,23 @@ final class PlacingWork extends ConstructionWork {
         if (!attempt.temporary && landedAnyway()) {
             int used = materialBefore < 0 ? 0 : materialBefore - services.site().carried(itemId(attempt.cell));
             consumed += used;
-            progressThisRound = true;
+            blockPlaced(attempt.cell.pos());
             records.change(new Change(Change.Kind.BLOCK_PLACED, itemId(attempt.cell), 1, attempt.cell.pos().toShortString()));
             return finish();
         }
         if (!attempt.temporary && site.alreadyMatches(attempt.cell, services.site())) {
             attempt = null;
-            progressThisRound = true;
             return nextCell();
         }
+        // 从这里去点这一面刚才走过去没走到：人没挪、附近也没新放方块，再算一次路还是一样，直接看下一面。
+        while (attempt.hasNext() && failedApproaches.contains(approachKey(attempt.peek()))) {
+            PlacementAttempt.Candidate skipped = attempt.next();
+            LOG.info("[施工] 放 {}：刚才从 {} 走不到能点 {} 的 {} 面的位置，人没挪，不再算路", attempt.cell.pos().toShortString(),
+                    services.site().feet().toShortString(), skipped.clicked().toShortString(), skipped.face());
+        }
         if (!attempt.hasNext()) {
-            // 每一面都试过了：先放一放，做别的格再回头。
-            deferred.add(attempt.cell);
+            // 每一面都试过了：先放一放，做别的格，情况变了再回头。
+            defer(attempt.cell, attempt.refusedByGame ? DeferredPlacements.Reason.REFUSED_BY_GAME : DeferredPlacements.Reason.NO_FACE_WORKED);
             attempt = null;
             return nextCell();
         }
@@ -326,6 +353,8 @@ final class PlacingWork extends ConstructionWork {
             LOG.info("[施工] 放 {}：放出来会是 {}，放下后用扳手转到位", attempt.cell.pos().toShortString(),
                     predicted.get().predicted());
         }
+        // 站位、朝向都对，原版却说这一下落不下来（多半是有生物站在那一格里）：记下来，这格过一会儿再回头。
+        if (predicted.isPresent() && predicted.get().predicted() == null) attempt.refusedByGame = true;
         if (!acceptable) {
             LOG.info("[施工] 放 {}：从 {} 的 {} 面不行（{}）", attempt.cell.pos().toShortString(),
                     candidate.clicked().toShortString(), candidate.face(),
@@ -355,7 +384,7 @@ final class PlacingWork extends ConstructionWork {
             }
             case ConstructionSeams.HoldPlan.Cannot cannot -> {
                 records.attempt("把 " + itemId + " 换到手上", cannot.problem().message());
-                deferred.add(attempt.cell);
+                defer(attempt.cell, DeferredPlacements.Reason.NO_FACE_WORKED);
                 attempt = null;
                 yield nextCell();
             }
@@ -389,7 +418,7 @@ final class PlacingWork extends ConstructionWork {
                 int used = materialBefore < 0 ? 0 : Math.max(0, materialBefore - services.site().carried(itemId));
                 consumed += used;
                 attempt.uses++;
-                progressThisRound = true;
+                blockPlaced(cell.pos());
                 records.change(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, (attempt.temporary ? "临时方块 " : "") + cell.pos().toShortString()));
                 BlockState live = services.site().state(cell.pos());
                 // 放下来朝向不对、能拿扳手转到位（照放的，或预测说放得成却落成了别的朝向）：转到位再收下。
@@ -507,12 +536,21 @@ final class PlacingWork extends ConstructionWork {
         // 扳手转到一半出了岔子：方块已经放下了，照现在的样子收下，差异交给整机比对。
         if (step == Step.TURN_HOLD || step == Step.TURN_CLICK) return finish();
         if (step == Step.HOLD) {
-            deferred.add(attempt.cell);
+            defer(attempt.cell, DeferredPlacements.Reason.NO_FACE_WORKED);
             attempt = null;
             return nextCell();
         }
-        // 走不到那一面、点不着：换一面再试。
+        // 走不到那一面：记下人停在哪、要点哪一面，人没挪就不再为它算路；然后换一面再试。
+        if (step == Step.APPROACH && services.site().feet() != null && attempt.current() != null) {
+            failedApproaches.add(approachKey(attempt.current()));
+        }
         return tryNextCandidate();
+    }
+
+    // 从人现在站的地方去点这一面。
+    private FailedApproach approachKey(PlacementAttempt.Candidate candidate) {
+        BlockPos feet = services.site().feet();
+        return new FailedApproach(feet == null ? null : feet.immutable(), candidate.clicked(), candidate.face());
     }
 
     private static String itemId(PlannedCell cell) {
