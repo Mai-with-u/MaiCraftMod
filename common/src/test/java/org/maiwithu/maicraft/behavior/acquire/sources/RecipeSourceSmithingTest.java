@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -47,7 +48,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 锻造台这条路：途径单列 smith、算现做；记得的锻造台 64 格内走过去用，没有就报身边摆一张、做完挖回来；
  * 一个模板复制成两个这种净多出来的配方算做法，换颜色这种一件换一件的照旧不算；
- * 要升级的那件背包里没有、身上正穿着时先脱下来再升级，背包里有就不动身上穿的。
+ * 要升级的那件背包里没有、身上正穿着时脱下 → 升级 → 穿回原来那一格，那一格被占了留在背包里，升级没成把原件穿回去；
+ * 背包里有就不动身上穿的。
  */
 class RecipeSourceSmithingTest {
 
@@ -68,6 +70,10 @@ class RecipeSourceSmithingTest {
     private final List<ItemRequest> asked = new ArrayList<>();
     /** 脱过哪几格、锻造台动手过几次：先后对得上才说明是先脱后升级。 */
     private final List<String> happened = new ArrayList<>();
+    /** 锻造台上这一回做不做得成：做不成时动手替身按缺料失败。 */
+    private boolean upgradeWorks = true;
+    /** 升级途中有别的事往这一格穿上了什么；为空就没有。 */
+    private String putOnWhileUpgrading;
 
     private static WorkstationRecipe chestplateUpgrade() {
         return new WorkstationRecipe("minecraft:netherite_chestplate_smithing", WorkstationRecipe.Kind.SMITHING,
@@ -89,19 +95,38 @@ class RecipeSourceSmithingTest {
         };
     }
 
-    // 锻造台动手替身：记一笔"升级了"，当场做完。
+    // 锻造台动手替身：推进时做得成就把钻石胸甲换成下界合金胸甲放进背包，做不成按缺料失败、背包不动。
     private RecipeRuns runs() {
-        return (recipe, station, times, permissions, records) -> {
-            happened.add("升级" + recipe.result().itemId());
-            return Optional.of(done("在锻造台上升级"));
-        };
+        return (recipe, station, times, permissions, records) -> Optional.of(new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                happened.add("升级" + recipe.result().itemId());
+                if (putOnWhileUpgrading != null) worn.put(GearSlotName.CHEST, putOnWhileUpgrading);
+                if (!upgradeWorks) return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "锻造台上少一块下界合金锭"));
+                backpack.take(DIAMOND_CHESTPLATE, 1);
+                backpack.addGear(recipe.result().itemId());
+                return ActionStatus.done();
+            }
+            @Override public String describe() {
+                return "在锻造台上升级";
+            }
+        });
     }
 
-    // 脱盔甲替身：那一格的东西挪进背包，记一笔脱了哪格。
+    // 穿脱盔甲替身：脱下把那一格的东西挪进背包，穿上从背包挪回那一格，各记一笔。
     private GearChanges gear() {
         return new GearChanges() {
             @Override public Optional<Action> wear(String itemId, GearSlotName slot) {
-                return Optional.empty();
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        if (!backpack.take(itemId, 1)) return failed("背包里没有").tick(context);
+                        worn.put(slot, itemId);
+                        happened.add("穿上" + slot.paramName() + " " + itemId);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() {
+                        return "穿上" + slot.paramName();
+                    }
+                });
             }
 
             @Override public Optional<Action> takeOff(GearSlotName slot) {
@@ -124,7 +149,7 @@ class RecipeSourceSmithingTest {
         SetsUpWorkstation placer = (blockType, placedAt) -> Optional.empty();
         TakesOffWornGear takesOff = new TakesOffWornGear(
                 slot -> Optional.ofNullable(worn.get(slot)).map(item -> new BackpackStack(item, 1, 1, true, false, false, false)),
-                gear(), tags);
+                gear(), backpack, tags);
         return new RecipeSource(Set.of(WorkstationRecipe.Kind.SMITHING), recipes, memory, itemId -> 0, runs(),
                 backpack, new FakeOffhand(), tags, needs(), placer, null, takesOff);
     }
@@ -145,6 +170,25 @@ class RecipeSourceSmithingTest {
                 return what;
             }
         };
+    }
+
+    private static Action failed(String why) {
+        return new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, why));
+            }
+            @Override public String describe() {
+                return why;
+            }
+        };
+    }
+
+    // 做完了才算过；没做完把问题原话带出来，一眼看得出卡在哪。
+    private static void assertDone(ActionStatus status) {
+        if (status instanceof ActionStatus.Failed failed) {
+            throw new AssertionError("没做成：" + failed.problem().message());
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
     }
 
     private static ActionStatus runToEnd(Action action) {
@@ -223,24 +267,60 @@ class RecipeSourceSmithingTest {
     }
 
     @Test
-    void 要升级的那件只穿在身上_先脱下来再升级_升级好的留在背包() {
+    void 要升级的那件只穿在身上_脱下升级再穿回原来那一格() {
+        CollectedRecords records = new CollectedRecords();
+        ActionStatus status = upgradeWornChestplate(records);
+
+        assertDone(status);
+        assertEquals(List.of("脱下chest", "升级minecraft:netherite_chestplate",
+                "穿上chest minecraft:netherite_chestplate"), happened);
+        assertEquals(NETHERITE_CHESTPLATE.itemId(), worn.get(GearSlotName.CHEST));
+        assertTrue(asked.stream().noneMatch(ask -> ask.wanted().specifier().equals(DIAMOND_CHESTPLATE)),
+                "没去另做一件钻石胸甲：" + asked);
+        assertTrue(noteOf(records, DIAMOND_CHESTPLATE).contains("脱下来"), records.changes.toString());
+        assertTrue(noteOf(records, NETHERITE_CHESTPLATE.itemId()).contains("穿回身上（chest）"), records.changes.toString());
+    }
+
+    @Test
+    void 原来那一格被别的占了_升级好的留在背包里照实说() {
+        putOnWhileUpgrading = "minecraft:elytra";
+        CollectedRecords records = new CollectedRecords();
+
+        assertDone(upgradeWornChestplate(records));
+        assertEquals("minecraft:elytra", worn.get(GearSlotName.CHEST));
+        assertTrue(backpack.stacks().stream().anyMatch(stack -> stack.itemId().equals(NETHERITE_CHESTPLATE.itemId())));
+        String note = noteOf(records, NETHERITE_CHESTPLATE.itemId());
+        assertTrue(note.contains("minecraft:elytra") && note.contains("留在背包里"), note);
+    }
+
+    @Test
+    void 升级没成_把原件穿回去再按那个问题收场() {
+        upgradeWorks = false;
+        CollectedRecords records = new CollectedRecords();
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, upgradeWornChestplate(records));
+        assertTrue(failed.problem().message().contains("下界合金锭"), failed.problem().message());
+        assertEquals(DIAMOND_CHESTPLATE, worn.get(GearSlotName.CHEST));
+        assertTrue(records.changes.stream().anyMatch(change -> change.note().contains("原样穿回身上（chest）")),
+                records.changes.toString());
+    }
+
+    // 身上穿着钻石胸甲、背包里有模板和锭，要一件下界合金胸甲：问价、动手、推到收场。
+    private ActionStatus upgradeWornChestplate(CollectedRecords records) {
         backpack.add(TEMPLATE, 1);
         backpack.add(NETHERITE_INGOT, 1);
         worn.put(GearSlotName.CHEST, DIAMOND_CHESTPLATE);
         RecipeSource source = smithing();
         ItemRequest request = new ItemRequest(NETHERITE_CHESTPLATE, 1, "穿");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request, CONTEXT));
-        CollectedRecords records = new CollectedRecords();
         Action action = source.begin(request, offer,
                 SourceContext.booked(WorldPosition.here(0, 64, 0), Permissions.DEFAULT, records)).orElseThrow();
+        return runToEnd(action);
+    }
 
-        assertInstanceOf(ActionStatus.Done.class, runToEnd(action));
-        assertEquals(List.of("脱下chest", "升级minecraft:netherite_chestplate"), happened);
-        assertTrue(asked.stream().noneMatch(ask -> ask.wanted().specifier().equals(DIAMOND_CHESTPLATE)),
-                "没去另做一件钻石胸甲：" + asked);
-        Change note = records.changes.stream().filter(change -> change.what().equals(DIAMOND_CHESTPLATE))
-                .findFirst().orElseThrow();
-        assertTrue(note.note().contains("要穿用 equip"), note.note());
+    private static String noteOf(CollectedRecords records, String item) {
+        return records.changes.stream().filter(change -> change.what().equals(item))
+                .map(Change::note).reduce((first, second) -> first + "；" + second).orElse("");
     }
 
     @Test
@@ -253,7 +333,7 @@ class RecipeSourceSmithingTest {
         ItemRequest request = new ItemRequest(NETHERITE_CHESTPLATE, 1, "穿");
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(request, CONTEXT));
 
-        assertInstanceOf(ActionStatus.Done.class, runToEnd(source.begin(request, offer, CONTEXT).orElseThrow()));
+        assertDone(runToEnd(source.begin(request, offer, CONTEXT).orElseThrow()));
         assertEquals(List.of("升级minecraft:netherite_chestplate"), happened);
         assertEquals(DIAMOND_CHESTPLATE, worn.get(GearSlotName.CHEST));
     }

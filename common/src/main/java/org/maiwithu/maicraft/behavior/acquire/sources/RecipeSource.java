@@ -251,7 +251,8 @@ public final class RecipeSource implements ItemSource {
         List<GearSlotName> wornSlots = wornToTakeOff(recipe, Math.min(timesNeeded(recipe, request.count()),
                 MAX_CRAFTS_PER_RUN));
         if (!wornSlots.isEmpty()) {
-            return Optional.of(worn.thenRun(wornSlots, context.records(), () -> {
+            // 脱下 → 升级 → 穿回原来那一格：升级好的是配方产出的那件。
+            return Optional.of(worn.thenRun(wornSlots, recipe.result().itemId(), context.records(), () -> {
                 List<WorkstationRecipe> now = ranked(request, context).candidates();
                 WorkstationRecipe same = now.stream().filter(candidate -> candidate.id().equals(recipe.id()))
                         .findFirst().orElse(recipe);

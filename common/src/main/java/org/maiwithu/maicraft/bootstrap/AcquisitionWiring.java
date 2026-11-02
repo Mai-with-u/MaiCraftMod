@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.sources.FluidTransformSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HuntSource;
+import org.maiwithu.maicraft.behavior.acquire.engine.BackpackWithArmor;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHunts;
@@ -87,11 +88,12 @@ final class AcquisitionWiring {
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
-        // 锻造台一条路：钻石装备加下界合金锭升级成下界合金的；要升级的那件只穿在身上时先脱下来，升级好的留在背包里。
+        // 锻造台一条路：钻石装备加下界合金锭升级成下界合金的；要升级的那件只穿在身上时脱下 → 升级 → 穿回原来那一格。
         RecipeSource smithSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.SMITHING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission,
-                new TakesOffWornGear(deps.character().equipment(), playerServices.gear(), deps.items().itemTags()));
+                new TakesOffWornGear(deps.character().equipment(), playerServices.gear(), deps.character().backpack(),
+                        deps.items().itemTags()));
         // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
         MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
                 permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
@@ -123,8 +125,10 @@ final class AcquisitionWiring {
         for (FluidTransforms transforms : deps.compat().fluidTransforms()) {
             sources.add(new FluidTransformSource(transforms, sites, playerServices, drops, stepsAside));
         }
+        // 清点身上几件时连穿着的护甲一起数：锻造台上升级好穿回身上的那件照样算拿到了。
+        BackpackWithArmor carried = new BackpackWithArmor(deps.character().backpack(), deps.character().equipment());
         ItemAcquisition acquisition = new ItemAcquisition(sources,
-                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(),
+                carried, deps.character().offhand(), deps.items().itemTags(),
                 deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
         // 备料时不把外层正要的东西当原料用掉（做合金不先把做好的合金压成块）。
@@ -139,7 +143,7 @@ final class AcquisitionWiring {
         deps.itemsInUse().watch(acquisition::inProgress);
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
-        return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), deps.character().backpack(), deps.character().offhand(),
+        return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
                 deps.items().itemTags(), ClientRegisteredIds.builtIn());
     }
 
