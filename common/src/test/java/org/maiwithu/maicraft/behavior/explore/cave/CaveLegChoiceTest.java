@@ -67,9 +67,9 @@ class CaveLegChoiceTest {
                 List.of());
         assertNull(walkedAll.next());
 
-        CaveLegChoice.Choice nearTried = CaveLegChoice.choose(situation(null), reached, cell -> false, cell -> true,
-                List.of(new BlockPos(16, 64, 0)));
-        assertEquals(new BlockPos(7, 64, 0), nearTried.next(), "走不到的那格 8 格内都不挑");
+        CaveLegChoice.Choice nearTried = CaveLegChoice.choose(situation(null), line(1, 0, 30), cell -> false,
+                cell -> true, List.of(new BlockPos(30, 64, 0)));
+        assertEquals(new BlockPos(13, 64, 0), nearTried.next(), "走不到的那格 16 格内都不挑");
     }
 
     @Test

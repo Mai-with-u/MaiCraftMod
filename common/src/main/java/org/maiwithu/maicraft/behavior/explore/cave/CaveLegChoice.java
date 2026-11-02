@@ -22,8 +22,8 @@ public final class CaveLegChoice {
 
     /** 离走过的地方这么远（格）才算新地方。 */
     static final int FRESH = 6;
-    /** 走不到的候选这么近（格）的不再挑。 */
-    static final int TRIED_RADIUS = 8;
+    /** 走不到的候选这么近（格）的不再挑：同一个方向上近一点的多半也是同一道坎。 */
+    static final int TRIED_RADIUS = 16;
     /** 一段至少走多远（格）：脚边那几格不值得停下来再走一段。 */
     static final int MIN_LEG = 4;
     /** 每个方向从远到近最多看几格视线：远的看见了就够了，不对几千格都打一遍视线。 */
