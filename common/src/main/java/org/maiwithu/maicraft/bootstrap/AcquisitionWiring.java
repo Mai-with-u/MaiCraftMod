@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.acquire.trade.MerchantTradeTakes;
 import org.maiwithu.maicraft.behavior.acquire.sources.MiningSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.RecipeRuns;
 import org.maiwithu.maicraft.behavior.acquire.sources.RecipeSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.TakesOffWornGear;
 import org.maiwithu.maicraft.behavior.acquire.sources.ReclaimSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.RememberedWoodSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.RegistryRecipeReads;
@@ -61,7 +62,7 @@ final class AcquisitionWiring {
 
     /**
      * 拿到物品能力的一份：身上的不算来源（引擎开场就清点），登记的是身外的途径——
-     * 记得的箱子与现场容器、合成（含石切台）、烧炼、挖矿、收熟作物、和村民交易。
+     * 记得的箱子与现场容器、合成（含石切台）、烧炼、锻造台升级、挖矿、收熟作物、和村民交易。
      * 来源备料缺原料缺工具时回到引擎自己再问一遍，
      * 引擎要等来源清单建好才建得出来，所以内需入口先接住、引擎建好后接上。
      */
@@ -86,6 +87,11 @@ final class AcquisitionWiring {
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
+        // 锻造台一条路：钻石装备加下界合金锭升级成下界合金的；要升级的那件只穿在身上时先脱下来，升级好的留在背包里。
+        RecipeSource smithSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.SMITHING),
+                recipeReads, deps.world().memory(), recipeReads, recipeRuns,
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission,
+                new TakesOffWornGear(deps.character().equipment(), playerServices.gear(), deps.items().itemTags()));
         // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
         MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
                 permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
@@ -99,7 +105,7 @@ final class AcquisitionWiring {
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags());
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                containerSource, craftSource, smeltSource, miningSource, harvestSource,
+                containerSource, craftSource, smeltSource, smithSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
                 new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags()),
                 new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
@@ -126,6 +132,7 @@ final class AcquisitionWiring {
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
         miningSource.prepareWorkTools(new LiveWorkTools(deps.character().context()), acquisition::inProgress);
         smeltSource.watchChain(acquisition::inProgress);
+        smithSource.watchChain(acquisition::inProgress);
         // 饿了身上没吃的：吃饭的临时任务经同一个引擎去弄口粮。
         deps.survivalWiring().attachFood(acquisition);
         // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。

@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -58,7 +59,8 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsFuels;
  * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
  * 某样原料弄不来、身上连一份的量都没有时当场放弃这个做法，不再去弄其余原料（没有羊毛就不去砍做床板的木头）。
  * 一格收好几样的原料（给床换颜色要"别的颜色的任一张床"）身上有哪样用哪样，缺了挑最省的那样去弄。
- * 附近没有工作台、石切台时就地摆一台，做完就挖回背包；熔炉要关着界面等它烧，放下就留着。
+ * 附近没有工作台、石切台、锻造台时就地摆一台，做完就挖回背包；熔炉要关着界面等它烧，放下就留着。
+ * 锻造台上要升级的那件背包里没有、身上正穿着时，先脱下来再升级（见 {@link TakesOffWornGear}）。
  */
 public final class RecipeSource implements ItemSource {
 
@@ -91,6 +93,8 @@ public final class RecipeSource implements ItemSource {
     private final ItemNeeds needs;
     /** 就地摆工作站的接缝；没接上时附近没有设施就如实说没有，不放。 */
     private final SetsUpWorkstation placer;
+    /** 锻造台上要升级的那件只穿在身上时先脱下来；没接上时不碰身上穿的。 */
+    private final TakesOffWornGear worn;
     private final PermissionCheck permission;
     /** 可以互换的原料怎么数、缺了去弄哪一样。 */
     private final IngredientChoice choice;
@@ -105,10 +109,10 @@ public final class RecipeSource implements ItemSource {
      */
     private boolean pricingIngredients;
 
-    /** 只做给定几种配方的来源：合成一条路（含石切台），烧炼一条路，分开登记才分得开 via。 */
+    /** 只做给定几种配方的来源：合成一条路（含石切台），烧炼一条路，锻造台一条路，分开登记才分得开 via。 */
     public RecipeSource(Set<WorkstationRecipe.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
             RecipeRuns runs, BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs,
-            SetsUpWorkstation placer, PermissionCheck permission) {
+            SetsUpWorkstation placer, PermissionCheck permission, TakesOffWornGear worn) {
         if (kinds.isEmpty()) throw new IllegalArgumentException("来源至少要认一种配方");
         this.kinds = Set.copyOf(kinds);
         this.recipes = recipes;
@@ -122,7 +126,15 @@ public final class RecipeSource implements ItemSource {
         this.choice = new IngredientChoice(backpack, offhand, tags, needs);
         this.placer = placer;
         this.permission = permission;
+        this.worn = worn;
         this.stations = new RememberedStations(memory, placer, SEARCH_RADIUS_BLOCKS);
+    }
+
+    /** 不碰身上穿的：合成、烧炼两条路用不上脱盔甲。 */
+    public RecipeSource(Set<WorkstationRecipe.Kind> kinds, ReadsRecipes recipes, WorldMemory memory, ReadsFuels fuels,
+            RecipeRuns runs, BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ItemNeeds needs,
+            SetsUpWorkstation placer, PermissionCheck permission) {
+        this(kinds, recipes, memory, fuels, runs, backpack, offhand, tags, needs, placer, permission, null);
     }
 
     /** 认所有种类配方、不就地摆设施的来源：就地摆放与种类分路接入前的老写法。 */
@@ -134,8 +146,14 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public String describe() {
+        if (smithingOnly()) return "锻造台上升级";
         return kinds.contains(WorkstationRecipe.Kind.SMELTING) && !kinds.contains(WorkstationRecipe.Kind.CRAFTING)
                 ? "烧炼" : "自己做";
+    }
+
+    // 只认锻造台的那一份：途径与说法都单独一条。
+    private boolean smithingOnly() {
+        return kinds.equals(Set.of(WorkstationRecipe.Kind.SMITHING));
     }
 
     /** 接上拿东西的引擎：它此刻在推进的那一串请求，备料时不把外层正要的东西当原料用掉。 */
@@ -144,6 +162,7 @@ public final class RecipeSource implements ItemSource {
     }
 
     @Override public AcquireVia via() {
+        if (smithingOnly()) return AcquireVia.SMITH;
         return kinds.contains(WorkstationRecipe.Kind.CRAFTING) ? AcquireVia.CRAFT : AcquireVia.SMELT;
     }
 
@@ -184,8 +203,8 @@ public final class RecipeSource implements ItemSource {
         List<WorkstationRecipe> withoutRecipe = recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .filter(recipe -> recipe.kind().placeable() || findStation(recipe.kind(), context).isPresent())
-                .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
-                .filter(recipe -> !consumesOuterWanted(recipe))
+                .filter(recipe -> !eatsWhatIsWanted(recipe, request.wanted()))
+                .filter(recipe -> !consumesOuterWanted(recipe, request))
                 .toList();
         if (!withoutRecipe.isEmpty()
                 && withoutRecipe.stream().allMatch(recipe -> ingredientsAllUnobtainable(recipe, request))) {
@@ -212,7 +231,9 @@ public final class RecipeSource implements ItemSource {
         List<ItemRequest> missing = new ArrayList<>(new RecipeShortfall(recipe.get(), context, choice, needs, backpack,
                 offhand, tags, this::pick).stillMissing(times));
         if (recipe.get().kind().cooks()) fuel.need(recipe.get(), times).ifPresent(missing::add);
-        return missing;
+        // 锻造台上要升级的那件穿在身上：动手时脱下来用，不算还要去弄的。
+        List<GearSlotName> wornSlots = wornToTakeOff(recipe.get(), times);
+        return wornSlots.isEmpty() ? missing : worn.notWorn(missing, wornSlots);
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -224,6 +245,18 @@ public final class RecipeSource implements ItemSource {
         if (recipe == null) {
             // 报价时还在、动手时查不到了：交回空，由引擎换路。
             return Optional.empty();
+        }
+        // 锻造台上要升级的那件背包里没有、身上正穿着：先脱下来放进背包，再按背包里现在的东西排做法、备料、动手，
+        // 不然备料会去另做一件（钻石胸甲要八颗钻石），身上那件原样穿着。
+        List<GearSlotName> wornSlots = wornToTakeOff(recipe, Math.min(timesNeeded(recipe, request.count()),
+                MAX_CRAFTS_PER_RUN));
+        if (!wornSlots.isEmpty()) {
+            return Optional.of(worn.thenRun(wornSlots, context.records(), () -> {
+                List<WorkstationRecipe> now = ranked(request, context).candidates();
+                WorkstationRecipe same = now.stream().filter(candidate -> candidate.id().equals(recipe.id()))
+                        .findFirst().orElse(recipe);
+                return run(variantsFor(same, now, request, context), same, request, context);
+            }));
         }
         List<WorkstationRecipe> variants = variantsFor(recipe, candidates, request, context);
         // 排头两种原料一样近（多半是身上的 AE 终端这五分钟没开过，每种木头都报"看一眼"）：先打开看一眼再挑，
@@ -238,6 +271,12 @@ public final class RecipeSource implements ItemSource {
             }
         }
         return Optional.of(run(variants, recipe, request, context));
+    }
+
+    // 这条配方做 times 次时，背包里缺、要从身上脱下来的盔甲格：只有锻造台、接上了脱盔甲的接缝才看，别的配方一律不碰身上穿的。
+    private List<GearSlotName> wornToTakeOff(WorkstationRecipe recipe, int times) {
+        if (worn == null || recipe.kind() != WorkstationRecipe.Kind.SMITHING) return List.of();
+        return worn.wornToTakeOff(recipe, times, choice::carried);
     }
 
     private Action run(List<WorkstationRecipe> variants, WorkstationRecipe recipe, ItemRequest request,
@@ -308,7 +347,8 @@ public final class RecipeSource implements ItemSource {
 
     // 用拿得到的配方排个先后，像玩家一样先看手头：原料身上缺得最少的那种优先（要"任意木板"、背包里有云杉原木，
     // 就做云杉木板，不去找竹子）；缺得一样多时，摆得进背包合成格的优先，再挑原料种类最少的。
-    // 拿要的东西本身当原料的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多。
+    // 拿要的东西本身当原料、做一次又不净多出来的配方不算做法：给床换个颜色、给羊毛染色，做完身上的床、羊毛一件没多；
+    // 净多出来的照样算（一个锻造模板加七颗钻石复制成两个）。
     // 缺的原料全被确认拿不到的做法也不算：引擎这一场里已经为它白跑过一圈，再报只会原地转圈。
     // 能用的做法按先后排：高炉、烟熏炉这类只用现成的，附近没记得一台就不算做法（不会为了快一倍去凑一台）；
     // 缺料一样、原料一样时烧得快的在前——记得高炉就把矿石拿去高炉烧，没有照旧用熔炉。
@@ -316,8 +356,8 @@ public final class RecipeSource implements ItemSource {
         List<WorkstationRecipe> candidates = recipes.recipesProducing(request.wanted()).stream()
                 .filter(recipe -> kinds.contains(recipe.kind()))
                 .filter(recipe -> recipe.kind().placeable() || findStation(recipe.kind(), context).isPresent())
-                .filter(recipe -> !consumesWhatIsWanted(recipe, request.wanted()))
-                .filter(recipe -> !consumesOuterWanted(recipe))
+                .filter(recipe -> !eatsWhatIsWanted(recipe, request.wanted()))
+                .filter(recipe -> !consumesOuterWanted(recipe, request))
                 .filter(recipe -> !ingredientsAllUnobtainable(recipe, request))
                 .toList();
         // 里层问价回来的那一次：不再算材料可得性，按配方注册顺序给出去，问价才能收得住。
@@ -414,15 +454,35 @@ public final class RecipeSource implements ItemSource {
         return assemble(recipe, station.map(MemoryRecord::position).orElse(null), times, context);
     }
 
-    // 这条配方的原料里有没有一样本身就满足这次要的东西：有的话做它不会让要的东西变多。
     // 外层正要的东西当这一步的原料：为了做安山合金去弄合金块，又拿身上刚做好的合金压成块——白白压掉。
     // 实机要 38 个安山合金，引擎选了"合金块拆成合金"，把做好的合金压成一个块，拆的配方没解锁，76 块安山岩做的合金进了块里。
-    private boolean consumesOuterWanted(WorkstationRecipe recipe) {
-        for (ItemRequest outer : chain.get()) {
-            if (consumesWhatIsWanted(recipe, outer.wanted())) return true;
+    // 这次请求自己也在推进的那一串里（同一样东西排在最里面那条）：它做一次净不净多出来由 eatsWhatIsWanted 管，
+    // 这里只看真正的外层——外层也在要同一样东西时（复制模板时缺的那个模板）照旧不拿它当原料，不绕回自己头上。
+    private boolean consumesOuterWanted(WorkstationRecipe recipe, ItemRequest request) {
+        List<ItemRequest> outer = new ArrayList<>(chain.get());
+        for (int i = outer.size() - 1; i >= 0; i--) {
+            if (outer.get(i).wanted().equals(request.wanted())) {
+                outer.remove(i);
+                break;
+            }
+        }
+        for (ItemRequest wanted : outer) {
+            if (consumesWhatIsWanted(recipe, wanted.wanted())) return true;
         }
         return false;
     }
+
+    // 做这条配方会不会让要的东西不增反平：原料里满足要的东西的件数不少于一次的产出（换颜色、染色一件换一件）才算吃掉；
+    // 一个模板复制成两个这种净多出来的不算。
+    private boolean eatsWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
+        int eaten = recipe.ingredients().stream()
+                .filter(ingredient -> choice.satisfies(ingredient, wanted))
+                .mapToInt(WorkstationRecipe.IngredientStack::count)
+                .sum();
+        return eaten > 0 && eaten >= recipe.resultCount();
+    }
+
+    // 这条配方的原料里有没有一样本身就满足要的东西。
 
     private boolean consumesWhatIsWanted(WorkstationRecipe recipe, WantedItem wanted) {
         return recipe.ingredients().stream().anyMatch(ingredient -> choice.satisfies(ingredient, wanted));

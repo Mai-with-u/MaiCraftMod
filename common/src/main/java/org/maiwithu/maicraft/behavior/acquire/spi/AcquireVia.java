@@ -25,6 +25,9 @@ public record AcquireVia(String name, String description) {
     public static final AcquireVia CRAFT = new AcquireVia("craft", "工作台上做出来（含石切台）");
     /** 熔炉里烧出来；记得附近有高炉、烟熏炉时，矿石与食物在那里烧（快一倍）。 */
     public static final AcquireVia SMELT = new AcquireVia("smelt", "熔炉里烧出来（记得附近有高炉、烟熏炉时在那里烧，快一倍）");
+    /** 锻造台上升级：升级模板、要升级的物品、升级材料各一件出一件新的（钻石装备加下界合金锭变成下界合金的）。 */
+    public static final AcquireVia SMITH = new AcquireVia("smith",
+            "锻造台上升级（升级模板 + 要升级的物品 + 升级材料，钻石装备加下界合金锭变成下界合金的）");
     /** 挖掉会掉出它的方块。 */
     public static final AcquireVia MINE = new AcquireVia("mine", "挖掉会掉出它的方块");
     /** 收成熟的作物。 */
@@ -46,9 +49,9 @@ public record AcquireVia(String name, String description) {
         return TRADE.name().equals(name);
     }
 
-    /** 这条途径是不是要现做的（合成、烧炼）：挑可以互换的原料时，现成的来路与现做分开比。 */
+    /** 这条途径是不是要现做的（合成、烧炼、锻造台升级）：挑可以互换的原料时，现成的来路与现做分开比。 */
     public static boolean makes(String name) {
-        return CRAFT.name().equals(name) || SMELT.name().equals(name);
+        return CRAFT.name().equals(name) || SMELT.name().equals(name) || SMITH.name().equals(name);
     }
 
     public AcquireVia {

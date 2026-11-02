@@ -15,6 +15,7 @@ import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.StonecutterMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.SmithingRecipe;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -46,12 +47,13 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 产出格一出货就整堆收进背包，做够件数（按背包里实际多出来的算）再关上界面。界面中途被关掉（吃东西、自卫打断，
  * 或别的原因）不当成做完：回到设施跟前重新点开接着做，格子里的料关界面时原版已经还回背包。
  *
- * <p>三种设施的用法不同，都按原版界面真实的规矩来：
+ * <p>几种设施的用法不同，都按原版界面真实的规矩来：
  * <ul>
  *   <li>背包合成格：摆得进 2×2 的合成不用工作台，打开背包照工作台的做法做（见 {@link InventoryCrafting}）；</li>
  *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；配方簿点不了（还没解锁、原料带附魔或改过名）
  *       就逐格摆（见 {@link CraftingGridFill}），一次摆几份、一下取走；</li>
  *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取（见 {@link FurnaceRun}）；</li>
+ *   <li>锻造台：模板、要升级的物品、升级材料依次 shift 点进三格，一件一件升级（见 {@link SmithingRun}）；</li>
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
  *       多的放回原格；再按下这条配方的按钮，取走产出。关界面时原版会把投入口剩下的还回背包。</li>
  * </ul>
@@ -78,6 +80,8 @@ public final class MenuRecipeRuns implements RecipeRuns {
     private static final String SMOKER_MENU = "minecraft:smoker";
     /** 石切台界面的类型注册 ID。 */
     private static final String STONECUTTER_MENU = "minecraft:stonecutter";
+    /** 锻造台界面的类型注册 ID。 */
+    private static final String SMITHING_MENU = "minecraft:smithing";
 
     // 容器侧格子的次序（原版界面布局）：石切台 0 投入口、1 产出格；工作台 0 产出格、1 到 9 合成格。
     private static final int CUTTER_INPUT = 0;
@@ -117,11 +121,21 @@ public final class MenuRecipeRuns implements RecipeRuns {
         if (id == null) {
             return Optional.empty();
         }
-        // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；合成与石切台站在跟前一口气做完。
-        return level.getRecipeManager().byKey(id).map(holder -> recipe.kind().cooks()
-                ? new FurnaceRun(holder, recipe, stations, times, at -> visit(recipe, at, permissions), fuels,
-                        memory, records)
-                : new WorkAction(holder, recipe, stations.getFirst(), times, permissions, records));
+        // 烧炼要关着界面等炉子、烧好再回来取，单独一个动作；锻造台三格各放一样、一件一件升级，也单独一个动作；
+        // 合成与石切台站在跟前一口气做完。
+        return level.getRecipeManager().byKey(id).flatMap(holder -> {
+            if (recipe.kind().cooks()) {
+                return Optional.<Action>of(new FurnaceRun(holder, recipe, stations, times, at -> visit(recipe, at, permissions),
+                        fuels, memory, records));
+            }
+            if (recipe.kind() == WorkstationRecipe.Kind.SMITHING) {
+                return holder.value() instanceof SmithingRecipe upgrade
+                        ? Optional.<Action>of(new SmithingRun(upgrade, recipe, stations.getFirst(), times,
+                                at -> visit(recipe, at, permissions), memory, records))
+                        : Optional.<Action>empty();
+            }
+            return Optional.<Action>of(new WorkAction(holder, recipe, stations.getFirst(), times, permissions, records));
+        });
     }
 
     // 到设施跟前点开界面的一趟：站位、点开、等同步、认界面类型，做配方和烧炉子共用。
@@ -133,6 +147,7 @@ public final class MenuRecipeRuns implements RecipeRuns {
             case BLASTING -> BLAST_FURNACE_MENU;
             case SMOKING -> SMOKER_MENU;
             case STONECUTTING -> STONECUTTER_MENU;
+            case SMITHING -> SMITHING_MENU;
         };
         return new StationVisit(close, interactions, context, station, permissions,
                 workstationName(recipe.kind()), doing, reading -> menuTypeIs(reading, menuType));

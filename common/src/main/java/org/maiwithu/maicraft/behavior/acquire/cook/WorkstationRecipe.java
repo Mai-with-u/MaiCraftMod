@@ -6,14 +6,14 @@ import java.util.Set;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
- * 一条工作站配方：角色能自己在合成台、熔炉、石切台上动手做的，从游戏真实配方管理器里读出来的只读快照。含模组配方；
+ * 一条工作站配方：角色能自己在合成台、熔炉、石切台、锻造台上动手做的，从游戏真实配方管理器里读出来的只读快照。含模组配方；
  * 原料写的是游戏要的东西（具体物品或标签），产出写一次能做出几件。
  *
  * @param id           配方的注册 ID，例如 minecraft:iron_ingot_from_blasting_iron_ore
- * @param kind         在哪种设施上做（合成台、熔炉、石切台）
+ * @param kind         在哪种设施上做（合成台、熔炉、石切台、锻造台）
  * @param result       做出来的东西
  * @param resultCount  做一次出几件
- * @param ingredients  做一次要的原料；烧炼与石切台只有一条
+ * @param ingredients  做一次要的原料；烧炼与石切台只有一条，锻造台是模板、要升级的物品、升级材料三条
  * @param fitsInInventory 合成配方摆得进背包的 2×2 合成格（木板、木棍、工作台这类）：不用工作台，打开背包就能做
  */
 public record WorkstationRecipe(String id, Kind kind, WantedItem result, int resultCount,
@@ -54,7 +54,12 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
         /** 烟熏炉烤食物，快一倍；同样只用记得的现成烟熏炉。 */
         SMOKING("minecraft:smoker", "烟熏炉", 100, false),
         /** 石切台切割，机制与合成同途径：读配方、放原料、取成品。 */
-        STONECUTTING("minecraft:stonecutter", "石切台", 0, true);
+        STONECUTTING("minecraft:stonecutter", "石切台", 0, true),
+        /**
+         * 锻造台升级：升级模板、要升级的物品、升级材料各一件出一件新的（钻石装备加下界合金锭变成下界合金的）。
+         * 附近没有会就地摆一张，做完挖回来，和工作台、石切台一样。
+         */
+        SMITHING("minecraft:smithing_table", "锻造台", 0, true);
 
         private final String blockType;
         private final String displayName;
@@ -73,7 +78,7 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
             return blockType;
         }
 
-        /** 给人看的名字：工作台、熔炉、高炉、烟熏炉、石切台。 */
+        /** 给人看的名字：工作台、熔炉、高炉、烟熏炉、石切台、锻造台。 */
         public String displayName() {
             return displayName;
         }
@@ -101,7 +106,7 @@ public record WorkstationRecipe(String id, Kind kind, WantedItem result, int res
             return cooks() ? 200 : 0;
         }
 
-        /** 附近没有时角色会不会就地摆一个：工作台、熔炉、石切台会；高炉、烟熏炉只用现成的。 */
+        /** 附近没有时角色会不会就地摆一个：工作台、熔炉、石切台、锻造台会；高炉、烟熏炉只用现成的。 */
         public boolean placeable() {
             return placeable;
         }

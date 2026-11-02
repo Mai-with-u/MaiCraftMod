@@ -11,7 +11,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.mojang.serialization.JsonOps;
+
+import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
@@ -21,21 +27,27 @@ import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeInput;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
+import org.maiwithu.maicraft.behavior.recipe.RecipeDefinitions;
 
 /**
  * 配方与燃料读端的注册表实现：能做出一种东西的有哪些做法、一件东西能烧多久，
  * 都从角色所在世界真实的配方管理器与燃料表读（服务端同步给客户端的数据，含模组配方）。
  *
- * <p>配方按设施种类分开问：合成一条（含石切台）、烧炼一条（熔炉、高炉、烟熏炉），via 参数认的就是这个分法。
+ * <p>配方按设施种类分开问：合成一条（含石切台）、烧炼一条（熔炉、高炉、烟熏炉）、锻造台升级一条，
+ * via 参数认的就是这个分法。
  * 产出写具体物品；原料优先写成标签（配方的原料本来就是"这一类都行"），
  * 对不上任何标签才落成具体物品；注册表里查不到的物品如实说没有做法，不猜。
  */
 public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
+
+    /** 锻造升级配方定义里三格的字段名，按界面上从左到右的先后：模板、要升级的物品、升级材料。 */
+    private static final List<String> SMITHING_SLOTS = List.of("template", "base", "addition");
 
     private final Supplier<PlayerContext> context;
     private final ReadsItemTags tags;
@@ -61,6 +73,7 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         collect(current, RecipeType.BLASTING, WorkstationRecipe.Kind.BLASTING, wanted, views);
         collect(current, RecipeType.SMOKING, WorkstationRecipe.Kind.SMOKING, wanted, views);
         collect(current, RecipeType.STONECUTTING, WorkstationRecipe.Kind.STONECUTTING, wanted, views);
+        collectSmithing(current, wanted, views);
         return List.copyOf(views);
     }
 
@@ -90,6 +103,40 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
                     WantedItem.ofItem(resultId), result.getCount(), ingredients(holder.value().getIngredients()),
                     fitsInInventory));
         }
+    }
+
+    // 锻造台只收升级配方（钻石装备加下界合金锭这类，出一件新物品）；纹饰配方只给盔甲加花纹、不出新物品，不算做法。
+    // 这类配方不交出原料列表（getIngredients 是空的），模板、要升级的物品、升级材料三格从配方自己的序列化格式读回来，
+    // 读不回来的那条不算做法，不猜。
+    private void collectSmithing(PlayerContext current, WantedItem wanted, List<WorkstationRecipe> views) {
+        HolderLookup.Provider registries = current.level().registryAccess();
+        for (RecipeHolder<?> holder : current.level().getRecipeManager().getAllRecipesFor(RecipeType.SMITHING)) {
+            if (!(holder.value() instanceof SmithingTransformRecipe upgrade)) continue;
+            ItemStack result = upgrade.getResultItem(registries);
+            if (result == null || result.isEmpty()) continue;
+            String resultId = BuiltInRegistries.ITEM.getKey(result.getItem()).toString();
+            if (!wanted.matches(resultId, tags.tagsOf(resultId))) continue;
+            Optional<List<Ingredient>> slots = smithingSlots(upgrade, registries);
+            if (slots.isEmpty()) continue;
+            views.add(new WorkstationRecipe(holder.id().toString(), WorkstationRecipe.Kind.SMITHING,
+                    WantedItem.ofItem(resultId), result.getCount(), ingredients(slots.get())));
+        }
+    }
+
+    // 锻造升级配方的三格：按模板、要升级的物品、升级材料的先后，从序列化出来的定义里逐格解回原料；有一格解不回来就整条不要。
+    private static Optional<List<Ingredient>> smithingSlots(SmithingTransformRecipe recipe, HolderLookup.Provider registries) {
+        JsonObject definition = RecipeDefinitions.of(recipe, registries);
+        if (definition == null) return Optional.empty();
+        RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, registries);
+        List<Ingredient> slots = new ArrayList<>();
+        for (String field : SMITHING_SLOTS) {
+            JsonElement written = definition.get(field);
+            if (written == null) return Optional.empty();
+            Optional<Ingredient> slot = Ingredient.CODEC.parse(ops, written).result();
+            if (slot.isEmpty() || slot.get().isEmpty()) return Optional.empty();
+            slots.add(slot.get());
+        }
+        return Optional.of(List.copyOf(slots));
     }
 
     // 一条配方的原料清单：每格一份，同一种写法合并计数。一格收好几样又对不上标签时（给床换颜色要的
