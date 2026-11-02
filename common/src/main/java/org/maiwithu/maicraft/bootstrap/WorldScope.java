@@ -192,21 +192,7 @@ public final class WorldScope {
                 name -> OnlinePlayers.idByName(minecraft, name));
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.dimension = minecraft.level.dimension().location().toString();
-        // 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
-        // 算路跑在后台线程上，碰不了当刻的角色上下文（玩家控制边界只许客户端线程进），所以门类推断不走
-        // 上面那份读现场的推断，改用寻路自己读到的这格方块来认；归属记录、区域几路照旧。
-        // 被封死在小坑里、按任务许可挖不出去时：别人放的普通方块能挖开出去，功能方块、记住的区域与地点旁边的照旧不碰。
-        NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
-            @Override public boolean protects(int x, int y, int z, BlockState state) {
-                return protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of(),
-                        state != null && LivePlayerMadeGuesses.looksPlacedByPlayer(state));
-            }
-
-            @Override public Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
-                return protection.breakableWhenTrapped(new WorldPosition(x, y, z, dimension),
-                        FunctionalBlocks.functional(state));
-            }
-        });
+        installNavigationProtection();
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
         NavigationObstacles.install(compat.obstacleSources());
         this.modSights = compat.modSights();
@@ -242,6 +228,26 @@ public final class WorldScope {
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig),
                 abilities);
+    }
+
+    /**
+     * 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
+     * 算路跑在后台线程上，碰不了当刻的角色上下文（玩家控制边界只许客户端线程进），所以门类推断不走
+     * 读现场的那份推断，改用寻路自己读到的这格方块来认；归属记录、区域几路照旧。
+     * 被封死在小坑里、按任务许可挖不出去时：别人放的普通方块能挖开出去，功能方块、记住的区域与地点旁边的照旧不碰。
+     */
+    private void installNavigationProtection() {
+        NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
+            @Override public boolean protects(int x, int y, int z, BlockState state) {
+                return protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of(),
+                        state != null && LivePlayerMadeGuesses.looksPlacedByPlayer(state));
+            }
+
+            @Override public Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
+                return protection.breakableWhenTrapped(new WorldPosition(x, y, z, dimension),
+                        FunctionalBlocks.functional(state));
+            }
+        });
     }
 
     /**
