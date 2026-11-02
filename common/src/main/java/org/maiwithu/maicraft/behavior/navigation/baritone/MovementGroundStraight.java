@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import baritone.api.IBaritone;
+import baritone.api.pathing.movement.IMovement;
 import baritone.api.pathing.movement.MovementStatus;
 import baritone.api.utils.BetterBlockPos;
 import baritone.api.utils.Rotation;
@@ -9,6 +10,8 @@ import baritone.api.utils.input.Input;
 import baritone.pathing.movement.CalculationContext;
 import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementState;
+import baritone.pathing.movement.movements.MovementDiagonal;
+import baritone.pathing.movement.movements.MovementTraverse;
 import java.util.HashSet;
 import java.util.Set;
 import net.minecraft.core.BlockPos;
@@ -17,7 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import baritone.pathing.path.PathExecutor;
 
 /**
- * 执行合并后的地面直线：朝终点前进，远时冲刺，接近后停下。真正轮到这一步时，仍反复检查眼前一段路和惯性可能带到的位置。
+ * 执行合并后的地面直线：朝终点前进并疾跑；后面接着是不急拐的平路就跑着交给下一段，否则接近终点时停下。真正轮到这一步时，仍反复检查眼前一段路和惯性可能带到的位置。
  */
 public final class MovementGroundStraight extends Movement {
     private final Vec3 from, target;
@@ -81,12 +84,50 @@ public final class MovementGroundStraight extends Movement {
             return state.setStatus(MovementStatus.UNREACHABLE);
         }
         Vec3 delta = target.subtract(ctx.player().position());
-        if (ctx.player().onGround() && delta.horizontalDistanceSqr() < 0.0625 && Math.abs(delta.y) < 0.05) {
+        Movement next = carriedInto();
+        boolean carryThrough = next != null;
+        // 后面还是同一高度、拐角不急的平路时，像人按住疾跑那样一路跑过去：经过这一段终点附近就交给下一段，
+        // 不先减速停准再起步；疾跑一断一续会让视野跟着一缩一放。急拐弯、接上下台阶或跳、整条路走到头，
+        // 才在最后两格松开疾跑、停准了再交接，免得冲过头来回修正。
+        // 跑着交接还要脚已经踩进下一段认的格子：否则路线执行会按脚下格把人退回这一段，两段来回交接。
+        boolean arrived = carryThrough
+                ? delta.horizontalDistanceSqr() < CARRY_THROUGH_RADIUS_SQR
+                        && next.getValidPositions().contains(ctx.playerFeet())
+                : delta.horizontalDistanceSqr() < PRECISE_ARRIVAL_RADIUS_SQR;
+        if (ctx.player().onGround() && arrived && Math.abs(delta.y) < 0.05) {
             return state.setStatus(MovementStatus.SUCCESS);
         }
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * Mth.RAD_TO_DEG) - 90;
+        boolean sprint = hopping || carryThrough || delta.horizontalDistanceSqr() > 4;
         return state.setTarget(new MovementState.MovementTarget(new Rotation(yaw, 8), false))
-                .setInput(Input.MOVE_FORWARD, true).setInput(Input.SPRINT, hopping || delta.horizontalDistanceSqr() > 4);
+                .setInput(Input.MOVE_FORWARD, true).setInput(Input.SPRINT, sprint);
+    }
+
+    // 路线上紧接着的那一步若是能接着跑过去的平路就返回它，否则返回 null。
+    private Movement carriedInto() {
+        var executor = baritone.getPathingBehavior().getCurrent();
+        if (executor == null) return null;
+        var movements = executor.getPath().movements();
+        int index = executor.getPosition();
+        if (index < 0 || index + 1 >= movements.size() || movements.get(index) != this) return null;
+        IMovement next = movements.get(index + 1);
+        boolean flatNext = next instanceof MovementGroundStraight
+                || next instanceof MovementTraverse || next instanceof MovementDiagonal;
+        return flatNext && carriesThrough(from, target, next.getSrc(), next.getDest()) ? (Movement) next : null;
+    }
+
+    /**
+     * 这一段跑完能不能不减速接着跑下一段：下一段与这一段同一高度，且拐角不超过 60 度。
+     * 拐得更急时疾跑的惯性会把人带出下一段的走廊，还是先停准再转。
+     */
+    static boolean carriesThrough(Vec3 from, Vec3 target, BlockPos nextSrc, BlockPos nextDest) {
+        // 终点脚底高度与下一段起点所在格差半格以上，说明中间有台阶或落差，不算平路。
+        if (nextSrc.getY() != nextDest.getY() || Math.abs(target.y - nextSrc.getY()) > 0.5) return false;
+        double ax = target.x - from.x, az = target.z - from.z;
+        double bx = nextDest.getX() - nextSrc.getX(), bz = nextDest.getZ() - nextSrc.getZ();
+        double lengths = Math.sqrt((ax * ax + az * az) * (bx * bx + bz * bz));
+        if (lengths < 1.0E-6) return false;
+        return (ax * bx + az * bz) / lengths >= MAX_CARRY_TURN_COS;
     }
 
     @Override protected boolean prepared(MovementState state) { return true; }
@@ -98,4 +139,11 @@ public final class MovementGroundStraight extends Movement {
     }
 
     public Vec3 target() { return target; }
+
+    /** 停准交接：离终点 0.25 格以内才算走完这一段。 */
+    private static final double PRECISE_ARRIVAL_RADIUS_SQR = 0.0625;
+    /** 跑着交接：经过终点 0.6 格以内就交给下一段；疾跑一刻约走 0.28 格，这个圈两三刻内一定会穿过。 */
+    private static final double CARRY_THROUGH_RADIUS_SQR = 0.36;
+    /** 跑着交接允许的最大拐角（60 度）的余弦。 */
+    private static final double MAX_CARRY_TURN_COS = 0.5;
 }
