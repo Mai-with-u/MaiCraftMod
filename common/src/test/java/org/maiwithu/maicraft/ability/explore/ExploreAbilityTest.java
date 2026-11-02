@@ -51,7 +51,7 @@ class ExploreAbilityTest {
             throw new AssertionError("探索能力不应自己开始走到");
         }, () -> null, new BlockScanService(),
                 new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "key"),
-                (kind, message) -> { }, List::of);
+                (kind, message) -> { }, List::of, () -> null);
     }
 
     /** 推进一刻用的决定上下文：只有目标。 */

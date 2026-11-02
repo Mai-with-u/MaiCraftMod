@@ -65,7 +65,7 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
     private final WalkTo walks;
     /** 场景此刻报的洞口与峡谷（近的在前）：挑洞口就挑这几处，与 observe 看到的一致。 */
     private final Supplier<List<CaveOpenings.Opening>> openings;
-    /** 站定转头看一圈的动作：演给观众看角色在找。 */
+    /** 站定转头看一圈的动作：演给观众看角色在找；闲时看关着时给 null，站着看不转头。 */
     private final Supplier<Action> look;
     /** 走过的地方：几次钻洞之间留着，再钻一次不重走。 */
     private final WalkedArea walked;
@@ -236,7 +236,8 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
 
     /** 进"看一眼"：走到新地方转头看一圈；没走到、原地重挑时不再转。量路从脚下重新量。 */
     private Action enterLook() {
-        lookDone = !turnHead;
+        Action turning = turnHead ? look.get() : null;
+        lookDone = turning == null;
         sightReady = false;
         waitedTicks = 0;
         WorldPosition spot = world.currentSpot();
@@ -244,7 +245,7 @@ public final class CaveWalkTask extends PhasedTask<CaveWalkTask.Phase> implement
         if (area == null || !area.start().equals(feet)) {
             area = new WalkableArea(world, feet, plan.permit().mayChangeTerrain());
         }
-        return turnHead ? look.get() : null;
+        return turning;
     }
 
     /** 看一眼：转头的同时量路、补矿的索引；三样都好了才挑下一段，不让人转完头再站着等。 */

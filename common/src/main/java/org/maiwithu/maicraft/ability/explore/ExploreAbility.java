@@ -17,7 +17,6 @@ import org.maiwithu.maicraft.behavior.explore.cave.WalkedArea;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.perception.CaveOpenings;
-import org.maiwithu.maicraft.behavior.perception.LookAround;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -39,6 +38,7 @@ import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 /**
@@ -61,19 +61,22 @@ public final class ExploreAbility implements AbilityModule {
     private final TaskEventSink events;
     /** 场景此刻报的洞口与峡谷：钻洞挑洞口就挑这几处，与 observe 看到的一致。 */
     private final Supplier<List<CaveOpenings.Opening>> caveOpenings;
+    /** 钻洞每走一段站定转头看一圈的动作；闲时看关着时给 null，站着看不转头。 */
+    private final Supplier<Action> lookAround;
     /** 钻洞走过的地方：几次钻洞之间留着，再钻一次不重走；换维度自己清空。 */
     private final WalkedArea walked = new WalkedArea();
 
     /** 生产用：读端在这里接上真实客户端与扫描服务，能力包内可见的实现类不出包。 */
     public static ExploreAbility live(Supplier<PlayerContext> context, BlockScanService scans,
             WalkTo walks, WorldMemory memory, TaskEventSink events,
-            Supplier<List<CaveOpenings.Opening>> caveOpenings) {
-        return new ExploreAbility(new LiveExploreTypes(context), walks, context, scans, memory, events, caveOpenings);
+            Supplier<List<CaveOpenings.Opening>> caveOpenings, Supplier<Action> lookAround) {
+        return new ExploreAbility(new LiveExploreTypes(context), walks, context, scans, memory, events, caveOpenings,
+                lookAround);
     }
 
     ExploreAbility(ReadsExploreTypes worldTypes, WalkTo walks, Supplier<PlayerContext> context,
             BlockScanService scans, WorldMemory memory, TaskEventSink events,
-            Supplier<List<CaveOpenings.Opening>> caveOpenings) {
+            Supplier<List<CaveOpenings.Opening>> caveOpenings, Supplier<Action> lookAround) {
         this.worldTypes = Objects.requireNonNull(worldTypes, "worldTypes");
         this.walks = Objects.requireNonNull(walks, "walks");
         this.context = Objects.requireNonNull(context, "context");
@@ -81,6 +84,7 @@ public final class ExploreAbility implements AbilityModule {
         this.memory = Objects.requireNonNull(memory, "memory");
         this.events = Objects.requireNonNull(events, "events");
         this.caveOpenings = Objects.requireNonNull(caveOpenings, "caveOpenings");
+        this.lookAround = Objects.requireNonNull(lookAround, "lookAround");
     }
 
     /** 钻洞默认走多远（离洞口的直线距离，格）。 */
@@ -290,7 +294,7 @@ public final class ExploreAbility implements AbilityModule {
         // 钻洞交给钻洞任务：转头看一圈、量路、看矿都在里面；其余目标照旧跑图。
         factories.register(ExploreInput.class, input -> input.objective().target() == ExploreObjective.Kind.CAVE
                 ? new CaveWalkTask(caveWalkPlan(input), new ClientCaveWorld(context, scans), walks, caveOpenings,
-                        LookAround::new, walked, memory, events)
+                        lookAround, walked, memory, events)
                 : new ExploreTask(input.objective(),
                         input.interests(), input.direction(), input.angleDegrees(), input.minDistance(),
                         input.maxDistance(), input.maxSeconds(), input.permit(),

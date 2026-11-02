@@ -71,8 +71,9 @@ public final class ClientCaveWorld implements CaveWorld {
 
     @Override
     public Float facingYaw() {
-        LocalPlayer player = player();
-        return player == null ? null : player.getYRot();
+        // 方向按角色站定时朝哪边算：转头看一圈时头扭到一边，挑洞口、往哪边偏不跟着头走。
+        PlayerContext current = context.get();
+        return current == null || current.localPlayer() == null ? null : current.facingYaw();
     }
 
     @Override

@@ -486,6 +486,11 @@ public final class AbilityCatalog {
         };
     }
 
+    /** 钻洞每走一段停下转头看一圈给观众看；所有者在实例配置里关了闲时看就站着看，不转头。 */
+    private static Supplier<Action> lookOnce(Deps deps) {
+        return deps.config().idleLooking() ? () -> LookAround.once(RandomGenerator.getDefault()) : () -> null;
+    }
+
     /** 寻找：方块与实体扫已加载区，结构查记过的产地线索；要塞附近没有线索时扔末影之眼指路。
      *  实体的类型、可见与特征读感知的同一份实体观察，命中直接在场景的观察编号表上领编号。 */
     private static void registerFind(AbilityRegistry registry, Deps deps, Shared shared) {
@@ -559,7 +564,7 @@ public final class AbilityCatalog {
         // 钻洞挑洞口挑的是场景此刻报的那几处，与 observe 看到的一致。
         registry.register(ExploreAbility.live(deps.character().context(), deps.world().blockScans(),
                 deps.travel().walks(), deps.world().memory(), deps.channels().events(),
-                () -> deps.world().scene().caveOpenings()));
+                () -> deps.world().scene().caveOpenings(), lookOnce(deps)));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         registry.register(chatModule(deps));
