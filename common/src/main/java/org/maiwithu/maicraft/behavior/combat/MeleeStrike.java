@@ -26,9 +26,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 近战出手一次：先把挑好的近战武器拿到主手，再原生攻击（充能够格才挥、换手当刻与目标无敌帧不挥）。
  *
- * <p>挑哪件按武器挑选的唯一判断（剑斧里每秒伤害最高的，对手举盾时斧优先）。在快捷栏就按一下数字键；
+ * <p>挑哪件按武器挑选的唯一判断（剑斧优先，没有剑斧抄加攻击力的工具，对手举盾时斧优先）。在快捷栏就按一下数字键；
  * 在主背包里时，对手还在四格外才打开背包把它换进快捷栏的空格再选中（不挤掉手里的镐），贴脸了不为换武器开背包，改拿快捷栏里最好的那件
- * （比手里的强才换）。身上没有剑斧就用手里现有的打。换不成也照样出手，不因此停下。
+ * （比手里的强才换）。连加攻击力的工具都挑不出时按空手打：先把主手的杂物腾掉（选中空的快捷栏格），不拿着木板挥；
+ * 腾不掉（快捷栏与背包都满）才拿手里的东西出手。换不成也照样出手，不因此停下。
  * 原先挑好的武器只拿来算"打不打得过"，从没换到手上，结果里还写成用的是它。
  */
 public final class MeleeStrike implements Action {
@@ -82,12 +83,37 @@ public final class MeleeStrike implements Action {
         return attack.tick(context);
     }
 
-    // 拿哪件、怎么拿：已在主手不动；快捷栏的选中；主背包的看对手远近决定开不开背包。
+    // 拿哪件、怎么拿：挑不出合格武器先腾空主手（按空手打）；已在主手不动；快捷栏的选中；主背包的看对手远近决定开不开背包。
     private Optional<Action> chooseArming(LocalPlayer self, Entity target) {
         boolean shielding = target instanceof LivingEntity living && living.isBlocking();
+        List<WeaponChoice.Carried> carried = WeaponCarriedReader.read(self);
+        WeaponChoice.Picked best = WeaponChoice.pickMelee(carried, shielding);
+        if (best.weapon() == WeaponChoice.Weapon.BARE_HANDS) {
+            // 身上连加攻击力的工具都没有：把主手的方块、杂物腾掉，空着手打——挥木板和空手一样狠，
+            // 还让"拿什么打"的记录冒充成武器。腾不掉（快捷栏与背包都满）时给空，拿着手里的东西出手。
+            return bareHands(self);
+        }
         // 在快捷栏按数字键选中；在主背包就换进快捷栏的空格（或放零碎的格）再选中，手里的镐留在原格。
-        return weaponWorthTaking(self, shielding, self.distanceTo(target) < INVENTORY_SWAP_DISTANCE)
-                .flatMap(hands::actionToMainhand);
+        Optional<String> take = weaponWorthTaking(self, shielding, self.distanceTo(target) < INVENTORY_SWAP_DISTANCE);
+        if (take.isPresent()) return take.flatMap(hands::actionToMainhand);
+        // 贴脸时不开背包、快捷栏里又没有合格武器，手里攥的还是杂物：同样腾空主手，不拿它挥。
+        return heldIsWeapon(self, carried, shielding) ? Optional.empty() : bareHands(self);
+    }
+
+    // 空着手打：主手已经空着就不用动；不然选中一个空的快捷栏格。
+    private Optional<Action> bareHands(LocalPlayer self) {
+        return self.getMainHandItem().isEmpty() ? Optional.empty() : hands.emptyMainhand();
+    }
+
+    // 主手此刻拿的算不算合格武器（剑斧或加攻击力的工具）；空手为否。
+    private static boolean heldIsWeapon(LocalPlayer self, List<WeaponChoice.Carried> carried, boolean shielding) {
+        int selected = self.getInventory().selected;
+        for (WeaponChoice.Carried stack : carried) {
+            if (stack.slot() == selected) {
+                return WeaponChoice.pickMelee(List.of(stack), shielding).weapon() != WeaponChoice.Weapon.BARE_HANDS;
+            }
+        }
+        return false;
     }
 
     /**

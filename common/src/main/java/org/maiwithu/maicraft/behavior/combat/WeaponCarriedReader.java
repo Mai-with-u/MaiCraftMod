@@ -101,7 +101,12 @@ public final class WeaponCarriedReader {
             if (entry.attribute().is(Attributes.ATTACK_DAMAGE)) damage += entry.modifier().amount();
             if (entry.attribute().is(Attributes.ATTACK_SPEED)) speed += entry.modifier().amount();
         }
-        return new WeaponChoice.Carried(id, stack.getCount(), charged, slot, damage, Math.max(0.1, speed), gearOf(stack));
+        // 剩余耐久：还能用多少次（上限减已损耗）。没有耐久上限的东西（方块、食物）记 -1，挑选时排在耐久多的后面。
+        Integer maxDamage = stack.get(DataComponents.MAX_DAMAGE);
+        int durability = maxDamage == null || maxDamage <= 0 ? WeaponChoice.NO_DURABILITY
+                : Math.max(0, maxDamage - stack.getOrDefault(DataComponents.DAMAGE, 0));
+        return new WeaponChoice.Carried(id, stack.getCount(), charged, slot, damage, Math.max(0.1, speed),
+                gearOf(stack), durability);
     }
 
     // 是哪种兵器：按物品类与物品标签认，不按名字猜。弩先认（它也是远程武器），其余远程武器当弓；

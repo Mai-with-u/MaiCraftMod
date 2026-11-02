@@ -29,7 +29,9 @@ final class DefenseTally {
     private final Map<String, Integer> defeated = new LinkedHashMap<>();
     /** 这一场新见到倒下的、还没交给任务记成变化的种类，按先后。 */
     private final List<String> unrecordedDefeats = new ArrayList<>();
-    private String weapon = "空手";
+    /** 主手空着时"拿什么打"的写法，和战斗动手读主手的说法一致。 */
+    static final String BARE_HANDS = "空手";
+    private String weapon = BARE_HANDS;
     private int hits;
     private int shots;
     /** 箭少了几支：按背包里箭的只数算，和射了几箭各记各的。 */
@@ -114,7 +116,10 @@ final class DefenseTally {
         Integer spent = arrows.spentOrNull();
         if (hits == 0 && shots == 0 && (spent == null || spent == 0)) return "";
         String who = defeated.isEmpty() ? "没见打倒哪只" : "打掉了 " + String.join("、", defeated());
-        String how = "拿 " + weapon + (hits > 0 ? " 挥中 " + hits + " 下" : "") + (shots > 0 ? " 射了 " + shots + " 箭" : "");
+        // 拿什么打按主手实际拿的写：空手就写"空手挥中几下"，不写成"拿 空手"。
+        String prefix = BARE_HANDS.equals(weapon) ? BARE_HANDS : "拿 " + weapon + " ";
+        String how = prefix + (hits > 0 ? "挥中 " + hits + " 下" : "")
+                + (shots > 0 ? (hits > 0 ? " " : "") + "射了 " + shots + " 箭" : "");
         // 背包的账和射的数对不上时把背包的数也说出来：离开背包几支、捡回几支分开说，读事件的一方一眼能对上
         // （"射了 5 箭"和"净少 3 支"并不矛盾，中间有 2 支捡回来了）。
         if (spent != null && (arrows.taken() != shots || arrows.pickedUp() > 0)) {

@@ -65,13 +65,36 @@ class TacticTest {
         assertInstanceOf(Tactic.Withdraw.class, decide(me(20, true, false), retreating, zombie(1, 5)),
                 "回了血也不回头，跑到甩开");
         assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), Tactic.Memory.FRESH, zombie(1, 5)),
-                "空手、对面会还手就撤");
-        assertInstanceOf(Tactic.Melee.class, decide(me(20, false, false), Tactic.Memory.FRESH, creeper(1, 5, false)),
-                "没点引信的苦力怕不还手，空手也能打");
+                "空手、有东西在追就撤");
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), Tactic.Memory.FRESH, creeper(1, 5, false)),
+                "空手对走近的苦力怕也先撤，不拿着杂物凑上去");
         assertInstanceOf(Tactic.KeepClear.class, decide(me(8, true, false), Tactic.Memory.FRESH, creeper(1, 5, false)),
                 "残血又射不了：不凑上去砍苦力怕，先避开它");
         assertInstanceOf(Tactic.Shoot.class, decide(me(8, true, true), Tactic.Memory.FRESH, creeper(1, 5, false)),
                 "残血有弓照射");
+    }
+
+    @Test
+    void bareHandsRetreatUnlessCaughtOrCornered() {
+        // 空手：远处的追兵不追——哪怕它刚射过我（骷髅在十格外），也是撤，不追着它跑一百格。
+        Battlefield.Foe farAttacker = new Battlefield.Foe(zombie(1, 5).threat(), true, true, true, false);
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), Tactic.Memory.FRESH, farAttacker),
+                "打过我但还没贴上来：撤");
+        Battlefield.Foe skeleton = new Battlefield.Foe(
+                foe(2, 10, ThreatAssessment.Kind.RANGED, false, true).threat(), true, true, true, false);
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), Tactic.Memory.FRESH, skeleton),
+                "骷髅在十格外射我：撤出射程，不空手冲上去");
+        // 被追上：它打过我、又已经贴到够得着我的距离——躲不开了，空手也还手。
+        Battlefield.Foe caught = new Battlefield.Foe(zombie(1, 2).threat(), true, true, true, false);
+        assertEquals(1, target(decide(me(20, false, false), Tactic.Memory.FRESH, caught)), "被追上就地还手");
+        // 贴上来但还没打过我的（刚围上来）：照撤，不先动手。
+        assertInstanceOf(Tactic.Withdraw.class, decide(me(20, false, false), Tactic.Memory.FRESH, zombie(1, 2)),
+                "贴脸但没打过我：撤");
+        // 退无可退：背水一战，空手也打。
+        Tactic.Memory cornered = new Tactic.Memory(-1, true, true, Set.of(), false, false);
+        assertEquals(1, target(decide(me(20, false, false), cornered, zombie(1, 5))), "退无可退就地迎战");
+        // 没有东西在追：不为"空手"起撤离，打完了就是打完了。
+        assertInstanceOf(Tactic.Finished.class, decide(me(20, false, false), Tactic.Memory.FRESH));
     }
 
     @Test

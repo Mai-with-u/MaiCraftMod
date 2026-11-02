@@ -133,7 +133,9 @@ class SelfDefenseTaskTest {
 
         @Override public double[] selfPosition(TickContext context) { return at.clone(); }
         @Override public boolean standable(TickContext context, int x, int y, int z) { return true; }
-        @Override public String mainHand(TickContext context) { return "minecraft:iron_sword"; }
+        /** 主手此刻拿的：空手时和生产实现一样报"空手"。 */
+        String mainHand = "minecraft:iron_sword";
+        @Override public String mainHand(TickContext context) { return mainHand; }
     }
 
     private record Fixed(Supplier<ActionStatus> status) implements Action {
@@ -191,6 +193,27 @@ class SelfDefenseTaskTest {
         var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
         assertEquals(moves.strikes, details.hits());
         assertEquals("minecraft:iron_sword", details.weapon());
+    }
+
+    @Test
+    void bareHandedStrikesAreReportedAsBareHands() {
+        // 空着手还手：收场的话里写"空手挥中几下"，不写成"拿 空手"，更不拿着木板之类的杂物冒充武器。
+        Senses senses = new Senses();
+        senses.threats.add(zombie(1, 2, 2));
+        Moves moves = new Moves();
+        moves.mainHand = "空手";
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, new Events());
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 3);
+        assertTrue(moves.strikes > 0, "够得着就打");
+        senses.threats.clear();
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class,
+                run(task, 3, 3 + SelfDefenseTask.WATCH_TICKS + 5)).result();
+        String note = task.finishedNote(finished);
+        assertTrue(note.contains("空手挥中 " + moves.strikes + " 下"), note);
+        assertFalse(note.contains("拿 空手"), note);
+        assertEquals("空手", assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details()).weapon());
     }
 
     @Test

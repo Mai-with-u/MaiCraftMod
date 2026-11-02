@@ -9,7 +9,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 武器挑选：已上弦弩最优先、有箭才有弓、举盾优先斧、什么都没有就空手。 */
+/** 武器挑选：已上弦弩最优先、有箭才有弓、举盾优先斧、没有剑斧抄加攻击力的工具、什么都没有就空手。 */
 class WeaponChoiceTest {
 
     private static final WeaponChoice.Carried SWORD = blade("minecraft:iron_sword", 20, 6, 1.6);
@@ -48,9 +48,37 @@ class WeaponChoiceTest {
         var picked = WeaponChoice.pickMelee(List.of(cobble, woodenPickaxe, diamondPickaxe), false);
         assertEquals(WeaponChoice.Weapon.MELEE, picked.weapon());
         assertEquals("minecraft:diamond_pickaxe", picked.itemId());
-        assertEquals(WeaponChoice.Weapon.BARE_HANDS, WeaponChoice.pickMelee(List.of(cobble, woodenPickaxe), false).weapon(),
-                "木镐一下才两点，不比空手强多少");
+        // 木镐一下两点，比空手的一点狠：加攻击力的就算武器，抄起木镐打。
+        assertEquals("minecraft:wooden_pickaxe", WeaponChoice.pickMelee(List.of(cobble, woodenPickaxe), false).itemId());
         assertEquals("minecraft:iron_sword", WeaponChoice.pickMelee(List.of(diamondPickaxe, SWORD), false).itemId());
+    }
+
+    @Test
+    void planksAreNotAWeaponButThePickaxeBesideThemIs() {
+        // 实机：自卫时手里攥着建房剩下的木板、包里有木镐——木板不加攻击力，不算武器；挑木镐，不拿木板挥。
+        var planks = new WeaponChoice.Carried("minecraft:oak_planks", 40);
+        var woodenPickaxe = new WeaponChoice.Carried("minecraft:wooden_pickaxe", 1, false, 9, 2, 1.2, WeaponChoice.Gear.OTHER);
+        var picked = WeaponChoice.pickMelee(List.of(planks, woodenPickaxe), false);
+        assertEquals(WeaponChoice.Weapon.MELEE, picked.weapon());
+        assertEquals("minecraft:wooden_pickaxe", picked.itemId());
+        // 只有木板：空手，不把它当武器。
+        var mutton = new WeaponChoice.Carried("minecraft:cooked_mutton", 5);
+        assertEquals(WeaponChoice.Weapon.BARE_HANDS, WeaponChoice.pickMelee(List.of(planks, mutton), false).weapon());
+    }
+
+    @Test
+    void toolsWithTheSameDamageRateAreChosenByRemainingDurability() {
+        // 两把石镐一样狠：快用坏的那把不先拿，用剩余耐久多的；狠的那把（铁镐）不因耐久少就被压过。
+        var worn = new WeaponChoice.Carried("minecraft:stone_pickaxe", 1, false, 0, 3, 1.2, WeaponChoice.Gear.OTHER, 5);
+        var fresh = new WeaponChoice.Carried("minecraft:stone_pickaxe", 1, false, 12, 3, 1.2, WeaponChoice.Gear.OTHER, 120);
+        assertEquals(12, WeaponChoice.pickMelee(List.of(worn, fresh), false).slot(), "一样狠挑耐久多的，哪怕要开背包");
+        var ironWorn = new WeaponChoice.Carried("minecraft:iron_pickaxe", 1, false, 13, 4, 1.2, WeaponChoice.Gear.OTHER, 3);
+        assertEquals("minecraft:iron_pickaxe", WeaponChoice.pickMelee(List.of(fresh, ironWorn), false).itemId(),
+                "每秒伤害先比，耐久只在打平时比");
+        // 剑也一样：两把一样的铁剑挑耐久多的。
+        var dullSword = new WeaponChoice.Carried("minecraft:iron_sword", 1, false, 1, 6, 1.6, WeaponChoice.Gear.BLADE, 10);
+        var keenSword = new WeaponChoice.Carried("minecraft:iron_sword", 1, false, 2, 6, 1.6, WeaponChoice.Gear.BLADE, 200);
+        assertEquals(2, WeaponChoice.pickMelee(List.of(dullSword, keenSword), false).slot());
     }
 
     @Test

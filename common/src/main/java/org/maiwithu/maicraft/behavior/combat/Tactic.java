@@ -13,7 +13,8 @@ import java.util.Set;
  * <ol>
  *   <li>躲爆炸：引信点着、还在它波及范围里的会炸物，压过一切（含血线撤离和点名目标）；</li>
  *   <li>已在撤离：开始了就跑到甩开（退无可退除外），回了一点血不回头；</li>
- *   <li>打不过：血线破了还有追兵，或手上什么都没有、对面会还手，就撤；撤不掉（退无可退）且没有在射我的，
+ *   <li>打不过：血线破了还有追兵，或空手（连加攻击力的工具都没有）有东西在追，就撤；空手只在被追上
+ *       （它真打过我、又贴到够得着我）时留下还手，不主动凑上去；撤不掉（退无可退）且没有在射我的，
  *       就地垫高三格，近战怪够不着；垫不了就转身迎战；</li>
  *   <li>挑目标：近处的苦力怕最急，其次马上要打到我的，再是点名的那一批，最后最近的；认准的那只没被更急的顶掉就接着打；</li>
  *   <li>打法：有远程且（目标点着引信、走不到、手上没近战、目标是会炸的、或离得远）就射，否则近身打；</li>
@@ -126,7 +127,9 @@ public final class Tactic {
             if (move != null) return new Dragon(move);
         }
         boolean chased = !field.chasers().isEmpty();
-        boolean outmatched = me.belowRetreatLine() || !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
+        // 空手：身上连加攻击力的工具都没有（剑斧、合格工具、能射的都挑不出）。
+        boolean bareHanded = !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0;
+        boolean outmatched = me.belowRetreatLine() || bareHanded;
         // 2 已在撤离：保持到甩开。
         if (memory.retreating() && !memory.cornered()) return new Withdraw("已在撤离，跑到甩开为止");
         // 3 打不过。
@@ -135,9 +138,11 @@ public final class Tactic {
         // 折回真血只剩三点）才跑——那时早被围住跑不掉了。实机 10-14 六点血、一身铁甲被四只尸壳围着，
         // 没破血线就硬打，两下见底，退着还手被围死。
         if (!memory.cornered() && chased && outnumbered(field)) return new Withdraw("被围着打不过，先撤");
-        if (!memory.cornered() && !me.hasMelee() && !me.canShoot() && me.weaponScore() <= 0
-                && field.chasers().stream().anyMatch(Battlefield.Foe::fightsBack)) {
-            return new Withdraw("手上没有任何武器，对面会还手");
+        // 空手撤离优先：有东西在追就撤，不主动凑上去打（空手追骷髅跑出一百格、拿羊肉凑近苦力怕都不再有）；
+        // 只有追上来的这只真打过我、又已贴到够得着我的距离（躲不开了），才留下来空手还手。
+        // 退无可退（cornered）另算：撤不掉就地迎战，在下面垫高或背水一战。
+        if (!memory.cornered() && chased && bareHanded && !caughtByAttacker(field)) {
+            return new Withdraw("手上没有任何武器，先撤离");
         }
         // 撤不掉又打不过：没有在射我的（站高了更挨射）就就地垫高三格，近战怪够不着；
         // 垫不了（没料、头顶不空、有射手在射）就转身迎战，不再原地熬时间。
@@ -181,6 +186,11 @@ public final class Tactic {
                     RangedCombat.ENGAGE_RANGE - BOW_APPROACH_MARGIN));
         }
         return new HoldOutsideIgnite(!threat.visible() || Math.abs(threat.y() - me.y()) > CombatGeometry.LEVEL_GAP);
+    }
+
+    // 被追上了：追兵里有一只十秒内真打过我、又已经贴到够得着我的距离——空手也躲不开，只能还手。
+    private static boolean caughtByAttacker(Battlefield field) {
+        return field.chasers().stream().anyMatch(foe -> foe.attacker() && foe.imminent());
     }
 
     // 两只以上会还手的追兵、照威胁评估打不过（按人数、种类和自己的血、甲、武器、口粮算）。

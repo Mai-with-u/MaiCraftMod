@@ -7,7 +7,8 @@ import java.util.Optional;
 /**
  * 武器挑选：从随身的东西里挑一件最顺手的，全仓只有这一份判断。
  *
- * <p>顺序：已上弦的弩、有箭的弓、近战武器，都没有就空手。对手举着盾时斧头优先——原版里斧能破盾。
+ * <p>顺序：已上弦的弩、有箭的弓、剑斧、加攻击力的工具（拿在主手比空手狠的镐铲、模组工具），都没有就空手。
+ * 对手举着盾时斧头优先——原版里斧能破盾。
  * 是什么武器按物品类与物品标签认（{@link Gear}），不按名字后缀猜：模组的剑、重锤、三叉戟都认得，
  * 名字里带 sword 的方块不会被当成剑。挑选只看背包里有什么，不替角色去买去造。
  */
@@ -39,7 +40,7 @@ public final class WeaponChoice {
         AXE,
         /** 剑、重锤、三叉戟与模组的近战武器。 */
         BLADE,
-        /** 不是兵器：镐铲锄这类工具、方块、食物。 */
+        /** 不是兵器：镐铲锄这类工具、方块、食物。加攻击力的工具在没有剑斧时也能拿来打。 */
         OTHER
     }
 
@@ -62,13 +63,20 @@ public final class WeaponChoice {
 
     /**
      * 随身的一件东西：物品注册 ID、数量、弩是否已上弦、在背包哪一格、拿在主手时的攻击伤害与攻击速度
-     * （按物品自己的攻击属性算，读不到时按空手的 1 点伤害、每秒 4 次），以及它是哪种兵器。
+     * （按物品自己的攻击属性算，读不到时按空手的 1 点伤害、每秒 4 次）、它是哪种兵器，以及剩余耐久
+     * （还能用多少次；方块、食物这类没有耐久的为 -1）。
      */
     public record Carried(String item, int count, boolean crossbowCharged, int slot, double attackDamage,
-                          double attackSpeed, Gear gear) {
+                          double attackSpeed, Gear gear, int durability) {
+        /** 没有耐久概念、或不关心耐久的一件。 */
+        public Carried(String item, int count, boolean crossbowCharged, int slot, double attackDamage,
+                       double attackSpeed, Gear gear) {
+            this(item, count, crossbowCharged, slot, attackDamage, attackSpeed, gear, NO_DURABILITY);
+        }
+
         /** 不是兵器的一件（方块、食物、工具）。 */
         public Carried(String item, int count) {
-            this(item, count, false, -1, 1.0, 4.0, Gear.OTHER);
+            this(item, count, false, -1, BARE_HAND_DAMAGE, 4.0, Gear.OTHER);
         }
 
         /** 每秒伤害：满充能才挥，挥得快的剑常比斧划算。 */
@@ -76,6 +84,9 @@ public final class WeaponChoice {
             return attackDamage * attackSpeed;
         }
     }
+
+    /** 没有耐久概念的东西（方块、食物）的剩余耐久。 */
+    public static final int NO_DURABILITY = -1;
 
     /**
      * 从随身的东西里挑武器。
@@ -113,25 +124,26 @@ public final class WeaponChoice {
         return inHotbar(candidate.slot()) && !inHotbar(current.slot()) ? candidate : current;
     }
 
-    /**
-     * 近战挑哪件：近战武器里每秒伤害最高的（攻击伤害 × 攻击速度：满充能才挥，挥得快的剑常比斧划算）；
-     * 一样好时快捷栏里的先（不用开背包）。对手举着盾时斧优先，斧是原版里能破盾的近战武器。都没有就空手。
-     * 镐铲锄是工具不是兵器，不拿来打（磨工具耐久还打不过空手太多）。
-     */
-    /** 不是兵器的工具拿来打：一下至少这么多伤害才比空手强得多（石镐 3、钻石镐 5）。 */
-    static final double MAKESHIFT_DAMAGE = 3.0;
+    /** 空手的攻击伤害：拿在主手比它狠的工具才算武器（木镐 2 点、石镐 3 点算；木板、方块、食物 1 点不算）。 */
+    static final double BARE_HAND_DAMAGE = 1.0;
 
+    /**
+     * 近战挑哪件：先在剑斧里挑，没有剑斧再在加攻击力的工具（镐、铲、模组工具）里挑，都没有就空手。
+     * 同一档里每秒伤害（攻击伤害 × 攻击速度：满充能才挥，挥得快的剑常比斧划算）高的先；
+     * 打平比剩余耐久——工具打架磨的是它干活的耐久，一样狠就用耐久多的那把；再打平挑快捷栏里的（不用开背包）。
+     * 对手举着盾时斧优先，斧是原版里能破盾的近战武器。
+     */
     public static Picked pickMelee(List<Carried> carried, boolean opponentShielding) {
         Carried best = null;
         for (Carried stack : carried) {
             if (stack.count() <= 0 || stack.gear() != Gear.AXE && stack.gear() != Gear.BLADE) continue;
             if (best == null || better(stack, best, opponentShielding)) best = stack;
         }
-        // 没有剑斧：像玩家一样抄起手边最趁手的工具（镐、铲、模组工具），一下比空手狠得多才算（伤害三点以上）。
-        // 原先只认剑斧，身上只有钻石镐时一律当空手，见怪就跑、被追着打也不还手。
+        // 没有剑斧：像玩家一样抄起手边加攻击力的工具，比空手狠一点就算（木镐也行）。
+        // 不加攻击力的木板、杂物不算武器——拿它们挥和空手一样，还污染"拿什么打"的记录。
         if (best == null) {
             for (Carried stack : carried) {
-                if (stack.count() <= 0 || stack.gear() != Gear.OTHER || stack.attackDamage() < MAKESHIFT_DAMAGE) continue;
+                if (stack.count() <= 0 || stack.gear() != Gear.OTHER || stack.attackDamage() <= BARE_HAND_DAMAGE) continue;
                 if (best == null || better(stack, best, false)) best = stack;
             }
         }
@@ -139,13 +151,14 @@ public final class WeaponChoice {
                 : new Picked(best.item(), Weapon.MELEE, best.slot(), best.rate());
     }
 
-    // 举盾的对手面前斧压过剑；同类里比每秒伤害，再比是不是在快捷栏。
+    // 举盾的对手面前斧压过剑；同类里比每秒伤害，打平比剩余耐久，再比是不是在快捷栏。
     private static boolean better(Carried candidate, Carried current, boolean opponentShielding) {
         boolean candidateAxe = candidate.gear() == Gear.AXE;
         if (opponentShielding && candidateAxe != (current.gear() == Gear.AXE)) return candidateAxe;
         double candidateRate = candidate.rate();
         double currentRate = current.rate();
         if (Math.abs(candidateRate - currentRate) > 1.0E-6) return candidateRate > currentRate;
+        if (candidate.durability() != current.durability()) return candidate.durability() > current.durability();
         return inHotbar(candidate.slot()) && !inHotbar(current.slot());
     }
 
