@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -133,7 +132,7 @@ final class ContainerTransfer implements Action {
             return run.tickAction(this::onSettled);
         }
         finished = true;
-        contentsAfter = merged(reading.containerSnapshots());
+        contentsAfter = reading.containerContents();
         return ActionStatus.done();
     }
 
@@ -277,14 +276,6 @@ final class ContainerTransfer implements Action {
             if (!snapshot.isEmpty() && idOf(snapshot).equals(itemId)) sum += snapshot.count();
         }
         return sum;
-    }
-
-    private static Map<String, Integer> merged(List<SlotSnapshot> snapshots) {
-        Map<String, Integer> merged = new LinkedHashMap<>();
-        for (SlotSnapshot snapshot : snapshots) {
-            if (!snapshot.isEmpty()) merged.merge(idOf(snapshot), snapshot.count(), Integer::sum);
-        }
-        return merged;
     }
 
     private static String idOf(SlotSnapshot snapshot) {

@@ -61,6 +61,10 @@ public final class TradeSource implements ItemSource {
     }
 
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+        // 买东西这次不认药水种类：点名了种类的药水不从村民那里买，如实说认不出，不让 LLM 以为是村民没货。
+        if (request.wanted().potion() != null) {
+            return new SourceQuote.Unavailable(describe(), "跟村民买东西这条路认不出药水种类，点名了种类的药水不从这里买");
+        }
         List<ScansMerchants.MerchantSpot> merchants = scans.merchants(context.characterAt(),
                 searchRadius(context));
         List<ScansMerchants.MerchantSpot> qualified = new ArrayList<>();

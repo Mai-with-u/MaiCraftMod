@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.Map;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,25 @@ class CarriedItemsTest {
         int carried = CarriedItems.matching(backpack, offhand,
                 new ItemRequest(WantedItem.ofItem("minecraft:coal"), 20, "火把"), tags);
         assertEquals(15, carried);
+    }
+
+    @Test
+    void 药水按种类数_水瓶不算抗火药水() {
+        backpack.stacks.add(potion("minecraft:water"));
+        backpack.stacks.add(potion("minecraft:fire_resistance"));
+        offhand.hold(potion("minecraft:fire_resistance"));
+
+        assertEquals(2, CarriedItems.matching(backpack, offhand,
+                WantedItem.ofPotion("minecraft:potion", "minecraft:fire_resistance"), tags));
+        assertEquals(3, CarriedItems.matching(backpack, offhand, WantedItem.ofItem("minecraft:potion"), tags),
+                "不点名种类任一种药水都算");
+        assertEquals(Map.of("minecraft:potion[potion=minecraft:water]", 1,
+                        "minecraft:potion[potion=minecraft:fire_resistance]", 2),
+                CarriedItems.byItem(backpack, offhand), "按种类分开记，说得出进包的是哪种");
+    }
+
+    private static BackpackStack potion(String kind) {
+        return new BackpackStack("minecraft:potion", 1, 1, false, false, false, false, kind);
     }
 
     @Test

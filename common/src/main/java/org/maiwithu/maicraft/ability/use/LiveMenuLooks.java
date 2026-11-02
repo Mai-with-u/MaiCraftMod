@@ -1,21 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
-import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
-import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -83,7 +79,7 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
         private ActionStatus waitSync() {
             Optional<MenuContent.Reading> reading = content.current();
             if (reading.isPresent()) {
-                contents = merged(reading.get().containerSnapshots());
+                contents = reading.get().containerContents();
                 stage = Stage.CLOSE;
                 return ActionStatus.progressed();
             }
@@ -128,14 +124,5 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
         }
 
         // 按物品合并的界面内容；数量大的全列，不悄悄截断。
-        private static Map<String, Integer> merged(List<SlotSnapshot> snapshots) {
-            Map<String, Integer> merged = new LinkedHashMap<>();
-            for (SlotSnapshot snapshot : snapshots) {
-                if (snapshot.isEmpty()) continue;
-                merged.merge(BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString(),
-                        snapshot.count(), Integer::sum);
-            }
-            return merged;
-        }
     }
 }

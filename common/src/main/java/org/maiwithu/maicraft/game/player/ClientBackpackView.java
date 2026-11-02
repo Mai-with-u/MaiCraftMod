@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.player;
 
+import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ArmorItem;
@@ -18,6 +19,7 @@ import net.minecraft.world.item.ShearsItem;
 import net.minecraft.world.item.ShieldItem;
 import net.minecraft.world.item.SwordItem;
 import net.minecraft.world.item.TridentItem;
+import net.minecraft.world.item.alchemy.PotionContents;
 import net.minecraft.client.player.LocalPlayer;
 
 import java.util.ArrayList;
@@ -113,6 +115,22 @@ public final class ClientBackpackView implements BackpackView {
                 gear,
                 food,
                 precious,
-                building);
+                building,
+                potionOf(stack));
+    }
+
+    /**
+     * 这一格是哪种药水：药水瓶、喷溅与滞留药水、药箭的药水内容里登记过的药水种类（药水注册表的 ID）；
+     * 别的东西、只调了颜色没有登记种类的给 null。容器界面读格子时也问这里，药水种类全仓只这一处读法。
+     */
+    public static String potionOf(ItemStack stack) {
+        PotionContents contents = stack.get(DataComponents.POTION_CONTENTS);
+        if (contents == null) return null;
+        return contents.potion().flatMap(Holder::unwrapKey).map(key -> key.location().toString()).orElse(null);
+    }
+
+    /** 这一格的带种类写法：药水写成物品 ID 加药水种类，别的就是物品 ID；世界记忆记容器内容用它。 */
+    public static String keyOf(ItemStack stack) {
+        return new StackKey(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), potionOf(stack)).written();
     }
 }

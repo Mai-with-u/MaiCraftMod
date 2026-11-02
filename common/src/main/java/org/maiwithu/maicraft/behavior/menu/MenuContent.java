@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.menu;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -45,6 +47,18 @@ public interface MenuContent {
             playerInventoryIndices = List.copyOf(playerInventoryIndices);
             containerSnapshots = List.copyOf(containerSnapshots);
             playerSnapshots = List.copyOf(playerSnapshots);
+        }
+
+        /**
+         * 容器那一侧装着什么、各几件：按带种类的物品写法合并（药水按种类分开），格子顺序在前的先列。
+         * 世界记忆记箱子内容、use 列出界面内容、存完东西记一笔都读这一份。
+         */
+        public Map<String, Integer> containerContents() {
+            Map<String, Integer> contents = new LinkedHashMap<>();
+            for (SlotSnapshot snapshot : containerSnapshots) {
+                if (!snapshot.isEmpty()) contents.merge(snapshot.key(), snapshot.count(), Integer::sum);
+            }
+            return contents;
         }
     }
 }

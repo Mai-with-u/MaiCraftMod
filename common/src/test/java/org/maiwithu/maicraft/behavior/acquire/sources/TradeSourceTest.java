@@ -65,6 +65,15 @@ class TradeSourceTest {
     }
 
     @Test
+    void 点名了药水种类_如实说认不出种类不去买() {
+        TradeSource source = source((center, radius) -> List.of(farmer(1, 8, false, true)), NOBODY);
+        ItemRequest potion = new ItemRequest(WantedItem.ofPotion("minecraft:potion", "minecraft:invisibility"), 1, "隐身");
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                source.quote(potion, CONTEXT));
+        assertTrue(unavailable.reason().contains("认不出药水种类"), unavailable.reason());
+    }
+
+    @Test
     void 幼年的村民被排除并写明原因() {
         TradeSource source = source((center, radius) -> List.of(farmer(1, 8, true, false)), NOBODY);
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,

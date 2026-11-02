@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.behavior.menu;
 
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.game.player.ClientBackpackView;
+
 /** 槽位快照：一个槽位在某一刻的样子（几件、什么物品、什么组件）；判定搬运结算时先在动手前取一份。 */
 public record SlotSnapshot(ItemStack stack) {
 
@@ -22,6 +24,11 @@ public record SlotSnapshot(ItemStack stack) {
 
     public int count() {
         return stack.getCount();
+    }
+
+    /** 这一格的带种类写法：药水写成物品 ID 加药水种类，别的就是物品 ID；按种类认东西、记箱子内容用它。 */
+    public String key() {
+        return ClientBackpackView.keyOf(stack);
     }
 
     /** 两份快照是不是同一种物品同一副组件：空对空也算一样；搬运的增减核对都建立在这上面。 */

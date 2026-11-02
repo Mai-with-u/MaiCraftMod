@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -179,11 +178,11 @@ public final class MenuContainerTakes implements ContainerTakes {
             return total;
         }
 
-        // 什么样的槽位算这一样：按物品 ID 与它挂着的标签匹配。
+        // 什么样的槽位算这一样：按物品 ID 与它挂着的标签匹配；点名了药水种类的按这一格写着的种类挑，不拿旁边的水瓶。
         private boolean matches(SlotSnapshot snapshot, ItemRequest want) {
             if (snapshot.isEmpty()) return false;
             String itemId = BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString();
-            return want.wanted().matches(itemId, tags.tagsOf(itemId));
+            return want.wanted().matches(snapshot.key(), tags.tagsOf(itemId));
         }
 
         // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读。
@@ -192,12 +191,8 @@ public final class MenuContainerTakes implements ContainerTakes {
             PlayerContext current = contexts.get();
             ClientLevel level = current == null ? null : current.level();
             if (level == null) return;
-            Map<String, Integer> contents = new LinkedHashMap<>();
-            for (SlotSnapshot snapshot : reading.containerSnapshots()) {
-                if (snapshot.isEmpty()) continue;
-                contents.merge(BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString(),
-                        snapshot.count(), Integer::sum);
-            }
+            // 药水连种类一起记：下回点名要抗火药水时认得出是这只箱子。
+            Map<String, Integer> contents = reading.containerContents();
             WorldPosition position = new WorldPosition(at.getX(), at.getY(), at.getZ(),
                     level.dimension().location().toString());
             String blockType = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();

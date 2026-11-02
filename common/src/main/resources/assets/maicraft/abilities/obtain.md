@@ -121,9 +121,10 @@
 
 | 参数 | 必填 | 说明 |
 | --- | :---: | --- |
-| `item` | ✅ | 物品 ID 或 `#` 开头的标签；写岔了（不存在的物品、空标签）不进游戏就报 `INVALID_PARAMETER`。要吃的不用一样样点名：`#maicraft:foods/edible` 是"能吃的口粮"一大类（含模组食物；按物品自己的食物组件认，吃了有害的、金苹果这类特殊的不算，生肉算）。填了 `items` 时不填 |
+| `item` | ✅ | 物品 ID 或 `#` 开头的标签；写岔了（不存在的物品、空标签）不进游戏就报 `INVALID_PARAMETER`。要吃的不用一样样点名：`#maicraft:foods/edible` 是"能吃的口粮"一大类（含模组食物；按物品自己的食物组件认，吃了有害的、金苹果这类特殊的不算，生肉算）。填了 `items` 时不填；只给 `potion` 时不填 |
+| `potion` | | 要哪种药水：药水种类 ID（`minecraft:fire_resistance`、延长的 `minecraft:long_fire_resistance`、加强的 `minecraft:strong_healing`、水瓶 `minecraft:water`）。配 `item` 写 `minecraft:potion` / `minecraft:splash_potion` / `minecraft:lingering_potion`，不给 `item` 当普通药水瓶；`items` 每项也能带 `potion`。点名了种类时身上只数这一种（水瓶不算抗火药水），箱子按记下的种类找、开箱按种类挑；记得箱子里有药水却没记下是哪种的，走过去打开看了再拿。ME 网络、村民和别的联动来源这次认不出种类，点名了种类不从那里拿。结果 `changes` 里药水写成 `minecraft:potion[potion=minecraft:fire_resistance]` |
 | `count` | | 再多拿几件，默认 1；不设上限，做不完如实 partial。填了 `items` 时不填 |
-| `items` | | 一次要几样：每项 `{"item": 物品 ID 或 # 标签, "count": 这次再多拿几件}`，最多 16 项；同一样写两次合并成一项、件数相加。与 `item`、`count`、`drops_from` 互斥（掉落线索只认一样东西） |
+| `items` | | 一次要几样：每项 `{"item": 物品 ID 或 # 标签, "count": 这次再多拿几件}`（药水另加 `"potion"`），最多 16 项；同一样写两次合并成一项、件数相加。与 `item`、`count`、`drops_from` 互斥（掉落线索只认一样东西） |
 | `via` | | `craft` / `smelt` / `smith` / `container` / `mine` / `harvest` / `trade`，联动模组接入的途径装了才有，以参数表列的为准；不给按代价自己挑 |
 | `radius` | | 容器与采掘的搜索范围（格），给了就冻结在范围内，上限 64 |
 | `max_distance` | | 愿意为此走多远（格）；太远的来源不参与 |

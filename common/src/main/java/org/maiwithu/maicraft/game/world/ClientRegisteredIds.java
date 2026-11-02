@@ -57,6 +57,7 @@ public final class ClientRegisteredIds implements ReadsRegisteredIds {
             case ENTITY_TYPE -> Optional.of(BuiltInRegistries.ENTITY_TYPE);
             case BIOME -> worldRegistry(Registries.BIOME);
             case STRUCTURE -> worldRegistry(Registries.STRUCTURE);
+            case POTION -> Optional.of(BuiltInRegistries.POTION);
         };
     }
 

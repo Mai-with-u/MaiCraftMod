@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 
 /**
@@ -28,44 +29,44 @@ public final class CarriedItems {
             WantedItem wanted, ReadsItemTags tags) {
         int total = 0;
         for (var stack : backpack.stacks()) {
-            if (wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId()))) {
+            if (wanted.matches(stack, tags.tagsOf(stack.itemId()))) {
                 total += stack.count();
             }
         }
         if (offhand != null) {
             total += offhand.heldInOffhand()
-                    .filter(stack -> wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId())))
+                    .filter(stack -> wanted.matches(stack, tags.tagsOf(stack.itemId())))
                     .map(BackpackStack::count)
                     .orElse(0);
         }
         return total;
     }
 
-    /** 身上（主背包与副手）想要的东西按物品分开数：要一类（标签）时说得出拿到的是哪几样。 */
+    /** 身上（主背包与副手）想要的东西按物品分开数（药水按种类分开，键是带种类的物品写法）：要一类（标签）时说得出拿到的是哪几样。 */
     public static Map<String, Integer> matchingByItem(BackpackView backpack, OffhandContents offhand,
             WantedItem wanted, ReadsItemTags tags) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (var stack : backpack.stacks()) {
-            if (wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId()))) {
-                counts.merge(stack.itemId(), stack.count(), Integer::sum);
+            if (wanted.matches(stack, tags.tagsOf(stack.itemId()))) {
+                counts.merge(StackKey.of(stack).written(), stack.count(), Integer::sum);
             }
         }
         if (offhand != null) {
             offhand.heldInOffhand()
-                    .filter(stack -> wanted.matches(stack.itemId(), tags.tagsOf(stack.itemId())))
-                    .ifPresent(stack -> counts.merge(stack.itemId(), stack.count(), Integer::sum));
+                    .filter(stack -> wanted.matches(stack, tags.tagsOf(stack.itemId())))
+                    .ifPresent(stack -> counts.merge(StackKey.of(stack).written(), stack.count(), Integer::sum));
         }
         return counts;
     }
 
-    /** 身上（主背包与副手）每样东西各几件：来源做完一趟后比一比，说得出这一趟进包的是什么。 */
+    /** 身上（主背包与副手）每样东西各几件（药水按种类分开）：来源做完一趟后比一比，说得出这一趟进包的是什么。 */
     public static Map<String, Integer> byItem(BackpackView backpack, OffhandContents offhand) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (var stack : backpack.stacks()) {
-            counts.merge(stack.itemId(), stack.count(), Integer::sum);
+            counts.merge(StackKey.of(stack).written(), stack.count(), Integer::sum);
         }
         if (offhand != null) {
-            offhand.heldInOffhand().ifPresent(stack -> counts.merge(stack.itemId(), stack.count(), Integer::sum));
+            offhand.heldInOffhand().ifPresent(stack -> counts.merge(StackKey.of(stack).written(), stack.count(), Integer::sum));
         }
         return counts;
     }

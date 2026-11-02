@@ -47,7 +47,7 @@
       {
         "ability": "maicraft:obtain",
         "summary": "让背包里某样东西再多几件，或一次要几样；可用 via 指定途径",
-        "parameters": "item?: string, count?: integer, items?: array, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
+        "parameters": "item?: string, potion?: string, count?: integer, items?: array, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
         "targets": [],
         "mode": "controls_player"
       },
@@ -561,6 +561,12 @@
           "doc": "要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）。填了 items 时不填"
         },
         {
+          "name": "potion",
+          "type": "string",
+          "required": false,
+          "doc": "要哪种药水（药水种类 ID，例如 minecraft:fire_resistance、延长的 minecraft:long_fire_resistance）：配 item 写 minecraft:potion / minecraft:splash_potion / minecraft:lingering_potion，不给 item 当普通药水瓶；items 里每项也能带 potion"
+        },
+        {
           "name": "count",
           "type": "integer",
           "required": false,
@@ -572,7 +578,7 @@
           "name": "items",
           "type": "array",
           "required": false,
-          "doc": "一次要几样：每项 {\"item\": 物品 ID 或 # 标签, \"count\": 再多拿几件}，最多 16 项；同一样写两次合并成一项、件数相加；与 item、count、drops_from 互斥"
+          "doc": "一次要几样：每项 {\"item\": 物品 ID 或 # 标签, \"count\": 再多拿几件, \"potion\": 药水种类（可不给）}，最多 16 项；同一样写两次合并成一项、件数相加；与 item、count、drops_from 互斥"
         },
         {
           "name": "via",

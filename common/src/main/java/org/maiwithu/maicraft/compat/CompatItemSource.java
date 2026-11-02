@@ -38,6 +38,12 @@ public final class CompatItemSource implements ItemSource {
         if (!module.active()) {
             return new SourceQuote.Unsupported(source.describe(), disabledReason());
         }
+        // 联动来源这次都不认药水种类（ME 网络、随身背包、工具箱、仓储都只按物品 ID 数）：
+        // 点名了种类的药水不从这里拿，如实说认不出，免得把水瓶当成抗火药水拿回来。
+        if (request.wanted().potion() != null) {
+            return new SourceQuote.Unavailable(source.describe(),
+                    source.describe() + "认不出药水种类，点名了种类的药水不从这里拿");
+        }
         try {
             return source.quote(request, context);
         } catch (ModApiMismatch broken) {

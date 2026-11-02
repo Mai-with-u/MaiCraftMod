@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -116,15 +117,18 @@ public final class SelfView {
         return json;
     }
 
+    // 同一样东西合成一项；药水按种类分开列，每项多写一个 potion：几瓶长得一样的药水分得清哪瓶是哪种。
     private static JsonArray inventory(BackpackView backpack, ReadsFoodValues foods) {
-        Map<String, Integer> merged = new LinkedHashMap<>();
+        Map<StackKey, Integer> merged = new LinkedHashMap<>();
         for (BackpackStack stack : backpack.stacks()) {
-            merged.merge(stack.itemId(), stack.count(), Integer::sum);
+            merged.merge(StackKey.of(stack), stack.count(), Integer::sum);
         }
         JsonArray list = new JsonArray();
-        merged.forEach((item, count) -> {
+        merged.forEach((key, count) -> {
+            String item = key.itemId();
             JsonObject entry = new JsonObject();
             entry.addProperty("item", item);
+            if (key.potion() != null) entry.addProperty("potion", key.potion());
             entry.addProperty("count", count);
             // 吃的写上吃一个补多少、可能带什么效果：模组食物认不全，挑哪样吃、要不要先烤看这一项。
             if (foods != null) foods.of(item).ifPresent(food -> entry.add("food", food(food)));

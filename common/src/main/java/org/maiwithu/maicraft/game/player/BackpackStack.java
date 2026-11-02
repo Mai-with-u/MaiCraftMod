@@ -14,6 +14,7 @@ package org.maiwithu.maicraft.game.player;
  * @param food             能吃：饿的时候要靠它
  * @param precious         稀有贵重：带附魔或游戏自己标了稀有度，丢了很难补回来
  * @param buildingMaterial 是整块的建材（圆石、木板、泥土这类）：能搭能垫，也最容易再弄到
+ * @param potion           药水种类（药水注册表的 ID）：药水瓶、药箭的物品 ID 分不出是哪种药水，另记在这里；别的东西为 null
  */
 public record BackpackStack(
         String itemId,
@@ -22,11 +23,18 @@ public record BackpackStack(
         boolean gear,
         boolean food,
         boolean precious,
-        boolean buildingMaterial) {
+        boolean buildingMaterial,
+        String potion) {
 
     public BackpackStack {
         if (itemId == null || itemId.isBlank()) throw new IllegalArgumentException("物品的注册 ID 不能为空");
         if (count <= 0) throw new IllegalArgumentException("一格里的物品数量必须为正：" + count);
         if (maxStackSize <= 0) throw new IllegalArgumentException("物品的最大堆叠必须为正：" + maxStackSize);
+    }
+
+    /** 不带药水种类的一格：除了药水瓶、药箭，别的东西都是这样。 */
+    public BackpackStack(String itemId, int count, int maxStackSize, boolean gear, boolean food, boolean precious,
+            boolean buildingMaterial) {
+        this(itemId, count, maxStackSize, gear, food, precious, buildingMaterial, null);
     }
 }

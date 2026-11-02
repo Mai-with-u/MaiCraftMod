@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
@@ -74,6 +75,7 @@ public final class ContainerSource implements ItemSource {
                 spots.around(cellOf(context.characterAt()), searchRadius(context));
         ContainerChooser.Candidate known = null;
         ContainerChooser.Candidate maybe = null;
+        boolean maybeUnsureKind = false;
         ContainerChooser.Candidate stale = null;
         boolean skippedProtected = false;
         for (ContainerChooser.Candidate candidate : candidates) {
@@ -86,11 +88,16 @@ public final class ContainerSource implements ItemSource {
             if (known == null && candidate.knownContents() != null && holdsWanted(candidate, request)) {
                 known = candidate;
             }
-            if (maybe == null && candidate.knownContents() == null) {
+            // 点名了药水种类、记得这只箱子里有这种药水瓶却没记下是哪种（认种类以前记的）：
+            // 和没开过的一样，走过去打开看了再拿，不当成没有。
+            boolean unsureKind = candidate.knownContents() != null && !holdsWanted(candidate, request)
+                    && kindNotRecorded(candidate, request);
+            if (maybe == null && (candidate.knownContents() == null || unsureKind)) {
                 maybe = candidate;
+                maybeUnsureKind = unsureKind;
             }
             // 开过、记得里面没有，但就在跟前：记忆可能过时（主播刚往里放了东西），真人会顺手再开一眼。
-            if (stale == null && candidate.knownContents() != null && !holdsWanted(candidate, request)
+            if (stale == null && candidate.knownContents() != null && !holdsWanted(candidate, request) && !unsureKind
                     && candidate.walkCost() <= RECHECK_NEAR_BLOCKS) {
                 stale = candidate;
             }
@@ -106,7 +113,9 @@ public final class ContainerSource implements ItemSource {
         if (maybe != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
                     new AcquisitionCost(reachableCost(maybe, context), 4),
-                    depthNote(maybe, context, "这只箱子只是看见过，没开过，不确定里面有什么"), positionHint(maybe));
+                    depthNote(maybe, context, maybeUnsureKind
+                            ? "记得这只箱子里有" + request.wanted().itemId() + "，没记下是哪种药水，打开看了再拿"
+                            : "这只箱子只是看见过，没开过，不确定里面有什么"), positionHint(maybe));
         }
         if (stale != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
@@ -192,6 +201,16 @@ public final class ContainerSource implements ItemSource {
     /** 开过、且记下的内容里有想要的东西的容器。 */
     private boolean holdsWanted(ContainerChooser.Candidate candidate, ItemRequest request) {
         return countWanted(candidate, request) > 0;
+    }
+
+    /** 点名了药水种类，记得的内容里有这种药水瓶、却只记了物品 ID 没记种类：说不准是不是要的那种。 */
+    private static boolean kindNotRecorded(ContainerChooser.Candidate candidate, ItemRequest request) {
+        if (request.wanted().potion() == null) return false;
+        for (String written : candidate.knownContents()) {
+            StackKey seen = StackKey.parse(written);
+            if (seen.potion() == null && seen.itemId().equals(request.wanted().itemId())) return true;
+        }
+        return false;
     }
 
     private int countWanted(ContainerChooser.Candidate candidate, ItemRequest request) {

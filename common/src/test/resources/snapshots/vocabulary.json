@@ -42,6 +42,7 @@
     "note": "到点时原样带回给你的一句备注：写清到时要看什么、做什么决定",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
     "page": "分页看结果时的页码，从 0 起",
+    "potion": "药水种类（药水注册表 ID，例如 minecraft:fire_resistance、minecraft:long_fire_resistance）：药水瓶的物品 ID 分不出是哪种药水，点名时另写",
     "prefer": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后",
     "properties": "只放一格时要求的方块状态属性（JSON 对象），例如 {\"facing\":\"north\"}",
     "quest": "任务书里任务的编号（16 位十六进制，FTB 任务）",

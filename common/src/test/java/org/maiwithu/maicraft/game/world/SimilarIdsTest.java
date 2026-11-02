@@ -65,6 +65,7 @@ class SimilarIdsTest {
                     case ENTITY_TYPE -> List.of("minecraft:zombie");
                     case BIOME -> List.of("minecraft:beach", "minecraft:plains");
                     case STRUCTURE -> List.of("minecraft:village_plains");
+                    case POTION -> List.of("minecraft:fire_resistance", "minecraft:long_fire_resistance");
                 };
             }
 
@@ -78,6 +79,8 @@ class SimilarIdsTest {
                 registered.missing(IdKind.ITEM, "#minecraft:log"));
         assertEquals("方块 minecraft:coal_oer 不存在；你是不是要 minecraft:coal_ore",
                 registered.missing(IdKind.BLOCK, "minecraft:coal_oer"));
+        assertEquals("药水种类 minecraft:fire_resistence 不存在；你是不是要 minecraft:fire_resistance",
+                registered.missing(IdKind.POTION, "minecraft:fire_resistence"));
         assertEquals("实体 minecraft:zombi 不存在；你是不是要 minecraft:zombie",
                 registered.missing(IdKind.ENTITY_TYPE, "minecraft:zombi"));
         assertEquals("群系 minecraft:beachh 不存在；你是不是要 minecraft:beach",

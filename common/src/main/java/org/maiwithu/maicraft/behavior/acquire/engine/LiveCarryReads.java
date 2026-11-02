@@ -18,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -50,9 +51,9 @@ public final class LiveCarryReads {
         };
     }
 
-    /** 物品标签的生产实现：一个物品挂着的全部标签，从游戏的注册表读。 */
+    /** 物品标签的生产实现：一个物品挂着的全部标签，从游戏的注册表读；带药水种类的写法按瓶子那样物品读。 */
     public static ReadsItemTags itemTags() {
-        return itemId -> BuiltInRegistries.ITEM.getOptional(parse(itemId))
+        return itemId -> BuiltInRegistries.ITEM.getOptional(parse(StackKey.parse(itemId).itemId()))
                 .map(item -> {
                     Set<String> names = new LinkedHashSet<>();
                     // 遍历物品挂着的标签键：注册表持有者直接给全部标签，不用猜哪个命名空间。

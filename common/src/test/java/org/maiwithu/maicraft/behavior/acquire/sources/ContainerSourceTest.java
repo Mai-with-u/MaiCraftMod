@@ -135,6 +135,40 @@ class ContainerSourceTest {
         return new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备");
     }
 
+    private static ItemRequest fireResistance(int count) {
+        return new ItemRequest(WantedItem.ofPotion("minecraft:potion", "minecraft:fire_resistance"), count, "下界");
+    }
+
+    @Test
+    void 记得箱子里有抗火药水_点名种类就去拿() {
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of(
+                "minecraft:potion[potion=minecraft:water]", "minecraft:potion[potion=minecraft:fire_resistance]"), NOW);
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source(memory).quote(fireResistance(2), CONTEXT));
+        assertTrue(offer.obtainableCount() > 0);
+        assertTrue(offer.risk().contains("现场为准"), offer.risk());
+    }
+
+    @Test
+    void 只记得有药水没记种类_走过去打开看了再拿() {
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:potion"), NOW);
+
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source(memory).quote(fireResistance(1), CONTEXT));
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, offer.obtainableCount());
+        assertTrue(offer.risk().contains("没记下是哪种药水"), offer.risk());
+    }
+
+    @Test
+    void 记得只有水瓶_点名抗火药水不去拿() {
+        WorldMemory memory = memory();
+        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest",
+                List.of("minecraft:potion[potion=minecraft:water]"), NOW);
+
+        assertInstanceOf(SourceQuote.Unavailable.class, source(memory).quote(fireResistance(1), CONTEXT));
+    }
+
     @Test
     void 开过的箱子按记下的内容报价() {
         WorldMemory memory = memory();

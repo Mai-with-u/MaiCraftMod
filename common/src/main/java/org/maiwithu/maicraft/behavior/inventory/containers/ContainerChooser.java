@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.game.player.StackKey;
 
 /**
  * 挑容器：在一批候选容器里决定存进哪只、按什么顺序试的纯函数。
@@ -134,10 +135,12 @@ public final class ContainerChooser {
     }
 
     // 排序：已经放着同种东西的 > 还有空位的 > 走过去的代价小的；同代价按位置排，保证顺序稳定。
+    // 记得的内容里药水带着种类，按物品 ID 比：存药水时照样先挑已经放着药水的箱子。
     private static Comparator<Entry> sortOrder(String itemTypeId) {
         Comparator<Entry> bySameItem = Comparator.comparing(entry ->
                 itemTypeId != null && entry.candidate().knownContents() != null
-                        && entry.candidate().knownContents().contains(itemTypeId) ? 0 : 1);
+                        && entry.candidate().knownContents().stream()
+                                .anyMatch(written -> StackKey.parse(written).itemId().equals(itemTypeId)) ? 0 : 1);
         Comparator<Entry> byFreeSpace = Comparator.comparing(entry -> entry.candidate().hasFreeSpace() ? 0 : 1);
         Comparator<Entry> byCost = Comparator.comparingDouble((Entry entry) -> entry.candidate().walkCost())
                 .thenComparing(entry -> entry.candidate().at().toString());

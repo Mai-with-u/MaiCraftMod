@@ -60,12 +60,13 @@ class ObtainAbilityTest {
         }
     }
 
-    /** 替身：本实例注册了锌矿与石头两种方块、僵尸一种实体；掉落线索按它分拣。 */
+    /** 替身：本实例注册了锌矿与石头两种方块、僵尸一种实体、三种药水；掉落线索与药水种类按它分拣。 */
     private record FakeIds() implements ReadsRegisteredIds {
         @Override public List<String> ids(IdKind kind) {
             return switch (kind) {
                 case BLOCK -> List.of("create:zinc_ore", "minecraft:stone");
                 case ENTITY_TYPE -> List.of("minecraft:zombie");
+                case POTION -> List.of("minecraft:fire_resistance", "minecraft:long_fire_resistance", "minecraft:weakness");
                 default -> List.of();
             };
         }
@@ -276,6 +277,52 @@ class ObtainAbilityTest {
         assertEquals(10, input.requests().get(0).count(), "件数相加");
         assertEquals("minecraft:coal", input.requests().get(1).wanted().specifier());
         assertEquals(4, input.requests().get(1).count());
+    }
+
+    // 只要一样时下达，进了世界给出要货单；没进世界把参数问题原话带出来。
+    private ObtainItems decided(JsonObject params) {
+        StepDecision decision = decide(params);
+        return assertInstanceOf(ObtainItems.class, assertInstanceOf(StepDecision.Run.class, decision,
+                decision instanceof StepDecision.Finish finish ? finish.result().problem().message() : "没进世界")
+                .input());
+    }
+
+    @Test
+    void 只点名药水种类_当普通药水瓶要() {
+        JsonObject params = new JsonObject();
+        params.addProperty("potion", "minecraft:fire_resistance");
+        params.addProperty("count", 3);
+        ItemRequest request = decided(params).requests().getFirst();
+        assertEquals("minecraft:potion[potion=minecraft:fire_resistance]", request.wanted().specifier());
+        assertEquals(3, request.count());
+    }
+
+    @Test
+    void 药水种类配喷溅药水瓶_items每项也能带() {
+        JsonObject params = new JsonObject();
+        JsonArray items = new JsonArray();
+        JsonObject splash = entry("minecraft:splash_potion", 1);
+        splash.addProperty("potion", "minecraft:weakness");
+        items.add(splash);
+        JsonObject plain = new JsonObject();
+        plain.addProperty("potion", "minecraft:long_fire_resistance");
+        items.add(plain);
+        params.add("items", items);
+        List<ItemRequest> requests = decided(params).requests();
+        assertEquals("minecraft:splash_potion[potion=minecraft:weakness]", requests.get(0).wanted().specifier());
+        assertEquals("minecraft:potion[potion=minecraft:long_fire_resistance]", requests.get(1).wanted().specifier());
+    }
+
+    @Test
+    void 药水种类写错_配的不是药水瓶_一次报全进不了世界() {
+        JsonObject params = new JsonObject();
+        params.addProperty("item", "minecraft:torch");
+        params.addProperty("potion", "minecraft:fire_resistence");
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        String message = finish.result().problem().message();
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+        assertTrue(message.contains("potion 只配药水瓶用"), message);
+        assertTrue(message.contains("药水种类 minecraft:fire_resistence 不存在；你是不是要 minecraft:fire_resistance"), message);
     }
 
     @Test

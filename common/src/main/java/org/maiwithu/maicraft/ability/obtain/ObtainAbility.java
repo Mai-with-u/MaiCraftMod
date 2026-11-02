@@ -23,6 +23,8 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.player.StackKey;
+import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -89,10 +91,14 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
                 ParamSpecs.of(
                         ParamSpec.of("item", ParamType.ITEM_OR_TAG)
                                 .doc("要多拿的物品 ID，或 # 开头的标签；#maicraft:foods/edible 是能吃的口粮一大类（含模组食物）。填了 items 时不填").build(),
+                        ParamSpec.of("potion", ParamType.TEXT)
+                                .doc("要哪种药水（药水种类 ID，例如 minecraft:fire_resistance、延长的 minecraft:long_fire_resistance）："
+                                        + "配 item 写 minecraft:potion / minecraft:splash_potion / minecraft:lingering_potion，"
+                                        + "不给 item 当普通药水瓶；items 里每项也能带 potion").build(),
                         ParamSpec.of("count", ParamType.INTEGER).range(1, Integer.MAX_VALUE)
                                 .doc("再多拿几件（不是背包里的总数），不给算 1；填了 items 时不填，件数写在每一项里").build(),
                         ParamSpec.of("items", ParamType.JSON_ARRAY)
-                                .doc("一次要几样：每项 {\"item\": 物品 ID 或 # 标签, \"count\": 再多拿几件}，最多 "
+                                .doc("一次要几样：每项 {\"item\": 物品 ID 或 # 标签, \"count\": 再多拿几件, \"potion\": 药水种类（可不给）}，最多 "
                                         + MAX_ITEMS + " 项；同一样写两次合并成一项、件数相加；与 item、count、drops_from 互斥").build(),
                         ParamSpec.of("via", ParamType.CHOICE)
                                 .choices(vias.stream().map(AcquireVia::name).toArray(String[]::new))
@@ -139,7 +145,8 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
     private Reading read(Goal goal) {
         ParamValues params = goal.params();
         List<String> invalid = new ArrayList<>();
-        boolean single = params.has("item");
+        // 只点名药水种类、不说瓶子也算要一样：当普通药水瓶。
+        boolean single = params.has("item") || (params.has("potion") && !params.has("items"));
         boolean several = params.has("items");
         if (!single && !several) {
             return new Reading(List.of(), List.of("缺少要拿的东西：填 item 要一样，或填 items 一次要几样"));
@@ -149,6 +156,9 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
         }
         if (several && params.has("count")) {
             invalid.add("给了 items 就不要给 count：件数写在每一项里");
+        }
+        if (several && params.has("potion")) {
+            invalid.add("给了 items 就不要给 potion：药水种类写在 items 的每一项里");
         }
         if (several && params.has("drops_from")) {
             invalid.add("给了 items 就不要给 drops_from：掉落线索只认一样东西，要线索就一样一样下达");
@@ -166,7 +176,9 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
         }
         List<ItemRequest> requests = new ArrayList<>();
         if (single) {
-            WantedItem wanted = wanted(params.text("item"), invalid);
+            WantedItem wanted = params.has("potion")
+                    ? potion(params.has("item") ? params.text("item") : null, params.text("potion"), "", invalid)
+                    : wanted(params.text("item"), invalid);
             if (wanted != null) requests.add(new ItemRequest(wanted, count, purpose, prefer, dropsFrom));
         } else if (several) {
             requests.addAll(readItems(params.json("items"), purpose, prefer, invalid));
@@ -195,11 +207,21 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
             }
             JsonObject entry = element.getAsJsonObject();
             JsonElement item = entry.get("item");
-            if (item == null || !item.isJsonPrimitive() || !item.getAsJsonPrimitive().isString()) {
+            JsonElement potion = entry.get("potion");
+            boolean namesPotion = potion != null && potion.isJsonPrimitive() && potion.getAsJsonPrimitive().isString();
+            if (potion != null && !namesPotion) {
+                invalid.add(at + "的 potion 必须是药水种类 ID 字符串");
+                continue;
+            }
+            boolean namesItem = item != null && item.isJsonPrimitive() && item.getAsJsonPrimitive().isString();
+            if (!namesItem && !namesPotion) {
                 invalid.add(at + "缺少 item（物品 ID 或 # 标签）");
                 continue;
             }
-            WantedItem wanted = wanted(item.getAsString(), invalid);
+            // 这一项点名了药水种类：瓶子不写当普通药水瓶，写了只能是三种药水瓶之一。
+            WantedItem wanted = namesPotion
+                    ? potion(namesItem ? item.getAsString() : null, potion.getAsString(), at + "的 ", invalid)
+                    : wanted(item.getAsString(), invalid);
             if (wanted == null) continue;
             int each = 1;
             JsonElement eachCount = entry.get("count");
@@ -234,6 +256,28 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
         boolean known = wanted.isTag() ? registry.tagHasItems(wanted.tagId()) : registry.itemExists(wanted.itemId());
         if (!known) invalid.add(registry.missing(wanted.specifier()));
         return wanted;
+    }
+
+    /**
+     * 点名了药水种类的一样：瓶子只能是三种药水瓶之一，不写当普通药水瓶；药水种类要在本实例注册过，
+     * 写错的说成"药水种类 … 不存在；你是不是要 …"。立不住时记一句、给 null。
+     *
+     * @param at 一次要几样时这一项的位置说法（"items 第 2 项的 "），只要一样时为空
+     */
+    private WantedItem potion(String item, String potion, String at, List<String> invalid) {
+        String bottle = item == null ? StackKey.PLAIN_POTION : item.trim().toLowerCase(Locale.ROOT);
+        String kind = potion.trim().toLowerCase(Locale.ROOT);
+        boolean fine = true;
+        if (!StackKey.POTION_BOTTLES.contains(bottle)) {
+            invalid.add(at + "potion 只配药水瓶用（item 写 minecraft:potion、minecraft:splash_potion 或 "
+                    + "minecraft:lingering_potion，不写当普通药水瓶），这里配的是 " + item);
+            fine = false;
+        }
+        if (kind.isEmpty() || !registeredIds.ids(IdKind.POTION).contains(kind)) {
+            invalid.add(at + registeredIds.missing(IdKind.POTION, potion));
+            fine = false;
+        }
+        return fine ? WantedItem.ofPotion(bottle, kind) : null;
     }
 
     // 拿东西在哪做都一样：被自卫撤离带离原地后，从新地点重新看现场接着拿，不停在半路等 LLM。
