@@ -1,6 +1,6 @@
 ---
 name: maid-getting-started
-description: 车万女仆入门：女仆是什么、怎么得到、先换皮肤再说话、和她说话、坐下喂食抱起、让她种田干活、下五子棋、她死了怎么取墓碑；第一次见到女仆、要和她互动或让她干活前读
+description: 车万女仆入门：女仆是什么、怎么得到、先换皮肤再说话、和她说话、坐下喂食抱起、让她种田干活、给她定工作和睡觉的地方、下五子棋、她死了怎么取墓碑；第一次见到女仆、要和她互动或让她干活前读
 metadata: {"requires-mods": "touhou_little_maid"}
 ---
 
@@ -69,6 +69,13 @@ metadata: {"requires-mods": "touhou_little_maid"}
 | `extinguishing` | 灭火 | 灭火器 |
 | `board_games` | 陪你下棋 | 附近有棋盘 |
 
+## 给她定工作、休息、睡觉的地方
+
+- 拿河童罗盘依次点三处方块：`use(item=touhou_little_maid:kappa_compass, target=<方块>)`，第一下是工作点、第二下是休息点、第三下是睡觉点，三处同一维度、彼此不超过 64 格。
+- 再对她点一下 `use(item=touhou_little_maid:kappa_compass, target=e#)` 写进她身上，聊天栏会回一句写进去了；之后驻守（`stay=in_area`）就围着这些点活动。
+- 潜行点方块清空罗盘，潜行点她清掉她身上的点。拿罗盘潜行右键她不会让她坐下。
+- 女仆床 `touhou_little_maid:maid_bed` 摆在睡觉点旁边，她到睡觉时段会去睡。
+
 ## 她会碍事的地方
 
 - 她跟着时会捡角色要 `gather` 的东西（身边 8 格内的掉落物）：采集前让她坐下或驻守，或者关拾取 `{"pickup": "false"}`。
@@ -92,6 +99,6 @@ metadata: {"requires-mods": "touhou_little_maid"}
 
 ## 只用现有能力能做、但结果以游戏为准的
 
-- 相机拍照：主手拿相机 `use(target=e#)` 对她右键，照片掉在脚下；拿照片 `use(target=<地面一格>, face=up)` 放出她。
+- 相机拍照：`use(item=touhou_little_maid:camera, target=e#)` 对自己的女仆右键，会把她整只收进照片——她从世界上消失，照片掉在角色脚下，记得捡起；她在睡觉时拍不了。拿照片 `use(item=touhou_little_maid:photo, target=<地面一格>, face=up)` 放出她。
 - 神龛复活：先把胶片放进神龛，再空手右键神龛，要花掉一半多的血，血不够先回血。
 - 祭坛：`design` 读祭坛的结构文件、`build` 施工、`use` 把料放到柱顶。合成要的料和摆法 `lookup(topic=recipe, …)` 查，结果如实以游戏为准。
