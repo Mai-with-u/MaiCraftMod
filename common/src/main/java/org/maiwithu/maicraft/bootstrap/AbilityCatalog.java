@@ -16,6 +16,9 @@ import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.machine.MachineVehicles;
 import org.maiwithu.maicraft.ability.chat.ChatAbility;
+import org.maiwithu.maicraft.ability.chat.FindsListener;
+import org.maiwithu.maicraft.ability.chat.LiveListeners;
+import org.maiwithu.maicraft.ability.chat.spi.TalkTo;
 import org.maiwithu.maicraft.ability.design.DesignModule;
 import org.maiwithu.maicraft.ability.design.LiveSiteCells;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
@@ -303,7 +306,7 @@ public final class AbilityCatalog {
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), innerNeeds,
                 deps.guards().protection(), deps.items().itemTags(), deps.compat().menuLayouts(),
                 deps.world().blockScans(), new SessionServerReads(deps.channels().session()),
-                deps.character().backpack(), deps.hands().digTools());
+                deps.character().backpack(), deps.hands().digTools(), refusals);
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
         // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
         // 现做工具包在外面：挖楼梯、清障、采掘带着这一趟的规模挖时，身上没有对路的工具、划算又有料就先做一把。
@@ -513,6 +516,8 @@ public final class AbilityCatalog {
             Function<Permissions, ConstructionServices> construction) {
         PermissionCheck permission = shared.permission();
         PlayerServices services = shared.playerServices();
+        // 联动的说话办法进世界时建一次：说话点名一只生物时逐个问它们。
+        List<TalkTo> talkTos = deps.compat().talkTos(services);
         // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
         registry.register(new FightModule(deps.senses(),
                 new LiveSeenTargets(deps.world().scene().seen()),
@@ -569,7 +574,9 @@ public final class AbilityCatalog {
                 () -> deps.world().scene().caveOpenings(), lookOnce(deps)));
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
-        registry.register(chatModule(deps));
+        // 点名一只生物时对它说：听法问联动登记的说话办法，联动装了没登记上时如实说。
+        registry.register(chatModule(deps, new LiveListeners(deps.world()::scene, deps.character().context(),
+                () -> talkTos, deps.compat()::whyNotWorking)));
 
         // 预留：只改预留表，当场完成；物品 ID 按物品注册表核对，写岔的一次报全。
         registry.register(new ReserveAbility(deps.reserved(), deps.items().itemRegistry()));
@@ -589,6 +596,10 @@ public final class AbilityCatalog {
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。
      *  包私有是给总装测试的接缝：测试从这里取组装好的能力，钉住实例配置接进了逐字打字开关。 */
     static ChatAbility chatModule(Deps deps) {
+        return chatModule(deps, FindsListener.NONE);
+    }
+
+    private static ChatAbility chatModule(Deps deps, FindsListener listeners) {
         ChatChannel chat = deps.channels().chat();
         ReadsChatEcho echo = new ReadsChatEcho() {
             @Override public boolean appearsInChat(String message) { return chat.appearsInChat(message); }
@@ -601,7 +612,7 @@ public final class AbilityCatalog {
         ClientCommandTree commandTree = new ClientCommandTree();
         // 逐字打字开关必须从实例配置接进来：它决定发话任务一开始是逐字打草稿，还是整句直接提交。
         return new ChatAbility(chat::send, echo, new ClientChatDraftScreen(), deps.config().allowGameCommands(),
-                deps.config().chatTypewriter(), commandTree::adminOnly);
+                deps.config().chatTypewriter(), commandTree::adminOnly, listeners);
     }
 
     /** 拿到物品能力的一份：往下挖楼梯的现场部件在这里拼，身外的来源清单与引擎见 AcquisitionWiring。 */

@@ -78,6 +78,7 @@ class CompatRegistryTest {
         assertTrue(registry.modules().isEmpty());
         assertTrue(registry.itemSources(NO_SERVICES).isEmpty());
         assertEquals(List.of("测试模组 backpack（backpack）：没装，跳过"), registry.decisions());
+        assertTrue(registry.whyNotWorking("backpack").isEmpty(), "没装的不算联动没登记");
     }
 
     @Test
@@ -89,6 +90,9 @@ class CompatRegistryTest {
         assertTrue(registry.modules().isEmpty());
         assertEquals("测试模组 backpack（backpack）：装的是 3.26.9，验证过的范围是 [3.25.69, 3.26)，不登记",
                 registry.decisions().getFirst());
+        // 装了没登记：点名它的东西时如实说联动没登记，不说成东西本来就不会。
+        assertEquals("装的是 3.26.9，验证过的范围是 [3.25.69, 3.26)，不登记",
+                registry.whyNotWorking("backpack").orElseThrow());
     }
 
     @Test
@@ -104,6 +108,7 @@ class CompatRegistryTest {
         assertEquals("背包", registry.itemSources(NO_SERVICES).getFirst().describe());
         assertEquals(MOD_ROUTE, registry.itemSources(NO_SERVICES).getFirst().via());
         assertEquals(List.of("测试模组 backpack（backpack）：已登记，版本 3.25.69"), registry.decisions());
+        assertTrue(registry.whyNotWorking("backpack").isEmpty(), "好好登记着的没有原因");
     }
 
     @Test
@@ -121,6 +126,7 @@ class CompatRegistryTest {
         assertEquals(1, registry.itemSources(NO_SERVICES).size());
         assertTrue(registry.decisions().get(0).contains("创建时出错，不登记"), registry.decisions().get(0));
         assertTrue(registry.decisions().get(1).contains("NoSuchMethodError"), registry.decisions().get(1));
+        assertTrue(registry.whyNotWorking("broken").orElseThrow().contains("创建时出错"));
     }
 
     @Test

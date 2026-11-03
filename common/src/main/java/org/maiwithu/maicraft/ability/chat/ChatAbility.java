@@ -9,6 +9,8 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.TargetKind;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
@@ -29,6 +31,9 @@ import java.util.Set;
  * 实例配置（所有者在配置文件里改，不经任何工具参数）放开后管理员命令也按命令发送，
  * 以角色自己的权限交给服务器裁决——能不能成，服务器说了算。/maicraft 与 /mai 永远留给人。
  * 哪条算管理员命令见 CommandKinds。读别人的聊天与听消息归感知侧，本能力只管发。
+ *
+ * <p>给了 target（一只生物的 e#）就是对那只生物说：不进公屏、不当命令，经联动登记的说话办法走到它跟前、
+ * 开它的对话框说（车万女仆的女仆）；它不会听人说话就如实说做不到。
  */
 public final class ChatAbility implements AbilityModule {
 
@@ -41,6 +46,8 @@ public final class ChatAbility implements AbilityModule {
     private final boolean chatTypewriter;
     /** 服务器的命令树：单人时认得出模组自带的管理员命令；拿不到时只按名单认。 */
     private final KnowsAdminCommands adminCommands;
+    /** 点名一只生物说话时找它的听法。 */
+    private final FindsListener listeners;
 
     /** 没有命令树可问的一份：只按名单认管理员命令（离线测试、连远程服务器）。逐字打字按开着处理。 */
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands) {
@@ -51,12 +58,19 @@ public final class ChatAbility implements AbilityModule {
     // 关不掉逐字打字。开关必须显式给，忘了接在编译期就报错，而不是运行时静默逐字。
     public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
             boolean chatTypewriter, KnowsAdminCommands adminCommands) {
+        this(sender, echo, drafts, allowGameCommands, chatTypewriter, adminCommands, FindsListener.NONE);
+    }
+
+    /** @param listeners 点名一只生物说话时找它的听法；没接联动时谁都不会听 */
+    public ChatAbility(SendsChatMessage sender, ReadsChatEcho echo, ChatDraftScreen drafts, boolean allowGameCommands,
+            boolean chatTypewriter, KnowsAdminCommands adminCommands, FindsListener listeners) {
         this.sender = sender;
         this.echo = echo;
         this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.allowGameCommands = allowGameCommands;
         this.chatTypewriter = chatTypewriter;
         this.adminCommands = Objects.requireNonNull(adminCommands, "adminCommands");
+        this.listeners = Objects.requireNonNull(listeners, "listeners");
     }
 
     @Override
@@ -82,8 +96,11 @@ public final class ChatAbility implements AbilityModule {
                 doc,
                 ParamSpecs.of(
                         ParamSpec.of("message", ParamType.TEXT).required()
-                                .doc(messageDoc).build()),
-                Set.of(),
+                                .doc(messageDoc + "；给了 target 就是对那只生物说，不进公屏，/ 开头的也照原话说给它听").build(),
+                        ParamSpec.of("max_seconds", ParamType.INTEGER).range(0, 90)
+                                .doc("对生物说话时，说完以后最多站着等回话几秒：默认 30，最多 90，0 表示确认它听到了就走；"
+                                        + "对全体玩家说时不用给").build()),
+                Set.of(TargetKind.SEEN),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(),
                 List.of(),
@@ -93,6 +110,13 @@ public final class ChatAbility implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         String message = step.goal().params().text("message");
+        // 点名一只生物：对它说，不进公屏，也不按命令处理。
+        if (step.goal().target() != null) return talkTo(step, step.goal().target(), message);
+        if (step.goal().params().has("max_seconds")) {
+            return new StepDecision.Finish(TaskResult.failed("没有把话发出去",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "max_seconds 只在对生物说话（给 target）时有用",
+                            "对全体玩家说就不给 max_seconds")));
+        }
         // 命令的规矩放在决定阶段，判断只读、无副作用：/maicraft 与 /mai 留给人；管理员命令默认不碰，实例放开才发；
         // 普通玩家命令像生存玩家一样照发，能不能成由服务器裁决。
         if (message.startsWith("/") && CommandKinds.reserved(message)) {
@@ -112,8 +136,22 @@ public final class ChatAbility implements AbilityModule {
         return new StepDecision.Run(new ChatInput(message));
     }
 
+    // 对生物说话：target 只认实体的观察编号；等回话默认 30 秒。它会不会听、话长不长在任务里对着此刻的它判断。
+    private StepDecision talkTo(StepContext step, Target target, String message) {
+        if (!(target instanceof Target.Seen seen) || !seen.id().startsWith("e")) {
+            return new StepDecision.Finish(TaskResult.failed("没有把话说出去",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "对生物说话的 target 要给一只生物的观察编号 e#（例如 e3）",
+                            "要对全体玩家说就不给 target")));
+        }
+        int maxSeconds = step.goal().params().has("max_seconds")
+                ? (int) step.goal().params().integer("max_seconds") : 30;
+        return new StepDecision.Run(new TalkInput(seen.id(), message, maxSeconds, step.goal().permissions()));
+    }
+
     @Override
     public void registerTasks(TaskFactories factories) {
+        // 对生物说话的任务：听法、逐字打字开关经闭包交给任务。
+        factories.register(TalkInput.class, input -> new TalkTask(input, listeners, chatTypewriter));
         factories.register(ChatInput.class, input -> {
             // 每次运行新建发话任务；聊天框、发送入口与回显通过闭包交给任务，不经全局单例。
             // 逐字打字关掉时任务直接从提交阶段开始，不再逐字打草稿。

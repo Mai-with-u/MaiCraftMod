@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.spi;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
@@ -38,12 +41,13 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
  * @param serverReads  向服务端问只读操作：客户端读不到的网络汇总（ME 网络的控制器、频道、能量）经它问
  * @param backpack     角色的背包视图：随身背包的来源认身上哪几格放的是包
  * @param digTools     挖之前拿哪件工具：和自带能力挖格同一份挑工具
+ * @param refusals     游戏的回应：动作栏提示语与聊天栏里服务端发来的系统消息；模组常把"不行"和回话写在聊天栏里
  */
 public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose approach,
                              Interactions interactions, MovesToMainhand toMainhand, GearChanges gear,
                              HoldsSneak sneak, ItemNeeds needs, Protection protection, ReadsItemTags itemTags,
                              MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads,
-                             BackpackView backpack, DigToolRule digTools) {
+                             BackpackView backpack, DigToolRule digTools, ClientGameRefusals refusals) {
 
     public PlayerServices {
         Objects.requireNonNull(context, "context");
@@ -60,5 +64,17 @@ public record PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose 
         Objects.requireNonNull(serverReads, "serverReads");
         Objects.requireNonNull(backpack, "backpack");
         Objects.requireNonNull(digTools, "digTools");
+        Objects.requireNonNull(refusals, "refusals");
+    }
+
+    /** 不读游戏回应的一份（离线测试）：动作栏与聊天栏都当什么也没收到。 */
+    public PlayerServices(Supplier<PlayerContext> context, BringsPlayerClose approach,
+                          Interactions interactions, MovesToMainhand toMainhand, GearChanges gear,
+                          HoldsSneak sneak, ItemNeeds needs, Protection protection, ReadsItemTags itemTags,
+                          MenuLayouts menuLayouts, BlockScanService blockScans, ServerReads serverReads,
+                          BackpackView backpack, DigToolRule digTools) {
+        this(context, approach, interactions, toMainhand, gear, sneak, needs, protection, itemTags, menuLayouts,
+                blockScans, serverReads, backpack, digTools,
+                new ClientGameRefusals(new OverlayMessages(), List::of, () -> 0L));
     }
 }

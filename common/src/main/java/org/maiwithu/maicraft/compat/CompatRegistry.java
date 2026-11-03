@@ -6,7 +6,9 @@ import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -27,6 +29,7 @@ import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.behavior.navigation.spi.FlyUpGear;
 import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
+import org.maiwithu.maicraft.ability.chat.spi.TalkTo;
 import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
 import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
@@ -96,9 +99,12 @@ public final class CompatRegistry {
     private final Slot<VehicleReader> vehicleReaders = slot("读载具的办法", CompatVehicleReader::new);
     private final Slot<TrainScheduler> trainSchedulers = slot("定列车时刻表的办法", CompatTrainScheduler::new);
     private final Slot<RideAlong> rideAlongs = slot("同乘的办法", CompatRideAlong::new);
+    private final Slot<TalkTo> talkTos = slot("对生物说话的办法", CompatTalkTo::new);
     private final Slot<FlightStabilizers> flightStabilizers = slot("飞行稳定器", CompatFlightStabilizers::new);
     private final Slot<StructureWorksites> structureWorksites = slot("物理结构上的工地", CompatStructureWorksites::new);
     private final List<String> decisions = new ArrayList<>();
+    /** 装了却没登记上的联动模组：模组 ID → 为什么（版本不在验证过的范围、创建时出错）。 */
+    private final Map<String, String> installedNotRegistered = new LinkedHashMap<>();
 
     /** 声明一种槽：建这个动作同时把它放进槽集合，回滚按槽集合撤，不用另记一份。 */
     private <T> Slot<T> slot(String what, BiFunction<CompatModule, T, T> wrap) {
@@ -132,6 +138,8 @@ public final class CompatRegistry {
     private void check(SupportedMod<CompatModule> mod, LoaderEnvironment loader) {
         Optional<String> skip = mod.skipReason(loader);
         if (skip.isPresent()) {
+            // 装了但版本不对：记下来，点名这个模组的东西时如实说"联动没登记"，不说成它本来就不会。
+            if (loader.isModLoaded(mod.modId())) installedNotRegistered.put(mod.modId(), skip.get());
             decide(mod, skip.get());
             return;
         }
@@ -146,6 +154,7 @@ public final class CompatRegistry {
             for (int i = 0; i < allSlots.size(); i++) {
                 allSlots.get(i).truncate(before[i]);
             }
+            installedNotRegistered.put(mod.modId(), "创建时出错，不登记：" + failure);
             decide(mod, "创建时出错，不登记：" + failure);
             return;
         }
@@ -294,6 +303,11 @@ public final class CompatRegistry {
         rideAlongs.add(module, build);
     }
 
+    /** 联动入口交一种对生物说话的办法（车万女仆的女仆）的建法：进世界时建，包一层后交给说话；模组停用后认不出它的生物。 */
+    public void talkTo(CompatModule module, Function<PlayerServices, TalkTo> build) {
+        talkTos.add(module, build);
+    }
+
     /** 联动入口交一种读写飞行稳定器的办法（Flight Control）的建法：进世界时建，包一层后交给看载具与驾驶。 */
     public void flightStabilizers(CompatModule module, Function<PlayerServices, FlightStabilizers> build) {
         flightStabilizers.add(module, build);
@@ -345,6 +359,18 @@ public final class CompatRegistry {
      */
     public List<String> installedModIds() {
         return modules.stream().filter(CompatModule::active).map(CompatModule::modId).distinct().sorted().toList();
+    }
+
+    /**
+     * 这个模组装了、联动却没在工作时，为什么：版本不在验证过的范围、创建时出错、用着用着接口对不上停用了。
+     * 联动清单里没有这个模组、或它好好登记着时给空。点名一只模组生物、一件模组的东西却没有办法处理时，
+     * 能力拿它分清"这东西本来就不会"和"联动没登记上，看启动日志"。
+     */
+    public Optional<String> whyNotWorking(String modId) {
+        String skipped = installedNotRegistered.get(modId);
+        if (skipped != null) return Optional.of(skipped);
+        return modules.stream().filter(module -> module.modId().equals(modId)).findFirst()
+                .flatMap(CompatModule::disabledReason);
     }
 
     /** 登记了的联动入口，按清单顺序。 */
@@ -415,6 +441,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的同乘办法；规矩同物品来源。 */
     public List<RideAlong> rideAlongs(PlayerServices services) {
         return rideAlongs.build(services);
+    }
+
+    /** 进世界时建联动模组的对生物说话办法；规矩同物品来源。 */
+    public List<TalkTo> talkTos(PlayerServices services) {
+        return talkTos.build(services);
     }
 
     /** 进世界时建联动模组的飞行稳定器读写办法；规矩同物品来源。 */
