@@ -532,19 +532,8 @@ final class BaritoneWalkRun implements WalkRun {
     // 引擎按下的方向、跳跃与潜行合成给输入入口；路线在手而引擎本刻没按键时保持站立、按住路线朝向。
     private void applyEngineInput(PlayerContext context, PlayerInput playerInput, IInputOverrideHandler input,
                                   PathingBehavior pathing, boolean routePresent, boolean calculating) {
-        float forward = (input.isInputForcedDown(Input.MOVE_FORWARD) ? 1F : 0F)
-                - (input.isInputForcedDown(Input.MOVE_BACK) ? 1F : 0F);
-        float strafe = (input.isInputForcedDown(Input.MOVE_LEFT) ? 1F : 0F)
-                - (input.isInputForcedDown(Input.MOVE_RIGHT) ? 1F : 0F);
-        boolean jump = input.isInputForcedDown(Input.JUMP);
-        boolean sneak = input.isInputForcedDown(Input.SNEAK);
-        boolean sprint = WalkSprint.sprint(input, pathing, sprintAllowed);
-        if (forward != 0F || strafe != 0F || jump || sneak) {
-            playerInput.applyNavigationMovement(
-                    new PlayerInput.Movement(forward, strafe, jump, sneak, sprint), context.clientTick());
-        } else if (routePresent && !calculating) {
-            playerInput.applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
-        }
+        PlayerInput.Movement movement = EngineKeys.movement(input, pathing, sprintAllowed, routePresent, calculating);
+        if (movement != null) playerInput.applyNavigationMovement(movement, context.clientTick());
     }
 
     // 落地救援这一刻占不占身体：出发前备料、落地后收回时站定，引擎不推进（这几刻站着不算没进展）；
