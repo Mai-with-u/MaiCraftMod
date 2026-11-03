@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
+import org.maiwithu.maicraft.game.MentionedEntity;
 import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
@@ -331,6 +332,35 @@ class ToolsTest {
         assertEquals("chat", reply.getAsJsonObject("next").getAsJsonObject("arguments").get("topic").getAsString());
         assertEquals(0, data(call("events", "{}")).getAsJsonArray("events").size());
         assertEquals("invalid_parameter", errorCode(call("events", "{\"topic\": \"chat\", \"goal_id\": 1}")));
+    }
+
+    @Test
+    void chatEventsSayWhoAMessageNamesAndWhoseNameItBorrowed() {
+        UUID momo = UUID.fromString("5f2b9c1e-0d4a-4c1b-9e7f-1a2b3c4d5e6f");
+        UUID creeper = UUID.fromString("0f0e0d0c-0b0a-4908-8706-050403020100");
+        ReceivedChat.fromServer("momo 被 苦力怕 炸死了", false).map(death -> death.with(List.of(
+                new MentionedEntity("momo", "touhou_little_maid:maid", momo),
+                new MentionedEntity("苦力怕", "minecraft:creeper", creeper)), "death.attack.explosion.player"))
+                .ifPresent(chat::append);
+        ReceivedChat.underOwnName("<Mai> [name:\"winefox_momo\", x:12, y:64, z:-3]", "Mai").ifPresent(chat::append);
+
+        JsonArray read = data(call("events", "{\"topic\": \"chat\"}")).getAsJsonArray("events");
+
+        // 死亡播报：按出现先后给点到的实体（名字、类型、UUID）和翻译键。
+        JsonObject death = read.get(0).getAsJsonObject();
+        assertEquals("death.attack.explosion.player", death.get("translation_key").getAsString());
+        JsonObject victim = death.getAsJsonArray("mentions").get(0).getAsJsonObject();
+        assertEquals("momo", victim.get("name").getAsString());
+        assertEquals("touhou_little_maid:maid", victim.get("type").getAsString());
+        assertEquals(momo.toString(), victim.get("uuid").getAsString());
+        assertEquals(creeper.toString(),
+                death.getAsJsonArray("mentions").get(1).getAsJsonObject().get("uuid").getAsString());
+        // 借角色名字代发的：系统消息、写明借的名字、没有发言人；没点到实体时不写 mentions。
+        JsonObject borrowed = read.get(1).getAsJsonObject();
+        assertEquals("system", borrowed.get("kind").getAsString());
+        assertEquals("Mai", borrowed.get("shown_as").getAsString());
+        assertEquals("[name:\"winefox_momo\", x:12, y:64, z:-3]", borrowed.get("text").getAsString());
+        assertFalse(borrowed.has("sender") || borrowed.has("mentions") || borrowed.has("translation_key"));
     }
 
     @Test

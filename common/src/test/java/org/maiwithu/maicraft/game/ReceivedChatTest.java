@@ -9,7 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-/** 收到的聊天：别人说的话照实收下，自己的回显、动作栏提示、空白消息不收，太长的截断并标出来。 */
+/**
+ * 收到的聊天：别人说的话照实收下，自己的回显、动作栏提示、空白消息不收，太长的截断并标出来；
+ * 借角色名字代发的消息按系统消息记。
+ */
 class ReceivedChatTest {
     private static final UUID SELF = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID STEVE = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
@@ -51,6 +54,35 @@ class ReceivedChatTest {
         ReceivedChat joined = ReceivedChat.fromServer("Alex 加入了游戏", false).orElseThrow();
         assertEquals(ReceivedChat.Kind.SYSTEM, joined.kind());
         assertNull(joined.sender());
+    }
+
+    @Test
+    void aMessageShownUnderTheCharactersOwnNameIsASystemMessage() {
+        // 车万女仆死后借主人的名字发一行坐标给主人：没有发言人 UUID，聊天格式里写的是角色自己。
+        assertTrue(ReceivedChat.isUnderOwnName(null, "Mai", null, SELF, "Mai"), "名字和账号名一样");
+        assertTrue(ReceivedChat.isUnderOwnName(null, "[红队] Mai", SELF, SELF, "Mai"), "名字点着的就是角色");
+
+        ReceivedChat chat = ReceivedChat.underOwnName(
+                "<Mai> [name:\"winefox_momo\", x:12, y:64, z:-3, dim:minecraft:overworld]", "Mai").orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
+        assertEquals("Mai", chat.shownAs());
+        assertEquals("[name:\"winefox_momo\", x:12, y:64, z:-3, dim:minecraft:overworld]", chat.text(),
+                "聊天格式加的名字前缀去掉");
+        assertNull(chat.sender());
+        assertNull(chat.senderId());
+    }
+
+    @Test
+    void messagesShownUnderSomeoneElsesNameStayAsTheyWere() {
+        // 命令方块、控制台的 /say 名字不是角色；同名但点着别的实体的不是角色；有发言人 UUID 的由 UUID 说了算。
+        assertFalse(ReceivedChat.isUnderOwnName(null, "Server", null, SELF, "Mai"));
+        assertFalse(ReceivedChat.isUnderOwnName(null, "Mai", STEVE, SELF, "Mai"));
+        assertFalse(ReceivedChat.isUnderOwnName(STEVE, "Mai", null, SELF, "Mai"));
+        assertFalse(ReceivedChat.isUnderOwnName(null, "Mai", null, null, null), "不在世界里时不认");
+        // 正文本来就没有前缀时原样留着；空白的不算收到的聊天。
+        assertEquals("已经到家", ReceivedChat.underOwnName("已经到家", "Mai").orElseThrow().text());
+        assertTrue(ReceivedChat.underOwnName("<Mai> ", "Mai").isEmpty());
     }
 
     @Test

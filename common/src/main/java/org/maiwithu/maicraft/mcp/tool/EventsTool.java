@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.tool;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.game.MentionedEntity;
 import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.event.ChatEvent;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
@@ -105,7 +106,10 @@ public final class EventsTool implements McpTool {
         return data;
     }
 
-    /** 一条收到的聊天：谁说的、说了什么；私聊和截断只在是的时候写出来。 */
+    /**
+     * 一条收到的聊天：谁说的、说了什么；私聊、截断、借名、点到的实体、翻译键只在有的时候写出来。
+     * 借角色名字代发的消息按系统消息给，借的名字写在 shown_as，宿主不会把它当成角色自己或主人说的话。
+     */
     private static JsonObject chatEvent(ChatEvent event) {
         ReceivedChat chat = event.chat();
         JsonObject json = new JsonObject();
@@ -113,9 +117,23 @@ public final class EventsTool implements McpTool {
         json.addProperty("kind", chat.kind().name().toLowerCase(Locale.ROOT));
         if (chat.sender() != null) json.addProperty("sender", chat.sender());
         if (chat.senderId() != null) json.addProperty("sender_id", chat.senderId().toString());
+        if (chat.shownAs() != null) json.addProperty("shown_as", chat.shownAs());
         json.addProperty("text", chat.text());
         if (chat.isPrivate()) json.addProperty("private", true);
         if (chat.truncated()) json.addProperty("truncated", true);
+        // 死亡播报里死的是谁、被谁打死：按出现先后给名字、类型与 UUID，宿主按 UUID 认出是哪一只。
+        if (!chat.mentions().isEmpty()) {
+            JsonArray mentions = new JsonArray();
+            for (MentionedEntity entity : chat.mentions()) {
+                JsonObject mention = new JsonObject();
+                if (entity.name() != null) mention.addProperty("name", entity.name());
+                if (entity.type() != null) mention.addProperty("type", entity.type());
+                mention.addProperty("uuid", entity.uuid().toString());
+                mentions.add(mention);
+            }
+            json.add("mentions", mentions);
+        }
+        if (chat.translationKey() != null) json.addProperty("translation_key", chat.translationKey());
         return json;
     }
 
