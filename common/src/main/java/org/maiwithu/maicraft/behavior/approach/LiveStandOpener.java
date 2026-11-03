@@ -207,7 +207,7 @@ final class LiveStandOpener implements StandOpener {
                     noShotTicks = 0;
                     yield ActionStatus.progressed();
                 }
-                case NO_SHOT -> ++noShotTicks > NO_SHOT_LIMIT_TICKS
+                case NO_SHOT, NO_ROOM -> ++noShotTicks > NO_SHOT_LIMIT_TICKS
                         ? ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "站到 " + feet.toShortString() + " 后打不着要挖开的 " + cells.get(index).toShortString()))
                         : ActionStatus.running();

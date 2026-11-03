@@ -51,14 +51,18 @@ public final class BlockDigger {
     private PendingInteraction toolSelectPending;
     private PendingMenuAction toolClosePending;
     private PendingMenuAction toolStagePending;
-    private int pendingToolSlot = -1;
-    private int minimumToolDurability;
-    public void minimumToolDurability(int remaining) { minimumToolDurability = Math.max(0, remaining); }
+    /** 挖之前要做的工具安排：不动、换到哪一格、腾空主手；null 表示这一趟不用动手。 */
+    private DigToolPlan pendingToolPlan;
+    /** 要腾空主手却腾不出放东西的地方：不丢东西，这一步交回调用方。 */
+    private boolean toolNoRoom;
     /** 挖之前拿哪件工具：玩家行为层的挑工具，从构造函数传入。 */
     private final DigToolRule tools;
     /** 这一趟预计还要挖几格：徒手也掉的方块按它算换不换工具；没说就当只挖这一格。 */
     private int expectedBlocks = 1;
     public void expectedBlocks(int blocks) { expectedBlocks = Math.max(1, blocks); }
+    /** 这一趟挖下来的东西要不要：只要路通时给 false，挖不到掉落的候选也能参与挑工具。 */
+    private boolean wantsDrop = true;
+    public void wantsDrop(boolean on) { wantsDrop = on; }
     /** 挖的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和精准采集，时运高的优先。 */
     private boolean forChanceDrops;
     public void forChanceDrops(boolean on) { forChanceDrops = on; }
@@ -107,7 +111,9 @@ public final class BlockDigger {
         /** 本刻只破坏了挡路方块而非目标，这是继续接近目标的一步。 */
         BROKE_OCCLUDER,
         /** 目标所有面都不可命中，且没有可安全清除的遮挡；当前无法继续。 */
-        NO_SHOT;
+        NO_SHOT,
+        /** 该腾空主手才划算，可背包里腾不出放手里东西的地方；不丢东西，交回调用方。 */
+        NO_ROOM;
 
         /** 本 tick 有方块真的没了(目标或遮挡物)。 */
         public boolean broke() {
@@ -225,12 +231,14 @@ public final class BlockDigger {
     // 真正开挖前，接着按顺序等工具搬运、关闭背包、快捷栏选择完成。
     // 这些步骤都是跨刻等待；中途失败就不继续挖。
     private DigResult advance(PlayerContext context, BlockHitResult hit, boolean targetBreak) {
+        // 腾空主手却放不下手里的东西：这一步做不下去，交回调用方报清原因，不丢东西。
+        if (toolNoRoom) return DigResult.NO_ROOM;
         // 关背包与搬工具两步都可能在等待；先结清它们，再轮到快捷栏选择和破坏本体。
         DigResult toolStep = advanceToolPreparation(context);
         if (toolStep != null) return toolStep;
-        if (pendingToolSlot >= 0) {
+        if (pendingToolPlan != null) {
             submitToolSelection(context);
-            return DigResult.PROGRESSING;
+            return toolNoRoom ? DigResult.NO_ROOM : DigResult.PROGRESSING;
         }
         if (toolSelectPending != null) {
             if (!toolSelectPending.terminal()) {
@@ -340,11 +348,8 @@ public final class BlockDigger {
         }
         reset();
         pos = target.immutable();
-        // 挖概率掉落时换一套挑法：拿剪刀、精准采集挖树叶和砾石，只会掉它自己，树苗、燧石一件都出不来。
-        // 别的都照玩家行为层的挑工具：能掉落先于不掉落、最省优先，改掉落的附魔与预留的工具不掺和。
-        pendingToolSlot = !selectTool || !player.level().isLoaded(pos) ? -1
-                : forChanceDrops ? ToolSelect.bestSlotForChanceDrops(player, player.level().getBlockState(pos))
-                : tools.slotFor(player, player.level().getBlockState(pos), minimumToolDurability, expectedBlocks);
+        // 先问这一趟挖之前要不要动手：换到哪一格、还是腾空主手，结论里的原生动作为此跨刻推进。
+        pendingToolPlan = !selectTool || !player.level().isLoaded(pos) ? null : planFor(player.level().getBlockState(pos));
         if (Minecraft.getInstance().screen != null || player.containerMenu != player.inventoryMenu) {
             toolClosePending = menuActions.close(context, TOOL_TIMEOUT_TICKS);
         } else {
@@ -366,9 +371,30 @@ public final class BlockDigger {
         return ItemStack.isSameItemSameComponents(beforeUnworn, nowUnworn);
     }
 
-    // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
+    // 按挑工具的结论动手：换到选中的那一格，或者把手里的东西收起来腾空主手。两步都是跨刻的原生动作。
     private void submitToolSelection(PlayerContext context) {
-        int bestSlot = pendingToolSlot;
+        DigToolPlan plan = pendingToolPlan;
+        if (plan instanceof DigToolPlan.Hold(int slot)) {
+            holdToolSlot(context, slot);
+        } else if (plan instanceof DigToolPlan.BareHand()) {
+            clearMainHand(context);
+        } else {
+            pendingToolPlan = null;
+        }
+    }
+
+    // 挑工具给的结论：挖概率掉落时照概率掉落的挑法，其余照玩家行为层的账。
+    private DigToolPlan planFor(BlockState state) {
+        // 挖概率掉落时换一套挑法：拿剪刀、精准采集挖树叶和砾石，只会掉它自己，树苗、燧石一件都出不来。
+        if (forChanceDrops) {
+            int slot = ToolSelect.bestSlotForChanceDrops(player, state);
+            return slot >= 0 ? DigToolPlan.hold(slot) : DigToolPlan.keep();
+        }
+        return tools.plan(player, state, expectedBlocks, wantsDrop);
+    }
+
+    // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。
+    private void holdToolSlot(PlayerContext context, int bestSlot) {
         // 切快捷栏也是一次交互：本刻没有机会就留到下一刻，选好的格子不丢。
         if (bestSlot >= 0 && bestSlot < 9 && !context.canInteractThisTick()) return;
         if (bestSlot >= 9 && bestSlot < 36 && !menuActions.ensureVisible(context)) return;
@@ -378,15 +404,64 @@ public final class BlockDigger {
                     context, bestSlot, TOOL_TIMEOUT_TICKS);
             // 提交入口这一刻不收（上一次动作还没结清）：选格留到下一刻再发，不丢选好的格子。
             if (submitted == null) return;
-            pendingToolSlot = -1;
+            pendingToolPlan = null;
             toolSelectPending = submitted;
         } else if (bestSlot >= 9 && bestSlot < 36) {
             // 工具在背包里时换到“当前手上那格”；扩展快捷栏模组可能让 selected 越出 0~8，
             // 原版 SWAP 交换只认 0~8，先折回原版范围再交换。
             toolStagePending = menuActions.swapInventoryToHotbar(
                     context, bestSlot, VanillaHotbar.swapTarget(selected), TOOL_TIMEOUT_TICKS);
-            pendingToolSlot = -1;
+            pendingToolPlan = null;
+        } else {
+            pendingToolPlan = null;
         }
+    }
+
+    // 空手最划算：把手里的东西放下。快捷栏有空位就换选那一格；没有就与主背包的空位交换，把东西收进背包。
+    // 两处都没有空位时腾不出手，如实交回，不把东西丢在地上。
+    private void clearMainHand(PlayerContext context) {
+        if (player.getMainHandItem().isEmpty()) {
+            pendingToolPlan = null;
+            return;
+        }
+        // 换选格也是一次交互：本刻没有机会就留到下一刻。
+        if (!context.canInteractThisTick()) return;
+        int freeHotbar = freeHotbarSlot();
+        if (freeHotbar >= 0) {
+            PendingInteraction submitted = sender.selectHotbar(context, freeHotbar, TOOL_TIMEOUT_TICKS);
+            if (submitted == null) return;
+            pendingToolPlan = null;
+            toolSelectPending = submitted;
+            return;
+        }
+        int freeBackpack = freeBackpackSlot();
+        if (freeBackpack < 0) {
+            toolNoRoom = true;
+            pendingToolPlan = null;
+            return;
+        }
+        if (!menuActions.ensureVisible(context)) return;
+        // 与当前手上那一格交换：手里的东西进背包空位，空位里的空手到手上。
+        toolStagePending = menuActions.swapInventoryToHotbar(
+                context, freeBackpack, VanillaHotbar.swapTarget(player.getInventory().selected), TOOL_TIMEOUT_TICKS);
+        pendingToolPlan = null;
+    }
+
+    // 快捷栏里第一个空着的格子（不含手上那格）；没有为 -1。
+    private int freeHotbarSlot() {
+        int selected = player.getInventory().selected;
+        for (int slot = 0; slot < 9 && slot < player.getInventory().getContainerSize(); slot++) {
+            if (slot != selected && player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        return -1;
+    }
+
+    // 主背包里第一个空着的格子（9~35）；没有为 -1。
+    private int freeBackpackSlot() {
+        for (int slot = 9; slot < 36 && slot < player.getInventory().getContainerSize(); slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) return slot;
+        }
+        return -1;
     }
 
     /**
@@ -447,7 +522,8 @@ public final class BlockDigger {
         toolSelectPending = null;
         toolClosePending = null;
         toolStagePending = null;
-        pendingToolSlot = -1;
+        pendingToolPlan = null;
+        toolNoRoom = false;
         destroyingItem = null;
     }
 

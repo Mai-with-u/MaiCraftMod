@@ -58,6 +58,7 @@ public final class LiveBlockDigging implements DigsBlocks {
         BlockBreaking digging = diggings.get();
         digging.aimAt(target.immutable());
         digging.expectBlocks(prep.expectedBlocks());
+        digging.wantsDrop(prep.wantsDrop());
         return Optional.of(new UntilGone(target.immutable(), digging));
     }
 
@@ -67,6 +68,7 @@ public final class LiveBlockDigging implements DigsBlocks {
         if (accelerators.isEmpty()) return dig(trigger, prep);
         BlockBreaking digging = diggings.get();
         digging.expectBlocks(prep.expectedBlocks());
+        digging.wantsDrop(prep.wantsDrop());
         return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, digging,
                 (context, cell) -> gone(context.player(), cell)));
     }

@@ -65,6 +65,16 @@ public final class ToolSelect {
         return enchantmentLevel(stack, Enchantments.FORTUNE);
     }
 
+    /** 这件东西上的效率等级：换算挖掘速度的加快倍数时用（等级平方再加一）。 */
+    public static int efficiencyLevel(ItemStack stack) {
+        return enchantmentLevel(stack, Enchantments.EFFICIENCY);
+    }
+
+    /** 这件东西带不带经验修补：磨掉的耐久会被经验补回来，磨损成本按折价算。 */
+    public static boolean mends(ItemStack stack) {
+        return enchantmentLevel(stack, Enchantments.MENDING) > 0;
+    }
+
     /** 拿它挖方块只掉方块自己：剪刀（树叶、草）和带精准采集的工具。 */
     public static boolean keepsBlockWhole(ItemStack stack) {
         if (stack.isEmpty()) return false;

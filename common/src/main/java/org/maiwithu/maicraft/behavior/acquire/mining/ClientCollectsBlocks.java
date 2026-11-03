@@ -192,7 +192,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                     // 收概率掉落的不连锁，挖的时候不拿剪刀和精准采集（拿了只掉方块自己）。
                     if (chanceDrops) yield digs.digForChanceDrops(cell());
                     // 带上这一趟还要挖几格：身上没有对路的工具时按它算现做一把划不划算。
-                    DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(cells.size() - index, permissions, null);
+                    // 采掘要掉落：挖不到掉落的候选不参与挑工具，宁可先备一把对的工具。
+                    DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(cells.size() - index, true, permissions, null);
                     yield chainable == null ? digs.dig(cell(), prep)
                             : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable, prep);
                 }

@@ -95,7 +95,7 @@ final class EngineClicks {
                     yield Doing.BROKE_A_BLOCK;
                 }
                 case PROGRESSING -> Doing.WORKING;
-                case NO_SHOT -> Doing.NOTHING;
+                case NO_SHOT, NO_ROOM -> Doing.NOTHING;
             };
         }
         if (left) {
@@ -182,7 +182,7 @@ final class EngineClicks {
                 yield Doing.BROKE_A_BLOCK;
             }
             case PROGRESSING -> Doing.WORKING;
-            case NO_SHOT -> Doing.NOTHING;
+            case NO_SHOT, NO_ROOM -> Doing.NOTHING;
         };
     }
 

@@ -28,14 +28,16 @@ public interface DigsBlocks {
     Optional<Action> dig(BlockPos target);
 
     /**
-     * 这一趟挖掘的规模与记账：挖楼梯、清障、采掘这些路径知道这一趟大概还要挖几格。挑工具按它算徒手也掉的方块换不换，
-     * 身上没有对路的工具时按它算现做一把划不划算；现做走这次任务的许可，做了什么、为什么没做记进 records（没有就不记）。
+     * 这一趟挖掘的规模与记账：挖楼梯、清障、采掘这些路径知道这一趟大概还要挖几格。挑工具按它算换不换手，
+     * 拿不到掉落的候选参不参与竞争看这一趟要不要掉落；身上没有对路的工具时按它算现做一把划不划算；
+     * 现做走这次任务的许可，做了什么、为什么没做记进 records（没有就不记）。
      *
      * @param expectedBlocks 这一趟预计还要挖几格（估不出给 1）
+     * @param wantsDrop      这一趟挖下来的东西要不要：采掘要，清障与挖楼梯只要路通
      * @param permissions    这次任务的许可：现做工具放工作台、拿料都按它
      * @param records        发起任务的记账口；可以为 null
      */
-    record ToolPrep(int expectedBlocks, Permissions permissions, TaskRecords records) {
+    record ToolPrep(int expectedBlocks, boolean wantsDrop, Permissions permissions, TaskRecords records) {
         public ToolPrep {
             expectedBlocks = Math.max(1, expectedBlocks);
             Objects.requireNonNull(permissions, "permissions");

@@ -77,7 +77,7 @@ final class StructureBreak implements Action {
     // 挑工具说不换、或身上没有更合适的就拿手上的挖。
     private ActionStatus chooseTool(TickContext tick, LocalPlayer player, BlockState state) {
         if (toMainhand == null) {
-            int slot = services.digTools().slotFor(player, state, 0, 1);
+            int slot = services.digTools().slotFor(player, state, 1);
             ItemStack best = slot < 0 ? ItemStack.EMPTY : player.getInventory().getItem(slot);
             if (best.isEmpty() || ItemStack.isSameItem(best, player.getMainHandItem())) {
                 toolChosen = true;

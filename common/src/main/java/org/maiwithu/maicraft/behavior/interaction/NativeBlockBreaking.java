@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -34,8 +35,10 @@ public final class NativeBlockBreaking implements BlockBreaking {
     private boolean forChanceDrops;
     /** 挖之前拿哪件工具。 */
     private final DigToolRule tools;
-    /** 这一趟预计还要挖几格：挑工具按它算徒手也掉的方块换不换。 */
+    /** 这一趟预计还要挖几格：挑工具按它算换不换手。 */
     private int expectedBlocks = 1;
+    /** 这一趟挖下来的东西要不要：只要路通时给 false，徒手、拿不对的工具挖也行。 */
+    private boolean wantsDrop = true;
     private Predicate<BlockHitResult> gate = hit -> true;
     /** 最近一刻的角色上下文；收尾时还属于本刻就用它停手，过期了就把停手留到下一刻。 */
     private PlayerContext lastContext;
@@ -71,6 +74,12 @@ public final class NativeBlockBreaking implements BlockBreaking {
     }
 
     @Override
+    public void wantsDrop(boolean wants) {
+        wantsDrop = wants;
+        if (digger != null) digger.wantsDrop(wants);
+    }
+
+    @Override
     public void forChanceDrops() {
         forChanceDrops = true;
         if (digger != null) digger.forChanceDrops(true);
@@ -94,6 +103,7 @@ public final class NativeBlockBreaking implements BlockBreaking {
             digger.requiredFace(face);
             digger.beforeBreak(gate);
             digger.forChanceDrops(forChanceDrops);
+            digger.wantsDrop(wantsDrop);
         }
         // 挥下去的那一下还没确认、方块在客户端已经没了（原版先在本地把方块挖掉）：射线已经打不中它，
         // 只等游戏确认这一下，不再对着空气重新挖。连锁键要按到这里结清才松。
@@ -101,7 +111,7 @@ public final class NativeBlockBreaking implements BlockBreaking {
                 && player.level() != null && player.level().getBlockState(cell).isAir()) {
             return switch (digger.settleGone(player, true)) {
                 case BROKE_TARGET, BROKE_OCCLUDER -> ActionStatus.progressed();
-                case PROGRESSING, NO_SHOT -> ActionStatus.running();
+                case PROGRESSING, NO_SHOT, NO_ROOM -> ActionStatus.running();
             };
         }
         // 挖得动就推进；一格真挖开了才算进展。暂时够不着（NO_SHOT）不算失败也不算进展，
@@ -109,6 +119,9 @@ public final class NativeBlockBreaking implements BlockBreaking {
         return switch (digger.digTargetStep(player, cell)) {
             case PROGRESSING, NO_SHOT -> ActionStatus.running();
             case BROKE_TARGET, BROKE_OCCLUDER -> ActionStatus.progressed();
+            // 空手最划算却腾不出放手里东西的地方：不丢东西，如实交回，别一直干等。
+            case NO_ROOM -> ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL,
+                    "背包里没有空位，手里那件东西收不起来，腾不出手挖 " + cell.toShortString()));
         };
     }
 

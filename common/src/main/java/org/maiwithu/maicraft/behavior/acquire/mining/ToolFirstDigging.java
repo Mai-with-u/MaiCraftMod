@@ -168,7 +168,8 @@ public final class ToolFirstDigging implements DigsBlocks {
             if (player == null || player.level() == null || !player.level().isLoaded(target)) return Optional.empty();
             BlockState state = player.level().getBlockState(target);
             if (state.isAir()) return Optional.empty();
-            if (!(tools.verdict(player, state, 0, prep.expectedBlocks()) instanceof DigToolChoice.Verdict.None none)) {
+            if (!(tools.verdict(player, state, prep.expectedBlocks(), prep.wantsDrop())
+                    instanceof DigToolChoice.Verdict.None none)) {
                 return Optional.empty();
             }
             DigToolChoice.Block block = tools.block(player, state);
@@ -178,6 +179,12 @@ public final class ToolFirstDigging implements DigsBlocks {
                     stock(player));
             String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             if (decision instanceof ToolMaking.Decision.NoMaterial lacking) {
+                // 这块方块的掉落要靠对的工具，现做又做不出来：不挖了，如实说缺什么。
+                // 徒手挖下去这几块矿就白毁了，还让人以为采过了。
+                if (prep.wantsDrop() && state.requiresCorrectToolForDrops()) {
+                    return Optional.of(ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
+                            missingToolMessage(player, blockId, lacking, state))));
+                }
                 if (settledFor().add("short:" + lacking.option().itemId())) {
                     note("徒手挖 " + blockId, "没现做 " + lacking.option().itemId() + "：" + lacking.why());
                 }
@@ -193,6 +200,35 @@ public final class ToolFirstDigging implements DigsBlocks {
             note("现做 " + makingItem, "挖 " + blockId + " 徒手一格 " + none.handTicks() + " 刻，有它每格省 "
                     + make.savedPerBlock() + " 刻，这一趟约 " + prep.expectedBlocks() + " 格，划得来");
             return Optional.of(ActionStatus.progressed());
+        }
+
+        // 缺工具的说明：说清这块方块要的是什么、缺在哪；身上被预留着的那把干得了这件事时点它的名，
+        // 让人知道不是身上没有，而是留着的不能用。
+        private String missingToolMessage(LocalPlayer player, String blockId, ToolMaking.Decision.NoMaterial lacking,
+                BlockState state) {
+            String held = reservedMention(player, lacking.option().itemId(), state);
+            if (held != null) {
+                return "挖 " + blockId + " 要用对的工具才掉东西，够格的是" + held + "，预留着没自动拿来用";
+            }
+            return "挖 " + blockId + " 要用对的工具才掉东西，" + lacking.why() + "，问过各来源都拿不到";
+        }
+
+        // 身上被预留着、又挖得下这块方块的这类东西：按要做的工具的名字认（stone_pickaxe 认 "pickaxe"）。
+        private String reservedMention(LocalPlayer player, String itemId, BlockState state) {
+            String kind = itemId.substring(itemId.lastIndexOf('_') + 1);
+            int size = Math.min(36, player.getInventory().getContainerSize());
+            for (int slot = 0; slot < size; slot++) {
+                ItemStack stack = player.getInventory().getItem(slot);
+                if (stack.isEmpty()) continue;
+                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                if (!id.endsWith(kind)) continue;
+                // 够格才点它的名：预留着木镐、眼前是钻石矿时，木镐不背这个锅。
+                if (!stack.isCorrectToolForDrops(state)) continue;
+                int keep = kept.keep(id);
+                if (keep <= 0) continue;
+                return stack.getHoverName().getString() + "（留 " + (keep == ItemsToKeep.ALL ? "全部" : keep + " 件") + "）";
+            }
+            return null;
         }
 
         private void note(String tried, String whatHappened) {
@@ -225,8 +261,8 @@ public final class ToolFirstDigging implements DigsBlocks {
         }
     }
 
-    // 能现做的几种：看这一格归哪种工具挖（镐、斧、锹、锄，按方块标签认），木的在前、石的在后；
-    // 速度倍数与能不能掉落问原版的物品。
+    // 能现做的几种：看这一格归哪种工具挖（镐、斧、锹、锄，按方块标签认），石头优先、圆石不够才做木的——
+    // 石镐每一趟都更便宜，木镐只在料不够时顶用。速度倍数与能不能掉落问原版的物品。
     private static List<ToolMaking.Option> options(BlockState state) {
         String kind = state.is(BlockTags.MINEABLE_WITH_PICKAXE) ? "pickaxe"
                 : state.is(BlockTags.MINEABLE_WITH_AXE) ? "axe"
@@ -234,7 +270,7 @@ public final class ToolFirstDigging implements DigsBlocks {
                 : state.is(BlockTags.MINEABLE_WITH_HOE) ? "hoe" : null;
         if (kind == null) return List.of();
         List<ToolMaking.Option> options = new ArrayList<>();
-        for (ToolMaking.Head head : ToolMaking.Head.values()) {
+        for (ToolMaking.Head head : List.of(ToolMaking.Head.STONE, ToolMaking.Head.PLANKS)) {
             String itemId = "minecraft:" + (head == ToolMaking.Head.PLANKS ? "wooden_" : "stone_") + kind;
             ItemStack tool = new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
             if (tool.isEmpty()) continue;

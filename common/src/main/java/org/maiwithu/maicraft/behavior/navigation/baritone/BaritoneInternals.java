@@ -119,7 +119,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     public static void selectDigTool(LocalPlayer player, BlockState state, int engineChoice) {
         BaritoneInternals internals = ATTACHED.get();
         int slot = internals == null || player == null ? engineChoice
-                : internals.digTools.slotFor(player, state, 0, 1);
+                : internals.digTools.slotFor(player, state, 1);
         ensureHotbarSelected(player, slot);
     }
 
@@ -428,7 +428,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     /** 挖路的工具只在主背包时挪到快捷栏哪一格的打算；快捷栏已经有顺手的、或挪不了为空。 */
     Optional<ScaffoldStaging.Swap> toolStaging(LocalPlayer self, BlockState toBreak) {
         var inventory = self.getInventory();
-        return ToolStaging.plan(inventory.items, inventory.selected, digTools.slotFor(self, toBreak, 0, 1), keeps);
+        return ToolStaging.plan(inventory.items, inventory.selected, digTools.slotFor(self, toBreak, 1), keeps);
     }
 
     /** 垫料只在主背包时挪到快捷栏哪一格的打算；不用挪或挪不了为空。 */

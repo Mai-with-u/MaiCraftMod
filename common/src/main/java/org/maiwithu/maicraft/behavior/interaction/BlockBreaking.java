@@ -28,14 +28,21 @@ public interface BlockBreaking extends Action {
     default void beforeFirstSwing(Predicate<BlockHitResult> gate) {
     }
 
-    /**
-     * 这一格要的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和带精准采集的（拿了只掉方块自己），
-     * 时运高的优先。不调用时照旧挑最快的。
-     */
-    /** 这一趟预计还要挖几格同样的：挑工具按它算徒手也掉的方块换不换；不说就当只挖这一格。 */
+    /** 这一趟预计还要挖几格同样的：挑工具按它算换不换手；不说就当只挖这一格。 */
     default void expectBlocks(int blocks) {}
 
+    /**
+     * 这一格要的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和带精准采集的（拿了只掉方块自己），
+     * 时运高的优先。不调用时照旧按每格代价挑。
+     */
     default void forChanceDrops() {
+    }
+
+    /**
+     * 这一趟挖下来的东西要不要：只要路通（清障、挖楼梯）给 false，徒手挖、拿不对的工具挖也行；
+     * 不说就按要算，挖不到掉落的候选不参与挑工具。
+     */
+    default void wantsDrop(boolean wants) {
     }
 
     /** 已经挥下去、游戏还没确认的那一下：连锁键要按到它结清才松。 */

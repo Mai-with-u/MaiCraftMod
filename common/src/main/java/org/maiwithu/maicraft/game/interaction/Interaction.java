@@ -366,6 +366,10 @@ public final class Interaction {
         if (result == BlockDigger.DigResult.BROKE_TARGET) {
             return Status.DONE;
         }
+        if (result == BlockDigger.DigResult.NO_ROOM) {
+            failReason = "the backpack has no free slot to stow the item in hand, so the hand cannot be cleared";
+            return Status.FAILED;
+        }
         if (result == BlockDigger.DigResult.NO_SHOT) {
             double reach = InteractionRange.blockReach(player);
             boolean beyondReach = player.getEyePosition().distanceToSqr(Vec3.atCenterOf(block))

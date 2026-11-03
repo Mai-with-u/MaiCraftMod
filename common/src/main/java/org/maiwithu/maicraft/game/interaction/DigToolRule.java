@@ -5,19 +5,27 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.level.block.state.BlockState;
 
 /**
- * 挖一格之前拿哪件工具的规矩：给角色此刻的背包和要挖的方块，回答换到背包第几格（0~8 快捷栏、9~35 主背包），
- * 不换给 -1。怎么挑（能掉落先于不掉落、最省优先、改掉落的附魔不掺和、预留的不挑）归玩家行为层的挑工具，
- * 挖方块的基础代码只照它换手，自己不比较工具。
+ * 挖一格之前拿哪件工具：由玩家行为层实现，从构造函数传进挖掘器。
+ *
+ * <p>结论只给"要不要动手"：主手不动（含手上没有更合适的）、换到哪一格、或者腾空主手。
+ * 换成哪件、腾空手的东西往哪放，由挖掘器按原生动作逐步兑现。
  */
 @FunctionalInterface
 public interface DigToolRule {
 
-    /** 手上拿着什么就用什么挖，不换：照准星点一下的原始点击用它。 */
-    DigToolRule HELD = (player, state, minimumDurability, expectedBlocks) -> -1;
+    /** 照准星点一下的原始点击：不动手，手里有什么就用什么。 */
+    DigToolRule HELD = (player, state, expectedBlocks, wantsDrop) -> DigToolPlan.keep();
 
     /**
-     * @param minimumDurability 这一批至少要剩多少耐久；不要求给 0
-     * @param expectedBlocks    这一趟预计还要挖几格（徒手也掉的方块按它算换不换；估不出给 1）
+     * @param player         本地角色
+     * @param state          要挖的方块
+     * @param expectedBlocks 这一趟预计还要挖几格同样的（估不出给 1）
+     * @param wantsDrop      这一趟挖下来的东西要不要；只要路通给 false
      */
-    int slotFor(LocalPlayer player, BlockState state, int minimumDurability, int expectedBlocks);
+    DigToolPlan plan(LocalPlayer player, BlockState state, int expectedBlocks, boolean wantsDrop);
+
+    /** 只要格号的入口（寻路与拆结构自己搬东西）：不用换时 -1。 */
+    default int slotFor(LocalPlayer player, BlockState state, int expectedBlocks) {
+        return plan(player, state, expectedBlocks, false) instanceof DigToolPlan.Hold(int slot) ? slot : -1;
+    }
 }
