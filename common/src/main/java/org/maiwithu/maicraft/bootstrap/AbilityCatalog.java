@@ -44,6 +44,7 @@ import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.explore.cave.RememberedCaveEntrances;
 import org.maiwithu.maicraft.behavior.explore.endereye.ClientEnderEyes;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
+import org.maiwithu.maicraft.behavior.perception.SeenCreatures;
 import org.maiwithu.maicraft.behavior.perception.looking.LookAround;
 import org.maiwithu.maicraft.behavior.interaction.ClientItemFrameHits;
 import org.maiwithu.maicraft.ability.fight.LiveSeenTargets;
@@ -575,8 +576,9 @@ public final class AbilityCatalog {
 
         // 聊天：发送与回显确认都走游戏聊天通道；是否放行游戏命令由所有者的实例配置决定。
         // 点名一只生物时对它说：听法问联动登记的说话办法，联动装了没登记上时如实说。
-        registry.register(chatModule(deps, new LiveListeners(deps.world()::scene, deps.character().context(),
-                () -> talkTos, deps.compat()::whyNotWorking)));
+        SeenCreatures creatures = new SeenCreatures(deps.world()::scene, deps.character().context(),
+                deps.compat()::whyNotWorking);
+        registry.register(chatModule(deps, new LiveListeners(creatures, () -> talkTos)));
 
         // 预留：只改预留表，当场完成；物品 ID 按物品注册表核对，写岔的一次报全。
         registry.register(new ReserveAbility(deps.reserved(), deps.items().itemRegistry()));
