@@ -70,11 +70,12 @@ class AssemblyTest {
         // 寻死也接上了：读角色与地形、走到、直接按键、换手、瞄准交互与穿卸都用共用的那一套。
         // 计时也接上了：只往启动侧那份计时表里挂，离线清单给一份没人听事件的。
         // 预留也接上了：只改启动侧那份预留表，离线清单给一份读不到身上件数的。
+        // 改女仆设置与下五子棋也接上了：办法由登记表按装了的车万女仆建，离线一份没有也照常登记（点名时如实说认不出）。
         assertEquals(Set.of("use", "eat", "equip", "drop", "suicide", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect", "light",
-                "fight", "follow", "timer", "travel", "find", "explore", "chat", "reserve", "remember", "sequence", "quest",
-                "vehicle_assemble",
+                "fight", "follow", "timer", "travel", "find", "explore", "chat", "maid_configure", "gomoku_play", "reserve",
+                "remember", "sequence", "quest", "vehicle_assemble",
                 "vehicle_drive", "fish", "enchant"), registered,
                 "清单里的能力要一个不少地登记上");
     }
