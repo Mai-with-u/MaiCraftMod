@@ -10,12 +10,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
+import org.maiwithu.maicraft.game.EntityMentions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -48,14 +50,21 @@ final class MaidSight implements ModSight {
                         summary(state), detail(state)));
                 continue;
             }
-            Optional<String> tombstone = compat.tombstoneName(entity);
+            Optional<Component> tombstone = compat.tombstoneName(entity);
             if (tombstone.isPresent()) {
-                JsonObject summary = new JsonObject();
-                summary.addProperty("maid_name", tombstone.get());
                 sink.accept(new ModThing("maid_tombstone", ModThing.Identity.ENTITY, Integer.toString(entity.getId()),
-                        at, summary, null));
+                        at, tombstone(tombstone.get()), null));
             }
         }
+    }
+
+    // 墓碑在场景里列的：墓碑上的女仆名，和她的 UUID。女仆死时车万女仆把她的显示名写上墓碑，原版显示名挂着她的 UUID，
+    // 宿主拿它对上之前场景里那只女仆、死亡播报里点到的那只；名字被别的模组改过、读不出 UUID 时只给名字。
+    static JsonObject tombstone(Component maidName) {
+        JsonObject summary = new JsonObject();
+        summary.addProperty("maid_name", maidName.getString());
+        EntityMentions.named(maidName).ifPresent(maid -> summary.addProperty("maid_uuid", maid.uuid().toString()));
+        return summary;
     }
 
     // 棋盘在场景里列的：轮到谁、下了几手、最后一手（记谱写法）、她坐没坐上座位；结束了写谁赢。

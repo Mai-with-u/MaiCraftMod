@@ -12,6 +12,7 @@ import java.util.TreeMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
@@ -86,7 +87,7 @@ final class MaidFakes {
             return states.get(maid.getId());
         }
 
-        @Override public Optional<String> tombstoneName(Entity entity) {
+        @Override public Optional<Component> tombstoneName(Entity entity) {
             return Optional.empty();
         }
 

@@ -23,6 +23,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
+import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation.TamedBy;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -86,7 +87,9 @@ public final class ClientEntitySight implements EntitySight {
                     Hostility.hostileNow(entity),
                     targetsPlayer(entity, player),
                     health,
-                    traits(entity, player, trusted)));
+                    traits(entity, player, trusted),
+                    // 谁驯服的都算有主：场景里带上它的 UUID，宿主才认得出主播身边的女仆、狗是哪一只。
+                    ClientCreatureSituations.tamedBy(entity, player, trusted) != TamedBy.NOBODY));
         }
         return found;
     }

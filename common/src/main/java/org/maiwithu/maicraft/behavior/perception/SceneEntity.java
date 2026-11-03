@@ -9,9 +9,10 @@ import java.util.Map;
  *
  * <p>可见为假时这条只代表"刚才看见过、现在还在保留期内"，不冒充此刻看得见。
  * 血量是活体生物才有的观察事实，不是活体时为 null。
+ * UUID 只给认得出是哪一个的：玩家、有名字的、被驯服的；别的为 null，一群僵尸不用各带一串编号。
  */
 public record SceneEntity(
-        String id, String type, String name,
+        String id, String type, String name, String uuid,
         String direction, String compass, int distance, int dy,
         boolean visible, boolean hostile, boolean targetingMe,
         EntitySight.Health health,

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.mcp.view;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -148,5 +149,34 @@ class SceneViewTest {
                 && elevator.has("position"));
         assertFalse(json.has("mod_things_farther"), "没有没列出来的就不写远处计数");
         assertFalse(json.has("grid"), "withGrid 关着就不带俯视网格");
+        assertFalse(zombie.has("uuid"), "野生的、怪物不带 UUID");
+    }
+
+    @Test
+    void playersNamedAndTamedCreaturesCarryTheirUuid() {
+        // 别的玩家、挂了命名牌的羊、别人驯服的狼带 UUID；同在近处的野生牛不带。
+        scene.updateEntities(10, List.of(
+                new EntitySight.Observation(1, "minecraft:player", null, "8667ba71-b85a-4004-af54-457a9734eed7",
+                        WorldPosition.here(3, 64, 0), true, false, false, new EntitySight.Health(20, 20), Map.of()),
+                new EntitySight.Observation(2, "minecraft:sheep", "小花", "00000000-0000-0000-0000-0000000000a2",
+                        WorldPosition.here(-3, 64, 0), true, false, false, new EntitySight.Health(8, 8), Map.of()),
+                new EntitySight.Observation(3, "minecraft:wolf", null, "00000000-0000-0000-0000-0000000000a3",
+                        WorldPosition.here(0, 64, -3), true, false, false, new EntitySight.Health(20, 20),
+                        Map.of("驯服", "别人的"), true),
+                new EntitySight.Observation(4, "minecraft:cow", null, "00000000-0000-0000-0000-0000000000a4",
+                        WorldPosition.here(0, 64, 3), true, false, false, new EntitySight.Health(10, 10), Map.of())));
+
+        Map<String, JsonObject> byType = new HashMap<>();
+        SceneView.scene(scene, false).getAsJsonArray("entities")
+                .forEach(entry -> byType.put(entry.getAsJsonObject().get("type").getAsString(), entry.getAsJsonObject()));
+
+        assertEquals("8667ba71-b85a-4004-af54-457a9734eed7", byType.get("minecraft:player").get("uuid").getAsString());
+        assertEquals("00000000-0000-0000-0000-0000000000a2", byType.get("minecraft:sheep").get("uuid").getAsString());
+        assertEquals("00000000-0000-0000-0000-0000000000a3", byType.get("minecraft:wolf").get("uuid").getAsString());
+        assertFalse(byType.get("minecraft:cow").has("uuid"));
+        // observe(detail) 的实体 now 与场景同一份形状，UUID 一并带上。
+        assertEquals("00000000-0000-0000-0000-0000000000a3",
+                SceneView.entity(scene.entities().stream().filter(entity -> entity.type().equals("minecraft:wolf"))
+                        .findFirst().orElseThrow()).get("uuid").getAsString());
     }
 }

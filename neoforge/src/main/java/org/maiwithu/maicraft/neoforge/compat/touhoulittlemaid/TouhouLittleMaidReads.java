@@ -124,9 +124,10 @@ public final class TouhouLittleMaidReads implements MaidReads {
         }
     }
 
-    @Override public Optional<String> tombstoneName(Entity entity) {
+    // 墓碑名是车万女仆同步给周围玩家的文字组件，样式跟着同步过来，原样交出去，女仆的 UUID 由观察那一侧读。
+    @Override public Optional<Component> tombstoneName(Entity entity) {
         if (!(entity instanceof EntityTombstone tombstone)) return Optional.empty();
-        return Optional.of(tombstone.getMaidName().getString());
+        return Optional.of(tombstone.getMaidName());
     }
 
     @Override public Map<String, String> skins() {

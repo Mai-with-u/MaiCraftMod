@@ -91,6 +91,8 @@ public final class SceneView {
         json.addProperty("id", entity.id());
         json.addProperty("type", entity.type());
         if (entity.name() != null) json.addProperty("name", entity.name());
+        // 玩家、有名字的、被驯服的带 UUID：同名的两只分得清，死了以后播报里点到的是不是这只也对得上。
+        if (entity.uuid() != null) json.addProperty("uuid", entity.uuid());
         json.addProperty("direction", entity.direction());
         json.addProperty("compass", entity.compass());
         json.addProperty("distance", entity.distance());

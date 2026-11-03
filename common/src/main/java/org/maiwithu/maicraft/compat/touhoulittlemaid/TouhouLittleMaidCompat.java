@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -56,7 +57,7 @@ public final class TouhouLittleMaidCompat extends CompatModule {
         return call("读女仆的状态", () -> reads.state(maid));
     }
 
-    Optional<String> tombstoneName(Entity entity) {
+    Optional<Component> tombstoneName(Entity entity) {
         return call("认女仆墓碑", () -> reads.tombstoneName(entity));
     }
 

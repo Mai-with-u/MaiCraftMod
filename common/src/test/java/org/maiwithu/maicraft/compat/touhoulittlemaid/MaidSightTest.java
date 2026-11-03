@@ -6,13 +6,52 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.UUID;
 
 import com.google.gson.JsonObject;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.entity.EntityType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** 女仆在观察里的样子：跟着与驻守、好感分档、在想与头上的话、只在是的时候给的几项；五子棋盘的轮次、最后一手与胜负。 */
+/**
+ * 女仆在观察里的样子：跟着与驻守、好感分档、在想与头上的话、只在是的时候给的几项；五子棋盘的轮次、最后一手与胜负；
+ * 女仆墓碑上的名字与她的 UUID。
+ */
 class MaidSightTest {
+
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
+    @Test
+    void 墓碑_从墓碑名的悬停信息读出女仆的UUID() {
+        // 女仆死时车万女仆把她的显示名写上墓碑：原版显示名挂着悬停显示实体，插入文本是她的 UUID。
+        UUID momo = UUID.fromString("5f2b9c1e-0d4a-4c1b-9e7f-1a2b3c4d5e6f");
+        Component name = Component.literal("momo").withStyle(style -> style
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ENTITY,
+                        new HoverEvent.EntityTooltipInfo(EntityType.CAT, momo, Component.literal("momo"))))
+                .withInsertion(momo.toString()));
+
+        JsonObject summary = MaidSight.tombstone(name);
+
+        assertEquals("momo", summary.get("maid_name").getAsString());
+        assertEquals(momo.toString(), summary.get("maid_uuid").getAsString());
+    }
+
+    @Test
+    void 墓碑_名字被改成没有样式的字时只给名字() {
+        JsonObject summary = MaidSight.tombstone(Component.literal("momo"));
+
+        assertEquals("momo", summary.get("maid_name").getAsString());
+        assertFalse(summary.has("maid_uuid"), "读不出 UUID 不编一个");
+    }
 
     @Test
     void 跟着主人_只写模式() {

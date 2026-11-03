@@ -93,12 +93,21 @@ public final class Scene {
             String id = ids.entity(sighting.entityId(),
                     WorldPosition.here(sighting.position().x(), sighting.position().y(), sighting.position().z()),
                     direction, nowTick);
-            next.add(new SceneEntity(id, sighting.type(), sighting.name(),
+            next.add(new SceneEntity(id, sighting.type(), sighting.name(), individualUuid(sighting),
                     direction, bearing.compass(), bearing.distance(), dy,
                     sighting.visible(), sighting.hostile(), sighting.targetingMe(),
                     sighting.health(), sighting.traits()));
         }
         replace(SceneEntity.class, next);
+    }
+
+    /**
+     * 认得出是哪一个的实体才带 UUID：玩家、有名字的、被驯服的（谁驯服的都算）。宿主按 UUID 记住主播身边的
+     * 女仆、狗和别的玩家，死了、走远了再见到也对得上；野生的、怪物不带，一群僵尸不用各带一串编号。
+     */
+    static String individualUuid(EntitySight.Observation sighting) {
+        boolean individual = PLAYER.equals(sighting.type()) || sighting.name() != null || sighting.tamed();
+        return individual ? sighting.uuid() : null;
     }
 
     /** 换掉其中一路的条目，其他路的条目原样留着：每次更新只重写自己那一路。 */

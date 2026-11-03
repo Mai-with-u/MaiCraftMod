@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.AABB;
@@ -22,8 +23,10 @@ public interface MaidReads {
     /** 一只女仆此刻的同步状态；调用方先用 {@link #isMaid} 认过。 */
     MaidState state(Entity maid);
 
-    /** 这只实体是女仆墓碑时，墓碑上的女仆名；不是墓碑给空。 */
-    Optional<String> tombstoneName(Entity entity);
+    /**
+     * 这只实体是女仆墓碑时，墓碑上的女仆名（她死时的显示名，样式原样带着，里面挂着她的 UUID）；不是墓碑给空。
+     */
+    Optional<Component> tombstoneName(Entity entity);
 
     /** 本机模型表：皮肤 ID → 显示名，按 ID 排。 */
     Map<String, String> skins();

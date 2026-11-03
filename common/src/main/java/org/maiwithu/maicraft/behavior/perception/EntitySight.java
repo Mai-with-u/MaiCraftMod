@@ -28,14 +28,23 @@ public interface EntitySight {
      * @param targetingMe 正把攻击目标放在角色身上
      * @param health 血量快照：当前值与上限，看得见的观察事实；不是活体生物（掉落物、矿车这类）为 null
      * @param traits 看得出来的特征：羊的颜色、是否剪过毛、幼年、着火、手持物、盔甲
+     * @param tamed 被驯服了（谁驯服的都算）：女仆、狗、猫这类有主的，场景里带上 UUID 好认出是哪一只
      */
     record Observation(
             int entityId, String type, String name, String uuid, WorldPosition position,
             boolean visible, boolean hostile, boolean targetingMe,
-            Health health, Map<String, String> traits) {
+            Health health, Map<String, String> traits, boolean tamed) {
 
         public Observation {
             traits = Map.copyOf(traits);
+        }
+
+        /** 没驯服的实体：野生动物、怪物、掉落物这些。 */
+        public Observation(
+                int entityId, String type, String name, String uuid, WorldPosition position,
+                boolean visible, boolean hostile, boolean targetingMe,
+                Health health, Map<String, String> traits) {
+            this(entityId, type, name, uuid, position, visible, hostile, targetingMe, health, traits, false);
         }
     }
 
