@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -15,11 +16,13 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.game.interaction.DigTool;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -68,9 +71,15 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
     @Override
     public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
             Consumer<BlockPos> givenUp, DigTool digTool) {
+        return collectBatch(cells, permissions, chainable, givenUp, digTool, null);
+    }
+
+    @Override
+    public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
+            Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
         if (cells.isEmpty()) return Optional.empty();
         return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, chainable,
-                Objects.requireNonNull(givenUp, "givenUp"), false, digTool));
+                Objects.requireNonNull(givenUp, "givenUp"), false, digTool, records));
     }
 
     @Override
@@ -82,11 +91,17 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
     @Override
     public Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
             Consumer<BlockPos> givenUp, DigTool digTool) {
+        return collectForChanceDrops(cells, permissions, givenUp, digTool, null);
+    }
+
+    @Override
+    public Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
         // 要的是概率掉落：一格一格挖（不连锁），挖的时候不拿剪刀和精准采集，其余和成批收一样；
         // 点名了工具就以点名为准，不再按概率掉落的挑法另换一件。
         if (cells.isEmpty()) return Optional.empty();
         return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, null,
-                Objects.requireNonNull(givenUp, "givenUp"), true, digTool));
+                Objects.requireNonNull(givenUp, "givenUp"), true, digTool, records));
     }
 
     /**
@@ -107,6 +122,12 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private final boolean chanceDrops;
         /** 目标里点名的工具：只用那一件，不在每格自动挑。 */
         private final DigTool digTool;
+        /** 这次任务的记账口：整批收完把工具现场记进结果；为 null 时只做不记。 */
+        private final TaskRecords records;
+        /** 整批挖下来的格子各用了什么工具，按先后：整批收完拼成结果里的一条。 */
+        private final List<DigToolUse> toolUses = new ArrayList<>();
+        /** 工具现场已经记过了：整批只记一条，不逐格刷屏。 */
+        private boolean toolsReported;
         private int index;
         private Stage stage = Stage.APPROACH;
         private Action step;
@@ -123,13 +144,14 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private boolean interrupted;
 
         Collect(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
-                Consumer<BlockPos> givenUp, boolean chanceDrops, DigTool digTool) {
+                Consumer<BlockPos> givenUp, boolean chanceDrops, DigTool digTool, TaskRecords records) {
             this.cells = cells;
             this.permissions = permissions;
             this.chainable = chainable;
             this.givenUp = givenUp;
             this.chanceDrops = chanceDrops;
             this.digTool = digTool;
+            this.records = records;
         }
 
         private BlockPos cell() {
@@ -196,6 +218,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
             ended = ActionStatus.failed(cells.size() == 1 ? firstFailure
                     : Problem.of(firstFailure.kind(), "这 " + cells.size() + " 格一格都没挖下来，第一格："
                             + firstFailure.message(), firstFailure.suggestion()));
+            report(ended);
             return ended;
         }
 
@@ -212,7 +235,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                     // 带上这一趟还要挖几格：身上没有对路的工具时按它算现做一把划不划算。
                     // 采掘要掉落：挖不到掉落的候选不参与挑工具，宁可先备一把对的工具。
                     DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(
-                            cells.size() - index, true, permissions, null, digTool);
+                            cells.size() - index, true, permissions, records, digTool);
                     yield chanceDrops ? digs.dig(cell(), prep)
                             : chainable == null ? digs.dig(cell(), prep)
                             : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable, prep);
@@ -234,6 +257,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         // 这一步做完（或这一步不用做）：收尾手上的子动作，换下一步——挖完一格还有下一格就去靠近下一格，
         // 整批挖完才去捡。
         private ActionStatus advance() {
+            harvestToolUses();
             if (stage == Stage.DIG && step == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上", null));
             }
@@ -248,7 +272,20 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 }
                 case PICK_UP, DONE -> Stage.DONE;
             };
-            return stage == Stage.DONE ? ActionStatus.done() : ActionStatus.progressed();
+            return stage == Stage.DONE ? report(ActionStatus.done()) : ActionStatus.progressed();
+        }
+
+        // 手上这一步挖完（或不用挖）就把它用了什么工具收上来，整批收完再记一条。
+        private void harvestToolUses() {
+            if (step instanceof TellsToolUse tells) toolUses.addAll(tells.toolUses());
+        }
+
+        // 整批收完：把这一趟的工具现场记进结果，一条说清用了什么、磨了多少、省了多少；只记一次。
+        private ActionStatus report(ActionStatus status) {
+            if (toolsReported) return status;
+            toolsReported = true;
+            if (records != null) ToolScene.tell(toolUses).ifPresent(attempt -> records.attempt(attempt.tried(), attempt.result()));
+            return status;
         }
 
         private void closeStep() {

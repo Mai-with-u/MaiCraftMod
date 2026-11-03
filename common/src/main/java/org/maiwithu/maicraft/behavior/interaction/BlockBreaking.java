@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import java.util.List;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
@@ -8,6 +9,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 
 import org.maiwithu.maicraft.game.interaction.DigTool;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -55,5 +57,13 @@ public interface BlockBreaking extends Action {
     /** 已经挥下去、游戏还没确认的那一下：连锁键要按到它结清才松。 */
     default boolean swingPending() {
         return false;
+    }
+
+    /**
+     * 到目前为止挖下来的格子用了哪些工具，按先后：给结果里那句工具现场用。
+     * 说不出（这一层没接上、还没挖过）给空表，结果里就不写工具现场。
+     */
+    default List<DigToolUse> toolUses() {
+        return List.of();
     }
 }

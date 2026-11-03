@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.hands.DigToolChoice;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -108,7 +109,7 @@ public final class ToolFirstDigging implements DigsBlocks {
     }
 
     /** 挖一格之前先看要不要现做：要做就先做（有上限），做完或不做都接着挖。 */
-    private final class ToolFirst implements Action {
+    private final class ToolFirst implements TellsToolUse {
         private final BlockPos target;
         private final ToolPrep prep;
         private final Supplier<Optional<Action>> digging;
@@ -122,6 +123,11 @@ public final class ToolFirstDigging implements DigsBlocks {
             this.target = target;
             this.prep = prep;
             this.digging = digging;
+        }
+
+        // 挖下来的格子用了什么工具：问此刻真正在挖的那一步；还在现做工具时还没挖过，给空表。
+        @Override public List<DigToolUse> toolUses() {
+            return dig instanceof TellsToolUse tells ? tells.toolUses() : List.of();
         }
 
         @Override public ActionStatus tick(TickContext context) {

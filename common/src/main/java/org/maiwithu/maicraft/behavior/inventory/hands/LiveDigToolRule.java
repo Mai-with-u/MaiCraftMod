@@ -62,6 +62,17 @@ public final class LiveDigToolRule implements DigToolRule {
     }
 
     /**
+     * 徒手挖这一格要几刻：同一本账里按空手速度算，报工具现场时当"比徒手快多少"的对照。
+     * 挖不动的（硬度小于零）返回 0。
+     */
+    @Override
+    public int bareHandTicks(LocalPlayer player, BlockState state) {
+        DigToolChoice.Block block = block(player, state);
+        return block == null ? 0
+                : DigToolChoice.ticksPerBlock(block, 1.0f, !block.needsCorrectTool());
+    }
+
+    /**
      * 点名工具的结论：0~8 快捷栏里的选中它，9~35 主背包里的换到主手，已经在主手就不动；
      * 背包前 36 格都没有那一件时说没找到。副手放着的不算：那件挖不了方块，也不自动换过来，
      * 只把话说明白。不看硬度、够不够格、预留和掉落敏感——点名了就用。

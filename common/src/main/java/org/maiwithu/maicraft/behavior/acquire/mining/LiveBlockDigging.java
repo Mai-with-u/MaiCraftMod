@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -113,7 +114,7 @@ public final class LiveBlockDigging implements DigsBlocks {
     }
 
     /** 挖到目标格没了才做完：每刻先看现场，还在就再挖一刻。 */
-    private record UntilGone(BlockPos cell, BlockBreaking digging) implements Action {
+    private record UntilGone(BlockPos cell, BlockBreaking digging) implements TellsToolUse {
 
         @Override public ActionStatus tick(TickContext context) {
             if (gone(context.player(), cell)) {
@@ -136,6 +137,11 @@ public final class LiveBlockDigging implements DigsBlocks {
 
         @Override public String describe() {
             return digging.describe();
+        }
+
+        // 挖下来的格子用了什么工具：问挖掘器，它一格一格记着。
+        @Override public List<DigToolUse> toolUses() {
+            return digging.toolUses();
         }
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.interaction;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
@@ -8,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
@@ -143,6 +145,12 @@ public final class NativeBlockBreaking implements BlockBreaking {
         String name = digTool instanceof DigTool.Item item ? item.itemId() : "点名的工具";
         String why = digger != null && digger.missingToolWhy() != null ? digger.missingToolWhy() : "身上没有";
         return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "你点名要用 " + name + " 挖，" + why));
+    }
+
+    // 挖下来的格子用了什么工具：由挖掘器记着，收批时交出去拼成结果里的一条。
+    @Override
+    public List<DigToolUse> toolUses() {
+        return digger == null ? List.of() : digger.toolUses();
     }
 
     @Override

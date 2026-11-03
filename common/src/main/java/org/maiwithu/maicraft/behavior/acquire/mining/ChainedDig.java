@@ -13,6 +13,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.ChainKeyHold;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -27,7 +28,7 @@ import org.slf4j.LoggerFactory;
  * → 松键、等模组按松开处理 → 做完。挖到一半键丢了（形状被换、工具换了）：停手、松键，改成只挖这一格。
  * 被打断时同样先松键，回来重新开一次连锁。哪些副格真挖掉了由调用方逐格复查。
  */
-final class ChainedDig implements Action {
+final class ChainedDig implements TellsToolUse {
 
     private static final Logger LOG = LoggerFactory.getLogger(ChainedDig.class);
 
@@ -226,6 +227,11 @@ final class ChainedDig implements Action {
 
     @Override public Interruptibility interruptibility() {
         return digging.interruptibility();
+    }
+
+    // 连锁挖下来的格子用了什么工具：问挖掘器，它一格一格记着。
+    @Override public List<DigToolUse> toolUses() {
+        return digging.toolUses();
     }
 
     @Override public String describe() {

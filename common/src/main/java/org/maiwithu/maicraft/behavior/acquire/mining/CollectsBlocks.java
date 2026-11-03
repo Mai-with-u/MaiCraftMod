@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
 
 /**
@@ -82,6 +83,20 @@ public interface CollectsBlocks {
     }
 
     /**
+     * 同上，并带上这次任务的记账口：整批挖完把这一趟的工具现场（用了什么、磨了多少、比徒手省了多少）
+     * 记成结果里的一条，让下令人看得到钱花在哪。没有记账口时只做不记。
+     *
+     * @param records 这次任务的记账口；null 表示不记
+     */
+    default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
+            Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
+        // 只实现旧签名的接缝照旧成批收：丢下点名与记账口，不把一批拆成一格一格。
+        return digTool == null
+                ? collectBatch(cells, permissions, chainable, givenUp)
+                : collectBatch(cells, permissions, chainable, givenUp, digTool);
+    }
+
+    /**
      * 收概率掉落的方块（砾石出燧石、树叶出树苗、草出种子）：和成批收一样一格一格走到跟前挖掉、整批挖完再捡，
      * 跳过的格交给 givenUp；挖的时候不拿剪刀和带精准采集的工具（拿了方块只掉它自己），有时运的优先，不连锁。
      * 没有专门实现的接缝照常成批收。
@@ -100,5 +115,11 @@ public interface CollectsBlocks {
         return digTool == null
                 ? collectBatch(cells, permissions, null, givenUp)
                 : collectBatch(cells, permissions, null, givenUp, digTool);
+    }
+
+    /** 同上，并带上这次任务的记账口：挖完把工具现场记成结果里的一条。 */
+    default Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
+        return collectForChanceDrops(cells, permissions, givenUp, digTool);
     }
 }

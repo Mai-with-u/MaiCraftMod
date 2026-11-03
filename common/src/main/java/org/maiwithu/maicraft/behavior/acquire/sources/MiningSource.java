@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -261,7 +262,7 @@ public final class MiningSource implements ItemSource {
         SpotWork[] work = new SpotWork[1];
         Optional<Action> collect = collectBatch(collects, batch.stream().map(MinableSpot::pos).toList(), permissions,
                 chainable(request, context.characterAt(), searchRadius(context), permissions),
-                cell -> work[0].note(dimension, cell), context.digTool());
+                cell -> work[0].note(dimension, cell), context.digTool(), context.records());
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
@@ -348,8 +349,10 @@ public final class MiningSource implements ItemSource {
                 };
                 return guessed
                         ? collectBatch(collects, cells, permissions,
-                                chainable(request, center, radius, permissions), noting, context.digTool())
-                        : collectForChanceDrops(collects, cells, permissions, noting, context.digTool());
+                                chainable(request, center, radius, permissions), noting, context.digTool(),
+                                context.records())
+                        : collectForChanceDrops(collects, cells, permissions, noting, context.digTool(),
+                                context.records());
             }
 
             @Override public int carriedWanted() {
@@ -498,7 +501,7 @@ public final class MiningSource implements ItemSource {
                 blockType -> minables.dropsWanted(request.wanted(), request.dropsFrom(), blockType), request.count(),
                 feet -> !inSight(request, at(feet, dimension), permissions).isEmpty(),
                 feet -> mineInSight(request, at(feet, dimension), permissions,
-                        cell -> work[0].note(dimension, cell), context.digTool()));
+                        cell -> work[0].note(dimension, cell), context.digTool(), context.records()));
         // 挖通道的每一格由路决定，不是目标方块，点名工具在这里没有可作用的对象：楼梯照旧自动挑。
         Optional<Action> digging = stairs.tunnelToward(tunnel, permissions);
         if (digging.isEmpty()) return Optional.empty();
@@ -519,28 +522,25 @@ public final class MiningSource implements ItemSource {
 
     // 看见了：从最近那格起连一批，整脉连锁挖了、挖完一起捡；看见的都不许挖为空。跳过的格交给 givenUp 记下。
     private Optional<Action> mineInSight(ItemRequest request, WorldPosition here, Permissions permissions,
-            Consumer<BlockPos> givenUp, DigTool digTool) {
+            Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
         List<MinableSpot> seen = inSight(request, here, permissions);
         if (seen.isEmpty()) return Optional.empty();
         List<BlockPos> batch = batchOf(seen, request.count()).stream().map(MinableSpot::pos).toList();
         return collectBatch(collects, batch, permissions,
-                chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions), givenUp, digTool);
+                chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions), givenUp, digTool, records);
     }
 
     // 点名了工具就走带点名的那条路，没点名仍用原来的成批收：测试替身与别的接缝只实现旧签名，
     // 无条件走新重载会把没点名的活儿也变成一格一格收，改掉原来的调用序列。
     private static Optional<Action> collectBatch(CollectsBlocks collects, List<BlockPos> cells,
-            Permissions permissions, Predicate<BlockPos> chainable, Consumer<BlockPos> givenUp, DigTool digTool) {
-        return digTool == null
-                ? collects.collectBatch(cells, permissions, chainable, givenUp)
-                : collects.collectBatch(cells, permissions, chainable, givenUp, digTool);
+            Permissions permissions, Predicate<BlockPos> chainable, Consumer<BlockPos> givenUp, DigTool digTool,
+            TaskRecords records) {
+        return collects.collectBatch(cells, permissions, chainable, givenUp, digTool, records);
     }
 
     private static Optional<Action> collectForChanceDrops(CollectsBlocks collects, List<BlockPos> cells,
-            Permissions permissions, Consumer<BlockPos> givenUp, DigTool digTool) {
-        return digTool == null
-                ? collects.collectForChanceDrops(cells, permissions, givenUp)
-                : collects.collectForChanceDrops(cells, permissions, givenUp, digTool);
+            Permissions permissions, Consumer<BlockPos> givenUp, DigTool digTool, TaskRecords records) {
+        return collects.collectForChanceDrops(cells, permissions, givenUp, digTool, records);
     }
 
     private static WorldPosition at(BlockPos feet, String dimension) {

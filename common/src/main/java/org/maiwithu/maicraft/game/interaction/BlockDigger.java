@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.item.ItemStack;
@@ -72,7 +75,15 @@ public final class BlockDigger {
     public void digTool(DigTool tool) { wanted = tool; }
     /** 点名的那件拿不到时的原因（身上没有、在副手上）：交给调用方原样说给下令人听。 */
     private String missingToolWhy;
+    /** 这一趟挖下来的格子各用了什么工具：换工具就另起一段，供结果里的工具现场用。 */
+    private final List<DigToolUse> toolUses = new ArrayList<>();
+    /** 手上这一格已经挖了几刻、徒手要几刻、挖的是什么方块：破块确认时记进工具现场。 */
+    private int breakingTicks;
+    private int breakingBareTicks;
+    private BlockState breakingState;
     public String missingToolWhy() { return missingToolWhy; }
+    /** 这一趟挖下来的格子用了哪些工具，按先后；还没挖过时为空。取只读快照，交出去之后不再变。 */
+    public List<DigToolUse> toolUses() { return List.copyOf(toolUses); }
     private Predicate<BlockHitResult> preparation = hit -> true;
     /** 哪些遮挡格可以顺手挖掉；判断归玩家行为层的许可检查点，没给时一格都不挖。 */
     private Predicate<BlockPos> mayBreakOccluder = occluder -> false;
@@ -174,6 +185,7 @@ public final class BlockDigger {
             return DigResult.PROGRESSING;
         }
         PendingInteraction.Status status = pending.status();
+        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) recordBroken();
         reset();
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
             blockHitDelay = POST_BREAK_DELAY_TICKS;
@@ -293,8 +305,13 @@ public final class BlockDigger {
             if (started == null) return DigResult.PROGRESSING;
             pending = started;
             destroyingItem = player.getMainHandItem().copy();
+            // 开挖这一刻记下挖的是什么、徒手要几刻；之后每推进一刻累加，破块时一并记进工具现场。
+            breakingState = player.level().getBlockState(hit.getBlockPos());
+            breakingTicks = 0;
+            breakingBareTicks = tools.bareHandTicks(player, breakingState);
         } else {
             pending = sender.continueBreaking(context, pending);
+            breakingTicks++;
         }
         return settleBreak(context, targetBreak);
     }
@@ -343,6 +360,7 @@ public final class BlockDigger {
             return DigResult.PROGRESSING;
         }
         PendingInteraction.Status status = pending.status();
+        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) recordBroken();
         reset();
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
             blockHitDelay = POST_BREAK_DELAY_TICKS;
@@ -362,6 +380,11 @@ public final class BlockDigger {
             return false;
         }
         reset();
+        // 换了要挖的格子就是另一趟：上一趟的工具现场留着给已经收走的动作读，这里重新攒。
+        toolUses.clear();
+        breakingTicks = 0;
+        breakingBareTicks = 0;
+        breakingState = null;
         pos = target.immutable();
         // 先问这一趟挖之前要不要动手：换到哪一格、还是腾空主手，结论里的原生动作为此跨刻推进。
         pendingToolPlan = !selectTool || !player.level().isLoaded(pos) ? null : planFor(player.level().getBlockState(pos));
@@ -533,9 +556,36 @@ public final class BlockDigger {
         reset();
     }
 
+    // 一格确认挖开了：记下用的是手里哪一件、磨掉多少、这一格花了几刻、徒手要几刻。
+    // 同一件工具连着挖的几格合成一段，换了工具就另起一段——结果里按先后说清楚，不逐格刷屏。
+    private void recordBroken() {
+        if (breakingState == null) return;
+        ItemStack used = destroyingItem == null ? ItemStack.EMPTY : destroyingItem;
+        String name = used.isEmpty() ? "空手" : used.getHoverName().getString();
+        String id = used.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(used.getItem()).toString();
+        // 耐久差以手里这一件为准：破块前后同一件的耐久值差就是这一格磨掉的（空手、不掉耐久的方块都是 0）。
+        ItemStack now = player.getMainHandItem();
+        int wear = used.isEmpty() || !now.is(used.getItem())
+                ? 0 : Math.max(0, now.getDamageValue() - used.getDamageValue());
+        boolean named = wanted instanceof DigTool.Item item ? item.itemId().equals(id)
+                : wanted instanceof DigTool.Hand && used.isEmpty();
+        DigToolUse fresh = new DigToolUse(name, id, 1, wear, Math.max(1, breakingTicks),
+                Math.max(0, breakingBareTicks), named);
+        if (!toolUses.isEmpty() && toolUses.get(toolUses.size() - 1).sameToolAs(fresh)) {
+            DigToolUse last = toolUses.remove(toolUses.size() - 1);
+            toolUses.add(last.plus(fresh.blocks(), fresh.wear(), fresh.ticks(), fresh.bareTicks()));
+        } else {
+            toolUses.add(fresh);
+        }
+        breakingTicks = 0;
+        breakingBareTicks = 0;
+        breakingState = null;
+    }
+
     /** 清除逻辑状态，但有意保留破坏后的冷却计时。 */
     // 只清本次挖掘的局部记录；挖完后的冷却仍保留，避免连续挖掘绕过速度设置。
     private void reset() {
+        // 工具现场不在这里清：一格一格的破块结算在 reset 之前已经记进去了，换正式换目标时才重新攒。
         pos = null;
         pending = null;
         toolSelectPending = null;

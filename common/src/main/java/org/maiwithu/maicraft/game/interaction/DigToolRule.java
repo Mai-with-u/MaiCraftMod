@@ -26,6 +26,12 @@ public interface DigToolRule {
      */
     DigToolPlan plan(LocalPlayer player, BlockState state, int expectedBlocks, boolean wantsDrop, DigTool wanted);
 
+    /**
+     * 徒手挖这一格要几刻：报工具现场时拿它当"比徒手快多少"的对照。
+     * 接不上挑工具的场合给 0，结果里就不提省了多少。
+     */
+    default int bareHandTicks(LocalPlayer player, BlockState state) { return 0; }
+
     /** 只要格号的入口（寻路与拆结构自己搬东西）：不用换时 -1。 */
     default int slotFor(LocalPlayer player, BlockState state, int expectedBlocks) {
         return plan(player, state, expectedBlocks, false, null) instanceof DigToolPlan.Hold(int slot) ? slot : -1;
