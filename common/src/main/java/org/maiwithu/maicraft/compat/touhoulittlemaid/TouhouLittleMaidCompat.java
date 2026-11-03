@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.touhoulittlemaid;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -12,7 +13,8 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
  * 车万女仆（TouhouLittleMaid）的联动入口。交给登记表：观察（女仆 maid 与女仆墓碑 maid_tombstone，
- * 和原版实体共用 e#）、对女仆说话（{@code chat} 点名她时走到跟前开她的对话框）。
+ * 和原版实体共用 e#）、对女仆说话（{@code chat} 点名她时走到跟前开她的对话框）、她的 8 种界面的布局证明、
+ * 改她的设置（{@code maid_configure}）。
  * 每一下读写都经联动入口包一层：装的版本和编译时用的对不上时停用联动，不让游戏崩。
  */
 public final class TouhouLittleMaidCompat extends CompatModule {
@@ -35,6 +37,10 @@ public final class TouhouLittleMaidCompat extends CompatModule {
         registry.modSight(this, new MaidSight(this));
         // 点名自己的女仆说话：走到跟前、对准、开她的对话框、逐字打字、回车、认她的回话。
         registry.talkTo(this, services -> new MaidTalk(this, services));
+        // 她的 8 种界面认得出：角色背包 36 格，容器侧只列内置 6 格与背包扩展的储物格。
+        registry.menuLayout(this, new MaidMenuLayout());
+        // 改她的设置：皮肤、工作、班次、跟随或驻守、拾取、手上与身上的装备，打开她的界面一项项改。
+        registry.maidSettings(this, services -> new MaidConfigure(this, services));
     }
 
     boolean isMaid(Entity entity) {
@@ -83,5 +89,29 @@ public final class TouhouLittleMaidCompat extends CompatModule {
 
     void closeDialog() {
         run("关对话框", actions::closeDialog);
+    }
+
+    List<MaidReads.Work> works(Entity maid) {
+        return call("读工作列表", () -> reads.works(maid));
+    }
+
+    boolean schedulePosScreenOpen() {
+        return call("认日程点确认屏", reads::schedulePosScreenOpen);
+    }
+
+    void setSkin(int entityId, String skinId) {
+        run("发换皮肤的包", () -> actions.setSkin(entityId, skinId));
+    }
+
+    void setWork(int entityId, String workId) {
+        run("发换工作的包", () -> actions.setWork(entityId, workId));
+    }
+
+    void setConfig(int entityId, boolean stayInArea, boolean pickup, boolean rideable, MaidState.Shift shift) {
+        run("发女仆设置包", () -> actions.setConfig(entityId, stayInArea, pickup, rideable, shift));
+    }
+
+    void closeSchedulePosScreen() {
+        run("关日程点确认屏", actions::closeSchedulePosScreen);
     }
 }

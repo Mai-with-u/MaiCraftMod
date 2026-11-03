@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.touhoulittlemaid;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -35,4 +36,25 @@ public interface MaidReads {
 
     /** "角色设定文件已经自动生成完毕"这句在本机语言里的样子：和没有预设人设的女仆说第一句时，她只发这句、不回答。 */
     String personaGeneratedText();
+
+    /** 她的界面里列的工作，按界面的顺序：ID、显示名、这会儿按钮点不点得动、界面写的条件。 */
+    List<Work> works(Entity maid);
+
+    /** 眼前是不是日程点确认屏：开驻守时日程点离她太远或不在同一维度，车万女仆弹它拒绝。 */
+    boolean schedulePosScreenOpen();
+
+    /**
+     * 她界面里的一个工作。
+     *
+     * @param id         工作 ID，例如 touhou_little_maid:farm
+     * @param name       显示名
+     * @param enabled    这会儿按钮点不点得动：灰着的点了也不切
+     * @param conditions 界面写的条件，每条"条件：满足"或"条件：不满足"（例如"主手需要锄：不满足"）
+     */
+    record Work(String id, String name, boolean enabled, List<String> conditions) {
+
+        public Work {
+            conditions = List.copyOf(conditions);
+        }
+    }
 }

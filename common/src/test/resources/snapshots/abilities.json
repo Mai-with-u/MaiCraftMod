@@ -270,6 +270,15 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:maid_configure",
+        "summary": "改自己的女仆的设置：皮肤、工作、班次、跟随或驻守、拾取、手上与身上的装备（车万女仆）",
+        "parameters": "settings: object",
+        "targets": [
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:reserve",
         "summary": "预留身上攒着的东西：写下这几样各留够几件，角色自己做主时不动它们，下令的目标不够才用、用了扣掉；一直有效，不占身体",
         "parameters": "operation: string = set, items?: array",
@@ -1608,6 +1617,27 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/chat.md"
+    },
+    {
+      "ability": "maicraft:maid_configure",
+      "summary": "改自己的女仆的设置：皮肤、工作、班次、跟随或驻守、拾取、手上与身上的装备（车万女仆）",
+      "parameters": [
+        {
+          "name": "settings",
+          "type": "object",
+          "required": true,
+          "doc": "要改成什么：键是她认的设置项（skin、work、work_shift、stay、pickup、mainhand、offhand、head、chest、legs、feet），值写字符串，按给的顺序改，例如 {\"skin\": \"geckolib:winefox\", \"stay\": \"in_area\"}"
+        }
+      ],
+      "targets": [
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "touhou_little_maid"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/maid_configure.md"
     },
     {
       "ability": "maicraft:reserve",

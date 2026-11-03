@@ -18,4 +18,20 @@ public interface MaidActions {
 
     /** 关掉眼前的对话框（和按 Esc 一样，里面的字不发）。 */
     void closeDialog();
+
+    /** 发换皮肤的包（真人在她的皮肤界面里点一个皮肤时发的那一个）。 */
+    void setSkin(int entityId, String skinId);
+
+    /** 发换工作的包（真人在她界面的工作列表里点一项时发的那一个）。 */
+    void setWork(int entityId, String workId);
+
+    /**
+     * 发她的设置包（真人在她界面里点驻守、拾取、骑乘、班次按钮时发的那一个）：四项一起发，不改的照她此刻的值带上。
+     *
+     * @param stayInArea 驻守为 true，跟着主人为 false
+     */
+    void setConfig(int entityId, boolean stayInArea, boolean pickup, boolean rideable, MaidState.Shift shift);
+
+    /** 关掉日程点确认屏。 */
+    void closeSchedulePosScreen();
 }

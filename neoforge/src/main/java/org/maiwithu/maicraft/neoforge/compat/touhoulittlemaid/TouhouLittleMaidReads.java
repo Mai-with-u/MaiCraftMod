@@ -6,8 +6,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.function.Predicate;
 
+import com.github.tartaricacid.touhoulittlemaid.api.event.MaidTaskEnableEvent;
+import com.github.tartaricacid.touhoulittlemaid.api.task.IMaidTask;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.AIChatScreen;
+import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.other.CheckSchedulePosGui;
 import com.github.tartaricacid.touhoulittlemaid.client.resource.CustomPackLoader;
 import com.github.tartaricacid.touhoulittlemaid.config.subconfig.AIConfig;
 import com.github.tartaricacid.touhoulittlemaid.entity.ai.brain.MaidSchedule;
@@ -18,7 +22,9 @@ import com.github.tartaricacid.touhoulittlemaid.entity.chatbubble.implement.Text
 import com.github.tartaricacid.touhoulittlemaid.entity.chatbubble.implement.WaitingChatBubbleData;
 import com.github.tartaricacid.touhoulittlemaid.entity.item.EntityTombstone;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
+import com.github.tartaricacid.touhoulittlemaid.entity.task.TaskManager;
 import com.github.tartaricacid.touhoulittlemaid.util.ParseI18n;
+import com.mojang.datafixers.util.Pair;
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
@@ -28,6 +34,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.schedule.Activity;
+import net.neoforged.neoforge.common.NeoForge;
 
 import org.maiwithu.maicraft.compat.touhoulittlemaid.MaidReads;
 import org.maiwithu.maicraft.compat.touhoulittlemaid.MaidState;
@@ -138,5 +145,43 @@ public final class TouhouLittleMaidReads implements MaidReads {
 
     @Override public String personaGeneratedText() {
         return Component.translatable(PERSONA_KEY).getString();
+    }
+
+    // 她界面工作列表里的那几项：按钮灰不灰和界面一样判（事件拦了、或工作自己说不能用），条件文字照界面拼。
+    @Override public List<Work> works(Entity entity) {
+        EntityMaid maid = (EntityMaid) entity;
+        List<Work> works = new ArrayList<>();
+        for (IMaidTask task : TaskManager.getNotHiddenTaskList(maid)) {
+            List<Pair<String, Predicate<EntityMaid>>> enableConditions = new ArrayList<>();
+            boolean enabled = true;
+            if (task != TaskManager.getIdleTask()) {
+                if (NeoForge.EVENT_BUS.post(new MaidTaskEnableEvent(task, maid, enableConditions)).isCanceled()) {
+                    enabled = false;
+                } else if (!task.isEnable(maid)) {
+                    enableConditions.addAll(task.getEnableConditionDesc(maid));
+                    enabled = false;
+                }
+            }
+            List<String> conditions = new ArrayList<>();
+            String prefix = "task." + task.getUid().getNamespace() + "." + task.getUid().getPath();
+            if (!enabled) conditions.addAll(lines(prefix + ".enable_condition.", enableConditions, maid));
+            conditions.addAll(lines(prefix + ".condition.", task.getConditionDescription(maid), maid));
+            works.add(new Work(task.getUid().toString(), task.getName().getString(), enabled, conditions));
+        }
+        return works;
+    }
+
+    private static List<String> lines(String keyPrefix, List<Pair<String, Predicate<EntityMaid>>> conditions,
+            EntityMaid maid) {
+        List<String> lines = new ArrayList<>();
+        for (Pair<String, Predicate<EntityMaid>> line : conditions) {
+            String text = Component.translatable(keyPrefix + line.getFirst()).getString();
+            lines.add(text + "：" + (line.getSecond().test(maid) ? "满足" : "不满足"));
+        }
+        return lines;
+    }
+
+    @Override public boolean schedulePosScreenOpen() {
+        return Minecraft.getInstance().screen instanceof CheckSchedulePosGui;
     }
 }
