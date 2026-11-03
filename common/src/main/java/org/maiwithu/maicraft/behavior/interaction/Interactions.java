@@ -87,6 +87,21 @@ public final class Interactions {
     }
 
     /**
+     * 对准一只生物，再替模组发一次它自己的包（模组把"对着生物按某个键"做成客户端拦按键、自己发包时用）：
+     * 转头看着它、准星确实落在它身上、眼前没开界面才提交，按给的条件等确认；对不准如实失败，不提交。
+     * 站位由调用方先走好。
+     *
+     * @param doing        在做什么，例如"打开女仆的对话框"
+     * @param submission   发那一个包
+     * @param confirmation 怎样算游戏接了这一下
+     * @param confirmTicks 提交后最多等几刻确认
+     */
+    public Action aimAtEntityThenSubmit(Entity target, String doing, Runnable submission,
+            InteractionConfirmation confirmation, int confirmTicks) {
+        return AimAtEntityThenSubmit.toward(target, doing, submission, confirmation, confirmTicks, new UseKeyPress());
+    }
+
+    /**
      * 对着空处真按一下使用键（和玩家按右键同一条路，模组挂在按键上的处理收得到）：准星先转到够不着东西的方向，
      * 按完照给的条件等游戏回话；确认窗到期没回按没生效交代。只想让模组收到按键时用，例如清掉链条输送机接线记着的起点。
      */

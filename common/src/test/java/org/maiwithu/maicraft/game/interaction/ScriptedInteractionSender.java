@@ -143,10 +143,21 @@ public final class ScriptedInteractionSender implements InteractionSender {
         throw new UnsupportedOperationException("替身没有实现这个入口");
     }
 
+    /** 经控制协议提交过的操作说明，按先后。 */
+    public final List<String> controlOperations = new ArrayList<>();
+
     @Override public PendingInteraction submitControlProtocol(
             PlayerContext context, String operation, Runnable submission,
             InteractionConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("替身没有实现这个入口");
+        // 本刻不收：交回 null，不发包，调用方下一刻原样重试。
+        if (busyThisTick) return null;
+        submission.run();
+        PendingInteraction pending = new PendingInteraction(
+                PendingInteraction.Kind.MOD_PROTOCOL, context, timeoutTicks, 1, confirmation, null, null);
+        submissions.add(new Submission(pending.kind(), null, confirmation, timeoutTicks));
+        controlOperations.add(operation);
+        last = pending;
+        return pending;
     }
 
     @Override public PendingInteraction attack(
