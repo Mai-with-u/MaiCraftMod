@@ -14,12 +14,16 @@ import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
@@ -36,9 +40,16 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 public final class ClientEntitySight implements EntitySight {
 
     private final Supplier<PlayerContext> context;
+    private final TrustedPlayers trusted;
 
     public ClientEntitySight(Supplier<PlayerContext> context) {
+        this(context, TrustedPlayers.NOBODY);
+    }
+
+    /** @param trusted 自家人名单：驯服的生物写清是你的、自家人的还是别人的 */
+    public ClientEntitySight(Supplier<PlayerContext> context, TrustedPlayers trusted) {
         this.context = Objects.requireNonNull(context, "context");
+        this.trusted = Objects.requireNonNull(trusted, "trusted");
     }
 
     @Override
@@ -75,7 +86,7 @@ public final class ClientEntitySight implements EntitySight {
                     Hostility.hostileNow(entity),
                     targetsPlayer(entity, player),
                     health,
-                    traits(entity)));
+                    traits(entity, player, trusted)));
         }
         return found;
     }
@@ -85,8 +96,11 @@ public final class ClientEntitySight implements EntitySight {
         return entity instanceof Mob mob && mob.getTarget() == player;
     }
 
-    /** 看得出来的特征：着火、幼年、羊的毛与剪毛、掉落物是什么几件、展示框里放着什么、手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。 */
-    public static Map<String, String> traits(Entity entity) {
+    /**
+     * 看得出来的特征：着火、幼年、羊的毛与剪毛、驯服的是谁的、坐着没有、掉落物是什么几件、展示框里放着什么、
+     * 手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。
+     */
+    public static Map<String, String> traits(Entity entity, Player viewer, TrustedPlayers trusted) {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
             traits.put("着火", "是");
@@ -104,6 +118,15 @@ public final class ClientEntitySight implements EntitySight {
             } else {
                 traits.put("毛色", sheep.getColor().getName());
             }
+        }
+        // 驯服了的写清是谁的：角色自己的能喂、能骑、能开界面不用点名，别人的要点名；没驯服的不写。
+        String tamedBy = ClientCreatureSituations.tamedBy(entity, viewer, trusted).word();
+        if (tamedBy != null) {
+            traits.put("驯服", tamedBy);
+        }
+        // 狼、猫、鹦鹉、女仆这类听令坐下的：坐着的不跟人走，让它站起来要再潜行右键一次。
+        if (entity instanceof TamableAnimal tamable && tamable.isInSittingPose()) {
+            traits.put("坐着", "是");
         }
         // 地上的掉落物：是什么、几件，LLM 才分得清先捡哪个、往哪走。
         if (entity instanceof ItemEntity item && !item.getItem().isEmpty()) {

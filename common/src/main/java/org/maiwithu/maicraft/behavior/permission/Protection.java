@@ -171,9 +171,17 @@ public final class Protection {
         return Optional.of(placedBy.get().playerId());
     }
 
-    /** 一只生物受不受保护：有名字、被驯服、拴着绳、围栏里，占上一条就是别人的，不碰。 */
+    /** 一只生物伤不伤得：有名字、被驯服（角色自己驯服的也算）、拴着绳、围栏里，占上一条就是有主的，不伤。 */
     public boolean creatureProtected(ReadsCreatureSituation.CreatureSituation situation) {
         return situation.bondedToSomeone();
+    }
+
+    /**
+     * 对一只生物用东西、喂、骑、抱、开它的界面、存取它身上的东西时，它算不算别人的：
+     * 角色自己驯服的不算；自家人驯服的照旧算别人的（自家人只放行取用存储）。
+     */
+    public boolean creatureSomeoneElses(ReadsCreatureSituation.CreatureSituation situation) {
+        return situation.someoneElses();
     }
 
     /** 这一格是不是角色自己放的（临时方块）：只有这个判断，TEMPORARY 档也放行收回。 */

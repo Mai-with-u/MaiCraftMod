@@ -85,6 +85,40 @@ class ProtectionTest {
     }
 
     @Test
+    void 驯服者_按角色与自家人名单分清是谁的() {
+        UUID self = UUID.randomUUID();
+        UUID friend = UUID.randomUUID();
+        TrustedPlayers trusted = new TrustedPlayers(List.of(friend.toString()), name -> Optional.empty());
+        assertEquals(ReadsCreatureSituation.TamedBy.SELF, ReadsCreatureSituation.TamedBy.of(self, self, trusted));
+        assertEquals(ReadsCreatureSituation.TamedBy.TRUSTED, ReadsCreatureSituation.TamedBy.of(friend, self, trusted));
+        assertEquals(ReadsCreatureSituation.TamedBy.SOMEONE_ELSE,
+                ReadsCreatureSituation.TamedBy.of(UUID.randomUUID(), self, trusted));
+        assertEquals(ReadsCreatureSituation.TamedBy.NOBODY, ReadsCreatureSituation.TamedBy.of(null, self, trusted));
+    }
+
+    @Test
+    void 自己驯服的_用它不算别人的_伤它仍算有主的() {
+        var protection = protection(Map.of(), List.of(), Map.of(), GuessesPlayerMade.NOTHING);
+        // 自己驯服的狼起了名字、拴着绳也一样：喂它、开它的界面不用点名，打它照样要放开。
+        var mine = new ReadsCreatureSituation.CreatureSituation(false, false, true, true, true, false, false,
+                ReadsCreatureSituation.TamedBy.SELF);
+        assertFalse(protection.creatureSomeoneElses(mine));
+        assertTrue(protection.creatureProtected(mine));
+        // 自家人驯服的照旧算别人的。
+        var friends = new ReadsCreatureSituation.CreatureSituation(false, false, false, true, false, false, false,
+                ReadsCreatureSituation.TamedBy.TRUSTED);
+        assertTrue(protection.creatureSomeoneElses(friends));
+        // 只说驯服了、没说是谁的：按别人的算。
+        var unknown = new ReadsCreatureSituation.CreatureSituation(false, false, false, true, false, false);
+        assertEquals(ReadsCreatureSituation.TamedBy.SOMEONE_ELSE, unknown.tamedBy());
+        assertTrue(protection.creatureSomeoneElses(unknown));
+        // 野生的、没占任何理由的，两问都不算。
+        var wild = new ReadsCreatureSituation.CreatureSituation(false, false, false, false, false, false);
+        assertFalse(protection.creatureSomeoneElses(wild));
+        assertFalse(protection.creatureProtected(wild));
+    }
+
+    @Test
     void 存储_自己和自家人放的能用_别人的不能用_拆照旧受保护() {
         String bob = UUID.randomUUID().toString();
         WorldPosition bobsChest = new WorldPosition(30, 64, 30, "minecraft:overworld");

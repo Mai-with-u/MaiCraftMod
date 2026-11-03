@@ -226,7 +226,7 @@ public final class WorldScope {
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress),
-                new Guards(protection, new ClientCreatureSituations(now)),
+                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted),
                 new Channels(new ChatChannel(now),
                         // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                         () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
@@ -276,7 +276,7 @@ public final class WorldScope {
         }
         scene.updateSelf(self);
         scene.updateEnvironment(new ClientEnvironmentSight(() -> current).current());
-        scene.updateEntities(gameTick, new ClientEntitySight(() -> current).nearby());
+        scene.updateEntities(gameTick, new ClientEntitySight(() -> current, trusted).nearby());
         scene.updateSounds(gameTick, new ClientSubtitleEar(() -> subtitles).recent());
         // 俯视网格以角色为中心画一张：地形特征从网格里聚出来，路过成片的树顺路记产地线索。
         scene.updateGrid(OverheadGrid.render(current.level(), player.blockPosition(), OverheadGrid.DEFAULT_RADIUS),

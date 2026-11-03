@@ -499,7 +499,8 @@ public final class AbilityCatalog {
                 ? () -> LookAround.whileWaiting(RandomGenerator.getDefault())
                 : () -> null;
         registry.register(FindModule.live(deps.character().context(), deps.world().blockScans(),
-                new ClientEntitySight(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
+                new ClientEntitySight(deps.character().context(), deps.guards().trusted()), deps.guards().creatures(),
+                deps.world().memory(),
                 deps.world().scene(),
                 new ClientEnderEyes(deps.character().context(), deps.travel().walks(), shared.toMainhand(),
                         shared.drops()),

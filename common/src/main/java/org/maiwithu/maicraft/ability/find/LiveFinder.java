@@ -229,7 +229,8 @@ final class LiveFinder implements FindsAround {
             boolean creatureProtected = false;
             String reason = null;
             Optional<ReadsCreatureSituation.CreatureSituation> situation = situations.apply(entity.uuid());
-            if (situation.isPresent() && situation.get().bondedToSomeone()) {
+            // 角色自己驯服的不报受保护：按类型找时照常算进来（伤它仍归许可管）。
+            if (situation.isPresent() && situation.get().someoneElses()) {
                 creatureProtected = true;
                 reason = protectionWord(situation.get());
             }
@@ -248,7 +249,10 @@ final class LiveFinder implements FindsAround {
     private static String protectionWord(ReadsCreatureSituation.CreatureSituation situation) {
         List<String> reasons = new ArrayList<>();
         if (situation.named()) reasons.add("有名字");
-        if (situation.tamed()) reasons.add("被驯服");
+        // 驯服的写清是谁的：自家人的也不是角色的。
+        if (situation.tamed()) {
+            reasons.add(situation.tamedBy() == ReadsCreatureSituation.TamedBy.TRUSTED ? "被自家人驯服" : "被别人驯服");
+        }
         if (situation.leashed()) reasons.add("拴着绳");
         if (situation.inEnclosure()) reasons.add("圈养着");
         if (situation.inVehicle()) reasons.add("放在船或矿车里");

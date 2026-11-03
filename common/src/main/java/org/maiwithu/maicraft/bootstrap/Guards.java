@@ -5,6 +5,7 @@ import java.util.Objects;
 
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 
 /**
  * 许可与保护：这个世界的保护判断与生物处境读端——
@@ -12,10 +13,17 @@ import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
  */
 record Guards(
         Protection protection,
-        ReadsCreatureSituation creatures) {
+        ReadsCreatureSituation creatures,
+        TrustedPlayers trusted) {
 
     Guards {
         Objects.requireNonNull(protection, "protection");
         Objects.requireNonNull(creatures, "creatures");
+        Objects.requireNonNull(trusted, "trusted");
+    }
+
+    /** 没配自家人时：驯服的生物只分"你的"与"别人的"。 */
+    Guards(Protection protection, ReadsCreatureSituation creatures) {
+        this(protection, creatures, TrustedPlayers.NOBODY);
     }
 }

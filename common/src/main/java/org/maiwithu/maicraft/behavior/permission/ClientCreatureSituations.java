@@ -22,7 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
- * 生物处境的读端：从客户端世界里把一只生物是玩家吗、敌对吗、有名字吗、被驯服了吗、
+ * 生物处境的读端：从客户端世界里把一只生物是玩家吗、敌对吗、有名字吗、被谁驯服了、
  * 拴着绳吗、在圈养设施里吗、被放在船或矿车里吗逐项读出来。
  *
  * <p>"在围栏里"是客户端能看到的粗看法：生物四周与脚下的小范围里有没有栅栏、墙、
@@ -35,9 +35,16 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
     private static final int ENCLOSURE_RADIUS = 3;
 
     private final Supplier<PlayerContext> context;
+    private final TrustedPlayers trusted;
 
     public ClientCreatureSituations(Supplier<PlayerContext> context) {
+        this(context, TrustedPlayers.NOBODY);
+    }
+
+    /** @param trusted 自家人名单：分清一只驯服的生物是自家人的还是别人的 */
+    public ClientCreatureSituations(Supplier<PlayerContext> context, TrustedPlayers trusted) {
         this.context = Objects.requireNonNull(context, "context");
+        this.trusted = Objects.requireNonNull(trusted, "trusted");
     }
 
     @Override
@@ -58,7 +65,7 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
         if (found == null || found.isRemoved()) {
             return Optional.empty();
         }
-        return Optional.of(of(level, self, found));
+        return Optional.of(of(level, self, found, trusted));
     }
 
     /**
@@ -66,15 +73,31 @@ public final class ClientCreatureSituations implements ReadsCreatureSituation {
      * 和按 UUID 问的是同一套判断。
      */
     public static CreatureSituation of(ClientLevel level, LocalPlayer self, Entity found) {
+        return of(level, self, found, TrustedPlayers.NOBODY);
+    }
+
+    /** 同上，按自家人名单分清驯服者是自家人还是别人。 */
+    public static CreatureSituation of(ClientLevel level, LocalPlayer self, Entity found, TrustedPlayers trusted) {
+        TamedBy tamedBy = tamedBy(found, self, trusted);
         return new CreatureSituation(
                 found instanceof Player && found != self,
                 found instanceof Enemy,
                 found.hasCustomName(),
-                found instanceof OwnableEntity ownable && ownable.getOwnerUUID() != null,
+                tamedBy != TamedBy.NOBODY,
                 found instanceof Leashable leashable && leashable.isLeashed(),
                 enclosedBy(level::getBlockState, found.blockPosition()),
                 // 坐在船里、矿车里的：多半是有人运着的牲口；骑在蜘蛛上的骷髅这类不算。
-                found.getVehicle() instanceof Boat || found.getVehicle() instanceof AbstractMinecart);
+                found.getVehicle() instanceof Boat || found.getVehicle() instanceof AbstractMinecart,
+                tamedBy);
+    }
+
+    /**
+     * 一只生物被谁驯服了：读原版可驯服生物同步给客户端的驯服者编号，与角色、自家人名单比对。
+     * 观察的"驯服"特征与保护判断读的是这同一份。
+     */
+    public static TamedBy tamedBy(Entity found, Player self, TrustedPlayers trusted) {
+        UUID owner = found instanceof OwnableEntity ownable ? ownable.getOwnerUUID() : null;
+        return TamedBy.of(owner, self == null ? null : self.getUUID(), trusted);
     }
 
     /**

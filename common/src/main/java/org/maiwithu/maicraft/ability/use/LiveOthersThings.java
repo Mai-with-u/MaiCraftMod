@@ -78,9 +78,9 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         ClientLevel level = level();
         Entity entity = level == null ? null : level.getEntity(target.entityId());
         if (entity == null) return true;
-        // 处境读不到按别人的算；玩家不是谁的东西，但对玩家用东西同样要点名。
+        // 处境读不到按别人的算；玩家不是谁的东西，但对玩家用东西同样要点名；角色自己驯服的不算别人的。
         return creatures.situationOf(entity.getUUID())
-                .map(situation -> situation.player() || guard.creatureProtected(situation))
+                .map(situation -> situation.player() || guard.creatureSomeoneElses(situation))
                 .orElse(true);
     }
 
