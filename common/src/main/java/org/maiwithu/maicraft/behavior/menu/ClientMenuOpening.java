@@ -8,11 +8,15 @@ import java.util.HashSet;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -30,6 +34,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 就一格都不点，按不支持失败；内容一直没同步完按卡住失败。失败时已经点开的界面请游戏关上。
  *
  * <p>界面挂在方块的一个部件上时（例如线缆上的 ME 终端面板），靠近与右键都对准部件框，不点线缆芯。
+ *
+ * <p>也能点开一只生物身上的界面（运输矿车、带箱子的驴、女仆）：靠近它此刻的包围盒，先腾出空手（拿着鞍、剪刀、
+ * 命名牌右键生物会做别的事），再右键它；要潜行右键才开的（带箱子的驴）按住潜行点。生物走开了就跟过去，
+ * 点开前它不在了按目标没了。
  */
 public final class ClientMenuOpening implements MenuOpening {
 
@@ -38,11 +46,19 @@ public final class ClientMenuOpening implements MenuOpening {
     /** 站的位置看不到或够不着容器时，最多再换几个站位：换遍了才算点不开。 */
     static final int MORE_SPOTS = 2;
 
-    private enum Stage { APPROACH, CLICK, SYNC, OPENED }
+    private enum Stage { APPROACH, HAND, CLICK, SYNC, OPENED }
 
     private final BlockPos at;
     /** 只点方块上的这个部件；为 null 时整格方块。 */
     private final AABB part;
+    /** 点开的是这只生物身上的界面；点方块时为 null。 */
+    private final Integer entityId;
+    /** 点生物时按住潜行右键。 */
+    private final boolean sneak;
+    /** 点生物前腾出空手；点方块时不用。 */
+    private final MovesToMainhand toMainhand;
+    /** 潜行右键时按住潜行；不潜行时不用。 */
+    private final HoldsSneak sneaks;
     private final MenuLayouts layouts;
     private final Permissions permissions;
     private final BringsPlayerClose close;
@@ -76,8 +92,35 @@ public final class ClientMenuOpening implements MenuOpening {
      */
     public ClientMenuOpening(BlockPos at, AABB part, Permissions permissions, MenuLayouts layouts,
             BringsPlayerClose close, Interactions interactions, Supplier<PlayerContext> contexts) {
+        this(at, part, null, false, null, null, permissions, layouts, close, interactions, contexts);
+    }
+
+    /**
+     * 点开一只生物身上的界面。
+     *
+     * @param entityId   生物的实体编号
+     * @param sneak      要不要按住潜行右键（带箱子的驴、骡、羊驼潜行右键才开物品栏）
+     * @param toMainhand 腾出空手
+     * @param sneaks     按住潜行；不潜行时可为 null
+     */
+    public static ClientMenuOpening ofEntity(int entityId, boolean sneak, Permissions permissions, MenuLayouts layouts,
+            BringsPlayerClose close, Interactions interactions, MovesToMainhand toMainhand, HoldsSneak sneaks,
+            Supplier<PlayerContext> contexts) {
+        Objects.requireNonNull(toMainhand, "toMainhand");
+        if (sneak) Objects.requireNonNull(sneaks, "sneaks");
+        return new ClientMenuOpening(BlockPos.ZERO, null, entityId, sneak, toMainhand, sneaks, permissions, layouts,
+                close, interactions, contexts);
+    }
+
+    private ClientMenuOpening(BlockPos at, AABB part, Integer entityId, boolean sneak, MovesToMainhand toMainhand,
+            HoldsSneak sneaks, Permissions permissions, MenuLayouts layouts, BringsPlayerClose close,
+            Interactions interactions, Supplier<PlayerContext> contexts) {
         this.at = at.immutable();
         this.part = part;
+        this.entityId = entityId;
+        this.sneak = sneak;
+        this.toMainhand = toMainhand;
+        this.sneaks = sneaks;
         this.layouts = Objects.requireNonNull(layouts, "layouts");
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.close = Objects.requireNonNull(close, "close");
@@ -92,30 +135,62 @@ public final class ClientMenuOpening implements MenuOpening {
     @Override public ActionStatus tick(TickContext tick) {
         return switch (stage) {
             case APPROACH -> approach(tick);
+            case HAND -> emptyHand(tick);
             case CLICK -> click(tick);
             case SYNC -> waitSync();
             case OPENED -> ActionStatus.done();
         };
     }
 
-    // 走到够得着、看得见容器的地方；走不到如实失败，不隔空点开。
+    // 走到够得着、看得见容器的地方；走不到如实失败，不隔空点开。生物按它此刻的包围盒靠近，走开了下一轮再跟。
     private ActionStatus approach(TickContext tick) {
         if (step == null) {
-            ApproachTarget target = part == null ? ApproachTarget.ofBlock(at)
-                    : ApproachTarget.ofBlockPart(at, part);
+            ApproachTarget target;
+            if (entityId != null) {
+                Optional<Entity> creature = creature();
+                if (creature.isEmpty()) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, what() + "已经不在了，还没点开", null));
+                }
+                target = ApproachTarget.ofEntity(creature.get().getBoundingBox());
+            } else {
+                target = part == null ? ApproachTarget.ofBlock(at) : ApproachTarget.ofBlockPart(at, part);
+            }
             step = poorSpots.isEmpty() ? close.toward(target, permissions)
                     : close.toward(target, permissions, cell -> poorSpots.contains(cell));
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Failed failed) {
             return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE,
-                    "走不到 " + at.toShortString() + " 的容器跟前：" + failed.problem().message(), null));
+                    "走不到" + what() + "跟前：" + failed.problem().message(), null));
+        }
+        if (status instanceof ActionStatus.Done) {
+            finishStep();
+            stage = entityId != null ? Stage.HAND : Stage.CLICK;
+        }
+        return status instanceof ActionStatus.Done ? ActionStatus.progressed() : status;
+    }
+
+    // 点生物前腾出空手：空手右键才是"打开看看"，拿着鞍、剪刀、命名牌右键生物会做别的事（C 玩家常识）。
+    private ActionStatus emptyHand(TickContext tick) {
+        if (step == null) {
+            Optional<Action> empty = toMainhand.emptyMainhand();
+            if (empty.isEmpty()) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                        "快捷栏和背包都满了，腾不出空手去点开" + what(), "先腾出一格再来"));
+            }
+            step = empty.get();
+        }
+        ActionStatus status = step.tick(tick);
+        if (status instanceof ActionStatus.Failed failed) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "腾不出空手去点开" + what() + "：" + failed.problem().message(), null));
         }
         if (status instanceof ActionStatus.Done) {
             finishStep();
             stage = Stage.CLICK;
+            return ActionStatus.progressed();
         }
-        return status instanceof ActionStatus.Done ? ActionStatus.progressed() : status;
+        return status;
     }
 
     // 右键点开：界面编号变了才算点开；游戏没让开就如实带原因失败。
@@ -124,7 +199,17 @@ public final class ClientMenuOpening implements MenuOpening {
             PlayerContext player = tick.player();
             int before = player.localPlayer().containerMenu.containerId;
             InteractionConfirmation opened = InteractionConfirmation.menuChanged(before);
-            step = part == null ? interactions.useBlock(at, opened) : interactions.useBlockPart(at, part, opened);
+            if (entityId != null) {
+                Optional<Entity> creature = creature();
+                if (creature.isEmpty()) {
+                    return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, what() + "已经不在了，还没点开", null));
+                }
+                Action use = interactions.useEntity(creature.get(), opened);
+                // 带箱子的驴这类潜行右键才开物品栏：整一下右键都按着潜行。
+                step = sneak ? sneaks.sneaking(use) : use;
+            } else {
+                step = part == null ? interactions.useBlock(at, opened) : interactions.useBlockPart(at, part, opened);
+            }
         }
         ActionStatus status = step.tick(tick);
         // 站的位置看不到容器的任何一面、或够不着：像玩家一样挪个地方再点，换遍了才算点不开。
@@ -134,6 +219,14 @@ public final class ClientMenuOpening implements MenuOpening {
             finishStep();
             stage = Stage.APPROACH;
             return ActionStatus.progressed();
+        }
+        if (status instanceof ActionStatus.Failed failed && entityId != null) {
+            // 生物身上的界面没打开：它在睡觉时写明（睡着的女仆不给开），其余如实交回游戏的拒绝。
+            boolean asleep = creature().map(found -> found instanceof LivingEntity living && living.isSleeping())
+                    .orElse(false);
+            return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                    "点开" + what() + "没打开界面" + (asleep ? "（它在睡觉）" : "（不是你的、不让开或被服务器拒绝）")
+                            + "：" + failed.problem().message(), null));
         }
         if (status instanceof ActionStatus.Failed failed) {
             return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
@@ -193,10 +286,24 @@ public final class ClientMenuOpening implements MenuOpening {
         }
     }
 
+    // 此刻的那只生物；不在了、被移除了为空。
+    private Optional<Entity> creature() {
+        PlayerContext current = contexts.get();
+        if (current == null || current.level() == null) return Optional.empty();
+        Entity found = current.level().getEntity(entityId);
+        return found == null || found.isRemoved() ? Optional.empty() : Optional.of(found);
+    }
+
+    // 说的是哪个容器：方块写位置，生物写编号。
+    private String what() {
+        return entityId != null ? "那只生物（实体 " + entityId + "）" : " " + at.toShortString() + " 的容器";
+    }
+
     @Override public String describe() {
         return switch (stage) {
-            case APPROACH -> "走到 " + at.toShortString() + " 的容器跟前";
-            case CLICK -> "点开 " + at.toShortString() + " 的容器";
+            case APPROACH -> "走到" + what() + "跟前";
+            case HAND -> "腾出空手去点开" + what();
+            case CLICK -> "点开" + what();
             case SYNC -> "等容器界面的内容同步完";
             case OPENED -> "容器界面开着";
         };
