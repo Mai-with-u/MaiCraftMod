@@ -90,6 +90,7 @@ final class BaritoneWalkRun implements WalkRun {
     /** 不许挖时走不通的只读复算："假如允许挖垫有没有路、要动哪些格"，只进说明不执行。 */
     private TerrainProbe probe;
     private boolean sprintAllowed = true; // 这一趟能不能疾跑：跟人快追上时关掉，免得冲过头撞上去
+    private final SprintBreaks sprintBreaks = new SprintBreaks(); // 疾跑断开的诊断：视野一缩一放时分清是谁断的
     /** 卡坑自动脱困：没路又困在坑里时按"搭 → 挖"临时升许可，出坑降回。 */
     private final TrapEscape escape;
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
@@ -342,6 +343,10 @@ final class BaritoneWalkRun implements WalkRun {
     void drivePlayer(PlayerContext context) {
         lastContext = context;
         LocalPlayer player = context.localPlayer();
+        // 每刻先读回上一刻的按键原版结算成什么样：我们按着疾跑、原版却停了，记下是撞墙、饿了还是别的。
+        sprintBreaks.read(new SprintBreaks.Reading(player.isSprinting(), player.horizontalCollision, player.minorHorizontalCollision,
+                player.getFoodData().getFoodLevel(), player.isUsingItem(), player.isInWater()), context.clientTick())
+                .ifPresent(line -> LOG.debug("[maicraft-path] {}，在 {}", line, player.blockPosition().toShortString()));
         if (resumed) {
             // 刚从停稳里续走：这一刻按原目标重新上路，进展计时重新起算，停半路的旧路线与等待作废。
             resumed = false;
@@ -507,6 +512,7 @@ final class BaritoneWalkRun implements WalkRun {
         context.input().releaseAll(player);
         // 收场时还在脱困（挖出坑就走到了、没来得及看一眼）：把这次脱困的经过与挖了谁的方块结掉再交账。
         escape.finish(progress.report().state() == WalkReport.State.ARRIVED);
+        sprintBreaks.summary().ifPresent(line -> LOG.info("[maicraft-path] {}", line)); // 这一趟疾跑断了几次、各为什么
         owner.release(this);
         finishEngine(engine, pathing);
     }
@@ -533,7 +539,12 @@ final class BaritoneWalkRun implements WalkRun {
     private void applyEngineInput(PlayerContext context, PlayerInput playerInput, IInputOverrideHandler input,
                                   PathingBehavior pathing, boolean routePresent, boolean calculating) {
         PlayerInput.Movement movement = EngineKeys.movement(input, pathing, sprintAllowed, routePresent, calculating);
-        if (movement != null) playerInput.applyNavigationMovement(movement, context.clientTick());
+        if (movement == null) return;
+        playerInput.applyNavigationMovement(movement, context.clientTick());
+        // 上一刻按着疾跑、这一刻不按了：记下是没按前进、引擎这一步不要跑，还是调用方不让跑。
+        sprintBreaks.commanded(new SprintBreaks.Command(movement.forward(), movement.sprinting(),
+                WalkSprint.engineWants(input, pathing), WalkSprint.step(pathing)), context.clientTick())
+                .ifPresent(line -> LOG.debug("[maicraft-path] {}", line));
     }
 
     // 落地救援这一刻占不占身体：出发前备料、落地后收回时站定，引擎不推进（这几刻站着不算没进展）；

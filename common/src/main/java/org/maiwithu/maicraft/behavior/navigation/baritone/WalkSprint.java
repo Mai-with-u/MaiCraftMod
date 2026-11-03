@@ -22,9 +22,22 @@ final class WalkSprint {
      * @param allowed 调用方让不让跑
      */
     static boolean sprint(IInputOverrideHandler input, PathingBehavior pathing, boolean allowed) {
+        return engineWants(input, pathing) && (allowed || parkourStep(pathing == null ? null : pathing.getCurrent()));
+    }
+
+    /** 引擎这一刻要不要跑：按着疾跑键，或执行段记下了下一刻该疾跑。 */
+    static boolean engineWants(IInputOverrideHandler input, PathingBehavior pathing) {
         PathExecutor executor = pathing == null ? null : pathing.getCurrent();
-        boolean wanted = input.isInputForcedDown(Input.SPRINT) || executor != null && executor.isSprinting();
-        return wanted && (allowed || parkourStep(executor));
+        return input.isInputForcedDown(Input.SPRINT) || executor != null && executor.isSprinting();
+    }
+
+    /** 路线当前这一步的走法（直走、上台阶、跳远……的类名），给诊断日志看；没有路线为空串。 */
+    static String step(PathingBehavior pathing) {
+        PathExecutor executor = pathing == null ? null : pathing.getCurrent();
+        if (executor == null) return "";
+        var movements = executor.getPath().movements();
+        int index = executor.getPosition();
+        return index >= 0 && index < movements.size() ? movements.get(index).getClass().getSimpleName() : "";
     }
 
     // 路线当前这一步是不是跳远。
