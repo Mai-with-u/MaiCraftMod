@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.SharedConstants;
@@ -16,7 +15,7 @@ import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** 放一放的格什么时候回头：旁边或下方新放了方块、人换了一层站、原版不让放的过一会儿；什么都没变不回头。 */
+/** 放一放的格什么时候回头：旁边或下方新放了方块、人站高了一层、生物挡着的过一会儿；什么都没变不回头。 */
 class DeferredPlacementsTest {
 
     @BeforeAll
@@ -60,7 +59,7 @@ class DeferredPlacementsTest {
     }
 
     @Test
-    void 人换了一层站_回头() {
+    void 人站高了一层_回头() {
         var deferred = new DeferredPlacements();
         deferred.defer(cell(ROOF), DeferredPlacements.Reason.NO_FACE_WORKED, GROUND_FEET, 0);
         assertTrue(deferred.changed(GROUND_FEET.east(), 1, c -> false).isEmpty(), "同一层挪两步不算");
@@ -68,20 +67,48 @@ class DeferredPlacementsTest {
     }
 
     @Test
-    void 原版不让放_过一会儿回头_几次之后不再按时回头() {
+    void 人往下走了一层_不回头() {
+        var deferred = new DeferredPlacements();
+        deferred.defer(cell(ROOF), DeferredPlacements.Reason.NO_FACE_WORKED, GROUND_FEET, 0);
+        assertTrue(deferred.changed(new BlockPos(5, 64, 0), 1, c -> false).isEmpty(),
+                "在高低不平的地上往下走一层看不到更多，不把放不上的格再轮一遍");
+    }
+
+    private static final String MAID = "站在这一格里的 阿缕（touhou_little_maid:maid）";
+
+    @Test
+    void 生物挡着_过一会儿回头_几次之后如实交代是谁() {
         var deferred = new DeferredPlacements();
         long now = 0;
         for (int i = 0; i < DeferredPlacements.MAX_TIMED_RETRIES; i++) {
-            deferred.defer(cell(ROOF), DeferredPlacements.Reason.REFUSED_BY_GAME, GROUND_FEET, now);
+            deferred.defer(cell(ROOF), DeferredPlacements.Reason.CREATURE_IN_THE_WAY, MAID, GROUND_FEET, now);
             assertTrue(deferred.waitingForTime(), "有生物站在那一格里，等它走开");
             assertTrue(deferred.takeStuck(c -> false).isEmpty(), "等着的格不急着垫方块");
             assertTrue(deferred.changed(GROUND_FEET, now + 1, c -> false).isEmpty(), "时候没到不回头");
-            now += DeferredPlacements.REFUSED_RETRY_TICKS;
+            now += DeferredPlacements.CREATURE_RETRY_TICKS;
             assertEquals(1, deferred.changed(GROUND_FEET, now, c -> false).size(), "过一会儿回头再试");
         }
-        deferred.defer(cell(ROOF), DeferredPlacements.Reason.REFUSED_BY_GAME, GROUND_FEET, now);
-        assertFalse(deferred.waitingForTime(), "回头几次还不让放，不再干等");
-        assertEquals(Optional.of(ROOF), deferred.takeStuck(c -> false).map(PlannedCell::pos), "交给垫方块那些办法");
+        deferred.defer(cell(ROOF), DeferredPlacements.Reason.CREATURE_IN_THE_WAY, MAID, GROUND_FEET, now);
+        assertFalse(deferred.waitingForTime(), "回头几次还挡着，不再干等");
+        assertTrue(deferred.takeStuck(c -> false).isEmpty(), "垫方块挪不走生物，不交给垫方块那些办法");
+        List<DeferredPlacements.Left> left = deferred.drain();
+        assertEquals(1, left.size());
+        assertEquals(DeferredPlacements.Reason.CREATURE_IN_THE_WAY, left.get(0).reason());
+        assertEquals(MAID, left.get(0).creature(), "交代时带上是谁挡着");
+    }
+
+    @Test
+    void 生物挡着的格_旁边新放了一块也回头() {
+        var deferred = new DeferredPlacements();
+        // 按时回头的次数先用完。
+        for (int i = 0; i < DeferredPlacements.MAX_TIMED_RETRIES; i++) {
+            deferred.defer(cell(ROOF), DeferredPlacements.Reason.CREATURE_IN_THE_WAY, MAID, GROUND_FEET, 0);
+            assertEquals(1, deferred.changed(GROUND_FEET, DeferredPlacements.CREATURE_RETRY_TICKS, c -> false).size());
+        }
+        deferred.defer(cell(ROOF), DeferredPlacements.Reason.CREATURE_IN_THE_WAY, MAID, GROUND_FEET, 0);
+        assertFalse(deferred.waitingForTime());
+        deferred.placed(ROOF.east());
+        assertEquals(1, deferred.changed(GROUND_FEET, 1, c -> false).size(), "不按时回头了，情况变了照样回头再试");
     }
 
     @Test

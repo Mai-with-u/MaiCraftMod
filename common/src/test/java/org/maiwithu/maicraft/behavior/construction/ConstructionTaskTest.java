@@ -102,6 +102,12 @@ class ConstructionTaskTest {
         boolean doorsLookPlayerMade;
         int digCalls;
         BlockPos feet = new BlockPos(5, 64, 5);
+        /** 站在某一格里的生物（称呼）：原版不让往这一格放方块。 */
+        final Map<BlockPos, String> creatures = new HashMap<>();
+        /** 挡在人眼睛和要点的那一面之间的生物（称呼）：点下去点到它，放不上。 */
+        String creatureInView;
+        /** 生物还要挡几下才走开（按被它挡住的次数算）；一直不走为最大值。 */
+        int creatureStaysFor = Integer.MAX_VALUE;
 
         Fake ground(int y) {
             for (int x = -3; x <= 8; x++) for (int z = -3; z <= 8; z++) world.put(new BlockPos(x, y, z), STONE);
@@ -124,6 +130,11 @@ class ConstructionTaskTest {
         }
 
         @Override public Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos clicked, Direction face) {
+            // 替身的原版：格里站着生物就说落不下来；挡够了次数生物走开。
+            if (creatures.containsKey(cell.pos())) {
+                if (--creatureStaysFor >= 0) return Optional.of(new PlacementPrediction.Placement(clicked, face, null, false));
+                creatures.remove(cell.pos());
+            }
             BlockState predicted = cell.state();
             // 替身的原版：门总是关着放下来，开关由验收去按。
             if (predicted.hasProperty(BlockStateProperties.OPEN)) predicted = predicted.setValue(BlockStateProperties.OPEN, false);
@@ -131,6 +142,8 @@ class ConstructionTaskTest {
             return Optional.of(new PlacementPrediction.Placement(clicked, face, predicted, crouchOnly.contains(cell.pos())));
         }
         @Override public boolean requiresSneak(BlockPos clicked) { return false; }
+        @Override public Optional<String> creatureIn(BlockPos pos) { return Optional.ofNullable(creatures.get(pos)); }
+        @Override public Optional<String> creatureBetween(BlockPos clicked, Direction face) { return Optional.ofNullable(creatureInView); }
         // 替身转法：放出来的样子点一下东面就转成蓝图里的样子（拿木棍当扳手）。
         @Override public Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
             for (var wrong : placesAs.entrySet()) {
@@ -156,6 +169,11 @@ class ConstructionTaskTest {
                 carried.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), -1, Integer::sum);
             };
             if (clickFailsAfterPlacing.contains(cell.pos())) return new Click(new FailingAfter(effect, "交互结果出乎预料"), () -> null);
+            // 视线上挡着生物：点到的是它，方块没放下去；挡够了次数它走开。
+            if (creatureInView != null) {
+                if (--creatureStaysFor >= 0) return new Click(new FailingAfter(() -> { }, "点到了生物"), () -> null);
+                creatureInView = null;
+            }
             return click(effect);
         }
         @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
@@ -517,6 +535,49 @@ class ConstructionTaskTest {
         assertTrue(fake.temporaries.isEmpty());
         assertEquals(AIR, fake.state(new BlockPos(0, 68, 0)));
         assertTrue(details(result).temporaryBlocksLeft().isEmpty());
+    }
+
+    private static final String MAID = "阿缕（touhou_little_maid:maid）";
+
+    @Test
+    void 生物站在要放的格里_过一会儿回头_走开了就放上() {
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        fake.creatures.put(new BlockPos(0, 64, 0), MAID);
+        fake.creatureStaysFor = 2;
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(STONE, fake.state(new BlockPos(0, 64, 0)));
+        assertEquals(1, count(result, Change.Kind.BLOCK_PLACED), "等生物走开再放，不垫临时方块");
+        assertEquals(8, fake.carried("minecraft:cobblestone"));
+    }
+
+    @Test
+    void 生物一直站在要放的格里_不垫方块_写明被谁挡着() {
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        fake.creatures.put(new BlockPos(0, 64, 0), MAID);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(0, count(result, Change.Kind.BLOCK_PLACED), "垫方块挪不走生物，一块也不垫");
+        assertEquals(8, fake.carried("minecraft:cobblestone"));
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("站在这一格里的 " + MAID)
+                && group.reason().contains("15 秒")), result.summary());
+    }
+
+    @Test
+    void 生物挡在人和要点的那一面之间_不垫方块_写明被谁挡着() {
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        fake.creatureInView = MAID;
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(0, count(result, Change.Kind.BLOCK_PLACED), "垫方块挪不走生物，一块也不垫");
+        assertTrue(details(result).problems().stream()
+                .anyMatch(group -> group.reason().contains("挡在人和要点的那一面之间的 " + MAID)), result.summary());
     }
 
     @Test

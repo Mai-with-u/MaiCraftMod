@@ -30,8 +30,11 @@ final class PlacementAttempt {
     PlacementPrediction.Placement placement;
     PlacementConfirmation confirmation;
     int uses;
-    /** 有一面站位、朝向都对，原版却说落不下来（多半是有生物站在那一格里）：这格过一会儿再回头。 */
-    boolean refusedByGame;
+    /**
+     * 挡着这一格的生物和它在哪（"站在这一格里的 阿缕（touhou_little_maid:maid）"）：有一面原版说落不下来、格里站着生物，
+     * 或者点下去点到了挡在跟前的生物时记下；每一面都试过还没放成，这格就等它走开再回头。没有为 null。
+     */
+    String creatureInTheWay;
     /** 原版放出来朝向不对、能拿扳手转到位：照放，放下后转。 */
     boolean turnAfter;
     /** 还能拿扳手点几下。 */

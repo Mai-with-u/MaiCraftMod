@@ -58,6 +58,22 @@ public final class ConstructionSeams {
         default boolean lavaSpreadsFar() {
             return false;
         }
+
+        /**
+         * 站在这一格里、让原版不肯往这里放方块的生物（女仆、狐狸、船这类，不算角色自己）：有就给它的称呼
+         * （名字和实体类型 ID），没有或读不到为空。放不上时拿它分清是生物挡着还是别的原因。
+         */
+        default Optional<String> creatureIn(BlockPos pos) {
+            return Optional.empty();
+        }
+
+        /**
+         * 挡在角色眼睛和 clicked 那一格 face 面之间的生物：有就给它的称呼（名字和实体类型 ID），没有或读不到为空。
+         * 点下去点到了生物而不是那一面时，拿它分清是生物挡着还是站位不好。
+         */
+        default Optional<String> creatureBetween(BlockPos clicked, Direction face) {
+            return Optional.empty();
+        }
     }
 
     /** 许可：角色自己挑的一格能不能挖、能不能放，全仓只有许可检查点回答。 */
