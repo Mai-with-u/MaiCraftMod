@@ -279,6 +279,15 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:gomoku_play",
+        "summary": "和坐在对面的女仆下五子棋：落一子并等她应手，或重开一局（车万女仆）",
+        "parameters": "move?: string, operation: string = move, max_seconds?: integer",
+        "targets": [
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:reserve",
         "summary": "预留身上攒着的东西：写下这几样各留够几件，角色自己做主时不动它们，下令的目标不够才用、用了扣掉；一直有效，不占身体",
         "parameters": "operation: string = set, items?: array",
@@ -1638,6 +1647,46 @@
       ],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/maid_configure.md"
+    },
+    {
+      "ability": "maicraft:gomoku_play",
+      "summary": "和坐在对面的女仆下五子棋：落一子并等她应手，或重开一局（车万女仆）",
+      "parameters": [
+        {
+          "name": "move",
+          "type": "string",
+          "required": false,
+          "doc": "这一手下在哪：列 A–O（站在你这一侧从左到右）加行 1–15（离你最近的是 1），例如 H8 是天元；落子时必填"
+        },
+        {
+          "name": "operation",
+          "type": "string",
+          "required": false,
+          "doc": "move 落一子（默认）；reset 点棋盘角上的棋盒重开一局",
+          "default": "move",
+          "choices": [
+            "move",
+            "reset"
+          ]
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "落下以后最多站着等她应手几秒：默认 15，最多 30；轮到她时先等她下完也按这个",
+          "min": 0,
+          "max": 30
+        }
+      ],
+      "targets": [
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [
+        "touhou_little_maid"
+      ],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/gomoku_play.md"
     },
     {
       "ability": "maicraft:reserve",

@@ -6,7 +6,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -14,7 +17,7 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 /**
  * 车万女仆（TouhouLittleMaid）的联动入口。交给登记表：观察（女仆 maid 与女仆墓碑 maid_tombstone，
  * 和原版实体共用 e#）、对女仆说话（{@code chat} 点名她时走到跟前开她的对话框）、她的 8 种界面的布局证明、
- * 改她的设置（{@code maid_configure}）。
+ * 改她的设置（{@code maid_configure}）、五子棋盘（观察里的 gomoku_board 与 {@code gomoku_play}）。
  * 每一下读写都经联动入口包一层：装的版本和编译时用的对不上时停用联动，不让游戏崩。
  */
 public final class TouhouLittleMaidCompat extends CompatModule {
@@ -41,6 +44,8 @@ public final class TouhouLittleMaidCompat extends CompatModule {
         registry.menuLayout(this, new MaidMenuLayout());
         // 改她的设置：皮肤、工作、班次、跟随或驻守、拾取、手上与身上的装备，打开她的界面一项项改。
         registry.maidSettings(this, services -> new MaidConfigure(this, services));
+        // 和坐在对面的她下五子棋：空手对准那一路落子、等她应手，点棋盒重开。
+        registry.gomokuBoards(this, services -> new MaidGomoku(this, services));
     }
 
     boolean isMaid(Entity entity) {
@@ -113,5 +118,13 @@ public final class TouhouLittleMaidCompat extends CompatModule {
 
     void closeSchedulePosScreen() {
         run("关日程点确认屏", actions::closeSchedulePosScreen);
+    }
+
+    Optional<GomokuState> gomoku(Level level, BlockPos at) {
+        return call("读五子棋盘", () -> reads.gomoku(level, at));
+    }
+
+    List<GomokuState> gomokuBoards(Level level, AABB region) {
+        return call("找附近的五子棋盘", () -> reads.gomokuBoards(level, region));
     }
 }

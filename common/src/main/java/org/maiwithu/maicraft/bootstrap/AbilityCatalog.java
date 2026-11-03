@@ -19,6 +19,9 @@ import org.maiwithu.maicraft.ability.chat.ChatAbility;
 import org.maiwithu.maicraft.ability.chat.FindsListener;
 import org.maiwithu.maicraft.ability.chat.LiveListeners;
 import org.maiwithu.maicraft.ability.chat.spi.TalkTo;
+import org.maiwithu.maicraft.ability.gomoku.GomokuPlayModule;
+import org.maiwithu.maicraft.ability.gomoku.LiveBoards;
+import org.maiwithu.maicraft.ability.gomoku.spi.GomokuBoards;
 import org.maiwithu.maicraft.ability.maid.LiveMaids;
 import org.maiwithu.maicraft.ability.maid.MaidConfigureModule;
 import org.maiwithu.maicraft.ability.maid.spi.MaidSettings;
@@ -575,7 +578,7 @@ public final class AbilityCatalog {
                 deps.travel().walks(), deps.world().memory(), deps.channels().events(),
                 () -> deps.world().scene().caveOpenings(), lookOnce(deps)));
 
-        registerCreatureTalk(registry, deps, services);
+        registerNamedTargets(registry, deps, services);
 
         // 预留：只改预留表，当场完成；物品 ID 按物品注册表核对，写岔的一次报全。
         registry.register(new ReserveAbility(deps.reserved(), deps.items().itemRegistry()));
@@ -593,10 +596,10 @@ public final class AbilityCatalog {
     }
 
     /**
-     * 点名一只生物的两个能力：聊天（对它说话）与改女仆设置。联动的说话办法、改女仆设置的办法进世界时建一次，
-     * 点名时逐个问它们；谁都不认时如实说它所属的模组装没装、联动登没登记上。
+     * 点名一只生物或一件模组摆设的能力：聊天（对它说话）、改女仆设置、下五子棋。联动的说话办法、改女仆设置的办法、
+     * 下五子棋的办法进世界时建一次，点名时逐个问它们；谁都不认时如实说它所属的模组装没装、联动登没登记上。
      */
-    private static void registerCreatureTalk(AbilityRegistry registry, Deps deps, PlayerServices services) {
+    private static void registerNamedTargets(AbilityRegistry registry, Deps deps, PlayerServices services) {
         List<TalkTo> talkTos = deps.compat().talkTos(services);
         List<MaidSettings> maidSettings = deps.compat().maidSettings(services);
         SeenCreatures creatures = new SeenCreatures(deps.world()::scene, deps.character().context(),
@@ -605,6 +608,10 @@ public final class AbilityCatalog {
         registry.register(chatModule(deps, new LiveListeners(creatures, () -> talkTos)));
         // 改女仆设置：车万女仆装了才上架；联动没登记上时点名她如实说联动没登记。
         registry.register(new MaidConfigureModule(new LiveMaids(creatures, () -> maidSettings)));
+        // 下五子棋：车万女仆装了才上架；点名的棋盘按方块所属的模组说联动登没登记上。
+        List<GomokuBoards> gomokuBoards = deps.compat().gomokuBoards(services);
+        registry.register(new GomokuPlayModule(new LiveBoards(deps.world()::scene, deps.character().context(),
+                () -> gomokuBoards, deps.compat()::whyNotWorking)));
     }
 
     /** 聊天能力的一份：命令的完成依据（提交后聊天栏冒出的反馈行）与聊天回显同出一个聊天栏日志。

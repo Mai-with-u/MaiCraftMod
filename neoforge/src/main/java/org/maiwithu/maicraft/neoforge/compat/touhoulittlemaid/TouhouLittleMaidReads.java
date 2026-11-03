@@ -6,10 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.function.Predicate;
 
 import com.github.tartaricacid.touhoulittlemaid.api.event.MaidTaskEnableEvent;
+import com.github.tartaricacid.touhoulittlemaid.api.game.gomoku.Point;
 import com.github.tartaricacid.touhoulittlemaid.api.task.IMaidTask;
+import com.github.tartaricacid.touhoulittlemaid.block.BlockGomoku;
+import com.github.tartaricacid.touhoulittlemaid.block.properties.GomokuPart;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.ai.AIChatScreen;
 import com.github.tartaricacid.touhoulittlemaid.client.gui.entity.maid.other.CheckSchedulePosGui;
 import com.github.tartaricacid.touhoulittlemaid.client.resource.CustomPackLoader;
@@ -23,26 +27,35 @@ import com.github.tartaricacid.touhoulittlemaid.entity.chatbubble.implement.Wait
 import com.github.tartaricacid.touhoulittlemaid.entity.item.EntityTombstone;
 import com.github.tartaricacid.touhoulittlemaid.entity.passive.EntityMaid;
 import com.github.tartaricacid.touhoulittlemaid.entity.task.TaskManager;
+import com.github.tartaricacid.touhoulittlemaid.tileentity.TileEntityGomoku;
 import com.github.tartaricacid.touhoulittlemaid.util.ParseI18n;
 import com.mojang.datafixers.util.Pair;
 import io.netty.buffer.Unpooled;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.GuiEventListener;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.ComponentSerialization;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.schedule.Activity;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.common.NeoForge;
 
+import org.maiwithu.maicraft.compat.touhoulittlemaid.GomokuState;
 import org.maiwithu.maicraft.compat.touhoulittlemaid.MaidReads;
 import org.maiwithu.maicraft.compat.touhoulittlemaid.MaidState;
 
 /**
  * 车万女仆的读端：读女仆同步给周围玩家的实体数据（皮肤、工作、班次、跟随或驻守、好感、气泡）、本机模型表、
- * 眼前的对话框。文字气泡的正文没有读法，用车万女仆登记的那份序列化器写进临时缓冲区再按同样的格式读回来，
- * 不用反射。只翻译，不判断。
+ * 眼前的对话框、五子棋盘同步下来的方块实体（棋子、轮到谁、这一局的状态、座位上坐的是谁）。
+ * 文字气泡的正文没有读法，用车万女仆登记的那份序列化器写进临时缓冲区再按同样的格式读回来，不用反射。只翻译，不判断。
  */
 public final class TouhouLittleMaidReads implements MaidReads {
 
@@ -183,5 +196,57 @@ public final class TouhouLittleMaidReads implements MaidReads {
 
     @Override public boolean schedulePosScreenOpen() {
         return Minecraft.getInstance().screen instanceof CheckSchedulePosGui;
+    }
+
+    // 棋盘上任一格都认：按方块状态里的部件位置退回中心那一格，读中心的方块实体。
+    @Override public Optional<GomokuState> gomoku(Level level, BlockPos at) {
+        if (level == null) return Optional.empty();
+        BlockState state = level.getBlockState(at);
+        if (!(state.getBlock() instanceof BlockGomoku)) return Optional.empty();
+        GomokuPart part = state.getValue(BlockGomoku.PART);
+        BlockPos center = at.offset(-part.getPosX(), 0, -part.getPosY());
+        if (!(level.getBlockEntity(center) instanceof TileEntityGomoku board)) return Optional.empty();
+        return Optional.of(read(level, board));
+    }
+
+    // 按区块翻方块实体表：只看客户端已经有的区块，没加载的不去加载。
+    @Override public List<GomokuState> gomokuBoards(Level level, AABB region) {
+        List<GomokuState> found = new ArrayList<>();
+        if (level == null) return found;
+        for (int chunkX = (int) Math.floor(region.minX) >> 4; chunkX <= (int) Math.floor(region.maxX) >> 4; chunkX++) {
+            for (int chunkZ = (int) Math.floor(region.minZ) >> 4; chunkZ <= (int) Math.floor(region.maxZ) >> 4; chunkZ++) {
+                LevelChunk chunk = level.getChunkSource().getChunkNow(chunkX, chunkZ);
+                if (chunk == null) continue;
+                for (BlockEntity entity : chunk.getBlockEntities().values()) {
+                    if (entity instanceof TileEntityGomoku board && region.contains(Vec3.atCenterOf(board.getBlockPos()))) {
+                        found.add(read(level, board));
+                    }
+                }
+            }
+        }
+        return found;
+    }
+
+    // 棋子数组按 x、y 原样抄出来；座位上坐没坐着女仆，和车万女仆落子前核对的一样：座位实体还在、第一个乘客是女仆。
+    private static GomokuState read(Level level, TileEntityGomoku board) {
+        BlockPos center = board.getBlockPos();
+        byte[][] chess = board.getChessData();
+        int[][] stones = new int[chess.length][];
+        for (int x = 0; x < chess.length; x++) {
+            stones[x] = new int[chess[x].length];
+            for (int y = 0; y < chess[x].length; y++) stones[x][y] = chess[x][y];
+        }
+        Point last = board.getLatestChessPoint();
+        GomokuState.Ending ending = switch (board.getStatue()) {
+            case IN_PROGRESS -> GomokuState.Ending.NOT_OVER;
+            case WIN -> GomokuState.Ending.WON;
+            case DRAW -> GomokuState.Ending.DRAW;
+        };
+        UUID sitId = board.getSitId();
+        boolean seated = !level.getEntities((Entity) null, new AABB(center).inflate(3),
+                entity -> entity.getUUID().equals(sitId) && entity.isAlive()
+                        && entity.getFirstPassenger() instanceof EntityMaid).isEmpty();
+        return new GomokuState(center, level.getBlockState(center).getValue(BlockGomoku.FACING), stones,
+                board.isPlayerTurn(), ending, board.getChessCounter(), last.x, last.y, last.type, seated);
     }
 }

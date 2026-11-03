@@ -11,7 +11,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 
-/** 女仆在观察里的样子：跟着与驻守、好感分档、在想与头上的话、只在是的时候给的几项。 */
+/** 女仆在观察里的样子：跟着与驻守、好感分档、在想与头上的话、只在是的时候给的几项；五子棋盘的轮次、最后一手与胜负。 */
 class MaidSightTest {
 
     @Test
@@ -49,5 +49,31 @@ class MaidSightTest {
         assertEquals("正在查看背包", summary.getAsJsonObject("thinking").get("note").getAsString());
         assertEquals(1, summary.getAsJsonArray("bubbles").size(), "表情气泡不列");
         assertEquals("你好呀", summary.getAsJsonArray("bubbles").get(0).getAsString());
+    }
+
+    @Test
+    void 五子棋盘_还在下_写轮到谁与最后一手() {
+        int[][] stones = MaidFakes.emptyStones();
+        stones[7][7] = GomokuState.YOURS;
+        JsonObject summary = MaidSight.gomoku(MaidFakes.board(stones, false, GomokuState.Ending.NOT_OVER, 1, 7, 7,
+                GomokuState.YOURS));
+        assertEquals("maid", summary.get("turn").getAsString());
+        assertEquals(1, summary.get("moves").getAsInt());
+        assertEquals("H8", summary.get("last_move").getAsString());
+        assertTrue(summary.get("maid_seated").getAsBoolean());
+        assertFalse(summary.has("winner"), "没结束不给");
+    }
+
+    @Test
+    void 五子棋盘_她赢了_空棋盘没有最后一手() {
+        JsonObject over = MaidSight.gomoku(MaidFakes.board(MaidFakes.emptyStones(), true, GomokuState.Ending.WON, 9,
+                3, 3, GomokuState.HERS));
+        assertEquals("over", over.get("turn").getAsString());
+        assertEquals("maid", over.get("winner").getAsString());
+        JsonObject fresh = MaidSight.gomoku(MaidFakes.board(MaidFakes.emptyStones(), true,
+                GomokuState.Ending.NOT_OVER, 0, -1, -1, 0));
+        assertFalse(fresh.has("last_move"));
+        assertEquals(15, MaidSight.gomokuDetail(MaidFakes.board(MaidFakes.emptyStones(), true,
+                GomokuState.Ending.NOT_OVER, 0, -1, -1, 0)).getAsJsonArray("board").size());
     }
 }

@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.navigation.spi.StowBeforeWalking;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.ability.chat.spi.TalkTo;
 import org.maiwithu.maicraft.ability.follow.spi.RideAlong;
+import org.maiwithu.maicraft.ability.gomoku.spi.GomokuBoards;
 import org.maiwithu.maicraft.ability.maid.spi.MaidSettings;
 import org.maiwithu.maicraft.ability.vehicle.spi.FlightStabilizers;
 import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
@@ -102,6 +103,7 @@ public final class CompatRegistry {
     private final Slot<RideAlong> rideAlongs = slot("同乘的办法", CompatRideAlong::new);
     private final Slot<TalkTo> talkTos = slot("对生物说话的办法", CompatTalkTo::new);
     private final Slot<MaidSettings> maidSettings = slot("改女仆设置的办法", CompatMaidSettings::new);
+    private final Slot<GomokuBoards> gomokuBoards = slot("下五子棋的办法", CompatGomokuBoards::new);
     private final Slot<FlightStabilizers> flightStabilizers = slot("飞行稳定器", CompatFlightStabilizers::new);
     private final Slot<StructureWorksites> structureWorksites = slot("物理结构上的工地", CompatStructureWorksites::new);
     private final List<String> decisions = new ArrayList<>();
@@ -315,6 +317,11 @@ public final class CompatRegistry {
         maidSettings.add(module, build);
     }
 
+    /** 联动入口交一种下五子棋的办法（车万女仆的棋盘）的建法：进世界时建，包一层后交给下五子棋；模组停用后认不出棋盘。 */
+    public void gomokuBoards(CompatModule module, Function<PlayerServices, GomokuBoards> build) {
+        gomokuBoards.add(module, build);
+    }
+
     /** 联动入口交一种读写飞行稳定器的办法（Flight Control）的建法：进世界时建，包一层后交给看载具与驾驶。 */
     public void flightStabilizers(CompatModule module, Function<PlayerServices, FlightStabilizers> build) {
         flightStabilizers.add(module, build);
@@ -458,6 +465,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的改女仆设置办法；规矩同物品来源。 */
     public List<MaidSettings> maidSettings(PlayerServices services) {
         return maidSettings.build(services);
+    }
+
+    /** 进世界时建联动模组的下五子棋办法；规矩同物品来源。 */
+    public List<GomokuBoards> gomokuBoards(PlayerServices services) {
+        return gomokuBoards.build(services);
     }
 
     /** 进世界时建联动模组的飞行稳定器读写办法；规矩同物品来源。 */

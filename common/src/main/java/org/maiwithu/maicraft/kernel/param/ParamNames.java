@@ -31,6 +31,7 @@ public final class ParamNames {
             Map.entry("prefer", "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后"),
             Map.entry("drops_from", "掉落线索：要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表）"),
             Map.entry("text", "要发送或书写的文字"),
+            Map.entry("move", "五子棋这一手下在哪（记谱写法）：列 A–O（站在你这一侧从左到右）加行 1–15（离你最近的是 1），例如 H8"),
             Map.entry("message", "要说的一句话：不给 target 发到游戏聊天、对全体玩家可见；给了 target 是对那只生物说"),
             Map.entry("name", "名字，例如要记住的地点名"),
             Map.entry("distance", "保持的距离，单位格，例如跟随时与目标相隔几格"),

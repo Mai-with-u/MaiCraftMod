@@ -10,10 +10,13 @@ import java.util.Set;
 import java.util.TreeMap;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -118,6 +121,34 @@ final class MaidFakes {
         @Override public boolean schedulePosScreenOpen() {
             return schedulePos;
         }
+
+        /** 摆着的那个五子棋盘；没有为 null。 */
+        GomokuState board;
+
+        // 棋盘上任一格都认：中心那一格前后左右各一格以内。
+        @Override public Optional<GomokuState> gomoku(Level level, BlockPos at) {
+            if (board == null) return Optional.empty();
+            BlockPos center = board.center();
+            boolean onBoard = at.getY() == center.getY() && Math.abs(at.getX() - center.getX()) <= 1
+                    && Math.abs(at.getZ() - center.getZ()) <= 1;
+            return onBoard ? Optional.of(board) : Optional.empty();
+        }
+
+        @Override public List<GomokuState> gomokuBoards(Level level, AABB region) {
+            return board == null ? List.of() : List.of(board);
+        }
+    }
+
+    /** 一个五子棋盘：中心在 (0, 64, 0)、朝北（她坐在东边，你在西边）；棋子按 x、y 摆。 */
+    static GomokuState board(int[][] stones, boolean yourTurn, GomokuState.Ending ending, int moves, int lastX,
+            int lastY, int lastStone) {
+        return new GomokuState(new BlockPos(0, 64, 0), Direction.NORTH, stones, yourTurn, ending, moves, lastX, lastY,
+                lastStone, true);
+    }
+
+    /** 一张空棋盘。 */
+    static int[][] emptyStones() {
+        return new int[GomokuState.SIZE][GomokuState.SIZE];
     }
 
     /** 写端替身：开框、打字、回车照真人的效果改读端；回车时的反应由测试摆。 */
