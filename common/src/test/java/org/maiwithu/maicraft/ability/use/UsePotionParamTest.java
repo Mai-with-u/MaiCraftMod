@@ -58,6 +58,25 @@ class UsePotionParamTest {
     }
 
     @Test
+    void 潜行与写字同时给_不进世界() {
+        // 潜行右键告示牌打不开编辑界面：两样一起给按参数用得不对报回。
+        JsonObject params = new JsonObject();
+        params.addProperty("sneak", true);
+        params.addProperty("text", "你好");
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, decide(params));
+        assertTrue(finish.result().problem().message().contains("sneak"));
+    }
+
+    @Test
+    void 给了潜行_任务输入带上潜行() {
+        JsonObject params = new JsonObject();
+        params.addProperty("sneak", true);
+        params.addProperty("item", "minecraft:golden_apple");
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class, decide(params));
+        assertTrue(((UseInput) run.input()).sneak());
+    }
+
+    @Test
     void 只给药水种类_拿写着这种药水的普通药水瓶() {
         JsonObject params = new JsonObject();
         params.addProperty("potion", "minecraft:fire_resistance");

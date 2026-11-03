@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
@@ -78,6 +79,9 @@ public final class UseModule implements AbilityModule {
                     ParamSpec.of("keep_trying", ParamType.INTEGER).range(0, 10).defaultValue(0)
                             .doc("点下去没反应时接着点，最多这么多秒：传送带上跑着的东西要连着点才抓得到。"
                                     + "不给就点一下没反应就停（不重复点，免得做两次）").build(),
+                    ParamSpec.of("sneak", ParamType.BOOLEAN).defaultValue(false)
+                            .doc("true 时按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；"
+                                    + "不给就不潜行。不能和 text 一起给").build(),
                     ParamSpec.of("face", ParamType.CHOICE)
                             .choices("up", "down", "north", "south", "east", "west")
                             .doc("点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。"
@@ -102,7 +106,7 @@ public final class UseModule implements AbilityModule {
             ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
             ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
-            FacilityKinds facilities) {
+            FacilityKinds facilities, HoldsSneak sneak) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -119,7 +123,8 @@ public final class UseModule implements AbilityModule {
                 memory,
                 new LiveOthersThings(context, protection, creatures),
                 space,
-                facilities), ClientRegisteredIds.builtIn());
+                facilities,
+                sneak), ClientRegisteredIds.builtIn());
     }
 
     @Override public AbilitySpec spec() {
@@ -138,6 +143,11 @@ public final class UseModule implements AbilityModule {
         List<String> textLines = linesOf(params.has("text") ? params.text("text") : null);
         List<String> invalid = UseDecider.invalidCombinations(step.goal().target() != null,
                 item, block, entity, textLines);
+        boolean sneak = params.has("sneak") && params.bool("sneak");
+        // 潜行右键告示牌会把手里的东西放上去、不打开编辑界面：写字只能直接右键。
+        if (sneak && !textLines.isEmpty()) {
+            invalid.add("sneak 不能和 text 一起给：写告示牌要直接右键，潜行右键打不开编辑界面");
+        }
         if (textLines.size() > 4) {
             invalid.add("告示牌最多写 4 行，现在给了 " + textLines.size() + " 行");
         }
@@ -168,7 +178,7 @@ public final class UseModule implements AbilityModule {
         int keepTrying = params.has("keep_trying") ? (int) params.integer("keep_trying") : 0;
         String held = potion == null ? lower(item) : new StackKey(lower(item), potion).written();
         return new StepDecision.Run(new UseInput(step.goal().target(), held, lower(block), lower(entity),
-                count, radius, textLines, step.goal().permissions(), face, keepTrying));
+                count, radius, textLines, step.goal().permissions(), face, keepTrying, sneak));
     }
 
     @Override public void registerTasks(TaskFactories factories) {

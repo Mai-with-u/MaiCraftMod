@@ -293,10 +293,17 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         return switch (services.interactions().build(target, input.writesText())) {
             case UseSeams.Built.CannotAim cannot -> aimFailed(cannot.problem());
             case UseSeams.Built.Ready ready -> {
+                // 要潜行着右键却没接上按住潜行：如实说做不了，不改成直接右键（那是另一种用法，开的不是同一个东西）。
+                if (input.sneak() && services.sneak() == null) {
+                    ready.action().close();
+                    yield stop(Problem.of(Problem.Kind.UNSUPPORTED, "这里按不了潜行，潜行右键做不了", null));
+                }
                 interaction = ready;
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
                 dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
-                yield goWith(Phase.INTERACT, ready.action(), "到了能动手的位置，出手");
+                // 潜行右键：整一下出手都按着潜行，动作收尾时松开。
+                Action strike = input.sneak() ? services.sneak().sneaking(ready.action()) : ready.action();
+                yield goWith(Phase.INTERACT, strike, input.sneak() ? "到了能动手的位置，按住潜行出手" : "到了能动手的位置，出手");
             }
         };
     }

@@ -68,6 +68,7 @@ public final class ParamNames {
             Map.entry("direction", "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定"),
             Map.entry("into", "存进哪里：container 箱子、木桶这类容器（默认），network ME 网络（身上的无线终端或附近装着的 ME 终端）"),
             Map.entry("keep_trying", "点下去没反应时接着点，最多这么多秒（传送带上跑着的东西要连着点才抓得到）；不给就点一下没反应就停"),
+            Map.entry("sneak", "按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；不给就不潜行"),
             Map.entry("face", "点方块的哪一面：up / down / north / south / east / west；用扳手转机器时点哪一面决定绕哪根轴转"),
             Map.entry("interests", "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID"),
             Map.entry("angle_degrees", "扇形开口角（度），1..360；配 direction 使用，有方向默认 90"),

@@ -23,10 +23,18 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param permissions 这次任务的许可
  * @param face       点方块朝哪一面；不指定为 null，点看得见的任一面
  * @param keepTrying 点下去没反应时接着点最多几秒；0 是点一下没反应就停
+ * @param sneak      出手时按住潜行（潜行右键是另一种用法：开马的物品栏、让女仆坐下）
  */
 record UseInput(Target target, String item, String block, String entity,
         long count, long radius, List<String> textLines, Permissions permissions, Direction face,
-        int keepTrying) implements TaskInput {
+        int keepTrying, boolean sneak) implements TaskInput {
+
+    /** 不潜行。 */
+    UseInput(Target target, String item, String block, String entity,
+            long count, long radius, List<String> textLines, Permissions permissions, Direction face,
+            int keepTrying) {
+        this(target, item, block, entity, count, radius, textLines, permissions, face, keepTrying, false);
+    }
 
     /** 不指定点哪一面，没反应就停。 */
     UseInput(Target target, String item, String block, String entity,
@@ -56,6 +64,6 @@ record UseInput(Target target, String item, String block, String entity,
         String what = block != null ? block : entity != null ? entity : target != null ? "指定的目标" : "手上的东西";
         String times = count > 1 ? "，做 " + count + " 次" : "";
         String writing = writesText() ? "，写「" + String.join(" / ", textLines) + "」" : "";
-        return "用一下" + what + times + writing;
+        return (sneak ? "潜行着用一下" : "用一下") + what + times + writing;
     }
 }

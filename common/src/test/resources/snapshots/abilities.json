@@ -5,7 +5,7 @@
       {
         "ability": "maicraft:use",
         "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
-        "parameters": "item?: string, potion?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, keep_trying: integer = 0, face?: string",
+        "parameters": "item?: string, potion?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, keep_trying: integer = 0, sneak: boolean = false, face?: string",
         "targets": [
           "here",
           "landmark",
@@ -385,6 +385,13 @@
           "default": 0,
           "min": 0,
           "max": 10
+        },
+        {
+          "name": "sneak",
+          "type": "boolean",
+          "required": false,
+          "doc": "true 时按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；不给就不潜行。不能和 text 一起给",
+          "default": false
         },
         {
           "name": "face",

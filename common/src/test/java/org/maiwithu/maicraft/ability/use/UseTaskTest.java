@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
@@ -205,6 +206,30 @@ class UseTaskTest {
         assertEquals(1L, ((UseDetails) result.details()).appliedTimes());
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED
                 && change.what().equals("minecraft:lever")));
+    }
+
+    @Test
+    void 潜行右键_整一下出手都按着潜行() {
+        // 潜行右键自己的狼让它坐下：出手的那个动作交给按住潜行包一层，靠近时不潜行。
+        Rig rig = new Rig();
+        rig.seen.put("e1", new ResolvesSeen.Resolved(WorldPosition.here(2, 64, 2), "minecraft:wolf", 7));
+        rig.world.entities.put(7, new UseSeams.ReadsWorld.SeenEntity("minecraft:wolf", new BlockPos(2, 64, 2), true));
+        rig.interactions.applied("狼坐下了");
+        TaskResult result = rig.run(new UseInput(new Target.Seen("e1"), null, null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 0, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, rig.sneaked.size());
+    }
+
+    @Test
+    void 要潜行却按不了潜行_如实说做不了_不改成直接右键() {
+        Rig rig = new Rig();
+        rig.sneak = null;
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.applied("不该点到这一下");
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 0, true));
+        assertProblem(result, Problem.Kind.UNSUPPORTED);
     }
 
     @Test
@@ -588,6 +613,12 @@ class UseTaskTest {
         });
         /** 附近搜索按由近到远给出的方块格子。 */
         final List<BlockPos> nearestBlocks = new ArrayList<>();
+        /** 按住潜行：默认记下包过哪些动作、原样推进；测"没接上"时置空。 */
+        final List<Action> sneaked = new ArrayList<>();
+        HoldsSneak sneak = inner -> {
+            sneaked.add(inner);
+            return inner;
+        };
         private long tick;
 
         UseInput input(Target target, String item, String block, String entity, long count) {
@@ -608,7 +639,7 @@ class UseTaskTest {
             };
             UseServices services = new UseServices(world, interactions, close, hand, needs,
                     id -> Optional.ofNullable(seen.get(id)), search, refusal, FakeSignEditor::open,
-                    drops, travel, menus, memory, others, space, facilities);
+                    drops, travel, menus, memory, others, space, facilities, sneak);
             UseTask task = new UseTask(input, services);
             task.start(tick());
             return task;

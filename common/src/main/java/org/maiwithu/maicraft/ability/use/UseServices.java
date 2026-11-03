@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
@@ -30,6 +31,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
  * @param facilities   设施分类：放下的床、工作台这类记不记进世界记忆问它；没接上时放下的不补账
  * @param others       别人的东西认不认得出；没接上时会改动世界的用法一律不碰自己挑的目标（宁可不做，不越权）
  * @param space        背包空间：要空手却腾不出格子时先腾一格（存进网络、箱子或丢零碎）；没接上时如实说腾不出
+ * @param sneak        出手时按住潜行；没接上时要潜行的用法如实说做不了
  */
 record UseServices(
         UseSeams.ReadsWorld world,
@@ -47,7 +49,18 @@ record UseServices(
         WorldMemory memory,
         UseSeams.OthersThings others,
         InventorySpace space,
-        FacilityKinds facilities) {
+        FacilityKinds facilities,
+        HoldsSneak sneak) {
+
+    /** 没接潜行。 */
+    UseServices(UseSeams.ReadsWorld world, UseSeams.BuildsInteraction interactions, BringsPlayerClose close,
+            UseSeams.PreparesHand hand, ItemNeeds needs, ResolvesSeen seen, SearchesNearby search,
+            UseSeams.ReadsGameRefusal refusal, UseSeams.ReadsSignEditor signEditors, PicksUpDrops drops,
+            UseSeams.TravelsTo travel, UseSeams.LooksInMenus menus, WorldMemory memory, UseSeams.OthersThings others,
+            InventorySpace space, FacilityKinds facilities) {
+        this(world, interactions, close, hand, needs, seen, search, refusal, signEditors, drops, travel, menus, memory,
+                others, space, facilities, null);
+    }
 
     /** 没接背包空间。 */
     UseServices(UseSeams.ReadsWorld world, UseSeams.BuildsInteraction interactions, BringsPlayerClose close,
@@ -55,7 +68,7 @@ record UseServices(
             UseSeams.ReadsGameRefusal refusal, UseSeams.ReadsSignEditor signEditors, PicksUpDrops drops,
             UseSeams.TravelsTo travel, UseSeams.LooksInMenus menus, WorldMemory memory, UseSeams.OthersThings others) {
         this(world, interactions, close, hand, needs, seen, search, refusal, signEditors, drops, travel, menus, memory,
-                others, null, null);
+                others, null, null, null);
     }
 
     UseServices {
