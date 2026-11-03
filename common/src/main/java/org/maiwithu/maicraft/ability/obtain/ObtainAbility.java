@@ -124,7 +124,7 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
             return invalidGoal(reading.invalid());
         }
         return new StepDecision.Run(new ObtainItems(reading.requests(), scope(goal.params()), goal.permissions(),
-                purposeLabel(goal), describeText(reading.requests())));
+                purposeLabel(goal), describeText(reading.requests()), goal.digTool()));
     }
 
     // 估算：参数照下达时一样读、一样查；写错了的不进世界，估成"按这次的写法弄不到"并写清哪里不对。

@@ -68,7 +68,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         // 来源动作里点了但没能确认结果的交互、途中腾地方存了丢了什么，引擎直接记进本任务的结果。
         return phase == Phase.ACQUIRE
                 ? acquisition.needSeveral(input.requests(), input.permissions(), input.scope(),
-                        obtainedVia::add, records())
+                        obtainedVia::add, records(), input.digTool())
                 : null;
     }
 

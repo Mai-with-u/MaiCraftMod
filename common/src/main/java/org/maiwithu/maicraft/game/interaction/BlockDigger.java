@@ -66,6 +66,13 @@ public final class BlockDigger {
     /** 挖的是概率掉落（砾石出燧石、树叶出树苗）：挑工具时不拿剪刀和精准采集，时运高的优先。 */
     private boolean forChanceDrops;
     public void forChanceDrops(boolean on) { forChanceDrops = on; }
+    /** 目标里点名的工具：只用那一件，不写时给 null 按每格代价自动挑。 */
+    private DigTool wanted;
+    /** 点名这一趟用哪件工具；在第一次开挖前设好，之后挖同一趟不换主意。 */
+    public void digTool(DigTool tool) { wanted = tool; }
+    /** 点名的那件拿不到时的原因（身上没有、在副手上）：交给调用方原样说给下令人听。 */
+    private String missingToolWhy;
+    public String missingToolWhy() { return missingToolWhy; }
     private Predicate<BlockHitResult> preparation = hit -> true;
     /** 哪些遮挡格可以顺手挖掉；判断归玩家行为层的许可检查点，没给时一格都不挖。 */
     private Predicate<BlockPos> mayBreakOccluder = occluder -> false;
@@ -113,7 +120,9 @@ public final class BlockDigger {
         /** 目标所有面都不可命中，且没有可安全清除的遮挡；当前无法继续。 */
         NO_SHOT,
         /** 该腾空主手才划算，可背包里腾不出放手里东西的地方；不丢东西，交回调用方。 */
-        NO_ROOM;
+        NO_ROOM,
+        /** 目标点名要用的工具身上没有：直接失败，不换成别的工具。 */
+        MISSING_TOOL;
 
         /** 本 tick 有方块真的没了(目标或遮挡物)。 */
         public boolean broke() {
@@ -233,6 +242,12 @@ public final class BlockDigger {
     private DigResult advance(PlayerContext context, BlockHitResult hit, boolean targetBreak) {
         // 腾空主手却放不下手里的东西：这一步做不下去，交回调用方报清原因，不丢东西。
         if (toolNoRoom) return DigResult.NO_ROOM;
+        // 点名要用的工具身上没有：不换别的、不临时现做，直接交回失败。
+        if (pendingToolPlan instanceof DigToolPlan.Missing missing) {
+            missingToolWhy = missing.problem();
+            reset();
+            return DigResult.MISSING_TOOL;
+        }
         // 关背包与搬工具两步都可能在等待；先结清它们，再轮到快捷栏选择和破坏本体。
         DigResult toolStep = advanceToolPreparation(context);
         if (toolStep != null) return toolStep;
@@ -378,19 +393,23 @@ public final class BlockDigger {
             holdToolSlot(context, slot);
         } else if (plan instanceof DigToolPlan.BareHand()) {
             clearMainHand(context);
+        } else if (plan instanceof DigToolPlan.Missing) {
+            // 点名的那件身上没有：留着这条结论，本刻的推进马上把它变成整趟失败，不换成别的工具。
         } else {
             pendingToolPlan = null;
         }
     }
 
-    // 挑工具给的结论：挖概率掉落时照概率掉落的挑法，其余照玩家行为层的账。
+    // 挑工具给的结论：点名只认那一件，否则挖概率掉落时照概率掉落的挑法，其余照玩家行为层的账。
     private DigToolPlan planFor(BlockState state) {
+        // 点名了就用那一件：挖概率掉落也不另挑剪刀或精准采集，不够格也照挖。
+        if (wanted != null) return tools.plan(player, state, expectedBlocks, wantsDrop, wanted);
         // 挖概率掉落时换一套挑法：拿剪刀、精准采集挖树叶和砾石，只会掉它自己，树苗、燧石一件都出不来。
         if (forChanceDrops) {
             int slot = ToolSelect.bestSlotForChanceDrops(player, state);
             return slot >= 0 ? DigToolPlan.hold(slot) : DigToolPlan.keep();
         }
-        return tools.plan(player, state, expectedBlocks, wantsDrop);
+        return tools.plan(player, state, expectedBlocks, wantsDrop, null);
     }
 
     // 工具在快捷栏就切换选中格；在背包第 9～35 格则先显示背包，再与当前快捷栏格交换。

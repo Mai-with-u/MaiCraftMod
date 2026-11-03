@@ -8,6 +8,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
 
@@ -22,9 +23,10 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param permissions  这次任务的许可；来源备料与腾背包受同一份许可管
  * @param purpose      用途标签，写进结果与腾背包的备注，例如"按需要拿取"
  * @param describeText 给日志与面板的一句话，例如"再拿 8 个 minecraft:torch"
+ * @param digTool      目标里点名的挖方块工具：途中要挖方块时只用那一件，身上没有就直接失败；null 按每格代价自动挑
  */
 record ObtainItems(List<ItemRequest> requests, ItemAcquisition.Scope scope, Permissions permissions,
-        String purpose, String describeText) implements TaskInput {
+        String purpose, String describeText, DigTool digTool) implements TaskInput {
 
     ObtainItems {
         if (requests == null || requests.isEmpty()) throw new IllegalArgumentException("拿东西必须带要拿的东西");
@@ -35,10 +37,16 @@ record ObtainItems(List<ItemRequest> requests, ItemAcquisition.Scope scope, Perm
         if (describeText == null || describeText.isBlank()) throw new IllegalArgumentException("任务输入必须有一句话描述");
     }
 
+    /** 没有点名挖方块工具的任务输入。 */
+    ObtainItems(List<ItemRequest> requests, ItemAcquisition.Scope scope, Permissions permissions,
+            String purpose, String describeText) {
+        this(requests, scope, permissions, purpose, describeText, null);
+    }
+
     /** 只要一样东西时的任务输入。 */
     ObtainItems(WantedItem wanted, int count, ItemAcquisition.Scope scope, Permissions permissions,
             String purpose, String describeText) {
-        this(List.of(new ItemRequest(wanted, count, purpose)), scope, permissions, purpose, describeText);
+        this(List.of(new ItemRequest(wanted, count, purpose)), scope, permissions, purpose, describeText, null);
     }
 
     // 同一样东西写两次按一项算、件数相加；先写的排在前面。

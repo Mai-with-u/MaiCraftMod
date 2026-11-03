@@ -6,6 +6,7 @@ import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -32,6 +33,15 @@ public interface StartsAcquisition {
      */
     Action needSeveral(List<ItemRequest> requests, Permissions permissions,
             ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records);
+
+    /**
+     * 同上，并带上目标里点名的挖方块工具：途中要挖方块时只用那一件。
+     * 实现不认点名时按原样办，接口层不挡。
+     */
+    default Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+            ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records, DigTool digTool) {
+        return needSeveral(requests, permissions, scope, onDelivered, records);
+    }
 
     /**
      * 这一场拿到现在为止试过的办法与结果，一句一条、同样的只讲一次：

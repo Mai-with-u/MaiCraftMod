@@ -7,6 +7,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -28,7 +29,7 @@ import java.util.Objects;
  */
 public final class GoalReader {
     private static final List<String> FIELDS =
-            List.of("ability", "purpose", "target", "parameters", "permissions", "steps", "on_failure");
+            List.of("ability", "purpose", "target", "parameters", "permissions", "dig_tool", "steps", "on_failure");
     /** sequence 里还能再套 sequence，但套太深多半是写错了。 */
     private static final int MAX_DEPTH = 3;
 
@@ -41,12 +42,13 @@ public final class GoalReader {
     /** 读一个目标；路径前缀是 {@code goal}。 */
     public Reading read(JsonElement raw) {
         RequestCheck check = new RequestCheck();
-        Goal goal = readGoal(raw, "goal", 0, null, check);
+        Goal goal = readGoal(raw, "goal", 0, null, null, check);
         return new Reading(check.ok() ? goal : null, check.code(), check.errors(), check.notes());
     }
 
     /** @param inherited sequence 里的一步时是整件事的许可，步骤没写的字段沿用它；最外层为 null */
-    private Goal readGoal(JsonElement raw, String path, int depth, Permissions inherited, RequestCheck check) {
+    private Goal readGoal(JsonElement raw, String path, int depth, Permissions inherited, DigTool inheritedTool,
+                          RequestCheck check) {
         if (raw == null || !raw.isJsonObject()) {
             check.error(path, "目标应该是一个对象", "{\"ability\": \"…\", \"parameters\": {…}}", raw);
             return null;
@@ -64,7 +66,11 @@ public final class GoalReader {
         Permissions permissions = present(object, "permissions")
                 ? PermissionsReader.read(object.get("permissions"), path + ".permissions", inherited, check)
                 : inherited;
-        List<Goal> steps = steps(object, path, depth, module, permissions, check);
+        // 挖方块的点名和许可一样沿用整件事的：步骤自己写了就以这一步为准。
+        DigTool digTool = present(object, "dig_tool")
+                ? DigToolReader.read(object.get("dig_tool"), path + ".dig_tool", inheritedTool, check)
+                : inheritedTool;
+        List<Goal> steps = steps(object, path, depth, module, permissions, digTool, check);
         String onFailure = check.choice(object, "on_failure", path + ".on_failure", List.of("stop", "continue"));
         if (module == null) {
             return null;
@@ -80,12 +86,12 @@ public final class GoalReader {
                 boolean ownChoice = i < rawSteps.size() && rawSteps.get(i).isJsonObject()
                         && rawSteps.get(i).getAsJsonObject().has("on_failure");
                 adjusted.add(ownChoice ? step : new Goal(step.ability(), step.purpose(), step.target(), step.params(),
-                        step.permissions(), step.steps(), wholeChoice));
+                        step.permissions(), step.digTool(), step.steps(), wholeChoice));
             }
             steps = adjusted;
             check.note(path + ".on_failure：写在整件事上，按每一步没单独写 on_failure 时的默认处理");
         }
-        return new Goal(module.spec().id(), purpose, target, params, permissions, steps,
+        return new Goal(module.spec().id(), purpose, target, params, permissions, digTool, steps,
                 onFailure == null ? null : Goal.OnFailure.valueOf(onFailure.toUpperCase(Locale.ROOT)));
     }
 
@@ -155,7 +161,7 @@ public final class GoalReader {
      * 整件事开始时说好的许可每一步都照样守：步骤没写的许可字段沿用整件事的。
      */
     private List<Goal> steps(JsonObject object, String path, int depth, AbilityModule module,
-                             Permissions permissions, RequestCheck check) {
+                             Permissions permissions, DigTool digTool, RequestCheck check) {
         JsonElement raw = object.get("steps");
         boolean takesSteps = module != null && module.acceptsSteps();
         if (raw == null || raw.isJsonNull()) {
@@ -178,7 +184,7 @@ public final class GoalReader {
         List<Goal> steps = new ArrayList<>();
         JsonArray array = raw.getAsJsonArray();
         for (int i = 0; i < array.size(); i++) {
-            Goal step = readGoal(array.get(i), path + ".steps[" + i + "]", depth + 1, permissions, check);
+            Goal step = readGoal(array.get(i), path + ".steps[" + i + "]", depth + 1, permissions, digTool, check);
             if (step != null) steps.add(step);
         }
         return steps;

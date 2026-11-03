@@ -59,6 +59,8 @@ public final class LiveBlockDigging implements DigsBlocks {
         digging.aimAt(target.immutable());
         digging.expectBlocks(prep.expectedBlocks());
         digging.wantsDrop(prep.wantsDrop());
+        // 目标里点名了工具就交给挖掘器：只认那一件，身上没有就失败。
+        digging.digTool(prep.digTool());
         return Optional.of(new UntilGone(target.immutable(), digging));
     }
 
@@ -69,6 +71,7 @@ public final class LiveBlockDigging implements DigsBlocks {
         BlockBreaking digging = diggings.get();
         digging.expectBlocks(prep.expectedBlocks());
         digging.wantsDrop(prep.wantsDrop());
+        digging.digTool(prep.digTool());
         return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, digging,
                 (context, cell) -> gone(context.player(), cell)));
     }

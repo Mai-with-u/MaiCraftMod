@@ -201,6 +201,10 @@
                   }
                 }
               },
+              "dig_tool": {
+                "type": "string",
+                "description": "这次挖方块点名用哪件工具：写物品 ID（如 stone_pickaxe 或 minecraft:stone_pickaxe）就只用那一件，身上没有就直接失败、不换成别的；写 hand 腾空主手空手挖；不写按每格代价自动挑。sequence 的一步没写就沿用整件事的"
+              },
               "steps": {
                 "type": "array",
                 "description": "只给 sequence：按顺序做的每一步，是一个列表，每一项都是写法和 goal 一样的完整目标",

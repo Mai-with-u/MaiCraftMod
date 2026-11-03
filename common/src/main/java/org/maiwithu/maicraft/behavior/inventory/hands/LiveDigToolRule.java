@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.game.interaction.DigToolPlan;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.interaction.ToolSelect;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 
 /**
  * 挑工具的生产实现：把角色此刻背包前 36 格与要挖的方块读成挑工具要的事实，交给 {@link DigToolChoice} 下结论。
@@ -47,13 +48,55 @@ public final class LiveDigToolRule implements DigToolRule {
     }
 
     @Override
-    public DigToolPlan plan(LocalPlayer player, BlockState state, int expectedBlocks, boolean wantsDrop) {
+    public DigToolPlan plan(LocalPlayer player, BlockState state, int expectedBlocks, boolean wantsDrop,
+                            DigTool wanted) {
+        // 点名了只认那一件：空手就腾主手，写了物品就挪到主手；身上的没有就如实说没有，不参与每格代价的账。
+        if (wanted != null) return named(player, wanted);
         return switch (verdict(player, state, expectedBlocks, wantsDrop)) {
             case DigToolChoice.Verdict.Swap(int slot) -> DigToolPlan.hold(slot);
             case DigToolChoice.Verdict.BareHand ignored -> DigToolPlan.bareHand();
             // 主手已是合适的、身上也没有更划算的：都不动手。
             case DigToolChoice.Verdict.Keep ignored -> DigToolPlan.keep();
             case DigToolChoice.Verdict.None ignored -> DigToolPlan.keep();
+        };
+    }
+
+    /**
+     * 点名工具的结论：0~8 快捷栏里的选中它，9~35 主背包里的换到主手，已经在主手就不动；
+     * 背包前 36 格都没有那一件时说没找到。副手放着的不算：那件挖不了方块，也不自动换过来，
+     * 只把话说明白。不看硬度、够不够格、预留和掉落敏感——点名了就用。
+     */
+    private static DigToolPlan named(LocalPlayer player, DigTool wanted) {
+        if (wanted instanceof DigTool.Hand) return DigToolPlan.bareHand();
+        Inventory inventory = player.getInventory();
+        List<String> itemIds = new ArrayList<>();
+        int size = Math.min(USABLE_SLOTS, inventory.getContainerSize());
+        for (int slot = 0; slot < size; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            itemIds.add(stack.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+        }
+        ItemStack offhand = inventory.getItem(Inventory.SLOT_OFFHAND);
+        String offhandId = offhand.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(offhand.getItem()).toString();
+        return named(wanted, inventory.selected, itemIds, offhandId);
+    }
+
+    /**
+     * 点名结论的纯判断：按背包前 36 格的物品 ID 找那一件。空手直接腾主手；找到的在快捷栏就选中、在主背包就换到主手、
+     * 已在主手不动；都没有时说清是身上没有，还是在副手上。留着给离线测试直接摆一格一格的物品，不碰客户端玩家对象。
+     */
+    static DigToolPlan named(DigTool wanted, int selected, List<String> itemIds, String offhandId) {
+        return switch (wanted) {
+            case DigTool.Hand ignored -> DigToolPlan.bareHand();
+            case DigTool.Item item -> {
+                for (int slot = 0; slot < Math.min(USABLE_SLOTS, itemIds.size()); slot++) {
+                    if (!item.itemId().equals(itemIds.get(slot))) continue;
+                    yield slot == selected ? DigToolPlan.keep() : DigToolPlan.hold(slot);
+                }
+                if (item.itemId().equals(offhandId)) {
+                    yield DigToolPlan.missing(item.itemId(), "它在副手上，不自动换过来");
+                }
+                yield DigToolPlan.missing(item.itemId(), "身上没有");
+            }
         };
     }
 

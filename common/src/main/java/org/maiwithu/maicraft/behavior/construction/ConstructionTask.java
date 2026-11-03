@@ -113,7 +113,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     private Next<Phase> toClear() {
         List<PlannedCell> cells = site.pendingClear(services.site());
         if (cells.isEmpty()) return toPlace();
-        prepared = new ClearingWork(services, site, records(), input.permissions(), cells);
+        prepared = new ClearingWork(services, site, records(), input.permissions(), cells, input.digTool());
         return Next.go(Phase.CLEAR, "有 " + cells.size() + " 格挡着，先清掉");
     }
 
@@ -172,7 +172,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
 
     private Next<Phase> toCleanup() {
         if (services.ledger().temporaries().isEmpty()) return Next.go(Phase.CLEANUP, "没有临时方块要收");
-        cleanup = new CleanupWork(services, site, records(), input.permissions());
+        cleanup = new CleanupWork(services, site, records(), input.permissions(), input.digTool());
         prepared = cleanup;
         return Next.go(Phase.CLEANUP, "收回临时方块");
     }

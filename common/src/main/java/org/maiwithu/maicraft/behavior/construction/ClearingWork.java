@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -39,6 +40,8 @@ final class ClearingWork extends ConstructionWork {
     private enum Step { APPROACH, DIG, DISMANTLE }
 
     private final Permissions permissions;
+    /** 目标里点名的挖方块工具：清障挖方块时只用那一件，身上没有就直接失败；null 自动挑。 */
+    private final DigTool digTool;
     private final Deque<PlannedCell> queue;
     private PlannedCell cell;
     private Step step;
@@ -50,9 +53,11 @@ final class ClearingWork extends ConstructionWork {
     /** 挖到一半被自卫、吃饭这类事叫走过：人已离了跟前，回来先重新走近再挖。 */
     private boolean interrupted;
 
-    ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions, List<PlannedCell> cells) {
+    ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions,
+            List<PlannedCell> cells, DigTool digTool) {
         super(services, site, records);
         this.permissions = permissions;
+        this.digTool = digTool;
         this.queue = new ArrayDeque<>(cells);
     }
 
@@ -167,7 +172,7 @@ final class ClearingWork extends ConstructionWork {
         // 带上这一趟还要清几格：身上没有对路的工具时按它算现做一把划不划算，做了什么记进施工结果。
         Optional<Action> digging = services.digs().digChained(cell.pos(), chainFace,
                 BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable,
-                new DigsBlocks.ToolPrep(queue.size() + 1, false, permissions, records));
+                new DigsBlocks.ToolPrep(queue.size() + 1, false, permissions, records, digTool));
         if (digging.isEmpty()) {
             site.unreachable(cell.pos(), "挖掘没接上，清不了");
             cell = null;

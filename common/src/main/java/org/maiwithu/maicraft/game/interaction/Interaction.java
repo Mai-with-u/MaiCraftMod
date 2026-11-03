@@ -370,6 +370,11 @@ public final class Interaction {
             failReason = "the backpack has no free slot to stow the item in hand, so the hand cannot be cleared";
             return Status.FAILED;
         }
+        // 点名工具找不到：照准星点一下的入口不点名工具（给的是 HELD），这里仍按失败收，不继续对着方块挥。
+        if (result == BlockDigger.DigResult.MISSING_TOOL) {
+            failReason = "the tool named in dig_tool is not carried, so the block was not broken";
+            return Status.FAILED;
+        }
         if (result == BlockDigger.DigResult.NO_SHOT) {
             double reach = InteractionRange.blockReach(player);
             boolean beyondReach = player.getEyePosition().distanceToSqr(Vec3.atCenterOf(block))

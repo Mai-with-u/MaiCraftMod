@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -112,11 +113,12 @@ public final class GatherAbility implements AbilityModule {
             return seen.lookup(seenId.id())
                     .map(found -> (StepDecision) new StepDecision.Run(new GatherSpot(found.at(), !found.block(),
                             null, expectedItem, goal.permissions(), true, describe(seenId.id(), found),
-                            found.itemFrame())))
+                            found.itemFrame(), goal.digTool())))
                     .orElseGet(() -> gone("观察编号 " + seenId.id() + " 对应的东西不在了（失效、走远或被拆）"));
         }
         if (target instanceof Target.Position position) {
-            Optional<GatherSpot> resolved = resolvePosition(position, params, expectedItem, goal.permissions());
+            Optional<GatherSpot> resolved = resolvePosition(position, params, expectedItem, goal.permissions(),
+                    goal.digTool());
             if (resolved.isPresent()) {
                 return new StepDecision.Run(resolved.get());
             }
@@ -133,7 +135,7 @@ public final class GatherAbility implements AbilityModule {
 
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
     private Optional<GatherSpot> resolvePosition(Target.Position position, ParamValues params, String expectedItem,
-            Permissions permissions) {
+            Permissions permissions, DigTool digTool) {
         // 给了高度就用（深板岩层、钻石层在 0 以下，负高度是合法的一格）；没给才找这一柱列的顶面，找不到才说不清。
         int y;
         if (position.y() != null) {
@@ -148,7 +150,7 @@ public final class GatherAbility implements AbilityModule {
         String declared = params.has("block") ? params.text("block") : null;
         WorldPosition at = new WorldPosition(position.x(), y, position.z(), position.dimension());
         return Optional.of(new GatherSpot(at, false, declared, expectedItem, permissions, false,
-                "采集 (" + position.x() + ", " + y + ", " + position.z() + ") 的方块"));
+                "采集 (" + position.x() + ", " + y + ", " + position.z() + ") 的方块", -1, digTool));
     }
 
     // 目标没了、写法不对都不进游戏就收场：一句话结论只带结论句，展开的原因只在问题里一份。

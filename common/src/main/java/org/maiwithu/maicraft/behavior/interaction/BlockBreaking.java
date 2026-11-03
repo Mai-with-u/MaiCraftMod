@@ -7,6 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -43,6 +44,12 @@ public interface BlockBreaking extends Action {
      * 不说就按要算，挖不到掉落的候选不参与挑工具。
      */
     default void wantsDrop(boolean wants) {
+    }
+
+    /**
+     * 这一趟挖方块点名用哪件工具：写了就只用那一件，身上没有就直接失败；不调用时按每格代价自动挑。
+     */
+    default void digTool(DigTool tool) {
     }
 
     /** 已经挥下去、游戏还没确认的那一下：连锁键要按到它结清才松。 */

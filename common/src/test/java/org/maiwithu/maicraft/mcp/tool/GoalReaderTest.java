@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp.tool;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -176,6 +177,48 @@ class GoalReaderTest {
         assertEquals(Permissions.Fight.SELF_DEFENSE, own.fight());
         assertEquals(Permissions.BlockChanges.NONE, own.changeBlocks());
         assertEquals(Set.of("家", "麦田"), own.protectedLandmarks());
+    }
+
+    @Test
+    void digToolNamesTheItemToDigWith() {
+        GoalReader.Reading reading = read("""
+                {"ability": "use", "dig_tool": "Stone_Pickaxe"}""");
+
+        assertTrue(reading.ok(), reading.errors()::toString);
+        assertEquals(new DigTool.Item("minecraft:stone_pickaxe"), reading.goal().digTool());
+        assertTrue(reading.notes().stream().anyMatch(note -> note.contains("goal.dig_tool")), reading.notes()::toString);
+    }
+
+    @Test
+    void digToolHandMeansTheBareHand() {
+        GoalReader.Reading reading = read("""
+                {"ability": "use", "dig_tool": "hand"}""");
+
+        assertTrue(reading.ok(), reading.errors()::toString);
+        assertEquals(new DigTool.Hand(), reading.goal().digTool());
+    }
+
+    @Test
+    void digToolInAStepOnlyChangesThatStepAndItsChildren() {
+        GoalReader.Reading reading = read("""
+                {"ability": "sequence", "dig_tool": "minecraft:iron_pickaxe", "steps": [
+                   {"ability": "use"},
+                   {"ability": "use", "dig_tool": "hand"}]}""");
+
+        assertTrue(reading.ok(), reading.errors()::toString);
+        assertEquals(new DigTool.Item("minecraft:iron_pickaxe"), reading.goal().digTool());
+        assertEquals(new DigTool.Item("minecraft:iron_pickaxe"), reading.goal().steps().get(0).digTool(),
+                "没写的一步沿用整件事的");
+        assertEquals(new DigTool.Hand(), reading.goal().steps().get(1).digTool(), "单独写了的照自己的");
+    }
+
+    @Test
+    void digToolThatIsNotTextIsReported() {
+        GoalReader.Reading reading = read("""
+                {"ability": "use", "dig_tool": 3}""");
+
+        assertFalse(reading.ok());
+        assertEquals(List.of("goal.dig_tool"), fields(reading));
     }
 
     @Test

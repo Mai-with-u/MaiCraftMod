@@ -130,7 +130,7 @@ public final class BuildModule implements AbilityModule {
             Blueprint blueprint = Blueprint.at(at.dimension(), origin, turn, source.cells());
             return new StepDecision.Run(new BuildInput(
                     new ConstructionInput(blueprint, step.goal().permissions(), "施工", source.fixturesSkipped(),
-                            recorderFor(params, source, blueprint, degrees)), source.what()));
+                            recorderFor(params, source, blueprint, degrees), step.goal().digTool()), source.what()));
         } catch (NoSuchFileException missing) {
             return fail(missing.getReason(), Problem.Kind.NOT_FOUND, "把文件放进 schematics 目录，或改用 design 画图");
         } catch (IOException failure) {
@@ -212,7 +212,7 @@ public final class BuildModule implements AbilityModule {
                             archive.lastCheckAt(), archive.lastCheckNote());
             return new StepDecision.Run(new BuildInput(
                     new ConstructionInput(construction, step.goal().permissions(), "施工", source.fixturesSkipped(),
-                            new BuildingRecorder(records, planned, true)),
+                            new BuildingRecorder(records, planned, true), step.goal().digTool()),
                     "改建「" + archive.name() + "」：" + source.what()));
         } catch (NoSuchFileException missing) {
             return fail(missing.getReason(), Problem.Kind.NOT_FOUND, "把文件放进 schematics 目录，或改用 design 画图");

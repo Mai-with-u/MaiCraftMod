@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.gather;
 
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.TaskInput;
@@ -17,14 +18,20 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param named        目标是 LLM 用观察编号点名的：点名即许可，玩家放的也照挖；按坐标给的走完整的保护检查
  * @param describeText 给日志与面板的一句话，例如"采集 b7 的方块"
  * @param itemFrame    点名的是展示框时它的游戏实体编号：打一下把里面的东西打出来再捡；不是展示框为 -1
+ * @param digTool      目标里点名的挖方块工具：挖的时候只用那一件，身上没有就直接失败；null 按每格代价自动挑
  */
 record GatherSpot(WorldPosition at, boolean drop, String declaredType,
-        String expectedItem, Permissions permissions, boolean named, String describeText, int itemFrame)
-        implements TaskInput {
+        String expectedItem, Permissions permissions, boolean named, String describeText, int itemFrame,
+        DigTool digTool) implements TaskInput {
 
     GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
             boolean named, String describeText) {
-        this(at, drop, declaredType, expectedItem, permissions, named, describeText, -1);
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, -1, null);
+    }
+
+    GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
+            boolean named, String describeText, int itemFrame) {
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, itemFrame, null);
     }
 
     GatherSpot {

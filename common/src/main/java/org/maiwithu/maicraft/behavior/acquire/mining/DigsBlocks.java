@@ -9,6 +9,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -36,11 +37,18 @@ public interface DigsBlocks {
      * @param wantsDrop      这一趟挖下来的东西要不要：采掘要，清障与挖楼梯只要路通
      * @param permissions    这次任务的许可：现做工具放工作台、拿料都按它
      * @param records        发起任务的记账口；可以为 null
+     * @param digTool        目标里点名的工具：写了就只用那一件，身上没有就直接失败；null 按每格代价自动挑
      */
-    record ToolPrep(int expectedBlocks, boolean wantsDrop, Permissions permissions, TaskRecords records) {
+    record ToolPrep(int expectedBlocks, boolean wantsDrop, Permissions permissions, TaskRecords records,
+                    DigTool digTool) {
         public ToolPrep {
             expectedBlocks = Math.max(1, expectedBlocks);
             Objects.requireNonNull(permissions, "permissions");
+        }
+
+        /** 没有点名工具的一趟：按每格代价自动挑。 */
+        public ToolPrep(int expectedBlocks, boolean wantsDrop, Permissions permissions, TaskRecords records) {
+            this(expectedBlocks, wantsDrop, permissions, records, null);
         }
     }
 

@@ -548,7 +548,9 @@ public final class ClientStairsDown implements DigsStairsDown {
             int left = tunnel != null && feet != null ? 3 * Math.max(1, feet.getY() - tunnel.targetY())
                     : Math.max(3, plannedCells - yielded);
             // 往下挖台阶只要路通，挖下来的东西不要：徒手、拿不对的工具挖也行。
-            return new DigsBlocks.ToolPrep(left, false, permissions == null ? Permissions.DEFAULT : permissions, records);
+            // 挖哪一格由路决定、不是目标方块，目标里点名的工具没有传进这条链，按每格代价自动挑。
+            return new DigsBlocks.ToolPrep(left, false,
+                    permissions == null ? Permissions.DEFAULT : permissions, records, null);
         }
 
         // 从触发格顺着挖的方向排下去的那一行：往下的不出这种矿的生成范围，横着的不超过通道长度；到第一格不合适的为止。

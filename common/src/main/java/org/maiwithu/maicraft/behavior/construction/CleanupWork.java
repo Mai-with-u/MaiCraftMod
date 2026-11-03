@@ -11,7 +11,9 @@ import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -37,6 +39,8 @@ final class CleanupWork extends ConstructionWork {
     private static final Logger LOG = LoggerFactory.getLogger(CleanupWork.class);
 
     private final Permissions permissions;
+    /** 目标里点名的挖方块工具：收回临时方块时只用那一件，身上没有就直接失败；null 自动挑。 */
+    private final DigTool digTool;
     private final Deque<BlockPos> queue = new ArrayDeque<>();
     private final List<BlockPos> left = new ArrayList<>();
     private boolean planned;
@@ -45,9 +49,11 @@ final class CleanupWork extends ConstructionWork {
     private Step step;
     private long lastRemovalTick = Long.MIN_VALUE;
 
-    CleanupWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions) {
+    CleanupWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions,
+            DigTool digTool) {
         super(services, site, records);
         this.permissions = permissions;
+        this.digTool = digTool;
     }
 
     /** 没收回的临时方块。 */
@@ -114,7 +120,8 @@ final class CleanupWork extends ConstructionWork {
     }
 
     private ActionStatus dig() {
-        Optional<Action> digging = services.digs().dig(removing);
+        Optional<Action> digging = services.digs().dig(removing,
+                new DigsBlocks.ToolPrep(1, true, permissions, records, digTool));
         if (digging.isEmpty()) {
             left.add(removing);
             removing = null;

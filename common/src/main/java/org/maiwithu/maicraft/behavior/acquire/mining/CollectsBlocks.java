@@ -9,6 +9,7 @@ import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
@@ -37,14 +38,7 @@ public interface CollectsBlocks {
      * @param cells 要收的格子，按先后
      */
     default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions) {
-        List<Action> steps = new ArrayList<>();
-        for (BlockPos cell : cells) {
-            Optional<Action> one = collect(cell, permissions);
-            if (one.isEmpty()) return Optional.empty();
-            steps.add(one.get());
-        }
-        return steps.isEmpty() ? Optional.empty()
-                : Optional.of(new StepwiseActions("一格一格收 " + cells.size() + " 格", steps.toArray(Action[]::new)));
+        return collectBatch(cells, permissions, null, null, null);
     }
 
     /**
@@ -70,6 +64,24 @@ public interface CollectsBlocks {
     }
 
     /**
+     * 同上，并带上目标里点名的工具：写了就只用那一件，身上没有就直接失败，不换成别的；
+     * 不写时按每格代价自动挑。没有成批实现的接缝没有带工具的入口，按一格一格收、忽略点名。
+     *
+     * @param digTool 目标里点名的工具；null 表示自动挑
+     */
+    default Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
+            Consumer<BlockPos> givenUp, DigTool digTool) {
+        List<Action> steps = new ArrayList<>();
+        for (BlockPos cell : cells) {
+            Optional<Action> one = collect(cell, permissions);
+            if (one.isEmpty()) return Optional.empty();
+            steps.add(one.get());
+        }
+        return steps.isEmpty() ? Optional.empty()
+                : Optional.of(new StepwiseActions("一格一格收 " + cells.size() + " 格", steps.toArray(Action[]::new)));
+    }
+
+    /**
      * 收概率掉落的方块（砾石出燧石、树叶出树苗、草出种子）：和成批收一样一格一格走到跟前挖掉、整批挖完再捡，
      * 跳过的格交给 givenUp；挖的时候不拿剪刀和带精准采集的工具（拿了方块只掉它自己），有时运的优先，不连锁。
      * 没有专门实现的接缝照常成批收。
@@ -77,5 +89,16 @@ public interface CollectsBlocks {
     default Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
             Consumer<BlockPos> givenUp) {
         return collectBatch(cells, permissions, null, givenUp);
+    }
+
+    /**
+     * 收概率掉落的方块，并带上目标里点名的工具：点名了就用那一件，不再另按概率掉落的挑法换工具。
+     * 没有专门实现的接缝照常成批收。
+     */
+    default Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp, DigTool digTool) {
+        return digTool == null
+                ? collectBatch(cells, permissions, null, givenUp)
+                : collectBatch(cells, permissions, null, givenUp, digTool);
     }
 }

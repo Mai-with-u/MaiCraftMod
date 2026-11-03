@@ -33,6 +33,9 @@ final class GoalSchema {
                 + "要去的地方、要处理的东西写在 target，不写在这里");
         properties.add("parameters", parameters);
         properties.add("permissions", permissions());
+        properties.add("dig_tool", text("这次挖方块点名用哪件工具：写物品 ID（如 stone_pickaxe 或 minecraft:stone_pickaxe）"
+                + "就只用那一件，身上没有就直接失败、不换成别的；写 hand 腾空主手空手挖；不写按每格代价自动挑。"
+                + "sequence 的一步没写就沿用整件事的"));
         JsonObject steps = new JsonObject();
         steps.addProperty("type", "array");
         steps.addProperty("description", "只给 sequence：按顺序做的每一步，是一个列表，每一项都是写法和 goal 一样的完整目标");

@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -164,9 +165,16 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     public Action needSeveral(List<ItemRequest> requests, Permissions permissions, Scope scope,
             Consumer<String> onDelivered, TaskRecords records) {
+        return needSeveral(requests, permissions, scope, onDelivered, records, null);
+    }
+
+    /** 同上，并带着目标里点名的挖方块工具：途中挖方块只用那一件。 */
+    public Action needSeveral(List<ItemRequest> requests, Permissions permissions, Scope scope,
+            Consumer<String> onDelivered, TaskRecords records, DigTool digTool) {
         // 每样仍交给一次拿东西的动作去办，其余还缺的随它一起交给来源（开箱时顺路拿）。
         return new SeveralNeeds(List.copyOf(requests), backpack, offhand, tags,
-                (request, alsoWanted) -> new Run(request, permissions, scope, onDelivered, records, alsoWanted));
+                (request, alsoWanted) -> new Run(request, permissions, scope, onDelivered, records, alsoWanted,
+                        digTool));
     }
 
     /** 带限定的一次拿东西，不接发起任务的记账口：途中腾地方的变化、没能确认的交互都不进任何结果。 */
@@ -184,7 +192,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     @Override public Action need(ItemRequest request, Permissions permissions, Scope scope,
             Consumer<String> onDelivered, TaskRecords records) {
-        return new Run(request, permissions, scope, onDelivered, records);
+        return new Run(request, permissions, scope, onDelivered, records, List.of(), null);
     }
 
     /**
@@ -225,7 +233,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 用东西缺了要拿的、施工缺料这些从任务直接发起的，带上任务的记账口；来源备料不带，接外层的。
      */
     @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
-        return new Run(request, permissions, Scope.ALL, null, records);
+        return new Run(request, permissions, Scope.ALL, null, records, List.of(), null);
     }
 
     /**
@@ -234,7 +242,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records,
             List<ItemRequest> alsoWanted) {
-        return new Run(request, permissions, Scope.ALL, null, records, alsoWanted);
+        return new Run(request, permissions, Scope.ALL, null, records, alsoWanted, null);
     }
 
     /** 这一次拿东西里已经问遍各来源都没拿到它：看此刻在推进的这一串最外层记下的。 */
@@ -328,20 +336,18 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final Map<String, Integer> alsoTargets = new LinkedHashMap<>();
         /** 顺手还要的那几样的目标定过没有。 */
         private boolean alsoStarted;
+        /** 目标里点名的挖方块工具：途中要挖方块时只用那一件；null 按每格代价自动挑。 */
+        private final DigTool digTool;
 
         private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
-                TaskRecords records) {
-            this(request, permissions, scope, onDelivered, records, List.of());
-        }
-
-        private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
-                TaskRecords records, List<ItemRequest> alsoWanted) {
+                TaskRecords records, List<ItemRequest> alsoWanted, DigTool digTool) {
             this.request = request;
             this.permissions = permissions;
             this.scope = scope;
             this.onDelivered = onDelivered;
             this.records = records;
             this.alsoWanted = List.copyOf(alsoWanted);
+            this.digTool = digTool;
         }
 
         // 顺手还要的那几样这一刻还缺几件：第一次推进时按"身上原有加还缺的"定目标，之后按身上的重新算。
@@ -455,7 +461,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private ActionStatus consult(int carried) {
             int stillNeeded = target - carried;
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
-                    scope.radiusBlocks(), scope.maxDistanceBlocks());
+                    scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool);
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
             boolean stillLooking = false;
@@ -631,7 +637,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         private ActionStatus startStep() {
             SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
-                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted());
+                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted(), digTool);
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()

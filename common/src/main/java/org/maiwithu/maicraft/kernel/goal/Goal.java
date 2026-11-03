@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.goal;
 
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Objects;
  * @param target      目标对象：要去的地方或要处理的东西；能力不需要时为 null
  * @param params      解析后的参数
  * @param permissions 这次任务的许可，没给时用默认值
+ * @param digTool     挖方块点名用哪件工具；为 null 时按每格代价自动挑
  * @param steps       只用于按顺序做几件事的 sequence：每一步的目标
  * @param onFailure   只用于 sequence 里的一步：这一步失败后整件事停下还是继续
  */
@@ -26,6 +28,7 @@ public record Goal(
         Target target,
         ParamValues params,
         Permissions permissions,
+        DigTool digTool,
         List<Goal> steps,
         OnFailure onFailure) {
 
@@ -43,9 +46,15 @@ public record Goal(
         onFailure = onFailure == null ? OnFailure.STOP : onFailure;
     }
 
+    /** 不点名挖方块工具时的写法：其余字段照旧。 */
+    public Goal(String ability, String purpose, Target target, ParamValues params, Permissions permissions,
+                List<Goal> steps, OnFailure onFailure) {
+        this(ability, purpose, target, params, permissions, null, steps, onFailure);
+    }
+
     /** 最常见的写法：一个能力、一个目标对象、一组参数，许可用默认值。 */
     public static Goal of(String ability, Target target, ParamValues params) {
-        return new Goal(ability, null, target, params, Permissions.DEFAULT, List.of(), OnFailure.STOP);
+        return new Goal(ability, null, target, params, Permissions.DEFAULT, null, List.of(), OnFailure.STOP);
     }
 
     /**

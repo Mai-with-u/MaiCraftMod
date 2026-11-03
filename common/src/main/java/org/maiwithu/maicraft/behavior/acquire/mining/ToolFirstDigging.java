@@ -164,6 +164,8 @@ public final class ToolFirstDigging implements DigsBlocks {
 
         // 身上没有对路的工具才算账：划算且料够就开始做，料不够说一句徒手挖；划不来、看不清现场就直接挖。
         private Optional<ActionStatus> decide(TickContext context) {
+            // 点名了工具就只认那一件：不现做、不换别的，交给挖掘器照点名的挖，身上没有就如实失败。
+            if (prep.digTool() != null) return Optional.empty();
             LocalPlayer player = context.player() == null ? null : context.player().localPlayer();
             if (player == null || player.level() == null || !player.level().isLoaded(target)) return Optional.empty();
             BlockState state = player.level().getBlockState(target);

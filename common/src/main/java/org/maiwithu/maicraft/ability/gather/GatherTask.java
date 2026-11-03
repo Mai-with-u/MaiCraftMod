@@ -155,7 +155,9 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         // 草、树叶、砾石这类：挖一下不一定掉要的东西，结算时按"挖开了就算做完"如实写掉了什么。
         chanceDrops = VanillaBlockDrops.chanceDropsOf(liveType);
         Optional<String> required = tools.toolRequired(liveType);
-        if (required.isPresent() && !CarriedItems.hasToolThatSuffices(backpack, offhand, liveType, tools)) {
+        // 点名了工具就只认那一件：不够格也照挖，挖掉了没掉落由结算如实报，不再因为缺工具取消资格。
+        if (spot.digTool() == null && required.isPresent()
+                && !CarriedItems.hasToolThatSuffices(backpack, offhand, liveType, tools)) {
             // 工具不足不自动备：备一把镐可能是采矿石加合成的一大串，采集悄悄做完会让结果难读。
             // 先拿东西备一把工具再来采集，两步都清清楚楚。
             return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
@@ -176,7 +178,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
             if (refusal.isPresent()) return Next.fail(refusal.get());
         }
         // 点名要的是这格的概率掉落（打草要种子、打树叶要树苗）：挖的时候不拿剪刀和精准采集，拿了只掉方块自己。
-        Optional<Action> dig = expectedChanceDrop().isPresent() ? digs.digForChanceDrops(asBlock(spot.at()))
+        // 但目标里点名了挖方块工具时以点名为准，概率掉落的挑法让位，只用那一件照挖。
+        Optional<Action> dig = spot.digTool() != null
+                ? digs.dig(asBlock(spot.at()), new DigsBlocks.ToolPrep(1, true, permissions, records(), spot.digTool()))
+                : expectedChanceDrop().isPresent() ? digs.digForChanceDrops(asBlock(spot.at()))
                 : digs.dig(asBlock(spot.at()));
         if (dig.isEmpty()) {
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));

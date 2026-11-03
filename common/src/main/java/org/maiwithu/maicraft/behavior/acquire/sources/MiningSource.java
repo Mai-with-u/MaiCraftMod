@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -213,6 +214,7 @@ public final class MiningSource implements ItemSource {
             return Optional.empty();
         }
         if (spots.isEmpty() && minables.buriedUnderfoot(request.wanted())) {
+            // 往下挖楼梯要边走边挖脚下的天然方块，挖哪一格由路决定，点名工具在这里没有可作用的对象，按自动挑走。
             return Optional.of(digStairs(request, context.permissions()));
         }
         Optional<Deposit> deposit = spots.isEmpty() ? deposit(request, context) : Optional.empty();
@@ -233,10 +235,12 @@ public final class MiningSource implements ItemSource {
         // 原木只沿竖向连——像真人砍一棵树、挖一片矿，整批挖完再捡，不挖一格捡一格。挖少了引擎清点后会再来。
         List<MinableSpot> batch = batchOf(certain, request.count());
         String blockType = batch.getFirst().blockType();
-        Optional<Action> required = toolStep(blockType, request, permissions);
+        // 点名了工具就只认那一件：不再先备要求的工具、也不先做一把顺手的，挖不动就照实报。
+        Optional<Action> required = context.digTool() == null ? toolStep(blockType, request, permissions)
+                : Optional.empty();
         if (required.isPresent()) {
             steps.add(required.get());
-        } else {
+        } else if (context.digTool() == null) {
             // 挖得动但成批干：先备一把石制工具（砍一片树先做石斧，拿木镐挖石头先换石镐）。开局什么都没有时
             // 先徒手弄够做第一把工具的料（这一趟只挖那几件，引擎清点后再来，那时去备工具）；正在为做这把工具
             // 挖料时不再要求先有它。工具只是建议：备不来照样徒手干。
@@ -255,9 +259,9 @@ public final class MiningSource implements ItemSource {
         // 整根树干一下挖掉（可能比要的多，像玩家用连锁那样），掉落物集中在挖的那一格，挖完一起捡。
         // 走不到跟前、挖不下来的那一格记一阵，并记在这一串动作上：整串只坏在这几格时，引擎换别处接着拿。
         SpotWork[] work = new SpotWork[1];
-        Optional<Action> collect = collects.collectBatch(batch.stream().map(MinableSpot::pos).toList(), permissions,
+        Optional<Action> collect = collectBatch(collects, batch.stream().map(MinableSpot::pos).toList(), permissions,
                 chainable(request, context.characterAt(), searchRadius(context), permissions),
-                cell -> work[0].note(dimension, cell));
+                cell -> work[0].note(dimension, cell), context.digTool());
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
@@ -343,8 +347,9 @@ public final class MiningSource implements ItemSource {
                     givenUp.accept(cell);
                 };
                 return guessed
-                        ? collects.collectBatch(cells, permissions, chainable(request, center, radius, permissions), noting)
-                        : collects.collectForChanceDrops(cells, permissions, noting);
+                        ? collectBatch(collects, cells, permissions,
+                                chainable(request, center, radius, permissions), noting, context.digTool())
+                        : collectForChanceDrops(collects, cells, permissions, noting, context.digTool());
             }
 
             @Override public int carriedWanted() {
@@ -358,7 +363,9 @@ public final class MiningSource implements ItemSource {
         ChanceDigging digging = new ChanceDigging(request.wanted().describe(), request.count(), odds, scene,
                 placeBack.orElse(null), placeBackNote(request, context),
                 new BlockPos(center.x(), center.y(), center.z()), context.records());
-        Optional<Action> tool = toolStep(blockType, request, permissions);
+        // 点名了工具就只认那一件：不再先备要求的工具，挖不动就照实报。
+        Optional<Action> tool = context.digTool() == null ? toolStep(blockType, request, permissions)
+                : Optional.empty();
         return tool.isEmpty() ? digging : new SpotWork(new StepwiseActions("碰运气挖" + request.wanted().describe(),
                 tool.get(), digging), digging);
     }
@@ -490,11 +497,14 @@ public final class MiningSource implements ItemSource {
         DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(deposit.workingY(), deposit.band().minY(),
                 blockType -> minables.dropsWanted(request.wanted(), request.dropsFrom(), blockType), request.count(),
                 feet -> !inSight(request, at(feet, dimension), permissions).isEmpty(),
-                feet -> mineInSight(request, at(feet, dimension), permissions, cell -> work[0].note(dimension, cell)));
+                feet -> mineInSight(request, at(feet, dimension), permissions,
+                        cell -> work[0].note(dimension, cell), context.digTool()));
+        // 挖通道的每一格由路决定，不是目标方块，点名工具在这里没有可作用的对象：楼梯照旧自动挑。
         Optional<Action> digging = stairs.tunnelToward(tunnel, permissions);
         if (digging.isEmpty()) return Optional.empty();
         List<Action> steps = new ArrayList<>();
-        toolStep(deposit.ore(), request, permissions).ifPresent(steps::add);
+        // 点名了工具就不再先备一把；照点名的挖，不够格如实报。
+        if (context.digTool() == null) toolStep(deposit.ore(), request, permissions).ifPresent(steps::add);
         steps.add(digging.get());
         work[0] = new SpotWork(new StepwiseActions("长程挖矿找" + request.wanted().describe(), steps.toArray(Action[]::new)));
         return Optional.of(work[0]);
@@ -509,12 +519,28 @@ public final class MiningSource implements ItemSource {
 
     // 看见了：从最近那格起连一批，整脉连锁挖了、挖完一起捡；看见的都不许挖为空。跳过的格交给 givenUp 记下。
     private Optional<Action> mineInSight(ItemRequest request, WorldPosition here, Permissions permissions,
-            Consumer<BlockPos> givenUp) {
+            Consumer<BlockPos> givenUp, DigTool digTool) {
         List<MinableSpot> seen = inSight(request, here, permissions);
         if (seen.isEmpty()) return Optional.empty();
         List<BlockPos> batch = batchOf(seen, request.count()).stream().map(MinableSpot::pos).toList();
-        return collects.collectBatch(batch, permissions, chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions),
-                givenUp);
+        return collectBatch(collects, batch, permissions,
+                chainable(request, here, SEARCH_RADIUS_BLOCKS, permissions), givenUp, digTool);
+    }
+
+    // 点名了工具就走带点名的那条路，没点名仍用原来的成批收：测试替身与别的接缝只实现旧签名，
+    // 无条件走新重载会把没点名的活儿也变成一格一格收，改掉原来的调用序列。
+    private static Optional<Action> collectBatch(CollectsBlocks collects, List<BlockPos> cells,
+            Permissions permissions, Predicate<BlockPos> chainable, Consumer<BlockPos> givenUp, DigTool digTool) {
+        return digTool == null
+                ? collects.collectBatch(cells, permissions, chainable, givenUp)
+                : collects.collectBatch(cells, permissions, chainable, givenUp, digTool);
+    }
+
+    private static Optional<Action> collectForChanceDrops(CollectsBlocks collects, List<BlockPos> cells,
+            Permissions permissions, Consumer<BlockPos> givenUp, DigTool digTool) {
+        return digTool == null
+                ? collects.collectForChanceDrops(cells, permissions, givenUp)
+                : collects.collectForChanceDrops(cells, permissions, givenUp, digTool);
     }
 
     private static WorldPosition at(BlockPos feet, String dimension) {

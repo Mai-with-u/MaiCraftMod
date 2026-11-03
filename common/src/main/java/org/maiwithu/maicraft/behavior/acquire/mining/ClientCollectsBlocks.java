@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -61,18 +62,31 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
     @Override
     public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
             Consumer<BlockPos> givenUp) {
+        return collectBatch(cells, permissions, chainable, givenUp, null);
+    }
+
+    @Override
+    public Optional<Action> collectBatch(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
+            Consumer<BlockPos> givenUp, DigTool digTool) {
         if (cells.isEmpty()) return Optional.empty();
         return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, chainable,
-                Objects.requireNonNull(givenUp, "givenUp"), false));
+                Objects.requireNonNull(givenUp, "givenUp"), false, digTool));
     }
 
     @Override
     public Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
             Consumer<BlockPos> givenUp) {
-        // 要的是概率掉落：一格一格挖（不连锁），挖的时候不拿剪刀和精准采集，其余和成批收一样。
+        return collectForChanceDrops(cells, permissions, givenUp, null);
+    }
+
+    @Override
+    public Optional<Action> collectForChanceDrops(List<BlockPos> cells, Permissions permissions,
+            Consumer<BlockPos> givenUp, DigTool digTool) {
+        // 要的是概率掉落：一格一格挖（不连锁），挖的时候不拿剪刀和精准采集，其余和成批收一样；
+        // 点名了工具就以点名为准，不再按概率掉落的挑法另换一件。
         if (cells.isEmpty()) return Optional.empty();
         return Optional.of(new Collect(cells.stream().map(BlockPos::immutable).toList(), permissions, null,
-                Objects.requireNonNull(givenUp, "givenUp"), true));
+                Objects.requireNonNull(givenUp, "givenUp"), true, digTool));
     }
 
     /**
@@ -91,6 +105,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private final Consumer<BlockPos> givenUp;
         /** 要的是概率掉落：挖的时候绕开剪刀和精准采集。 */
         private final boolean chanceDrops;
+        /** 目标里点名的工具：只用那一件，不在每格自动挑。 */
+        private final DigTool digTool;
         private int index;
         private Stage stage = Stage.APPROACH;
         private Action step;
@@ -107,12 +123,13 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private boolean interrupted;
 
         Collect(List<BlockPos> cells, Permissions permissions, Predicate<BlockPos> chainable,
-                Consumer<BlockPos> givenUp, boolean chanceDrops) {
+                Consumer<BlockPos> givenUp, boolean chanceDrops, DigTool digTool) {
             this.cells = cells;
             this.permissions = permissions;
             this.chainable = chainable;
             this.givenUp = givenUp;
             this.chanceDrops = chanceDrops;
+            this.digTool = digTool;
         }
 
         private BlockPos cell() {
@@ -189,12 +206,15 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                 case DIG -> {
                     if (dropsBefore == null) dropsBefore = drops.nearby();
                     // 连锁时整条矿脉、整根树干一起挖掉，掉落物集中在这一格，整批挖完一起捡。
-                    // 收概率掉落的不连锁，挖的时候不拿剪刀和精准采集（拿了只掉方块自己）。
-                    if (chanceDrops) yield digs.digForChanceDrops(cell());
+                    // 收概率掉落的不连锁，挖的时候不拿剪刀和精准采集（拿了只掉方块自己）；
+                    // 点名了工具就只认那一件，概率掉落的挑法让位给点名。
+                    if (chanceDrops && digTool == null) yield digs.digForChanceDrops(cell());
                     // 带上这一趟还要挖几格：身上没有对路的工具时按它算现做一把划不划算。
                     // 采掘要掉落：挖不到掉落的候选不参与挑工具，宁可先备一把对的工具。
-                    DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(cells.size() - index, true, permissions, null);
-                    yield chainable == null ? digs.dig(cell(), prep)
+                    DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(
+                            cells.size() - index, true, permissions, null, digTool);
+                    yield chanceDrops ? digs.dig(cell(), prep)
+                            : chainable == null ? digs.dig(cell(), prep)
                             : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable, prep);
                 }
                 // 一下都没挖（每一格都被连锁或别人挖掉了）：没有这一下掉出来的东西要捡。

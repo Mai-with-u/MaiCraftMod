@@ -2,21 +2,24 @@
 package org.maiwithu.maicraft.game.interaction;
 
 /**
- * 挖一格之前的工具安排：主手已经是这一趟最划算的、要换到哪一格、还是腾空主手拿空手挖。
+ * 挖一格之前的工具安排：主手已经是这一趟要用的、要换到哪一格、腾空主手拿空手挖，还是点名的工具身上没有。
  *
  * <p>挑工具的账在玩家行为层算（{@code behavior.inventory.hands.DigToolChoice}），这里只装结论，
  * 供挖掘器在真正开挖前一步步兑现：换手要切快捷栏或开背包搬东西，都是跨刻的原生动作。
  */
 public sealed interface DigToolPlan {
 
-    /** 不动：主手已经是这一趟最划算的，或者手上没有更合适的可换。 */
+    /** 不动：主手已经是这一趟要用的，或者手上没有更合适的可换。 */
     record Keep() implements DigToolPlan {}
 
     /** 换到这一格再挖。 */
     record Hold(int slot) implements DigToolPlan {}
 
-    /** 空手最划算：把手里的东西收起来，腾空主手再挖。 */
+    /** 空手最划算（或点名空手）：把手里的东西收起来，腾空主手再挖。 */
     record BareHand() implements DigToolPlan {}
+
+    /** 点名要用的工具身上拿不到：这一趟直接失败，不换成别的工具；problem 说明差在哪（身上没有、在副手上收不过来）。 */
+    record Missing(String itemId, String problem) implements DigToolPlan {}
 
     static DigToolPlan keep() {
         return new Keep();
@@ -28,5 +31,9 @@ public sealed interface DigToolPlan {
 
     static DigToolPlan bareHand() {
         return new BareHand();
+    }
+
+    static DigToolPlan missing(String itemId, String problem) {
+        return new Missing(itemId, problem);
     }
 }

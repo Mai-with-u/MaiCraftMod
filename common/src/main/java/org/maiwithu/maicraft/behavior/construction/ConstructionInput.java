@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /**
@@ -13,15 +14,22 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  * @param purpose         用途，例如"施工"或"照明"
  * @param fixturesSkipped 结构文件里没装的摆设实体数；不是从结构文件来的为空，结果里不写
  * @param recorder        收场时记账的那一步（盖房子记建筑档案）；不记账传 {@link RecordsConstruction#NONE}
+ * @param digTool         目标里点名的挖方块工具：清障要挖方块时只用那一件，身上没有就直接失败；null 自动挑
  */
 public record ConstructionInput(Blueprint blueprint, Permissions permissions, String purpose, Integer fixturesSkipped,
-                                RecordsConstruction recorder) {
+                                RecordsConstruction recorder, DigTool digTool) {
 
     public ConstructionInput {
         Objects.requireNonNull(blueprint, "blueprint");
         Objects.requireNonNull(permissions, "permissions");
         if (purpose == null || purpose.isBlank()) throw new IllegalArgumentException("施工要写用途");
         recorder = recorder == null ? RecordsConstruction.NONE : recorder;
+    }
+
+    /** 没有点名挖方块工具的施工。 */
+    public ConstructionInput(Blueprint blueprint, Permissions permissions, String purpose, Integer fixturesSkipped,
+            RecordsConstruction recorder) {
+        this(blueprint, permissions, purpose, fixturesSkipped, recorder, null);
     }
 
     /** 收场不记账的施工：照明、机器的普通格这些。 */

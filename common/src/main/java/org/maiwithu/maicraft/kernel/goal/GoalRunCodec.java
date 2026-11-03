@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.kernel.goal;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
@@ -93,6 +94,7 @@ final class GoalRunCodec {
         if (goal.target() != null) json.add("target", target(goal.target()));
         json.add("parameters", goal.params().toJson());
         json.add("permissions", permissions(goal.permissions()));
+        if (goal.digTool() != null) json.addProperty("dig_tool", digTool(goal.digTool()));
         JsonArray steps = new JsonArray();
         goal.steps().forEach(step -> steps.add(goal(step)));
         json.add("steps", steps);
@@ -117,6 +119,7 @@ final class GoalRunCodec {
                 json.has("target") ? readTarget(json.getAsJsonObject("target")) : null,
                 parsed.params(),
                 readPermissions(json.getAsJsonObject("permissions")),
+                json.has("dig_tool") ? readDigTool(json.get("dig_tool")) : null,
                 steps,
                 Goal.OnFailure.valueOf(upper(json.get("on_failure").getAsString())));
     }
@@ -174,6 +177,19 @@ final class GoalRunCodec {
         permissions.protectedLandmarks().stream().sorted().forEach(landmarks::add);
         json.add("protected_landmarks", landmarks);
         return json;
+    }
+
+    // 点名工具存成对外接口里的同一种写法："hand" 或带命名空间的物品 ID。
+    private static String digTool(DigTool tool) {
+        return switch (tool) {
+            case DigTool.Hand ignored -> "hand";
+            case DigTool.Item item -> item.itemId();
+        };
+    }
+
+    private static DigTool readDigTool(JsonElement raw) {
+        String text = raw.getAsString();
+        return text.equals("hand") ? new DigTool.Hand() : new DigTool.Item(text);
     }
 
     private static Permissions readPermissions(JsonObject json) {
