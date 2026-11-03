@@ -240,7 +240,7 @@ public final class AbilityCatalog {
         registry.register(obtainModule(deps, shared, containerSource));
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, shared.storing(), shared.collects(), shared.networks()));
+        registry.register(depositModule(deps, shared));
 
         // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
         // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
@@ -670,13 +670,15 @@ public final class AbilityCatalog {
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
-    private static DepositModule depositModule(Deps deps, StoresInContainer.Parts storing,
-            ClientCollectsBlocks collects, List<NetworkStorage> networks) {
+    private static DepositModule depositModule(Deps deps, Shared shared) {
         // 存进网络（into=network）用和腾地方同一份网络存储：联动模组登记的第一个。
-        return DepositModule.live(deps.character().context(), storing, collects,
+        // 点名一只生物时存进它身上：点开生物身上的界面用共用的靠近、腾空手与按住潜行。
+        return DepositModule.live(deps.character().context(), shared.storing(), shared.collects(),
                 deps.items().itemTags(), deps.world().memory(), deps.character().backpack(),
                 deps.world().blockScans(), deps.guards().protection(), deps.world()::scene,
-                deps.world().facilities(), () -> networks.stream().findFirst(), deps.kept());
+                deps.world().facilities(), () -> shared.networks().stream().findFirst(), deps.kept(),
+                deps.compat().menuLayouts(), shared.bringClose(), deps.hands().interactions(), shared.toMainhand(),
+                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()));
     }
 
     /**

@@ -79,6 +79,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private Action prepared;
     private ContainerChooser.Entry current;
     private StoresInContainer storing;
+    /** 点名的是一只生物时存进它身上用的部件；存进方块容器时为 null。 */
+    private StoresInContainer.Parts creatureParts;
 
     DepositTask(DepositInput input, DepositServices services, BackpackView backpack) {
         super("存东西", Phase.CHOOSE, new ProgressTracker(200, 20L * 60 * 10));
@@ -174,10 +176,11 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         }
     }
 
-    /** target 落在哪：一片地方（在 center 附近挑）、点名的一格，或落不了（why 写原因）。 */
+    /** target 落在哪：一片地方（在 center 附近挑）、点名的一格、点名的一只生物，或落不了（why 写原因）。 */
     private sealed interface Place {
         record Area(BlockPos center) implements Place {}
         record Cell(WorldPosition at) implements Place {}
+        record Creature(DepositSeams.CreatureStorage.Creature creature) implements Place {}
         record Missing(String why) implements Place {}
     }
 
@@ -186,6 +189,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         return switch (input.target()) {
             case null -> new Place.Area(services.places().feet());
             case Target.Here here -> new Place.Area(services.places().feet());
+            case Target.Seen seen when seen.id().startsWith("e") -> creaturePlace(seen.id());
             case Target.Seen seen -> services.places().seen(seen.id())
                     .<Place>map(at -> seen.id().startsWith("f") ? new Place.Area(cellOf(at)) : new Place.Cell(at))
                     .orElseGet(() -> new Place.Missing("观察编号 " + seen.id() + " 对应的东西已经不在了"));
@@ -197,10 +201,20 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         };
     }
 
-    // 挑容器：一格只用它，一片地方在那里挑；还在扫给空。
+    // 点名一只生物（运输矿车、带箱子的驴、女仆）：把它身上的储物当容器；点名就是许可，别人的也去开，开不了如实交回。
+    private Place creaturePlace(String seenId) {
+        if (services.creatures() == null) {
+            return new Place.Missing("存东西还认不了生物身上的储物（" + seenId + "）");
+        }
+        return services.creatures().creature(seenId).<Place>map(Place.Creature::new)
+                .orElseGet(() -> new Place.Missing("观察编号 " + seenId + " 对应的生物已经不在了"));
+    }
+
+    // 挑容器：一格只用它，一片地方在那里挑，点名的生物只用它；还在扫给空。
     private Optional<ContainerChooser.Pick> pick(Place place) {
         return switch (place) {
             case Place.Area area -> area(area.center());
+            case Place.Creature creature -> Optional.of(onCreature(creature.creature()));
             case Place.Cell cell -> Optional.of(named(cell.at()));
             case Place.Missing missing -> Optional.of(new ContainerChooser.Pick.NotFound(missing.why()));
         };
@@ -226,6 +240,16 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
             return Optional.empty();
         }
         return Optional.of(ContainerChooser.choose(found, wanted.keySet().iterator().next(), mayDigLid()));
+    }
+
+    // 点名的生物身上的储物：只有它一只候选，没有盖子、坐着的猫这些；存的时候走点开生物身上的界面。
+    private ContainerChooser.Pick onCreature(DepositSeams.CreatureStorage.Creature creature) {
+        creatureParts = services.creatures().parts(creature.entityId());
+        String name = (creature.name() == null ? creature.typeId() : creature.name() + "（" + creature.typeId() + "）")
+                + "身上";
+        return new ContainerChooser.Pick.Chosen(List.of(new ContainerChooser.Entry(new ContainerChooser.Candidate(
+                name, creature.typeId(), creature.at(), null, true, 0, false, true, ContainerChooser.Lid.CLEAR, false),
+                false)));
     }
 
     // 点名的容器：LLM 点名就算允许，别人的也用；界面认不出、坐着猫、盖子压住照样按挑容器的规矩判。
@@ -261,6 +285,11 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         switch (place) {
             case Place.Missing missing -> {
                 return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, missing.why(), null));
+            }
+            // 说了存进网络又点名一只生物：生物身上没有终端，两样不能同时成立。
+            case Place.Creature creature -> {
+                return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "存进网络要找 ME 终端，点名的却是一只生物",
+                        "去掉 into=network 就存进它身上"));
             }
             case Place.Cell cell -> {
                 terminalSearch = cellSearch(cell.at());
@@ -379,7 +408,8 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private Next<Phase> storeInCurrent() {
         ContainerChooser.Candidate candidate = current.candidate();
         storing = new StoresInContainer(new KnownContainer(candidate.name(), candidate.at(), candidate.blockTypeId()),
-                List.copyOf(wanted.keySet()), ledger(), input.permissions(), services.storing());
+                List.copyOf(wanted.keySet()), ledger(), input.permissions(),
+                creatureParts != null ? creatureParts : services.storing());
         return goWith(Phase.STORE, storing, "走过去点开" + name());
     }
 

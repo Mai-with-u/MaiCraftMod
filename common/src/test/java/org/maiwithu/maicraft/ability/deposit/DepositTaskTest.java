@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.deposit;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -333,6 +334,42 @@ class DepositTaskTest {
     }
 
     @Test
+    void 点名运输矿车_存进它身上() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        FakeChest cart = new FakeChest(rig, NEAR, false);
+        rig.creatures.put("e3", cart);
+        TaskResult result = rig.run(rig.input(new Target.Seen("e3"), List.of(), null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(32, cart.total(DIRT));
+        assertEquals(1, rig.creatureOpens);
+        assertEquals(0, rig.opens, "点名生物不去开方块容器");
+        assertTrue(result.changes().stream().anyMatch(change -> change.note().contains("身上")),
+                "存进了哪写明是它身上");
+    }
+
+    @Test
+    void 点名的生物不在了_如实说() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        TaskResult result = rig.run(rig.input(new Target.Seen("e9"), List.of(), null));
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("e9"));
+    }
+
+    @Test
+    void 不点名时不挑生物身上存() {
+        // 附近只有一辆运输矿车：自动挑存放处不算会走的生物，照实说附近没有容器。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.creatures.put("e3", new FakeChest(rig, NEAR, false));
+        TaskResult result = rig.run(rig.input(null, List.of(), null));
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(0, rig.creatureOpens);
+    }
+
+    @Test
     void 打不开就换下一只() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
@@ -477,6 +514,9 @@ class DepositTaskTest {
         final List<ItemStack> player = new ArrayList<>();
         final Map<WorldPosition, FakeChest> chests = new HashMap<>();
         int opens;
+        /** 点名得到的生物身上的储物：观察编号 → 储物替身；实体编号按登记先后从 100 起。 */
+        final Map<String, FakeChest> creatures = new LinkedHashMap<>();
+        int creatureOpens;
         /** 网络存储替身；没有为 null。 */
         NetworkStorage network;
         /** 副手拿着的。 */
@@ -543,10 +583,29 @@ class DepositTaskTest {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
             }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
-                    () -> Optional.ofNullable(network), offhandClearing(), ItemsToKeep.NOTHING);
+                    () -> Optional.ofNullable(network), offhandClearing(), ItemsToKeep.NOTHING, creatureStorage());
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;
+        }
+
+        // 生物身上的储物替身：点名的编号对上登记的就是它；存的时候开的是它身上那一份。
+        private DepositSeams.CreatureStorage creatureStorage() {
+            List<String> ids = new ArrayList<>(creatures.keySet());
+            return new DepositSeams.CreatureStorage() {
+                @Override public Optional<Creature> creature(String seenId) {
+                    FakeChest storage = creatures.get(seenId);
+                    return storage == null ? Optional.empty() : Optional.of(new Creature(100 + ids.indexOf(seenId),
+                            "minecraft:chest_minecart", storage.at, null));
+                }
+
+                @Override public StoresInContainer.Parts parts(int entityId) {
+                    return new StoresInContainer.Parts((at, permissions) -> {
+                        creatureOpens++;
+                        return new FakeOpening(creatures.get(ids.get(entityId - 100)));
+                    }, null);
+                }
+            };
         }
 
         // 副手替身：拿着的那一堆换进背包第一个空格。

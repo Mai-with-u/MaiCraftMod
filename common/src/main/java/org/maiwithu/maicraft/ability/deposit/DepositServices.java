@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
  * @param network 网络存储（身上的无线终端）；没有联动时给空
  * @param offhand 副手：整理背包时把副手的东西放回背包一起存；没接上为 null，副手不管
  * @param kept    要留的东西：不给物品时预留的、正要用的留够件数在身上
+ * @param creatures 生物身上的储物：点名生物时用；没接上为 null，点名生物按存不进说
  */
 record DepositServices(
         SpotsContainers spots,
@@ -34,7 +35,15 @@ record DepositServices(
         ReadsItemTags tags,
         Supplier<Optional<NetworkStorage>> network,
         DepositSeams.ClearsOffhand offhand,
-        ItemsToKeep kept) {
+        ItemsToKeep kept,
+        DepositSeams.CreatureStorage creatures) {
+
+    /** 没接生物身上的储物。 */
+    DepositServices(SpotsContainers spots, StoresInContainer.Parts storing, DepositSeams.FindsPlaces places,
+            DepositSeams.DigsLid digs, ReadsItemTags tags, Supplier<Optional<NetworkStorage>> network,
+            DepositSeams.ClearsOffhand offhand, ItemsToKeep kept) {
+        this(spots, storing, places, digs, tags, network, offhand, kept, null);
+    }
 
     DepositServices {
         if (kept == null) throw new IllegalArgumentException("要留的东西不能为空：不给物品时预留的要留在身上");

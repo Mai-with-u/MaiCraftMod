@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -32,6 +33,28 @@ final class DepositSeams {
 
         /** 把副手那一堆换进背包一个空格的动作；背包没空格时给空。 */
         Optional<Action> intoBackpack();
+    }
+
+    /**
+     * 生物身上的储物：点名一只生物（e#：运输矿车、带箱子的驴、女仆）时把它身上的储物当容器。
+     * 只在点名时用；自动挑存放处不算生物（它会走，存进去的东西下次不一定找得到）。
+     */
+    interface CreatureStorage {
+        /** 观察编号指的是一只还在的生物时，给它是谁、在哪；不是生物或不在了给空。 */
+        Optional<Creature> creature(String seenId);
+
+        /** 存进它身上要用的部件：点开走"点开生物身上的界面"，存完不记进世界记忆。 */
+        StoresInContainer.Parts parts(int entityId);
+
+        /**
+         * 一只点名的生物。
+         *
+         * @param entityId 游戏实体编号
+         * @param typeId   实体类型
+         * @param at       此刻所在的格
+         * @param name     它的名字；没起名为 null
+         */
+        record Creature(int entityId, String typeId, WorldPosition at, String name) {}
     }
 
     /** 目标对象落在哪：观察编号此刻的位置、记得的地点、看得见的告示牌、角色脚下。 */

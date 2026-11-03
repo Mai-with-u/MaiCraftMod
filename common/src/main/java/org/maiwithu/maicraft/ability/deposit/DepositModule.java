@@ -7,6 +7,11 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
+import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
@@ -79,13 +84,16 @@ public final class DepositModule implements AbilityModule {
     public static DepositModule live(Supplier<PlayerContext> contexts, StoresInContainer.Parts storing,
             CollectsBlocks digs, ReadsItemTags tags, WorldMemory memory,
             BackpackView backpack, BlockScanService scans, Protection protection, Supplier<Scene> scene,
-            FacilityKinds facilities, Supplier<Optional<NetworkStorage>> network, ItemsToKeep kept) {
+            FacilityKinds facilities, Supplier<Optional<NetworkStorage>> network, ItemsToKeep kept,
+            MenuLayouts layouts, BringsPlayerClose close, Interactions interactions, MovesToMainhand toMainhand,
+            HoldsSneak sneaks) {
         return new DepositModule(new DepositServices(
                 new ClientSpotsContainers(scans, contexts, memory, protection, facilities),
                 storing,
                 new LiveDepositPlaces(scene, memory, contexts),
                 new NativeLidDigging(digs),
-                tags, network, new LiveOffhandClearing(contexts), kept), backpack);
+                tags, network, new LiveOffhandClearing(contexts), kept,
+                new LiveCreatureStorage(scene, contexts, layouts, close, interactions, toMainhand, sneaks)), backpack);
     }
 
     @Override public AbilitySpec spec() {
