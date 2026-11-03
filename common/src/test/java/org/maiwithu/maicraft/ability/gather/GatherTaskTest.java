@@ -15,6 +15,7 @@ import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.TellsToolUse;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
@@ -23,6 +24,7 @@ import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -94,6 +96,8 @@ class GatherTaskTest {
         final int dropCount;
         final List<String> log = new ArrayList<>();
         boolean digsWired = true;
+        /** 挖这一格用了什么工具：设了就让挖的那一步说出来，用来核对工具现场有没有记进结果。 */
+        List<DigToolUse> dugWith = List.of();
 
         FakeActions(FakeBackpack backpack, String dropItem, int dropCount) {
             this.backpack = backpack;
@@ -117,7 +121,21 @@ class GatherTaskTest {
         @Override public Optional<Action> dig(BlockPos target) {
             if (!digsWired) return Optional.empty();
             log.add("挖 " + target);
-            return Optional.of(simple("挖一格", "挖"));
+            return Optional.of(new TellsToolUse() {
+                @Override public List<DigToolUse> toolUses() {
+                    return dugWith;
+                }
+
+                @Override public ActionStatus tick(TickContext context) {
+                    log.add("挖");
+                    backpack.add(dropItem, dropCount);
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "挖一格";
+                }
+            });
         }
 
         private Action simple(String describe, String what) {
@@ -231,6 +249,20 @@ class GatherTaskTest {
         assertEquals(Change.Kind.BLOCK_BROKEN, result.changes().get(0).kind());
         assertEquals(Change.Kind.ITEM_GAINED, result.changes().get(1).kind());
         assertEquals(1, result.changes().get(1).count());
+    }
+
+    @Test
+    void 挖完把用了什么工具记进结果() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = new FakeActions(backpack, "minecraft:cobblestone", 1);
+        actions.dugWith = List.of(new DigToolUse("木镐", "minecraft:wooden_pickaxe", 1, 1, 12, 45, true));
+        GatherTask task = new GatherTask(blockSpot("minecraft:cobblestone"), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(1, result.attempts().size());
+        assertEquals("用你点名的木镐挖了 1 格", result.attempts().get(0).tried());
+        assertTrue(result.attempts().get(0).result().contains("磨掉 1 点耐久"));
     }
 
     @Test

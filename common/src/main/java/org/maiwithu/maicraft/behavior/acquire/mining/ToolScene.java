@@ -7,6 +7,7 @@ import java.util.Optional;
 
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.kernel.result.Attempt;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
 /**
  * 把这一趟挖方块用到的工具拼成结果里的一条：用了什么、磨了多少、比徒手省了多少。
@@ -30,6 +31,18 @@ public final class ToolScene {
         List<DigToolUse> merged = merged(uses);
         if (merged.isEmpty()) return Optional.empty();
         return Optional.of(new Attempt(tried(merged), how(merged)));
+    }
+
+    /**
+     * 把这一趟的工具现场记进任务结果。挖方块的地方不止一处（成批收、采一格），说法却只有一套，
+     * 所以"记进结果"这一步也留在这里，调用方只管把挖下来的格子用过什么交过来。
+     *
+     * @param records 发起任务的记账口；没有记账口时（问价、替身）做了什么都不记
+     * @param uses    挖下来的格子用了哪些工具，按先后
+     */
+    public static void record(TaskRecords records, List<DigToolUse> uses) {
+        if (records == null) return;
+        tell(uses).ifPresent(attempt -> records.attempt(attempt.tried(), attempt.result()));
     }
 
     // 同一件工具连着挖的合成一段，段数就是句子里要说的工具件数。

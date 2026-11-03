@@ -284,7 +284,7 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private ActionStatus report(ActionStatus status) {
             if (toolsReported) return status;
             toolsReported = true;
-            if (records != null) ToolScene.tell(toolUses).ifPresent(attempt -> records.attempt(attempt.tried(), attempt.result()));
+            if (records != null) ToolScene.record(records, toolUses);
             return status;
         }
 

@@ -12,6 +12,8 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.TellsToolUse;
+import org.maiwithu.maicraft.behavior.acquire.mining.ToolScene;
 import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
@@ -75,6 +77,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private Set<Integer> dropsBefore = Set.of();
     /** 下一阶段的动作：上一刻按现场备好，进入阶段时交给基类持有。 */
     private Action prepared;
+    /** 这次挖方块那一步：挖完要问它用了什么工具，把工具现场记进结果。 */
+    private Action digAction;
     /** 打展示框之前框里放着的东西（物品 ID）：结算时说清打出来的是什么。 */
     private String frameItem;
 
@@ -187,7 +191,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));
         }
         dropsBefore = drops.nearby();
-        return goWith(Phase.DIG, dig.get(), why);
+        digAction = dig.get();
+        return goWith(Phase.DIG, digAction, why);
     }
 
     // 到展示框跟前了：框不在了、框里空着都如实说（空框再打就把框本身打下来了，不打）；
@@ -221,15 +226,20 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     }
 
     // 挖开了：记下拆掉的方块，走过去捡这一下掉出来的东西。
-    private Next<Phase> digDone(TickContext context) {
-        return switch (runAction(context)) {
+    private Next<Phase> digDone(TickContext context) {        return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
                 recordChange(Change.of(Change.Kind.BLOCK_BROKEN, liveType, 1));
+                tellToolUse();
                 yield goWith(Phase.PICK_UP, drops.pickUpNewSince(dropsBefore), "挖开了，走过去捡掉出来的东西");
             }
             case ActionStatus.Failed failed -> Next.fail(failed.problem());
         };
+    }
+
+    // 挖完这一格：问挖的那一步用了什么工具，记成结果里的一条（空手、换了工具都照实说）。
+    private void tellToolUse() {
+        if (digAction instanceof TellsToolUse tells) ToolScene.record(records(), tells.toolUses());
     }
 
     // 捡完了（捡不到的如实记一笔）：收的是熟作物就趁种子进了包顺手种回去，否则按背包变化结算。
