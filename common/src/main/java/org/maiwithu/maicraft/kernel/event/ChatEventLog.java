@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.kernel.event;
 
+import java.util.List;
+
 import org.maiwithu.maicraft.game.ReceivedChat;
 
 /**
@@ -27,6 +29,28 @@ public final class ChatEventLog {
     /** 当前的流编号。 */
     public String streamId() {
         return log.streamId();
+    }
+
+    /** 此刻最新一条聊天的序号：出手前记下它，之后收到的才算"这一下前后"收到的。 */
+    public long latestCursor() {
+        return log.latest();
+    }
+
+    /**
+     * 某个序号之后收到的服务端系统消息原话，按收到先后，不等。玩家说的话不算（别人聊天和这一下无关）。
+     * 换了世界（流换了）时序号作废，给空。
+     */
+    public List<String> systemTextsAfter(long cursor) {
+        if (cursor > log.latest()) return List.of();
+        try {
+            CursorLog.Page<ChatEvent> page = log.read(log.streamId(), cursor,
+                    event -> event.chat().kind() == ReceivedChat.Kind.SYSTEM, CAPACITY, 0);
+            if (page.cursorStatus() == CursorLog.CursorStatus.STREAM_CHANGED) return List.of();
+            return page.events().stream().map(event -> event.chat().text()).toList();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return List.of();
+        }
     }
 
     /**

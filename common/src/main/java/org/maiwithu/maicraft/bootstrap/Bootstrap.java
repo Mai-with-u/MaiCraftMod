@@ -538,7 +538,7 @@ public final class Bootstrap {
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
                         dropConfirmations,
-                        taskEvents, lightLevels, lightingWorld, followLighting, timers);
+                        taskEvents, lightLevels, lightingWorld, followLighting, timers, chatEvents);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();

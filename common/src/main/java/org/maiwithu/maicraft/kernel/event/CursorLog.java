@@ -69,6 +69,11 @@ public final class CursorLog<E> {
         return streamId;
     }
 
+    /** 此刻最新一条的序号；还没记过为 0。 */
+    public synchronized long latest() {
+        return latest;
+    }
+
     /**
      * 读事件；没有可读的事件时最多等 {@code waitMillis} 毫秒，期间来了事件或流换了就立即返回。
      *

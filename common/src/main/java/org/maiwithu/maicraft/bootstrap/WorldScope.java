@@ -71,6 +71,7 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
@@ -166,7 +167,7 @@ public final class WorldScope {
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
-            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers) {
+            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
         SaveIdentity save = SaveIdentity.current(minecraft)
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
@@ -230,7 +231,7 @@ public final class WorldScope {
                 new Channels(new ChatChannel(now),
                         // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
                         () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
-                        events, timers, session),
+                        events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig),
                 abilities);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -147,9 +148,20 @@ final class UseSeams {
         Optional<SignEditor> current();
     }
 
-    /** 游戏的拒绝：动作栏此刻显示的提示语（"箱子已上锁"、领地保护）；没有在显示为空。 */
+    /** 游戏的回应：动作栏此刻显示的提示语（"箱子已上锁"、领地保护），与聊天栏里的服务端系统消息。 */
     interface ReadsGameRefusal {
+        /** 动作栏此刻显示的提示语；没有在显示为空。 */
         Optional<String> latestMessage();
+
+        /** 出手前记一下聊天栏读到哪了；没接聊天栏为 0。 */
+        default long chatMark() {
+            return 0;
+        }
+
+        /** 记号之后聊天栏收到的服务端系统消息原话，按收到先后；没接聊天栏为空。 */
+        default List<String> systemMessagesSince(long mark) {
+            return List.of();
+        }
     }
 
     /** 走到没加载的坐标：一直走到那一片加载出来；给不出走法时为空。 */

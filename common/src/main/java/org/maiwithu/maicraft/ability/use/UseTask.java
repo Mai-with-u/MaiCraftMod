@@ -65,6 +65,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     /** 这一下交互：出手前冻结的现场与结论的读口。 */
     private UseSeams.Built.Ready interaction;
     private String messageBefore;
+    /** 出手前聊天栏读到哪了：之后收到的服务端系统消息才算这一下的回应。 */
+    private long chatMark;
+    /** 生效的那几下前后聊天栏收到的服务端系统消息原话。 */
+    private final List<String> gameMessages = new ArrayList<>();
     private Set<Integer> dropsBefore = Set.of();
     private WriteSign writing;
     private UseSeams.MenuLook looking;
@@ -300,6 +304,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 }
                 interaction = ready;
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
+                chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
                 dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
                 // 潜行右键：整一下出手都按着潜行，动作收尾时松开。
                 Action strike = input.sneak() ? services.sneak().sneaking(ready.action()) : ready.action();
@@ -343,8 +348,12 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         if (result == null) {
             return stop(Problem.of(Problem.Kind.STUCK, "交互动作结束了却没有给出结论", null));
         }
-        return switch (UseDecider.settle(result, newGameMessage())) {
+        List<String> chatMessages = services.refusal() == null ? List.of()
+                : services.refusal().systemMessagesSince(chatMark);
+        return switch (UseDecider.settle(result, newGameMessage(), chatMessages)) {
             case UseDecider.Settlement.Applied applied -> {
+                // 生效了照常算生效；这段时间聊天栏里服务端说的话原样附上，要不要当回事由 LLM 判断。
+                gameMessages.addAll(chatMessages);
                 fetched = false;
                 approachRetries = 0;
                 // 写字时点开编辑界面只是第一步，字写上去才算这一次做成。
@@ -356,6 +365,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 yield afterApplied();
             }
             case UseDecider.Settlement.Unexpected unexpected -> {
+                gameMessages.addAll(chatMessages);
                 appliedTimes++;
                 recordChange(new Change(target != null && target.isEntity() ? Change.Kind.ENTITY_AFFECTED
                         : Change.Kind.BLOCK_CHANGED, describeWhat(), 1, "交互生效了，现场出乎预料：" + unexpected.scene()));
@@ -514,7 +524,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new UseDetails(appliedTimes, openedMenu, signLines, riding);
+        return new UseDetails(appliedTimes, openedMenu, signLines, riding, gameMessages);
     }
 
     @Override protected List<String> remaining() {

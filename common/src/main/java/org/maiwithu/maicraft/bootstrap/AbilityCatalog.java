@@ -293,7 +293,8 @@ public final class AbilityCatalog {
         DeferredInnerNeeds innerNeeds = new DeferredInnerNeeds();
         // 游戏拒绝读端：用东西与睡觉共一份（动作栏提示语同出一个来源）。
         ClientGameRefusals refusals = new ClientGameRefusals(new OverlayMessages(),
-                () -> deps.channels().session().confirmations().recent(), deps.channels().clientTicks());
+                () -> deps.channels().session().confirmations().recent(), deps.channels().clientTicks(),
+                deps.channels().chatEvents());
         // 联动能用的玩家行为：联动来源、机器类型、网络读取器进世界时都带着这一份建，
         // 走过去、点开、换手、缺东西去拿与自带能力是同一套。
         PlayerServices playerServices = new PlayerServices(deps.character().context(), bringsClose,

@@ -70,6 +70,7 @@ import java.nio.file.Path;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -361,6 +362,39 @@ class UseTaskTest {
         TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
         assertProblem(result, Problem.Kind.REFUSED_BY_GAME);
         assertTrue(result.problem().message().contains("箱子已上锁"));
+    }
+
+    @Test
+    void 没生效时聊天栏里说了话_按游戏拒绝附原话() {
+        // 右键别人的女仆：模组在聊天栏里说这不是你的女仆，动作栏什么都没有。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.refusal.chat.add("出手前别人进服的提示");
+        rig.interactions.outcome(InteractionResult.notApplied("没反应"), () -> rig.refusal.chat.add("这不是你的女仆"));
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertProblem(result, Problem.Kind.REFUSED_BY_GAME);
+        assertTrue(result.problem().message().contains("这不是你的女仆"));
+        assertFalse(result.problem().message().contains("别人进服"), "出手前收到的旧消息不算");
+    }
+
+    @Test
+    void 确认等满了却在聊天栏收到话_按游戏拒绝不报说不清() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.outcome(InteractionResult.unconfirmed("确认没等到"), () -> rig.refusal.chat.add("名额已满"));
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertProblem(result, Problem.Kind.REFUSED_BY_GAME);
+        assertTrue(result.unconfirmed().isEmpty());
+    }
+
+    @Test
+    void 生效了聊天栏里也说了话_照常生效并附上原话() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.interactions.outcome(InteractionResult.applied("扳动了"), () -> rig.refusal.chat.add("某某加入了游戏"));
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of("某某加入了游戏"), ((UseDetails) result.details()).gameMessages());
     }
 
     @Test
@@ -829,8 +863,16 @@ class UseTaskTest {
 
     private static final class FakeRefusal implements UseSeams.ReadsGameRefusal {
         String message;
+        /** 聊天栏收到的服务端系统消息，按收到先后；记号就是条数。 */
+        final List<String> chat = new ArrayList<>();
 
         @Override public Optional<String> latestMessage() { return Optional.ofNullable(message); }
+
+        @Override public long chatMark() { return chat.size(); }
+
+        @Override public List<String> systemMessagesSince(long mark) {
+            return List.copyOf(chat.subList((int) mark, chat.size()));
+        }
     }
 
     private static final class FakeDrops implements PicksUpDrops {

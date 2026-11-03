@@ -119,13 +119,32 @@ final class UseDecider {
      * @param gameMessage 出手后动作栏新冒出的提示语（"箱子已上锁"、领地保护）；没有为空
      */
     static Settlement settle(InteractionResult result, Optional<String> gameMessage) {
+        return settle(result, gameMessage, List.of());
+    }
+
+    /**
+     * 把交互结论结算成走向，连同这一下前后聊天栏收到的服务端系统消息。
+     *
+     * <p>聊天栏的话只在没生效时拿来当原因：游戏没接、确认等满了，而这段时间里服务端在聊天栏说了话（模组的
+     * "名额满了"、插件的领地保护），就按游戏拒绝交回、附上原话。生效了照常算生效，原话由调用方附进结果。
+     * 不按文字猜哪条和这一下有关：同一段时间里别人进出服务器的提示也会进来。
+     *
+     * @param chatMessages 出手后聊天栏收到的服务端系统消息原话，按收到先后
+     */
+    static Settlement settle(InteractionResult result, Optional<String> gameMessage, List<String> chatMessages) {
+        Optional<Problem> chatRefusal = chatMessages.isEmpty() ? Optional.empty()
+                : Optional.of(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                        "游戏没有接这一下，聊天栏里说：" + String.join("；", chatMessages), null));
         return switch (result.verdict()) {
             case APPLIED -> new Settlement.Applied();
             case UNEXPECTED -> new Settlement.Unexpected(result.scene());
-            case UNCONFIRMED -> new Settlement.Unconfirmed(result.scene());
-            // 游戏说了为什么就附原话；什么都没说、目标也没变，就是这样用没有效果。
+            // 确认等满了却在聊天栏收到了服务端的话：多半是被拒绝了，附原话交回，不再报说不清。
+            case UNCONFIRMED -> chatRefusal.<Settlement>map(Settlement.NotApplied::new)
+                    .orElseGet(() -> new Settlement.Unconfirmed(result.scene()));
+            // 游戏说了为什么就附原话（动作栏优先，其次聊天栏）；什么都没说、目标也没变，就是这样用没有效果。
             case NOT_APPLIED -> new Settlement.NotApplied(gameMessage
                     .map(message -> Problem.of(Problem.Kind.REFUSED_BY_GAME, "游戏拒绝了：" + message, null))
+                    .or(() -> chatRefusal)
                     .orElseGet(() -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                             "这样用没有效果：" + result.scene(), null)));
         };

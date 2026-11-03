@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -115,7 +116,19 @@ public final class UseModule implements AbilityModule {
                 needs,
                 new LiveSeenResolver(scene),
                 new LiveNearbySearcher(scans, context),
-                refusals::latestMessage,
+                new UseSeams.ReadsGameRefusal() {
+                    @Override public Optional<String> latestMessage() {
+                        return refusals.latestMessage();
+                    }
+
+                    @Override public long chatMark() {
+                        return refusals.chatMark();
+                    }
+
+                    @Override public List<String> systemMessagesSince(long mark) {
+                        return refusals.systemMessagesSince(mark);
+                    }
+                },
                 new MenuSignEditors(),
                 new ClientDropPickup(context, walks, confirmations),
                 new LiveUseTravel(walks),
