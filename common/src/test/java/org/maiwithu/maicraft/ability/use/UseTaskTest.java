@@ -644,6 +644,9 @@ class UseTaskTest {
             @Override public Set<String> blocksIn(String tag) {
                 return Set.of();
             }
+            @Override public Set<String> allBlockTypes() {
+                return Set.of();
+            }
         });
         /** 附近搜索按由近到远给出的方块格子。 */
         final List<BlockPos> nearestBlocks = new ArrayList<>();

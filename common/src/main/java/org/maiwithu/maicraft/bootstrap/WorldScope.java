@@ -6,7 +6,6 @@ import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.nio.file.Path;
 import java.util.Objects;
@@ -288,12 +287,10 @@ public final class WorldScope {
         // 俯视网格以角色为中心画一张：地形特征从网格里聚出来，路过成片的树顺路记产地线索。
         scene.updateGrid(OverheadGrid.render(current.level(), player.blockPosition(), OverheadGrid.DEFAULT_RADIUS),
                 gameTick, when);
-        // 设施观察：容器与工作设施两类都查（按方块标签认，模组的箱子、损坏的铁砧都算），看见的写进世界记忆；
-        // 床不在扫描清单里（按颜色散成十六种）。
-        Set<String> facilities = new LinkedHashSet<>(kinds.containerBlockTypes());
-        facilities.addAll(kinds.workstationBlockTypes());
+        // 设施观察：容器、工作设施与床三类都查——容器与工作设施按方块标签认（模组的箱子、损坏的铁砧都算），
+        // 床按方块类型名认；三类都报观察编号，只有容器与工作设施写进世界记忆。
         observing = current;
-        scene.updateFacilities(gameTick, when, facilitySight.nearby(facilities));
+        scene.updateFacilities(gameTick, when, facilitySight.nearby(kinds.facilityBlockTypes()));
         // 看得见的告示牌连同牌子上的字：主播在基地立的路牌、留言，observe 里读得到。
         scene.updateSigns(gameTick, facilitySight.signs());
         // 洞口与峡谷：每刻扫一小段，扫完一圈才换上这一圈看到的；看见的顺路记进世界记忆。

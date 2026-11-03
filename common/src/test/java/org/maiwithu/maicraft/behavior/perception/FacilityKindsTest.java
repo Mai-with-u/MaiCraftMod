@@ -71,4 +71,22 @@ class FacilityKindsTest {
         assertFalse(kinds.isWorkstation("minecraft:chest"));
         assertFalse(kinds.isContainer("minecraft:stone"));
     }
+
+    @Test
+    void 设施观察的种类里有床() {
+        // 床没有方块标签，从注册表的全部方块类型里按名字认：染色床、模组照这个名字起的床都算，
+        // 不叫这个名字的方块不算；设施观察的清单把床与容器、工作设施并在一起，观察一侧只取这一份。
+        FakeBlockTags withBeds = FakeBlockTags.vanilla()
+                .block("minecraft:white_bed", "minecraft:red_bed", "somemod:camp_bed", "somemod:bedrock");
+        FacilityKinds beds = new FacilityKinds(withBeds);
+
+        assertTrue(beds.bedBlockTypes().contains("minecraft:white_bed"));
+        assertTrue(beds.bedBlockTypes().contains("minecraft:red_bed"));
+        assertTrue(beds.bedBlockTypes().contains("somemod:camp_bed"));
+        assertFalse(beds.bedBlockTypes().contains("somemod:bedrock"));
+        assertTrue(beds.facilityBlockTypes().contains("minecraft:chest"));
+        assertTrue(beds.facilityBlockTypes().contains("minecraft:furnace"));
+        assertTrue(beds.facilityBlockTypes().contains("minecraft:white_bed"));
+        assertFalse(beds.facilityBlockTypes().contains("minecraft:ender_chest"));
+    }
 }

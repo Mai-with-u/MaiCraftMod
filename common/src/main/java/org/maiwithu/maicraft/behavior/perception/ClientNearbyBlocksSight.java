@@ -161,23 +161,14 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
         return this.signBlocks;
     }
 
-    // 感知常驻关心的设施种类：第一次用到时找齐，之后复用。
+    // 感知常驻关心的设施方块：容器、工作设施与床，种类由设施分类给齐（床在注册表里找），第一次用到时换成方块对象复用。
     private Set<Block> facilities() {
         if (this.facilities != null) {
             return this.facilities;
         }
         Set<Block> facilities = new LinkedHashSet<>();
-        for (String typeId : kinds.containerBlockTypes()) {
+        for (String typeId : kinds.facilityBlockTypes()) {
             blockOf(typeId).ifPresent(facilities::add);
-        }
-        for (String typeId : kinds.workstationBlockTypes()) {
-            blockOf(typeId).ifPresent(facilities::add);
-        }
-        // 床有十六种染色，按注册表按名找齐；名字以外的新床出现时也会在下次登记前进来。
-        for (Block block : BuiltInRegistries.BLOCK) {
-            if (BuiltInRegistries.BLOCK.getKey(block).getPath().endsWith("_bed")) {
-                facilities.add(block);
-            }
         }
         this.facilities = Set.copyOf(facilities);
         return this.facilities;

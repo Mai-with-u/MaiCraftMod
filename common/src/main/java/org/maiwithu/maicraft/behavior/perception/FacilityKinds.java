@@ -37,6 +37,8 @@ public final class FacilityKinds {
             "minecraft:anvil", "c:player_workstations/crafting_tables", "c:player_workstations/furnaces");
 
     private final ReadsBlockTags tags;
+    /** 全部床的种类：床没有方块标签，要翻一遍注册表才找得齐，找到后复用。 */
+    private Set<String> bedBlockTypes;
 
     public FacilityKinds(ReadsBlockTags tags) {
         this.tags = Objects.requireNonNull(tags, "tags");
@@ -85,6 +87,34 @@ public final class FacilityKinds {
         for (String tag : WORKSTATION_TAGS) {
             types.addAll(tags.blocksIn(tag));
         }
+        return types;
+    }
+
+    /**
+     * 全部床的种类：床没有方块标签，从注册表的全部方块类型里按类型名认一次，之后复用。
+     * 原版十六种染色床和照这个名字起名的模组床都在内。
+     */
+    public Set<String> bedBlockTypes() {
+        if (bedBlockTypes == null) {
+            Set<String> beds = new LinkedHashSet<>();
+            for (String typeId : tags.allBlockTypes()) {
+                if (isBed(typeId)) {
+                    beds.add(typeId);
+                }
+            }
+            this.bedBlockTypes = Set.copyOf(beds);
+        }
+        return bedBlockTypes;
+    }
+
+    /**
+     * 设施观察要看的全部方块类型：容器、工作设施与床。观察一侧只取这一份清单，
+     * 登记与查询共用，免得各列一遍、床从查询里漏掉。
+     */
+    public Set<String> facilityBlockTypes() {
+        Set<String> types = new LinkedHashSet<>(containerBlockTypes());
+        types.addAll(workstationBlockTypes());
+        types.addAll(bedBlockTypes());
         return types;
     }
 }

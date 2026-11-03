@@ -48,4 +48,12 @@ public final class RegistryBlockTags implements ReadsBlockTags {
         }
         return blocks;
     }
+
+    @Override public Set<String> allBlockTypes() {
+        Set<String> types = new LinkedHashSet<>();
+        for (Block block : BuiltInRegistries.BLOCK) {
+            types.add(BuiltInRegistries.BLOCK.getKey(block).toString());
+        }
+        return types;
+    }
 }
