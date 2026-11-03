@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.game.interaction;
 
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -10,7 +9,7 @@ import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.phys.BlockHitResult;
 
 /**
- * 右键三类目标各自的确认依据：点击格、相邻格、手中物品或菜单只要有一项变化，就作为点击已生效的线索。
+ * 右键方块与使用手中物品各自的确认依据（右键生物的在 {@link EntityUseConfirmation}）：点击格、相邻格、手中物品或菜单只要有一项变化，就作为点击已生效的线索。
  * 这些依据只回答「游戏接没接这一下」，不验证每种物品真正想产生的完整结果，也不能拿它们代替成品检查。
  */
 final class UseConfirmations {
@@ -56,22 +55,5 @@ final class UseConfirmations {
                 c -> c.localPlayer().isUsingItem()
                         ? InteractionConfirmation.Verdict.APPLIED
                         : InteractionConfirmation.Verdict.PENDING);
-    }
-
-    /** 右键实体：手中物品、打开的菜单或乘坐关系变化算线索；羊有没有被剪毛这类不在这份观察里。 */
-    static InteractionConfirmation entityUse(Player player, Entity target, InteractionHand usedHand) {
-        Entity vehicleBefore = player.getVehicle();
-        int passengersBefore = target.getPassengers().size();
-        ItemStack heldBefore = player.getItemInHand(usedHand).copy();
-        int beforeMenu = player.containerMenu.containerId;
-        InteractionConfirmation ridingChanged = c ->
-                c.localPlayer().getVehicle() != vehicleBefore
-                        || target.getPassengers().size() != passengersBefore
-                        ? InteractionConfirmation.Verdict.APPLIED
-                        : InteractionConfirmation.Verdict.PENDING;
-        return InteractionConfirmation.anyOf(
-                InteractionConfirmation.heldItemChanged(usedHand, heldBefore),
-                InteractionConfirmation.menuChanged(beforeMenu),
-                ridingChanged);
     }
 }

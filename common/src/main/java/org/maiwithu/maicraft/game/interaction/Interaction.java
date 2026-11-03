@@ -703,7 +703,7 @@ public final class Interaction {
             pending = submitted;
         } else {
             PendingInteraction submitted = sender.interact(
-                    context, entity, hand, UseConfirmations.entityUse(player, entity, hand),
+                    context, entity, hand, EntityUseConfirmation.of(player, entity, hand),
                     CONFIRM_TIMEOUT_TICKS);
             // 提交入口这一刻不收：不算失败，下一刻原样再点。
             if (submitted == null) return false;

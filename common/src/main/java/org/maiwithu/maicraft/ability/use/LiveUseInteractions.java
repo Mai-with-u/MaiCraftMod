@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.interaction.GestureConfirmations;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
+import org.maiwithu.maicraft.game.interaction.EntityUseConfirmation;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -38,7 +39,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 /**
  * 组装这一下交互的生产实现：出手前冻结现场，按手上实际拿着的东西归手势，按手势挑点哪一格、怎样算生效。
  *
- * <p>对实体用：手上变了、点开了界面、骑了上去，有一项成立就算生效。写告示牌：编辑界面打开才算点上了。
+ * <p>对实体用：按右键生物的那一份确认（手上变了、点开了界面、骑了上去、它坐下或被驯服、它被收起……）。写告示牌：编辑界面打开才算点上了。
  * 桶和船按自己的射线或使用行为作用（舀只认源格、倒在被点面外面、放船由船自己找落点），
  * 所以它们是"朝那一格使用手里的物品"，不是右键准星下的方块；其余都是右键要点的那一格。
  * 方块有没有自己的右键行为、能不能直接点着，按方块的种类与它给不给界面判断，不按名字猜。
@@ -75,28 +76,28 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 return new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         "刷子要对着方块刷（可疑的沙子、沙砾），不给目标没法刷", null));
             }
+            // 拿鞍对空处右键放下抱着的女仆：手上没变，身上的乘客变了也算。
             SustainedUse use = interactions.useHeldItem(InteractionHand.MAIN_HAND,
-                    InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, handBefore), 0);
+                    EntityUseConfirmation.ofHeldItem(player, InteractionHand.MAIN_HAND), 0);
             return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, null);
         }
         if (target.isEntity()) {
-            return onEntity(current.level(), target, handBefore, held, gesture, menuBefore);
+            return onEntity(current.level(), player, target, held, gesture, menuBefore);
         }
         return onBlock(current.level(), player, target, writesSign, handBefore, held, gesture, menuBefore);
     }
 
-    // 对实体用：按编号找回当刻的它；手上变了（挤到奶）、点开了界面（村民）、骑上去了（马、船），都算生效。
-    private UseSeams.Built onEntity(ClientLevel level, ResolvedTarget target, ItemStack handBefore,
+    // 对实体用：按编号找回当刻的它；算不算生效问全仓那一份右键生物的确认（手上变了、点开了界面、骑上去了、
+    // 它坐下了、被驯服了、被收起来了……）。
+    private UseSeams.Built onEntity(ClientLevel level, LocalPlayer player, ResolvedTarget target,
             UseSeams.ReadsWorld.Held held, ItemUseAim.Gesture gesture, int menuBefore) {
         Entity entity = level.getEntity(target.entityId());
         if (entity == null || entity.isRemoved()) {
             return new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.TARGET_GONE,
                     target.describe() + " 已经不在了，还没出手", "重新 observe"));
         }
-        AimAndInteract use = interactions.useEntity(entity, GestureConfirmations.anyOf(
-                InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, handBefore),
-                InteractionConfirmation.menuChanged(menuBefore),
-                InteractionConfirmation.ridingOn(entity)));
+        AimAndInteract use = interactions.useEntity(entity,
+                EntityUseConfirmation.of(player, entity, InteractionHand.MAIN_HAND));
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, null);
     }
 
