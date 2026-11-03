@@ -7,6 +7,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.level.Level;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -121,6 +124,15 @@ public final class SeenRegistry {
                 .filter(entry -> entry.getValue().equals(id))
                 .map(Map.Entry::getKey)
                 .findFirst();
+    }
+
+    /**
+     * 观察编号此刻对应的那只实体：按游戏实体编号从这个世界里读回来；编号不是在册实体、
+     * 它已经不在这个世界里（走远卸载、死了被移除）时给空。点名一只生物说话、存东西、改设置都从这里找回它。
+     */
+    public Optional<Entity> entityIn(Level level, String id) {
+        if (level == null) return Optional.empty();
+        return gameEntityOf(id).map(level::getEntity).filter(entity -> !entity.isRemoved());
     }
 
     /**

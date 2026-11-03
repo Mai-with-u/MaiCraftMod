@@ -49,9 +49,7 @@ final class LiveCreatureStorage implements DepositSeams.CreatureStorage {
         Scene current = scene.get();
         PlayerContext player = contexts.get();
         if (current == null || player == null || player.level() == null) return Optional.empty();
-        return current.seen().gameEntityOf(seenId)
-                .map(id -> player.level().getEntity(id))
-                .filter(entity -> !entity.isRemoved())
+        return current.seen().entityIn(player.level(), seenId)
                 .map(entity -> new Creature(entity.getId(),
                         BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
                         WorldPosition.here(entity.getBlockX(), entity.getBlockY(), entity.getBlockZ()),

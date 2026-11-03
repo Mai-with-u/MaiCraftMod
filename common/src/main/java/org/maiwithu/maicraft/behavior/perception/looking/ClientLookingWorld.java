@@ -225,8 +225,7 @@ final class ClientLookingWorld implements LookingWorld {
 
     private Optional<Entity> entity(TickContext context, String sceneId) {
         ClientLevel level = context.player() == null ? null : context.player().level();
-        if (level == null) return Optional.empty();
-        return scene.seen().gameEntityOf(sceneId).map(level::getEntity).filter(entity -> !entity.isRemoved());
+        return scene.seen().entityIn(level, sceneId);
     }
 
     private static boolean sameDimension(TickContext context, WorldPosition position) {

@@ -42,9 +42,7 @@ public final class LiveListeners implements FindsListener {
         Scene current = scene.get();
         PlayerContext player = contexts.get();
         if (current == null || player == null || player.level() == null) return new Found.Gone();
-        Optional<Entity> creature = current.seen().gameEntityOf(seenId)
-                .map(id -> player.level().getEntity(id))
-                .filter(entity -> !entity.isRemoved() && entity.isAlive());
+        Optional<Entity> creature = current.seen().entityIn(player.level(), seenId).filter(Entity::isAlive);
         if (creature.isEmpty()) return new Found.Gone();
         // 先问联动：谁认得这只生物、它会听，就交给谁。
         for (TalkTo talkTo : talkTos.get()) {
