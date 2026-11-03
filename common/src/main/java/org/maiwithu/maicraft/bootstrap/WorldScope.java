@@ -88,6 +88,7 @@ import org.maiwithu.maicraft.behavior.perception.looking.IdleLooking;
 import org.maiwithu.maicraft.game.world.RegistryBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfBrief;
+import org.maiwithu.maicraft.mcp.view.SelfView;
 import org.maiwithu.maicraft.ability.timer.Timers;
 
 /**
@@ -137,6 +138,8 @@ public final class WorldScope {
     private final IdleLooking idleLooking;
     /** 看界面要读的东西：开着的界面按这个世界认得出的界面（原版加联动模组的证明）读，交易界面再读报价。 */
     private final MenuView.Reads menus;
+    /** 角色是谁、在哪个世界：进世界时读一次。 */
+    private final SelfView.Identity selfIdentity;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -173,6 +176,9 @@ public final class WorldScope {
                 .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
+        // 角色是谁、在哪个世界：账号名与 UUID 在这一趟进世界里不会变，observe(self) 每次照抄。
+        this.selfIdentity = new SelfView.Identity(minecraft.player.getGameProfile().getName(),
+                minecraft.player.getUUID(), save.key());
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
@@ -341,6 +347,11 @@ public final class WorldScope {
     public Optional<String> selfBrief() {
         SceneSelf self = scene.self();
         return self == null ? Optional.empty() : Optional.of(SelfBrief.line(self, dimension, menus.screens().current()));
+    }
+
+    /** observe(self) 带的角色是谁：账号名、UUID 与世界身份编号。 */
+    public SelfView.Identity identity() {
+        return selfIdentity;
     }
 
     /** observe(menu) 读的界面：开着的界面与交易报价。 */

@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * observe(self) 的样子：角色自己的状态、背包、手上在做的事和这件事的许可。
@@ -32,6 +33,24 @@ public final class SelfView {
      * @param carried 身上现有几件（标签按合计）
      */
     public record Reserved(String item, Integer atLeast, int carried) {}
+
+    /**
+     * 角色是谁、在哪个世界：账号名、UUID 与世界身份编号。宿主拿它认出聊天、死亡播报、场景里哪一个是角色自己，
+     * 按世界身份编号把不同存档、服务器里记下的事分开。
+     *
+     * @param name     角色的账号名
+     * @param uuid     角色的 UUID
+     * @param worldKey 世界身份编号：按存档目录或服务器地址算出的那串编号，世界记忆也按它分开存；认不出时为 null
+     */
+    public record Identity(String name, UUID uuid, String worldKey) {}
+
+    /** 把角色是谁写进自己这一栏；读不到的项不写，不编一个。 */
+    public static void addIdentity(JsonObject view, Identity identity) {
+        if (identity == null) return;
+        if (identity.name() != null) view.addProperty("name", identity.name());
+        if (identity.uuid() != null) view.addProperty("uuid", identity.uuid().toString());
+        if (identity.worldKey() != null) view.addProperty("world_key", identity.worldKey());
+    }
 
     /** 把预留写进自己这一栏：每样留几件、身上几件；全都留着写 all。没有预留时不写，免得多一项空数组。 */
     public static void addReserved(JsonObject view, List<Reserved> reserved) {

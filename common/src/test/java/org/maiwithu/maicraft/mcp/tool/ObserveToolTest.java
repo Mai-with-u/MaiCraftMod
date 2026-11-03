@@ -48,6 +48,7 @@ import org.maiwithu.maicraft.kernel.task.Urgency;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.mcp.view.MenuView;
+import org.maiwithu.maicraft.mcp.view.SelfView;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -61,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.UUID;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -103,6 +105,9 @@ class ObserveToolTest {
     /** 本刻的角色上下文替身：默认没有（不在世界里或还没接上），看背包的用例先摆好。 */
     private PlayerContext heldPlayer;
     private ToolDispatcher tools;
+    /** 角色是谁、在哪个世界：测试摆，默认读到了全部三项。 */
+    private SelfView.Identity identity = new SelfView.Identity("Mai",
+            UUID.fromString("00000000-0000-0000-0000-000000000001"), "ab".repeat(32));
     /** 板上还成立的提醒：测试摆。 */
     private List<Reminder> reminders = List.of();
     /** 角色此刻开着的界面：测试摆，默认什么都没开。 */
@@ -202,7 +207,8 @@ class ObserveToolTest {
         };
         tools = new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
                 () -> inWorld ? memory : null, table, direct, () -> reminders,
-                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null, List::of, reads::add),
+                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null, List::of, reads::add,
+                () -> inWorld ? identity : null),
                 new ExecuteTool(registry, table, direct)));
     }
 
@@ -252,6 +258,19 @@ class ObserveToolTest {
         assertEquals("minecraft:stone_pickaxe", self.get("held").getAsString());
         assertEquals("空闲，没有在做的目标", self.getAsJsonObject("goal").get("doing").getAsString());
         assertEquals("natural", self.getAsJsonObject("permissions").get("change_blocks").getAsString());
+    }
+
+    @Test
+    void selfSaysWhoTheCharacterIsAndWhichWorldItIsIn() {
+        JsonObject self = data(observe("{\"what\": \"self\"}"));
+
+        assertEquals("Mai", self.get("name").getAsString());
+        assertEquals("00000000-0000-0000-0000-000000000001", self.get("uuid").getAsString());
+        assertEquals("ab".repeat(32), self.get("world_key").getAsString());
+
+        // 认不出世界时只少这一项，不编一个。
+        identity = new SelfView.Identity("Mai", UUID.fromString("00000000-0000-0000-0000-000000000001"), null);
+        assertFalse(data(observe("{\"what\": \"self\"}")).has("world_key"));
     }
 
     @Test

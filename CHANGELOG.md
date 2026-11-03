@@ -37,6 +37,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 - 角色闲着时会顺着 LLM 读的东西看过去：`observe(self)` 打开背包看两三秒，`observe(scene)` 从左到右看看身边两三样东西，`observe(detail)` 转头看着那样东西（隔着墙、在地下看不见的只朝那边大致瞥一眼，手边够得着的自家箱子打开看一眼，再读这个编号就是刚看到的内容），`lookup` 查配方时翻开 EMI 或 JEI 的那一页；`find` 做完看向最近的那个，`machine_inspect`、`design(read_site)` 做完扫过那片机器、那一栋。
 - 两次调用之间角色不再干站着：隔几秒看看刚说话的人、声音来处、身边的玩家和生物，或者随便看看；目标在等回答、被暂停时也会看，只转头不开界面，回答一到接着干。转头不改变观察里的前后左右。实例配置 `config/maicraft.json` 多一项 `idleLooking`（默认开），关掉就站着不动。
 - `find` 扫描附近时角色会原地环顾：往一边转头、略低头，再扫到另一边，回正后停两三秒再看下一圈，扫完、找满当场停下；找到的东西和报的方位不变。
+- `observe(self)` 写明角色是谁了：`name` 账号名、`uuid`，以及 `world_key`（这个存档或服务器的编号，换一个世界就不一样，认不出时不给）。
 - `observe` 的场景和详情里，玩家、有名字的、被驯服的生物多一项 `uuid`；女仆墓碑（`maid_tombstone`）多一项 `maid_uuid`，是墓碑上那只女仆的 UUID，和她生前场景里的 `uuid` 对得上。
 - `events(topic=chat)` 的消息带上点到的实体了（`mentions`）：死亡播报里死的是谁、被谁打死，进出提示里的玩家，按出现先后给名字、实体类型和 UUID；整句是一条游戏翻译时另有 `translation_key`（例如 `death.attack.explosion.player`），分得出是哪种播报。
 

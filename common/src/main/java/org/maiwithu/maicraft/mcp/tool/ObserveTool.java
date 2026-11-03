@@ -53,6 +53,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<List<SelfView.Reserved>> reserved;
     /** 读完告诉闲时看读了什么：角色闲着时顺着看过去，读到的内容不变。 */
     private final LooksAfterReading looks;
+    /** 角色是谁、在哪个世界：observe(self) 每次都带上；不在世界里时给 null。 */
+    private final Supplier<SelfView.Identity> identity;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -82,6 +84,15 @@ public final class ObserveTool implements McpTool {
                        ClientThread clientThread, Supplier<List<Reminder>> reminders,
                        Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
                        LooksAfterReading looks) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, () -> null);
+    }
+
+    /** @param identity 角色是谁、在哪个世界；不在世界里时给 null */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity) {
+        this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
         this.reserved = Objects.requireNonNull(reserved, "reserved");
         this.scene = Objects.requireNonNull(scene, "scene");
@@ -175,6 +186,8 @@ public final class ObserveTool implements McpTool {
         view.add("reminders", REMINDER_JSON.toJsonTree(reminders.get()));
         // 预留着什么、身上各有几件：没有预留时不写这一项。
         SelfView.addReserved(view, reserved.get());
+        // 角色是谁、在哪个世界：宿主认出聊天和播报里哪个名字是角色自己，按世界分开记事。
+        SelfView.addIdentity(view, identity.get());
         return view;
     }
 }
