@@ -8,3 +8,4 @@ mekanism/mekanism-ore-processing
 progression/progression-ender-dragon
 progression/progression-ftb-quests
 building/building-workflow
+touhoulittlemaid/maid-getting-started
