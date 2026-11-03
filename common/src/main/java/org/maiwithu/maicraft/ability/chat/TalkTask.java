@@ -133,8 +133,7 @@ final class TalkTask extends PhasedTask<TalkTask.Phase> {
         } else if (heard.personaGenerated()) {
             summary = who + "这次只生成了一份人设，没回答这句；再说一遍才会回答";
         } else if (!heard.delivered()) {
-            summary = "话交出去了，但没看到" + who + "有反应，没能确认它听到了；不要重说"
-                    + (heard.unconfirmed() == null ? "" : "（" + heard.unconfirmed() + "）");
+            summary = "没能确认" + who + "听到了这句" + (heard.unconfirmed() == null ? "" : "：" + heard.unconfirmed());
         } else if (input.maxSeconds() == 0) {
             summary = who + "听到了，没等回话就走了；它的回话会进 events(topic=chat)";
         } else {

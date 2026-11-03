@@ -29,6 +29,15 @@ class VerifiedVersionsTest {
     }
 
     @Test
+    void 版本后面带加载器与游戏版本后缀的照样认() {
+        // 车万女仆的加载器版本是 1.5.3-neoforge+mc1.21.1：后缀段不是数字按 0 算，落在 [1.5.3, 1.5.4) 里。
+        VerifiedVersions maid = new VerifiedVersions("1.5.3", "1.5.4");
+        assertTrue(maid.contains("1.5.3-neoforge+mc1.21.1"));
+        assertFalse(maid.contains("1.5.4-neoforge+mc1.21.1"));
+        assertFalse(maid.contains("1.5.2-neoforge+mc1.21.1"));
+    }
+
+    @Test
     void 比的是模组自身的版本带游戏版本前缀的写法对不上() {
         // 加载器报的是 3.25.69；Modrinth 文件名那种 1.21.1-3.25.69.1979 会拿 1 去和 3 比，不能写进范围也不会被认成在范围内。
         assertFalse(range.contains("1.21.1-3.25.69.1979"));

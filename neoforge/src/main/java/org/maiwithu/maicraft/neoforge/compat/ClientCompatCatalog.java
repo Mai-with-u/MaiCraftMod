@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
 import org.maiwithu.maicraft.compat.jei.JeiCompat;
 import org.maiwithu.maicraft.compat.mekanism.MekanismCompat;
 import org.maiwithu.maicraft.compat.ponder.PonderCompat;
+import org.maiwithu.maicraft.compat.touhoulittlemaid.TouhouLittleMaidCompat;
 import org.maiwithu.maicraft.compat.ultimine.UltimineCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGrid;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsPatterns;
@@ -50,6 +51,8 @@ import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
 import org.maiwithu.maicraft.neoforge.compat.jei.JeiClientReads;
 import org.maiwithu.maicraft.neoforge.compat.mekanism.MekanismClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ponder.PonderClientReads;
+import org.maiwithu.maicraft.neoforge.compat.touhoulittlemaid.TouhouLittleMaidActions;
+import org.maiwithu.maicraft.neoforge.compat.touhoulittlemaid.TouhouLittleMaidReads;
 import org.maiwithu.maicraft.neoforge.compat.ultimine.UltimineClientReads;
 
 /**
@@ -118,6 +121,9 @@ public final class ClientCompatCatalog {
                 // FTB 连锁破坏：按 2101.1.15 编译，实测实例装的就是它；装了 2101.2 及以上不登记
                 // （当前形状要读它客户端的一个非公开字段，换了版本可能改名）。
                 new SupportedMod<>(UltimineCompat.MOD_ID, "FTB 连锁破坏", new VerifiedVersions("2101.1.15", "2101.2"),
-                        () -> new UltimineCompat(new UltimineClientReads())));
+                        () -> new UltimineCompat(new UltimineClientReads())),
+                // 车万女仆：按 1.5.3 编译（加载器报 1.5.3-neoforge+mc1.21.1），粉丝服两端装的就是它；装了 1.5.4 及以上不登记。
+                new SupportedMod<>(TouhouLittleMaidCompat.MOD_ID, "车万女仆", new VerifiedVersions("1.5.3", "1.5.4"),
+                        () -> new TouhouLittleMaidCompat(new TouhouLittleMaidReads(), new TouhouLittleMaidActions())));
     }
 }
