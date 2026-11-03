@@ -11,6 +11,7 @@ import net.minecraft.client.player.LocalPlayer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 看看点开的界面的生产实现：认领这一次点开的那份界面，等内容同步完列出里面有什么，再关上。
  *
  * <p>每次点开都新建读端，绑上的就是这一份界面（读端只绑一次，复用上一次的会一直读旧的那份）。
+ * 认界面用联动登记表合并后的布局：联动证明过的模组界面（女仆界面这类）也列得出内容。
  * 界面认不出（村民交易这类）或内容一直没同步完时列不出内容，照样关上：打开者负责关闭。
  * 关闭走界面会话，一份会话从头用到尾，只请求游戏关一次。
  */
@@ -29,9 +31,12 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
     static final int SYNC_WAIT_TICKS = 40;
 
     private final Supplier<PlayerContext> context;
+    private final MenuLayouts layouts;
 
-    LiveMenuLooks(Supplier<PlayerContext> context) {
+    /** @param layouts 认得出哪些界面：原版加上联动模组证明过的 */
+    LiveMenuLooks(Supplier<PlayerContext> context, MenuLayouts layouts) {
         this.context = Objects.requireNonNull(context, "context");
+        this.layouts = Objects.requireNonNull(layouts, "layouts");
     }
 
     @Override
@@ -43,7 +48,7 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
             return Optional.empty();
         }
         ClientMenuChannel channel = ClientMenuChannel.claimCurrent(context);
-        return channel == null ? Optional.empty() : Optional.of(new Look(channel, new ClientMenuContent(context)));
+        return channel == null ? Optional.empty() : Optional.of(new Look(channel, new ClientMenuContent(context, layouts)));
     }
 
     /** 看一次界面：等同步 → 列内容 → 关上。 */

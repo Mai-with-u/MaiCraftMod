@@ -666,7 +666,7 @@ public final class AbilityCatalog {
                 deps.world()::scene, deps.world().blockScans(), refusals, deps.travel().walks(),
                 deps.dropConfirmations(), deps.world().memory(), deps.guards()::protection,
                 deps.guards().creatures(), space, deps.world().facilities(),
-                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()));
+                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.compat().menuLayouts());
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */

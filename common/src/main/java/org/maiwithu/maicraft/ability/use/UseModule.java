@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
@@ -107,7 +108,7 @@ public final class UseModule implements AbilityModule {
             ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
             ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
-            FacilityKinds facilities, HoldsSneak sneak) {
+            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -132,7 +133,7 @@ public final class UseModule implements AbilityModule {
                 new MenuSignEditors(),
                 new ClientDropPickup(context, walks, confirmations),
                 new LiveUseTravel(walks),
-                new LiveMenuLooks(context),
+                new LiveMenuLooks(context, layouts),
                 memory,
                 new LiveOthersThings(context, protection, creatures),
                 space,
