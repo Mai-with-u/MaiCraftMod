@@ -52,6 +52,8 @@ class WalkSurvivalGuardsTest {
         assertEquals(Problem.Kind.UNREACHABLE, report.problem().kind());
         assertTrue(report.problem().message().contains("氧气只剩 30"), report.problem().message());
         assertTrue(report.problem().message().contains("浮上水面换气"), report.problem().message());
+        // 换气没能先插进来、走路自己憋不住：一口气不够就是不够，这一次就算从这里到不了。
+        assertTrue(report.noRouteFromHere());
     }
 
     @Test

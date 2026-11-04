@@ -77,9 +77,11 @@ final class WalkSurvivalGuards {
             SurvivalSituation read = situation.get();
             if (UnderwaterWalkBudget.judge(read) == UnderwaterWalkBudget.Verdict.GIVE_UP_AND_SURFACE) {
                 // 头在水里、氧气落到放弃线：这段路就此判死，身体交给换气链；记一行，实机能对上是哪道闸收的场。
-                LOG.debug("[maicraft-path] 水下呼吸预算判死：氧气 {}/{} 刻，放弃这段路上浮，在 {}",
+                // 走到这里说明换气没能先插进来把走路停下（这一步停下不安全、换气刚失败在缓着、主任务把生存需求全关了）：
+                // 没有换气接着，一口气不够就是不够，不用数够 3 次，这一次就标成从这里到不了，靠近把剩下的站位合起来只再算一次。
+                LOG.debug("[maicraft-path] 水下呼吸预算判死：氧气 {}/{} 刻，放弃这段路上浮，按从这里到不了收场，在 {}",
                         read.airTicks(), read.maxAirTicks(), feet.toShortString());
-                progress.fail(UnderwaterWalkBudget.giveUpProblem(read, feet), feet);
+                progress.failNoRoute(UnderwaterWalkBudget.giveUpProblem(read, feet), feet);
             }
         }
         return progress.done();

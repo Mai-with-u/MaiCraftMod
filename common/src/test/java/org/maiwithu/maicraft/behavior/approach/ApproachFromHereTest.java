@@ -10,6 +10,8 @@ import java.util.OptionalLong;
 import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.survival.SurvivalFakes;
+import org.maiwithu.maicraft.behavior.survival.breath.UnderwaterWalkBudget;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -17,7 +19,8 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 /**
  * 靠近的"从这里到不了"：某个站位因为从这里到不了走不通，剩下的站位合成一个目标再算一次；
  * 合起来也走不通就记下、按到不了收场，同一个目标运行里、起点 8 格内再靠近同一个对象直接收场；
- * 换了目标运行、离开起点 8 格以上就失效；一般的走不通照旧一个个换站位。
+ * 换了目标运行、离开起点 8 格以上就失效；一般的走不通照旧一个个换站位。走路自己按呼吸预算憋不住放弃的，
+ * 一样算从这里到不了。
  */
 class ApproachFromHereTest {
 
@@ -37,6 +40,12 @@ class ApproachFromHereTest {
 
     private static ActionStatus noRoute() {
         return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "连续算路 15 秒仍没有可走的路线"));
+    }
+
+    // 走路自己按呼吸预算放弃这段路时交回的收场问题：氧气只剩一泡。
+    private static ActionStatus outOfBreath() {
+        return ActionStatus.failed(UnderwaterWalkBudget.giveUpProblem(
+                SurvivalFakes.calm().underwater(30).build(), new BlockPos(1, 60, 0)));
     }
 
     // 推进到有结论为止，最多这么多刻。
@@ -110,6 +119,23 @@ class ApproachFromHereTest {
         again.onArrive = () -> world.feet = GOOD_SPOT;
         assertEquals(ActionStatus.done(), runToEnd(approach(again)));
         assertEquals(1, again.begun.size());
+    }
+
+    @Test
+    void walkGivingUpOnItsOwnBreathAlsoMergesOnceAndIsRemembered() {
+        // 换气插不进来（比如主任务把生存需求全关了），走路自己按呼吸预算憋不住放弃：同样从这里到不了，
+        // 剩下的站位合起来只再算一次，也不行就记下收场；起点附近再靠近同一只箱子一步不走直接收场。
+        world.grounded = false;
+        StubMoves moves = new StubMoves(world, outOfBreath(), outOfBreath());
+        moves.noRouteFromHere = true;
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, runToEnd(approach(moves)));
+        assertEquals(2, moves.begun.size(), "只走了第一个站位和合起来的一趟");
+        assertEquals("Composite", moves.goals.get(1).goal().getClass().getSimpleName());
+        assertTrue(failed.problem().message().contains("氧气只剩 30"), failed.problem().message());
+
+        StubMoves again = new StubMoves(world);
+        assertInstanceOf(ActionStatus.Failed.class, approach(again).tick(new StubTick(1)));
+        assertEquals(0, again.begun.size());
     }
 
     @Test
