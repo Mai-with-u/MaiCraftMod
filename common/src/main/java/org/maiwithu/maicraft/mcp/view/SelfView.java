@@ -39,11 +39,13 @@ public final class SelfView {
      * 角色是谁、在哪个世界：账号名、UUID 与所在的世界。宿主拿它认出聊天、死亡播报、场景里哪一个是角色自己，
      * 按世界编号把不同存档、服务器里记下的事分开。
      *
-     * @param name  角色的账号名
-     * @param uuid  角色的 UUID
-     * @param world 所在的世界：编号、给人看的名字与编号从哪来，和 events 每一页带的是同一个；认不出时为 null
+     * @param name     角色的账号名
+     * @param uuid     角色的 UUID
+     * @param world    所在的世界：编号、给人看的名字与编号从哪来，和 events 每一页带的是同一个；认不出时为 null
+     * @param worldKey 过渡用：这个世界的数据在旧版本里存在哪个编号名下（接手旧数据的世界是旧编号，刚建好的是世界编号）；
+     *                 旧版宿主按它当键照常能用，新版宿主看到它和世界编号不同就把这个编号名下的数据搬过去；认不出时为 null
      */
-    public record Identity(String name, UUID uuid, SaveIdentity world) {}
+    public record Identity(String name, UUID uuid, SaveIdentity world, String worldKey) {}
 
     /** 把角色是谁写进自己这一栏；读不到的项不写，不编一个。 */
     public static void addIdentity(JsonObject view, Identity identity) {
@@ -51,6 +53,7 @@ public final class SelfView {
         if (identity.name() != null) view.addProperty("name", identity.name());
         if (identity.uuid() != null) view.addProperty("uuid", identity.uuid().toString());
         if (identity.world() != null) view.add("world", WorldIdentityView.of(identity.world()));
+        if (identity.worldKey() != null) view.addProperty("world_key", identity.worldKey());
     }
 
     /** 把预留写进自己这一栏：每样留几件、身上几件；全都留着写 all。没有预留时不写，免得多一项空数组。 */

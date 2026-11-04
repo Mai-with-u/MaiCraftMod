@@ -184,15 +184,16 @@ public final class WorldScope {
         this.world = Objects.requireNonNull(save, "save");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
-        // 角色是谁、在哪个世界：账号名、UUID 与世界在这一趟进世界里不会变，observe(self) 每次照抄。
-        this.selfIdentity = new SelfView.Identity(minecraft.player.getGameProfile().getName(),
-                minecraft.player.getUUID(), save);
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
         DocumentStore documents = new DocumentStore(identity.databaseFile());
         // 旧版本按存档目录或服务器地址存的记忆：第一次用世界编号进这个世界时决定搬不搬，先于读记忆、读目标。
-        adoptLegacyMemory(documents, save, minecraft.level.getGameTime());
+        // 同一个决定也答出这个世界的数据在旧版本里存在哪个编号名下，宿主按它搬自己的旧数据。
+        String worldKey = adoptLegacyMemory(documents, save, minecraft.level.getGameTime());
+        // 角色是谁、在哪个世界：账号名、UUID 与世界在这一趟进世界里不会变，observe(self) 每次照抄。
+        this.selfIdentity = new SelfView.Identity(minecraft.player.getGameProfile().getName(),
+                minecraft.player.getUUID(), save, worldKey);
         this.memory = new WorldMemory(documents, identity.key());
         // 吃过亏的方块：碰着就掉血的那几种记在所有世界共用的一份里，进世界读出来交给寻路绕开。
         this.pains = new PainfulBlocks(documents);
@@ -257,13 +258,19 @@ public final class WorldScope {
      * 旧版本的记忆按存档目录或服务器地址算的编号存着：玩过一阵的世界（旧版本里玩过的存档、连过的服务器）第一次在新版本里进，
      * 整体搬到世界编号名下接着用；刚建好的世界（游戏时间还不到一分钟）不搬，那份只可能是同名文件夹里删掉的旧存档留下的。
      * 搬不动时记日志、从空记忆开始，下次进来再试，不让它挡住进世界。
+     *
+     * @return 这个世界的数据在旧版本里存在哪个编号名下（observe(self) 的 world_key）：接手旧数据的是旧编号，
+     *         刚建好的世界是世界编号；决定记不下来时按这一次现场的判断答
      */
-    private static void adoptLegacyMemory(DocumentStore documents, SaveIdentity save, long gameTime) {
+    private static String adoptLegacyMemory(DocumentStore documents, SaveIdentity save, long gameTime) {
+        boolean newWorld = gameTime < NEW_WORLD_TICKS;
         try {
-            int moved = LegacyWorldKeys.adopt(documents, save.legacyKey(), save.key(), gameTime < NEW_WORLD_TICKS);
-            if (moved > 0) LOG.info("旧版本存下的 {} 条世界记忆搬到了这个世界的世界编号名下", moved);
+            LegacyWorldKeys.Decision decision = LegacyWorldKeys.adopt(documents, save.legacyKey(), save.key(), newWorld);
+            if (decision.moved() > 0) LOG.info("旧版本存下的 {} 条世界记忆搬到了这个世界的世界编号名下", decision.moved());
+            return decision.worldKey();
         } catch (IOException failure) {
             LOG.warn("旧版本存下的世界记忆搬不过来，这次从空记忆开始，下次进来再试", failure);
+            return newWorld || save.legacyKey() == null ? save.key() : save.legacyKey();
         }
     }
 
