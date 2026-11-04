@@ -632,7 +632,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private TaskRecords bookedRecords() {
             if (records == null) return null;
             Run outermost = advancing.peekLast();
-            return outermost == null ? records : new ExceptOutermostGain(records, outermost.request.wanted());
+            return outermost == null ? records : new ExceptOutermostGain(records, outermost.request.wanted(), tags);
         }
 
         private ActionStatus startStep() {
@@ -769,30 +769,4 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
     /** 计划里的一项：报价连同报价的来源，执行时按它找动手的人。 */
     private record Planned(ItemSource source, SourceQuote.Offer offer) {}
-
-    /** 记账口的一层过滤：最外层要的东西的入包不记，其余照传。 */
-    private final class ExceptOutermostGain implements TaskRecords {
-        private final TaskRecords delegate;
-        private final WantedItem wanted;
-
-        ExceptOutermostGain(TaskRecords delegate, WantedItem wanted) {
-            this.delegate = delegate;
-            this.wanted = wanted;
-        }
-
-        @Override public void change(Change change) {
-            if (change.kind() == Change.Kind.ITEM_GAINED && wanted.matches(change.what(), tags.tagsOf(change.what()))) {
-                return;
-            }
-            delegate.change(change);
-        }
-
-        @Override public void unconfirmed(Change change) {
-            delegate.unconfirmed(change);
-        }
-
-        @Override public void attempt(String tried, String whatHappened) {
-            delegate.attempt(tried, whatHappened);
-        }
-    }
 }
