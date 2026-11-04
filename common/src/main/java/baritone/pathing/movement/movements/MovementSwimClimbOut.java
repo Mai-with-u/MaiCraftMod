@@ -35,27 +35,52 @@ public class MovementSwimClimbOut extends Movement {
         return ImmutableSet.of(src, src.above(), src.above(2), dest, overshoot);
     }
 
+    /** 攀出水面要看的三种格子：是不是水、能不能站在上面、身体能不能穿过去。 */
+    public interface Shore {
+        boolean water(int x, int y, int z);
+
+        boolean standOn(int x, int y, int z);
+
+        boolean passable(int x, int y, int z);
+    }
+
     /**
      * 只从水面节点起攀：头顶还是水就先上浮，原版出水助推只在水面贴岸处生效；
      * 岸顶必须现成可站可立，不在水里垫块。
      */
     public static double cost(CalculationContext context, int x, int y, int z, int destX, int destZ) {
-        if (!MovementHelper.isWater(context.get(x, y, z))) {
-            return COST_INF;
-        }
-        if (MovementHelper.isWater(context.get(x, y + 1, z))) {
-            return COST_INF;
-        }
-        BlockState ledge = context.get(destX, y + 1, destZ);
-        if (!MovementHelper.canWalkOn(context, destX, y + 1, destZ, ledge)) {
-            return COST_INF;
-        }
-        if (!MovementHelper.canWalkThrough(context, destX, y + 2, destZ)
-                || !MovementHelper.canWalkThrough(context, destX, y + 3, destZ)
-                || !MovementHelper.canWalkThrough(context, x, y + 1, z)) {
-            return COST_INF;
-        }
-        return WALK_ONE_IN_WATER_COST + JUMP_ONE_BLOCK_COST + context.jumpPenalty;
+        return climbable(shore(context), x, y, z, destX, destZ)
+                ? WALK_ONE_IN_WATER_COST + JUMP_ONE_BLOCK_COST + context.jumpPenalty
+                : COST_INF;
+    }
+
+    /**
+     * 从水面这一格 (x,y,z) 能不能攀上旁边 (destX,destZ) 那一格岸，纯函数：脚下这格是水、头上那格不是水
+     * （人浮在水面），旁边 y+1 那块站得住（岸顶在 y+2，比水面高出约 1.1 格），岸顶往上两格和自己头上那格都空着。
+     */
+    public static boolean climbable(Shore shore, int x, int y, int z, int destX, int destZ) {
+        if (!shore.water(x, y, z) || shore.water(x, y + 1, z)) return false;
+        if (!shore.standOn(destX, y + 1, destZ)) return false;
+        return shore.passable(destX, y + 2, destZ) && shore.passable(destX, y + 3, destZ)
+                && shore.passable(x, y + 1, z);
+    }
+
+    // 算路时按计算上下文读格子：和原先逐格读的是同一份判断。
+    private static Shore shore(CalculationContext context) {
+        return new Shore() {
+            @Override public boolean water(int x, int y, int z) {
+                return MovementHelper.isWater(context.get(x, y, z));
+            }
+
+            @Override public boolean standOn(int x, int y, int z) {
+                BlockState ledge = context.get(x, y, z);
+                return MovementHelper.canWalkOn(context, x, y, z, ledge);
+            }
+
+            @Override public boolean passable(int x, int y, int z) {
+                return MovementHelper.canWalkThrough(context, x, y, z);
+            }
+        };
     }
 
     @Override
