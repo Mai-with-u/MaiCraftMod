@@ -5,26 +5,67 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.CropBlock;
+import net.minecraft.world.level.block.DoublePlantBlock;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.material.FluidState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-/** 缺材料时只挖地图上自然长的：石头、矿、树上的原木算；圆石墙、木板、刷石机里的圆石这些搭出来的不算。 */
+/**
+ * 缺材料时只挖地图上自然长的：石头、矿、树上的原木、野生草木算；圆石墙、木板、刷石机里的圆石这些搭出来的不算。
+ * 草木按方块类别认，种的庄稼、树苗、田里的不算野生。
+ */
 class NaturalBlocksTest {
 
     @BeforeAll
     static void bootMinecraft() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        // 离线没有数据包：地形、矿石、树苗的标签手动绑上几样。
+        BuiltInRegistries.BLOCK.bindTags(Map.of(
+                BlockTags.BASE_STONE_OVERWORLD, List.of(holder(Blocks.STONE)),
+                BlockTags.DIRT, List.of(holder(Blocks.DIRT), holder(Blocks.GRASS_BLOCK)),
+                TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "ores")),
+                List.of(holder(Blocks.IRON_ORE)),
+                BlockTags.SAPLINGS, List.of(holder(Blocks.OAK_SAPLING), holder(Blocks.AZALEA))));
+    }
+
+    private static Holder<Block> holder(Block block) {
+        return BuiltInRegistries.BLOCK.wrapAsHolder(block);
+    }
+
+    /** 模组的花：继承原版的草木类别，不在任何名单里。只拿它的类别来认，不用造出这个方块。 */
+    abstract static class ModFlower extends BushBlock {
+        ModFlower(BlockBehaviour.Properties properties) {
+            super(properties);
+        }
+    }
+
+    /** 模组的庄稼：继承原版的庄稼类别。 */
+    static class ModCrop extends CropBlock {
+        ModCrop(BlockBehaviour.Properties properties) {
+            super(properties);
+        }
     }
 
     /** 替身世界：没摆的格子都是空气。 */
@@ -89,5 +130,61 @@ class NaturalBlocksTest {
             }
         }
         assertTrue(NaturalBlocks.grown(log, new BlockPos(0, 64, 0), world, ignored -> true, new HashMap<>()));
+    }
+
+    @Test
+    void 草木按类别认_模组的花也认得_种的不算() {
+        assertTrue(NaturalBlocks.plantType(ModFlower.class), "继承草木类别的模组花");
+        assertFalse(NaturalBlocks.plantType(ModCrop.class), "继承庄稼类别的模组庄稼");
+        assertTrue(NaturalBlocks.wildPlant(Blocks.TORCHFLOWER.defaultBlockState()), "旧名单里没有的火把花");
+        assertTrue(NaturalBlocks.wildPlant(Blocks.SHORT_GRASS.defaultBlockState()));
+        assertTrue(NaturalBlocks.wildPlant(Blocks.GLOW_LICHEN.defaultBlockState()));
+        assertFalse(NaturalBlocks.wildPlant(Blocks.WHEAT.defaultBlockState()), "小麦");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.TORCHFLOWER_CROP.defaultBlockState()), "火把花的苗");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.MELON_STEM.defaultBlockState()), "西瓜茎");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.NETHER_WART.defaultBlockState()), "地狱疣");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.COCOA.defaultBlockState()), "可可豆");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.OAK_SAPLING.defaultBlockState()), "树苗");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.AZALEA.defaultBlockState()), "杜鹃花丛在树苗标签里");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.TORCH.defaultBlockState()), "火把");
+        assertFalse(NaturalBlocks.wildPlant(Blocks.MOSS_CARPET.defaultBlockState()), "苔藓地毯");
+    }
+
+    @Test
+    void 田里种的草木不算野生_两格高的看下半截底下() {
+        World world = new World();
+        BlockPos onGrass = new BlockPos(0, 64, 0);
+        world.put(0, 63, 0, Blocks.GRASS_BLOCK.defaultBlockState());
+        world.put(0, 64, 0, Blocks.SWEET_BERRY_BUSH.defaultBlockState());
+        assertTrue(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), onGrass, world, ignored -> true,
+                new HashMap<>()), "草地上的甜浆果丛是野生的");
+
+        BlockPos onFarmland = new BlockPos(2, 64, 0);
+        world.put(2, 63, 0, Blocks.FARMLAND.defaultBlockState());
+        world.put(2, 64, 0, Blocks.SWEET_BERRY_BUSH.defaultBlockState());
+        assertFalse(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), onFarmland, world,
+                ignored -> true, new HashMap<>()), "耕地上的是人种的");
+
+        BlockState lower = Blocks.SUNFLOWER.defaultBlockState().setValue(DoublePlantBlock.HALF, DoubleBlockHalf.LOWER);
+        BlockState upper = Blocks.SUNFLOWER.defaultBlockState().setValue(DoublePlantBlock.HALF, DoubleBlockHalf.UPPER);
+        world.put(4, 63, 0, Blocks.FARMLAND.defaultBlockState());
+        world.put(4, 64, 0, lower);
+        world.put(4, 65, 0, upper);
+        assertFalse(NaturalBlocks.wildAt(upper, new BlockPos(4, 65, 0), world, ignored -> true, new HashMap<>()),
+                "两格高的上半截也看下半截底下是不是耕地");
+        assertFalse(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), new BlockPos(6, 64, 0), world,
+                pos -> pos.getY() != 63, new HashMap<>()), "底下那格没加载时拿不准，不挖");
+    }
+
+    @Test
+    void 黑曜石南瓜西瓜睡莲缺料时照样能采_挨着传送门的黑曜石不采() {
+        World world = new World();
+        assertTrue(grown(world, Blocks.OBSIDIAN.defaultBlockState(), 0, 64, 0));
+        assertTrue(grown(world, Blocks.PUMPKIN.defaultBlockState(), 2, 64, 0));
+        assertTrue(grown(world, Blocks.MELON.defaultBlockState(), 4, 64, 0));
+        assertTrue(grown(world, Blocks.LILY_PAD.defaultBlockState(), 6, 64, 0));
+        world.put(10, 65, 0, Blocks.NETHER_PORTAL.defaultBlockState());
+        assertFalse(grown(world, Blocks.OBSIDIAN.defaultBlockState(), 10, 64, 0), "门框");
+        assertFalse(grown(world, Blocks.CARVED_PUMPKIN.defaultBlockState(), 12, 64, 0), "雕刻过的南瓜是人做的");
     }
 }

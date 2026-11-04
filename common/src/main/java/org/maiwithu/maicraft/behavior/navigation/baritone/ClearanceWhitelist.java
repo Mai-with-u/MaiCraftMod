@@ -1,41 +1,49 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.state.BlockState;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.Map;
-import java.util.function.Predicate;
-import net.minecraft.core.BlockPos;
-import net.minecraft.world.level.block.Blocks;
-import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalTrees;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** 寻路挖路与施工清场共用的方块类型白名单；默认包含自然地形与普通火把，不依赖服务端安装本模组。 */
+/**
+ * 寻路挖路与施工清场共用的"路上能挖开哪些方块"：天然地形、自然长的树叶、长在树上的原木、野生草木
+ * （按标签和方块类别认，见 {@link NaturalBlocks#wildAt}），再加上这个实例在配置文件里额外列的方块或标签。
+ * 不依赖服务端安装本模组。替换许可、流体和保护格仍由各执行段另行核验。
+ */
 public final class ClearanceWhitelist {
     private static final Logger LOG = LoggerFactory.getLogger(ClearanceWhitelist.class);
     public static final String CONFIG = "config/maicraft-clearance.json";
-    private static final List<String> DEFAULTS = Arrays.stream(("""
+    /**
+     * 旧版自动写进配置文件的默认名单。读配置时这些条目不再起作用：地形和草木改按标签、类别认；
+     * 火把、黑曜石、南瓜、西瓜、睡莲、苔藓地毯不再默认挖开。玩家自己加的条目照旧有效。
+     * 这份表冻结，以后不增不删：它只用来认出旧版自动写进文件的条目，不决定路上挖不挖。
+     * 哪些方块能挖开按 {@link NaturalBlocks} 的标签与类别认，不往这里加方块 ID。
+     */
+    private static final Set<ResourceLocation> LEGACY_DEFAULTS = Arrays.stream(("""
             stone granite diorite andesite deepslate tuff calcite dripstone_block pointed_dripstone
             dirt grass_block coarse_dirt podzol mycelium rooted_dirt mud muddy_mangrove_roots clay
             sand red_sand gravel sandstone red_sandstone terracotta white_terracotta orange_terracotta
@@ -60,42 +68,51 @@ public final class ClearanceWhitelist {
             brown_mushroom red_mushroom sugar_cane cactus bamboo bamboo_sapling sweet_berry_bush
             pumpkin melon lily_pad seagrass tall_seagrass kelp kelp_plant chorus_plant chorus_flower
             torch wall_torch
-            """).trim().split("\\s+")).map(name -> "minecraft:" + name).toList();
-    private static final AtomicReference<Rules> CURRENT = new AtomicReference<>(parse(DEFAULTS));
+            """).trim().split("\\s+")).map(name -> ResourceLocation.withDefaultNamespace(name))
+            .collect(Collectors.toUnmodifiableSet());
+    private static final AtomicReference<Rules> CURRENT = new AtomicReference<>(Rules.NONE_EXTRA);
 
     private ClearanceWhitelist() {}
 
-    /** 客户端启动时读取本实例的名单；空表禁止清障，坏配置也关闭清障，避免意外放宽玩家的限制。 */
+    /**
+     * 客户端启动时读取本实例额外列的方块：文件不存在就写一个空表；旧版写进去的默认条目不再起作用，文件不删不改。
+     * 读不出来（手滑写错一个逗号）按没有额外条目处理：天然方块照常挖开，不比空表还严，日志写明哪个文件、哪里错了。
+     * 不想让角色在路上动土用 change_blocks=none。
+     */
     public static void initialize(Path gameDirectory) {
         Path file = gameDirectory.resolve(CONFIG);
         try {
             if (!Files.exists(file)) {
                 Files.createDirectories(file.getParent());
-                Files.writeString(file, new GsonBuilder().setPrettyPrinting().create().toJson(DEFAULTS) + "\n",
-                        StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
+                Files.writeString(file, "[]\n", StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW);
             }
-            var json = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
-            if (!json.isJsonArray()) throw new IllegalArgumentException("expected an array of block IDs or #block_tags");
-            var entries = new ArrayList<String>();
-            for (var value : json.getAsJsonArray()) {
-                if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
-                    throw new IllegalArgumentException("whitelist entries must be strings");
-                entries.add(value.getAsString());
+            Rules rules = read(Files.readString(file, StandardCharsets.UTF_8));
+            if (rules.legacyIgnored() > 0) {
+                LOG.info("[clearance] {} 里有 {} 条旧版默认条目不再起作用：地形和草木改按标签与类别认，"
+                        + "火把、黑曜石、南瓜这些不再默认挖开", file, rules.legacyIgnored());
             }
-            CURRENT.set(parse(entries));
+            CURRENT.set(rules);
         } catch (IOException | RuntimeException invalid) {
-            CURRENT.set(parse(List.of()));
-            LOG.warn("[clearance] 清障白名单读取失败，已禁止自动清障：{}: {}", file, invalid.getMessage());
+            CURRENT.set(Rules.NONE_EXTRA);
+            LOG.warn("[clearance] {} 读不出来（{}），按没有额外条目处理：天然方块照常挖开，文件里列的不生效",
+                    file, invalid.getMessage());
         }
     }
 
-    /** 已经是空气就无需清障；其他格严格按类型匹配，替换许可、流体和保护格仍由各执行段另行核验。 */
-    public static boolean allows(BlockState state) { return state.isAir() || CURRENT.get().allows(state); }
+    /**
+     * 只看方块种类，这一格能不能挖开：已经是空气就无需清障；地形、野生草木、树叶和原木这几类（原木和树叶还要看
+     * 长没长在树上，见 {@link #allowsAt}），再加上实例额外列的。
+     */
+    public static boolean allows(BlockState state) {
+        if (state.isAir()) return true;
+        return NaturalBlocks.terrain(state) || NaturalBlocks.wildPlant(state)
+                || state.getBlock() instanceof LeavesBlock || NaturalTrees.isLog(state) || CURRENT.get().extra(state);
+    }
 
     /**
-     * 这一格能不能当地形清掉：类型在名单里，原木还得长在天然树上、树叶得是自然长的。
-     * 村里木屋的原木地板、原木屋顶，玩家用原木搭的房子、人放的树叶都不算地形，寻路不挖、看不见也不挖开。
-     * 实机里角色困在村庄木屋里，名单只认类型，把原木地板挖了个坑、又把原木屋顶拆开钻出去。
+     * 这一格能不能当地形清掉：天然的按 {@link NaturalBlocks#wildAt} 认（原木得长在天然树上、树叶得是自然长的、
+     * 田里种的不算），再加上实例额外列的方块。
+     * 实机里角色困在村庄木屋里，只认类型的名单把原木地板挖了个坑、又把原木屋顶拆开钻出去。
      *
      * @param world  读这一格周围的方块（算路在后台线程上读它自己那份）
      * @param loaded 哪些格读得到
@@ -103,51 +120,48 @@ public final class ClearanceWhitelist {
      */
     public static boolean allowsAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
             Map<BlockPos, Boolean> trunks) {
-        // 名单清空表示这个实例不许自动清障：照旧什么都不清。
-        if (CURRENT.get().empty()) return state.isAir();
-        // 树叶、原木按长没长在树上认，模组的也算（名单只列了原版的）：实机在 BOP 冷杉林里缺原木，
-        // 冷杉树叶不在名单里挖不开，一千多个站位全被树叶挡住，一根都砍不下来。人放的树叶、房子的原木照旧不清。
-        if (state.getBlock() instanceof LeavesBlock) {
-            return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
-        }
-        if (NaturalTrees.isLog(state)) return NaturalTrees.partOfNaturalTree(pos, world, loaded, trunks);
-        // 挨着传送门方块的（门框的黑曜石）是门的一部分，不算地形：拆了门就没了。
+        if (state.isAir()) return true;
+        if (NaturalBlocks.wildAt(state, pos, world, loaded, trunks)) return true;
+        // 实例额外列了黑曜石也不拆门框：挨着传送门的是门的一部分，拆了门就没了。
         // 实机 10-14 进门失败后为了自己建门去挖黑曜石，把旁边那扇亮着的门框整个拆了。
-        if (state.is(Blocks.OBSIDIAN) && touchesPortal(pos, world, loaded)) return false;
-        return allows(state);
+        if (state.is(Blocks.OBSIDIAN) && NaturalBlocks.touchesPortal(pos, world, loaded)) return false;
+        return CURRENT.get().extra(state);
     }
 
-    // 这一格六面有没有挨着传送门方块（下界门、末地门）。
-    private static boolean touchesPortal(BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded) {
-        for (Direction side : Direction.values()) {
-            BlockPos next = pos.relative(side);
-            if (!loaded.test(next)) continue;
-            BlockState near = world.getBlockState(next);
-            if (near.is(Blocks.NETHER_PORTAL) || near.is(Blocks.END_PORTAL)) return true;
-        }
-        return false;
-    }
-
-    // 明确列举方块或引用实际同步的标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
-    static Rules parse(List<String> entries) {
+    // 读配置：一个字符串数组，每条是方块 ID 或 #方块标签；不凭名称包含 stone、ore 等文字猜测模组机器是否属于自然地形。
+    // 旧版自动写进去的默认条目跳过不算，数一下跳过了几条。
+    static Rules read(String json) {
+        var parsed = JsonParser.parseString(json);
+        if (!parsed.isJsonArray()) throw new IllegalArgumentException("expected an array of block IDs or #block_tags");
         Set<ResourceLocation> blocks = new LinkedHashSet<>();
         Set<TagKey<Block>> tags = new LinkedHashSet<>();
-        for (String entry : entries) {
-            String text = entry.trim();
+        int legacy = 0;
+        for (var value : parsed.getAsJsonArray()) {
+            if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
+                throw new IllegalArgumentException("clearance entries must be strings");
+            String text = value.getAsString().trim();
             boolean tag = text.startsWith("#");
             ResourceLocation id = ResourceLocation.tryParse(tag ? text.substring(1) : text);
-            if (id == null) throw new IllegalArgumentException("invalid clearance entry: " + entry);
-            if (tag) tags.add(TagKey.create(Registries.BLOCK, id)); else blocks.add(id);
+            if (id == null) throw new IllegalArgumentException("invalid clearance entry: " + text);
+            if (tag) {
+                tags.add(TagKey.create(Registries.BLOCK, id));
+            } else if (LEGACY_DEFAULTS.contains(id)) {
+                legacy++;
+            } else {
+                blocks.add(id);
+            }
         }
-        return new Rules(Set.copyOf(blocks), Set.copyOf(tags));
+        return new Rules(Set.copyOf(blocks), Set.copyOf(tags), legacy);
     }
 
-    record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags) {
-        boolean empty() {
-            return blocks.isEmpty() && tags.isEmpty();
-        }
+    /**
+     * 实例的清障配置：额外能挖的方块和标签、旧版默认条目跳过了几条。
+     */
+    record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags, int legacyIgnored) {
+        static final Rules NONE_EXTRA = new Rules(Set.of(), Set.of(), 0);
 
-        boolean allows(BlockState state) {
+        /** 这个方块是不是实例额外列出来能挖的。 */
+        boolean extra(BlockState state) {
             return blocks.contains(BuiltInRegistries.BLOCK.getKey(state.getBlock())) || tags.stream().anyMatch(state::is);
         }
     }

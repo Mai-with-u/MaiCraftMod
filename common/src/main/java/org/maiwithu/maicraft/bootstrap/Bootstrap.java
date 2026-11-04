@@ -44,6 +44,7 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.DismountsBeforeWalks;
 import org.maiwithu.maicraft.behavior.interaction.LiveHoldsSneak;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
@@ -276,6 +277,8 @@ public final class Bootstrap {
             // 实例配置启动时读一次：所有者在 config/maicraft.json 里放的开关，全进程只认这份文件。
             this.loader = loader;
             instanceConfig = InstanceConfig.read(loader.configDirectory());
+            // 实例额外允许路上挖的方块（config/maicraft-clearance.json）也在启动时读一次；读不出来就关掉自动清障。
+            ClearanceWhitelist.initialize(loader.gameDirectory());
             furnaceFuels = loader.furnaceFuels();
             if (instanceConfig.allowGameCommands()) {
                 LOG.info("{} 本实例连管理员命令也允许角色执行（配置文件放开）", ModIdentity.NAME);
