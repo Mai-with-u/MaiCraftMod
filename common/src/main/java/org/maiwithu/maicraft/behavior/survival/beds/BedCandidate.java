@@ -38,8 +38,11 @@ public record BedCandidate(BlockPos cell, boolean occupied, boolean protectedLan
      * （同一张床的两个半格只报一张，原版点床尾自己也会去床头方向找另一半）；床头不在就仍用命中格。
      * 床头不在不再当成"没有床"：以前就在这里把半张床悄悄丢掉，世界明明有床，选床却当作没有，
      * 掉进现做一张床的分支。
+     *
+     * <p>观察上报与睡觉同用这一个折格判断：一张床占两格、扫描命中两次，观察路上也折到同一格，
+     * 才不会把一张床报成两张。
      */
-    static BlockPos clickCell(BlockPos hit, BlockState hitState, BlockState stateTowardHead) {
+    public static BlockPos clickCell(BlockPos hit, BlockState hitState, BlockState stateTowardHead) {
         // 命中床头：床头就是要点的那格。原版点床头就发起入睡，不要求床尾那一格也在。
         if (hitState.getValue(BedBlock.PART) == BedPart.HEAD) {
             return hit.immutable();

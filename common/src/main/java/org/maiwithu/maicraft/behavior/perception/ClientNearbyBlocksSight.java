@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.perception;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -10,6 +11,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
@@ -17,11 +20,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
+import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.survival.beds.BedCandidate;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ScanTargets;
@@ -34,7 +40,8 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * <p>复用游戏接口层的 {@code BlockScanService}：设施的种类（容器、工作设施、床）首次用到时
  * 向扫描服务登记一次，之后每次查询走索引，一刻只花小预算；扫完之前返回已找到的部分，
  * "没扫完"不冒充"没有"。查到的每一格再用与观察同一套遮挡判断筛一遍——
- * 墙后的箱子不报成看见。索引登记的方块种类以设施分类为限，感知只认设施。
+ * 墙后的箱子不报成看见。床占两格、命中两次，折到床头那格只报一张。
+ * 索引登记的方块种类以设施分类为限，感知只认设施。
  *
  * <p>告示牌另查一份，不和箱子抢名额：注册表里凡是原版告示牌方块的（立牌、挂墙、悬挂、挂墙悬挂四种，
  * 模组继承它们的也算）都登记，看得见的再读它的方块实体上客户端收到的两面文字。
@@ -88,15 +95,37 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
         registered.ensure(level, targets);
         var result = scans.query(level, player.blockPosition(), targets,
                 WANT, MAX_CHUNK_RADIUS, BUILD_BUDGET);
+        List<BlockSighting> sightings =
+                seenFacilities(result.hits(), p -> ObservationVisibility.block(player, p), level::getBlockState);
+        return sightings;
+    }
+
+    /**
+     * 扫描命中变看得见的设施清单：视线被挡的不报；床占两格、扫描命中两次，与睡觉同用折格判断
+     * 折到床头那格，同一张床只报一条，观察与记忆里不把一张床数成两张。可见性按命中格判——
+     * 只看得见床尾也算看见了这张床，报的位置仍是折后的床头格。
+     */
+    static List<BlockSighting> seenFacilities(Collection<BlockPos> hits, Predicate<BlockPos> visible,
+            Function<BlockPos, BlockState> stateAt) {
         List<BlockSighting> sightings = new ArrayList<>();
-        for (BlockPos hit : result.hits()) {
-            // 视线被挡住的功能方块不是看得见的设施；等角色走近、看得见了再报。
-            if (!ObservationVisibility.block(player, hit)) {
+        Set<BlockPos> seenBeds = new HashSet<>();
+        for (BlockPos hit : hits) {
+            if (!visible.test(hit)) {
                 continue;
             }
-            String typeId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(hit).getBlock()).toString();
+            BlockState state = stateAt.apply(hit);
+            BlockPos cell = hit;
+            if (state.getBlock() instanceof BedBlock) {
+                // 床头在床头那格：朝床头的邻居读一下状态，折格判断自己认床头在不在。
+                BlockState stateTowardHead = stateAt.apply(hit.relative(state.getValue(BedBlock.FACING)));
+                cell = BedCandidate.clickCell(hit, state, stateTowardHead);
+                if (!seenBeds.add(cell)) {
+                    continue;
+                }
+            }
+            String typeId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             sightings.add(new BlockSighting(
-                    WorldPosition.here(hit.getX(), hit.getY(), hit.getZ()), typeId));
+                    WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()), typeId));
         }
         return sightings;
     }
