@@ -30,11 +30,17 @@ public interface FindsAround {
      * @param hiddenLead   范围内被挡住、看不见的那些的线索；没有为 null
      * @param scanQuiet    附近方块索引的视野账安静了没有（连续多刻没有补进新方块）；
      *                     没安静时"扫完且没有"只是"还没看清"，任务不下"没有"的结论
+     * @param ruledOut     这一轮新排除了几处看不见的候选：有排除说明扫描在往外走，不是原地打转
      */
-    record Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead, boolean scanQuiet) {
+    record Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead, boolean scanQuiet,
+            int ruledOut) {
 
         public Round {
             hits = List.copyOf(hits);
+        }
+
+        Round(List<Hit> hits, boolean complete, boolean worldChanged, String hiddenLead, boolean scanQuiet) {
+            this(hits, complete, worldChanged, hiddenLead, scanQuiet, 0);
         }
 
         Round(List<Hit> hits, boolean complete, boolean worldChanged) {

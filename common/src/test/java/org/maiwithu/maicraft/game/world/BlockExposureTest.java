@@ -4,8 +4,10 @@ package org.maiwithu.maicraft.game.world;
 import java.util.HashMap;
 import java.util.Map;
 
+import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -13,6 +15,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
 
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -23,6 +26,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 只要有一面邻着空气、水、玻璃这类不挡光的方块就算露出来。
  */
 class BlockExposureTest {
+
+    // 用到原版方块表：单独跑这个测试类时也要先引导原版注册表。
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     /** 用一张坐标表冒充世界：没写的格子一律当空气。 */
     private static final class FakeWorld implements BlockGetter {
@@ -94,6 +104,37 @@ class BlockExposureTest {
             water.put(inWater.relative(face), face == Direction.DOWN ? Blocks.WATER : Blocks.STONE);
         }
         assertTrue(BlockExposure.hasExposedFace(water, inWater));
+    }
+
+    @Test
+    void 水面以下的水算埋着_贴着空气的水面才露出() {
+        // 找水时一湖水成千上万格：水挨着水、挨着泡在水里的海带那几面原版不画，看不见；只有顶上贴着空气的水面露出来。
+        FakeWorld world = new FakeWorld();
+        BlockPos deep = new BlockPos(0, 58, 0);
+        BlockPos surface = new BlockPos(0, 62, 0);
+        for (int x = -2; x <= 2; x++) {
+            for (int z = -2; z <= 2; z++) {
+                world.put(new BlockPos(x, 57, z), Blocks.STONE);
+                for (int y = 58; y <= 62; y++) {
+                    world.put(new BlockPos(x, y, z), Blocks.WATER);
+                }
+            }
+        }
+        world.put(deep.east(), Blocks.KELP);
+        assertFalse(BlockExposure.hasExposedFace(world, deep));
+        assertTrue(BlockExposure.hasExposedFace(world, surface));
+    }
+
+    @Test
+    void 湖底的石头隔着水还算露出() {
+        // 视线穿得过水：湖底贴着水的那一面看得见，不按液体的规矩算。
+        FakeWorld world = new FakeWorld();
+        BlockPos bed = new BlockPos(0, 57, 0);
+        world.put(bed, Blocks.STONE);
+        for (Direction face : Direction.values()) {
+            world.put(bed.relative(face), face == Direction.UP ? Blocks.WATER : Blocks.STONE);
+        }
+        assertTrue(BlockExposure.hasExposedFace(world, bed));
     }
 
     @Test

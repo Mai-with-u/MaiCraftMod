@@ -49,6 +49,11 @@ final class LiveFinder implements FindsAround {
     // 与感知读端同一套预算：一刻扫不完就分刻扫；半径换算成区块圈数封顶。
     private static final int MAX_CHUNK_RADIUS = 8;
     private static final int BUILD_BUDGET = 4096;
+    /**
+     * 找方块时每轮至少复核几处候选：只复核要找的那几个时，最近的全是水下、洞里看不见的格子，
+     * 一刻只排除一两处，几百刻也排不到看得见的那一处。
+     */
+    private static final int SIGHT_CHECKS_PER_ROUND = 16;
     /** 看结构地表特征时一次要几处证据：凑一个村庄的组合够用。 */
     private static final int CLUE_WANT = 64;
     /**
@@ -123,7 +128,8 @@ final class LiveFinder implements FindsAround {
         quietness.observe(scans.sectionsBuilt(level), level.getGameTime());
         // 账本跟着查询走：位置、目标、数量、半径任一变了就清账重来。
         blocked.followQuery(center, input.selectors(), input.count(), input.radius());
-        var result = scans.query(level, center, targets, input.count(),
+        // 由近到远一轮复核一批：看不见的整批排除，下一轮接着往外看。
+        var result = scans.query(level, center, targets, Math.max(input.count(), SIGHT_CHECKS_PER_ROUND),
                 Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET,
                 blocked.excluded(), false, true);
         List<Hit> hits = new ArrayList<>();
@@ -143,7 +149,8 @@ final class LiveFinder implements FindsAround {
             confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
         }
         boolean complete = blocked.settle(result.complete(), hits.size(), input.count(), rejected);
-        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet(level.getGameTime()));
+        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet(level.getGameTime()),
+                blocked.lastRuledOut());
     }
 
     /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；没过的返回 false。 */

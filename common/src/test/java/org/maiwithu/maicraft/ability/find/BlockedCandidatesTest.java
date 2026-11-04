@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.find;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.core.BlockPos;
@@ -70,5 +71,31 @@ class BlockedCandidatesTest {
         // 角色走动换了中心：旧站位下看不见的位置在新站位未必还看不见，账本清空重来。
         ledger.followQuery(CENTER.offset(1, 0, 0), TARGETS, 1, 16);
         assertTrue(ledger.excluded().isEmpty());
+    }
+    @Test
+    void 看不见的排到上限就按看得见的就这些收场() {
+        // 水下、洞里的候选成千上万：一轮轮排下去，排满上限就收场，不一直排到停滞闸。
+        BlockedCandidates ledger = ledger();
+        List<BlockPos> batch = new ArrayList<>();
+        boolean complete = false;
+        int rounds = 0;
+        for (int i = 0; !complete; i++) {
+            batch.add(new BlockPos(i, 40, 0));
+            if (batch.size() == 16) {
+                complete = ledger.settle(false, 0, 1, batch);
+                batch = new ArrayList<>();
+                rounds++;
+            }
+        }
+        assertEquals(BlockedCandidates.MAX_RULED_OUT / 16, rounds);
+    }
+
+    @Test
+    void 只把新排除的算作往外走() {
+        BlockedCandidates ledger = ledger();
+        ledger.settle(false, 0, 1, List.of(new BlockPos(1, 40, 0), new BlockPos(2, 40, 0)));
+        assertEquals(2, ledger.lastRuledOut());
+        ledger.settle(false, 0, 1, List.of(new BlockPos(2, 40, 0)));
+        assertEquals(0, ledger.lastRuledOut());
     }
 }

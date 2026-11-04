@@ -15,8 +15,14 @@ import net.minecraft.core.BlockPos;
  * <p>只有当一轮真的扫完了该扫的范围、且这轮没有新的看不见候选可排除时，才承认扫完。
  * 纯记账，不读世界；同一份候选换一次查询（位置、目标、数量、半径变了）就清账重来，
  * 旧查询里看不见的位置在新的站位下未必还看不见。
+ *
+ * <p>排除有上限：水下、洞里、墙后露着面却看不见的格子可能成千上万，一处处排除永远排不完；
+ * 排到上限还不够，就按这一片看得见的就这些收场。
  */
 final class BlockedCandidates {
+
+    /** 一次查询最多排除几处看不见的候选：每轮复核十几处，排满约一两百刻，比停滞闸的两分钟上限早得多。 */
+    static final int MAX_RULED_OUT = 2048;
 
     /** 这次查询里过不了视线闸的候选位置：下一轮作为排除名单喂回索引。 */
     private final Set<BlockPos> blocked = new HashSet<>();
@@ -25,6 +31,8 @@ final class BlockedCandidates {
     private List<String> targetIds;
     private int want = -1;
     private int radius = -1;
+    /** 最近一轮新排除了几处：有新排除说明扫描在往外走，任务算真实进展。 */
+    private int lastRuledOut;
 
     /** 查询参数变了就清账：中心、目标、数量或半径任一不同（含清账用的空参）都算新的查询。 */
     void followQuery(BlockPos queryCenter, List<String> targetIds, int want, int radius) {
@@ -38,6 +46,7 @@ final class BlockedCandidates {
         this.want = want;
         this.radius = radius;
         blocked.clear();
+        lastRuledOut = 0;
     }
 
     /** 本轮喂回索引的排除名单。 */
@@ -56,11 +65,22 @@ final class BlockedCandidates {
      * @return 读侧该向任务报的"扫完没有"
      */
     boolean settle(boolean indexComplete, int accepted, int want, List<BlockPos> rejected) {
+        int before = blocked.size();
         blocked.addAll(rejected);
+        lastRuledOut = blocked.size() - before;
         if (accepted >= want) {
+            return true;
+        }
+        // 排除到上限还不够：看得见的就这些，不再一处处排下去。
+        if (blocked.size() >= MAX_RULED_OUT) {
             return true;
         }
         // 找得少不冒充扫完：还有没试过的候选就继续，只有扫完且再无新排除时才是可信的"没有了"。
         return indexComplete && rejected.isEmpty();
+    }
+
+    /** 最近一轮新排除了几处看不见（或不在半径里）的候选。 */
+    int lastRuledOut() {
+        return lastRuledOut;
     }
 }

@@ -245,6 +245,21 @@ class FindTaskTest {
     }
 
     @Test
+    void 一轮轮排除看不见的候选_算在往外看_不掐停滞闸() {
+        // 找水：最近的候选全在水下、洞里，读端每轮排除一批看不见的。排除在往外走，不是原地打转，
+        // 停滞闸 200 刻不掐；读端排到上限交出扫完，再按没找到收场。
+        for (int i = 0; i < 250; i++) {
+            finder.script.add(new FindsAround.Round(List.of(), false, false, null, true, 16));
+        }
+        finder.script.add(new FindsAround.Round(List.of(), true, false));
+        TaskResult result = run(new FindInput(FindInput.FindKind.BLOCK,
+                List.of("minecraft:water"), 1, 48));
+
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind(), result.summary());
+    }
+
+    @Test
     void 视野账一直没安静_等满时限如实说还没看完() {
         // 站在原地但别的扫描一直在补账：等到最多能做的时限（两千四百刻），收场说明写"还没看完"，不写成找不到。
         for (int i = 0; i < 2500; i++) {

@@ -116,6 +116,8 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
         if (found.size() >= input.count()) {
             return Next.done(FindSettlement.done(input, found, countByType(found)));
         }
+        // 这一轮排除了看不见的候选（水下、洞里、墙后）：扫描在往外走，算真实进展；排除有上限，不会一直走下去。
+        if (round.ruledOut() > 0) recordProgress("复核排除了 " + round.ruledOut() + " 处看不见的，接着往外看");
         scanQuiet = round.scanQuiet();
         if (!scanQuiet) {
             // 视野的账还在往索引里补新方块（刚换世界、刚登记新目标、刚走到的冷索引）：
