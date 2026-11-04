@@ -3,11 +3,14 @@ package org.maiwithu.maicraft.game;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
@@ -28,6 +31,15 @@ class ClientReceivedChatTest {
     private static final UUID MOMO = UUID.fromString("5f2b9c1e-0d4a-4c1b-9e7f-1a2b3c4d5e6f");
     private static final UUID CREEPER = UUID.fromString("0f0e0d0c-0b0a-4908-8706-050403020100");
     private static final String POSITION = "[name:\"winefox_momo\", x:12, y:64, z:-3, dim:minecraft:overworld]";
+    /** 玩家列表里谁都不在。 */
+    private static final Predicate<String> NOBODY = name -> false;
+    /** 玩家列表里有角色 Steve 和玩家 Alex。 */
+    private static final Predicate<String> ONLINE = Set.of("Steve", "Alex")::contains;
+
+    /** 没有签名的服务器把公屏聊天整句当系统消息发："<名字> 原话"。 */
+    private static Component publicLine(Component name, String said) {
+        return Component.translatable("chat.type.text", name, Component.literal(said));
+    }
 
     @BeforeAll
     static void bootMinecraft() {
@@ -90,13 +102,67 @@ class ClientReceivedChatTest {
                 EntityMentionsTest.named("momo", EntityType.CAT, MOMO),
                 EntityMentionsTest.named("苦力怕", EntityType.CREEPER, CREEPER));
 
-        ReceivedChat chat = ClientReceivedChat.system(death, false).orElseThrow();
+        ReceivedChat chat = ClientReceivedChat.system(death, false, SELF, "Mai", NOBODY).orElseThrow();
 
         // 正文按本机语言拼，测试环境不一定有语言文件：只看死者与凶手的名字都在。
         assertTrue(chat.text().contains("momo") && chat.text().contains("苦力怕"), chat.text());
         assertEquals("death.attack.explosion.player", chat.translationKey());
         assertEquals(List.of(MOMO, CREEPER), chat.mentions().stream().map(MentionedEntity::uuid).toList());
-        assertNull(ClientReceivedChat.system(Component.literal("Alex 加入了游戏"), false).orElseThrow()
+        assertNull(ClientReceivedChat.system(Component.literal("Alex 加入了游戏"), false, SELF, "Mai", NOBODY).orElseThrow()
                 .translationKey(), "整句不是翻译时不给翻译键");
+    }
+
+    @Test
+    void unsignedPublicChatFromAnotherOnlinePlayerIsHisWords() {
+        // 服务器不走签名聊天：别人说的话以系统消息到达，拆出发言人和不带前缀的原话，没有 UUID。
+        Component line = publicLine(Component.literal("Alex"), "不是我的");
+
+        ReceivedChat chat = ClientReceivedChat.system(line, false, SELF, "Steve", ONLINE).orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
+        assertEquals("Alex", chat.sender());
+        assertNull(chat.senderId(), "没有签名就没有发言人凭据");
+        assertEquals("不是我的", chat.text());
+        assertNull(chat.translationKey(), "聊天格式的翻译键不当消息的翻译键");
+        assertNull(chat.shownAs());
+        assertFalse(chat.isPrivate());
+    }
+
+    @Test
+    void unsignedPublicChatUnderTheCharactersOwnNameIsItsOwnEchoAndDropped() {
+        // 角色自己说的话回显回来：名字和账号名一样，或名字点着的实体就是角色，都不算收到的聊天。
+        assertTrue(ClientReceivedChat.system(publicLine(Component.literal("Steve"), "你好呀"), false,
+                SELF, "Steve", ONLINE).isEmpty());
+        Component hovered = EntityMentionsTest.named("史蒂夫", EntityType.PLAYER, SELF);
+        assertTrue(ClientReceivedChat.system(publicLine(hovered, "你好呀"), false, SELF, "Steve",
+                name -> true).isEmpty(), "显示名改过、悬停里是角色自己，也是回显");
+    }
+
+    @Test
+    void publicChatFormatWithANameNotInThePlayerListStaysASystemMessage() {
+        // 名字不在玩家列表里（插件、模组拼出来的同格式公告）：照旧按系统消息记，不冒充谁说的话。
+        Component line = publicLine(Component.literal("Herobrine"), "我来了");
+
+        ReceivedChat chat = ClientReceivedChat.system(line, false, SELF, "Steve", ONLINE).orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
+        assertNull(chat.sender());
+        assertEquals("chat.type.text", chat.translationKey());
+    }
+
+    @Test
+    void otherChatFormatsAreNotSplitEvenFromOnlinePlayers() {
+        // 表情动作、私聊这些格式不是公屏聊天：照旧按系统消息记。
+        Component emote = Component.translatable("chat.type.emote", Component.literal("Alex"),
+                Component.literal("挥了挥手"));
+        Component whisper = Component.translatable("commands.message.display.incoming",
+                Component.literal("Alex"), Component.literal("悄悄话"));
+        for (Component line : List.of(emote, whisper)) {
+            ReceivedChat chat = ClientReceivedChat.system(line, false, SELF, "Steve", ONLINE).orElseThrow();
+            assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind(), line.toString());
+            assertNull(chat.sender());
+        }
+        assertTrue(ClientReceivedChat.system(publicLine(Component.literal("Alex"), "嗨"), true,
+                SELF, "Steve", ONLINE).isEmpty(), "动作栏提示不算聊天");
     }
 }

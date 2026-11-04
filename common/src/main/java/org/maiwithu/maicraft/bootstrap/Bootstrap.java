@@ -712,10 +712,11 @@ public final class Bootstrap {
             }
         }
 
-        // 服务器的系统消息全收（进出、死亡播报、公告、命令反馈），动作栏提示不算聊天。
+        // 服务器的系统消息全收（进出、死亡播报、公告、命令反馈），动作栏提示不算聊天；
+        // 没有签名的服务器转来的公屏聊天读成那个玩家说的话，角色自己说话的回显不记。
         @Override public void systemMessageReceived(Minecraft minecraft, Component message, boolean actionBar) {
             if (minecraft.player == null) return;
-            ClientReceivedChat.system(message, actionBar).ifPresent(chatEvents::append);
+            ClientReceivedChat.system(minecraft, message, actionBar).ifPresent(chatEvents::append);
         }
     }
 }
