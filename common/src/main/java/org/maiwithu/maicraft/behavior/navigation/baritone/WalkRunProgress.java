@@ -43,6 +43,8 @@ final class WalkRunProgress {
     private boolean stopRequested;
     /** 走不通的问题补过现场没有。 */
     private boolean failureExplained;
+    /** 这一段走路为换气停下了几次、离目标最近到过哪：停够次数都没靠近就判走不通。 */
+    private final BreathStops breaths = new BreathStops();
 
     WalkRunProgress(NavGoal goal) {
         // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
@@ -83,11 +85,21 @@ final class WalkRunProgress {
         return stopRequested;
     }
 
+    /**
+     * 被打断（生存需求插进来）：请求停下；这一刻头在水里、氧气到了该浮头换气的线，就记一次为换气停下。
+     * 换完气接着走（{@link #resume()}）还是同一段，次数接着数。
+     */
+    void pause(boolean outOfBreath) {
+        if (!done()) breaths.stopped(outOfBreath);
+        requestStop();
+    }
+
     /** 已停稳的运行从原地接着走：收回停下请求、回到正在算路；泅渡是这段路的累计事实，照旧带着。不是已停下的不改。 */
     void resume() {
         if (report.state() != WalkReport.State.STOPPED) return;
         stopRequested = false;
         failureExplained = false;
+        breaths.resumed();
         report = WalkReport.planning();
     }
 
@@ -97,11 +109,17 @@ final class WalkRunProgress {
         report = WalkReport.failed(problem, feet, crossedWater);
     }
 
+    /** 走不通，而且是"从这里到不了"（连续算路没有路线这一类）：靠近据此合并剩下的站位再算一次，不再一个个空算。 */
+    void failNoRoute(Problem problem, BlockPos feet) {
+        if (done()) return;
+        report = WalkReport.failedNoRoute(problem, feet, crossedWater);
+    }
+
     /** 已经走不通了：把问题换成补了现场的那一份；只补一次，后面的观察不再改它。 */
     void explainFailure(UnaryOperator<Problem> explain) {
         if (report.state() != WalkReport.State.FAILED || failureExplained) return;
         failureExplained = true;
-        report = WalkReport.failed(explain.apply(report.problem()), report.feet(), report.crossedWater());
+        report = report.withProblem(explain.apply(report.problem()));
     }
 
     /** 算路程序出错的问题：写明是程序的问题和异常本身，建议先做不用走路的事。 */
@@ -122,6 +140,13 @@ final class WalkRunProgress {
         }
         // 泅渡发生在路上就如实记账；到达后不再把水里的漂动算进这段路。
         crossedWater |= o.inWater && o.routePresent;
+
+        // 水下为换气停下够次数都没靠近：换完气接着走的第一刻就判这段路从这里走不通，不再潜下去重算一轮。
+        if (o.feet != null) breaths.observe(o.feet, goal.center());
+        if (breaths.exhausted()) {
+            report = WalkReport.failedNoRoute(breaths.giveUpProblem(), o.feet, crossedWater);
+            return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
+        }
 
         if (o.calcFailed && !o.routePresent) {
             // 算路程序出错与真的没有路分开说：程序出错时换目标、带垫料都绕不开，不能让调用方当成地形问题反复试。

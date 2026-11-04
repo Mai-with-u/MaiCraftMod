@@ -44,6 +44,15 @@ final class WalkSurvivalGuards {
                 headInWater, player.isPassenger(), submerged, () -> SurvivalSituation.read(context));
     }
 
+    /**
+     * 被打断的这一刻是不是在水下快没气了：头在水里、氧气到了该浮头换气的线（与呼吸预算、换气需求同一条线）。
+     * 读不到角色按不是算。
+     */
+    static boolean outOfBreath(PlayerContext context) {
+        if (context == null || context.localPlayer() == null || context.level() == null) return false;
+        return UnderwaterWalkBudget.judge(SurvivalSituation.read(context)) == UnderwaterWalkBudget.Verdict.GIVE_UP_AND_SURFACE;
+    }
+
     // 这一刻是不是潜泳路线段在带着身体走：那段路自己按氧气上浮换气，呼吸预算不抢它的活。
     private static boolean submergedTravelActive(PathingBehavior pathing) {
         PathExecutor current = pathing.getCurrent();
@@ -59,7 +68,8 @@ final class WalkSurvivalGuards {
             boolean passenger, boolean submergedTravelActive, Supplier<SurvivalSituation> situation) {
         if (progress.done()) return true;
         if (ceiling.observe(progress.report().state() != WalkReport.State.PLANNING, calculating)) {
-            progress.fail(PlanningCeiling.timeoutProblem(
+            // 算了这么久都没有路线：从这里到不了，靠近据此把剩下的站位合起来再算一次，不再一个个空算。
+            progress.failNoRoute(PlanningCeiling.timeoutProblem(
                     world, feet, inWater, onGround, ceiling.accruedTicks()), feet);
             return true;
         }

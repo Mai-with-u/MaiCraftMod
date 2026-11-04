@@ -103,6 +103,8 @@ class WalkSurvivalGuardsTest {
         WalkReport report = progress.report();
         assertEquals(WalkReport.State.FAILED, report.state());
         assertTrue(report.problem().message().contains("连续算路"), report.problem().message());
+        // 算路死就是"从这里到不了"：靠近据此把剩下的站位合起来再算一次。
+        assertTrue(report.noRouteFromHere());
     }
 
     @Test

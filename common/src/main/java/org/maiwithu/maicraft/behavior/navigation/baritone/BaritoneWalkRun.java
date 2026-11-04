@@ -743,8 +743,8 @@ final class BaritoneWalkRun implements WalkRun {
     @Override
     public void pause() {
         // 生存需求打断：请求停下，安全时立刻撤路线、松开按键；停稳后这一趟按"已停下"结算，
-        // 不会自己续上——调用方恢复时让运行从原地接着走（resume）。
-        progress.requestStop();
+        // 不会自己续上——调用方恢复时让运行从原地接着走（resume）。停下时人在水下快没气了，记一次为换气停下。
+        progress.pause(WalkSurvivalGuards.outOfBreath(lastContext));
         clicks.stop(lastContext);
         var pathing = owner.pathing();
         if (activated && pathing != null && pathing.isSafeToCancel()) {

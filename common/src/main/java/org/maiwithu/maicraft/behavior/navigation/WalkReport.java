@@ -12,8 +12,10 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * @param feet         这一刻脚所在的方块格；还没开始观察（正在算路）时为 null
  * @param crossedWater 这段路到目前为止有没有泅渡
  * @param problem      走不下去的原因；只有失败的状态有
+ * @param noRouteFromHere 走不通的原因是"从这里到不了"：连续算路 15 秒没有路线，或水下为换气停下 3 次都没靠近；
+ *                     靠近据此不再一个个站位空算。只有失败的状态会是 true
  */
-public record WalkReport(State state, BlockPos feet, boolean crossedWater, Problem problem) {
+public record WalkReport(State state, BlockPos feet, boolean crossedWater, Problem problem, boolean noRouteFromHere) {
 
     /** 走到进展到哪一步。正在算路与在路上还在走，到达是成功，已停下与失败是终点。 */
     public enum State {
@@ -29,7 +31,14 @@ public record WalkReport(State state, BlockPos feet, boolean crossedWater, Probl
         FAILED
     }
 
+    public WalkReport(State state, BlockPos feet, boolean crossedWater, Problem problem) {
+        this(state, feet, crossedWater, problem, false);
+    }
+
     public WalkReport {
+        if (noRouteFromHere && state != State.FAILED) {
+            throw new IllegalArgumentException("只有失败的走到情况才是从这里到不了");
+        }
         if (state == State.FAILED && problem == null) {
             throw new IllegalArgumentException("失败的走到情况必须带上问题");
         }
@@ -58,5 +67,15 @@ public record WalkReport(State state, BlockPos feet, boolean crossedWater, Probl
     /** 失败：feet 是停下时脚下的方块格，还能取到就带上，供上层结算剩余距离。 */
     public static WalkReport failed(Problem problem, BlockPos feet, boolean crossedWater) {
         return new WalkReport(State.FAILED, feet, crossedWater, problem);
+    }
+
+    /** 失败而且是"从这里到不了"：从这一片起点出发，换别的站位多半也一样，交给靠近合并重算一次再定。 */
+    public static WalkReport failedNoRoute(Problem problem, BlockPos feet, boolean crossedWater) {
+        return new WalkReport(State.FAILED, feet, crossedWater, problem, true);
+    }
+
+    /** 换掉失败的问题（补了现场的那一份），别的照旧。 */
+    public WalkReport withProblem(Problem next) {
+        return new WalkReport(state, feet, crossedWater, next, noRouteFromHere);
     }
 }
