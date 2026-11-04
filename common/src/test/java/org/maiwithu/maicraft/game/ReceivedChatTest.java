@@ -19,7 +19,7 @@ class ReceivedChatTest {
 
     @Test
     void someoneElseSpeakingIsKeptWithTheirNameAndId() {
-        ReceivedChat chat = ReceivedChat.fromPlayer("  麦麦你在干嘛  ", STEVE, "Steve", false, SELF).orElseThrow();
+        ReceivedChat chat = ReceivedChat.fromPlayer("  麦麦你在干嘛  ", STEVE, "Steve", true, false, SELF).orElseThrow();
 
         assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
         assertEquals("Steve", chat.sender());
@@ -32,14 +32,14 @@ class ReceivedChatTest {
     @Test
     void theCharactersOwnWordsAreNotReceivedChat() {
         // 自己说话的回显与自己发出的私聊，发言人都是自己。
-        assertTrue(ReceivedChat.fromPlayer("我来了", SELF, "Mai", false, SELF).isEmpty());
-        assertTrue(ReceivedChat.fromPlayer("悄悄话", SELF, "Mai", true, SELF).isEmpty());
+        assertTrue(ReceivedChat.fromPlayer("我来了", SELF, "Mai", true, false, SELF).isEmpty());
+        assertTrue(ReceivedChat.fromPlayer("悄悄话", SELF, "Mai", true, true, SELF).isEmpty());
     }
 
     @Test
     void unsignedMessagesWithoutAnIdAreStillKept() {
         // 命令方块的 /say 这类没有签名的消息：没有 UUID，名字可能也没有，照样收下，不当成自己的话。
-        ReceivedChat chat = ReceivedChat.fromPlayer("[Server] 欢迎", null, " ", false, SELF).orElseThrow();
+        ReceivedChat chat = ReceivedChat.fromPlayer("[Server] 欢迎", null, " ", false, false, SELF).orElseThrow();
 
         assertNull(chat.senderId());
         assertNull(chat.sender());
@@ -49,7 +49,7 @@ class ReceivedChatTest {
     void actionBarAndBlankMessagesAreNotChat() {
         assertTrue(ReceivedChat.fromServer("床太远了", true).isEmpty());
         assertTrue(ReceivedChat.fromServer("   ", false).isEmpty());
-        assertTrue(ReceivedChat.fromPlayer("", STEVE, "Steve", false, SELF).isEmpty());
+        assertTrue(ReceivedChat.fromPlayer("", STEVE, "Steve", true, false, SELF).isEmpty());
 
         ReceivedChat joined = ReceivedChat.fromServer("Alex 加入了游戏", false).orElseThrow();
         assertEquals(ReceivedChat.Kind.SYSTEM, joined.kind());

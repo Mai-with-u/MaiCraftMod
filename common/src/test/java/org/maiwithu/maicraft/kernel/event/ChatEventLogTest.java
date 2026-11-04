@@ -19,7 +19,7 @@ class ChatEventLogTest {
         ChatEventLog log = new ChatEventLog();
         log.append(ReceivedChat.fromServer("出手前的旧话", false).orElseThrow());
         long mark = log.latestCursor();
-        log.append(ReceivedChat.fromPlayer("路过的人说话", UUID.randomUUID(), "路人", false, UUID.randomUUID())
+        log.append(ReceivedChat.fromPlayer("路过的人说话", UUID.randomUUID(), "路人", true, false, UUID.randomUUID())
                 .orElseThrow());
         log.append(ReceivedChat.fromServer("这不是你的女仆", false).orElseThrow());
         log.append(ReceivedChat.fromServer("某某加入了游戏", false).orElseThrow());

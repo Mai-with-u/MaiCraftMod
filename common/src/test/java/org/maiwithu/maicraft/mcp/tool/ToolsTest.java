@@ -318,24 +318,29 @@ class ToolsTest {
     @Test
     void chatIsItsOwnStreamAndKeepsTheSenderAndPrivateMessages() {
         UUID steve = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
-        ReceivedChat.fromPlayer("麦麦过来", steve, "Steve", false, null).ifPresent(chat::append);
-        ReceivedChat.fromPlayer("悄悄跟你说", steve, "Steve", true, null).ifPresent(chat::append);
+        ReceivedChat.fromPlayer("麦麦过来", steve, "Steve", true, false, null).ifPresent(chat::append);
+        ReceivedChat.fromPlayer("悄悄跟你说", steve, "Steve", true, true, null).ifPresent(chat::append);
         ReceivedChat.fromServer("Alex 加入了游戏", false).ifPresent(chat::append);
+        ReceivedChat.fromPlayer("服务器十分钟后重启", null, "Server", false, false, null).ifPresent(chat::append);
 
         JsonObject reply = call("events", "{\"topic\": \"chat\"}");
         JsonArray read = data(reply).getAsJsonArray("events");
 
-        // 玩家说的话带名字与 UUID；私聊才写 private；系统消息没有发言人。
-        assertEquals(3, read.size());
+        // 玩家说的话带名字与 UUID，并写明发言人在不在玩家列表里；私聊才写 private；系统消息没有发言人。
+        assertEquals(4, read.size());
         JsonObject said = read.get(0).getAsJsonObject();
         assertEquals("player", said.get("kind").getAsString());
         assertEquals("Steve", said.get("sender").getAsString());
         assertEquals(steve.toString(), said.get("sender_id").getAsString());
+        assertTrue(said.get("sender_online").getAsBoolean());
         assertEquals("麦麦过来", said.get("text").getAsString());
         assertFalse(said.has("private"));
         assertTrue(read.get(1).getAsJsonObject().get("private").getAsBoolean());
         assertEquals("system", read.get(2).getAsJsonObject().get("kind").getAsString());
         assertFalse(read.get(2).getAsJsonObject().has("sender"));
+        assertFalse(read.get(2).getAsJsonObject().has("sender_online"), "系统消息没有发言人，不写");
+        // 控制台的 /say 借了个名字：照旧是玩家说的话，写明不是在线玩家。
+        assertFalse(read.get(3).getAsJsonObject().get("sender_online").getAsBoolean());
         // 照抄 next 接着读的还是聊天；角色身上的事件流里没有聊天；读聊天不带 goal_id。
         assertEquals("chat", reply.getAsJsonObject("next").getAsJsonObject("arguments").get("topic").getAsString());
         assertEquals(0, data(call("events", "{}")).getAsJsonArray("events").size());

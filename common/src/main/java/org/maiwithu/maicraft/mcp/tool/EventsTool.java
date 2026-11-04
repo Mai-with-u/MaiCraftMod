@@ -125,14 +125,17 @@ public final class EventsTool implements McpTool {
     /**
      * 一条收到的聊天：谁说的、说了什么；私聊、截断、借名、点到的实体、翻译键只在有的时候写出来。
      * 借角色名字代发的消息按系统消息给，借的名字写在 shown_as，宿主不会把它当成角色自己或主人说的话。
+     * 玩家说的话总带 sender_online，宿主按它分出是在场的玩家说的，还是控制台、命令方块借了个名字。
      */
-    private static JsonObject chatEvent(ChatEvent event) {
+    public static JsonObject chatEvent(ChatEvent event) {
         ReceivedChat chat = event.chat();
         JsonObject json = new JsonObject();
         json.addProperty("cursor", event.cursor());
         json.addProperty("kind", chat.kind().name().toLowerCase(Locale.ROOT));
         if (chat.sender() != null) json.addProperty("sender", chat.sender());
         if (chat.senderId() != null) json.addProperty("sender_id", chat.senderId().toString());
+        // 发言人是不是此刻在线玩家列表里的那个玩家：玩家说的话 true、false 都写；系统消息没有发言人，不写。
+        if (chat.kind() == ReceivedChat.Kind.PLAYER) json.addProperty("sender_online", chat.senderOnline());
         if (chat.shownAs() != null) json.addProperty("shown_as", chat.shownAs());
         json.addProperty("text", chat.text());
         if (chat.isPrivate()) json.addProperty("private", true);

@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.ChatEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
@@ -41,6 +43,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 import org.maiwithu.maicraft.mcp.tool.ErrorCode;
+import org.maiwithu.maicraft.mcp.tool.EventsTool;
 import org.maiwithu.maicraft.mcp.tool.FieldError;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ResultJson;
@@ -175,6 +178,10 @@ class InterfaceSnapshotTest {
                 "第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
                 TaskResult.Status.DONE, "在 minecraft:overworld 12, 64, -8；血 20，饱食 18；手上 minecraft:oak_log",
                 List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：在背包的合成格里做，不用工作台")))));
+        // 聊天流里一条玩家说的话：发言人名字、UUID，以及发言人是不是此刻在线玩家列表里的那个玩家。
+        ReceivedChat said = ReceivedChat.fromPlayer("麦麦过来", UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
+                "Steve", true, false, null).orElseThrow();
+        shapes.add("chat_event", EventsTool.chatEvent(new ChatEvent(3, said)));
         return shapes;
     }
 

@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
@@ -24,17 +25,23 @@ import org.junit.jupiter.api.Test;
 
 /**
  * 聊天栏收到的组件读成收到的聊天：借角色名字代发的伪装聊天改记系统消息、去掉名字前缀；
- * 别人名下的伪装聊天照旧；死亡播报带点到的实体与翻译键。组件按原版聊天格式手搭，不起游戏。
+ * 别人名下的伪装聊天照旧；死亡播报带点到的实体与翻译键；玩家说的话核对发言人在不在当前玩家列表里。
+ * 组件按原版聊天格式手搭，不起游戏。
  */
 class ClientReceivedChatTest {
     private static final UUID SELF = UUID.fromString("00000000-0000-0000-0000-000000000001");
     private static final UUID MOMO = UUID.fromString("5f2b9c1e-0d4a-4c1b-9e7f-1a2b3c4d5e6f");
     private static final UUID CREEPER = UUID.fromString("0f0e0d0c-0b0a-4908-8706-050403020100");
+    private static final UUID ALEX = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
     private static final String POSITION = "[name:\"winefox_momo\", x:12, y:64, z:-3, dim:minecraft:overworld]";
     /** 玩家列表里谁都不在。 */
     private static final Predicate<String> NOBODY = name -> false;
     /** 玩家列表里有角色 Steve 和玩家 Alex。 */
     private static final Predicate<String> ONLINE = Set.of("Steve", "Alex")::contains;
+    /** 按 UUID 查玩家列表：谁都查不到。 */
+    private static final Function<UUID, String> NOT_LISTED = id -> null;
+    /** 按 UUID 查玩家列表：只有玩家 Alex。 */
+    private static final Function<UUID, String> ALEX_LISTED = id -> ALEX.equals(id) ? "Alex" : null;
 
     /** 没有签名的服务器把公屏聊天整句当系统消息发："<名字> 原话"。 */
     private static Component publicLine(Component name, String said) {
@@ -60,7 +67,7 @@ class ClientReceivedChatTest {
         ChatType.Bound under = chatUnder(EntityMentionsTest.named("Mai", EntityType.PLAYER, SELF));
         Component line = under.decorate(Component.literal(POSITION));
 
-        ReceivedChat chat = ClientReceivedChat.player(line, null, null, null, under, SELF, "Mai").orElseThrow();
+        ReceivedChat chat = ClientReceivedChat.player(line, null, null, null, under, SELF, "Mai", NOT_LISTED).orElseThrow();
 
         assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
         assertEquals("Mai", chat.shownAs());
@@ -76,7 +83,7 @@ class ClientReceivedChatTest {
         ChatType.Bound under = chatUnder(Component.literal("Mai"));
         Component changed = Component.literal("<Mai> " + POSITION);
 
-        ReceivedChat chat = ClientReceivedChat.player(changed, null, null, null, under, SELF, "Mai").orElseThrow();
+        ReceivedChat chat = ClientReceivedChat.player(changed, null, null, null, under, SELF, "Mai", NOT_LISTED).orElseThrow();
 
         assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
         assertEquals(POSITION, chat.text());
@@ -88,7 +95,7 @@ class ClientReceivedChatTest {
         ChatType.Bound under = chatUnder(Component.literal("Server"));
         Component line = under.decorate(Component.literal("欢迎"));
 
-        ReceivedChat chat = ClientReceivedChat.player(line, null, null, null, under, SELF, "Mai").orElseThrow();
+        ReceivedChat chat = ClientReceivedChat.player(line, null, null, null, under, SELF, "Mai", NOT_LISTED).orElseThrow();
 
         assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
         assertEquals("Server", chat.sender());
@@ -164,5 +171,73 @@ class ClientReceivedChatTest {
         }
         assertTrue(ClientReceivedChat.system(publicLine(Component.literal("Alex"), "嗨"), true,
                 SELF, "Steve", ONLINE).isEmpty(), "动作栏提示不算聊天");
+    }
+    @Test
+    void publicChatForwardedByAServerWithoutSigningFromAListedPlayerIsFromAnOnlinePlayer() {
+        // 不走签名聊天的服务器把 Alex 的公屏聊天当系统消息发下来：名字按玩家列表对上了，算在线玩家说的。
+        ReceivedChat chat = ClientReceivedChat.system(publicLine(Component.literal("Alex"), "下午好"), false,
+                SELF, "Steve", ONLINE).orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
+        assertTrue(chat.senderOnline());
+    }
+
+    @Test
+    void sayFromTheServerConsoleIsNotFromAnOnlinePlayer() {
+        // 控制台的 /say 是伪装聊天：没有发言人 UUID，名字 Server 只是借来的，不算在线玩家说的。
+        ChatType.Bound under = chatUnder(Component.literal("Server"));
+        Component line = under.decorate(Component.literal("服务器十分钟后重启"));
+
+        ReceivedChat chat = ClientReceivedChat.player(line, null, null, null, under, SELF, "Steve", ALEX_LISTED)
+                .orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
+        assertEquals("Server", chat.sender());
+        assertFalse(chat.senderOnline());
+    }
+
+    @Test
+    void aPlayerChatPacketFromAListedSenderIsFromAnOnlinePlayerSignedOrNot() {
+        // 玩家聊天包签没签名都带发言人 UUID：加载器没给名字，按 UUID 从玩家列表查到 Alex，名字对得上。
+        ChatType.Bound under = chatUnder(Component.literal("Alex"));
+        Component said = Component.literal("跟我来");
+
+        ReceivedChat chat = ClientReceivedChat.player(under.decorate(said), said, ALEX, null, under, SELF, "Steve",
+                ALEX_LISTED).orElseThrow();
+
+        assertEquals("Alex", chat.sender());
+        assertEquals(ALEX, chat.senderId());
+        assertTrue(chat.senderOnline());
+    }
+
+    @Test
+    void aSignedMessageWhoseLoaderGivenNameMatchesThePlayerListIsFromAnOnlinePlayer() {
+        // 有签名的消息：加载器连原话、UUID 和名字一起给，名字和玩家列表里的一样。
+        ChatType.Bound under = chatUnder(Component.literal("Alex"));
+        Component said = Component.literal("箱子在这边");
+
+        ReceivedChat chat = ClientReceivedChat.player(under.decorate(said), said, ALEX, "Alex", under, SELF, "Steve",
+                ALEX_LISTED).orElseThrow();
+
+        assertEquals(ALEX, chat.senderId());
+        assertEquals("箱子在这边", chat.text());
+        assertTrue(chat.senderOnline());
+    }
+
+    @Test
+    void aPlayerChatPacketFromASenderNotInTheListIsNotFromAnOnlinePlayer() {
+        // 发言人 UUID 不在玩家列表里：名字只剩消息类型里写的 Alex，没核对上，不算在线玩家说的。
+        ChatType.Bound under = chatUnder(Component.literal("Alex"));
+        Component said = Component.literal("我是 Alex");
+        UUID stranger = UUID.fromString("11111111-2222-4333-8444-555555555555");
+
+        ReceivedChat chat = ClientReceivedChat.player(under.decorate(said), said, stranger, null, under, SELF, "Steve",
+                ALEX_LISTED).orElseThrow();
+
+        assertEquals("Alex", chat.sender());
+        assertFalse(chat.senderOnline());
+        // UUID 在列表里、加载器给的名字却和列表里的对不上：同样不算。
+        assertFalse(ClientReceivedChat.player(under.decorate(said), said, ALEX, "Herobrine", under, SELF, "Steve",
+                ALEX_LISTED).orElseThrow().senderOnline());
     }
 }

@@ -300,6 +300,14 @@
           "how": "自己做：在背包的合成格里做，不用工作台"
         }
       ]
+    },
+    "chat_event": {
+      "cursor": 3,
+      "kind": "player",
+      "sender": "Steve",
+      "sender_id": "8667ba71-b85a-4004-af54-457a9734eed7",
+      "sender_online": true,
+      "text": "麦麦过来"
     }
   }
 }
