@@ -79,6 +79,24 @@ public final class FirstPersonInteractionTargeting {
         return block;
     }
 
+    /**
+     * 右键实体时准星点在它身上的哪一点，和原版准星的取法一样：从眼睛沿视线射进它的点选框
+     * （碰撞箱外扩点选半径），眼睛已经在框里就是眼睛本身。盔甲架按这一点的高低决定空手取下哪一件，
+     * 所以角色瞄哪里就取哪件。视线没穿过框时（调用方没对准就出手）退到框的中心，
+     * 给一个落在实体身上的点，不编一个框外的位置。
+     *
+     * @param eye     角色眼睛的位置
+     * @param view    视线方向
+     * @param pickBox 目标的点选框
+     */
+    public static Vec3 entityClickPoint(Vec3 eye, Vec3 view, AABB pickBox) {
+        if (pickBox.contains(eye)) return eye;
+        // 射线长度取到框中心的距离再加上框的三边长，只要视线朝着框，线段一定穿得过它。
+        double length = eye.distanceTo(pickBox.getCenter())
+                + pickBox.getXsize() + pickBox.getYsize() + pickBox.getZsize();
+        return pickBox.clip(eye, eye.add(view.normalize().scale(length))).orElse(pickBox.getCenter());
+    }
+
     /** 桶由原版 useItem 沿视线取水／倒水，不要改成点击水后面的机器。 */
     public static boolean usesBucketRay(Item item) {
         return item instanceof BucketItem;

@@ -108,6 +108,10 @@ public interface InteractionSender extends BoundaryLifecycle {
             InteractionConfirmation confirmation,
             int timeoutTicks);
 
+    /**
+     * 右键一个实体，照原版准星右键的顺序：先带着视线点中的位置右键它（盔甲架穿脱装备只认这一下），
+     * 它不接再按普通右键实体（骑船、剪毛、挤奶、交易）。点中的位置跟着角色此刻的视线走。
+     */
     PendingInteraction interact(
             PlayerContext context,
             Entity target,

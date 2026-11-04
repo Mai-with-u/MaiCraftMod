@@ -7,6 +7,7 @@ import java.util.function.BiFunction;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
@@ -20,6 +21,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuVisibility;
@@ -433,7 +436,15 @@ public final class DefaultInteractionSender implements InteractionSender {
         PendingInteraction pending = oneShot(
                 PendingInteraction.Kind.INTERACT_ENTITY, context, confirmation, timeoutTicks);
         try {
-            var result = gameMode(context).interact(context.localPlayer(), target, hand);
+            // 照原版准星右键的顺序：先带着点中的位置右键它（盔甲架穿脱装备只认这一下），
+            // 它不接再按普通右键实体（骑船、剪毛、挤奶、交易）。点中的位置从此刻的视线算，瞄哪里就点哪里。
+            LocalPlayer player = context.localPlayer();
+            Vec3 clicked = FirstPersonInteractionTargeting.entityClickPoint(player.getEyePosition(),
+                    player.getViewVector(1.0f), target.getBoundingBox().inflate(target.getPickRadius()));
+            var result = gameMode(context).interactAt(player, target, new EntityHitResult(target, clicked), hand);
+            if (!result.consumesAction()) {
+                result = gameMode(context).interact(player, target, hand);
+            }
             // 原版自己的结算是这一下右键唯一在出手当时就有的权威事实：骑船这类不开界面、不改世界的用法，
             // 确认窗只能等乘客关系同步，等不到时全靠它分清是原版规则当场拒了（船泡在水下、刚下过车），
             // 还是点击被接受了、效果丢在了客户端到服务端之间。
@@ -441,9 +452,9 @@ public final class DefaultInteractionSender implements InteractionSender {
             // 原版当场拒收时不解释是哪条拒的：把提交瞬间的按键、距离与乘客现场记进等待记录，
             // 确认窗过期时随收场报文带出，下一轮实机直接读出拒收原因。
             if (!result.consumesAction()) {
-                pending.noteEntityUseScene(EntityUseScene.of(context.localPlayer(), target));
+                pending.noteEntityUseScene(EntityUseScene.of(player, target));
             }
-            if (result.shouldSwing()) context.localPlayer().swing(hand);
+            if (result.shouldSwing()) player.swing(hand);
         } catch (RuntimeException failure) {
             pending.finish(PendingInteraction.Status.UNCERTAIN,
                     "native entity interaction threw after entering the client action path");
