@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import java.util.List;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
@@ -35,20 +36,31 @@ final class McpTools {
                                      Supplier<List<Reminder>> reminders, ReservedItems reserved) {
         LooksAfterReading looks = looksInWorld(worldScope);
         return new ToolDispatcher(List.of(
-                new ObserveTool(() -> worldScope.get() == null ? null : worldScope.get().scene(),
-                        () -> worldScope.get() == null ? null : worldScope.get().memory(), goals, clientWork,
-                        reminders, () -> worldScope.get() == null ? null : worldScope.get().menus(),
+                new ObserveTool(inWorld(worldScope, WorldScope::scene),
+                        inWorld(worldScope, WorldScope::memory), goals, clientWork,
+                        reminders, inWorld(worldScope, WorldScope::menus),
                         // 预留与身上各有几件：读的是客户端全程那一份，进世界时已换成这个世界存着的。
                         () -> reserved.list().stream().map(entry -> new SelfView.Reserved(entry.item(),
                                 entry.atLeast(), reserved.carriedFor(entry))).toList(), looks,
-                        () -> worldScope.get() == null ? null : worldScope.get().identity()),
+                        inWorld(worldScope, WorldScope::identity)),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork, looks),
                 new GoalTool(goals, clientWork),
                 // 读事件每一页都带角色眼下在哪个世界：读的是这一趟进世界认出的那个，不在世界里为 null。
                 new EventsTool(taskEvents, chatEvents, goals, clientWork,
-                        () -> worldScope.get() == null ? null : worldScope.get().world())), recentCalls);
+                        inWorld(worldScope, WorldScope::world))), recentCalls);
+    }
+
+    /**
+     * 从当前世界的现场读一样东西；不在世界里时为 null。MCP 的请求线程上读：现场先取到手再判空，
+     * 不分两次读——退出世界那一刻客户端线程正好把现场摘掉，第二次读就是空的（读事件被叫醒时恰好就在这一刻）。
+     */
+    private static <T> Supplier<T> inWorld(Supplier<WorldScope> worldScope, Function<WorldScope, T> read) {
+        return () -> {
+            WorldScope scope = worldScope.get();
+            return scope == null ? null : read.apply(scope);
+        };
     }
 
     /** 读完告诉当前世界的闲时看读了什么；不在世界里时没有角色可演，什么都不做。 */
