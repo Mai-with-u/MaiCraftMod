@@ -405,7 +405,11 @@ public final class LocalPlayerInput implements PlayerInput {
         input.right = command.strafe() < 0;
         input.jumping = command.jumping();
         input.shiftKeyDown = command.sneaking();
-        player.setSprinting(command.sprinting());
+        // 要跑时只按住疾跑键，开不开跑交给原版下一刻结算：服务端会把疾跑标志回传给角色自己，
+        // 只有原版在同一刻里按"疾跑键还按着"把回传的"没在跑"接回来，才不会一停一跑地来回发包、视野一缩一放。
+        input.sprintHeld = command.sprinting();
+        // 原版松开疾跑键不会停跑；这一步不要跑（快到头、要精准起跳）时像人收住脚步一样主动停下。
+        if (!command.sprinting()) player.setSprinting(false);
     }
 
     /** 判断当前界面是否允许角色在已有移动指令下继续行走。 */
@@ -486,6 +490,7 @@ public final class LocalPlayerInput implements PlayerInput {
             input.right = false;
             input.jumping = false;
             input.shiftKeyDown = false;
+            input.sprintHeld = false;
         }
         if (controlledPlayer != null) controlledPlayer.setSprinting(false);
     }
@@ -598,11 +603,24 @@ public final class LocalPlayerInput implements PlayerInput {
 
     record AutomationRequest(long revision, boolean created) {}
 
-    /** 自动化持有身体时只消费注入的移动信号，不读取玩家键盘。 */
+    /** 自动化持有身体时只消费注入的移动信号，不读取玩家键盘；疾跑键也由它按住。 */
     public static final class BotInput extends Input {
+        /** 自动化按着疾跑键：原版每刻判开跑时读的就是它。 */
+        public boolean sprintHeld;
+
         @Override
         public void tick(boolean slowDown, float movementScale) {
             // 每个客户端游戏刻结束时，由身体控制端写入本轮移动信号。
+        }
+
+        /**
+         * 原版这一刻读到的疾跑键：身上换着自动输入时是自动化按没按，人自己操作时原样是键盘。
+         *
+         * @param current       玩家身上此刻的输入对象
+         * @param keyboardDown  键盘上的疾跑键按没按
+         */
+        public static boolean sprintKeyDown(Input current, boolean keyboardDown) {
+            return current instanceof BotInput bot ? bot.sprintHeld : keyboardDown;
         }
     }
 

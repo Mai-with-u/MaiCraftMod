@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.game.player;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
+import net.minecraft.client.player.Input;
 
 import org.junit.jupiter.api.Test;
 
@@ -86,5 +87,19 @@ class LocalPlayerInputTest {
         LocalPlayerInput.AxisStep settled = LocalPlayerInput.smoothDamp(89.9f, 90f, 0f, 0.11f, 240f, 0.05f);
         assertEquals(90f, settled.value(), 1e-3, "余差小到不可分辨时吸附到目标");
         assertEquals(0f, settled.velocity(), 1e-3, "吸附后角速度归零");
+    }
+
+    @Test
+    void sprintKeyFollowsAutomationOnlyWhileBotInputIsInstalled() {
+        // 自动化持有身体：原版读到的疾跑键就是自动化按没按，键盘上按着也不算。
+        LocalPlayerInput.BotInput bot = new LocalPlayerInput.BotInput();
+        bot.sprintHeld = true;
+        assertTrue(LocalPlayerInput.BotInput.sprintKeyDown(bot, false), "自动化按住疾跑键");
+        bot.sprintHeld = false;
+        assertFalse(LocalPlayerInput.BotInput.sprintKeyDown(bot, true), "自动化松开时不跟键盘走");
+        // 人自己操作：身上是键盘输入，读值原样不变。
+        Input keyboard = new Input();
+        assertTrue(LocalPlayerInput.BotInput.sprintKeyDown(keyboard, true), "人按着疾跑键");
+        assertFalse(LocalPlayerInput.BotInput.sprintKeyDown(keyboard, false), "人没按疾跑键");
     }
 }

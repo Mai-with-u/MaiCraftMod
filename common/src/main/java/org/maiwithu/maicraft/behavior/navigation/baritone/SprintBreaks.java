@@ -33,15 +33,25 @@ final class SprintBreaks {
         }
     }
 
-    /** 这一刻开始时读回的原版情况：上一刻的按键结算之后，角色跑没跑、撞没撞、饿不饿。 */
+    /**
+     * 刻末读回的原版情况：这一刻的按键结算之后，角色跑没跑、撞没撞、饿不饿。
+     * 撞没撞是这一刻移动之后的；原版判停跑用的是上一刻移动之后的那份，比它早一拍。
+     */
     record Reading(boolean sprinting, boolean horizontalCollision, boolean minorCollision, int food,
-                   boolean usingItem, boolean inWater) {}
+                   boolean usingItem, boolean inWater) {
+        /** 换成另一刻移动之后的碰撞，其余照这一刻。 */
+        Reading collidedAs(Reading other) {
+            return new Reading(sprinting, other.horizontalCollision, other.minorCollision, food, usingItem, inWater);
+        }
+    }
 
     /** 原版饱食度到这个数及以下就不让疾跑。 */
     private static final int SPRINT_FOOD = 6;
 
     /** 上一刻给的按键；那一刻没给为 null。 */
     private Command previous;
+    /** 上一刻读回的原版情况：原版这一刻判停跑时看的碰撞就是它；还没读过为 null。 */
+    private Reading lastReading;
     /** 这一刻给的按键；还没给为 null。 */
     private Command current;
     /** 疾跑断开的那一刻；没断为 -1。 */
@@ -59,6 +69,9 @@ final class SprintBreaks {
         Command before = previous;
         previous = given;
         current = null;
+        // 原版这一刻判停跑时看的是上一刻移动之后撞没撞：拿上一份读回的碰撞来归因，不拿这一刻移动后的。
+        Reading judged = lastReading == null ? reading : reading.collidedAs(lastReading);
+        lastReading = reading;
         if (given == null) {
             // 上一刻在备料、等前面的东西过去、落地救援占着：再上一刻按着疾跑的，疾跑键在这里松了。
             return before != null && before.running()
@@ -66,8 +79,8 @@ final class SprintBreaks {
         }
         if (!given.running()) return Optional.empty();
         if (!reading.sprinting()) {
-            String cause = vanillaCause(reading);
-            return broke("原版停的：" + cause, "按着疾跑，原版把它停了：" + cause + "（" + facts(reading) + "）", tick);
+            String cause = vanillaCause(judged);
+            return broke("原版停的：" + cause, "按着疾跑，原版把它停了：" + cause + "（" + facts(judged) + "）", tick);
         }
         return resumed(tick);
     }

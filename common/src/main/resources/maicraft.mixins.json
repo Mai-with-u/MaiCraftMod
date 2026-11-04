@@ -18,6 +18,7 @@
     "MouseHandlerControlMixin",
     "BlockUseAcknowledgementMixin",
     "UseKeyHoldMixin",
+    "SprintKeyHoldMixin",
     "MinecraftUseKeyInvoker",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",

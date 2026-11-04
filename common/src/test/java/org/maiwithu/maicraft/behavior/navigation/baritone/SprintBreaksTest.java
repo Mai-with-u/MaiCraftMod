@@ -14,6 +14,10 @@ class SprintBreaksTest {
     private static final SprintBreaks.Command RUN = new SprintBreaks.Command(1F, true, true, "MovementTraverse");
     private static final SprintBreaks.Reading SPRINTING = new SprintBreaks.Reading(true, false, false, 20, false, false);
     private static final SprintBreaks.Reading BUMPED = new SprintBreaks.Reading(false, true, false, 20, false, false);
+    /** 还在跑、这一刻移动之后撞上了：原版下一刻才按它停跑。 */
+    private static final SprintBreaks.Reading RUNNING_INTO = new SprintBreaks.Reading(true, true, false, 20, false, false);
+    /** 原版停了跑、这一刻移动之后没撞着（慢下来就没顶上）。 */
+    private static final SprintBreaks.Reading STOPPED_CLEAR = new SprintBreaks.Reading(false, false, false, 20, false, false);
 
     // 一刻：先读回上一刻的结算，再给这一刻的按键；两句里有话的那句交出来。
     private static Optional<String> tick(SprintBreaks breaks, long tick, SprintBreaks.Reading reading, SprintBreaks.Command command) {
@@ -33,7 +37,7 @@ class SprintBreaksTest {
     void 按着疾跑原版停了_说是撞墙_接上时说断了几刻() {
         var breaks = new SprintBreaks();
         tick(breaks, 0, SPRINTING, RUN);
-        tick(breaks, 1, SPRINTING, RUN);
+        tick(breaks, 1, RUNNING_INTO, RUN);
         String line = tick(breaks, 2, BUMPED, RUN).orElseThrow();
         assertTrue(line.contains("原版") && line.contains("撞墙"), line);
         assertTrue(tick(breaks, 3, BUMPED, RUN).isEmpty(), "断着的时候不重复说");
@@ -45,9 +49,28 @@ class SprintBreaksTest {
     @Test
     void 擦边不算撞墙() {
         var breaks = new SprintBreaks();
-        tick(breaks, 0, SPRINTING, RUN);
+        tick(breaks, 0, new SprintBreaks.Reading(true, true, true, 20, false, false), RUN);
         String line = tick(breaks, 1, new SprintBreaks.Reading(false, true, true, 20, false, false), RUN).orElseThrow();
         assertTrue(line.contains("没认出原因") && line.contains("擦边=是"), line);
+    }
+
+    @Test
+    void 原版按上一刻的碰撞停跑_停下那一刻没撞着也算撞墙() {
+        // 跑着顶上墙角，原版下一刻停跑；停跑后慢下来这一刻没再顶上，读回的碰撞已经是"没撞着"。
+        var breaks = new SprintBreaks();
+        tick(breaks, 0, SPRINTING, RUN);
+        tick(breaks, 1, RUNNING_INTO, RUN);
+        String line = tick(breaks, 2, STOPPED_CLEAR, RUN).orElseThrow();
+        assertTrue(line.contains("撞墙") && line.contains("撞着=是"), line);
+    }
+
+    @Test
+    void 上一刻没撞_停下那一刻才撞上_不算撞墙() {
+        // 原版判停跑时看的那份碰撞是"没撞着"：停跑另有原因，不冒充成撞墙。
+        var breaks = new SprintBreaks();
+        tick(breaks, 0, SPRINTING, RUN);
+        String line = tick(breaks, 1, BUMPED, RUN).orElseThrow();
+        assertTrue(line.contains("没认出原因"), line);
     }
 
     @Test
