@@ -83,6 +83,8 @@ public final class ClientSpotsContainers implements SpotsContainers {
         Set<BlockPos> seen = new HashSet<>();
         for (BlockPos hit : result.hits()) {
             seen.add(hit);
+            // 按区块扫会扫进半径外、上下很远的格子：和记得的容器用同一把尺子，直线距离超出半径的不要。
+            if (!withinRadius(hit, center, radius)) continue;
             candidateFromWorld(level, hit, center).ifPresent(found::add);
         }
         // 世界记忆里记过的容器补进来：现场还看得见的按现场读，没加载的按记忆读（到场还要核对）。
@@ -97,6 +99,11 @@ public final class ClientSpotsContainers implements SpotsContainers {
         // 由近及远给出去，挑选的排序再按内容与空位细分。
         found.sort(Comparator.comparingDouble(candidate -> candidate.walkCost()));
         return List.copyOf(found);
+    }
+
+    /** 扫到的容器算不算在半径内：直线距离不超过半径，和世界记忆找附近记过的同一把尺子。 */
+    static boolean withinRadius(BlockPos hit, BlockPos center, int radius) {
+        return Math.sqrt(hit.distSqr(center)) <= radius;
     }
 
     @Override
