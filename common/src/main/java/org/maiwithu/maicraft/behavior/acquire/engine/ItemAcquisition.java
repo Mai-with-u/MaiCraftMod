@@ -114,8 +114,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         this.space = space;
         if (maxDepth < 1) throw new IllegalArgumentException("递归深度上限至少为 1：" + maxDepth);
         this.maxDepth = maxDepth;
-        this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth);
         this.priceAsks = new PriceAsks(this.sources, position);
+        this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth, this.priceAsks);
     }
 
     // 估算：只问价不拿，按此刻会走的路往下估原料。内部需求不带限定（夜里比床和武器哪个费事）。

@@ -44,6 +44,8 @@ final class FetchesFood implements Action {
      * 和拿东西的引擎问价等看清现场的窗口一样长；等太久按问得出的排，不一直等着饿着。
      */
     static final int MAX_ESTIMATE_WAIT_TICKS = 400;
+    /** 一类口粮估了超过这么多毫秒就记一行，带上这一刻的空气值：实机里估算慢和憋气能直接对上。 */
+    private static final long SLOW_ESTIMATE_MILLIS = 50;
 
     private final ItemNeeds needs;
     private final long budgetTicks;
@@ -75,7 +77,9 @@ final class FetchesFood implements Action {
             // 每刻只估一类：这一轮还有没估的就估下一类，没估齐这一刻到此为止，下一刻接着估。
             Optional<String> next = nextToEstimate();
             if (next.isPresent()) {
+                long started = System.nanoTime();
                 estimated.put(next.get(), needs.estimate(requestFor(next.get()).just(1), Permissions.DEFAULT));
+                logSlowEstimate(next.get(), (System.nanoTime() - started) / 1_000_000, context);
                 if (nextToEstimate().isPresent()) return ActionStatus.running();
             }
             boolean waitedOut = waitingSince >= 0 && context.gameTick() - waitingSince >= MAX_ESTIMATE_WAIT_TICKS;
@@ -186,6 +190,14 @@ final class FetchesFood implements Action {
         return request.wanted().describe() + "：" + estimate.effort().wireName() + "，" + basis
                 + distance.map(blocks -> " " + Math.round(blocks) + " 格").orElse("，不参与")
                 + "（" + estimate.how() + "）";
+    }
+
+    // 估得慢时记一行，带上这一刻的空气：饿了找吃的估算卡住主线程时，水下的角色换不了气。
+    private static void logSlowEstimate(String kind, long millis, TickContext context) {
+        if (millis <= SLOW_ESTIMATE_MILLIS) return;
+        var player = context.player() == null ? null : context.player().localPlayer();
+        String air = player == null ? "不知道" : player.getAirSupply() + "/" + player.getMaxAirSupply();
+        LOG.info("[弄吃的] 估 {} 用了 {} 毫秒，这一刻空气 {}", kind, millis, air);
     }
 
     // 挑定或开始等时各写一行，等着的每一刻不重复写：方便实机对照 doing 里选了哪类、为什么。

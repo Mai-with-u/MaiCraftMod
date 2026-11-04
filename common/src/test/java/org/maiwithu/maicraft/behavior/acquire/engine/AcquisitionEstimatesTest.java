@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 
 import org.junit.jupiter.api.Test;
@@ -364,6 +365,50 @@ class AcquisitionEstimatesTest {
                 + hunt.asked.values().stream().mapToInt(Integer::intValue).sum()
                 + chest.asked.values().stream().mapToInt(Integer::intValue).sum();
         assertEquals(AcquisitionEstimates.MAX_QUOTES, asked);
+    }
+
+    @Test
+    void 排做法时问原料价也扣额度_一次报价里问光了就说没估完() {
+        // 做剑的候选做法很多，排先后时每条都要问一样不同原料的价，问的遍数比额度还多：问到额度用完就不再问遍来源，
+        // 这次报价不作数，剑如实说没估完；后面的来源也不再问。
+        AtomicReference<ItemAcquisition> engine = new AtomicReference<>();
+        craft.offer(SWORD, (request, context) -> {
+            for (int i = 0; i < AcquisitionEstimates.MAX_QUOTES + 20; i++) {
+                engine.get().cheapestCost(want("maicraft_test:part_" + i, 1), PERMISSIONS, true);
+            }
+            return new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null, "sword");
+        }, List.of());
+        chest.offer(SWORD, (request, context) -> new SourceQuote.Offer("记得的箱子", 1, new AcquisitionCost(20, 2),
+                null, "chest"), List.of());
+        engine.set(engine());
+
+        GoalEstimate estimate = engine.get().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.UNKNOWN, estimate.effort());
+        assertTrue(estimate.how().contains(AcquisitionEstimates.OUT_OF_QUOTES), estimate.how());
+        long partsAsked = chest.asked.keySet().stream().filter(item -> item.startsWith("maicraft_test:part_")).count();
+        assertEquals(AcquisitionEstimates.MAX_QUOTES - 1, partsAsked, "剑本身问一次，余下的额度全用在原料上");
+        assertNull(chest.asked.get(SWORD), "额度用完后不再问别的来源");
+    }
+
+    @Test
+    void 估算里同一样原料排做法时只问遍一次来源_估完就不再记着() {
+        // 做剑排先后时两条做法都缺两块木板，问不出价时还要再问一遍是不是还没看完：一次估算里只问遍一次各来源。
+        AtomicReference<ItemAcquisition> engine = new AtomicReference<>();
+        craft.offer(SWORD, (request, context) -> {
+            engine.get().cheapestCost(want(PLANKS, 2), PERMISSIONS, true);
+            engine.get().cheapestCost(want(PLANKS, 2), PERMISSIONS, true);
+            engine.get().priceStillLooking(want(PLANKS, 2), PERMISSIONS, true);
+            return new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null, "sword");
+        }, List.of());
+        engine.set(engine());
+
+        engine.get().estimate(want(SWORD, 1), PERMISSIONS);
+        assertEquals(1, chest.asked.get(PLANKS));
+
+        // 估完了：再问价是此刻的现场，照常问遍来源。
+        engine.get().cheapestCost(want(PLANKS, 2), PERMISSIONS, true);
+        assertEquals(2, chest.asked.get(PLANKS));
     }
 
     // 床在背包外的工作台上做：缺三块白色羊毛，木板身上有。

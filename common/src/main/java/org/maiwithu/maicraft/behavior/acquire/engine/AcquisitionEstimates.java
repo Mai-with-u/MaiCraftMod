@@ -39,10 +39,13 @@ final class AcquisitionEstimates {
 
     private static final Logger LOG = LoggerFactory.getLogger(AcquisitionEstimates.class);
     /**
-     * 一次估算最多向来源问几次价。食物、燃料这类原料链分叉多、配方互相绕回来（小麦与干草块、锭与块），
-     * 不设上限时一次估算要问上千次价、主线程卡好几秒，角色原地不动；问满了余下的说没估完，由外面按估得出的排。
+     * 一次估算最多问几次价：向一个来源问一次算一次，做法排先后时为一样原料问遍各来源一遍也算一次。
+     * 食物、燃料这类原料链分叉多、配方互相绕回来（小麦与干草块、锭与块），不设上限时一次估算要问上千次价、
+     * 主线程卡好几秒，角色原地不动；问满了余下的说没估完，由外面按估得出的排。
+     * 装了几个大模组的客户端里实测，热起来后每次 0.1 到 0.5 毫秒，问满 100 次约 50 毫秒以内：
+     * 面包、熟牛肉、铁镐都估得完，金胡萝卜这类原料链长的估到一半说没估完。
      */
-    static final int MAX_QUOTES = 300;
+    static final int MAX_QUOTES = 100;
     /** 估算花的时间超过这么多毫秒就写一行日志：实机卡顿时看得出是哪样东西估得慢、问了多少次价。 */
     private static final long SLOW_ESTIMATE_MILLIS = 50;
     /** 问满了价还没估完的那样原料怎么说。 */
@@ -51,23 +54,30 @@ final class AcquisitionEstimates {
     private final List<ItemSource> sources;
     private final ReadsCharacterPosition position;
     private final int maxDepth;
+    /** 做法排先后时问原料价走的那一份：估算期间由它记住问过的原料价，问一遍从这次估算的额度里扣一次。 */
+    private final PriceAsks priceAsks;
 
-    AcquisitionEstimates(List<ItemSource> sources, ReadsCharacterPosition position, int maxDepth) {
+    AcquisitionEstimates(List<ItemSource> sources, ReadsCharacterPosition position, int maxDepth, PriceAsks priceAsks) {
         this.sources = List.copyOf(sources);
         this.position = position;
         this.maxDepth = maxDepth;
+        this.priceAsks = priceAsks;
     }
 
     /** 估一样东西：限定照最外层的写法，原料不带。 */
     GoalEstimate estimate(ItemRequest request, Permissions permissions, ItemAcquisition.Scope scope) {
         long started = System.nanoTime();
-        Session session = new Session(permissions);
-        Part part = session.estimate(request, scope);
+        QuoteBudget budget = new QuoteBudget(MAX_QUOTES);
+        Session session = new Session(permissions, budget);
+        // 估的时候游戏停着：排做法时问过的原料价记下来，同一样原料别的做法、别的层再问直接用；
+        // 排做法时问原料价也从这次估算的额度里扣，一次报价里问上几十遍也收得住。
+        Part part = priceAsks.during(budget, () -> session.estimate(request, scope));
         long millis = (System.nanoTime() - started) / 1_000_000;
         // 估得慢时记一行：哪样东西、多少毫秒、问了几次价、有没有问满，实机卡顿时拿它查是哪样东西拖慢了。
         if (millis > SLOW_ESTIMATE_MILLIS) {
-            LOG.info("[估算] {} 用了 {} 毫秒，问价 {} 次{}", describe(request), millis, session.quotesAsked,
-                    session.outOfQuotes ? "，问满了没估完" : "");
+            LOG.info("[估算] {} 用了 {} 毫秒，问价 {} 次（其中排做法时问原料价 {} 遍）{}；最费时的来源：{}",
+                    describe(request), millis, budget.used(), budget.ingredientAsks(),
+                    budget.refused() > 0 ? "，问满了没估完" : "", session.slowestSources());
         }
         return part.toEstimate(session.blockedWhy);
     }
@@ -122,11 +132,16 @@ final class AcquisitionEstimates {
         private final Map<Quoted, SourceQuote> quotes = new HashMap<>();
         /** 正在估的每一样往下问到了哪些东西、最深几层：估完并进上一样，决定记下的结果别处能不能直接用。 */
         private final Deque<Trace> traces = new ArrayDeque<>();
-        private int quotesAsked;
-        private boolean outOfQuotes;
+        /** 这次估算的问价额度：问来源、排做法时问原料价都从这里扣。 */
+        private final QuoteBudget budget;
+        /** 各来源问价一共花了多少纳秒：估得慢时日志里说是哪几个来源拖的。 */
+        private final Map<String, Long> nanosBySource = new HashMap<>();
+        private final Map<String, Integer> quotesBySource = new HashMap<>();
+        private final Map<String, Long> slowestQuoteBySource = new HashMap<>();
 
-        Session(Permissions permissions) {
+        Session(Permissions permissions, QuoteBudget budget) {
             this.permissions = permissions;
+            this.budget = budget;
         }
 
         Part estimate(ItemRequest request, ItemAcquisition.Scope scope) {
@@ -167,17 +182,42 @@ final class AcquisitionEstimates {
             return part;
         }
 
+        // 最费时的三个来源：名字、问了几次、一共几毫秒、最慢的一次几毫秒，按花的时间从多到少。
+        String slowestSources() {
+            return String.join("；", nanosBySource.entrySet().stream()
+                    .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                    .limit(3)
+                    .map(entry -> entry.getKey() + " " + quotesBySource.get(entry.getKey()) + " 次共 "
+                            + entry.getValue() / 1_000_000 + " 毫秒（最慢一次 "
+                            + slowestQuoteBySource.get(entry.getKey()) / 1_000_000 + " 毫秒）")
+                    .toList());
+        }
+
         // 同一来源对同一请求只问一次价；没问过的要新问时先看还剩几次，问满了返回空。
         private SourceQuote quote(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
                 SourceContext context) {
             Quoted asked = new Quoted(source, request, scope);
             SourceQuote known = quotes.get(asked);
             if (known != null) return known;
-            if (quotesAsked >= MAX_QUOTES) return null;
-            quotesAsked++;
+            if (!budget.takeQuote()) return null;
+            int refusedBefore = budget.refused();
+            long started = System.nanoTime();
             SourceQuote fresh = source.quote(request, context);
+            long spent = System.nanoTime() - started;
+            nanosBySource.merge(source.describe(), spent, Long::sum);
+            slowestQuoteBySource.merge(source.describe(), spent, Math::max);
+            quotesBySource.merge(source.describe(), 1, Integer::sum);
+            // 做法类来源报价时给每条候选做法问原料价，中途把额度问光了：这次报价是拿不全的原料价排的，
+            // 不作数也不记下，跟问满了一样说没估完。
+            if (budget.refused() != refusedBefore) return null;
             quotes.put(asked, fresh);
             return fresh;
+        }
+
+        // 问满了价：这一样不再往下估，如实说没估完；它和它上面几层都是半截的，不记下来给别处用。
+        private Part outOfQuotes(String what) {
+            traces.element().budgetCut = true;
+            return Part.unknown(what, OUT_OF_QUOTES, false);
         }
 
         // 问遍来源 → 按总代价挑出要走的那几处 → 每处往下估原料；挑中的走不通就划掉它再挑，都走不通才说弄不到。
@@ -192,11 +232,7 @@ final class AcquisitionEstimates {
                 if (!scope.allows(source.via().name())) continue;
                 SourceQuote quote = quote(source, request, scope, context);
                 // 问满了价：这一样不再往下估，如实说没估完；它和它上面几层都是半截的，不记下来给别处用。
-                if (quote == null) {
-                    outOfQuotes = true;
-                    traces.element().budgetCut = true;
-                    return Part.unknown(what, OUT_OF_QUOTES, false);
-                }
+                if (quote == null) return outOfQuotes(what);
                 switch (quote) {
                     case SourceQuote.Offer offer -> {
                         if (scope.maxDistanceBlocks() != null && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
@@ -272,7 +308,10 @@ final class AcquisitionEstimates {
             double farthest = distance;
             boolean stillLooking = false;
             Effort effort = own;
+            int refusedBefore = budget.refused();
             List<ItemRequest> missing = planned.source().missingIngredients(portion, offer, context);
+            // 列缺料时又排了一遍做法、中途把额度问光了：缺料清单是拿不全的原料价排出来的，不作数，说没估完。
+            if (budget.refused() != refusedBefore) return outOfQuotes(what);
             List<Part> parts = new ArrayList<>();
             for (ItemRequest ingredient : missing) {
                 Part part = estimate(ingredient, ItemAcquisition.Scope.ALL);
