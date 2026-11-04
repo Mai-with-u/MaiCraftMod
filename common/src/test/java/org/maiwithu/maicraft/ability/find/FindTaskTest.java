@@ -186,24 +186,25 @@ class FindTaskTest {
         TaskResult result = run(new FindInput(FindInput.FindKind.BLOCK,
                 List.of("minecraft:coal_ore"), 2, 48));
 
-        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertEquals(TaskResult.Status.DONE, result.status());
         FindDetails details = (FindDetails) result.details();
         assertEquals(1, details.found().size(), "同一格只数一次");
-        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
     }
 
     @Test
-    void 扫完了还不足按部分完成并写明查了多大范围() {
+    void count是最多找几个_看完不够也算找完并写明找到几个与看完了多大范围() {
+        // LLM 把 count 当上限：要"附近所有煤矿"填 3，这一片只有 1 个，照实交出 1 个，不判没做成。
         finder.script.add(new FindsAround.Round(List.of(block(0, 64, -8, "minecraft:coal_ore")),
                 true, false));
         TaskResult result = run(new FindInput(FindInput.FindKind.BLOCK,
                 List.of("minecraft:coal_ore"), 3, 48));
 
-        assertEquals(TaskResult.Status.PARTIAL, result.status());
-        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
-        assertTrue(result.problem().message().contains("48 格"), result.problem().message());
-        assertTrue(result.problem().message().contains("查过没有不等于世界里没有"));
-        assertEquals(1, ((FindDetails) result.details()).found().size());
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().startsWith("找到 1 个"), result.summary());
+        assertTrue(result.summary().contains("最多找 3 个") && result.summary().contains("48 格")
+                && result.summary().contains("看完了"), result.summary());
+        FindDetails details = (FindDetails) result.details();
+        assertEquals(1, details.found().size());
     }
 
     @Test

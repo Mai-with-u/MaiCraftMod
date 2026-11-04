@@ -7,7 +7,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
- * 寻找的结算：找满即收工；扫完仍不足就写清找到几个、查了什么范围。
+ * 寻找的结算：count 是最多找几个，找满即收工；这一片看完不够也算找完，写清找到几个、查了什么范围；一个都没有才算没找到。
  * "查过已加载区没有"不等于"世界里没有"——这句话术只在这里出现一次，
  * 成功的结算里不出现。纯计算，不读世界；任务在收束时调用。
  */
@@ -31,7 +31,10 @@ final class FindSettlement {
                 .build();
     }
 
-    /** 扫完了却不够数：有收获按部分完成，一个都没有按没找到失败；两种都写明查了多大范围。 */
+    /**
+     * 这一片看完了却没找满：count 是最多找几个，有收获就按找完收场，写明找到几个、这一片看完了；
+     * 要凑够数的调用方看个数自己决定换地方接着找。一个都没有按没找到失败。
+     */
     static TaskResult insufficient(FindInput input, List<FindDetails.Found> found,
             Map<String, Integer> byType) {
         return insufficient(input, found, byType, null);
@@ -47,8 +50,11 @@ final class FindSettlement {
         if (found.isEmpty()) {
             return TaskResult.failed("寻找：这一片没有找到" + String.join("、", input.selectors()), problem);
         }
-        return TaskResult.builder(TaskResult.Status.PARTIAL, summary(input, found.size()))
-                .problem(problem)
+        // 找到几个就是几个：LLM 常把 count 当上限（"附近所有墓碑"填 10），找到 7 个照实交出来，不判没做成。
+        // 看不见的那几个的线索照样带上，想找全的自己走近再找。
+        String rest = "最多找 " + input.count() + " 个，半径 " + input.radius() + " 格的已加载区看完了，看得见的就这些"
+                + (hiddenLead == null ? "" : "；" + hiddenLead);
+        return TaskResult.builder(TaskResult.Status.DONE, summary(input, found.size()) + "（" + rest + "）")
                 .details(new FindDetails(found, input.radius(), true, byType))
                 .build();
     }
@@ -61,6 +67,6 @@ final class FindSettlement {
 
     // 一句话结论：找到了几个、最近的一个在哪，直播解说可以直接念。
     private static String summary(FindInput input, int foundCount) {
-        return "找到 " + foundCount + " 个（要 " + input.count() + " 个）";
+        return "找到 " + foundCount + " 个";
     }
 }

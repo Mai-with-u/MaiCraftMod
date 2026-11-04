@@ -1511,7 +1511,7 @@
           "name": "count",
           "type": "integer",
           "required": false,
-          "doc": "要找到几个，找满即收工",
+          "doc": "最多找几个：找满即收工；这一片看完不够也算找完，结果里报找到几个",
           "default": 1,
           "min": 1,
           "max": 32

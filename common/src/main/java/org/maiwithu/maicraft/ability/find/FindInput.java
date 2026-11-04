@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  *
  * @param kind      找方块、找实体还是找结构线索，三者一次只找一种
  * @param selectors 方块 ID 或标签、实体类型 ID，或结构 ID，按种类解释
- * @param count     要找到几个；找满即收工
+ * @param count     最多找几个；找满即收工，这一片看完不够也算找完
  * @param radius    扫描半径，单位格，以角色为圆心；只扫已加载区
  * @param permissions 这次任务的许可：扔末影之眼找要塞时走的那几段按它能不能挖垫
  */

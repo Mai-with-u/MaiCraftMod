@@ -102,7 +102,7 @@ public final class FindModule implements AbilityModule {
                                     + "与 block、blocks、entity 三选一").build(),
                     ParamSpec.of("count", ParamType.INTEGER)
                             .range(1, 32).defaultValue(1L)
-                            .doc("要找到几个，找满即收工").build(),
+                            .doc("最多找几个：找满即收工；这一片看完不够也算找完，结果里报找到几个").build(),
                     ParamSpec.of("radius", ParamType.INTEGER)
                             .range(4, 128)
                             .doc("扫描半径，单位格；方块默认 48，实体默认 64；只扫已加载区").build()),
