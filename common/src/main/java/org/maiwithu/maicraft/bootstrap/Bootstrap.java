@@ -36,6 +36,7 @@ import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.landing.FallRescues;
@@ -520,8 +521,13 @@ public final class Bootstrap {
             // 下面每一项各自兜底：某一项这一刻出错只跳过它，后面的照常推进，游戏不崩。
             if (minecraft.level != null) tickGuard.run("方块扫描", () -> blockScans.tick(minecraft.level));
             tickGuard.run("进出世界", () -> keepWorldScopeFresh(minecraft, context));
-            if (context.isEmpty()) clientWork.drain(null);
-            context.ifPresent(current -> tickInWorld(minecraft, current));
+            // 进了世界、握手还没认出是哪个世界时现场还没建：MCP 请求按不在世界里答，角色这几刻不动，
+            // 只收尾这一刻的控制边界；认出世界、现场建好的下一刻起照常推进。
+            if (context.isEmpty() || worldScope[0] == null) clientWork.drain(null);
+            context.ifPresent(current -> {
+                if (worldScope[0] != null) tickInWorld(minecraft, current);
+                else playerControl.endTick(current);
+            });
             // 与服务端的会话跟着每个客户端刻推进。
             tickGuard.run("服务端会话", () -> session.tick(minecraft));
             // 调试面板最后取现状：这一刻控制循环与会话都推进完了，读到的是这一刻的结果。
@@ -529,11 +535,14 @@ public final class Bootstrap {
         }
 
         /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。
-         *  目标运行表的记地点入口跟着换：进世界指到当期的记忆，退世界摘掉。 */
+         *  目标运行表的记地点入口跟着换：进世界指到当期的记忆，退世界摘掉。
+         *  现场等握手认出是哪个世界再建：世界编号要等服务器在欢迎包里报，先按别的编号建了再换，记忆就分到两处。 */
         private void keepWorldScopeFresh(Minecraft minecraft, Optional<PlayerContext> context) {
             if (minecraft.level != null && worldScope[0] == null && context.isPresent()) {
+                Optional<SaveIdentity> save = SaveIdentity.current(minecraft, session.capabilities());
+                if (save.isEmpty()) return;
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
-                WorldScope scope = new WorldScope(minecraft, playerControl, blockScans, session,
+                WorldScope scope = new WorldScope(minecraft, save.get(), playerControl, blockScans, session,
                         subtitles, interactions, useKeyProjection, walksOnFoot, walks, combatSenses,
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
@@ -551,6 +560,8 @@ public final class Bootstrap {
                         new SettlesReservations(new NotesGoalGains(scope.goalRuns(), itemsInUse), reserved),
                         taskEvents, selfBriefs, readySteps);
                 goals.enterWorld(scope.memory(), publishingGoalRuns);
+                // 认出了世界：挂着读聊天的也当场返回，带上这个世界（任务事件流上面换了新流，已经叫醒）。
+                chatEvents.wakeReaders();
                 // 开关开启时，这次进世界要逐刻请求控制权直到拿到；还没有目标时也守得住角色。
                 startupAutomationPending = automationOnJoin;
             } else if (minecraft.level == null) {
@@ -570,12 +581,17 @@ public final class Bootstrap {
             reserved.detach();
             publishingGoalRuns = null;
             if (worldScope[0] != null) {
+                WorldScope leaving = worldScope[0];
                 goals.leaveWorld();
-                worldScope[0].leave();
-                worldScope[0].memory().flush();
+                leaving.leave();
+                leaving.memory().flush();
                 blockScans.dropAll();
+                // 先摘掉现场再叫醒读事件的一方：被叫醒的那一页读到的已经是"不在世界里"。
+                worldScope[0] = null;
                 // 聊天流在离开时换新：下一个世界登录后最早几条消息（谁进来了）可能比现场建好还早到，进世界时再换会把它们冲掉。
                 chatEvents.restart();
+                // 任务事件流不在离开时换新（离开前停手的暂停事件还没读）：只叫醒挂着等的，让它当场看到退出了世界。
+                taskEvents.wakeReaders();
             }
             // 预览的蓝图属于刚离开的那个世界，不跟到下一个。
             blueprintOverlay.hide();

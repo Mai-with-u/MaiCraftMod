@@ -29,6 +29,8 @@ public final class CursorLog<E> {
     private final Deque<E> events = new ArrayDeque<>();
     private String streamId = newStreamId();
     private long latest;
+    /** 被叫醒过几次：等着的读者看到它变了就带着眼下这一页返回。 */
+    private long wakeups;
 
     /**
      * @param capacity 最多保留几条；再多就挤掉最早的
@@ -64,6 +66,15 @@ public final class CursorLog<E> {
         notifyAll();
     }
 
+    /**
+     * 叫醒正在等的读者，让它们马上带着眼下这一页返回（没有新事件就是空页）；流编号、游标与已记的事件都不动。
+     * 用在读的一方要当场知道、却不是一条事件的变化上（例如角色换了世界：每一页都带着角色在哪个世界）。
+     */
+    public synchronized void wakeReaders() {
+        wakeups++;
+        notifyAll();
+    }
+
     /** 当前的流编号。 */
     public synchronized String streamId() {
         return streamId;
@@ -75,7 +86,7 @@ public final class CursorLog<E> {
     }
 
     /**
-     * 读事件；没有可读的事件时最多等 {@code waitMillis} 毫秒，期间来了事件或流换了就立即返回。
+     * 读事件；没有可读的事件时最多等 {@code waitMillis} 毫秒，期间来了事件、流换了或被叫醒就立即返回。
      *
      * @param expectedStream 读的一方上次拿到的流编号；第一次读时为 null
      * @param afterCursor    上次读到的游标；第一次读时为 0
@@ -89,6 +100,7 @@ public final class CursorLog<E> {
             throw new IllegalArgumentException("游标、条数或等待时间不合法：" + afterCursor + "、" + limit + "、" + waitMillis);
         }
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitMillis);
+        long woken = wakeups;
         Page<E> page = page(expectedStream, afterCursor, filter, limit);
         // 只有"游标有效、确实没有新事件"才值得等；流换了或历史丢了要马上告诉读的一方。
         while (page.events().isEmpty() && page.cursorStatus() == CursorStatus.VALID) {
@@ -96,6 +108,8 @@ public final class CursorLog<E> {
             if (left <= 0) break;
             TimeUnit.NANOSECONDS.timedWait(this, left);
             page = page(expectedStream, afterCursor, filter, limit);
+            // 等的时候被叫醒（例如角色换了世界）：不再接着等，带着这一页回去，读的一方当场看到变化。
+            if (wakeups != woken) break;
         }
         return page;
     }

@@ -20,6 +20,8 @@ public final class ServerProtocolDispatcher {
         long tick();
         /** 这个玩家是不是服务器认的角色账号：不是就不给会话，普通玩家照常游玩，只是用不了服务端链路。 */
         boolean admitted();
+        /** 这台服务器当前存档的世界编号，握手时报给客户端，客户端按它认出是哪个世界；没有时为 null，欢迎包里就不带。 */
+        String worldId();
         boolean mayMutate();
         List<ServerFeature> features();
         JsonObject execute(String operationId, JsonObject body);

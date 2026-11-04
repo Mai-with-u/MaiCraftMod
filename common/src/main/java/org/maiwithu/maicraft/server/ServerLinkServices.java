@@ -9,11 +9,12 @@ import net.minecraft.server.MinecraftServer;
 
 /**
  * 按服务器实例登记服务端服务的登记表。Mixin 注入的钩子没有任何构造路径能把服务传进来，
- * 只能到这里按当前服务器取；启动在服务器的第一个刻结束时按需创建并登记，停服时移除，
- * 因此每个服务器实例（包括单人游戏的每次开局）都有自己的归属记录，不跨服残留。
+ * 只能到这里按当前服务器取；启动在服务器的第一个刻结束时（或更早收到客户端握手时）按需创建并登记，停服时移除，
+ * 因此每个服务器实例（包括单人游戏的每次开局）都有自己的归属记录与世界编号，不跨服残留。
  */
 public final class ServerLinkServices {
-    private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations) {}
+    /** 一台服务器的服务：方块归属记录、交互确认通道，以及这个存档的世界编号（写不进编号文件时为 null）。 */
+    private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations, String worldId) {}
 
     private static final Map<MinecraftServer, Services> ATTACHED =
             Collections.synchronizedMap(new IdentityHashMap<>());
@@ -23,8 +24,9 @@ public final class ServerLinkServices {
     /** 尚未登记时用给定的工厂创建并登记；同一服务器重复调用不重建。 */
     public static void attachIfAbsent(MinecraftServer server,
                                       Supplier<BlockOwnershipRecord> ownership,
-                                      Supplier<ServerConfirmations> confirmations) {
-        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get()));
+                                      Supplier<ServerConfirmations> confirmations,
+                                      Supplier<String> worldId) {
+        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get(), worldId.get()));
     }
 
     public static void detach(MinecraftServer server) {
@@ -41,5 +43,11 @@ public final class ServerLinkServices {
     public static ServerConfirmations confirmations(MinecraftServer server) {
         var services = ATTACHED.get(server);
         return services == null ? null : services.confirmations();
+    }
+
+    /** 该服务器当前存档的世界编号：握手时报给客户端；尚未登记或编号文件写不进去时返回 null。 */
+    public static String worldId(MinecraftServer server) {
+        var services = ATTACHED.get(server);
+        return services == null ? null : services.worldId();
     }
 }

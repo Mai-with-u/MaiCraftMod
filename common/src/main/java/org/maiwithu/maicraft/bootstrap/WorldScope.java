@@ -93,7 +93,7 @@ import org.maiwithu.maicraft.ability.timer.Timers;
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
  *
- * <p>世界身份从存档目录或服务器地址识别，记忆按身份分开存；连到另一个世界时这份现场整体丢弃，
+ * <p>世界身份由握手认出（存档自己的世界编号，服务器没报时按存档目录或服务器地址算），记忆按身份分开存；连到另一个世界时这份现场整体丢弃，
  * 不把上一个世界的东西带过来。每刻由启动侧把当刻的角色上下文交给 {@link #observe}，
  * 各路读端从这里读出观察事实，交给场景整理。
  */
@@ -139,6 +139,8 @@ public final class WorldScope {
     private final MenuView.Reads menus;
     /** 角色是谁、在哪个世界：进世界时读一次。 */
     private final SelfView.Identity selfIdentity;
+    /** 认出的是哪个世界：这一趟进世界里不再变，宿主读事件、看自己时都带着它。 */
+    private final SaveIdentity world;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -162,7 +164,8 @@ public final class WorldScope {
                 new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)));
     }
 
-    public WorldScope(Minecraft minecraft, PlayerControlBoundary playerControl, BlockScanService blockScans,
+    /** @param save 握手认出的世界：现场只在认出世界之后才建，记忆按它分开存 */
+    public WorldScope(Minecraft minecraft, SaveIdentity save, PlayerControlBoundary playerControl, BlockScanService blockScans,
             ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
             UseKeyProjection useKeyProjection, WalkTo walksOnFoot, BaritoneInternals walks, CombatSenses senses,
             AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
@@ -171,13 +174,14 @@ public final class WorldScope {
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
-        SaveIdentity save = SaveIdentity.current(minecraft)
-                .orElseThrow(() -> new IllegalStateException("进了世界却识别不出世界身份，记忆无处安放"));
-        StateIdentity identity = new StateIdentity(save.key(), save.directory(),
+        // 世界记忆还按旧版本那串按存档目录或服务器地址算的编号存：认不出旧编号（服务器列表里没有这台）时才用世界编号。
+        this.world = Objects.requireNonNull(save, "save");
+        String storageKey = save.legacyKey() != null ? save.legacyKey() : save.key();
+        StateIdentity identity = new StateIdentity(storageKey, save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
-        // 角色是谁、在哪个世界：账号名与 UUID 在这一趟进世界里不会变，observe(self) 每次照抄。
+        // 角色是谁、在哪个世界：账号名、UUID 与世界在这一趟进世界里不会变，observe(self) 每次照抄。
         this.selfIdentity = new SelfView.Identity(minecraft.player.getGameProfile().getName(),
-                minecraft.player.getUUID(), save.key());
+                minecraft.player.getUUID(), save);
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
@@ -346,9 +350,14 @@ public final class WorldScope {
         return self == null ? Optional.empty() : Optional.of(SelfBrief.line(self, dimension, menus.screens().current()));
     }
 
-    /** observe(self) 带的角色是谁：账号名、UUID 与世界身份编号。 */
+    /** observe(self) 带的角色是谁：账号名、UUID 与所在的世界。 */
     public SelfView.Identity identity() {
         return selfIdentity;
+    }
+
+    /** 认出的是哪个世界：events 每一页都带它。 */
+    public SaveIdentity world() {
+        return world;
     }
 
     /** observe(menu) 读的界面：开着的界面与交易报价。 */

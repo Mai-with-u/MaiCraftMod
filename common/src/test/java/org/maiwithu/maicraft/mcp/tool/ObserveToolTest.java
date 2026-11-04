@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.goal.InMemoryGoalRunStore;
@@ -107,7 +108,8 @@ class ObserveToolTest {
     private ToolDispatcher tools;
     /** 角色是谁、在哪个世界：测试摆，默认读到了全部三项。 */
     private SelfView.Identity identity = new SelfView.Identity("Mai",
-            UUID.fromString("00000000-0000-0000-0000-000000000001"), "ab".repeat(32));
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state")));
     /** 板上还成立的提醒：测试摆。 */
     private List<Reminder> reminders = List.of();
     /** 角色此刻开着的界面：测试摆，默认什么都没开。 */
@@ -266,11 +268,15 @@ class ObserveToolTest {
 
         assertEquals("Mai", self.get("name").getAsString());
         assertEquals("00000000-0000-0000-0000-000000000001", self.get("uuid").getAsString());
-        assertEquals("ab".repeat(32), self.get("world_key").getAsString());
+        // 在哪个世界：和 events 每一页带的是同一个 world，编号、存档名与编号从哪来。
+        JsonObject world = self.getAsJsonObject("world");
+        assertEquals("ab".repeat(32), world.get("id").getAsString());
+        assertEquals("新的世界", world.get("name").getAsString());
+        assertEquals("world_id_file", world.get("source").getAsString());
 
         // 认不出世界时只少这一项，不编一个。
         identity = new SelfView.Identity("Mai", UUID.fromString("00000000-0000-0000-0000-000000000001"), null);
-        assertFalse(data(observe("{\"what\": \"self\"}")).has("world_key"));
+        assertFalse(data(observe("{\"what\": \"self\"}")).has("world"));
     }
 
     @Test

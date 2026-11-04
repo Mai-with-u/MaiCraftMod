@@ -49,13 +49,18 @@ public final class TaskEventLog implements TaskEventSink {
         log.restart();
     }
 
+    /** 角色换了世界：叫醒正在等的读者，让它们当场带着新的世界返回；已记的事件与游标都不动。 */
+    public void wakeReaders() {
+        log.wakeReaders();
+    }
+
     /** 当前的流编号。 */
     public String streamId() {
         return log.streamId();
     }
 
     /**
-     * 读事件；没有可读的事件时最多等 {@code waitMillis} 毫秒，期间来了事件或流换了就立即返回。
+     * 读事件；没有可读的事件时最多等 {@code waitMillis} 毫秒，期间来了事件、流换了或被叫醒就立即返回。
      *
      * @param expectedStream 读的一方上次拿到的流编号；第一次读时为 null
      * @param afterCursor    上次读到的游标；第一次读时为 0

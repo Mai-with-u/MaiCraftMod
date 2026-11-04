@@ -83,6 +83,7 @@ public final class ServerLinkNetwork {
             @Override public String dimension() { return player.serverLevel().dimension().location().toString(); }
             @Override public long tick() { return Integer.toUnsignedLong(server.getTickCount()); }
             @Override public boolean admitted() { return admitted; }
+            @Override public String worldId() { return ServerLinkServices.worldId(server); }
             @Override public boolean mayMutate() { return player.isAlive() && !player.isSpectator(); }
             @Override public List<ServerFeature> features() { return operations.features(player); }
             @Override public JsonObject execute(String operationId, JsonObject body) {

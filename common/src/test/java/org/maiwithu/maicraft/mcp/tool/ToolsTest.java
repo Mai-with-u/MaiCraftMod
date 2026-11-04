@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
 import org.maiwithu.maicraft.game.MentionedEntity;
 import org.maiwithu.maicraft.game.ReceivedChat;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
@@ -25,13 +26,18 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 四个接上行为的工具：lookup、execute、goal、events，以及调度时把异常换成错误种类。 */
@@ -52,6 +58,8 @@ class ToolsTest {
     private final List<String> remembered = new ArrayList<>();
     private long tick = 100;
     private boolean inWorld = true;
+    /** 角色眼下在哪个世界：读事件每一页都带它；null 是不在世界里或还没认出世界。 */
+    private volatile SaveIdentity world;
     private final ToolDispatcher tools;
 
     ToolsTest() {
@@ -78,7 +86,7 @@ class ToolsTest {
             }
         };
         tools = new ToolDispatcher(List.of(new LookupTool(registry, KnowledgeLibrary.offline()), new ExecuteTool(registry, table, direct),
-                new GoalTool(table, direct), new EventsTool(events, chat, table, direct)));
+                new GoalTool(table, direct), new EventsTool(events, chat, table, direct, () -> world)));
     }
 
     private JsonObject call(String tool, String arguments) {
@@ -332,6 +340,51 @@ class ToolsTest {
         assertEquals("chat", reply.getAsJsonObject("next").getAsJsonObject("arguments").get("topic").getAsString());
         assertEquals(0, data(call("events", "{}")).getAsJsonArray("events").size());
         assertEquals("invalid_parameter", errorCode(call("events", "{\"topic\": \"chat\", \"goal_id\": 1}")));
+    }
+
+    @Test
+    void everyEventsPageSaysWhichWorldTheCharacterIsIn() {
+        // 不在世界里、还没认出世界：world 照样在，是 null，宿主不用分"没带"和"没认出"。
+        assertTrue(data(call("events", "{}")).get("world").isJsonNull());
+        assertTrue(data(call("events", "{\"topic\": \"chat\"}")).get("world").isJsonNull());
+
+        // 认出了世界：两条流的每一页都带同一个 world，编号、存档名与编号从哪来。
+        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", "cd".repeat(32),
+                Path.of("state"));
+        for (String arguments : List.of("{}", "{\"topic\": \"chat\"}")) {
+            JsonObject shown = data(call("events", arguments)).getAsJsonObject("world");
+            assertEquals("ab".repeat(32), shown.get("id").getAsString());
+            assertEquals("新的世界", shown.get("name").getAsString());
+            assertEquals("world_id_file", shown.get("source").getAsString());
+            // 旧版本那串按目录算的编号只用来搬 Mod 自己的旧数据，不报给宿主。
+            assertEquals(3, shown.size());
+        }
+    }
+
+    @Test
+    void aWaitingEventsReadReturnsAtOnceWhenTheWorldChanges() throws Exception {
+        // 宿主挂着长轮询等事件：角色退回主菜单时被叫醒，当场带着 world=null 返回，不用等满 30 秒。
+        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state"));
+        JsonObject first = data(call("events", "{}"));
+        String arguments = "{\"stream_id\": \"" + first.get("stream_id").getAsString() + "\", \"after_cursor\": "
+                + first.get("cursor").getAsLong() + ", \"wait_ms\": 60000}";
+        CompletableFuture<JsonObject> waiting = CompletableFuture.supplyAsync(() -> call("events", arguments));
+        world = null;
+        // 读的一方什么时候挂上等不确定：每 100 毫秒叫一次，挂上之后的那一次会叫醒它；不叫醒它要等满 60 秒。
+        JsonObject reply = null;
+        for (int attempt = 0; attempt < 50 && reply == null; attempt++) {
+            events.wakeReaders();
+            try {
+                reply = waiting.get(100, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException stillWaiting) {
+                // 还在等：再叫一次。
+            }
+        }
+        assertNotNull(reply, "世界变了，挂着等的读取没有被叫醒");
+        JsonObject page = data(reply);
+        assertEquals(0, page.getAsJsonArray("events").size());
+        assertEquals("valid", page.get("cursor_status").getAsString());
+        assertTrue(page.get("world").isJsonNull());
     }
 
     @Test

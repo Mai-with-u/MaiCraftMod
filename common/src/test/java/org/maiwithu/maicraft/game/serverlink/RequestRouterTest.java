@@ -3,6 +3,8 @@ package org.maiwithu.maicraft.game.serverlink;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -103,6 +105,40 @@ class RequestRouterTest {
         assertEquals(ClientRequest.Status.SUCCEEDED, snapshot.status());
         assertEquals(ClientRequest.Effect.NOT_APPLIED, snapshot.effect());
         assertFalse(snapshot.unresolvedMutation());
+    }
+
+    @Test
+    void 欢迎包里的世界编号记下来_没报或不像样时为空_换维度重新握手前清掉() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.register(new ClientOperation("ownership.query", 1, false));
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        // 还没收到欢迎包：没有作用域，也没有编号，认世界的一方继续等。
+        assertNull(session.capabilities.scope());
+        assertNull(session.capabilities.worldId());
+
+        // 服务器报了存档的世界编号：原样记下。
+        JsonObject welcome = welcome(session.nonce, "session-1");
+        welcome.addProperty("worldId", "ab".repeat(32));
+        router.receive(welcome, 1);
+        assertEquals("ab".repeat(32), session.capabilities.worldId());
+
+        // 换维度重新握手：欢迎包回来之前作用域与编号都清掉，不拿上一次握手的当这一次的。
+        router.bind(1, 2, "minecraft:the_nether", 0, true, 1);
+        assertNull(session.capabilities.scope());
+        assertNull(session.capabilities.worldId());
+
+        // 旧版本服务端不报编号、或报来的不是 64 位十六进制：握手照样生效，编号按没报算。
+        router.bind(2, 3, "minecraft:overworld", 0, true, 2);
+        JsonObject odd = welcome(session.nonce, "session-2");
+        odd.addProperty("worldId", "../saves/新的世界");
+        router.receive(odd, 2);
+        assertNotNull(session.capabilities.scope());
+        assertNull(session.capabilities.worldId());
     }
 
     @Test

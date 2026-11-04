@@ -12,6 +12,8 @@ final class ProtocolSession {
     final String id = UUID.randomUUID().toString();
     final String nonce;
     final String dimension;
+    /** 握手时这台服务器存档的世界编号；没有时为 null。 */
+    final String worldId;
     final Map<String, ServerFeature> features = new LinkedHashMap<>();
     final ServerRequestLedger ledger = new ServerRequestLedger();
     final long createdTick;
@@ -23,6 +25,7 @@ final class ProtocolSession {
     ProtocolSession(JsonObject hello, ServerProtocolDispatcher.Peer peer) {
         nonce = ProtocolJson.string(hello, "clientNonce");
         dimension = peer.dimension();
+        worldId = peer.worldId();
         controlGeneration = ProtocolJson.number(hello, "controlGeneration");
         if (controlGeneration < 0) throw new IllegalArgumentException("Negative control generation");
         createdTick = lastTick = peer.tick();
@@ -46,6 +49,8 @@ final class ProtocolSession {
         response.addProperty("clientNonce", nonce);
         response.addProperty("sessionId", id);
         response.addProperty("dimension", dimension);
+        // 存档的世界编号：客户端按它认出是哪个世界（删档后同名重建也认得出是新的）；旧版本客户端不读这一项。
+        if (worldId != null) response.addProperty("worldId", worldId);
         response.addProperty("controlGeneration", controlGeneration);
         response.addProperty("allowed", allowed && !closed);
         response.addProperty("serverTick", tick);

@@ -23,13 +23,14 @@ import org.maiwithu.maicraft.server.ServerConfirmations;
 import org.maiwithu.maicraft.server.ServerLinkNetwork;
 import org.maiwithu.maicraft.server.ServerLinkServices;
 import org.maiwithu.maicraft.server.ServerOperationRegistry;
+import org.maiwithu.maicraft.server.WorldIdFile;
 import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 import org.maiwithu.maicraft.server.compat.ServerCompatRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 启动的服务端一侧（独立服务器与客户端里的内置服务器都会执行）：方块归属记录、交互确认通道、
+ * 启动的服务端一侧（独立服务器与客户端里的内置服务器都会执行）：方块归属记录、交互确认通道、存档的世界编号、
  * 只读的归属查询与服务端联动读数，服务端链路只对角色账号开放（服主用 /mai 管名单）。
  * 不引用任何仅客户端的类。
  */
@@ -60,11 +61,15 @@ final class ServerStartup {
         ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
         // 方块归属存盘：主线程只拍快照，压缩写盘在后台，存盘时不卡服。
         OwnershipSaver ownershipSaver = new OwnershipSaver();
+        // 这台服务器的服务只建一份：从存档读回归属记录、登记确认通道，再读出（第一次就生成）这个存档的世界编号。
+        Consumer<MinecraftServer> attach = server -> ServerLinkServices.attachIfAbsent(server,
+                () -> OwnershipFile.of(server).load(),
+                () -> new ServerConfirmations(push, network::hasSession),
+                () -> WorldIdFile.of(server).loadOrCreate());
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
-                // 首刻从存档读回本服务器的归属记录并登记确认通道；之后每五分钟把改动存一次盘，停服时再存一次。
-                ServerLinkServices.attachIfAbsent(server, () -> OwnershipFile.of(server).load(),
-                        () -> new ServerConfirmations(push, network::hasSession));
+                // 首刻建好本服务器的服务；之后每五分钟把归属记录的改动存一次盘，停服时再存一次。
+                attach.accept(server);
                 if (server.getTickCount() % OWNERSHIP_SAVE_INTERVAL_TICKS == 0) {
                     ownershipSaver.saveLater(server);
                 }
@@ -80,6 +85,8 @@ final class ServerStartup {
 
             @Override public void clientEnvelope(ServerPlayer player, MaiCraftPayload payload,
                                                  Consumer<JsonObject> reply) {
+                // 客户端的握手可能赶在服务器第一个刻结束之前到：先把服务建好，欢迎包里才有世界编号可报。
+                attach.accept(player.serverLevel().getServer());
                 network.receive(player, payload, reply);
             }
 

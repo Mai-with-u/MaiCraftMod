@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.network;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
@@ -17,10 +18,12 @@ class ProtocolFlowTest {
         final AtomicLong clock = new AtomicLong(100);
         boolean mayMutate = true;
         boolean admitted = true;
+        String worldId = "ab".repeat(32);
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return clock.get(); }
         @Override public boolean admitted() { return admitted; }
+        @Override public String worldId() { return worldId; }
         @Override public boolean mayMutate() { return mayMutate; }
         @Override public List<ServerFeature> features() {
             return List.of(new ServerFeature("ownership.query", 1, false, true, new JsonObject()),
@@ -44,6 +47,19 @@ class ProtocolFlowTest {
         versions.addProperty("test.place", 1);
         request.add("features", versions);
         return request;
+    }
+
+    @Test
+    void 欢迎包带上存档的世界编号_没有编号时不带() {
+        // 服务器读出了存档的世界编号：握手的欢迎包原样带给客户端，客户端按它认出是哪个世界。
+        var peer = new FakePeer();
+        JsonObject welcome = new ServerProtocolDispatcher().receive(hello(), peer);
+        assertEquals("ab".repeat(32), welcome.get("worldId").getAsString());
+
+        // 编号文件写不进去时服务器没有编号：欢迎包里不带这一项，客户端退回按存档目录或服务器地址认。
+        var without = new FakePeer();
+        without.worldId = null;
+        assertFalse(new ServerProtocolDispatcher().receive(hello(), without).has("worldId"));
     }
 
     @Test

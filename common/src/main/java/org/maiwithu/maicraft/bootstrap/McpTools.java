@@ -46,7 +46,9 @@ final class McpTools {
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork, looks),
                 new GoalTool(goals, clientWork),
-                new EventsTool(taskEvents, chatEvents, goals, clientWork)), recentCalls);
+                // 读事件每一页都带角色眼下在哪个世界：读的是这一趟进世界认出的那个，不在世界里为 null。
+                new EventsTool(taskEvents, chatEvents, goals, clientWork,
+                        () -> worldScope.get() == null ? null : worldScope.get().world())), recentCalls);
     }
 
     /** 读完告诉当前世界的闲时看读了什么；不在世界里时没有角色可演，什么都不做。 */

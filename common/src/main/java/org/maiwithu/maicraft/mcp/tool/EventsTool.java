@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.game.MentionedEntity;
 import org.maiwithu.maicraft.game.ReceivedChat;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.event.ChatEvent;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.CursorLog;
@@ -12,6 +13,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
+import org.maiwithu.maicraft.mcp.view.WorldIdentityView;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +21,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * events：按游标读事件，没有新事件时最多等 {@code wait_ms} 毫秒。{@code topic} 选读哪条流：
@@ -28,6 +31,9 @@ import java.util.function.Function;
  * <p>返回的 next 已经填好下一次该带的流编号与游标，照抄即可；游标失效（换了世界、落后太多）时
  * {@code cursor_status} 会说明，并从还能读的地方接着给。带 goal_id 时同时附上这个目标此刻的样子，
  * 事件被挤掉也不会错过它的结果。
+ *
+ * <p>每一页都带角色眼下在哪个世界（{@code world}）：宿主一直挂着读事件，换存档、退回主菜单不用另外问；
+ * 世界一变，挂着等的读取当场返回（空页也返回），不用等到超时。
  */
 public final class EventsTool implements McpTool {
     /** next 里建议的等待时长：有更多没读完的事件时不等，否则等 30 秒。 */
@@ -41,12 +47,16 @@ public final class EventsTool implements McpTool {
     private final ChatEventLog chat;
     private final GoalRunTable table;
     private final ClientThread clientThread;
+    private final Supplier<SaveIdentity> world;
 
-    public EventsTool(TaskEventLog log, ChatEventLog chat, GoalRunTable table, ClientThread clientThread) {
+    /** @param world 角色眼下在哪个世界；不在世界里、握手还没认出世界时给 null */
+    public EventsTool(TaskEventLog log, ChatEventLog chat, GoalRunTable table, ClientThread clientThread,
+                      Supplier<SaveIdentity> world) {
         this.log = Objects.requireNonNull(log, "log");
         this.chat = Objects.requireNonNull(chat, "chat");
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
+        this.world = Objects.requireNonNull(world, "world");
     }
 
     @Override public String name() {
@@ -78,10 +88,10 @@ public final class EventsTool implements McpTool {
             if (readsChat) {
                 // 聊天单独一条流：读法和角色身上的事件一样，没有目标可附。
                 CursorLog.Page<ChatEvent> page = chat.read(streamId, cursor, PAGE_SIZE, wait);
-                return ToolReply.ok(page(page, EventsTool::chatEvent), notes, next(page, CHAT, null));
+                return ToolReply.ok(withWorld(page(page, EventsTool::chatEvent)), notes, next(page, CHAT, null));
             }
             CursorLog.Page<TaskEvent> page = log.read(streamId, cursor, goalId == null ? OptionalLong.empty() : OptionalLong.of(goalId), PAGE_SIZE, wait);
-            JsonObject data = page(page, ResultJson::event);
+            JsonObject data = withWorld(page(page, ResultJson::event));
             if (goalId != null) {
                 attachGoal(data, goalId, notes);
             }
@@ -90,6 +100,12 @@ public final class EventsTool implements McpTool {
             Thread.currentThread().interrupt();
             return ToolReply.error(ErrorCode.BUSY, "等待事件时被中断，稍后再试");
         }
+    }
+
+    // 读完这一页再看角色在哪个世界：等事件时世界变了被叫醒的那一页，带的是变了之后的世界。
+    private JsonObject withWorld(JsonObject data) {
+        data.add("world", WorldIdentityView.of(world.get()));
+        return data;
     }
 
     private static <E> JsonObject page(CursorLog.Page<E> page, Function<E, JsonObject> json) {

@@ -23,10 +23,15 @@ public final class ServerCapabilityState {
     Scope scope;
     final Map<String, Feature> features = new LinkedHashMap<>();
     JsonObject limits = new JsonObject();
+    /** 欢迎包里服务器报的存档世界编号；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
+    String worldId;
 
     public State state() { return state; }
     public String reason() { return reason; }
+    /** 当前绑定收到的有效欢迎包对应的作用域；还没收到（握手中、被拒、换维度重新握手）时为 null。 */
     public Scope scope() { return scope; }
+    /** 握手时服务器报的存档世界编号；欢迎包里没有或不像样时为 null。只在 {@link #scope()} 不为 null 时有意义。 */
+    public String worldId() { return worldId; }
     public Map<String, Feature> features() { return Map.copyOf(features); }
     public JsonObject limits() { return limits.deepCopy(); }
 
@@ -45,6 +50,7 @@ public final class ServerCapabilityState {
         state = next;
         reason = detail;
         scope = null;
+        worldId = null;
         features.clear();
         limits = new JsonObject();
     }
@@ -62,6 +68,9 @@ public final class ServerCapabilityState {
         String sessionId = text(envelope, "sessionId");
         if (sessionId.isBlank()) throw new IllegalArgumentException("missing server session identity");
         scope = new Scope(connection, sessionId, dimension);
+        // 世界编号只收 64 位小写十六进制：服务器报来别的样子就当没报，客户端退回按服务器地址认，不让一串外来文字当存档文档库的键。
+        String reported = text(envelope, "worldId");
+        worldId = reported.matches("[0-9a-f]{64}") ? reported : null;
         features.clear();
         features.putAll(discovered);
         limits = object(envelope, "limits").deepCopy();
