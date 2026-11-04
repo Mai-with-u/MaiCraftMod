@@ -105,6 +105,37 @@ public final class DocumentStore {
         } catch (SQLException failure) { throw new IOException("document_update_failed", failure); }
     }
 
+    /**
+     * 把一个世界身份名下的文档整体改挂到另一个身份名下：新身份名下还一条文档都没有时才搬，已经在用就不动，
+     * 不把两份数据混在一起。先取写锁再在同一个事务里核对与改挂，返回搬了几条；库文件还不存在时什么都不做。
+     */
+    public int moveIdentity(String from, String to) throws IOException {
+        if (Files.notExists(file)) return 0;
+        try (var connection = open(); var transaction = connection.createStatement()) {
+            transaction.execute("BEGIN IMMEDIATE");
+            try {
+                int moved = 0;
+                boolean taken;
+                try (var check = connection.prepareStatement("SELECT 1 FROM documents WHERE identity_key=? LIMIT 1")) {
+                    check.setString(1, to);
+                    try (var result = check.executeQuery()) { taken = result.next(); }
+                }
+                if (!taken) {
+                    try (var statement = connection.prepareStatement(
+                            "UPDATE documents SET identity_key=? WHERE identity_key=?")) {
+                        statement.setString(1, to); statement.setString(2, from);
+                        moved = statement.executeUpdate();
+                    }
+                }
+                transaction.execute("COMMIT");
+                return moved;
+            } catch (SQLException | RuntimeException failure) {
+                try { transaction.execute("ROLLBACK"); } catch (SQLException rollback) { failure.addSuppressed(rollback); }
+                throw failure;
+            }
+        } catch (SQLException failure) { throw new IOException("document_move_failed", failure); }
+    }
+
     /** 删除一个文档；库里其他文档不受影响。 */
     public void delete(String scope, String identity, String key) throws IOException {
         if (Files.notExists(file)) return;

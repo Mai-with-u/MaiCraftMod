@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
+import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +81,7 @@ import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.behavior.inventory.StoredReservations;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
+import org.maiwithu.maicraft.kernel.storage.LegacyWorldKeys;
 import org.maiwithu.maicraft.kernel.storage.StateIdentity;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -89,6 +91,8 @@ import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfBrief;
 import org.maiwithu.maicraft.mcp.view.SelfView;
 import org.maiwithu.maicraft.ability.timer.Timers;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
@@ -98,6 +102,9 @@ import org.maiwithu.maicraft.ability.timer.Timers;
  * 各路读端从这里读出观察事实，交给场景整理。
  */
 public final class WorldScope {
+    private static final Logger LOG = LoggerFactory.getLogger(WorldScope.class);
+    /** 游戏时间不到这么多刻（一分钟）的世界算刚建好：不搬旧版本按目录、地址存的记忆。 */
+    private static final long NEW_WORLD_TICKS = 20 * 60;
 
     private final BlockScanService blockScans;
     private final SubtitleFeed subtitles;
@@ -173,11 +180,9 @@ public final class WorldScope {
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents) {
-        // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录。
-        // 世界记忆还按旧版本那串按存档目录或服务器地址算的编号存：认不出旧编号（服务器列表里没有这台）时才用世界编号。
+        // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
-        String storageKey = save.legacyKey() != null ? save.legacyKey() : save.key();
-        StateIdentity identity = new StateIdentity(storageKey, save.directory(),
+        StateIdentity identity = new StateIdentity(save.key(), save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
         // 角色是谁、在哪个世界：账号名、UUID 与世界在这一趟进世界里不会变，observe(self) 每次照抄。
         this.selfIdentity = new SelfView.Identity(minecraft.player.getGameProfile().getName(),
@@ -186,6 +191,8 @@ public final class WorldScope {
         this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
         DocumentStore documents = new DocumentStore(identity.databaseFile());
+        // 旧版本按存档目录或服务器地址存的记忆：第一次用世界编号进这个世界时决定搬不搬，先于读记忆、读目标。
+        adoptLegacyMemory(documents, save, minecraft.level.getGameTime());
         this.memory = new WorldMemory(documents, identity.key());
         // 吃过亏的方块：碰着就掉血的那几种记在所有世界共用的一份里，进世界读出来交给寻路绕开。
         this.pains = new PainfulBlocks(documents);
@@ -244,6 +251,20 @@ public final class WorldScope {
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig),
                 abilities);
+    }
+
+    /**
+     * 旧版本的记忆按存档目录或服务器地址算的编号存着：玩过一阵的世界（旧版本里玩过的存档、连过的服务器）第一次在新版本里进，
+     * 整体搬到世界编号名下接着用；刚建好的世界（游戏时间还不到一分钟）不搬，那份只可能是同名文件夹里删掉的旧存档留下的。
+     * 搬不动时记日志、从空记忆开始，下次进来再试，不让它挡住进世界。
+     */
+    private static void adoptLegacyMemory(DocumentStore documents, SaveIdentity save, long gameTime) {
+        try {
+            int moved = LegacyWorldKeys.adopt(documents, save.legacyKey(), save.key(), gameTime < NEW_WORLD_TICKS);
+            if (moved > 0) LOG.info("旧版本存下的 {} 条世界记忆搬到了这个世界的世界编号名下", moved);
+        } catch (IOException failure) {
+            LOG.warn("旧版本存下的世界记忆搬不过来，这次从空记忆开始，下次进来再试", failure);
+        }
     }
 
     /**
