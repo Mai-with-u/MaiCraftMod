@@ -13,6 +13,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
 import org.maiwithu.maicraft.behavior.perception.looking.IdleLooking;
@@ -437,7 +438,11 @@ public final class Bootstrap {
                     // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
                     uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
                     // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
-                    new ClientDropPickup(now, walksOnFoot, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory());
+                    new ClientDropPickup(now, walksOnFoot, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory(),
+                    // 岩浆里垫不垫落脚看主目标许可的方块档位；手上没有目标时按默认许可。
+                    () -> goals == null ? Permissions.DEFAULT.changeBlocks()
+                            : goals.mainGoal().map(run -> run.goal().permissions().changeBlocks())
+                                    .orElse(Permissions.DEFAULT.changeBlocks()));
         }
 
         /**

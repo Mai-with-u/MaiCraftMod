@@ -30,6 +30,9 @@ import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
 import org.maiwithu.maicraft.behavior.survival.breath.BreathNeed;
 import org.maiwithu.maicraft.behavior.survival.breath.LiveAirRoutes;
 import org.maiwithu.maicraft.behavior.survival.breath.LiveCeilingDigs;
+import org.maiwithu.maicraft.behavior.survival.burning.BurningNeed;
+import org.maiwithu.maicraft.behavior.survival.burning.LiveBurningMoves;
+import org.maiwithu.maicraft.behavior.survival.burning.LiveBurningView;
 import org.maiwithu.maicraft.behavior.survival.defense.SelfDefenseNeed;
 import org.maiwithu.maicraft.behavior.survival.digout.DigOutNeed;
 import org.maiwithu.maicraft.behavior.survival.fall.EdgeProximityNeed;
@@ -50,6 +53,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.interrupt.DeathDecisionHost;
 
@@ -67,6 +71,7 @@ final class SurvivalNeedCatalog {
      * 饿了的临时任务吃随身食物：先换到主手，再原生按住吃完一口；身上没吃的就经拿东西的引擎有预算地弄口粮。
      * 夜晚的"今晚有没有床"与夜间休息由睡觉能力进世界时接上桥，接上前按弄不到床对待。
      * 太暗只在两个动作之间插（LATER）：走到暗处、包里有火把，就在眼前顺手插一支火把。
+     * 泡在岩浆里没岸可上时垫一块落脚，按主目标许可的方块档位（mainBlockChanges）定垫不垫，和出行垫临时方块同一份许可。
      */
     static ControlLoop controlLoop(
             TaskEventSink events, DeathDecisionHost deathDecisions,
@@ -78,7 +83,8 @@ final class SurvivalNeedCatalog {
             FollowLighting followLighting, ReadsLightLevels lightLevels, ClientMovesToMainhand hands,
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues,
             Supplier<List<LandingMaterials>> landingMaterials, Predicate<UUID> trusted,
-            PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places) {
+            PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places,
+            Supplier<Permissions.BlockChanges> mainBlockChanges) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         ControlLoop loop = new ControlLoop(List.of(
                 // 被埋挖开头顶：和换气挖顶、挖格同一份原生挖掘，工具照挑工具换。
@@ -91,6 +97,9 @@ final class SurvivalNeedCatalog {
                                 || JetpackFlightFreshness.stillControlling(
                                         ClientHooks.flightControlledAt(), System.nanoTime())
                                 || BaritoneInternals.flyingUp()),
+                // 岩浆、火排在被攻击前面：岩浆比怪烧得快，两项都立刻时先出岩浆。
+                new BurningNeed(new LiveBurningView(),
+                        new LiveBurningMoves(interactions, hands, keeps, mainBlockChanges), events),
                 // 自家人打角色只发事件、不停工；别的玩家打角色退开举盾、停下等 LLM 决定。
                 // 打完把这一仗掉出来的东西和射出去的箭捡回来（用回去捡尸体的同一套）；撤离往记过的"家"那一侧跑。
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged, keeps), events,
