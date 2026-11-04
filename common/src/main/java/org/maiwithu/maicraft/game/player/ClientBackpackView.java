@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.game.player;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.block.EntityBlock;
@@ -127,6 +128,20 @@ public final class ClientBackpackView implements BackpackView {
         PotionContents contents = stack.get(DataComponents.POTION_CONTENTS);
         if (contents == null) return null;
         return contents.potion().flatMap(Holder::unwrapKey).map(key -> key.location().toString()).orElse(null);
+    }
+
+    /**
+     * 这一格药水内容里带哪些效果（效果注册表的 ID）：药水种类自带的加上额外写进去的，模组药水、多效果药水都照实读；
+     * 没有药水内容的东西给空。着火时挑防火药水按它认，不按药水种类的 ID 认。
+     */
+    public static List<String> potionEffectsOf(ItemStack stack) {
+        PotionContents contents = stack.get(DataComponents.POTION_CONTENTS);
+        if (contents == null) return List.of();
+        List<String> effects = new ArrayList<>();
+        for (MobEffectInstance effect : contents.getAllEffects()) {
+            effect.getEffect().unwrapKey().ifPresent(key -> effects.add(key.location().toString()));
+        }
+        return List.copyOf(effects);
     }
 
     /** 这一格的带种类写法：药水写成物品 ID 加药水种类，别的就是物品 ID；世界记忆记容器内容用它。 */
