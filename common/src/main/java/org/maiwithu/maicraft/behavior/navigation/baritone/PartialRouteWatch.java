@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import net.minecraft.core.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts;
 
 /**
@@ -15,6 +19,8 @@ final class PartialRouteWatch {
     static final int LIMIT_TICKS = 600;
     /** 更近两格才算更近：寻路估价一格约 3.6。 */
     static final double MIN_GAIN = 2 * HeuristicCosts.COST_HEURISTIC;
+
+    private static final Logger LOG = LoggerFactory.getLogger(PartialRouteWatch.class);
 
     private double best = Double.MAX_VALUE;
     private long bestTick = Long.MIN_VALUE;
@@ -32,6 +38,32 @@ final class PartialRouteWatch {
             return false;
         }
         return tick - bestTick > LIMIT_TICKS;
+    }
+
+    /**
+     * 走路时的半截路一刻：和 {@link #stalled} 同一份判断，另外开始数、数满判死各记一行调试日志，
+     * 实机里对得上是哪道闸收的场、数了多久。
+     */
+    boolean watch(double remaining, long tick, BlockPos feet) {
+        boolean starting = bestTick == Long.MIN_VALUE;
+        long since = bestTick;
+        boolean stalled = stalled(remaining, tick);
+        if (starting) {
+            LOG.debug("[maicraft-path] 只有半截路，开始数有没有更近（离目标估价 {}），在 {}",
+                    Math.round(remaining), feet.toShortString());
+        }
+        if (stalled) {
+            LOG.debug("[maicraft-path] 半截路 {} 刻没更近两格，判走不通，在 {}", tick - since, feet.toShortString());
+        }
+        return stalled;
+    }
+
+    /** 续走、有了整路时从头算；正在数的话记一行为什么清零、已经数了多久。 */
+    void reset(String why, long tick, BlockPos feet) {
+        if (bestTick != Long.MIN_VALUE) {
+            LOG.debug("[maicraft-path] {}，半截路计时清零（已数 {} 刻），在 {}", why, tick - bestTick, feet.toShortString());
+        }
+        reset();
     }
 
     /** 有了一条能到目标的整路、或换了目标：从头算。 */

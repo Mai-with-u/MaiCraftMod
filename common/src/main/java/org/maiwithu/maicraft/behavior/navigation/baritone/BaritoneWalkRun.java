@@ -107,6 +107,8 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean resumed;
     /** 只有半截路时看人有没有离目标更近：半分钟没更近就交还上层换个去处。 */
     private final PartialRouteWatch partialRoute = new PartialRouteWatch();
+    /** 水下呼吸预算是在数还是让开：情形变了记一行调试日志。 */
+    private final UnderwaterBudgetNotes underwaterNotes = new UnderwaterBudgetNotes();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
     private boolean replanWhenSafe;
     /** 算路时长上限：连续算路太久仍没有可走的路线就如实收场，不让调用方把死掉的算路当成还在算。 */
@@ -351,7 +353,7 @@ final class BaritoneWalkRun implements WalkRun {
             // 刚从停稳里续走：这一刻按原目标重新上路，进展计时重新起算，停半路的旧路线与等待作废。
             resumed = false;
             replannedFrom(context.clientTick());
-            partialRoute.reset();
+            partialRoute.reset("续走", context.clientTick(), player.blockPosition());
             transientRetries = 0;
             replanWhenSafe = false;
         }
@@ -386,8 +388,8 @@ final class BaritoneWalkRun implements WalkRun {
         progress.observe(new WalkRunProgress.Observation(
                 feet, onGround, inWater, routePresent, calculating, noPath, calcError));
         // 行走段的自我保护闸：算路超上限如实收场、水下按呼吸预算放弃上浮（见 WalkSurvivalGuards）。
-        WalkSurvivalGuards.guard(progress, planningCeiling, context, player, pathing, feet,
-                onGround, inWater, calculating, submergedTravelActive(pathing));
+        WalkSurvivalGuards.guard(progress, planningCeiling, underwaterNotes, context, player, pathing, feet,
+                onGround, inWater, calculating);
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
         // 走不通：把起点几格、垫料、许可与附近岩浆补进问题，LLM 据此调整；程序出错不补现场，免得把程序问题说成地形问题。
@@ -567,12 +569,6 @@ final class BaritoneWalkRun implements WalkRun {
         };
     }
 
-    // 这一刻是不是潜泳路线段在带着身体走：那段路自己按氧气上浮换气，呼吸预算不抢它的活。
-    private static boolean submergedTravelActive(PathingBehavior pathing) {
-        PathExecutor current = pathing.getCurrent();
-        return current != null && current.submergedWaterTravelActive();
-    }
-
     // 路线前方 16 格被正在动的东西（转着的风车、开过来的火车）挡着：站稳、能停时原地等它过去，最多 5 秒，
     // 等的这几刻不算没有进展；等满了还挡着就交回引擎，引擎按碰撞里的障碍自己绕。
     private boolean waitsForMovingObstacle(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
@@ -621,10 +617,10 @@ final class BaritoneWalkRun implements WalkRun {
         var route = engine.getPathingBehavior().getCurrent();
         if (route == null) return false;
         if (route.getPath().getGoal().isInGoal(route.getPath().getDest())) {
-            partialRoute.reset();
+            partialRoute.reset("有了到得了目标的整路", tick, feet);
             return false;
         }
-        return partialRoute.stalled(engineGoal.heuristic(feet.getX(), feet.getY(), feet.getZ()), tick);
+        return partialRoute.watch(engineGoal.heuristic(feet.getX(), feet.getY(), feet.getZ()), tick, feet);
     }
 
     // 引擎说没有路：不许挖的先别认输，做一次"假如允许挖垫"的只读复算，等它回来再定——

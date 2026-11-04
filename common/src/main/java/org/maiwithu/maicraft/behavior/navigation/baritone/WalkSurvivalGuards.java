@@ -2,9 +2,12 @@
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import baritone.api.IBaritone;
 import baritone.behavior.PathingBehavior;
+import baritone.pathing.path.PathExecutor;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
@@ -23,18 +26,28 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  */
 final class WalkSurvivalGuards {
 
+    private static final Logger LOG = LoggerFactory.getLogger(WalkSurvivalGuards.class);
+
     private WalkSurvivalGuards() {}
 
     /**
      * 一刻的自保检查；收了场返回 true，调用方照常走统一结算。
      * 算路账只记引擎真在算的刻，挪垫料、等移动障碍的空档不算。
      */
-    static boolean guard(WalkRunProgress progress, PlanningCeiling ceiling, PlayerContext context,
-            LocalPlayer player, PathingBehavior pathing, BlockPos feet,
-            boolean onGround, boolean inWater, boolean calculating, boolean submergedTravelActive) {
+    static boolean guard(WalkRunProgress progress, PlanningCeiling ceiling, UnderwaterBudgetNotes notes,
+            PlayerContext context, LocalPlayer player, PathingBehavior pathing, BlockPos feet,
+            boolean onGround, boolean inWater, boolean calculating) {
+        boolean headInWater = player.isEyeInFluid(FluidTags.WATER);
+        boolean submerged = submergedTravelActive(pathing);
+        notes.note(headInWater, player.isPassenger(), submerged, player.getAirSupply(), player.getMaxAirSupply(), feet);
         return guard(progress, ceiling, context.level(), feet, onGround, inWater, calculating,
-                player.isEyeInFluid(FluidTags.WATER), player.isPassenger(), submergedTravelActive,
-                () -> SurvivalSituation.read(context));
+                headInWater, player.isPassenger(), submerged, () -> SurvivalSituation.read(context));
+    }
+
+    // 这一刻是不是潜泳路线段在带着身体走：那段路自己按氧气上浮换气，呼吸预算不抢它的活。
+    private static boolean submergedTravelActive(PathingBehavior pathing) {
+        PathExecutor current = pathing.getCurrent();
+        return current != null && current.submergedWaterTravelActive();
     }
 
     /**
@@ -53,6 +66,9 @@ final class WalkSurvivalGuards {
         if (headInWater && !passenger && !submergedTravelActive) {
             SurvivalSituation read = situation.get();
             if (UnderwaterWalkBudget.judge(read) == UnderwaterWalkBudget.Verdict.GIVE_UP_AND_SURFACE) {
+                // 头在水里、氧气落到放弃线：这段路就此判死，身体交给换气链；记一行，实机能对上是哪道闸收的场。
+                LOG.debug("[maicraft-path] 水下呼吸预算判死：氧气 {}/{} 刻，放弃这段路上浮，在 {}",
+                        read.airTicks(), read.maxAirTicks(), feet.toShortString());
                 progress.fail(UnderwaterWalkBudget.giveUpProblem(read, feet), feet);
             }
         }
