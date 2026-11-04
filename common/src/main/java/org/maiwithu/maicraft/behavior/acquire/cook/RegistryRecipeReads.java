@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire.cook;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +27,7 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeInput;
 import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.world.item.crafting.SmithingTransformRecipe;
 
@@ -43,6 +45,8 @@ import org.maiwithu.maicraft.behavior.recipe.RecipeDefinitions;
  * via 参数认的就是这个分法。
  * 产出写具体物品；原料优先写成标签（配方的原料本来就是"这一类都行"），
  * 对不上任何标签才落成具体物品；注册表里查不到的物品如实说没有做法，不猜。
+ *
+ * <p>配方按产出物品分好再查（见 {@link RecipesByResult}），配方表换了才重分一次。
  */
 public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
 
@@ -52,6 +56,9 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
     private final Supplier<PlayerContext> context;
     private final ReadsItemTags tags;
     private final FurnaceFuels fuels;
+    /** 按产出分好的配方，与它是照哪一份配方表分的；配方表换了就整份重分。 */
+    private RecipesByResult byResult;
+    private Collection<RecipeHolder<?>> sortedTable;
 
     /** @param fuels 一件东西能烧多久，由加载器回答（含模组燃料） */
     public RegistryRecipeReads(Supplier<PlayerContext> context, ReadsItemTags tags, FurnaceFuels fuels) {
@@ -66,15 +73,32 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         if (current == null || current.level() == null) {
             return List.of();
         }
-        List<WorkstationRecipe> views = new ArrayList<>();
-        collect(current, RecipeType.CRAFTING, WorkstationRecipe.Kind.CRAFTING, wanted, views);
-        collect(current, RecipeType.SMELTING, WorkstationRecipe.Kind.SMELTING, wanted, views);
+        return byResult(current).producing(wanted, tags);
+    }
+
+    // 估一次价要问几十次做法：配方表没换就沿用分好的那份。重进世界、换服务器、重载数据包时服务端重发配方，
+    // 配方管理器换上新的一张表，它交出的配方集合也换成新的一份，凭这个认出来再重分。
+    private RecipesByResult byResult(PlayerContext current) {
+        Collection<RecipeHolder<?>> table = current.level().getRecipeManager().getRecipes();
+        if (byResult == null || sortedTable != table) {
+            byResult = new RecipesByResult(table(current));
+            sortedTable = table;
+        }
+        return byResult;
+    }
+
+    // 整张配方表按设施种类排成一列：先合成，再熔炉、高炉、烟熏炉，然后石切台，最后锻造台。
+    private List<RecipesByResult.Entry> table(PlayerContext current) {
+        RecipeManager manager = current.level().getRecipeManager();
+        List<RecipesByResult.Entry> table = new ArrayList<>();
+        collect(current, manager, RecipeType.CRAFTING, WorkstationRecipe.Kind.CRAFTING, table);
+        collect(current, manager, RecipeType.SMELTING, WorkstationRecipe.Kind.SMELTING, table);
         // 高炉、烟熏炉各有自己的配方表（矿石、金属装备进高炉，食物进烟熏炉），同一件东西可能两种炉子都能烧。
-        collect(current, RecipeType.BLASTING, WorkstationRecipe.Kind.BLASTING, wanted, views);
-        collect(current, RecipeType.SMOKING, WorkstationRecipe.Kind.SMOKING, wanted, views);
-        collect(current, RecipeType.STONECUTTING, WorkstationRecipe.Kind.STONECUTTING, wanted, views);
-        collectSmithing(current, wanted, views);
-        return List.copyOf(views);
+        collect(current, manager, RecipeType.BLASTING, WorkstationRecipe.Kind.BLASTING, table);
+        collect(current, manager, RecipeType.SMOKING, WorkstationRecipe.Kind.SMOKING, table);
+        collect(current, manager, RecipeType.STONECUTTING, WorkstationRecipe.Kind.STONECUTTING, table);
+        collectSmithing(current, manager, table);
+        return table;
     }
 
     @Override
@@ -84,42 +108,41 @@ public final class RegistryRecipeReads implements ReadsRecipes, ReadsFuels {
         return item.map(value -> fuels.burnTicks(new ItemStack(value))).orElse(0);
     }
 
-    // 按设施种类收配方：产出对上想要的（具体物品按 ID，标签按物品挂的标签）才算一条做法。
-    private <I extends RecipeInput, T extends Recipe<I>> void collect(PlayerContext current, RecipeType<T> type, WorkstationRecipe.Kind kind,
-            WantedItem wanted, List<WorkstationRecipe> views) {
-        for (RecipeHolder<?> holder : current.level().getRecipeManager().getAllRecipesFor(type)) {
+    // 按设施种类收配方：只记下做出什么，原料清单等第一次被问到时才拼（要一格格对标签，整张表都拼太慢）。
+    private <I extends RecipeInput, T extends Recipe<I>> void collect(PlayerContext current, RecipeManager manager,
+            RecipeType<T> type, WorkstationRecipe.Kind kind, List<RecipesByResult.Entry> table) {
+        for (RecipeHolder<?> holder : manager.getAllRecipesFor(type)) {
             var result = holder.value().getResultItem(current.level().registryAccess());
             if (result == null || result.isEmpty()) {
                 continue;
             }
             String resultId = BuiltInRegistries.ITEM.getKey(result.getItem()).toString();
-            if (!wanted.matches(resultId, tags.tagsOf(resultId))) {
-                continue;
-            }
-            // 合成配方按游戏自己的判断看摆不摆得进 2×2：摆得进的在背包合成格里做，不用先有工作台。
-            boolean fitsInInventory = kind == WorkstationRecipe.Kind.CRAFTING
-                    && holder.value().canCraftInDimensions(2, 2);
-            views.add(new WorkstationRecipe(holder.id().toString(), kind,
-                    WantedItem.ofItem(resultId), result.getCount(), ingredients(holder.value().getIngredients()),
-                    fitsInInventory));
+            int count = result.getCount();
+            table.add(new RecipesByResult.Entry(resultId, () -> {
+                // 合成配方按游戏自己的判断看摆不摆得进 2×2：摆得进的在背包合成格里做，不用先有工作台。
+                boolean fitsInInventory = kind == WorkstationRecipe.Kind.CRAFTING
+                        && holder.value().canCraftInDimensions(2, 2);
+                return Optional.of(new WorkstationRecipe(holder.id().toString(), kind,
+                        WantedItem.ofItem(resultId), count, ingredients(holder.value().getIngredients()),
+                        fitsInInventory));
+            }));
         }
     }
 
     // 锻造台只收升级配方（钻石装备加下界合金锭这类，出一件新物品）；纹饰配方只给盔甲加花纹、不出新物品，不算做法。
     // 这类配方不交出原料列表（getIngredients 是空的），模板、要升级的物品、升级材料三格从配方自己的序列化格式读回来，
     // 读不回来的那条不算做法，不猜。
-    private void collectSmithing(PlayerContext current, WantedItem wanted, List<WorkstationRecipe> views) {
+    private void collectSmithing(PlayerContext current, RecipeManager manager, List<RecipesByResult.Entry> table) {
         HolderLookup.Provider registries = current.level().registryAccess();
-        for (RecipeHolder<?> holder : current.level().getRecipeManager().getAllRecipesFor(RecipeType.SMITHING)) {
+        for (RecipeHolder<?> holder : manager.getAllRecipesFor(RecipeType.SMITHING)) {
             if (!(holder.value() instanceof SmithingTransformRecipe upgrade)) continue;
             ItemStack result = upgrade.getResultItem(registries);
             if (result == null || result.isEmpty()) continue;
             String resultId = BuiltInRegistries.ITEM.getKey(result.getItem()).toString();
-            if (!wanted.matches(resultId, tags.tagsOf(resultId))) continue;
-            Optional<List<Ingredient>> slots = smithingSlots(upgrade, registries);
-            if (slots.isEmpty()) continue;
-            views.add(new WorkstationRecipe(holder.id().toString(), WorkstationRecipe.Kind.SMITHING,
-                    WantedItem.ofItem(resultId), result.getCount(), ingredients(slots.get())));
+            int count = result.getCount();
+            table.add(new RecipesByResult.Entry(resultId, () -> smithingSlots(upgrade, registries)
+                    .map(slots -> new WorkstationRecipe(holder.id().toString(), WorkstationRecipe.Kind.SMITHING,
+                            WantedItem.ofItem(resultId), count, ingredients(slots)))));
         }
     }
 
