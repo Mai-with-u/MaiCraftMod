@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.spi.UnreachablePlaces;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
@@ -18,7 +19,12 @@ import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
+import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -31,6 +37,9 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
  *
  * <p>别人的箱子不碰：别人放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
  * 记得里面有货也不去翻——默认绝不碰玩家的箱子。自己放的、自家人（所有者信任的玩家）放的照常翻。
+ *
+ * <p>一只箱子这一次拿东西里走不到跟前，记进这一次的"走不到的地方"：后面的原料不再拿去问它，
+ * 只记下又问到了它，失败说明里由引擎合成一句。
  */
 public final class ContainerSource implements ItemSource {
 
@@ -78,13 +87,22 @@ public final class ContainerSource implements ItemSource {
         boolean maybeUnsureKind = false;
         ContainerChooser.Candidate stale = null;
         boolean skippedProtected = false;
+        boolean skippedUnreachable = false;
+        int considered = 0;
+        UnreachablePlaces unreachable = context.unreachable();
         for (ContainerChooser.Candidate candidate : candidates) {
+            // 这一次里已经走不到跟前的箱子：不再去问，只记一笔又问到了它。
+            if (unreachable != null && unreachable.skips(candidate.at(), request.wanted().describe())) {
+                skippedUnreachable = true;
+                continue;
+            }
             // 别人的箱子不翻：记得里面有货也跳过，只在说明里交代一句；自家人的照常翻。
             // 这次任务额外保护的地标读端不知道，在这里按任务许可再问一遍保护判断。
             if (protectedContainer(candidate, context)) {
                 skippedProtected = true;
                 continue;
             }
+            considered++;
             if (known == null && candidate.knownContents() != null && holdsWanted(candidate, request)) {
                 known = candidate;
             }
@@ -126,6 +144,10 @@ public final class ContainerSource implements ItemSource {
         if (!spots.scanComplete()) {
             return new SourceQuote.NotYet(describe(), "附近的容器还没扫完，扫完再答有没有");
         }
+        // 能翻的都是这一次走不到跟前的：不另说一条原因，引擎在最外层合成一句说。
+        if (skippedUnreachable && considered == 0 && !skippedProtected) {
+            return new SourceQuote.Unavailable(describe(), UnreachablePlaces.SKIPPED);
+        }
         return new SourceQuote.Unavailable(describe(),
                 "记得的容器里没有装着" + request.wanted().describe() + "的"
                         + (skippedProtected ? "（别人的箱子不翻）" : ""));
@@ -158,7 +180,40 @@ public final class ContainerSource implements ItemSource {
         for (ItemRequest extra : context.alsoWanted()) {
             if (!extra.wanted().specifier().equals(request.wanted().specifier())) wants.add(extra);
         }
-        return takes.take(known, wants, context.permissions());
+        Optional<Action> take = takes.take(known, wants, context.permissions());
+        UnreachablePlaces unreachable = context.unreachable();
+        if (unreachable == null) return take;
+        WorldPosition at = container.at();
+        String label = describe() + " " + at.x() + ", " + at.y() + ", " + at.z();
+        return take.map(action -> new NotesUnreachable(action, unreachable, at, label, request.wanted().describe()));
+    }
+
+    /**
+     * 开箱取货的动作套一层：靠近收场为到不了时，把这只箱子连同经过记进这一次的"走不到的地方"。
+     * 别的照原样转给里面那一个，没能确认的交互照旧交回。
+     */
+    private record NotesUnreachable(Action take, UnreachablePlaces unreachable, WorldPosition at, String label,
+            String asking) implements Action, ReportsUnconfirmed {
+
+        @Override public ActionStatus tick(TickContext context) {
+            ActionStatus status = take.tick(context);
+            if (status instanceof ActionStatus.Failed failed && failed.problem().kind() == Problem.Kind.UNREACHABLE) {
+                unreachable.note(at, label, asking, failed.problem().message());
+            }
+            return status;
+        }
+
+        @Override public List<String> unconfirmedFacts() {
+            return take instanceof ReportsUnconfirmed reporting ? reporting.unconfirmedFacts() : List.of();
+        }
+
+        @Override public void pause() { take.pause(); }
+        @Override public void close() { take.close(); }
+        @Override public boolean stopSafely() { return take.stopSafely(); }
+        @Override public boolean stoppedSafely() { return take.stoppedSafely(); }
+        @Override public Interruptibility interruptibility() { return take.interruptibility(); }
+        @Override public Interruptibility interruptibility(TickContext context) { return take.interruptibility(context); }
+        @Override public String describe() { return take.describe(); }
     }
 
     /** 这只箱子能不能翻：自己或自家人放的、野外无主的能翻；别人的、在玩家地盘里的、额外保护的、拿不准的不翻。 */

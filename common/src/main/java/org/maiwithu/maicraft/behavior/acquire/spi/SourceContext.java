@@ -29,9 +29,11 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
  * @param alsoWanted   这一趟还要的另外几样（同一次要货里还缺的）：开一次箱能一起拿的来源用它，
  *                     每样都写着这一刻还缺几件；已经拿够的、别样任务要的不在这里面
  * @param digTool      目标里点名的挖方块工具：挖的时候只用那一件，身上没有就直接失败；null 按每格代价自动挑
+ * @param unreachable  这一次拿东西里走不到跟前的地方：去过走不到的不再问，走不到时记进来；null 表示不记
  */
 public record SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
-        Double maxDistanceBlocks, TaskRecords records, List<ItemRequest> alsoWanted, DigTool digTool) {
+        Double maxDistanceBlocks, TaskRecords records, List<ItemRequest> alsoWanted, DigTool digTool,
+        UnreachablePlaces unreachable) {
 
     public SourceContext {
         if (characterAt == null) throw new IllegalArgumentException("问询来源必须带着角色的位置");
@@ -42,7 +44,7 @@ public record SourceContext(WorldPosition characterAt, Permissions permissions, 
     /** 没有点名工具的一次现场：按每格代价自动挑。 */
     public SourceContext(WorldPosition characterAt, Permissions permissions, Integer radiusBlocks,
             Double maxDistanceBlocks, TaskRecords records, List<ItemRequest> alsoWanted) {
-        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, alsoWanted, null);
+        this(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, alsoWanted, null, null);
     }
 
     /** 不限搜索半径与距离的问询：来源按自己的默认半径找。 */
@@ -69,6 +71,13 @@ public record SourceContext(WorldPosition characterAt, Permissions permissions, 
 
     /** 同一处现场再带上这次点名的挖方块工具。 */
     public SourceContext withDigTool(DigTool tool) {
-        return new SourceContext(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, alsoWanted, tool);
+        return new SourceContext(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, alsoWanted, tool,
+                unreachable);
+    }
+
+    /** 同一处现场再带上这一次拿东西里走不到跟前的地方。 */
+    public SourceContext withUnreachable(UnreachablePlaces places) {
+        return new SourceContext(characterAt, permissions, radiusBlocks, maxDistanceBlocks, records, alsoWanted, digTool,
+                places);
     }
 }

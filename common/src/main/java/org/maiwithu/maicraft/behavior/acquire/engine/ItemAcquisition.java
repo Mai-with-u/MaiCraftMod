@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.spi.UnreachablePlaces;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -314,6 +315,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final List<Shortage> causes = new ArrayList<>();
         /** 只在最外层用：这一次拿东西里问遍各来源都没拿到的东西，按物品写法记，连同当时的经过。 */
         private final Map<String, Shortage> unobtainable = new HashMap<>();
+        /** 只在最外层用：这一次拿东西里走不到跟前的地方，备料的每一层都不再去问，失败时在最外层合成一句说。 */
+        private final UnreachablePlaces unreachable = new UnreachablePlaces();
+        /** 当前来源动手前记着几处走不到的地方：多了就是这一步败在走不到跟前。 */
+        private int unreachableAtStepStart;
         /** 这一场没拿到的经过，失败时定下；交给外层的就是它。 */
         private Shortage shortage;
         private Stage stage = Stage.CONSULT;
@@ -461,7 +466,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private ActionStatus consult(int carried) {
             int stillNeeded = target - carried;
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
-                    scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool);
+                    scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool).withUnreachable(unreachable());
             List<Planned> offers = new ArrayList<>();
             List<SourceQuote> refusals = new ArrayList<>();
             boolean stillLooking = false;
@@ -594,7 +599,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     }
                     // 一件要的都没拿到、却有别的进了包（按掉落线索挖了模组矿，掉的是别的）：如实写进了什么。
                     boolean gainedWanted = CarriedItems.matching(backpack, offhand, request, tags) > carriedAtStepStart;
-                    deadEnds.add(stepSource + "（" + failed.problem().message() + (gainedWanted ? "" : otherGains()) + "）");
+                    // 败在走不到跟前：那一处连同经过已经记下，失败时在最外层合成一句说，这里不每样原料各抄一遍。
+                    if (unreachable().size() == unreachableAtStepStart) {
+                        deadEnds.add(stepSource + "（" + failed.problem().message() + (gainedWanted ? "" : otherGains()) + "）");
+                    }
                     // 收尾时出了岔子，但这一步里东西确实进了背包：途径照记，不说成"身上已有的"。
                     if (onDelivered != null && gainedWanted) {
                         onDelivered.accept(stepSourceVia);
@@ -637,7 +645,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         private ActionStatus startStep() {
             SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
-                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted(), digTool);
+                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted(), digTool, unreachable());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
@@ -656,6 +664,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             stepSourceVia = planned.source().via().name();
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
             carriedByItemAtStepStart = CarriedItems.byItem(backpack, offhand);
+            unreachableAtStepStart = unreachable().size();
             forwardedFacts = 0;
             stage = Stage.RUN;
             // 起了一步还没有世界效果；走没走动、拿没拿到由这一步自己的推进状态如实报告。
@@ -676,6 +685,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             // 这一次里问遍了都没拿到，记在最外层：换一种做法又要到它时不再问一遍。
             List<String> reasons = new ArrayList<>();
             for (SourceQuote refusal : refusals) {
+                // 只是跳过了走不到的地方：不算一条原因，最外层统一说一次。
+                if (refusal instanceof SourceQuote.Unavailable skipped && UnreachablePlaces.SKIPPED.equals(skipped.reason())) continue;
                 reasons.add(describeRefusal(refusal));
             }
             for (String deadEnd : deadEnds) {
@@ -694,6 +705,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             if (!explained.isEmpty()) {
                 message.append("；").append(explained);
             }
+            if (advancing.size() <= 1) unreachable.lines().forEach(line -> message.append("；").append(line));
             // 指定了途径（例如只从 ME 网络取）时如实说只走了这几条：没有现货不等于做不出来，
             // 实机用 via=ae2 试探"有没有铁粒"得到"没有"，其实网络里的铁块合成下去就有。
             String suggestion = scope.vias().isEmpty() || advancing.size() > 1 ? null
@@ -763,7 +775,17 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 if (!text.isEmpty()) text.append("；");
                 text.append(shortage);
             }
+            for (String line : unreachable.lines()) {
+                if (!text.isEmpty()) text.append("；");
+                text.append(line);
+            }
             return text.toString();
+        }
+
+        // 这一次拿东西里走不到跟前的地方：最外层那一场的那一份，备料的每一层共用。
+        private UnreachablePlaces unreachable() {
+            Run outermost = advancing.peekLast();
+            return outermost == null ? unreachable : outermost.unreachable;
         }
     }
 
