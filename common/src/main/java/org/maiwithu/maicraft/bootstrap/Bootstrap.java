@@ -604,6 +604,11 @@ public final class Bootstrap {
          * 新下达的目标本刻就开始。自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，
          * 但不推进控制循环，生存需求不能去抢人类手上的角色。
          */
+        // 主目标在推进：在跑或在等 LLM 回答（sequence 跑到哪一步都算）；被暂停的不算，暂停可能一停很久。
+        private boolean goalUnderway() {
+            return goals != null && goals.mainGoal().filter(run -> run.state() != GoalRunState.PAUSED).isPresent();
+        }
+
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
             // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。人按了 F8 就不再追着要。
             if (startupAutomationPending && playerControl.input().humanTookOver()) {
@@ -619,7 +624,7 @@ public final class Bootstrap {
             WorldScope scope = worldScope[0];
             // 感知出错（世界记忆读不到、某个读端碰到没见过的方块实体）只跳过这一刻的观察，下一刻再看。
             if (scope != null) {
-                tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime()));
+                tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime(), goalUnderway()));
             }
             long gameTick = minecraft.level.getGameTime();
             // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。

@@ -221,7 +221,7 @@ public final class Scene {
             DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(self.x(), self.y(), self.z(),
                     self.facingYaw(), sighting.position().x(), sighting.position().y(), sighting.position().z());
             String direction = bearing.direction();
-            String id = ids.facility(sighting.position(), direction, nowTick);
+            String id = ids.facility(sighting.position(), sighting.blockType(), direction, nowTick);
             next.add(new FacilitySighting(id, sighting.blockType(), sighting.position(),
                     direction, bearing.compass(), bearing.distance()));
             if (kinds.isContainer(sighting.blockType())) {
@@ -246,7 +246,8 @@ public final class Scene {
             DirectionWords.Bearing bearing = DirectionWords.Bearing.byBlock(self.x(), self.y(), self.z(),
                     self.facingYaw(), sighting.position().x(), sighting.position().y(), sighting.position().z());
             String direction = bearing.direction();
-            next.add(new SceneSign(ids.facility(sighting.position(), direction, nowTick), sighting.blockType(),
+            next.add(new SceneSign(ids.facility(sighting.position(), sighting.blockType(), direction, nowTick),
+                    sighting.blockType(),
                     sighting.position(), direction, bearing.compass(), bearing.distance(), sighting.lines()));
         }
         next.sort(Comparator.comparingInt(SceneSign::distance));
@@ -294,7 +295,12 @@ public final class Scene {
      * 失效的条目同时从列表里撤下——编号已经不认得，视图里还留着会冒充在场。
      */
     public List<SeenRegistry.Gone> expire(long nowTick) {
-        List<SeenRegistry.Gone> gone = ids.expire(nowTick);
+        return expire(nowTick, null);
+    }
+
+    /** 同 {@link #expire(long)}；目标在推进时给"东西还在不在"的判断，到期但还在的编号照留。 */
+    public List<SeenRegistry.Gone> expire(long nowTick, Predicate<SeenRegistry.Entry> stillThereWhileWorking) {
+        List<SeenRegistry.Gone> gone = ids.expire(nowTick, stillThereWhileWorking);
         if (gone.isEmpty()) {
             return gone;
         }

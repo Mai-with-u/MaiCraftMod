@@ -178,7 +178,7 @@ final class FindTask extends PhasedTask<FindTask.Phase> {
     private String issueId(FindsAround.Hit hit, SceneSelf self, long nowTick) {
         String direction = directionOf(hit.position(), self);
         return switch (hit.kind()) {
-            case BLOCK -> scene.seen().facility(hit.position(), direction, nowTick);
+            case BLOCK -> scene.seen().facility(hit.position(), hit.typeId(), direction, nowTick);
             case ENTITY -> scene.seen().entity(hit.gameEntityId(), hit.position(), direction, nowTick);
             case STRUCTURE -> scene.seen().feature(hit.position(), direction, nowTick);
         };

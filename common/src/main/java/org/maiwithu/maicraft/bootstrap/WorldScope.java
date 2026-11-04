@@ -297,8 +297,10 @@ public final class WorldScope {
     /**
      * 每刻的世界扫描：各路读端读当刻的观察事实，交给场景整理并发观察编号。
      * 没有角色基准时整理不出方位，先等自身观察，别的什么都不整理。
+     *
+     * @param goalUnderway 主目标在推进（含 sequence 一步接一步地做、等回答）：到期但东西还在的观察编号照留
      */
-    public void observe(PlayerContext current, long gameTick) {
+    public void observe(PlayerContext current, long gameTick, boolean goalUnderway) {
         LocalPlayer player = current.localPlayer();
         if (player == null) {
             return;
@@ -334,7 +336,9 @@ public final class WorldScope {
             sight.sight(current.level(), player, around, things::add);
         }
         scene.updateModThings(gameTick, things);
-        scene.expire(gameTick);
+        // 目标在推进时，LLM 排好的后几步点的还是开头看到的编号：到期时先看东西还在不在，还在就留着；
+        // 没有目标在推进时到期就失效。
+        scene.expire(gameTick, goalUnderway ? entry -> scene.seen().stillThere(current.level(), entry) : null);
     }
 
     /** 离开这个世界：寻路不再按这个世界的保护判断挖路、不再问它的障碍来源，记下的归属作废。 */
