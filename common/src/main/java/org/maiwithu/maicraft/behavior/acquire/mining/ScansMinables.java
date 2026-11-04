@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.mining;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -48,6 +49,14 @@ public interface ScansMinables {
      */
     default Optional<String> minableAt(WantedItem wanted, DropsFrom dropsFrom, BlockPos pos) {
         return Optional.empty();
+    }
+
+    /**
+     * 这一列头顶露天的地面在多高（世界 y，不算树叶）：长程挖矿看人是不是还站在地表、头顶盖着几格土石。
+     * 没加载、不在世界里、维度头顶是基岩顶（下界）为空。
+     */
+    default OptionalInt surfaceY(WorldPosition feet) {
+        return OptionalInt.empty();
     }
 
     /** 想要的东西是哪种知道生成高度的矿石掉的（铁矿、钻石矿这类，见 OreHeights）；不是为空。长程挖矿按它往下挖。 */

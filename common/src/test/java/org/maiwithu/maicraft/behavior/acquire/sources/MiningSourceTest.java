@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.function.Predicate;
 
@@ -369,6 +370,48 @@ class MiningSourceTest {
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
         assertTrue(offer.risk().contains("往下挖三格高的台阶到 Y=16"), offer.risk());
         assertTrue(offer.risk().contains("两格高的通道"), offer.risk());
+    }
+
+    /** 替身：附近看不见煤，只知道煤矿在哪几层；这一列的地表在 surfaceY。 */
+    private record CoalUnseen(int surfaceY) implements ScansMinables {
+        @Override public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
+            return List.of();
+        }
+        @Override public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
+            return true;
+        }
+        @Override public boolean scanComplete() {
+            return true;
+        }
+        @Override public boolean buriedUnderfoot(WantedItem wanted) {
+            return false;
+        }
+        @Override public boolean dropsWanted(WantedItem wanted, DropsFrom dropsFrom, String blockTypeId) {
+            return blockTypeId.equals("minecraft:coal_ore");
+        }
+        @Override public Optional<String> depositOre(WantedItem wanted) {
+            return Optional.of("minecraft:coal_ore");
+        }
+        @Override public OptionalInt surfaceY(WorldPosition feet) {
+            return OptionalInt.of(surfaceY);
+        }
+    }
+
+    @Test
+    void 站在地表要煤_先往下挖到地表下八格再横着挖() {
+        // 煤最多在 95 层，人站在 64 层的地面上：原地横挖只是在地上开沟，先下到 56 层。
+        SourceQuote quote = source(new CoalUnseen(64), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertTrue(offer.risk().contains("往下挖三格高的台阶到 Y=56"), offer.risk());
+    }
+
+    @Test
+    void 已经在地下够深的地方要煤_就在这一层横着挖() {
+        SourceQuote quote = source(new CoalUnseen(90), new FakeDigs())
+                .quote(new ItemRequest(WantedItem.ofItem("minecraft:coal"), 3, "火把"), CONTEXT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, quote);
+        assertTrue(offer.risk().contains("就在这一层（Y=64）横着挖"), offer.risk());
     }
 
     @Test

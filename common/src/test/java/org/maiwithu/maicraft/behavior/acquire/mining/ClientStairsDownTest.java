@@ -546,8 +546,13 @@ class ClientStairsDownTest {
     private final List<BlockPos> minedFrom = new ArrayList<>();
 
     private ActionStatus prospect(int targetY, int floorY, BlockPos sightAt) {
+        return prospectSeeing(targetY, floorY, feet -> feet.equals(sightAt));
+    }
+
+    /** 同上，站到哪些格看得见矿由 inSight 说（看矿有半径，走过那一片的任何一格都看得见）。 */
+    private ActionStatus prospectSeeing(int targetY, int floorY, Predicate<BlockPos> inSight) {
         DigsStairsDown.Tunnel tunnel = new DigsStairsDown.Tunnel(targetY, floorY,
-                type -> type.equals("minecraft:iron_ore"), 3, feet -> feet.equals(sightAt),
+                type -> type.equals("minecraft:iron_ore"), 3, inSight,
                 feet -> Optional.of(done("挖看见的铁矿", () -> minedFrom.add(feet))));
         Action action = stairs().tunnelToward(tunnel, Permissions.DEFAULT).orElseThrow();
         for (long t = 0; t < 20000; t++) {
@@ -583,15 +588,44 @@ class ClientStairsDownTest {
     }
 
     @Test
+    void 长程挖矿在地上横着走_连着空着的格一次走过去_走到头再看() {
+        // 站在 64 层的地面上横挖：前面全是空气、脚下是土，一次走八格，不每格停下来寻一次路。
+        ActionStatus status = prospect(64, 0, new BlockPos(0, 64, -16));
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(List.of(new BlockPos(0, 64, -8), new BlockPos(0, 64, -16)), world.walkedTo,
+                "一次走 " + ClientStairsDown.OPEN_RUN + " 格，走到头看见了矿");
+        assertEquals(List.of(new BlockPos(0, 64, -16)), minedFrom);
+        assertTrue(digs.dug.isEmpty(), "空着的格不挖");
+    }
+
+    @Test
+    void 横着走过的空格到要挖的格前停下_挖完那格只走一格() {
+        world.placed.put(new BlockPos(0, 64, -5), "minecraft:stone");
+        prospect(64, 0, new BlockPos(0, 64, -13));
+        assertEquals(List.of(new BlockPos(0, 64, -4), new BlockPos(0, 64, -5), new BlockPos(0, 64, -13)),
+                world.walkedTo, "停在石头前，挖开那格走一格，后面空着的再一次走过去");
+        assertEquals(List.of(new BlockPos(0, 64, -5)), digs.dug);
+    }
+
+    @Test
+    void 横着连着走的空格挨着岩浆_走到它前面就停() {
+        world.placed.put(new BlockPos(1, 64, -3), "minecraft:lava");
+        prospect(64, 0, new BlockPos(0, 64, -2));
+        assertEquals(new BlockPos(0, 64, -2), world.walkedTo.getFirst(), "挨着岩浆的那格不一口气走过去：" + world.walkedTo);
+    }
+
+    @Test
     void 装了连锁挖_往下三行各连锁一次_横着两行各连锁一次() {
         digs.chaining = true;
-        ActionStatus status = prospect(40, 0, new BlockPos(6, 40, -24));
-        assertInstanceOf(ActionStatus.Done.class, status);
+        // 连锁先把前面一长条挖空，后面空着的几格一口气走过去：横到 x=6 以后就看得见矿。
+        ActionStatus status = prospectSeeing(40, 0, feet -> feet.getY() == 40 && feet.getX() >= 6);
+        assertInstanceOf(ActionStatus.Done.class, status, () -> status + " 走过：" + world.walkedTo);
         // 往北挖台阶：齐头、齐脚两行对着迎面（朝南那面），脚下那行对着顶面；到 40 层转向东横着挖，两行对着朝西那面。
         assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("DOWNWARD_LINE south")), digs.chains.toString());
         assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("DOWNWARD_LINE up")), digs.chains.toString());
         assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("STRAIGHT_LINE west")), digs.chains.toString());
-        assertEquals(List.of(new BlockPos(6, 40, -24)), minedFrom);
+        assertEquals(1, minedFrom.size(), "看见了就去挖：" + minedFrom);
+        assertTrue(minedFrom.getFirst().getX() >= 6, minedFrom.toString());
         assertTrue(digs.chains.size() < digs.dug.size(), "连锁一下挖开一长条，不是一格一格挖");
     }
 

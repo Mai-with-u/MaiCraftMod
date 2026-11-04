@@ -120,6 +120,8 @@ public final class ClientStairsDown implements DigsStairsDown {
     static final int EXTRA_DROP = 2;
     /** 长程挖矿横着挖的通道最长几格：挖满还没看见要的矿就停，如实说。 */
     static final int LEVEL_STEPS = 64;
+    /** 横着挖时前面本来就空着（洞里、地上）：连着空着的格一次最多走过去几格，走到头再看一眼有没有矿。 */
+    static final int OPEN_RUN = 8;
     /** 长程挖矿一次最多走几级（台阶加通道）：从高山挖到深层也够，防止没完没了。 */
     static final int MAX_TUNNEL_STEPS = 400;
     /** 连锁一行最多核几格：模组按自己的上限挖，比这还长的线这里核不完就不连锁。 */
@@ -231,6 +233,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         private int levelSteps;
         /** 正走的这一步是横着的。 */
         private boolean steppingLevel;
+        /** 正走的这一步一次走过几格：横着挖、前面连着空着时不止一格。 */
+        private int stepRun = 1;
         /** 已经开始横着挖了：台阶挖到那一层时转一次向。 */
         private boolean levelStarted;
         private Set<Integer> dropsBefore = Set.of();
@@ -489,8 +493,34 @@ public final class ClientStairsDown implements DigsStairsDown {
             stage = Stage.STEP_DOWN;
             stepTarget = landing;
             steppingLevel = !way.down();
-            step = site.stepTo(landing);
+            stepRun = 1;
+            // 横着挖、这一步一格没挖（前面本来就空着，洞里、地上）：连着空着、踩得住、不挨水和岩浆的几格一次走过去，
+            // 不每格停下来重新寻一次路；走到头再看一眼有没有矿，前面要挖了再一格一格来。
+            if (steppingLevel && digsThisStep == 0 && landing.equals(nextFeet(feet, way))) {
+                while (stepRun < OPEN_RUN && levelSteps + stepRun < LEVEL_STEPS) {
+                    BlockPos further = stepTarget.relative(heading);
+                    if (!openStretch(context, further)) break;
+                    stepTarget = further;
+                    stepRun++;
+                }
+            }
+            step = site.stepTo(stepTarget);
             return ActionStatus.progressed();
+        }
+
+        // 横着再往前一格还是现成的通道：齐头、齐脚两格空着，脚下踩得住（不是空的、液体、挖不动或没加载的、岩浆块），
+        // 两格四周和头顶不挨水、岩浆。
+        private boolean openStretch(TickContext context, BlockPos at) {
+            if (site.ground(context, at) != Ground.OPEN || site.ground(context, at.above()) != Ground.OPEN) return false;
+            Ground floor = site.ground(context, at.below());
+            if (floor == Ground.OPEN || floor == Ground.FLUID || floor == Ground.UNBREAKABLE) return false;
+            if (site.hurtsToStandOn(context, at.below())) return false;
+            for (BlockPos cell : List.of(at, at.above())) {
+                for (Direction side : Direction.Plane.HORIZONTAL) {
+                    if (site.ground(context, cell.relative(side)) == Ground.FLUID) return false;
+                }
+            }
+            return site.ground(context, at.above(2)) != Ground.FLUID;
         }
 
         // 下一级脚下往下三格都空：许可准放、身上有垫料，就在下一级脚下垫一块，垫好回去重新看这一级再走下去；
@@ -601,8 +631,8 @@ public final class ClientStairsDown implements DigsStairsDown {
                 return finish(Problem.of(Problem.Kind.UNREACHABLE, "往下挖楼梯：走不下下一级 "
                         + at(stepTarget) + "：" + failed.problem().message()));
             }
-            steps++;
-            if (steppingLevel) levelSteps++;
+            steps += stepRun;
+            if (steppingLevel) levelSteps += stepRun;
             // 下到新的一级：上一级在来时方向的反面，这一级挖不了的方向从头算，垫没垫过也从头算。
             back = heading.getOpposite();
             filledThisStep = false;

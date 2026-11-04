@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -36,6 +37,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.ScansMatureCrops;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.field.CropSpot;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 
 /**
  * 按产出扫方块的读端：要一件东西时，把"挖掉会掉它"或"熟了能收它"的方块登记进
@@ -215,6 +217,21 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
                 || productIds.contains(VanillaBlockDrops.droppedBy(blockTypeId))
                 || chanceFor(blockTypeId, productIds).isPresent();
         return yields ? Optional.of(blockTypeId) : Optional.empty();
+    }
+
+    @Override
+    public OptionalInt surfaceY(WorldPosition feet) {
+        if (notInWorld()) return OptionalInt.empty();
+        ClientLevel level = context().level();
+        // 头顶是基岩顶的维度（下界）没有露天的地表；不在这个维度的位置读不到。
+        if (level.dimensionType().hasCeiling()) return OptionalInt.empty();
+        if (feet.dimension() != null && !feet.dimension().equals(level.dimension().location().toString())) {
+            return OptionalInt.empty();
+        }
+        BlockPos at = new BlockPos(feet.x(), feet.y(), feet.z());
+        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的列读出来地表在世界最底层；按区块真加载没加载判。
+        if (!level.isLoaded(at)) return OptionalInt.empty();
+        return OptionalInt.of(ClientSurfaceHeight.motionBlockingNoLeaves(level, at.getX(), at.getZ()));
     }
 
     @Override

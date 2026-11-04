@@ -447,6 +447,7 @@ public final class MiningSource implements ItemSource {
     private record Deposit(String ore, OreHeights.Band band, int workingY) {}
 
     // 附近看不见、但知道这种矿在哪几层生成：同一个维度、角色没在生成范围以下（不往上爬）才长程挖。
+    // 在主世界还站在地表、浅坑里时（头顶盖不到 8 格），先往下挖到地表下面再横着挖，不在地上开沟。
     private Optional<Deposit> deposit(ItemRequest request, SourceContext context) {
         Optional<String> ore = minables.depositOre(request.wanted());
         if (ore.isEmpty()) return Optional.empty();
@@ -454,7 +455,8 @@ public final class MiningSource implements ItemSource {
         if (band.isEmpty()) return Optional.empty();
         String dimension = context.characterAt().dimension();
         if (dimension != null && !dimension.equals(band.get().dimension())) return Optional.empty();
-        OptionalInt workingY = OreHeights.workingY(band.get(), context.characterAt().y());
+        OptionalInt workingY = OreHeights.workingY(band.get(), context.characterAt().y(),
+                minables.surfaceY(context.characterAt()));
         if (workingY.isEmpty()) return Optional.empty();
         return Optional.of(new Deposit(ore.get(), band.get(), workingY.getAsInt()));
     }

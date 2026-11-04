@@ -72,6 +72,12 @@ public final class OreHeights {
             Map.entry("minecraft:nether_gold_ore", NETHER_GOLD),
             Map.entry("minecraft:nether_quartz_ore", NETHER_QUARTZ));
 
+    /**
+     * 主世界里横挖的那一层头顶至少盖着几格：矿埋在石头里，露天和浅坑里横着挖只是在地上开沟，
+     * 空格一格格走过去还碰不上矿。
+     */
+    public static final int COVER_DEPTH = 8;
+
     private OreHeights() {}
 
     /** 这种矿石方块的生成范围；不在表里为空。 */
@@ -87,5 +93,20 @@ public final class OreHeights {
         if (feetY > band.peakY()) return OptionalInt.of(band.peakY());
         if (feetY >= band.minY()) return OptionalInt.of(feetY);
         return OptionalInt.empty();
+    }
+
+    /**
+     * 同上，再看头顶盖着多厚：主世界里那一层离这一列的地表不到 {@link #COVER_DEPTH} 格（人站在地表、浅坑里，
+     * 或最多那层就在地表附近）就先往下挖到地表下这么深，再横着挖；地表下这么深已经低于生成范围时挖到范围底。
+     * 人已经在地下够深的地方照旧。下界头顶是基岩顶，不按地表算，照旧。
+     *
+     * @param surfaceY 这一列头顶露天的地面在多高；读不到为空，照旧
+     */
+    public static OptionalInt workingY(Band band, int feetY, OptionalInt surfaceY) {
+        OptionalInt plain = workingY(band, feetY);
+        if (plain.isEmpty() || surfaceY.isEmpty() || !OVERWORLD.equals(band.dimension())) return plain;
+        int underground = surfaceY.getAsInt() - COVER_DEPTH;
+        if (plain.getAsInt() <= underground) return plain;
+        return OptionalInt.of(Math.max(band.minY(), underground));
     }
 }
