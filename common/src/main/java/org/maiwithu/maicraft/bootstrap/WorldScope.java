@@ -19,6 +19,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.behavior.approach.UnreachableFromHere;
 import org.maiwithu.maicraft.behavior.navigation.PainfulBlocks;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
@@ -179,7 +180,8 @@ public final class WorldScope {
             InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
-            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents) {
+            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents,
+            UnreachableFromHere unreachable) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
@@ -243,7 +245,7 @@ public final class WorldScope {
                 new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
-                new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress),
+                new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
                 new Guards(protection, new ClientCreatureSituations(now, trusted), trusted),
                 new Channels(new ChatChannel(now),
                         // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。

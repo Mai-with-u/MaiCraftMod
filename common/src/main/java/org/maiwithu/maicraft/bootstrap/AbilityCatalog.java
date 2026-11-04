@@ -295,7 +295,7 @@ public final class AbilityCatalog {
         PermissionCheck permission = new PermissionCheck(deps.guards().protection(), deps.guards().creatures());
         LiveApproaches bringsClose = new LiveApproaches(deps.character().context(),
                 new LiveApproachWorld(deps.character().context()), deps.travel().walks(), permission,
-                deps.hands().digTools());
+                deps.hands().digTools(), deps.travel().unreachable());
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.character().context());
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，

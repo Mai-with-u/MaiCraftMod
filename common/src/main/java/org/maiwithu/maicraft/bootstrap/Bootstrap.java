@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.bootstrap;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 import java.util.List;
 import java.util.function.Supplier;
@@ -32,6 +33,7 @@ import org.maiwithu.maicraft.behavior.interaction.UseKeyHoldProjection;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
+import org.maiwithu.maicraft.behavior.approach.UnreachableFromHere;
 import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
@@ -555,7 +557,8 @@ public final class Bootstrap {
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
                         dropConfirmations,
-                        taskEvents, lightLevels, lightingWorld, followLighting, timers, chatEvents);
+                        taskEvents, lightLevels, lightingWorld, followLighting, timers, chatEvents,
+                        new UnreachableFromHere(this::mainGoalRun));
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();
@@ -612,6 +615,12 @@ public final class Bootstrap {
          * 新下达的目标本刻就开始。自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，
          * 但不推进控制循环，生存需求不能去抢人类手上的角色。
          */
+        // 此刻主目标运行的编号：靠近记得的"从这里到不了"按它分开，换了目标就失效。
+        private OptionalLong mainGoalRun() {
+            return goals == null ? OptionalLong.empty()
+                    : goals.mainGoal().map(run -> OptionalLong.of(run.id())).orElse(OptionalLong.empty());
+        }
+
         // 主目标在推进：在跑或在等 LLM 回答（sequence 跑到哪一步都算）；被暂停的不算，暂停可能一停很久。
         private boolean goalUnderway() {
             return goals != null && goals.mainGoal().filter(run -> run.state() != GoalRunState.PAUSED).isPresent();

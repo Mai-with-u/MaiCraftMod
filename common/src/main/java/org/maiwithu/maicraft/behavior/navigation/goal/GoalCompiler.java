@@ -75,6 +75,17 @@ public final class GoalCompiler {
         return new Compiled(NavGoal.composite(stances.stream().map(NavGoal::exact).toList()), single(target));
     }
 
+    /**
+     * 几个站位里走到哪一个都行，一次搜索挑走得到的：干的要站进那一格并落地，水里的走到够得着它就算。
+     * 靠近在"从这里到不了"之后把剩下的站位合起来再算一次时用；和逐个上路时一样不保护任何格。
+     */
+    public static Compiled anyStance(List<BlockPos> dry, List<BlockPos> wet) {
+        List<NavGoal> members = new ArrayList<>(dry.size() + wet.size());
+        for (BlockPos feet : dry) members.add(NavGoal.exact(feet.immutable()));
+        for (BlockPos feet : wet) members.add(NavGoal.getToBlock(feet.immutable()));
+        return new Compiled(NavGoal.composite(members), LongSets.emptySet());
+    }
+
     /** 要求正交相邻站在 {@code target} 旁作为放置站位；目标格受 sacred 保护，路线不能在任务即将填入方块的位置搭设脚手架。 */
     public static Compiled standAdjacent(BlockPos target) {
         BlockPos t = target.immutable();

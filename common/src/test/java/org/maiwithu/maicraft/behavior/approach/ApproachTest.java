@@ -48,7 +48,7 @@ class ApproachTest {
     private Approach approach(ApproachTarget target, StubMoves moves, StandOpener opener,
             Permissions permissions, TaskRecords records) {
         return new Approach(target, REACH, world, walking, guarded,
-                moves, TerrainPermit.WALK_ONLY, opener, permissions, records);
+                moves, TerrainPermit.WALK_ONLY, opener, permissions, records, UnreachableFromHere.none());
     }
 
     @Test

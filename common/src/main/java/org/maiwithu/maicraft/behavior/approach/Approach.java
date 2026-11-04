@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -34,10 +36,15 @@ import java.util.Set;
  * 要挖的方块就在脚下、旁边一格都站不了时，就地挖不算到不了，下面是什么随任务结果交代。
  * 仍不成功按"到不了"结束，问题里带着试过几个站位、各自败在哪一项；
  * 换站位的过程是本动作的内部事务，不作为独立失败上报。
+ * 某个站位走不通、原因是"从这里到不了"（连续算路没有路线、水下换气几次都没靠近）时，不再一个个空算：
+ * 剩下的站位合成一个目标再算一次，这次也不行就记下"从这里到不了"按到不了收场；同一个目标运行里、
+ * 起点 8 格内再要靠近同一个对象，直接按这条记忆收场。
  *
  * <p>每刻只推进一步：挑候选、走一段、核对或补救各占一刻，世界在变，晚一刻再核对没有坏处。
  */
 public final class Approach implements Action {
+
+    private static final Logger LOG = LoggerFactory.getLogger(Approach.class);
 
     /** 动作内部的推进位置：先确认原地，再逐个候选走过去，最后才补救。 */
     private enum Stage { CHECK_HERE, NEXT_SPOT, WALKING, OPENING }
@@ -53,6 +60,14 @@ public final class Approach implements Action {
     private final Permissions permissions;
     /** 发起方的记账口：就地挖这类要跟着任务结果走的事实记在这里；null 表示不需要记。 */
     private final TaskRecords records;
+    /** 记得的"从这里到不了"：跨越一次次靠近，同一个目标运行里有效。 */
+    private final UnreachableFromHere unreachable;
+    /** 这次靠近从哪出发：记"从这里到不了"时按它算同一片起点。 */
+    private BlockPos start;
+    /** 正在走的是剩下几个站位合起来的那一趟；没有为 0。 */
+    private int merged;
+    /** 合起来再算过一次了：一次靠近只合一次。 */
+    private boolean mergeTried;
 
     /** 手上这一趟走向站位；没有在路上的一趟时为 null。暂停与停稳都由走到运行自己记，这里只读它的情况。 */
     private WalkRun walk;
@@ -78,10 +93,12 @@ public final class Approach implements Action {
      * @param opener      站位补救；交互轨没接上之前传 null，等于不挖不垫
      * @param permissions 这次的许可，决定最后手段能不能用
      * @param records     发起任务的记账口，就地挖的说明记进任务结果；不需要时传 null
+     * @param unreachable 记得的"从这里到不了"，各次靠近共用一份
      */
     public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
                     WalkCost walking, ProtectedCells guarded, WalkTo walks, TerrainPermit permit,
-                    StandOpener opener, Permissions permissions, TaskRecords records) {
+                    StandOpener opener, Permissions permissions, TaskRecords records,
+                    UnreachableFromHere unreachable) {
         this.target = target;
         this.reach = reach;
         this.world = world;
@@ -92,6 +109,7 @@ public final class Approach implements Action {
         this.opener = opener;
         this.permissions = permissions;
         this.records = records;
+        this.unreachable = unreachable;
     }
 
     @Override public ActionStatus tick(TickContext context) {
@@ -143,7 +161,8 @@ public final class Approach implements Action {
         return switch (stage) {
             case CHECK_HERE -> "看看现在是不是已经能对目标动手";
             case NEXT_SPOT -> "在挑下一个能靠近" + describeTarget() + "的站位";
-            case WALKING -> current == null ? "正在走向" + describeTarget()
+            case WALKING -> merged > 0 ? "正在走向" + describeTarget() + "剩下 " + merged + " 个站位里走得到的一个"
+                    : current == null ? "正在走向" + describeTarget()
                     : "正在走向站位 " + current.feet().toShortString();
             case OPENING -> "正在为靠近" + describeTarget() + "挖开遮挡或垫方块";
         };
@@ -162,6 +181,15 @@ public final class Approach implements Action {
     private ActionStatus checkHere() {
         Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded);
         if (failure.isEmpty()) return ActionStatus.done();
+        start = world.currentFeet();
+        // 这次目标里刚从这附近试过、合起来再算也到不了：直接收场，不再重算一轮。
+        Optional<UnreachableFromHere.Entry> known = unreachable.recall(target, start);
+        if (known.isPresent()) {
+            String message = "从 " + known.get().start().toShortString() + " 附近到不了" + describeTarget()
+                    + "：这次目标里刚试过，剩下的站位合起来再算也走不到，不再重算";
+            LOG.debug("[maicraft-approach] 收场：{}", message);
+            return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, message, null));
+        }
         StandSpots.Ranking ranking = StandSpots.find(target, reach, world, walking, guarded);
         pending.addAll(ranking.spots());
         rejected.addAll(ranking.rejected());
@@ -172,6 +200,8 @@ public final class Approach implements Action {
     private ActionStatus takeNextSpot() {
         current = pending.poll();
         if (current != null) {
+            LOG.debug("[maicraft-approach] 走向站位 {}（还剩 {} 个），靠近{}", current.feet().toShortString(),
+                    pending.size(), describeTarget());
             startWalk(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
             stage = Stage.WALKING;
             return ActionStatus.progressed();
@@ -185,12 +215,17 @@ public final class Approach implements Action {
      * 干的站位按「站进指定格」上路，到了以身体站进那一格并落地为准。
      */
     private void startWalk(BlockPos feet, boolean wetSpot) {
+        closeWalk();
+        walk = walks.start(wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet), permit);
+    }
+
+    // 换下一趟前先把上一趟收掉、交出身体。
+    private void closeWalk() {
         if (walk != null) {
             walk.close();
             walk = null;
         }
         holdingStop = false;
-        walk = walks.start(wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet), permit);
     }
 
     private ActionStatus walkStep(TickContext context) {
@@ -206,16 +241,69 @@ public final class Approach implements Action {
         return switch (status) {
             case ActionStatus.Running running -> running;
             // 到了再核对一次：路走完了不等于位置还能用，世界可能在这几刻里变了。
-            case ActionStatus.Done done -> verifyArrival();
+            case ActionStatus.Done done -> {
+                if (merged > 0) arrivedFromMerged();
+                yield verifyArrival();
+            }
             // 寻路程序出错：换哪个站位都一样会错，不再挨个试，照原样交上去。
             case ActionStatus.Failed failed when failed.problem().kind() == Problem.Kind.INTERNAL_ERROR -> failed;
-            case ActionStatus.Failed failed -> {
-                recordTried(current.feet(), "这条路走不通：" + failed.problem().message());
-                dropUnclimbableRest(current.feet());
-                stage = Stage.NEXT_SPOT;
-                yield ActionStatus.progressed();
-            }
+            case ActionStatus.Failed failed -> walkFailed(failed.problem());
         };
+    }
+
+    // 一趟没走通：合起来的那一趟也不行就记下从这里到不了、收场；单个站位从这里到不了且还剩站位，
+    // 把剩下的合起来再算一次；别的原因照常换下一个站位。
+    private ActionStatus walkFailed(Problem problem) {
+        boolean noRouteFromHere = walk.report().noRouteFromHere();
+        if (merged > 0) {
+            recordTried("剩下 " + merged + " 个站位合起来再算", "也走不通：" + problem.message());
+            return unreachableFromHere();
+        }
+        recordTried(current.feet(), "这条路走不通：" + problem.message());
+        if (noRouteFromHere && !mergeTried && !pending.isEmpty()) return mergeRest();
+        dropUnclimbableRest(current.feet());
+        stage = Stage.NEXT_SPOT;
+        return ActionStatus.progressed();
+    }
+
+    // 从这里到不了这个站位：寻路是全域找路，剩下的站位多半一样到不了，但一边封死、另一边开着的照样走得到。
+    // 剩下的合成一个目标再算一次（走路自己的算路预算照旧），不再一个个空算；待试队列留着，走到了哪个就从里面拿掉。
+    private ActionStatus mergeRest() {
+        mergeTried = true;
+        List<BlockPos> dry = new ArrayList<>();
+        List<BlockPos> wet = new ArrayList<>();
+        for (StandSpot spot : pending) {
+            (target.wetFeetAllowed() && world.inFluid(spot.feet()) ? wet : dry).add(spot.feet());
+        }
+        merged = pending.size();
+        current = null;
+        LOG.debug("[maicraft-approach] 站位从这里到不了，剩下 {} 个合起来再算一次，靠近{}", merged, describeTarget());
+        closeWalk();
+        walk = walks.start(GoalCompiler.anyStance(dry, wet), permit);
+        return ActionStatus.progressed();
+    }
+
+    // 合起来的那一趟走到了：脚下是哪个候选就当作走到了它，从待试队列拿掉；核对不过时照常换剩下的。
+    private void arrivedFromMerged() {
+        merged = 0;
+        BlockPos here = world.currentFeet();
+        for (StandSpot spot : pending) {
+            if (spot.feet().equals(here)) {
+                current = spot;
+                pending.remove(spot);
+                return;
+            }
+        }
+    }
+
+    // 合起来再算也走不通：记下"从这里到不了"，按到不了收场，试过的站位各自为什么不行照常交代。
+    private ActionStatus unreachableFromHere() {
+        merged = 0;
+        unreachable.remember(target, start);
+        String from = start == null ? "" : "从 " + start.toShortString() + " 附近";
+        String message = from + "到不了" + describeTarget() + "：试过 " + tried.size() + " 个位置" + summary();
+        LOG.debug("[maicraft-approach] 收场：{}到不了{}，记下这次目标里不再重算", from, describeTarget());
+        return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, message, null));
     }
 
     /**
@@ -353,6 +441,7 @@ public final class Approach implements Action {
         String suggestion = blocked != null && !mayChangeBlocks
                 ? "允许挖开遮挡或垫方块的话，" + blocked.feet().toShortString() + " 附近也许能过去"
                 : null;
+        LOG.debug("[maicraft-approach] 收场：{}，靠近{}", message, describeTarget());
         Problem problem = Problem.of(Problem.Kind.UNREACHABLE, message.toString(), suggestion);
         return ActionStatus.failed(problem);
     }

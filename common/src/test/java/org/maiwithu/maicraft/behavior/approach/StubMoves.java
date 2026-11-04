@@ -38,6 +38,8 @@ final class StubMoves implements WalkTo {
     /** 悬在半空走着：能不能打断说停不得，叫先停稳就答应收尾。 */
     boolean airborne;
     int safeStops;
+    /** 走不通时报的是不是"从这里到不了"（连续算路没有路线这一类）。 */
+    boolean noRouteFromHere;
     /** 每次真的走到（吐出 Done）之后调用，测试用它摆出"走过去时世界变了"的场景。 */
     Runnable onArrive = () -> {};
     private BlockPos heading;
@@ -76,12 +78,18 @@ final class StubMoves implements WalkTo {
         boolean closed;
         /** 叫停之后推进了几刻；没在收尾为 -1。 */
         int stopTicks = -1;
+        /** 这一趟走不通时的结论；还没失败为 null。 */
+        ActionStatus.Failed failed;
 
         boolean landed() {
             return stopTicks >= 2;
         }
 
         @Override public WalkReport report() {
+            if (failed != null) {
+                return noRouteFromHere ? WalkReport.failedNoRoute(failed.problem(), BlockPos.ZERO, false)
+                        : WalkReport.failed(failed.problem(), BlockPos.ZERO, false);
+            }
             return paused || landed() ? WalkReport.stopped(BlockPos.ZERO, false)
                     : WalkReport.onTheWay(BlockPos.ZERO, false);
         }
@@ -102,6 +110,7 @@ final class StubMoves implements WalkTo {
                 return landed() ? ActionStatus.done() : ActionStatus.running();
             }
             ActionStatus status = script.isEmpty() ? ActionStatus.done() : script.poll();
+            if (status instanceof ActionStatus.Failed failure) failed = failure;
             if (status instanceof ActionStatus.Done && heading != null) {
                 world.feet = heading;
                 world.grounded = true;

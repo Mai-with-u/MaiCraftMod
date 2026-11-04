@@ -32,11 +32,16 @@ public final class LiveApproaches implements BringsPlayerClose {
     private final WalkTo walks;
     private final PermissionCheck permission;
     private final DigToolRule tools;
+    private final UnreachableFromHere unreachable;
 
-    /** @param tools 站位补救挖遮挡时拿哪件工具 */
+    /**
+     * @param tools       站位补救挖遮挡时拿哪件工具
+     * @param unreachable 记得的"从这里到不了"：每次靠近共用这一份，同一个目标运行里不再重算
+     */
     public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
-                          PermissionCheck permission, DigToolRule tools) {
+                          PermissionCheck permission, DigToolRule tools, UnreachableFromHere unreachable) {
         this.tools = Objects.requireNonNull(tools, "tools");
+        this.unreachable = Objects.requireNonNull(unreachable, "unreachable");
         this.context = Objects.requireNonNull(context, "context");
         this.world = Objects.requireNonNull(world, "world");
         this.walks = Objects.requireNonNull(walks, "walks");
@@ -67,7 +72,7 @@ public final class LiveApproaches implements BringsPlayerClose {
         TerrainPermit permit = TerrainPermit.of(permissions);
         StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
-                avoid, walks, permit, opener, permissions, records);
+                avoid, walks, permit, opener, permissions, records, unreachable);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取。 */
