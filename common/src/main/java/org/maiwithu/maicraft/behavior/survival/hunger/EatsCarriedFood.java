@@ -73,7 +73,7 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
     // 按饥饿处境挑：平时只吃补得刚好的普通食物（没坏效果的生肉也是），饱食度见底在掉血才什么都吃。
     // 预留的、正要用的那几件趁空当垫一口时不算口粮；伤得重、饿到不能疾跑就先顾身体：先吃不留的，没有才动留着的。
-    // 伤得重又没普通食物、腐肉生鸡肉这类吃一口就过回血线：吃它回血。
+    // 伤得重又没普通食物：腐肉、生鸡肉这类只带饥饿效果的先吃，一口口往回血线垫；会中毒的、珍贵的照旧不动。
     private Optional<String> pick(HungerNeed.Facts hunger) {
         if (!hunger.eatsKeptFood()) return choose(FoodPicker.carried(backpack.stacks(), foods, keeps), hunger);
         return FoodPicker.keptLast(backpack.stacks(), foods, keeps, carried -> choose(carried, hunger));
@@ -81,7 +81,7 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
 
     private static Optional<String> choose(List<FoodPicker.Carried> carried, HungerNeed.Facts hunger) {
         Optional<String> pick = FoodPicker.forHunger(carried, hunger.food(), hunger.losingHealth());
-        if (pick.isEmpty() && hunger.eatsToHeal() && hunger.junkReachesRegen()) pick = FoodPicker.autoPick(carried);
+        if (pick.isEmpty() && hunger.eatsToHeal() && hunger.carryingJunk()) pick = FoodPicker.autoPick(carried);
         return pick;
     }
 

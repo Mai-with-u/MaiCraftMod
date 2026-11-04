@@ -37,7 +37,7 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
         int food = self.getFoodData().getFoodLevel();
         // 掉了一颗心以上算受了伤：饱食度不到回血线时宁可溢出一点也吃，血才回得来。
         boolean injured = self.getHealth() <= self.getMaxHealth() - 2;
-        // 血不到一半算伤得重：没有普通食物时，腐肉这类垃圾食物吃一口能过回血线也吃。
+        // 血不到一半算伤得重：没有普通食物时，腐肉这类垃圾食物也先吃，吃到回血线或吃完为止。
         boolean badlyHurt = self.getHealth() <= self.getMaxHealth() / 2;
         // 伤得重或饿到不能疾跑时先顾身体，预留的、正要用的吃的也算口粮；只是趁空当垫一口时才绕开它们。
         // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；

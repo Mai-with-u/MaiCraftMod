@@ -41,16 +41,17 @@ public final class HungerNeed implements SurvivalNeed {
         }
 
         /**
-         * 为回血吃一口：伤得重（血不到一半）、饱食度不到回血线、身上没有普通食物。腐肉这类垃圾食物吃一口
-         * 就过回血线就吃它，不然去弄点吃的——人残血时不会揣着腐肉干等。
+         * 为回血吃一口：伤得重（血不到一半）、饱食度不到回血线、身上没有普通食物。身上有腐肉、生鸡肉这类
+         * 只带饥饿效果的垃圾食物就先吃它，一口口往回血线垫，吃完还不够再去弄点吃的——人残血时不会揣着腐肉
+         * 干等，也不会揣着腐肉跑去抓鱼。
          */
         public boolean eatsToHeal() {
             return badlyHurt && food < NATURAL_REGEN_FOOD && !carryingEdible();
         }
 
-        /** 回血时吃垃圾食物值不值：吃一口就能过回血线。 */
-        public boolean junkReachesRegen() {
-            return bestJunkNutrition > 0 && food + bestJunkNutrition >= NATURAL_REGEN_FOOD;
+        /** 身上有没有腐肉、生鸡肉这类只带饥饿效果的垃圾食物：伤得重又没普通食物时先吃它。 */
+        public boolean carryingJunk() {
+            return bestJunkNutrition > 0;
         }
 
         /** 身上有没有饿了就能顺手吃的普通食物。 */
@@ -88,8 +89,9 @@ public final class HungerNeed implements SurvivalNeed {
                 || facts.injured() && facts.food() < NATURAL_REGEN_FOOD)) {
             return Urgency.LATER;
         }
-        // 伤得重、饱食度不到回血线、身上没普通食物：一直不回血。趁空当吃一口腐肉过回血线，或去弄点吃的。
-        // 实机 10-14 两点多血、饱食度 14、身上六块腐肉，残血站了几分钟不回血。
+        // 伤得重、饱食度不到回血线、身上没普通食物：一直不回血。身上有腐肉这类就趁空当先吃，没有或吃完还不够再去弄点吃的。
+        // 实机 10-14 两点多血、饱食度 14、身上六块腐肉，残血站了几分钟不回血；
+        // 实机 11-03 八点血、饱食度 8、身上有腐肉和生鸡肉，一口不吃跑去抓鱼，下水淹死。
         if (facts.eatsToHeal()) {
             return Urgency.LATER;
         }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival.hunger;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,5 +44,46 @@ class EatsCarriedFoodTest {
         // 10-15 直播 21:25:43：三颗心、饱食度 12，上一个目标拿到的那块生羊肉被留着，去烤熟肉又被怪打断。
         assertTrue(moves.carriesBite(new HungerNeed.Facts(12, false, 0, true, true, 0)), "血不到一半先顾身体");
         assertTrue(moves.carriesBite(new HungerNeed.Facts(HungerNeed.SPRINT_FLOOR, false, 0)), "饿到不能疾跑照吃");
+    }
+    @Test
+    void 伤得重又只有腐肉_吃了不到回血线也先吃_会中毒的不吃() {
+        // 实机 11-03：八点血、饱食度 8，身上只有腐肉、生鸡肉和蜘蛛眼，一口不吃跑去抓鱼，下水淹死。
+        // 腐肉加 4 到不了回血线 18 也先吃；蜘蛛眼会中毒，不算。
+        BackpackView junkOnly = new BackpackView() {
+            @Override public List<BackpackStack> stacks() {
+                return List.of(new BackpackStack("minecraft:spider_eye", 2, 64, false, true, false, false),
+                        new BackpackStack("minecraft:rotten_flesh", 3, 64, false, true, false, false));
+            }
+
+            @Override public int usedSlots() { return 2; }
+
+            @Override public int totalSlots() { return 36; }
+        };
+        ReadsFoodValues values = id -> switch (id) {
+            case "minecraft:rotten_flesh" -> Optional.of(new ReadsFoodValues.FoodValue(id, 4, 0.8f, 1.6f, false,
+                    List.of(new ReadsFoodValues.FoodEffect("minecraft:hunger", false))));
+            case "minecraft:spider_eye" -> Optional.of(new ReadsFoodValues.FoodValue(id, 2, 3.2f, 1.6f, false,
+                    List.of(new ReadsFoodValues.FoodEffect("minecraft:poison", false))));
+            default -> Optional.empty();
+        };
+        EatsCarriedFood hurtMoves = new EatsCarriedFood(junkOnly, values, item -> Optional.empty(), null, id -> 0);
+
+        HungerNeed.Facts badlyHurt = new HungerNeed.Facts(8, false, 0, true, true, 4);
+        assertTrue(hurtMoves.carriesBite(badlyHurt));
+        // 腐肉和蜘蛛眼混着带：挑腐肉，有毒的轮不到。
+        assertEquals(Optional.of("minecraft:rotten_flesh"),
+                FoodPicker.autoPick(FoodPicker.everything(junkOnly.stacks(), values)));
+        assertFalse(hurtMoves.carriesBite(new HungerNeed.Facts(8, false, 0, true, false, 4)), "只是掉了点血不吃腐肉");
+        BackpackView poisonOnly = new BackpackView() {
+            @Override public List<BackpackStack> stacks() {
+                return List.of(new BackpackStack("minecraft:spider_eye", 2, 64, false, true, false, false));
+            }
+
+            @Override public int usedSlots() { return 1; }
+
+            @Override public int totalSlots() { return 36; }
+        };
+        EatsCarriedFood poisonMoves = new EatsCarriedFood(poisonOnly, values, item -> Optional.empty(), null, id -> 0);
+        assertFalse(poisonMoves.carriesBite(new HungerNeed.Facts(8, false, 0, true, true, 0)), "会中毒的不吃");
     }
 }
