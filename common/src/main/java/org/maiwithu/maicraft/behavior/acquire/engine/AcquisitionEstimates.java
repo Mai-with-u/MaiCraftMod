@@ -4,9 +4,13 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -15,6 +19,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate.Effort;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 拿东西的估算：只问价不拿，按引擎此刻会走的那条路往下估原料，给 LLM 一份"要花多大功夫"，好自己排先后。
@@ -25,8 +31,22 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
  *
  * <p>不动手、不记事实、不动世界记忆；附近还没扫完不等，如实说还没看完，要不要等由调用方定。
  * 弄不到的原因按"同一样东西只讲一次"摊平在最外层讲：一层套一层地抄原因，几层下来同一句话会重复很多遍。
+ *
+ * <p>估算在主线程上做，估的时候游戏停着：同一次估算里同一样东西估过就记下结果，原料链别处再缺它直接用；
+ * 同一来源对同一请求只问一次价；问价有上限，问满了余下的原料如实说没估完，不让一次估算卡住游戏好几秒。
  */
 final class AcquisitionEstimates {
+
+    private static final Logger LOG = LoggerFactory.getLogger(AcquisitionEstimates.class);
+    /**
+     * 一次估算最多向来源问几次价。食物、燃料这类原料链分叉多、配方互相绕回来（小麦与干草块、锭与块），
+     * 不设上限时一次估算要问上千次价、主线程卡好几秒，角色原地不动；问满了余下的说没估完，由外面按估得出的排。
+     */
+    static final int MAX_QUOTES = 300;
+    /** 估算花的时间超过这么多毫秒就写一行日志：实机卡顿时看得出是哪样东西估得慢、问了多少次价。 */
+    private static final long SLOW_ESTIMATE_MILLIS = 50;
+    /** 问满了价还没估完的那样原料怎么说。 */
+    static final String OUT_OF_QUOTES = "原料链太长，没估完";
 
     private final List<ItemSource> sources;
     private final ReadsCharacterPosition position;
@@ -40,8 +60,15 @@ final class AcquisitionEstimates {
 
     /** 估一样东西：限定照最外层的写法，原料不带。 */
     GoalEstimate estimate(ItemRequest request, Permissions permissions, ItemAcquisition.Scope scope) {
+        long started = System.nanoTime();
         Session session = new Session(permissions);
         Part part = session.estimate(request, scope);
+        long millis = (System.nanoTime() - started) / 1_000_000;
+        // 估得慢时记一行：哪样东西、多少毫秒、问了几次价、有没有问满，实机卡顿时拿它查是哪样东西拖慢了。
+        if (millis > SLOW_ESTIMATE_MILLIS) {
+            LOG.info("[估算] {} 用了 {} 毫秒，问价 {} 次{}", describe(request), millis, session.quotesAsked,
+                    session.outOfQuotes ? "，问满了没估完" : "");
+        }
         return part.toEstimate(session.blockedWhy);
     }
 
@@ -83,11 +110,20 @@ final class AcquisitionEstimates {
         }
     }
 
-    /** 一次估算：许可、正在估的那一串（防转圈、限深）、里层弄不到的原因（摊平讲一次）。 */
+    /**
+     * 一次估算：许可、正在估的那一串（防转圈、限深）、里层弄不到的原因（摊平讲一次）、
+     * 估过的东西与问过的价（同一次里不重估、不重问）、问了几次价。
+     */
     private final class Session {
         private final Permissions permissions;
         private final Deque<String> chain = new ArrayDeque<>();
         private final Map<String, String> blockedWhy = new LinkedHashMap<>();
+        private final Map<Asked, Recalled> recalled = new HashMap<>();
+        private final Map<Quoted, SourceQuote> quotes = new HashMap<>();
+        /** 正在估的每一样往下问到了哪些东西、最深几层：估完并进上一样，决定记下的结果别处能不能直接用。 */
+        private final Deque<Trace> traces = new ArrayDeque<>();
+        private int quotesAsked;
+        private boolean outOfQuotes;
 
         Session(Permissions permissions) {
             this.permissions = permissions;
@@ -96,15 +132,52 @@ final class AcquisitionEstimates {
         Part estimate(ItemRequest request, ItemAcquisition.Scope scope) {
             String what = describe(request);
             String key = request.wanted().specifier();
+            Trace caller = traces.peek();
+            if (caller != null) caller.reach(key);
             // 防转圈与限深和引擎一样：同一样东西在一条原料链上出现两次、或层数太深，这一样说估不了，不卡住。
             if (chain.contains(key)) return Part.unknown(what, "原料链转回了它自己", false);
-            if (chain.size() >= maxDepth) return Part.unknown(what, "原料链超过 " + maxDepth + " 层", false);
+            if (chain.size() >= maxDepth) {
+                if (caller != null) caller.depthCut = true;
+                return Part.unknown(what, "原料链超过 " + maxDepth + " 层", false);
+            }
+            // 原料链别处估过同样的东西：只要这回往下走不会碰到不同的转圈与限深，结果和重估一遍一样，直接用。
+            Asked asked = new Asked(request, scope);
+            Recalled earlier = recalled.get(asked);
+            if (earlier != null && earlier.fits(chain, maxDepth)) {
+                if (caller != null) caller.absorb(earlier.reaches(), earlier.height(), earlier.depthCut(), false);
+                return earlier.part();
+            }
+            Trace trace = new Trace();
+            traces.push(trace);
             chain.push(key);
+            Part part;
             try {
-                return consult(request, scope, what);
+                part = consult(request, scope, what);
             } finally {
                 chain.pop();
+                traces.pop();
             }
+            // 问满了价的结果是半截的，不记；其余记下这回往下问到了哪些、链上已有的哪几样被问到、最深几层。
+            if (!trace.budgetCut) {
+                Set<String> outerSeen = trace.reaches.stream().filter(chain::contains).collect(Collectors.toSet());
+                recalled.put(asked, new Recalled(part, Set.copyOf(trace.reaches), outerSeen, chain.size(),
+                        trace.height, trace.depthCut));
+            }
+            if (caller != null) caller.absorb(trace.reaches, trace.height, trace.depthCut, trace.budgetCut);
+            return part;
+        }
+
+        // 同一来源对同一请求只问一次价；没问过的要新问时先看还剩几次，问满了返回空。
+        private SourceQuote quote(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
+                SourceContext context) {
+            Quoted asked = new Quoted(source, request, scope);
+            SourceQuote known = quotes.get(asked);
+            if (known != null) return known;
+            if (quotesAsked >= MAX_QUOTES) return null;
+            quotesAsked++;
+            SourceQuote fresh = source.quote(request, context);
+            quotes.put(asked, fresh);
+            return fresh;
         }
 
         // 问遍来源 → 按总代价挑出要走的那几处 → 每处往下估原料；挑中的走不通就划掉它再挑，都走不通才说弄不到。
@@ -117,7 +190,14 @@ final class AcquisitionEstimates {
             List<String> looking = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (!scope.allows(source.via().name())) continue;
-                switch (source.quote(request, context)) {
+                SourceQuote quote = quote(source, request, scope, context);
+                // 问满了价：这一样不再往下估，如实说没估完；它和它上面几层都是半截的，不记下来给别处用。
+                if (quote == null) {
+                    outOfQuotes = true;
+                    traces.element().budgetCut = true;
+                    return Part.unknown(what, OUT_OF_QUOTES, false);
+                }
+                switch (quote) {
                     case SourceQuote.Offer offer -> {
                         if (scope.maxDistanceBlocks() != null && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
                             refusals.add(offer.source() + "：在愿意走的 " + blocks(scope.maxDistanceBlocks()) + " 格之外");
@@ -266,4 +346,49 @@ final class AcquisitionEstimates {
     }
 
     private record Planned(ItemSource source, SourceQuote.Offer offer) {}
+
+    /** 估过的是哪一样：同样的请求、同样的限定。 */
+    private record Asked(ItemRequest request, ItemAcquisition.Scope scope) {}
+
+    /** 问过的是哪一次价：同一来源、同样的请求、同样的限定（限定决定问价时的半径与距离）。 */
+    private record Quoted(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope) {}
+
+    /**
+     * 估过一样东西记下的：结果，往下问到过的东西，当时链上已有的几样里被问到的，当时链有多长，往下最深几层，
+     * 有没有碰到限深。
+     */
+    private record Recalled(Part part, Set<String> reaches, Set<String> outerSeen, int depth, int height,
+            boolean depthCut) {
+
+        // 这回链上的东西和当时一样地挡住或不挡住往下问到的每一样（转圈判断一样），层数也一样够或不够，
+        // 重估一遍得到的就是同一个结果。碰到过限深的只在同样深的地方用。
+        boolean fits(Deque<String> chain, int maxDepth) {
+            for (String reached : reaches) {
+                if (chain.contains(reached) != outerSeen.contains(reached)) return false;
+            }
+            return depthCut ? chain.size() == depth : chain.size() + height < maxDepth;
+        }
+    }
+
+    /** 正在估的一样往下的足迹：问到了哪些东西、最深几层、碰没碰到限深、问没问满价。 */
+    private static final class Trace {
+        private final Set<String> reaches = new HashSet<>();
+        private int height;
+        private boolean depthCut;
+        private boolean budgetCut;
+
+        // 往下问了一样东西（转圈、限深挡回去的也算问到）：至少深一层。
+        void reach(String key) {
+            reaches.add(key);
+            height = Math.max(height, 1);
+        }
+
+        // 往下那一样估完了：把它的足迹并进来，深度在它的基础上加一层。
+        void absorb(Set<String> childReaches, int childHeight, boolean childDepthCut, boolean childBudgetCut) {
+            reaches.addAll(childReaches);
+            height = Math.max(height, childHeight + 1);
+            depthCut |= childDepthCut;
+            budgetCut |= childBudgetCut;
+        }
+    }
 }

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,6 +54,12 @@ class AcquisitionEstimatesTest {
     private ItemAcquisition engine() {
         return new ItemAcquisition(List.of(craft, mine, hunt, chest), new FakeBackpack(36), new FakeOffhand(),
                 new FakeTags(), new FixedSpot(0, 64, 0), Optional.empty(), ItemAcquisition.DEFAULT_MAX_DEPTH);
+    }
+
+    // 层数上限换成小的：测超层时不用搭十几层的配方。
+    private ItemAcquisition engine(int maxDepth) {
+        return new ItemAcquisition(List.of(craft, mine, hunt, chest), new FakeBackpack(36), new FakeOffhand(),
+                new FakeTags(), new FixedSpot(0, 64, 0), Optional.empty(), maxDepth);
     }
 
     private static ItemRequest want(String item, int count) {
@@ -273,6 +280,92 @@ class AcquisitionEstimatesTest {
         assertTrue(estimate.how().contains("记得的箱子（322 格外）"), estimate.how());
     }
 
+    @Test
+    void 同一样原料在两处都缺_一次估算里只问一次价() {
+        // 剑要木板和木棍，木棍也要木板：两处缺的都是两块木板，估过一次就记下，第二处直接用，不再问遍来源。
+        craft.offer(SWORD, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null,
+                "sword"), List.of(want(PLANKS, 2), want(STICK, 1)));
+        craft.offer(STICK, (request, context) -> new SourceQuote.Offer("自己做", 4, new AcquisitionCost(0, 5), null,
+                "stick"), List.of(want(PLANKS, 2)));
+        chest.offer(PLANKS, (request, context) -> new SourceQuote.Offer("记得的箱子", 64, new AcquisitionCost(20, 2),
+                null, "chest"), List.of());
+
+        GoalEstimate estimate = engine().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.NEARBY, estimate.effort());
+        assertEquals(1, chest.asked.get(PLANKS));
+        assertEquals(1, craft.asked.get(PLANKS));
+    }
+
+    @Test
+    void 估过的原料搬到更深处会超层数时重估_照样说超层() {
+        // 层数上限 4：剑 → 木板 → 原木 → 木头，原木在第三层估得出；剑 → 木棍 → 竹块 → 原木在第四层，
+        // 再往下的木头就超层了。不能把浅处估过的原木搬过去冒充估得出，重估一遍照样说超层。
+        craft.offer(SWORD, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null,
+                "sword"), List.of(want(PLANKS, 1), want(STICK, 1)));
+        craft.offer(PLANKS, (request, context) -> new SourceQuote.Offer("自己做", 4, new AcquisitionCost(0, 5), null,
+                "planks"), List.of(want(LOG, 1)));
+        craft.offer(STICK, (request, context) -> new SourceQuote.Offer("自己做", 4, new AcquisitionCost(0, 5), null,
+                "stick"), List.of(want("minecraft:bamboo_block", 1)));
+        craft.offer("minecraft:bamboo_block", (request, context) -> new SourceQuote.Offer("自己做", 1,
+                new AcquisitionCost(0, 5), null, "bblock"), List.of(want(LOG, 1)));
+        craft.offer(LOG, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 5), null,
+                "log"), List.of(want("minecraft:oak_wood", 1)));
+        chest.offer("minecraft:oak_wood", (request, context) -> new SourceQuote.Offer("记得的箱子", 64,
+                new AcquisitionCost(20, 2), null, "chest"), List.of());
+
+        GoalEstimate estimate = engine(4).estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.UNKNOWN, estimate.effort());
+        assertTrue(estimate.how().contains("原料链超过 4 层"), estimate.how());
+    }
+
+    @Test
+    void 估过的原料搬到会转回来的地方时重估_照样说转圈() {
+        // 铁块要一个铁锭（箱子里有几个），九个铁锭箱子不够、要拆铁块：先估铁块时铁锭估得出；
+        // 再估九个铁锭时链上已经有铁锭，铁块往下又要铁锭，重估才会说转回了它自己，不能搬用先前估得出的铁块。
+        String block = "minecraft:iron_block";
+        String ingot = "minecraft:iron_ingot";
+        craft.offer(SWORD, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null,
+                "sword"), List.of(want(block, 1), want(ingot, 9)));
+        craft.offer(block, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 5), null,
+                "block"), List.of(want(ingot, 1)));
+        chest.offer(ingot, (request, context) -> request.count() > 5
+                ? new SourceQuote.Unavailable("记得的箱子", "只有 5 个")
+                : new SourceQuote.Offer("记得的箱子", 5, new AcquisitionCost(20, 2), null, "chest"), List.of());
+        craft.offer(ingot, (request, context) -> new SourceQuote.Offer("自己做", 9, new AcquisitionCost(0, 5, 500),
+                null, "ingot"), List.of(want(block, 1)));
+
+        GoalEstimate estimate = engine().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.UNKNOWN, estimate.effort());
+        assertTrue(estimate.how().contains("原料链转回了它自己"), estimate.how());
+    }
+
+    @Test
+    void 问满了价_余下的原料说没估完_不一直估下去() {
+        // 一样东西缺很多样各不相同的原料，每样都要问遍四个来源，加起来超过上限：问到上限就停，没估到的那样如实说没估完。
+        List<ItemRequest> parts = new ArrayList<>();
+        for (int i = 0; i < AcquisitionEstimates.MAX_QUOTES / 4 + 10; i++) {
+            String part = "maicraft_test:part_" + i;
+            parts.add(want(part, 1));
+            chest.offer(part, (request, context) -> new SourceQuote.Offer("记得的箱子", 1, new AcquisitionCost(20, 2),
+                    null, "chest"), List.of());
+        }
+        craft.offer(SWORD, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6), null,
+                "sword"), parts);
+
+        GoalEstimate estimate = engine().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.UNKNOWN, estimate.effort());
+        assertTrue(estimate.how().contains(AcquisitionEstimates.OUT_OF_QUOTES), estimate.how());
+        int asked = craft.asked.values().stream().mapToInt(Integer::intValue).sum()
+                + mine.asked.values().stream().mapToInt(Integer::intValue).sum()
+                + hunt.asked.values().stream().mapToInt(Integer::intValue).sum()
+                + chest.asked.values().stream().mapToInt(Integer::intValue).sum();
+        assertEquals(AcquisitionEstimates.MAX_QUOTES, asked);
+    }
+
     // 床在背包外的工作台上做：缺三块白色羊毛，木板身上有。
     private void bedRecipe() {
         craft.offer(BED, (request, context) -> new SourceQuote.Offer("自己做", 1, new AcquisitionCost(0, 6, 96),
@@ -285,6 +378,8 @@ class AcquisitionEstimatesTest {
         private final AcquireVia via;
         private final Map<String, BiFunction<ItemRequest, SourceContext, SourceQuote>> quotes = new HashMap<>();
         private final Map<String, List<ItemRequest>> missing = new HashMap<>();
+        /** 每样东西被问了几次价：看同一次估算里有没有重问。 */
+        final Map<String, Integer> asked = new HashMap<>();
         int begun;
 
         Stub(String name, AcquireVia via) {
@@ -306,6 +401,7 @@ class AcquisitionEstimatesTest {
         }
 
         @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+            asked.merge(request.wanted().specifier(), 1, Integer::sum);
             var quote = quotes.get(request.wanted().specifier());
             return quote == null ? new SourceQuote.Unavailable(name, "没有" + request.wanted().specifier())
                     : quote.apply(request, context);

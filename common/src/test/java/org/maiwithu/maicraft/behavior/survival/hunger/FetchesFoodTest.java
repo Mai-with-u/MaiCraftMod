@@ -52,6 +52,16 @@ class FetchesFoodTest {
         }
     }
 
+    /** 一轮估齐几类口粮要几刻：每刻只估一类。 */
+    private static final int ROUND = FetchesFood.KINDS.size() + 1;
+
+    // 从这一刻起连着推一整轮：前几刻只在估各类口粮，最后一刻排先后、去拿，返回最后一刻的状态。
+    private static ActionStatus tickRound(FetchesFood fetch, long from) {
+        ActionStatus status = null;
+        for (int i = 0; i < ROUND; i++) status = fetch.tick(at(from + i));
+        return status;
+    }
+
     private static TickContext at(long tick) {
         return new TickContext() {
             @Override public long gameTick() {
@@ -69,7 +79,7 @@ class FetchesFoodTest {
         // 网络里没有面包，箱子里有熟肉（5 格），田里有蔬菜（30 格）：拿熟肉。
         FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/cooked_meat", 5d, "#c:foods/vegetable", 30d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#c:foods/cooked_meat"), needs.asked);
     }
 
@@ -93,7 +103,7 @@ class FetchesFoodTest {
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
         ActionStatus status = ActionStatus.running();
-        for (int i = 0; i < 5 && !(status instanceof ActionStatus.Done); i++) status = fetch.tick(at(i));
+        for (int i = 0; i < 3 * ROUND && !(status instanceof ActionStatus.Done); i++) status = fetch.tick(at(i));
         assertInstanceOf(ActionStatus.Done.class, status);
         assertEquals(List.of("#c:foods/bread", "#c:foods/cooked_meat"), needs.asked);
     }
@@ -103,7 +113,7 @@ class FetchesFoodTest {
         // 面包、熟肉、熟鱼、蔬菜、水果都弄不到，箱子里只有模组食物：按"能吃的口粮"一大类去拿，不饿着。
         FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 12d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
     }
 
@@ -112,7 +122,7 @@ class FetchesFoodTest {
         // 门口有羊（打猎报价 2 格），面包合成要走 20 格：直接打猎拿肉，不为熟食绕远。
         FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 2d, "#c:foods/bread", 20d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
     }
 
@@ -135,7 +145,7 @@ class FetchesFoodTest {
             }
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
     }
 
@@ -165,7 +175,7 @@ class FetchesFoodTest {
             }
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
         assertEquals(List.of(1), pricedCounts.stream().distinct().toList());
     }
@@ -193,12 +203,12 @@ class FetchesFoodTest {
             }
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        for (int tick = 0; tick < settledAt[0]; tick++) {
+        for (int tick = 0; tick < settledAt[0] * ROUND; tick++) {
             ActionStatus waiting = fetch.tick(at(tick));
             assertInstanceOf(ActionStatus.Running.class, waiting);
             assertEquals(List.of(), needs.asked);
         }
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(settledAt[0])));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, settledAt[0] * ROUND));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
     }
 
@@ -212,7 +222,8 @@ class FetchesFoodTest {
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
         ActionStatus status = ActionStatus.running();
-        for (int tick = 0; tick <= FetchesFood.MAX_ESTIMATE_WAIT_TICKS && !(status instanceof ActionStatus.Done); tick++) {
+        for (int tick = 0; tick <= FetchesFood.MAX_ESTIMATE_WAIT_TICKS + 2 * ROUND
+                && !(status instanceof ActionStatus.Done); tick++) {
             status = fetch.tick(at(tick));
         }
         assertInstanceOf(ActionStatus.Done.class, status);
@@ -233,7 +244,7 @@ class FetchesFoodTest {
             }
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#maicraft:foods/edible"), needs.asked);
     }
 
@@ -251,7 +262,8 @@ class FetchesFoodTest {
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
         ActionStatus status = ActionStatus.running();
-        for (int tick = 0; tick <= FetchesFood.MAX_ESTIMATE_WAIT_TICKS && !(status instanceof ActionStatus.Done); tick++) {
+        for (int tick = 0; tick <= FetchesFood.MAX_ESTIMATE_WAIT_TICKS + 2 * ROUND
+                && !(status instanceof ActionStatus.Done); tick++) {
             status = fetch.tick(at(tick));
         }
         assertInstanceOf(ActionStatus.Done.class, status);
@@ -279,7 +291,7 @@ class FetchesFoodTest {
     void 一样近时熟食优先_不先吃生肉() {
         FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 5d, "#c:foods/bread", 5d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#c:foods/bread"), needs.asked);
     }
 
@@ -287,7 +299,7 @@ class FetchesFoodTest {
     void 只有远处的面包时还是去拿面包() {
         FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 20d));
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Done.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Done.class, tickRound(fetch, 0));
         assertEquals(List.of("#c:foods/bread"), needs.asked);
     }
 
@@ -312,16 +324,40 @@ class FetchesFoodTest {
             }
         };
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        // 第一刻去拿面包，面包当场失败：换下一类的这一刻返回的状态不带进展。
-        ActionStatus afterSwitch = fetch.tick(at(0));
+        // 估齐一轮去拿面包，面包当场失败：换下一类的这一刻返回的状态不带进展。
+        ActionStatus afterSwitch = tickRound(fetch, 0);
         assertInstanceOf(ActionStatus.Running.class, afterSwitch);
         assertEquals(false, ((ActionStatus.Running) afterSwitch).progressed());
     }
 
     @Test
+    void 每刻只估一类口粮_估齐了才去拿() {
+        // 一类口粮的估算可能要好一会儿：同一刻连估六类会把游戏卡住好几秒，每刻只估一类，估齐一轮再排先后。
+        List<Integer> estimatesPerTick = new ArrayList<>();
+        int[] thisTick = {0};
+        FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 5d)) {
+            @Override public GoalEstimate estimate(ItemRequest request, Permissions permissions) {
+                thisTick[0]++;
+                return super.estimate(request, permissions);
+            }
+        };
+        FetchesFood fetch = new FetchesFood(needs, 1200);
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 0; tick < 3 * ROUND && !(status instanceof ActionStatus.Done); tick++) {
+            thisTick[0] = 0;
+            status = fetch.tick(at(tick));
+            estimatesPerTick.add(thisTick[0]);
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(ROUND, estimatesPerTick.size());
+        assertEquals(List.of(1), estimatesPerTick.stream().distinct().toList());
+        assertEquals(List.of("#c:foods/bread"), needs.asked);
+    }
+
+    @Test
     void 哪儿都没有现成口粮如实说() {
         FetchesFood fetch = new FetchesFood(new FakeNeeds(Map.of()), 1200);
-        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, fetch.tick(at(0)));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, tickRound(fetch, 0));
         assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
     }
 
@@ -343,7 +379,7 @@ class FetchesFoodTest {
         FakeNeeds needs = new FakeNeeds(Map.of("#c:foods/bread", 2d));
         needs.neverDone = true;
         FetchesFood fetch = new FetchesFood(needs, 1200);
-        assertInstanceOf(ActionStatus.Running.class, fetch.tick(at(0)));
+        assertInstanceOf(ActionStatus.Running.class, tickRound(fetch, 0));
         assertEquals(Interruptibility.WORKING, fetch.interruptibility());
         fetch.pause();
         fetch.close();

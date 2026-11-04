@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.behavior.survival.hunger;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -26,6 +28,7 @@ import org.slf4j.LoggerFactory;
  * 饿了身上没吃的：像玩家一样去弄点现成的口粮。面包、熟肉、熟鱼、蔬菜、水果几类和"能吃的口粮"一大类
  * （含生肉、模组食物）同一轮问拿东西的估算哪类整条路走得最近（网络里、箱子里有就拿，没有再做、再打猎），
  * 挑最近的那类拿几件，一样近时熟食优先；有预算，超时或哪儿都没有如实说。
+ * 估算在主线程上做、一类可能要估好一会儿，所以每刻只估一类，几类估齐了再排先后，不在同一刻连估六类卡住游戏。
  * 没弄满也不要紧：吃饭任务每刻看身上，弄到第一件这会儿能吃的（打到的生肉、烤好的第一块熟肉）就把这里叫停、先吃。
  */
 final class FetchesFood implements Action {
@@ -47,8 +50,10 @@ final class FetchesFood implements Action {
     private long deadline = -1;
     private Action current;
     private String chosen;
-    /** 已经为"附近还没看完"等了几刻；挑定一类就清零。 */
-    private int estimateWaits;
+    /** 这一轮已经估过的几类口粮（按 KINDS 的顺序）：估齐了排先后，排完清空，下一轮重估。 */
+    private final Map<String, GoalEstimate> estimated = new LinkedHashMap<>();
+    /** 从哪一刻起为"附近还没看完"等着；没在等为 -1，挑定一类就清掉。 */
+    private long waitingSince = -1;
     /** 已经去弄过、没弄成的几类：换下一类，不在同一类上反复。 */
     private final Set<String> tried = new HashSet<>();
     private Problem lastFailure;
@@ -67,11 +72,22 @@ final class FetchesFood implements Action {
                     "给角色一些普通食物"));
         }
         if (current == null) {
-            Pick pick = nearestKind();
+            // 每刻只估一类：这一轮还有没估的就估下一类，没估齐这一刻到此为止，下一刻接着估。
+            Optional<String> next = nextToEstimate();
+            if (next.isPresent()) {
+                estimated.put(next.get(), needs.estimate(requestFor(next.get()).just(1), Permissions.DEFAULT));
+                if (nextToEstimate().isPresent()) return ActionStatus.running();
+            }
+            boolean waitedOut = waitingSince >= 0 && context.gameTick() - waitingSince >= MAX_ESTIMATE_WAIT_TICKS;
+            Pick pick = nearestOf(waitedOut);
+            estimated.clear();
             // 有的口粮估算说附近还没看完（刚换地方，方块扫描还在补）：和拿东西的引擎问价一样先等它看完再排，
             // 不拿第一步的距离硬排——那会让"身边放熔炉"0 格的面包压过 2 格外的羊。等着看清现场算真实进展，
-            // 等有上限，等满了按问得出的排。
-            if (pick.stillLooking() && ++estimateWaits <= MAX_ESTIMATE_WAIT_TICKS) return ActionStatus.progressed();
+            // 下一轮重估；等有上限，等满了按问得出的排。
+            if (pick.stillLooking() && !waitedOut) {
+                if (waitingSince < 0) waitingSince = context.gameTick();
+                return ActionStatus.progressed();
+            }
             Optional<ItemRequest> nearest = pick.request();
             if (nearest.isEmpty()) {
                 if (lastFailure != null) return ActionStatus.failed(lastFailure);
@@ -79,7 +95,7 @@ final class FetchesFood implements Action {
                         "饿了，身上没有口粮，附近、箱子里、网络里也都没找到现成的面包、熟肉、熟鱼、蔬菜、水果或别的能吃的",
                         "给角色一些普通食物，或种地、养殖"));
             }
-            estimateWaits = 0;
+            waitingSince = -1;
             tried.add(nearest.get().wanted().specifier());
             chosen = nearest.get().wanted().describe();
             current = needs.actionFor(nearest.get(), Permissions.DEFAULT);
@@ -99,30 +115,36 @@ final class FetchesFood implements Action {
     /** 挑口粮的结果：挑中的那一类（哪类都没有为空），以及有没有哪类的估算还在等附近看完。 */
     private record Pick(Optional<ItemRequest> request, boolean stillLooking) {}
 
-    // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮问价，挑整条路最远走多远最近的去拿：
-    // 面包虽常有小麦合成报价，但远处有羊有鸡时打猎更近，不该绕远去做面包；一样近时按 KINDS 的顺序挑，
-    // 熟的、不用再加工的排前面，生肉是饿急了的备选。
-    private Pick nearestKind() {
+    // 这一轮下一类要估的：按 KINDS 的顺序，叫得出名字的几类之后是"能吃的口粮"一大类；去弄过没弄成的不再估。
+    private Optional<String> nextToEstimate() {
         List<String> all = new ArrayList<>(KINDS);
         all.add(EverydayFood.TAG);
-        return nearestOf(all, estimateWaits >= MAX_ESTIMATE_WAIT_TICKS);
+        return all.stream()
+                .filter(kind -> !tried.contains(WantedItem.ofTag(kind).specifier()) && !estimated.containsKey(kind))
+                .findFirst();
     }
 
+    private static ItemRequest requestFor(String kind) {
+        return new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
+    }
+
+    // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮估齐，挑整条路最远走多远最近的去拿：
+    // 面包虽常有小麦合成报价，但远处有羊有鸡时打猎更近，不该绕远去做面包；一样近时按 KINDS 的顺序挑，
+    // 熟的、不用再加工的排前面，生肉是饿急了的备选。
     // 排先后只问弄到一件要走多远：弄到第一件就会被叫停先吃，按一次要的件数去估，身边两只羊只够两件、
     // 凑满还得把远处箱子里的算上，整条路最远就被远箱子抬成和面包一样远，近处的羊反而排不到前面。去拿时仍按一次要的件数要。
     // 估得出整条路的（含不用离开的）排在只问得出第一步距离的前面：第一步距离里"身边放熔炉"是 0 格，和真估出来的
     // 0 格打平就会靠排在前面抢走，羊在三格内也去做面包。身边几格就有的已经是最近，不为别类还没看完再等。
-    private Pick nearestOf(List<String> kinds, boolean waitedOut) {
+    private Pick nearestOf(boolean waitedOut) {
         ItemRequest best = null;
         double bestDistance = Double.MAX_VALUE;
         ItemRequest bestFallback = null;
         double bestFallbackDistance = Double.MAX_VALUE;
         boolean stillLooking = false;
         List<String> considered = new ArrayList<>();
-        for (String kind : kinds) {
-            if (tried.contains(WantedItem.ofTag(kind).specifier())) continue;
-            ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
-            GoalEstimate estimate = needs.estimate(request.just(1), Permissions.DEFAULT);
+        for (Map.Entry<String, GoalEstimate> entry : estimated.entrySet()) {
+            ItemRequest request = requestFor(entry.getKey());
+            GoalEstimate estimate = entry.getValue();
             if (estimate.stillLooking() && estimate.farthestBlocks() == null && !waitedOut) {
                 stillLooking = true;
                 considered.add(request.wanted().describe() + "：附近还没看完，等着（" + estimate.how() + "）");
@@ -170,9 +192,9 @@ final class FetchesFood implements Action {
     private void logPick(ItemRequest best, double bestDistance, boolean stillLooking, boolean waitedOut,
             List<String> considered) {
         if (!LOG.isDebugEnabled()) return;
-        // 这一刻会不会继续等：和 tick 里的判断同一条——有的还没看完、等的刻数还没满。
-        boolean waiting = stillLooking && estimateWaits < MAX_ESTIMATE_WAIT_TICKS;
-        if (waiting && estimateWaits > 0) return;
+        // 这一轮会不会继续等：和 tick 里的判断同一条——有的还没看完、等的刻数还没满；已经在等的不重复写。
+        boolean waiting = stillLooking && !waitedOut;
+        if (waiting && waitingSince >= 0) return;
         String outcome;
         if (waiting) {
             outcome = "有的还没看完，先等" + (best == null ? "" : "（此刻最近的是 " + best.wanted().describe() + "）");
