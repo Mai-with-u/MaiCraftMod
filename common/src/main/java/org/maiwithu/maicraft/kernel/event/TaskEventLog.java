@@ -49,6 +49,18 @@ public final class TaskEventLog implements TaskEventSink {
         return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, status, selfBrief, readyNow));
     }
 
+    /**
+     * 记一条目标的事件（开始、提问、暂停、恢复、停滞、结束、sequence 的一步做完）：带上这条事件说的那个能力，
+     * 宿主按字段认是哪个能力，不用解析消息开头。
+     *
+     * @param ability 能力 ID，和 execute 时传的一样；sequence 的一步的事件是那一步的能力
+     */
+    public TaskEvent appendForGoal(TaskEvent.Kind kind, long goalRunId, String ability, String message,
+                                   TaskResult.Status status, String selfBrief, List<TaskEvent.ReadyStep> readyNow) {
+        return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, status, selfBrief, readyNow,
+                null, ability));
+    }
+
     /** 换世界或重启：清空事件、换一个新的流编号，叫醒正在等的读者让它们重新对齐。 */
     public void restart() {
         log.restart();

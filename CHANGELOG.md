@@ -9,6 +9,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 ### 新增
 
 - `observe(self)` 多了两项，看得出死一次会怎样：`keep_inventory` 是死亡不掉落开没开（`on` / `off`；连服务器时由服务端 MaiCraft 报，服主中途改了也会再报，只有服务端是旧版时才是 `unknown`）；`respawn` 是会在哪重生、是床还是重生锚还是世界出生点，单人世界和局域网主机读的是真实的（`confirmed=true`），别人的服务器按最近睡过的床推断（`confirmed=false`）。
+- `events` 里目标的事件（`started`、`resumed`、`paused`、`asked`、`stalled`、`finished`、`step_finished`）多了 `ability`，写这条事件说的是哪个能力，和 `execute` 时传的一样；sequence 的一步写那一步的能力。认能力看这个字段就行，不用再解析消息开头。
 - 连服务器时 `suicide` 也认得出死亡不掉落开没开了：服务端 MaiCraft 握手时报这条规则、改了当场再报，开着就直接寻死，不用再给 `keep_inventory_confirmed` 或回答确认；只有服务端是旧版时才要确认。
 - 走投无路时会提一句寻死：卡在坑里出不去（`change_blocks=none` 不脱困的也算）、饿了问遍各处弄不到吃的、水下从这里到不了、点名打架撤了又回不了血，建议或事件末尾会说可以 `suicide` 回重生点，血和饱食度都是满的；服务端是旧版、读不到死亡不掉落时，提醒要带 `keep_inventory_confirmed=true`；死亡不掉落关着、创造、旁观、极限模式不提。
 - `suicide` 寻死会先用命令了：服务器给了 `/suicide`，或角色能用 `/kill`，就直接发命令死，不脱甲，`/suicide` 前先收起不死图腾；发了 5 秒没死，把服务器回的话记进 `attempts`，再照原来脱甲找岩浆、悬崖这些死法。`via=command` 只用命令，结果细节 `command` 写发的是哪条。

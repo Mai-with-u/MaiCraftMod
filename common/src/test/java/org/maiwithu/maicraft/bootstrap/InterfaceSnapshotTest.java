@@ -171,16 +171,20 @@ class InterfaceSnapshotTest {
                 List.of(new FieldError("goal.parameters.count", "count 应在 1..256", "1..256")), null));
         shapes.add("result", ResultJson.result(partial));
         shapes.add("goal_run", ResultJson.goalRun(asking, question, "在等回答"));
-        shapes.add("event", ResultJson.event(new TaskEvent(7, TaskEvent.Kind.ASKED, 12, "动哪个箱子？", null)));
+        // 目标的事件带上是哪个能力：和 execute 时传的一样。
+        shapes.add("event", ResultJson.event(new TaskEvent(7, TaskEvent.Kind.ASKED, 12, "动哪个箱子？", null, null,
+                List.of(), null, "maicraft:deposit")));
         // 目标结束的事件附结束那一刻角色的一行自身摘要。
         shapes.add("finished_event", ResultJson.event(new TaskEvent(9, TaskEvent.Kind.FINISHED, 12,
                 "拿到 3 块原木，还差 5 块", TaskResult.Status.PARTIAL,
-                "在 minecraft:overworld 12, 64, -8；血 18，饱食 15；手上 minecraft:stone_axe")));
+                "在 minecraft:overworld 12, 64, -8；血 18，饱食 15；手上 minecraft:stone_axe", List.of(), null,
+                "maicraft:obtain")));
         // sequence 的一步做完、整件事还要接着做：附上后面此刻不用走路就能做的那几步。
         shapes.add("step_finished_event", ResultJson.event(new TaskEvent(10, TaskEvent.Kind.STEP_FINISHED, 12,
                 "第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
                 TaskResult.Status.DONE, "在 minecraft:overworld 12, 64, -8；血 20，饱食 18；手上 minecraft:oak_log",
-                List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：在背包的合成格里做，不用工作台")))));
+                List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：在背包的合成格里做，不用工作台")),
+                null, "maicraft:obtain")));
         // 饿急了从别人的箱子拿了吃的：消息一句话，按字段的事实挂在 others_food_taken 上，不带 goal_id。
         shapes.add("others_food_taken_event", ResultJson.event(new TaskEvent(11, TaskEvent.Kind.OTHERS_FOOD_TAKEN,
                 TaskEventLog.NO_GOAL, "饿到饱食度 3，从 Alex 家的箱子（12, 64, -8）拿了 1 个面包", null, null, List.of(),

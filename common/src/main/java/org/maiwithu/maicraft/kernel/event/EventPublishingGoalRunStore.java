@@ -132,8 +132,8 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
             }
             lastStallNoticeNanos.put(run.id(), now);
             long minutes = (now - last) / 60_000_000_000L;
-            log.append(TaskEvent.Kind.STALLED, run.id(), "目标 " + run.id() + "（" + describe(run) + "）已经 "
-                    + minutes + " 分钟没有任何新事件，仍在推进中；用 goal 按编号看它此刻在做什么，不会再动了就取消", null);
+            event(TaskEvent.Kind.STALLED, run.id(), run, "目标 " + run.id() + "（" + describe(run) + "）已经 "
+                    + minutes + " 分钟没有任何新事件，仍在推进中；用 goal 按编号看它此刻在做什么，不会再动了就取消");
         }
     }
 
@@ -144,21 +144,21 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
         switch (run.state()) {
             case RUNNING -> {
                 if (before == null && !step) {
-                    log.append(TaskEvent.Kind.STARTED, id, "开始：" + describe(run), null);
+                    event(TaskEvent.Kind.STARTED, id, run, "开始：" + describe(run));
                 } else if (before == GoalRunState.PAUSED) {
-                    log.append(TaskEvent.Kind.RESUMED, id, "接着推进：" + describe(run), null);
+                    event(TaskEvent.Kind.RESUMED, id, run, "接着推进：" + describe(run));
                 }
             }
             case AWAITING_ANSWER -> {
                 String question = run.question().text();
                 if (before == GoalRunState.PAUSED) {
-                    log.append(TaskEvent.Kind.RESUMED, id, "解除暂停，仍在等回答：" + question, null);
+                    event(TaskEvent.Kind.RESUMED, id, run, "解除暂停，仍在等回答：" + question);
                 } else {
-                    log.append(TaskEvent.Kind.ASKED, id, question, null);
+                    event(TaskEvent.Kind.ASKED, id, run, question);
                 }
             }
             // 被临时任务带离原地停下的，带上为什么停、停在哪：LLM 不必猜是不是游戏重连了。
-            case PAUSED -> log.append(TaskEvent.Kind.PAUSED, id, "暂停：" + describe(run) + run.pauseNote("；"), null);
+            case PAUSED -> event(TaskEvent.Kind.PAUSED, id, run, "暂停：" + describe(run) + run.pauseNote("；"));
             // sequence 的一步做完记在整件 sequence 的编号上，结论句前带上第几步、哪个能力：连着几步结论一样
             // （一格一格施工每步都是"按图建好了"）时，读事件的人也分得清做完的是哪一步。
             // 结束这一刻顺手附上角色的一行自身摘要（在哪、血、饱食、主手、开着的界面），读不到就不附。
@@ -167,10 +167,15 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
                 List<TaskEvent.ReadyStep> ready = step ? readyAfter(run) : List.of();
                 String message = step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary()
                         : run.result().summary();
-                log.append(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id,
+                log.appendForGoal(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id, run.goal().ability(),
                         message + readyNote(ready), run.result().status(), selfBrief.current().orElse(null), ready);
             }
         }
+    }
+
+    // 目标的一条事件：记在这个编号上（sequence 的一步记在整件 sequence 上），带上这条事件说的那个能力。
+    private void event(TaskEvent.Kind kind, long id, GoalRun run, String message) {
+        log.appendForGoal(kind, id, run.goal().ability(), message, null, null, List.of());
     }
 
     // 整件 sequence 还要接着做（这一步做成了，或没做成但写了接着做）才看后面；做完最后一步、要停下的都不看。

@@ -136,6 +136,10 @@ public final class ResultJson {
         if (event.goalRunId() != TaskEventLog.NO_GOAL) {
             json.addProperty("goal_id", event.goalRunId());
         }
+        // 目标的事件带上是哪个能力（和 execute 时传的一样，sequence 的一步是那一步的）：宿主按字段认，不解析消息开头。
+        if (event.ability() != null) {
+            json.addProperty("ability", event.ability());
+        }
         json.addProperty("message", event.message());
         if (event.status() != null) {
             json.addProperty("status", lower(event.status()));

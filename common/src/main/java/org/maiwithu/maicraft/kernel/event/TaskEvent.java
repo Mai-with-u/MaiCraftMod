@@ -23,9 +23,11 @@ import java.util.Objects;
  *                  其余事件、或结束时读不到角色时为 null
  * @param readyNow  sequence 的一步做完时，后面还没开始的步骤里此刻不用走路就能做的那几步；其余事件为空
  * @param facts     附带的结构化事实（例如饿急了从别人的箱子拿了什么）；没有为 null
+ * @param ability   目标的事件说的是哪个能力（能力 ID，和 execute 时传的一样；sequence 的一步是那一步的能力）：
+ *                  宿主按它认，不解析消息开头；生存需求、死亡恢复决策这些不挂在能力上的事件为 null
  */
 public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
-                        String selfBrief, List<ReadyStep> readyNow, EventFacts facts) {
+                        String selfBrief, List<ReadyStep> readyNow, EventFacts facts, String ability) {
 
     /**
      * sequence 后面还没开始的一步，此刻不用走路就能做。
@@ -124,6 +126,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
     public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
                      String selfBrief, List<ReadyStep> readyNow) {
         this(cursor, kind, goalRunId, message, status, selfBrief, readyNow, null);
+    }
+
+    /** 不说是哪个能力的事件：生存需求、死亡恢复决策这些不挂在目标的能力上。 */
+    public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
+                     String selfBrief, List<ReadyStep> readyNow, EventFacts facts) {
+        this(cursor, kind, goalRunId, message, status, selfBrief, readyNow, facts, null);
     }
 
     public TaskEvent {

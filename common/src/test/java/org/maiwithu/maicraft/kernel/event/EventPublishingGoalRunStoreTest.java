@@ -53,6 +53,8 @@ class EventPublishingGoalRunStoreTest {
         assertEquals("要拆这面墙吗？", events.get(1).message());
         assertEquals(TaskResult.Status.DONE, events.get(4).status());
         assertNull(events.get(0).status());
+        // 每条都带上是哪个能力：宿主按字段认，不解析"开始：maicraft:test"这类消息开头。
+        assertTrue(events.stream().allMatch(event -> "maicraft:test".equals(event.ability())), events.toString());
     }
 
     @Test
@@ -89,6 +91,31 @@ class EventPublishingGoalRunStoreTest {
         assertEquals(sequence.id(), events.get(2).goalRunId());
         assertEquals(TaskResult.Status.FAILED, events.get(2).status());
         assertEquals("第 1 步（maicraft:test）：没拆", events.get(2).message());
+    }
+
+    @Test
+    void sequenceStepEventsCarryTheStepsOwnAbility() throws InterruptedException {
+        // sequence 的一步：事件记在整件 sequence 的编号上，ability 写那一步的能力；整件开始时写 sequence 自己的。
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log);
+        GoalRun sequence = new GoalRun(store.nextId(), Goal.of("maicraft:sequence", null, ParamValues.EMPTY));
+        store.save(sequence);
+        GoalRun step = new GoalRun(store.nextId(), Goal.of("maicraft:suicide", null, ParamValues.EMPTY), sequence.id(), 0);
+        store.save(step);
+        step.pause();
+        store.save(step);
+        step.resume();
+        store.save(step);
+        step.finish(TaskResult.done("死了，在 0, 64, 0 重生"), 100);
+        store.save(step);
+
+        List<TaskEvent> events = events(log);
+        assertEquals(List.of(TaskEvent.Kind.STARTED, TaskEvent.Kind.PAUSED, TaskEvent.Kind.RESUMED,
+                TaskEvent.Kind.STEP_FINISHED), events.stream().map(TaskEvent::kind).toList());
+        assertEquals("maicraft:sequence", events.get(0).ability());
+        assertEquals(List.of("maicraft:suicide", "maicraft:suicide", "maicraft:suicide"),
+                events.subList(1, 4).stream().map(TaskEvent::ability).toList());
+        assertTrue(events.stream().allMatch(event -> event.goalRunId() == sequence.id()));
     }
 
     @Test
