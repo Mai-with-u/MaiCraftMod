@@ -72,11 +72,6 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
      * @see <a href="https://docs.google.com/document/d/1WVHHXKXFdCR1Oz__KtK8sFqyvSwJN_H4lftkHFgmzlc/edit">here</a>
      */
     /**
-     * If a path goes less than 5 blocks and doesn't make it to its goal, it's not worth considering.
-     */
-    protected static final double MIN_DIST_PATH = PartialPathRanking.MIN_DIST_PATH;
-
-    /**
      * there are floating point errors caused by random combinations of traverse and diagonal over a flat area
      * that means that sometimes there's a cost improvement of like 10 ^ -16
      * it's not worth the time to update the costs, decrease-key the heap, potentially repropagate, etc
@@ -219,7 +214,8 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
             if (dist > bestDist) {
                 bestDist = dist;
             }
-            if (dist > PartialPathRanking.MIN_DIST_PATH * PartialPathRanking.MIN_DIST_PATH) { // square the comparison since distFromStartSq is squared
+            // 离起点够远才交这段半截路：一般 5 格，目的地本来就在跟前时门槛跟着缩。
+            if (ranking.pastStart(node)) {
                 if (logInfo) {
                     if (PartialPathRanking.COEFFICIENTS[i] >= 3) {
                         System.out.println("Warning: cost coefficient is greater than three! Probably means that");

@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import baritone.api.pathing.goals.Goal;
 import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Test;
  * 部分路线的各系数排位：往下挖一层台阶（单步代价约百刻）在次末位大系数下要算成进展，
  * 徒手挖石质楼梯往上爬（单步四五百刻起步）在末位系数下要算成进展，
  * 让搜索承认这些像样分段；水平走路在原有小系数下照旧算进展；其余目标不受新增档影响。
+ * 像样分段的门槛一般 5 格，目的地本来就在跟前时跟着缩；交出去的终点总比起点离目的地近。
  */
 class PartialPathRankingTest {
 
@@ -37,6 +40,17 @@ class PartialPathRankingTest {
             @Override public boolean isInGoal(int x, int y, int z) { return x == gx && y == gy && z == gz; }
             @Override public double heuristic(int x, int y, int z) {
                 return Math.max(Math.abs(x - gx), Math.max(Math.abs(y - gy), Math.abs(z - gz))) * 3.563;
+            }
+        };
+    }
+
+    /** 要恰好站进的一格：估价和出行的精确目标同一份（八向水平距离加升降代价）。 */
+    private static Goal standAt(int gx, int gy, int gz) {
+        BlockPos goal = new BlockPos(gx, gy, gz);
+        return new Goal() {
+            @Override public boolean isInGoal(int x, int y, int z) { return x == gx && y == gy && z == gz; }
+            @Override public double heuristic(int x, int y, int z) {
+                return HeuristicCosts.pointBound(goal, new BlockPos(x, y, z));
             }
         };
     }
@@ -189,5 +203,68 @@ class PartialPathRankingTest {
         }
         assertNull(ranking.firstNodePastStart());
         assertFalse(ranking.hasSegmentPastStart());
+    }
+
+    @Test
+    void 目的地在墙后5格多_墙外最近那格离起点正好5格也交得出半截路() {
+        // 封闭走廊：目的地在墙后，从完整地面出发；墙外离目的地最近的那格 (-176,100,316) 离起点正好 5 格，
+        // 死门槛下永远交不出半截路，头一次算路 6 秒一到就报没有路线。门槛跟着目的地缩以后，先走到那一格再接着算。
+        Goal goal = standAt(-176, 100, 314);
+        PathNode start = node(goal, -171, 100, 316, 0);
+        assertTrue(PartialPathRanking.segmentThreshold(start.estimatedCostToGoal) < PartialPathRanking.MIN_DIST_PATH,
+                "目的地离起点 5 格多，门槛要比 5 格小");
+        PartialPathRanking ranking = new PartialPathRanking(-171, 100, 316, start, 0.01);
+
+        // 沿墙外往西走，每格按走路 4.633 刻算。
+        for (int k = 1; k <= 6; k++) {
+            ranking.consider(node(goal, -171 - k, 100, 316, k * 4.633));
+        }
+
+        assertTrue(ranking.hasSegmentPastStart(), "该交得出半截路");
+        PathNode end = ranking.firstNodePastStart();
+        assertEquals(-176, end.x, "半截路走到墙外离目的地最近的那一格");
+        assertEquals(316, end.z);
+        assertEquals(25.0, ranking.distanceFromStartSquared(end), "这一格离起点正好 5 格，死门槛下不算");
+    }
+
+    @Test
+    void 目的地远时门槛照旧5格() {
+        double sprintBlock = HeuristicCosts.COST_HEURISTIC;
+        assertEquals(5.0, PartialPathRanking.segmentThreshold(30 * sprintBlock), 1e-9);
+        assertEquals(5.0, PartialPathRanking.segmentThreshold(6.25 * sprintBlock), 1e-9, "6.25 格起门槛就是 5 格");
+        assertEquals(4.0, PartialPathRanking.segmentThreshold(5 * sprintBlock), 1e-9, "5 格远的目的地门槛 4 格");
+        assertEquals(5.0, PartialPathRanking.segmentThreshold(-20), 1e-9, "估价是负数的离开类目标照旧 5 格");
+        assertEquals(5.0, PartialPathRanking.segmentThreshold(Double.NaN), 1e-9);
+
+        // 目的地在 30 格外：朝它走正好 5 格的不算像样分段，走出 6 格的算，和原来一样。
+        Goal goal = standAt(30, 64, 0);
+        PathNode start = node(goal, 0, 64, 0, 0);
+        PartialPathRanking ranking = new PartialPathRanking(0, 64, 0, start, 0.01);
+        ranking.consider(node(goal, 5, 64, 0, 5 * 4.633));
+        assertFalse(ranking.hasSegmentPastStart(), "离起点正好 5 格不算");
+        ranking.consider(node(goal, 6, 64, 0, 6 * 4.633));
+        assertTrue(ranking.hasSegmentPastStart(), "离起点 6 格算");
+        assertEquals(6, ranking.firstNodePastStart().x);
+    }
+
+    @Test
+    void 目的地就在跟前时_比起点还远的节点再远也不给半截路() {
+        // 目的地在 3 格外的墙后，门槛缩到 2.4 格：往反方向、往两侧走远的节点估价都比起点大，进不了排位，
+        // 交回的是没有路线，不会领着人越走越远、来回重算。
+        Goal goal = standAt(3, 64, 0);
+        PathNode start = node(goal, 0, 64, 0, 0);
+        PartialPathRanking ranking = new PartialPathRanking(0, 64, 0, start, 0.01);
+        for (int d = 3; d <= 10; d++) {
+            ranking.consider(node(goal, -d, 64, 0, d * 4.633));
+            ranking.consider(node(goal, 0, 64, d, d * 4.633));
+            ranking.consider(node(goal, -d, 64, -d, d * 6.55));
+        }
+        assertFalse(ranking.hasSegmentPastStart(), "比起点远的节点不给半截路");
+        assertNull(ranking.firstNodePastStart());
+
+        // 绕到墙侧、比起点离目的地近的一格（离起点约 2.8 格）：给，终点估价比起点小。
+        ranking.consider(node(goal, 2, 64, 2, 2 * 6.55));
+        PathNode end = ranking.firstNodePastStart();
+        assertTrue(end != null && end.estimatedCostToGoal < start.estimatedCostToGoal, "半截路终点要比起点离目的地近");
     }
 }
