@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.KeepInventoryRule;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
@@ -141,7 +142,7 @@ final class OfflineCatalog {
                             @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
                             @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
                         },
-                        new UnloadedWorld()),
+                        new UnloadedWorld(), new KeepInventoryRule()),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary()),
                         new LiveDigToolRule(ItemsToKeep.NOTHING, blockId -> true)),

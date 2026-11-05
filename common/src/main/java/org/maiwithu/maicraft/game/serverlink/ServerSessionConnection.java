@@ -108,6 +108,11 @@ final class ServerSessionConnection {
             admission(envelope);
             return true;
         }
+        // 服主中途改了死亡不掉落：照新值记下，不重新握手。
+        if (kind.equals(ServerProtocolDispatcher.RULES)) {
+            capabilities.rulesChanged(envelope);
+            return true;
+        }
         if (kind.equals("welcome")) {
             if (!nonce.equals(ServerCapabilityState.text(envelope, "clientNonce"))
                     || capabilities.state != ServerCapabilityState.State.NEGOTIATING) return true;

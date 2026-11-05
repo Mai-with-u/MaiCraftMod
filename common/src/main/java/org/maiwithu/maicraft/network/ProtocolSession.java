@@ -41,7 +41,8 @@ final class ProtocolSession {
 
     boolean expired(long tick) { return tick - lastTick > RETENTION_TICKS; }
 
-    JsonObject welcome(long tick) {
+    /** @param keepInventory 此刻的死亡不掉落规则；读不到为 null，欢迎包里不带 */
+    JsonObject welcome(long tick, Boolean keepInventory) {
         JsonObject response = new JsonObject();
         response.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
         response.addProperty("kind", "welcome");
@@ -51,6 +52,8 @@ final class ProtocolSession {
         response.addProperty("dimension", dimension);
         // 存档的世界编号：客户端按它认出是哪个世界（删档后同名重建也认得出是新的）；旧版本客户端不读这一项。
         if (worldId != null) response.addProperty("worldId", worldId);
+        // 死亡不掉落：客户端连别人的服务器时读不到这条规则，由服务端报；旧版本客户端不读这一项。
+        if (keepInventory != null) response.addProperty("keepInventory", keepInventory);
         response.addProperty("controlGeneration", controlGeneration);
         response.addProperty("allowed", allowed && !closed);
         response.addProperty("serverTick", tick);

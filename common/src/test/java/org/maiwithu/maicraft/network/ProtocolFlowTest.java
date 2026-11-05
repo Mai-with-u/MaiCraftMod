@@ -19,11 +19,13 @@ class ProtocolFlowTest {
         boolean mayMutate = true;
         boolean admitted = true;
         String worldId = "ab".repeat(32);
+        Boolean keepInventory = true;
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return clock.get(); }
         @Override public boolean admitted() { return admitted; }
         @Override public String worldId() { return worldId; }
+        @Override public Boolean keepInventory() { return keepInventory; }
         @Override public boolean mayMutate() { return mayMutate; }
         @Override public List<ServerFeature> features() {
             return List.of(new ServerFeature("ownership.query", 1, false, true, new JsonObject()),
@@ -47,6 +49,36 @@ class ProtocolFlowTest {
         versions.addProperty("test.place", 1);
         request.add("features", versions);
         return request;
+    }
+
+    @Test
+    void 欢迎包报死亡不掉落_读不到时不带() {
+        var on = new FakePeer();
+        assertTrue(new ServerProtocolDispatcher().receive(hello(), on).get("keepInventory").getAsBoolean());
+        var off = new FakePeer();
+        off.keepInventory = false;
+        assertFalse(new ServerProtocolDispatcher().receive(hello(), off).get("keepInventory").getAsBoolean());
+        var unknown = new FakePeer();
+        unknown.keepInventory = null;
+        assertFalse(new ServerProtocolDispatcher().receive(hello(), unknown).has("keepInventory"));
+    }
+
+    @Test
+    void 同一随机数重发握手_欢迎包报的是此刻的规则() {
+        // 握手之后服主改了规则，客户端重发同一个握手：回的欢迎包按此刻的规则报，不按建会话时的。
+        var peer = new FakePeer();
+        var dispatcher = new ServerProtocolDispatcher();
+        dispatcher.receive(hello(), peer);
+        peer.keepInventory = false;
+        assertFalse(dispatcher.receive(hello(), peer).get("keepInventory").getAsBoolean());
+    }
+
+    @Test
+    void 规则变了的通知_编解码往返不变() {
+        JsonObject notice = ServerProtocolDispatcher.rulesNotice(false);
+        JsonObject decoded = ProtocolJson.decode(ProtocolJson.encode(notice));
+        assertEquals(ServerProtocolDispatcher.RULES, decoded.get("kind").getAsString());
+        assertFalse(decoded.get("keepInventory").getAsBoolean());
     }
 
     @Test

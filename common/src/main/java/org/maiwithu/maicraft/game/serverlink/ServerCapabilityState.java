@@ -25,6 +25,8 @@ public final class ServerCapabilityState {
     JsonObject limits = new JsonObject();
     /** 欢迎包里服务器报的存档世界编号；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
     String worldId;
+    /** 服务端报的死亡不掉落；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
+    Boolean keepInventory;
 
     public State state() { return state; }
     public String reason() { return reason; }
@@ -32,6 +34,8 @@ public final class ServerCapabilityState {
     public Scope scope() { return scope; }
     /** 握手时服务器报的存档世界编号；欢迎包里没有或不像样时为 null。只在 {@link #scope()} 不为 null 时有意义。 */
     public String worldId() { return worldId; }
+    /** 服务端报的死亡不掉落（握手时报、改了再推）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
+    public Boolean keepInventory() { return keepInventory; }
     public Map<String, Feature> features() { return Map.copyOf(features); }
     public JsonObject limits() { return limits.deepCopy(); }
 
@@ -51,8 +55,16 @@ public final class ServerCapabilityState {
         reason = detail;
         scope = null;
         worldId = null;
+        keepInventory = null;
         features.clear();
         limits = new JsonObject();
+    }
+
+    // 服务端推来"规则变了"：握好手的才照新值记；还在握手的等欢迎包带当时的值。
+    void rulesChanged(JsonObject envelope) {
+        if (scope == null) return;
+        Boolean reported = bool(envelope, "keepInventory");
+        if (reported != null) keepInventory = reported;
     }
 
     void welcome(JsonObject envelope, long connection, String dimension) {
@@ -71,6 +83,8 @@ public final class ServerCapabilityState {
         // 世界编号只收 64 位小写十六进制：服务器报来别的样子就当没报，客户端退回按服务器地址认，不让一串外来文字当存档文档库的键。
         String reported = text(envelope, "worldId");
         worldId = reported.matches("[0-9a-f]{64}") ? reported : null;
+        // 死亡不掉落只收布尔值：旧版本服务端不报、报来别的样子都按没报，客户端照旧读不到。
+        keepInventory = bool(envelope, "keepInventory");
         features.clear();
         features.putAll(discovered);
         limits = object(envelope, "limits").deepCopy();
@@ -108,6 +122,10 @@ public final class ServerCapabilityState {
 
     static String text(JsonObject object, String name) {
         return object.has(name) && !object.get(name).isJsonNull() ? object.get(name).getAsString() : "";
+    }
+    static Boolean bool(JsonObject object, String name) {
+        return object.has(name) && object.get(name).isJsonPrimitive() && object.getAsJsonPrimitive(name).isBoolean()
+                ? object.get(name).getAsBoolean() : null;
     }
     static JsonObject object(JsonObject object, String name) {
         return object.has(name) && object.get(name).isJsonObject()

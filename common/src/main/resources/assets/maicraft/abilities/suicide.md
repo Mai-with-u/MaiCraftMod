@@ -22,8 +22,8 @@
 
 ## 死亡不掉落
 
-- 单人世界、开局域网的主机：直接读游戏规则，关着就不做，不看 `keep_inventory_confirmed`。
-- 连别人的服务器读不到这条规则：给 `keep_inventory_confirmed=true` 就做；不给会问一句"这个服务器开着吗"，答 `yes` 接着做，答 `no` 不做。
+- 单人世界、开局域网的主机直接读游戏规则；连服务器时服务端 MaiCraft 会报这条规则（服主中途改了也会再报）。读得到就按规则来，关着就不做，不看 `keep_inventory_confirmed`。`observe(self)` 的 `keep_inventory` 就是读到的值。
+- 服务端是旧版、没报这条规则（`keep_inventory` 是 `unknown`）：给 `keep_inventory_confirmed=true` 就做；不给会问一句"这个服务器开着吗"，答 `yes` 接着做，答 `no` 不做。
 - 创造、旁观模式死不了，极限模式死了不能重生，都不做。
 
 ## 结果怎么读
@@ -32,7 +32,7 @@
 - `unconfirmed`：右键出去没等到确认的点火、倒岩浆。
 - `details.way`：最后用的死法（`command` / `lava` / `fall` / `cactus` / `hostile_mob` / `fire` / `lava_bucket`）。
 - `details.command`：发过的寻死命令（`/suicide` 或 `/kill @s`），没发没有这一项。
-- `details.keep_inventory_known_by`：怎么知道开着死亡不掉落的——`game_rule` 读到游戏规则，`caller_confirmed` 你确认的。
+- `details.keep_inventory_known_by`：怎么知道开着死亡不掉落的——`game_rule` 读到游戏规则（单人读本机，连服务器是服务端报的），`caller_confirmed` 你确认的。
 - `details.armor_still_worn`、`details.totems_still_held`：没脱下、没收起的，带原因。
 - `details.armor_not_restored`：脱下了没穿回的，带原因（原件找不到、原部位有别的、被新目标替换来不及穿）。
 - 没死成时 `problem.message` 按死法摊开说一次：试过的说放弃了几处、为什么；没试的说为什么用不上（没带打火石、附近没找到……）。

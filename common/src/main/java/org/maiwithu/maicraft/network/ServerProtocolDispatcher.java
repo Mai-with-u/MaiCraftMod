@@ -14,6 +14,8 @@ public final class ServerProtocolDispatcher {
     public static final String NOT_CHARACTER_ACCOUNT = "not_character_account";
     /** 服务端主动推的"准入变了"：服主用命令把这个号加进或撤出角色账号名单。 */
     public static final String ADMISSION = "admission";
+    /** 服务端主动推的"游戏规则变了"：死亡不掉落被改了，客户端照新值读。 */
+    public static final String RULES = "rules";
 
     public interface Peer {
         String dimension();
@@ -22,6 +24,8 @@ public final class ServerProtocolDispatcher {
         boolean admitted();
         /** 这台服务器当前存档的世界编号，握手时报给客户端，客户端按它认出是哪个世界；没有时为 null，欢迎包里就不带。 */
         String worldId();
+        /** 这台服务器此刻的死亡不掉落规则，握手时报给客户端；读不到为 null，欢迎包里就不带。 */
+        default Boolean keepInventory() { return null; }
         boolean mayMutate();
         List<ServerFeature> features();
         JsonObject execute(String operationId, JsonObject body);
@@ -79,7 +83,7 @@ public final class ServerProtocolDispatcher {
                 if (session.closed || !session.dimension.equals(peer.dimension()))
                     return failure(request, "hello", "session_closed", "Use a new nonce for the current world", peer.tick());
                 session.lastTick = peer.tick();
-                return session.welcome(peer.tick());
+                return session.welcome(peer.tick(), peer.keepInventory());
             }
         }
         if (limited(peer.tick())) return failure(request, "hello", "rate_limited", "Per-tick request budget exhausted", peer.tick());
@@ -92,7 +96,7 @@ public final class ServerProtocolDispatcher {
         if (sessions.size() >= MAX_SESSIONS)
             return failure(request, "hello", "session_capacity", "Receipt retention prevents another session yet", peer.tick());
         ProtocolSession session = new ProtocolSession(request, peer);
-        JsonObject welcome = session.welcome(peer.tick());
+        JsonObject welcome = session.welcome(peer.tick(), peer.keepInventory());
         ProtocolJson.encode(welcome);
         // 新作用域会撤销已有修改权限，同时保留请求记录的查询能力。
         invalidateWorld();
@@ -135,6 +139,18 @@ public final class ServerProtocolDispatcher {
         notice.addProperty("kind", ADMISSION);
         notice.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
         notice.addProperty("admitted", admitted);
+        return notice;
+    }
+
+    /**
+     * 游戏规则变了的通知：服主中途改了死亡不掉落（/gamerule keepInventory），推给有会话的角色，
+     * 客户端照新值读，不用重新握手。
+     */
+    public static JsonObject rulesNotice(boolean keepInventory) {
+        JsonObject notice = new JsonObject();
+        notice.addProperty("kind", RULES);
+        notice.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
+        notice.addProperty("keepInventory", keepInventory);
         return notice;
     }
 

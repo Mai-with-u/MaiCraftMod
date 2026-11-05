@@ -575,7 +575,7 @@
           "name": "keep_inventory_confirmed",
           "type": "boolean",
           "required": false,
-          "doc": "你确认这个服务器开着死亡不掉落；连别人的服务器时给 true，单人世界以游戏规则为准"
+          "doc": "你确认这个服务器开着死亡不掉落；只有服务端是旧版、报不了规则时才要给 true，读得到规则（单人世界，或服务端报了）时以规则为准"
         }
       ],
       "targets": [],

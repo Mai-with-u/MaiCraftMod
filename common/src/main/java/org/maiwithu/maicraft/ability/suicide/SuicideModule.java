@@ -82,12 +82,12 @@ public final class SuicideModule implements AbilityModule {
 
     /**
      * 接在真实客户端上的一份：读角色与世界、走到、直接按键、换手、瞄准交互、穿卸装备、保护与许可都用共用的那一套；
-     * 寻死命令读客户端收到的命令树、经聊天输入发出去。
+     * 寻死命令读客户端收到的命令树、经聊天输入发出去；死亡不掉落读这个世界那一份（连服务器时是服务端报的）。
      */
     public static SuicideModule live(Supplier<PlayerContext> context, WalkTo walks, Interactions interactions,
             ClientMovesToMainhand toMainhand, GearChanges gear, ReadsEffects effects, Protection protection,
-            PermissionCheck permission, ChatChannel chat) {
-        LiveSuicidePlayer player = new LiveSuicidePlayer(context, new KeepInventoryRule(), effects);
+            PermissionCheck permission, ChatChannel chat, KeepInventoryRule keepInventory) {
+        LiveSuicidePlayer player = new LiveSuicidePlayer(context, keepInventory, effects);
         return new SuicideModule(player,
                 permissions -> new LiveSuicideWorld(context, protection, permission, permissions),
                 new LiveSuicideMoves(context, walks, interactions, toMainhand), gear,
@@ -107,7 +107,8 @@ public final class SuicideModule implements AbilityModule {
                         ParamSpec.of("max_seconds", ParamType.INTEGER).range(MIN_SECONDS, MAX_SECONDS)
                                 .defaultValue(DEFAULT_SECONDS).doc("最多花多少秒去死；死亡、暂停、穿回护甲的时间不算").build(),
                         ParamSpec.of("keep_inventory_confirmed", ParamType.BOOLEAN)
-                                .doc("你确认这个服务器开着死亡不掉落；连别人的服务器时给 true，单人世界以游戏规则为准").build()),
+                                .doc("你确认这个服务器开着死亡不掉落；只有服务端是旧版、报不了规则时才要给 true，"
+                                        + "读得到规则（单人世界，或服务端报了）时以规则为准").build()),
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
     }
 
@@ -144,7 +145,7 @@ public final class SuicideModule implements AbilityModule {
         };
     }
 
-    // 连别人的服务器读不到规则：调用方确认了就做；没确认就问一句，答了按答的办，不用重下。
+    // 服务端是旧版、没报规则：调用方确认了就做；没确认就问一句，答了按答的办，不用重下。
     private StepDecision unreadableRule(StepContext step, ParamValues params, Permissions permissions, WayToDie via) {
         if (params.has("keep_inventory_confirmed") && params.bool("keep_inventory_confirmed")) {
             return run(params, permissions, via, BY_CALLER);
@@ -155,7 +156,7 @@ public final class SuicideModule implements AbilityModule {
             return new StepDecision.Finish(TaskResult.cancelled("这个服务器没开死亡不掉落，不寻死"));
         }
         return new StepDecision.Ask(new Question(Question.Reason.NEED_APPROVAL,
-                "连的是别人的服务器，读不到死亡不掉落（keepInventory）开没开。这个服务器开着吗？"
+                "这个服务器的 MaiCraft 是旧版，没报死亡不掉落（keepInventory）开没开。这个服务器开着吗？"
                         + "开着才寻死；没开的话死了东西会掉在原地。",
                 List.of(new Question.Option("yes", "开着，继续寻死"),
                         new Question.Option("no", "没开，不做了"))));

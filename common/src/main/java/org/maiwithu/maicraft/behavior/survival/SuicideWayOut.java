@@ -15,7 +15,7 @@ public interface SuicideWayOut {
 
     /** 读到死亡不掉落开着时说的。 */
     String WHEN_ON = "死亡不掉落开着，位置不要紧的话可以 suicide 回重生点，血和饱食度都是满的";
-    /** 连别人的服务器读不到规则时说的：要调用方确认开着才能寻死。 */
+    /** 服务端是旧版、报不了规则时说的：要调用方确认开着才能寻死。 */
     String WHEN_UNKNOWN = "如果这个服务器开着死亡不掉落，位置不要紧的话可以 suicide（带 keep_inventory_confirmed=true）"
             + "回重生点，血和饱食度都是满的";
 

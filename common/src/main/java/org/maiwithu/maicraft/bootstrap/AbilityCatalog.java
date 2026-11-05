@@ -425,7 +425,7 @@ public final class AbilityCatalog {
         registry.register(SuicideModule.live(deps.character().context(), deps.travel().walks(),
                 deps.hands().interactions(), shared.toMainhand(),
                 new ClientGearChanges(deps.character().context(), shared.toMainhand()), deps.character().effects(),
-                deps.guards().protection(), shared.permission(), deps.channels().chat()));
+                deps.guards().protection(), shared.permission(), deps.channels().chat(), deps.world().keepInventory()));
     }
 
     /**

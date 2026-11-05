@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.serverlink;
 
+import org.maiwithu.maicraft.network.ProtocolJson;
+import org.maiwithu.maicraft.network.ServerFeature;
+import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -195,6 +198,69 @@ class RequestRouterTest {
         envelope.addProperty("code", "not_character_account");
         envelope.addProperty("clientNonce", clientNonce);
         return envelope;
+    }
+
+    /** 服务端那一侧的假对端：只为握手，死亡不掉落按字段报。 */
+    private static final class ServerSide implements ServerProtocolDispatcher.Peer {
+        Boolean keepInventory;
+
+        @Override public String dimension() { return "minecraft:overworld"; }
+        @Override public long tick() { return 100; }
+        @Override public boolean admitted() { return true; }
+        @Override public String worldId() { return null; }
+        @Override public Boolean keepInventory() { return keepInventory; }
+        @Override public boolean mayMutate() { return true; }
+        @Override public List<ServerFeature> features() { return List.of(); }
+        @Override public JsonObject execute(String operationId, JsonObject body) { return new JsonObject(); }
+    }
+
+    // 客户端发出的握手原样交给服务端协议引擎，回的欢迎包按线上的样子编码再解码交回客户端。
+    private static void handshake(RequestRouter router, CapturingTransport transport, ServerSide server, long connection) {
+        JsonObject hello = ProtocolJson.decode(ProtocolJson.encodeRequest(transport.last()));
+        JsonObject welcome = new ServerProtocolDispatcher().receive(hello, server);
+        router.receive(ProtocolJson.decode(ProtocolJson.encode(welcome)), connection);
+    }
+
+    @Test
+    void 服务端报的死亡不掉落_握手往返记下_改了照新值_旧服务端不报() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        assertNull(session.capabilities.keepInventory(), "还没握好手：读不到");
+
+        var server = new ServerSide();
+        server.keepInventory = true;
+        handshake(router, transport, server, 1);
+        assertTrue(router.serverConfirmed());
+        assertEquals(Boolean.TRUE, session.capabilities.keepInventory());
+
+        // 服主中途关了：服务端推一条"规则变了"，照新值记，不重新握手。
+        router.receive(ServerProtocolDispatcher.rulesNotice(false), 1);
+        assertEquals(Boolean.FALSE, session.capabilities.keepInventory());
+        assertTrue(router.serverConfirmed());
+
+        // 换到旧版服务端（不报这一项）：重新握手后按没报算。
+        router.bind(2, 2, "minecraft:overworld", 0, true, 1);
+        router.observe(1);
+        handshake(router, transport, new ServerSide(), 2);
+        assertTrue(router.serverConfirmed());
+        assertNull(session.capabilities.keepInventory());
+    }
+
+    @Test
+    void 还没握好手时收到规则变了_不记() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        router.receive(ServerProtocolDispatcher.rulesNotice(true), 1);
+        assertNull(router.session().capabilities.keepInventory(), "欢迎包会带当时的值，握手前的推送不算");
     }
 
     private static JsonObject admission(boolean admitted) {

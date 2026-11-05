@@ -70,6 +70,8 @@ final class ServerStartup {
             @Override public void tickEnd(MinecraftServer server) {
                 // 首刻建好本服务器的服务；之后每五分钟把归属记录的改动存一次盘，停服时再存一次。
                 attach.accept(server);
+                // 服主中途改了死亡不掉落：推给有会话的角色，寻死和看自己照新值读。
+                network.watchRules(server, push);
                 if (server.getTickCount() % OWNERSHIP_SAVE_INTERVAL_TICKS == 0) {
                     ownershipSaver.saveLater(server);
                 }

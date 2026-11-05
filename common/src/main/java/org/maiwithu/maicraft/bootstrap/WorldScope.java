@@ -155,7 +155,7 @@ public final class WorldScope {
     /** 认出的是哪个世界：这一趟进世界里不再变，宿主读事件、看自己时都带着它。 */
     private final SaveIdentity world;
     /** observe(self) 读的死亡不掉落与重生点：本机服务端上要交给服务端线程读，读到的记在这一份里，换世界跟着换。 */
-    private final KeepInventoryRule keepInventory = new KeepInventoryRule();
+    private final KeepInventoryRule keepInventory;
     private final RespawnPoint respawnPoint = new RespawnPoint();
     /** 走投无路时提的那句寻死出路：能力从角色读端拿，寻路与吃饭经启动一侧转到当前世界这一份。 */
     private final SuicideWayOut suicideWayOut;
@@ -231,7 +231,8 @@ public final class WorldScope {
         this.modSights = compat.modSights();
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-        // 寻死出路和 observe(self) 读同一份死亡不掉落：走投无路要提的那一刻就有现成的值。
+        // 死亡不掉落：单人读本机，连服务器读服务端握手时报的（改了再推）；寻死、寻死出路和 observe(self) 读同一份。
+        this.keepInventory = new KeepInventoryRule(() -> session.capabilities().keepInventory());
         this.suicideWayOut = new LiveSuicideWayOut(now, keepInventory);
         this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
@@ -254,7 +255,7 @@ public final class WorldScope {
                         LiveCarryReads.characterPosition(now), suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
-                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld),
+                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),

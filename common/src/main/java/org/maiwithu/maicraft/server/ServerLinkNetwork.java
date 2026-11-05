@@ -12,6 +12,7 @@ import java.util.function.Predicate;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.network.ServerGamePacketListenerImpl;
+import net.minecraft.world.level.GameRules;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.network.ProtocolJson;
 import org.maiwithu.maicraft.network.ProtocolReplies;
@@ -38,6 +39,8 @@ public final class ServerLinkNetwork {
      */
     private final Set<ServerGamePacketListenerImpl> refused =
             Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    /** 上一刻看到的死亡不掉落；还没看过（刚开服）为 null。只在服务端线程读写。 */
+    private Boolean keepInventorySeen;
 
     /**
      * @param operations 服务端操作注册表
@@ -84,6 +87,9 @@ public final class ServerLinkNetwork {
             @Override public long tick() { return Integer.toUnsignedLong(server.getTickCount()); }
             @Override public boolean admitted() { return admitted; }
             @Override public String worldId() { return ServerLinkServices.worldId(server); }
+            @Override public Boolean keepInventory() {
+                return server.getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
+            }
             @Override public boolean mayMutate() { return player.isAlive() && !player.isSpectator(); }
             @Override public List<ServerFeature> features() { return operations.features(player); }
             @Override public JsonObject execute(String operationId, JsonObject body) {
@@ -115,6 +121,26 @@ public final class ServerLinkNetwork {
         }
     }
 
+    /**
+     * 每刻看一眼死亡不掉落：服主中途改了，就给这台服务器上每个有会话的角色推一条"规则变了"。
+     * 第一刻只记下当时的值；握手时欢迎包里已经报过，不重推。
+     *
+     * @param push 给玩家发信封的加载器通道
+     */
+    public void watchRules(MinecraftServer server, ServerConfirmations.Push push) {
+        boolean now = server.getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
+        Boolean before = keepInventorySeen;
+        keepInventorySeen = now;
+        if (before == null || before == now) return;
+        List<ServerPlayer> players;
+        synchronized (connections) {
+            players = connections.keySet().stream().map(connection -> connection.player)
+                    .filter(player -> player.serverLevel().getServer() == server && !player.hasDisconnected()).toList();
+        }
+        JsonObject notice = ServerProtocolDispatcher.rulesNotice(now);
+        players.forEach(player -> push.send(player, notice));
+    }
+
     public void worldChanged(ServerPlayer player) {
         var dispatcher = connections.get(player.connection);
         if (dispatcher != null) dispatcher.invalidateWorld();
@@ -132,6 +158,8 @@ public final class ServerLinkNetwork {
                     .filter(connection -> connection.player.serverLevel().getServer() == server).toList();
         }
         remaining.forEach(connections::remove);
+        // 下一次开的世界规则可能不一样：重新从第一刻记起。
+        keepInventorySeen = null;
         // 停服时连接都没了：记过日志的连接一并清掉，单人游戏下次开世界重新记。
         refused.clear();
     }
