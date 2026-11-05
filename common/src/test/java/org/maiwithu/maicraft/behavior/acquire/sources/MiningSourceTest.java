@@ -56,6 +56,8 @@ class MiningSourceTest {
     private final FakeBackpack backpack = new FakeBackpack(36);
     private final FakeOffhand offhand = new FakeOffhand();
     private final CapturingNeeds needs = new CapturingNeeds();
+    /** 物品标签：备工具前数身上的原木、木板、石料要用；默认空着。 */
+    private final FakeTags tags = new FakeTags();
 
     /** 替身：记下递归进来的内部需求，动作当场做完。 */
     private static final class CapturingNeeds implements ItemNeeds {
@@ -87,7 +89,12 @@ class MiningSourceTest {
             return complete;
         }
         @Override public List<MinableSpot> minable(WantedItem wanted, DropsFrom dropsFrom, WorldPosition center, int radiusBlocks) {
-            return spots;
+            // 问做石制工具的料时只认掉圆石的格子：一片树林里看不见石头；问别的东西时掉圆石的格子不算它的来路。
+            if ("minecraft:stone_tool_materials".equals(wanted.tagId())) {
+                return spots.stream().filter(spot -> spot.droppedItem().equals("minecraft:cobblestone")).toList();
+            }
+            return spots.stream().filter(spot -> !spot.droppedItem().equals("minecraft:cobblestone")
+                    || spot.droppedItem().equals(wanted.itemId())).toList();
         }
         @Override public boolean anyBlockDrops(WantedItem wanted, DropsFrom dropsFrom) {
             return anyDrops;
@@ -211,7 +218,7 @@ class MiningSourceTest {
                         return Optional.empty();
                     }
                 });
-        return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, new FakeTags(),
+        return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, tags,
                 needs, null);
     }
 
@@ -564,12 +571,69 @@ class MiningSourceTest {
 
     @Test
     void 成批砍树先备一把石斧再砍() {
+        // 身上有三块圆石：石斧的料在手边，先备石斧。
         FakeDigs digs = new FakeDigs();
+        tags.put("minecraft:cobblestone", "minecraft:stone_tool_materials");
+        backpack.add("minecraft:cobblestone", 3);
         MiningSource source = source(new FakeMinables(tree(6), true), digs);
         source.prepareWorkTools(axeFirst(0), List::of);
         runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
                 new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
         assertEquals("minecraft:stone_axe", needs.asked.getFirst().wanted().specifier());
+        assertEquals(6, digs.dug.size());
+    }
+
+    @Test
+    void 附近看得见石头_身上没有石料也照样先备石斧() {
+        // 身上没有圆石，但旁边露着一块石头：挖三块就够，照旧先备石斧。
+        FakeDigs digs = new FakeDigs();
+        List<MinableSpot> spots = new ArrayList<>(tree(6));
+        spots.add(new MinableSpot(new BlockPos(5, 63, 0), "minecraft:stone", "minecraft:cobblestone"));
+        MiningSource source = source(new FakeMinables(spots, true), digs);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertEquals("minecraft:stone_axe", needs.asked.getFirst().wanted().specifier());
+    }
+
+    @Test
+    void 海边看不见石头_身上有原木木棍_改备木斧不去挖楼梯() {
+        // 实机 11-04：海边要 6 根橡木，身上 4 根橡木 2 根木棍，没有石头：不为石斧往下挖楼梯，改做一把木斧再砍。
+        FakeDigs digs = new FakeDigs();
+        tags.put("minecraft:oak_log", "minecraft:logs");
+        backpack.add("minecraft:oak_log", 4);
+        backpack.add("minecraft:stick", 2);
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertEquals(List.of("minecraft:wooden_axe"),
+                needs.asked.stream().map(request -> request.wanted().specifier()).toList());
+        assertEquals(6, digs.dug.size());
+    }
+
+    @Test
+    void 看不见石头_身上已有木斧_直接砍不再备() {
+        FakeDigs digs = new FakeDigs();
+        tags.put("minecraft:oak_log", "minecraft:logs");
+        backpack.add("minecraft:oak_log", 4);
+        backpack.add("minecraft:wooden_axe", 1);
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertTrue(needs.asked.isEmpty(), "拿着木斧砍");
+        assertEquals(6, digs.dug.size());
+    }
+
+    @Test
+    void 看不见石头_木料也不够_徒手砍() {
+        FakeDigs digs = new FakeDigs();
+        MiningSource source = source(new FakeMinables(tree(6), true), digs);
+        source.prepareWorkTools(axeFirst(0), List::of);
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertTrue(needs.asked.isEmpty(), "什么工具都不备");
         assertEquals(6, digs.dug.size());
     }
 

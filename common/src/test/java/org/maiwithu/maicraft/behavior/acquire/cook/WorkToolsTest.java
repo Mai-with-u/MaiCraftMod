@@ -10,6 +10,19 @@ import org.junit.jupiter.api.Test;
 class WorkToolsTest {
 
     @Test
+    void 石料不在手边时改备木制的_身上有木制的或木料不够就不备() {
+        // 石料在手边照旧备石斧；不在手边、木料够做就备木斧；身上已有木斧就拿它干、不再备；木料也不够就徒手。
+        assertEquals(Optional.of("minecraft:stone_axe"), WorkTools.affordable("minecraft:stone_axe", true, false, false));
+        assertEquals(Optional.of("minecraft:wooden_axe"), WorkTools.affordable("minecraft:stone_axe", false, false, true));
+        assertEquals(Optional.empty(), WorkTools.affordable("minecraft:stone_axe", false, true, true));
+        assertEquals(Optional.empty(), WorkTools.affordable("minecraft:stone_axe", false, false, false));
+        // 不是石制的基准工具（要铁镐的矿）不在这本账里，照旧备。
+        assertEquals(Optional.of("minecraft:iron_pickaxe"),
+                WorkTools.affordable("minecraft:iron_pickaxe", false, false, false));
+        assertEquals("minecraft:wooden_shovel", WorkTools.woodenOf("minecraft:stone_shovel"));
+    }
+
+    @Test
     void 基准工具至少是石制_要铁镐的矿按铁镐() {
         assertEquals(Optional.of("minecraft:stone_axe"), WorkTools.reference("axe", 0));
         assertEquals(Optional.of("minecraft:stone_pickaxe"), WorkTools.reference("pickaxe", 0));

@@ -31,6 +31,36 @@ public final class WorkTools {
         return Optional.of("minecraft:" + material + "_" + family);
     }
 
+    /**
+     * 备得起哪一把：基准工具是石制的，石料却不在手边（身上不够、附近看不见能挖的、现成的这把也没有来路）时，
+     * 改备同类木制的；身上已经有木制的就直接用、不再备，木料也不够就不备、徒手干——不为一把只是建议用的工具
+     * 去挖楼梯找石头。不是石制的基准工具照旧备。
+     *
+     * @param reference      要备的基准工具
+     * @param stoneAtHand    石料在手边：身上够做一把、附近看得见能挖、或者现成的这把有来路
+     * @param woodenCarried  身上已有同类木制工具
+     * @param woodAtHand     身上的木料（木板、原木、木棍、工作台）够做一把木制的
+     */
+    public static Optional<String> affordable(String reference, boolean stoneAtHand, boolean woodenCarried,
+            boolean woodAtHand) {
+        if (!stoneTier(reference) || stoneAtHand) return Optional.of(reference);
+        if (woodenCarried || !woodAtHand) return Optional.empty();
+        return Optional.of(woodenOf(reference));
+    }
+
+    /** 这把基准工具是不是石制的。 */
+    public static boolean stoneTier(String reference) {
+        return reference.startsWith(STONE_PREFIX);
+    }
+
+    /** 石制基准工具同类的木制工具：石斧对木斧、石镐对木镐。 */
+    public static String woodenOf(String stoneReference) {
+        return WOODEN_PREFIX + stoneReference.substring(STONE_PREFIX.length());
+    }
+
+    private static final String STONE_PREFIX = "minecraft:stone_";
+    private static final String WOODEN_PREFIX = "minecraft:wooden_";
+
     /** 身上那把工具的耐久至少要留多少才算够这批活：这批几格再加余量，最少十六、最多六十四。 */
     public static int durabilityNeeded(int work) {
         return Math.min(64, Math.max(16, work + 8));

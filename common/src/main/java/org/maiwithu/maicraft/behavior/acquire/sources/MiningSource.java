@@ -52,6 +52,9 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.mining.FailedSpots;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsWorkTools;
+import org.maiwithu.maicraft.behavior.acquire.cook.WorkTools;
+import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
+import org.maiwithu.maicraft.behavior.acquire.mining.ToolMaking;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 
 /**
@@ -251,8 +254,11 @@ public final class MiningSource implements ItemSource {
                 if (bootstrap > 0) {
                     batch = batchOf(certain, Math.min(request.count(), bootstrap));
                 } else {
-                    steps.add(new TriesFirst(needs.actionForTool(new ItemRequest(WantedItem.ofItem(workTool.get()), 1,
-                            "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions, null)));
+                    // 备之前过料账：石料不在手边就改备木制的或徒手干，不为建议用的工具去挖楼梯。
+                    affordableWorkTool(workTool.get(), context).filter(tool -> !inChain(tool)).ifPresent(tool ->
+                            steps.add(new TriesFirst(needs.actionForTool(new ItemRequest(WantedItem.ofItem(tool), 1,
+                                    "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions,
+                                    null))));
                 }
             }
         }
@@ -572,6 +578,30 @@ public final class MiningSource implements ItemSource {
             return blockType.isPresent() && permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                     WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()), blockType.get()).isEmpty();
         };
+    }
+
+    // 备一把建议用的石制工具前过料账：石料在身上够一把的头料、附近看得见能挖、或者现成的这把有来路（箱子、网络里放着），
+    // 才备它；不然改备同类木制的（身上已有就直接用，木料不够就徒手干）。料按身上的件数算，正在攒的那种也算
+    // （为砍原木做斧头，原木能做木板）；不为一把只是建议用的工具去挖楼梯找石头。
+    private Optional<String> affordableWorkTool(String tool, SourceContext context) {
+        if (!WorkTools.stoneTier(tool)) return Optional.of(tool);
+        ToolMaking.Stock stock = new ToolMaking.Stock(count(WantedItem.ofTag("minecraft:planks")),
+                count(WantedItem.ofTag("minecraft:logs")), carried("minecraft:stick"), count(STONE_TOOL_MATERIALS),
+                carried("minecraft:crafting_table") > 0, 0, 0);
+        boolean stoneAtHand = ToolMaking.stoneHeadOnHand(stock)
+                || !minables.minable(STONE_TOOL_MATERIALS, DropsFrom.NONE, context.characterAt(),
+                        searchRadius(context)).isEmpty()
+                || needs.cheapestCost(new ItemRequest(WantedItem.ofItem(tool), 1, "看现成的这把有没有来路"),
+                        context.permissions(), false).isPresent();
+        return WorkTools.affordable(tool, stoneAtHand, carried(WorkTools.woodenOf(tool)) > 0,
+                ToolMaking.shortOf(ToolMaking.Head.PLANKS, stock).isEmpty());
+    }
+
+    /** 做石制工具的料：圆石、深板岩圆石、黑石这类（原版的石质工具材料标签）。 */
+    private static final WantedItem STONE_TOOL_MATERIALS = WantedItem.ofTag("minecraft:stone_tool_materials");
+
+    private int count(WantedItem wanted) {
+        return CarriedItems.matching(backpack, offhand, wanted, tags);
     }
 
     // 引擎正在推进的请求里已经有要这把工具的（正在为做它挖料）：不再先要它，免得为做斧头先要斧头。

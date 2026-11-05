@@ -95,13 +95,25 @@ public final class ToolMaking {
         return firstShort != null ? new Decision.NoMaterial(firstShort, firstWhy) : new Decision.NotWorth(best);
     }
 
-    // 料够不够做这一把：头料三件、木棍两根（不够就拿两块木板现做四根）、没带工作台再四块木板。
     private static Optional<String> missing(Option option, Stock stock) {
+        return shortOf(option.head(), stock);
+    }
+
+    /** 身上不留的石质料够不够一把石制工具的头料（三块）；木棍、木板另算。 */
+    public static boolean stoneHeadOnHand(Stock stock) {
+        return stock.stone() >= HEAD;
+    }
+
+    /**
+     * 料够不够做一把这种头料的工具：头料三件、木棍两根（不够就拿两块木板现做四根）、没带工作台再四块木板。
+     * 够了给空；不够说缺的是什么。成批采掘前备建议用的工具时也问这一本账。
+     */
+    public static Optional<String> shortOf(Head head, Stock stock) {
         int planksNeeded = (stock.sticks() >= STICKS ? 0 : PLANKS_PER_STICK_CRAFT)
                 + (stock.table() ? 0 : PLANKS_PER_TABLE)
-                + (option.head() == Head.PLANKS ? HEAD : 0);
+                + (head == Head.PLANKS ? HEAD : 0);
         int planksOnHand = stock.planks() + stock.logs() * PLANKS_PER_LOG;
-        if (option.head() == Head.STONE && stock.stone() < HEAD) {
+        if (head == Head.STONE && stock.stone() < HEAD) {
             return Optional.of("石质的料（圆石这类）要 " + HEAD + " 块，身上不留的只有 " + stock.stone() + " 块"
                     + (stock.keptStone() > 0 ? "（留着 " + stock.keptStone() + " 块）" : ""));
         }
