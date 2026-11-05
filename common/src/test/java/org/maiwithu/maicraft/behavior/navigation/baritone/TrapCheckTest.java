@@ -128,7 +128,7 @@ class TrapCheckTest {
         assertTrue(escape.throughOthers());
         assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "许可档位不变，只放开别人的普通方块");
         assertFalse(escape.raise(null, () -> true, 18), "升到头了");
-        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
         assertTrue(stuck.message().contains("还是没出去"), stuck.message());
         escape.noteBroken(new BlockPos(0, 64, 0));
         escape.restore();

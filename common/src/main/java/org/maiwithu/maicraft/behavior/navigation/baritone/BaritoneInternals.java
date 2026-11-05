@@ -29,6 +29,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.ScaffoldBlocks;
@@ -79,6 +80,7 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     private List<OthersBlockBroken> lastOthersBroken = List.of();
     /** 被困挖了别人的方块时当场报给宿主的出口；没接上时就地丢弃。 */
     private TaskEventSink events = TaskEventSink.NONE;
+    private SuicideWayOut wayOut = SuicideWayOut.NONE;
     /** 正要用的东西每种留几件：垫脚只用多出来的。 */
     private final ItemsToKeep keeps;
     /** 挖路之前拿哪件工具。 */
@@ -135,6 +137,15 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     TaskEventSink events() {
         return events;
+    }
+
+    /** 接上寻死出路：卡在坑里出不去、水下从这里到不了时，走不通的建议末尾接那一句。 */
+    public void offerSuicideWith(SuicideWayOut wayOut) {
+        this.wayOut = wayOut == null ? SuicideWayOut.NONE : wayOut;
+    }
+
+    SuicideWayOut suicideWayOut() {
+        return wayOut;
     }
 
     /** 接上联动登记的能直接飞上高处的装备。 */

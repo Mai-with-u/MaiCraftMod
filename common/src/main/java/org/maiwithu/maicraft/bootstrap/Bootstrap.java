@@ -12,6 +12,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.Camera;
 import net.minecraft.client.gui.GuiGraphics;
 import org.joml.Matrix4f;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -227,6 +228,9 @@ public final class Bootstrap {
         private final WorldScope[] worldScope = new WorldScope[1];
         // 目标结束时附的一行自身摘要读当前世界的现场；不在世界里时不附，事件照发。
         private final ReadsSelfBrief selfBriefs = () -> worldScope[0] == null ? Optional.empty() : worldScope[0].selfBrief();
+        /** 寻路与吃饭是客户端全程一份：寻死出路每次问当前世界那一份，不在世界里不提。 */
+        private final SuicideWayOut wayOutInWorld = () -> worldScope[0] == null ? Optional.empty()
+                : worldScope[0].suicideWayOut().line();
         private EmbeddedMcpService mcp;
         /** MCP 入口启动失败的原因；启动成功时为 null。调试面板照实显示。 */
         private String mcpStartFailure;
@@ -419,7 +423,7 @@ public final class Bootstrap {
                     foods,
                     hands,
                     useKeyProjection, kept, survivalWiring::food,
-                    owner -> OnlinePlayers.nameOrId(playerControl.activeContext().orElse(null), owner));
+                    owner -> OnlinePlayers.nameOrId(playerControl.activeContext().orElse(null), owner), wayOutInWorld);
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
@@ -494,6 +498,8 @@ public final class Bootstrap {
             walks.fallBrakes(() -> compat.fallBrakes());
             // 被别人的方块封死、挖开出来时当场报一条任务事件：宿主不等走路结束就知道挖了谁的。
             walks.reportTo(taskEvents);
+            // 卡在坑里出不去、水下从这里到不了时，走不通的建议末尾接寻死出路。
+            walks.offerSuicideWith(wayOutInWorld);
             tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
                     lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot(), reserved);
             // 随包的玩法技能按联动登记表筛：需要的模组都真的接上了才发布，没接上的不进目录。
@@ -675,6 +681,7 @@ public final class Bootstrap {
             if (scope != null) {
                 tickGuard.run("闲时看", () -> scope.idleLooking().tick(new ClientTickContext(gameTick, current),
                         lookingAvailability(owned)));
+                tickGuard.run("死亡不掉落", scope::readKeepInventory);
             }
             if (owned) {
                 // 主任务被临时任务带离原地、回不去：目标挂成暂停并发事件，LLM 才知道身体停着。

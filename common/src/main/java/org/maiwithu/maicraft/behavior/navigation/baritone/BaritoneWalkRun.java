@@ -131,9 +131,9 @@ final class BaritoneWalkRun implements WalkRun {
         this.goal = target.goal();
         // 引擎目标带着现场读格：要求站实的目标搜索时就要干地终点，引擎别在水面上收线。
         this.engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
-        this.progress = new WalkRunProgress(goal);
+        this.progress = new WalkRunProgress(goal, owner.suicideWayOut());
         this.probe = new TerrainProbe(engineGoal, permit);
-        this.escape = new TrapEscape(permit, owner.events());
+        this.escape = new TrapEscape(permit, owner.events(), owner.suicideWayOut());
         this.gear = new WalkGear(owner);
         this.staging = new HotbarStaging(owner, hands, new HotbarStaging.Run() {
             @Override public boolean done() { return progress.done(); }
@@ -398,7 +398,7 @@ final class BaritoneWalkRun implements WalkRun {
         progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
                 : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty(),
                         owner -> TrapEscape.nameOf(owner, context)), () -> TrapWalls.around(context, feet),
-                        !spare.isEmpty()), context.level(), player, permit, spare));
+                        () -> trappedHere(feet), !spare.isEmpty()), context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
             return;

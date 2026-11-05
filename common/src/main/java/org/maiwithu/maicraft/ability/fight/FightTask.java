@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -136,15 +137,23 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private boolean atKillSpot;
     /** 捡这一仗掉出来的东西（共用的捡掉落物）。 */
     private Action pickup;
+    private final SuicideWayOut wayOut;
 
     FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
             NamedTargetConsent consent) {
+        this(input, senses, seenTargets, moves, consent, SuicideWayOut.NONE);
+    }
+
+    /** @param wayOut 撤离后回不了血时提的那句寻死出路 */
+    FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
+            NamedTargetConsent consent, SuicideWayOut wayOut) {
         super("战斗", Phase.CHECK, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
         this.input = Objects.requireNonNull(input, "input");
         this.senses = Objects.requireNonNull(senses, "senses");
         this.seenTargets = Objects.requireNonNull(seenTargets, "seenTargets");
         this.moves = Objects.requireNonNull(moves, "moves");
         this.consent = Objects.requireNonNull(consent, "consent");
+        this.wayOut = Objects.requireNonNull(wayOut, "wayOut");
     }
 
     @Override protected Action enter(Phase phase) { return null; }
@@ -402,7 +411,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
                 fled = true;
                 retreatWhy = moment.retreatWhy();
                 yield Next.fail(RetreatEnding.escaped(moment.retreatWhy(), senses.profile(context),
-                        senses.foodLevel(context)));
+                        senses.foodLevel(context), wayOut.line()));
             }
             case FINISHED -> named.isEmpty()
                     ? Next.go(Phase.LOOT, lastKillSpot == null ? "附近没有要打的了" : "这一批清完了，就地捡一下")

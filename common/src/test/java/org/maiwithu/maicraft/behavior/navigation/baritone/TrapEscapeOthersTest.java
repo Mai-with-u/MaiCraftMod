@@ -125,12 +125,12 @@ class TrapEscapeOthersTest {
         assertTrue(closed, "第二十四格挖开就收回放开，调用方重新算路");
         assertFalse(escape.throughOthers());
         assertFalse(escape.raise(FEET, () -> true, 10), "这一趟到上限后不再放开");
-        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
         assertTrue(stuck.message().contains("24 格的上限") && stuck.message().contains("还是没出去"), stuck.message());
         assertEquals(1, events.size());
         assertTrue(events.getFirst().contains("还是没出去"), events.getFirst());
         // 同一次脱困的说明可能被问好几次，事件只报一次。
-        escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
+        escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
         assertEquals(1, events.size());
     }
 

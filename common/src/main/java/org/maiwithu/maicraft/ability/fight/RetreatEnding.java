@@ -14,24 +14,30 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  *
  * <p>血在拒战线之下、身上没有吃了不伤身的食物、饱食度又低于原版自然回血线三样同时成立时，
  * "吃东西回血再来打"这条链断了：照普通的话术写，LLM 会在吃东西（没吃的）和再打（又撤）之间来回，
- * 所以点破这条链并给全出路——先弄吃的，或开着死亡不掉落时寻死重置。睡觉不回血，不写这条。
+ * 所以点破这条链并给全出路——先弄吃的；附近弄不到吃的时，按死亡不掉落与游戏模式接一句寻死出路。睡觉不回血，不写这条。
  * 有吃的、饱食度够自然回血、读不到饱食度（创造模式）时照普通话术，不插长文。
  */
 final class RetreatEnding {
 
-    /** 回不了血时的出路：弄吃的让血自己回，或寻死重置。 */
+    /** 回不了血时的出路：弄吃的让血自己回；后面按处境接寻死出路。 */
     private static final String HEAL_FIRST = "先 obtain 弄些吃了不伤身的食物（面包、熟肉这类）吃到饱食度 "
-            + HungerNeed.NATURAL_REGEN_FOOD + " 以上，血会自己回，再来打；附近弄不到吃的、又开着死亡不掉落时，"
-            + "也可以 suicide 回出生点重置";
+            + HungerNeed.NATURAL_REGEN_FOOD + " 以上，血会自己回，再来打";
 
     private RetreatEnding() {
     }
 
     /** 甩开了追兵：撤离成功不等于打赢，目标没死就以危险收场。 */
     static Problem escaped(String why, CombatSenses.CombatProfile profile, OptionalInt foodLevel) {
+        return escaped(why, profile, foodLevel, Optional.empty());
+    }
+
+    /** @param wayOut 回不了血时接在出路后面的寻死那句；不该提为空 */
+    static Problem escaped(String why, CombatSenses.CombatProfile profile, OptionalInt foodLevel,
+            Optional<String> wayOut) {
         String message = "撤离成功，甩开了追兵（" + why + "），但目标没有击败——这一仗算没打赢";
+        String healFirst = wayOut.map(line -> HEAL_FIRST + "；附近弄不到吃的时，" + line).orElse(HEAL_FIRST);
         return cannotHeal(profile, foodLevel)
-                .map(dead -> Problem.of(Problem.Kind.DANGER, message + "；" + dead, HEAL_FIRST))
+                .map(dead -> Problem.of(Problem.Kind.DANGER, message + "；" + dead, healFirst))
                 .orElseGet(() -> Problem.of(Problem.Kind.DANGER, message, "吃点东西回血到拒战线以上，或换把武器再来"));
     }
 

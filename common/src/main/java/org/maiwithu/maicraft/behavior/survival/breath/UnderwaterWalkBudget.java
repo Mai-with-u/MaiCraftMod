@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival.breath;
 
+import java.util.Optional;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
@@ -40,8 +41,14 @@ public final class UnderwaterWalkBudget {
 
     /** 放弃上浮时的收场问题：写明氧气还剩多少、停在哪，调用方照原样交给收场结算。 */
     public static Problem giveUpProblem(DrowningDanger.View situation, BlockPos feet) {
+        return giveUpProblem(situation, feet, Optional.empty());
+    }
+
+    /** 同上；水里从这里到不了，建议是那句寻死出路（不该提时没有建议）。 */
+    public static Problem giveUpProblem(DrowningDanger.View situation, BlockPos feet, Optional<String> wayOut) {
         return Problem.of(Problem.Kind.UNREACHABLE,
                 "走到目标的路上潜进了水里，氧气只剩 " + situation.airTicks() + " 刻，"
-                        + "不够再走下去：放弃这段路，先浮上水面换气（停在 " + feet.toShortString() + "）");
+                        + "不够再走下去：放弃这段路，先浮上水面换气（停在 " + feet.toShortString() + "）",
+                wayOut.orElse(null));
     }
 }

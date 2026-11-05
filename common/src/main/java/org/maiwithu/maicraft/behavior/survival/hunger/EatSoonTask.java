@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival.hunger;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -66,6 +67,11 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
          * 身上此刻有没有这会儿该吃的一口（和 {@link #eating} 挑的是同一样）。弄吃的路上每刻问一句，
          * 弄到第一件就回来先吃；饥饿需求歇着不找吃的时，也靠它看身上是不是已经有吃的了。
          */
+        /** 问遍各处弄不到吃的时，事件末尾提的那句寻死出路；默认不提。 */
+        default SuicideWayOut suicideWayOut() {
+            return SuicideWayOut.NONE;
+        }
+
         default boolean carriesBite(HungerNeed.Facts hunger) {
             Action bite = eating(hunger);
             if (bite == null) return false;
@@ -209,7 +215,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
     private Next<Phase> giveUp(Problem problem, boolean resting, TickContext context) {
         // 为回血吃（不饿、伤得重）和真饿着分开说，不把残血想吃一口说成饿了。
         String why = latest != null && !hungry(latest) && latest.eatsToHeal() ? "伤得重想吃点东西回血，但没吃上：" : "饿了但没吃上：";
-        String then = resting ? "；先回去继续干活，过一分钟再找吃的" : "；先回去继续干活";
+        // 问遍各处都弄不到（要歇一分钟再找）：消息末尾再提一句寻死出路，死亡不掉落开着时回重生点饱食度是满的。
+        String then = resting ? SuicideWayOut.appendTo("；先回去继续干活，过一分钟再找吃的", moves.suicideWayOut().line())
+                : "；先回去继续干活";
         tellUnhandled(why + problem.message(), "还是没吃上，原因没变（%s说过了）", then, context);
         return Next.fail(problem);
     }

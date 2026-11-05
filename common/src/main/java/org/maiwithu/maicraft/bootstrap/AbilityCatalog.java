@@ -537,7 +537,7 @@ public final class AbilityCatalog {
                         new ClientDropPickup(deps.character().context(), deps.travel().walks(),
                                 deps.dropConfirmations()),
                         deps.kept()),
-                permission));
+                permission, deps.character().suicideWayOut()));
 
         // 跨维度出行的现场部件一次拼好：找门、进门、建门与末地门房间，出行与跟着过门共用。
         DimensionTravelServices portals = dimensionPortals(deps, shared, construction);

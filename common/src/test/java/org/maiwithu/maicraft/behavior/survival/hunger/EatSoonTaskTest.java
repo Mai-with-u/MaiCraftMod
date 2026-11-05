@@ -7,12 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.behavior.survival.SurvivalFakes;
 import org.maiwithu.maicraft.kernel.event.EventFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -197,6 +199,16 @@ class EatSoonTaskTest {
     }
 
     @Test
+    void nothingFoundAnywhereEndsTheEventWithTheSuicideWayOut() {
+        Problem nowhere = Problem.of(Problem.Kind.NEED_ITEM, "问过各来源都拿不到；箱子：没有");
+        FetchThenBite moves = new FetchThenBite(-1, nowhere);
+        moves.wayOut = () -> Optional.of(SuicideWayOut.WHEN_ON);
+        run(moves, facts(5, false), () -> facts(5, false), new HungerBout());
+        assertEquals(1, events.size(), events.toString());
+        assertTrue(events.getFirst().endsWith("过一分钟再找吃的；" + SuicideWayOut.WHEN_ON), events.getFirst());
+    }
+
+    @Test
     void tellsTheLlmOncePerHungerBoutAndOnlyTheNewFactWhenItGetsMoreUrgent() {
         // 10-15 直播：哪儿都弄不到吃的，二十秒里报了三次、每次一千多字。同一回饿只说一次；
         // 饿到掉血是新的事实，要再说，但各来源的原因没变，只说"更急了"，不把上千字再抄一遍。
@@ -359,6 +371,8 @@ class EatSoonTaskTest {
      * 身上有了吃的才给吃一口的动作，一口当刻吃完。记下弄吃的推了几刻、收尾了几次、吃了几口。
      */
     static final class FetchThenBite implements EatSoonTask.FoodMoves {
+        /** 问遍各处弄不到吃的时提的寻死出路；默认不提。 */
+        SuicideWayOut wayOut = SuicideWayOut.NONE;
         private final int deliverAt;
         private final Problem failWith;
         boolean carrying;
@@ -382,6 +396,11 @@ class EatSoonTaskTest {
 
                 @Override public String describe() { return "吃一口"; }
             };
+        }
+
+        @Override
+        public SuicideWayOut suicideWayOut() {
+            return wayOut;
         }
 
         @Override

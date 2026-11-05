@@ -8,6 +8,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.navigation.WalkArrival;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
@@ -45,10 +46,22 @@ final class WalkRunProgress {
     private boolean failureExplained;
     /** 这一段走路为换气停下了几次、离目标最近到过哪：停够次数都没靠近就判走不通。 */
     private final BreathStops breaths = new BreathStops();
+    /** 水下从这里到不了时，走不通的建议末尾接的那句寻死出路。 */
+    private final SuicideWayOut wayOut;
 
     WalkRunProgress(NavGoal goal) {
+        this(goal, SuicideWayOut.NONE);
+    }
+
+    WalkRunProgress(NavGoal goal, SuicideWayOut wayOut) {
         // 没有目标就无从判断到没到：这是调用方的程序错误，建的时候就拒绝，不在走的路上兜底。
         this.goal = Objects.requireNonNull(goal, "goal");
+        this.wayOut = Objects.requireNonNull(wayOut, "wayOut");
+    }
+
+    /** 走投无路时提的寻死出路：水下呼吸预算放弃这段路时，保护闸也从这里取。 */
+    SuicideWayOut wayOut() {
+        return wayOut;
     }
 
     /** 走着换了目标点：到没到从这一刻起按新目标判；已经有结论的不改。 */
@@ -144,7 +157,7 @@ final class WalkRunProgress {
         // 水下为换气停下够次数都没靠近：换完气接着走的第一刻就判这段路从这里走不通，不再潜下去重算一轮。
         if (o.feet != null) breaths.observe(o.feet, goal.center());
         if (breaths.exhausted()) {
-            report = WalkReport.failedNoRoute(breaths.giveUpProblem(), o.feet, crossedWater);
+            report = WalkReport.failedNoRoute(breaths.giveUpProblem(wayOut.line()), o.feet, crossedWater);
             return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
         }
 

@@ -81,7 +81,7 @@ final class WalkSurvivalGuards {
                 // 没有换气接着，一口气不够就是不够，不用数够 3 次，这一次就标成从这里到不了，靠近把剩下的站位合起来只再算一次。
                 LOG.debug("[maicraft-path] 水下呼吸预算判死：氧气 {}/{} 刻，放弃这段路上浮，按从这里到不了收场，在 {}",
                         read.airTicks(), read.maxAirTicks(), feet.toShortString());
-                progress.failNoRoute(UnderwaterWalkBudget.giveUpProblem(read, feet), feet);
+                progress.failNoRoute(UnderwaterWalkBudget.giveUpProblem(read, feet, progress.wayOut().line()), feet);
             }
         }
         return progress.done();

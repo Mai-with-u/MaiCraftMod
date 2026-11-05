@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
@@ -84,14 +86,15 @@ final class BreathStops {
         return stops;
     }
 
-    /** 判死的说明：最近到过哪、离目标还有多远、为换气停下了几次。 */
-    Problem giveUpProblem() {
+    /** 判死的说明：最近到过哪、离目标还有多远、为换气停下了几次；建议末尾接寻死出路（不该提时为空）。 */
+    Problem giveUpProblem(Optional<String> wayOut) {
         LOG.debug("[maicraft-path] 水下为换气停下 {} 次都没靠近 1 格以上，判这段路走不通（最近到 {}，离目标 {} 格）",
                 stops, nearest == null ? "?" : nearest.toShortString(), String.format("%.1f", best));
         String where = nearest == null ? "" : "最近到过 " + nearest.toShortString() + "，";
         return Problem.of(Problem.Kind.UNREACHABLE,
                 "水下一口气游不过去：为换气停下了 " + stops + " 次，离目标都没近 1 格以上；"
                         + where + "离目标还有约 " + Math.round(best) + " 格",
-                "这段路要在水下憋气走太远；换一个不用潜这么深的地方或来源，或带上能在水下呼吸的东西再来");
+                SuicideWayOut.appendTo("这段路要在水下憋气走太远；换一个不用潜这么深的地方或来源，或带上能在水下呼吸的东西再来",
+                        wayOut));
     }
 }

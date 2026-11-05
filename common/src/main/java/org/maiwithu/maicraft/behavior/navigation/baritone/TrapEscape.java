@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.navigation.OthersBlockBroken;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -48,6 +49,8 @@ final class TrapEscape {
 
     private final TerrainPermit base;
     private final TaskEventSink events;
+    /** 卡在坑里出不去时，走不通的建议末尾接的那句寻死出路。 */
+    private final SuicideWayOut wayOut;
     /** 脱困中升到的那一档；没在脱困为 null。 */
     private TerrainPermit raised;
     /** 脱困中放开了别人放的普通方块（最后一级）。 */
@@ -75,8 +78,14 @@ final class TrapEscape {
 
     /** @param events 这次脱困挖了别人的方块时，当场报给宿主的出口 */
     TrapEscape(TerrainPermit base, TaskEventSink events) {
+        this(base, events, SuicideWayOut.NONE);
+    }
+
+    /** @param wayOut 卡在坑里出不去时提的那句寻死出路 */
+    TrapEscape(TerrainPermit base, TaskEventSink events, SuicideWayOut wayOut) {
         this.base = base;
         this.events = events;
+        this.wayOut = wayOut;
     }
 
     /** 此刻生效的地形许可：脱困中是升过的那一档，平时是任务给的。 */
@@ -216,11 +225,19 @@ final class TrapEscape {
      * 升到头还是出不去：走不通的说明里补上这次脱困实际做了什么，再说身边挡着什么、为什么没挖开、还剩哪条出路；
      * 挖过别人的方块就当场报一条事件。
      *
+     * change_blocks=none 不升许可、人困在坑里按走不通收场的，说明照旧，只在建议末尾接寻死那句。
+     *
      * @param walls           身边的坑壁，只在这次确实在脱困时才读
+     * @param trapped         人此刻困没困在坑里：none 不升许可时才问
      * @param carriesScaffold 手边有没有能垫的料：只能垫上去时说得出有没有料可垫
      */
-    Problem explain(Problem problem, Supplier<TrapWalls> walls, boolean carriesScaffold) {
-        if (raised == null || problem == null) return problem;
+    Problem explain(Problem problem, Supplier<TrapWalls> walls, BooleanSupplier trapped, boolean carriesScaffold) {
+        if (problem == null) return null;
+        if (raised == null) {
+            // none 一格都不动：被困也不升，原样按走不通收场，出不去的人照样该知道还有寻死这条路。
+            boolean stuckInPit = base.changes() == Permissions.BlockChanges.NONE && trapped.getAsBoolean();
+            return stuckInPit ? withWayOut(problem.message(), problem) : problem;
+        }
         report(Boolean.FALSE);
         String capped = othersAll.size() >= MAX_OTHERS_BLOCKS
                 ? "，挖别人放的方块到了一趟 " + MAX_OTHERS_BLOCKS + " 格的上限" : "";
@@ -228,8 +245,12 @@ final class TrapEscape {
         String tried = story() + capped + (placed > 0 || dug > 0 ? "，还是没出去" : "");
         // 出路按任务原来的许可说：脱困临时升的那一档只管寻路，单独下令挖一格仍按任务许可检查。
         String around = walls.get().describe(base.changes(), carriesScaffold);
-        return Problem.of(problem.kind(), problem.message() + "；" + tried + (around.isEmpty() ? "" : "；" + around),
-                problem.suggestion());
+        return withWayOut(problem.message() + "；" + tried + (around.isEmpty() ? "" : "；" + around), problem);
+    }
+
+    // 卡在坑里出不去：说明换成补过现场的那句，建议末尾接寻死出路（不该提时建议照原样）。
+    private Problem withWayOut(String message, Problem problem) {
+        return Problem.of(problem.kind(), message, SuicideWayOut.appendTo(problem.suggestion(), wayOut.line()));
     }
 
     /**

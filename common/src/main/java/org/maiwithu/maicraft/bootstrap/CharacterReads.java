@@ -6,6 +6,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsEffects;
@@ -30,7 +31,9 @@ record CharacterReads(
         ReadsEffects effects,
         ReadsGearFit gearFit,
         /** 角色此刻站在哪一格：丢弃落点、挖楼梯、记地点、施工锚点与拿到物品都从这里读。 */
-        ReadsCharacterPosition position) {
+        ReadsCharacterPosition position,
+        /** 走投无路时提的那句寻死出路：读这个世界的死亡不掉落与角色此刻的游戏模式。 */
+        SuicideWayOut suicideWayOut) {
 
     CharacterReads {
         Objects.requireNonNull(context, "context");
@@ -42,5 +45,6 @@ record CharacterReads(
         Objects.requireNonNull(effects, "effects");
         Objects.requireNonNull(gearFit, "gearFit");
         Objects.requireNonNull(position, "position");
+        Objects.requireNonNull(suicideWayOut, "suicideWayOut");
     }
 }

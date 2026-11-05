@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -45,6 +46,8 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     private final Supplier<Optional<ItemNeeds>> sources;
     /** 玩家编号换成名字：饿急了拿了别人的吃的，事件里写是谁家的。 */
     private final Function<String, String> ownerNames;
+    /** 问遍各处弄不到吃的时提的那句寻死出路。 */
+    private final SuicideWayOut wayOut;
 
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps) {
@@ -62,6 +65,14 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps,
             Supplier<Optional<ItemNeeds>> sources, Function<String, String> ownerNames) {
+        this(backpack, foods, toMainhand, projection, keeps, sources, ownerNames, SuicideWayOut.NONE);
+    }
+
+    /** @param wayOut 问遍各处弄不到吃的时提的那句寻死出路 */
+    public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
+            MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps,
+            Supplier<Optional<ItemNeeds>> sources, Function<String, String> ownerNames, SuicideWayOut wayOut) {
+        this.wayOut = Objects.requireNonNull(wayOut, "wayOut");
         this.sources = Objects.requireNonNull(sources, "sources");
         this.ownerNames = Objects.requireNonNull(ownerNames, "ownerNames");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
@@ -101,6 +112,11 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
         // 饿了身上没吃的：经拿东西的引擎有预算地弄几件现成口粮（网络、箱子、做、打猎），弄到第一件能吃的吃饭任务就叫停先吃；
         // 引擎还没接上给 null，任务如实说。
         return sources.get().map(needs -> (Action) new FetchesFood(needs, budgetTicks)).orElse(null);
+    }
+
+    @Override
+    public SuicideWayOut suicideWayOut() {
+        return wayOut;
     }
 
     @Override

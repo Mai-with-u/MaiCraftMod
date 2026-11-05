@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.behavior.survival.SurvivalFakes;
 import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -54,6 +56,14 @@ class WalkSurvivalGuardsTest {
         assertTrue(report.problem().message().contains("浮上水面换气"), report.problem().message());
         // 换气没能先插进来、走路自己憋不住：一口气不够就是不够，这一次就算从这里到不了。
         assertTrue(report.noRouteFromHere());
+    }
+
+    @Test
+    void 水下从这里到不了_建议是寻死出路() {
+        WalkRunProgress progress = new WalkRunProgress(GoalCompiler.standOn(目标).goal(),
+                () -> Optional.of(SuicideWayOut.WHEN_ON));
+        assertTrue(guard(progress, new PlanningCeiling(300), true, false, false));
+        assertEquals(SuicideWayOut.WHEN_ON, progress.report().problem().suggestion());
     }
 
     @Test

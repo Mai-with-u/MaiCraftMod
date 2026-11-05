@@ -10,6 +10,7 @@ import java.util.OptionalInt;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /** 撤离收场：血低、没吃的、饱食度不够自然回血三样都卡住才点破互锁；有一样还有路就照普通话术。 */
@@ -21,7 +22,8 @@ class RetreatEndingTest {
 
     @Test
     void lowHealthNoFoodAndHungryPointsOutTheDeadEnd() {
-        Problem problem = RetreatEnding.escaped("血到拒战线", body(5, 0), OptionalInt.of(12));
+        Problem problem = RetreatEnding.escaped("血到拒战线", body(5, 0), OptionalInt.of(12),
+                Optional.of(SuicideWayOut.WHEN_ON));
 
         assertEquals(Problem.Kind.DANGER, problem.kind());
         assertTrue(problem.message().contains("没有吃了不伤身的食物") && problem.message().contains("饱食度 12"),
@@ -29,6 +31,15 @@ class RetreatEndingTest {
         assertTrue(problem.suggestion().contains("obtain") && problem.suggestion().contains("suicide"),
                 problem.suggestion());
         assertFalse(problem.suggestion().contains("睡"), "睡觉不回血，不写：" + problem.suggestion());
+        assertTrue(problem.suggestion().endsWith(SuicideWayOut.WHEN_ON), problem.suggestion());
+    }
+
+    @Test
+    void withNoWayOutOnlyFoodIsSuggested() {
+        // 死亡不掉落关着、创造、极限这类：寻死那句不提，出路只剩弄吃的。
+        Problem problem = RetreatEnding.escaped("血到拒战线", body(5, 0), OptionalInt.of(12), Optional.empty());
+        assertTrue(problem.suggestion().contains("obtain"), problem.suggestion());
+        assertFalse(problem.suggestion().contains("suicide"), problem.suggestion());
     }
 
     @Test

@@ -9,6 +9,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
@@ -131,7 +132,7 @@ final class OfflineCatalog {
                         PlayerViews.equipment(nobody),
                         PlayerViews.effects(nobody),
                         PlayerViews.gearFit(nobody),
-                        LiveCarryReads.characterPosition(nobody)),
+                        LiveCarryReads.characterPosition(nobody), SuicideWayOut.NONE),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         LiveCarryReads.toolRequirements(nobody), stack -> 0),
                 new WorldReads(new Scene(memory, facilities), memory, new BlockScanService(), facilities,

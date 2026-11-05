@@ -51,6 +51,8 @@ import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.LiveSuicideWayOut;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
 import org.maiwithu.maicraft.behavior.travel.planning.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgress;
@@ -155,6 +157,8 @@ public final class WorldScope {
     /** observe(self) 读的死亡不掉落与重生点：本机服务端上要交给服务端线程读，读到的记在这一份里，换世界跟着换。 */
     private final KeepInventoryRule keepInventory = new KeepInventoryRule();
     private final RespawnPoint respawnPoint = new RespawnPoint();
+    /** 走投无路时提的那句寻死出路：能力从角色读端拿，寻路与吃饭经启动一侧转到当前世界这一份。 */
+    private final SuicideWayOut suicideWayOut;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -227,6 +231,8 @@ public final class WorldScope {
         this.modSights = compat.modSights();
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+        // 寻死出路和 observe(self) 读同一份死亡不掉落：走投无路要提的那一刻就有现成的值。
+        this.suicideWayOut = new LiveSuicideWayOut(now, keepInventory);
         this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
@@ -245,7 +251,7 @@ public final class WorldScope {
                         PlayerViews.equipment(now),
                         PlayerViews.effects(now),
                         PlayerViews.gearFit(now),
-                        LiveCarryReads.characterPosition(now)),
+                        LiveCarryReads.characterPosition(now), suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
                 new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld),
@@ -407,6 +413,16 @@ public final class WorldScope {
     public SelfView.AfterDeath afterDeath() {
         return SelfView.afterDeath(keepInventory.read(), respawnPoint.read(), SleptBeds.latest(memory),
                 respawnPoint.worldSpawn());
+    }
+
+    /** 走投无路时提的那句寻死出路。 */
+    public SuicideWayOut suicideWayOut() {
+        return suicideWayOut;
+    }
+
+    /** 每刻读一眼死亡不掉落：读要交给服务端线程，一直读着，看自己、提寻死出路时当场就有现成的值。只在客户端线程调用。 */
+    public void readKeepInventory() {
+        keepInventory.read();
     }
 
     /** 认出的是哪个世界：events 每一页都带它。 */

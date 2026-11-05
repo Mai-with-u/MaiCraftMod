@@ -19,9 +19,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 /**
  * 卡坑脱困没出去时的说法按实际发生的写：一格没动就说没动，并说身边挡着什么、为什么没挖、还剩哪条出路；
@@ -59,7 +61,7 @@ class TrapEscapeStoryTest {
         // 实机：任务许可已经是 any，坑壁是模组的黑砂岩；放开别人的方块也没有一格是别人放的。
         TrapEscape escape = new TrapEscape(TerrainPermit.ANY, TaskEventSink.NONE);
         assertTrue(escape.raise(FEET, () -> true, 0));
-        Problem stuck = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, true);
+        Problem stuck = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, () -> true, true);
         assertEquals("没有能走到目标的路线；卡在坑里，自动脱困一格没动；脚下和四周的 " + SANDSTONE
                 + " 不算天然地形，寻路不会自己挖，可以单独下令挖掉：(5, 63, 5)、(6, 64, 5)、(6, 65, 5)", stuck.message());
     }
@@ -68,11 +70,11 @@ class TrapEscapeStoryTest {
     void 只许垫的许可_挡着的不算天然地形时只能垫上去_没料照实说() {
         TrapEscape escape = new TrapEscape(TerrainPermit.TEMPORARY, TaskEventSink.NONE);
         assertTrue(escape.raise(FEET, () -> true, 0));
-        Problem noScaffold = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, false);
+        Problem noScaffold = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, () -> true, false);
         assertEquals("没有能走到目标的路线；卡在坑里，没等许可临时放开挖天然方块，自动脱困一格没动；脚下和四周的 " + SANDSTONE
                 + " 不算天然地形，寻路不会自己挖；这次许可只能垫方块上去，手边没有能垫的料", noScaffold.message());
         // 手边有料：料是哪些已经在走不通的现场里列着，这里只说只能垫上去。
-        Problem withScaffold = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, true);
+        Problem withScaffold = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, () -> true, true);
         assertTrue(withScaffold.message().endsWith("这次许可只能垫方块上去"), withScaffold.message());
     }
 
@@ -84,7 +86,7 @@ class TrapEscapeStoryTest {
                 new TrapWalls.Cell(FEET.east(), "minecraft:chest", TrapWalls.Wall.PLACED_BY_OTHER, "甲"),
                 new TrapWalls.Cell(FEET.west(), "minecraft:oak_planks", TrapWalls.Wall.PLACED_BY_OTHER, "乙"),
                 new TrapWalls.Cell(FEET.north(), "minecraft:stone", TrapWalls.Wall.PROTECTED, null)));
-        Problem stuck = escape.explain(NO_ROUTE, () -> walls, true);
+        Problem stuck = escape.explain(NO_ROUTE, () -> walls, () -> true, true);
         assertEquals("没有能走到目标的路线；卡在坑里，自动脱困一格没动；脚下和四周的 minecraft:chest、minecraft:oak_planks"
                 + " 是 甲、乙 放的，要挖得先同意；minecraft:stone 受保护，要挖得先同意", stuck.message());
     }
@@ -108,7 +110,7 @@ class TrapEscapeStoryTest {
         escape.noteBroken(FEET.east());
         escape.watchDigging(FEET.above(2), Blocks.STONE.defaultBlockState(), null);
         escape.noteBroken(FEET.above(2));
-        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
         assertEquals("没有能走到目标的路线；卡在坑里，自动脱困：挖开 2 格，其中" + OWNER + " 放的 1 格，还是没出去",
                 stuck.message());
     }
@@ -120,9 +122,31 @@ class TrapEscapeStoryTest {
         assertTrue(escape.raise(FEET, () -> true, 0));
         escape.notePlaced();
         escape.notePlaced();
-        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
         assertEquals("没有能走到目标的路线；卡在坑里，没等许可临时放开挖天然方块，自动脱困：垫了 2 块，还是没出去",
                 stuck.message());
+    }
+
+    @Test
+    void 升到头还出不去_建议末尾接寻死出路() {
+        TrapEscape escape = new TrapEscape(TerrainPermit.NATURAL, TaskEventSink.NONE,
+                () -> Optional.of(SuicideWayOut.WHEN_ON));
+        assertTrue(escape.raise(FEET, () -> true, 0));
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
+        assertTrue(stuck.suggestion().endsWith(SuicideWayOut.WHEN_ON), stuck.suggestion());
+    }
+
+    @Test
+    void 不许动方块被困在坑里_说明照旧_建议末尾接寻死出路() {
+        // none 不升许可，原样按走不通收场：出不去的人照样该知道还有寻死这条路。
+        TrapEscape escape = new TrapEscape(TerrainPermit.WALK_ONLY, TaskEventSink.NONE,
+                () -> Optional.of(SuicideWayOut.WHEN_UNKNOWN));
+        assertFalse(escape.raise(FEET, () -> true, 0));
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> true, true);
+        assertEquals(NO_ROUTE.message(), stuck.message());
+        assertTrue(stuck.suggestion().endsWith(SuicideWayOut.WHEN_UNKNOWN), stuck.suggestion());
+        // 没困在坑里（就是远、没路）不提。
+        assertSame(NO_ROUTE, escape.explain(NO_ROUTE, () -> TrapWalls.NONE, () -> false, true));
     }
 
     @Test
@@ -130,7 +154,7 @@ class TrapEscapeStoryTest {
         TrapEscape escape = new TrapEscape(TerrainPermit.NATURAL, TaskEventSink.NONE);
         assertSame(NO_ROUTE, escape.explain(NO_ROUTE, () -> {
             throw new AssertionError("没在脱困不该读现场");
-        }, true));
+        }, () -> true, true));
     }
 
     @Test
