@@ -241,15 +241,19 @@ public final class AimAndInteract implements Action {
         };
     }
 
-    // 现场说明：目标格提交前后的状态对比只在方块目标时有。
+    // 现场说明：目标格提交前后的状态对比只在方块目标时有；前后两头都按玩家看到的方块名说。
     private String sceneFacts(FirstPersonScene scene) {
         StringBuilder facts = new StringBuilder("提交时射线命中" + submittedHitDescription);
         if (target instanceof InteractionTarget.BlockTarget block && targetStateAtSubmission != null) {
-            BlockState now = scene.blockAt(block.pos());
-            facts.append("；目标格提交前是").append(targetStateAtSubmission.getBlock())
-                    .append("，现在是").append(now == null ? "未加载" : now.getBlock().getName().getString());
+            facts.append("；目标格提交前是").append(blockName(targetStateAtSubmission))
+                    .append("，现在是").append(blockName(scene.blockAt(block.pos())));
         }
         return facts.toString();
+    }
+
+    // 方块按游戏里显示的名字说（黑沙、橡木门），不报方块对象的原始写法；那一格没加载就说未加载。
+    private static String blockName(BlockState state) {
+        return state == null ? "未加载" : state.getBlock().getName().getString();
     }
 
     // 目标还没加载不能当成没有；方块目标已经变成空气就是没了，实体目标已经死亡或离开世界也是没了。

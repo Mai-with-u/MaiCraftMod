@@ -79,7 +79,7 @@ public interface InteractionSender extends BoundaryLifecycle {
     default PendingInteraction dropSelected(
             PlayerContext context, ItemStack expectedSelected, boolean fullStack,
             InteractionConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("native selected-stack dropping is unavailable");
+        throw new UnsupportedOperationException("这个交互入口不会丢手上的东西");
     }
 
     PendingInteraction creativeSetSlot(
@@ -128,7 +128,7 @@ public interface InteractionSender extends BoundaryLifecycle {
             PlayerContext context,
             InteractionConfirmation confirmation,
             int timeoutTicks) {
-        throw new UnsupportedOperationException("native waking from bed is unavailable");
+        throw new UnsupportedOperationException("这个交互入口不会起床");
     }
 
     /** 这次持续使用是否仍归提交方管理；只有它自己认下的使用才允许继续按住或松开。 */

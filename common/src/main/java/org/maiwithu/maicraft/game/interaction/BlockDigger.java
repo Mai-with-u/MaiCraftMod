@@ -521,12 +521,10 @@ public final class BlockDigger {
             // 收尾时已经拿不到本刻的上下文（例如任务在两刻之间被换掉）：停挖留到下一刻在新任务之前做，
             // 还在等确认的切工具按不确定交还；不能因为拿不到上下文就让挖掘一直按着。
             if (pendingBreak) {
-                sender.deferBreakCancellationForTaskBoundary(pending,
-                        "the block-digging task ended before its native break was confirmed");
+                sender.deferBreakCancellationForTaskBoundary(pending, "挖方块的任务在这一格挖开前就结束了");
             }
             if (pendingSelection) {
-                sender.abandonOneShotForTaskBoundary(toolSelectPending,
-                        "the block-digging task ended while tool selection was awaiting confirmation");
+                sender.abandonOneShotForTaskBoundary(toolSelectPending, "挖方块的任务结束时切工具还在等确认");
             }
             reset();
             return;
@@ -536,22 +534,13 @@ public final class BlockDigger {
                 || MenuVisibility.inventoryVisible(
                         Minecraft.getInstance(), player);
         if (pendingBreak) {
-            sender.cancelBreakingForTaskBoundary(
-                    context,
-                    pending,
-                    "the block-digging task ended before its native break was confirmed");
+            sender.cancelBreakingForTaskBoundary(context, pending, "挖方块的任务在这一格挖开前就结束了");
         }
         if (pendingSelection) {
-            sender.retireOneShotForTaskBoundary(
-                    context,
-                    toolSelectPending,
-                    "the block-digging task ended while tool selection was awaiting confirmation");
+            sender.retireOneShotForTaskBoundary(context, toolSelectPending, "挖方块的任务结束时切工具还在等确认");
         }
         if (pendingMenu) {
-            menuActions.closeForTaskBoundary(
-                    context,
-                    TOOL_TIMEOUT_TICKS,
-                    "the block-digging task ended while tool staging was awaiting confirmation");
+            menuActions.closeForTaskBoundary(context, TOOL_TIMEOUT_TICKS, "挖方块的任务结束时为换工具开的背包还在等确认");
         }
         reset();
     }

@@ -23,9 +23,12 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.interaction.ScriptedInteractionSender;
+import org.maiwithu.maicraft.game.interaction.SettledConfirmations;
+import org.maiwithu.maicraft.kernel.result.RawTextLeaks;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 
@@ -168,6 +171,45 @@ class AimAndInteractTest {
         if (expected == InteractionVerdict.UNCONFIRMED) {
             assertEquals(Interruptibility.WORKING, action.interruptibility(), "已经收尾的动作不再挡打断");
         }
+    }
+
+    /**
+     * 游戏没让这一下生效时交给上层的问题说明：目标格前后都按方块名说，确认记录是真实提交方到期收场的那句中文，
+     * 不夹 Block{…} 这类方块对象串，也不夹英文句子。
+     */
+    @Test
+    void aRefusedUseReadsAsChineseAndNamesTheBlock() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.ray = hitAt(TARGET);
+        scene.blocks.put(TARGET, Blocks.STONE.defaultBlockState());
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.PENDING);
+        runUntilSubmitted(action, context);
+        sender.nextStatus = PendingInteraction.Status.CONFIRMED_NOT_APPLIED;
+        sender.nextDetail = SettledConfirmations.expiredWithoutChange();
+        ActionStatus status = action.tick(context.asTickContext());
+        assertEquals("REFUSED_BY_GAME", failedKind(status));
+        String message = failedMessage(status);
+        RawTextLeaks.assertNone(message);
+        String stone = Blocks.STONE.getName().getString();
+        assertTrue(message.contains("目标格提交前是" + stone + "，现在是" + stone), message);
+    }
+
+    /** 经真实的交互提交方点一下：离线调用原版必然出错，没能确认的问题说明同样是中文结论句。 */
+    @Test
+    void anUnconfirmedUseThroughTheRealSenderReadsAsChinese() {
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext();
+        context.sender = new DefaultInteractionSender(null);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.ray = hitAt(TARGET);
+        scene.blocks.put(TARGET, Blocks.STONE.defaultBlockState());
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.PENDING);
+        runUntilSubmitted(action, context);
+        ActionStatus status = action.tick(context.asTickContext());
+        assertEquals("STUCK", failedKind(status));
+        RawTextLeaks.assertNone(failedMessage(status));
+        assertTrue(failedMessage(status).contains("确认记录：右键方块时游戏出错"), failedMessage(status));
     }
 
     @Test
@@ -407,7 +449,7 @@ class AimAndInteractTest {
         runUntilSubmitted(action, context);
         // 确认窗过期也没坐上去：如实按没能确认上报，不冒充骑上了。
         sender.nextStatus = PendingInteraction.Status.UNCERTAIN;
-        sender.nextDetail = "the bounded read-only confirmation window expired";
+        sender.nextDetail = "确认时限到了还没看到结果";
         ActionStatus status = action.tick(context.asTickContext());
         assertTrue(status instanceof ActionStatus.Failed);
         assertEquals(InteractionVerdict.UNCONFIRMED, action.result().verdict());

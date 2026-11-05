@@ -28,7 +28,8 @@ public final class PendingInteraction {
     private int stableTicks;
     private long lastStableTickRevision = Long.MIN_VALUE;
     private long lastNativeTick;
-    private String detail = "awaiting authoritative client facts";
+    /** 确认记录里写给人和 LLM 看的一句结论：确认到了什么、没确认到什么；收场前是"还在等"。 */
+    private String detail = "还在等游戏确认";
     /** 右键方块提交现场的插桩事实（点击面、客户端预测结果、预测包是否发出）；只有 useBlock 提交时写入一次。 */
     private String useOnTrace = "";
     /** 右键实体提交那一刻原版自己的结算结论（这一下预测接受了没有）；只有 interact 提交时写入一次，
@@ -49,8 +50,8 @@ public final class PendingInteraction {
             BlockPos breakTarget,
             Direction breakFace) {
         // 期限按客户端的动作刻计算；保存提交时的角色对象，不能把旧玩家的点击结果用到新玩家身上。
-        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
-        if (stableTicksRequired < 1) throw new IllegalArgumentException("stableTicksRequired must be positive");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("等确认的期限至少要 1 刻");
+        if (stableTicksRequired < 1) throw new IllegalArgumentException("连续稳定的刻数至少要 1 刻");
         this.kind = kind;
         this.submittedPlayer = context.localPlayer();
         this.submittedTick = context.clientTick();

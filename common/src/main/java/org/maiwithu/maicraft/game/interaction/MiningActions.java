@@ -13,6 +13,11 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  */
 final class MiningActions {
 
+    /** 任务边界停挖时调用方没给原因的说法。 */
+    static final String TASK_ENDED = "任务在这一格挖开前就结束了";
+    /** 发原版停挖时游戏出错：停没停下不知道，挖掘按没能确认收场。 */
+    static final String STOP_THREW = "停挖时游戏出错，没能确认停没停下";
+
     private final DefaultInteractionSender owner;
     /** 旧任务留下的挖掘还未实际停止时保留此原因，由每刻推进先完成停手。 */
     private String pendingBreakCancellationReason;
@@ -40,8 +45,8 @@ final class MiningActions {
             DefaultInteractionSender.gameMode(context).startDestroyBlock(hit.getBlockPos(), hit.getDirection());
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining start threw after entering the client action path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "开挖时游戏出错，没能确认挖没挖动");
         }
         return owner.poll(context, pending);
     }
@@ -58,8 +63,8 @@ final class MiningActions {
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
             pending.nativeAdvanced(context.clientTick());
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining continuation threw before the block outcome was confirmed");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "接着挖时游戏出错，没能确认这一格挖没挖开");
         }
         return owner.poll(context, pending);
     }
@@ -77,11 +82,9 @@ final class MiningActions {
         if (!DefaultInteractionSender.claimSubmission(context)) return pending;
         try {
             DefaultInteractionSender.gameMode(context).stopDestroyBlock();
-            pending.finish(PendingInteraction.Status.CANCELLED,
-                    "native mining was cancelled before confirmation");
+            pending.finish(PendingInteraction.Status.CANCELLED, "这一格挖开前就停手了");
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native mining cancellation could not be confirmed");
+            pending.finish(PendingInteraction.Status.UNCERTAIN, STOP_THREW);
         }
         pendingBreakCancellationReason = null;
         return pending;
@@ -99,16 +102,13 @@ final class MiningActions {
             pendingBreakCancellationReason = null;
             return pending;
         }
-        String reason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before native mining confirmation"
-                : boundaryReason;
+        String reason = boundaryReason == null || boundaryReason.isBlank() ? TASK_ENDED : boundaryReason;
         if (context.tryClaimInteraction()) {
             try {
                 DefaultInteractionSender.gameMode(context).stopDestroyBlock();
                 pending.finish(PendingInteraction.Status.CANCELLED, reason);
             } catch (RuntimeException failure) {
-                pending.finish(PendingInteraction.Status.UNCERTAIN,
-                        reason + "; native mining cancellation could not be confirmed");
+                pending.finish(PendingInteraction.Status.UNCERTAIN, reason + "；" + STOP_THREW);
             }
             pendingBreakCancellationReason = null;
             return pending;
@@ -129,8 +129,7 @@ final class MiningActions {
             return true;
         }
         if (pending.kind() != PendingInteraction.Kind.BREAK_BLOCK) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "a task-boundary break cancellation no longer owned the active break interaction");
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "欠着的停挖对不上正在等确认的动作，没能确认这一下的结果");
             pendingBreakCancellationReason = null;
             return true;
         }
@@ -140,9 +139,7 @@ final class MiningActions {
             pending.finish(PendingInteraction.Status.CANCELLED,
                     pendingBreakCancellationReason);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    pendingBreakCancellationReason
-                            + "; native mining cancellation could not be confirmed");
+            pending.finish(PendingInteraction.Status.UNCERTAIN, pendingBreakCancellationReason + "；" + STOP_THREW);
         } finally {
             pendingBreakCancellationReason = null;
         }
@@ -152,7 +149,7 @@ final class MiningActions {
     /** 任务刚结束时登记停挖原因：只登记，下一刻的推进先停挖再结算。 */
     void oweCancellation(String boundaryReason) {
         pendingBreakCancellationReason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before native mining confirmation" : boundaryReason;
+                ? TASK_ENDED : boundaryReason;
     }
 
     /** 没有欠着的停挖：换角色、收尾与新动作接手时都不再欠。 */

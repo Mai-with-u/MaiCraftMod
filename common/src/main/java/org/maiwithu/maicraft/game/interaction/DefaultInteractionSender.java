@@ -81,19 +81,21 @@ public final class DefaultInteractionSender implements InteractionSender {
         var player = context.localPlayer();
         if (player.containerMenu != player.inventoryMenu || !player.containerMenu.getCarried().isEmpty()
                 || !MenuVisibility.worldInputAllowed(Minecraft.getInstance().screen) || player.isUsingItem())
-            throw new IllegalStateException("selected-stack drop requires an idle world view and empty cursor");
+            throw new IllegalStateException("丢手上的东西要先回到世界画面、光标上不挂东西");
         if (player.getInventory().selected < 0 || player.getInventory().selected > 8 || expectedSelected.isEmpty()
                 || !ItemStack.matches(player.getMainHandItem(), expectedSelected))
-            throw new IllegalStateException("selected stack changed before native drop");
-        Objects.requireNonNull(confirmation, "drop requires exact debit and receiving evidence");
+            throw new IllegalStateException("出手丢之前手上的东西已经变了");
+        Objects.requireNonNull(confirmation, "丢东西要给出手上扣数与东西落地的确认条件");
         PendingInteraction pending = oneShot(PendingInteraction.Kind.DROP_SELECTED, context, confirmation, timeoutTicks);
         try {
             context.localPlayer().connection.send(new ServerboundMovePlayerPacket.Rot(
                     player.getYRot(), player.getXRot(), player.onGround()));
+            // 原版丢东西当场就没丢出去（手上这一格已经空了）：如实记没生效，东西还在原处。
             if (!player.drop(fullStack)) pending.finish(
-                    PendingInteraction.Status.CONFIRMED_NOT_APPLIED, "native player drop rejected the selected stack");
+                    PendingInteraction.Status.CONFIRMED_NOT_APPLIED, "原版没把手上这一组丢出去，东西还在原处");
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN, "native drop entered submission but its outcome is unknown");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "丢东西时游戏出错，没能确认丢没丢出去");
         }
         return poll(context, pending);
     }
@@ -142,7 +144,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         BlockUseConfirmation acknowledged = null;
         if (confirmation.requiresBlockAcknowledgement()) {
             if (!(context.level() instanceof BlockUseAcknowledgement sequences))
-                throw new IllegalStateException("native block acknowledgement hook is unavailable");
+                throw new IllegalStateException("读不到方块操作编号，等不了服务端对这一下右键的回应");
             acknowledged = new BlockUseConfirmation(confirmation, sequences);
         }
         PendingInteraction pending = oneShot(
@@ -169,8 +171,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             LOG.debug("[maicraft-interaction] {}", pending.useOnTrace());
             if (result.shouldSwing()) player.swing(hand);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native block use threw after entering the client action path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "右键方块时游戏出错，没能确认这一下生效没有");
         }
         return poll(context, pending);
     }
@@ -187,8 +189,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             activeItemUseWasHeld = context.localPlayer().isUsingItem();
             if (result.shouldSwing()) context.localPlayer().swing(hand);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native item use threw after entering the client action path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "使用手上的东西时游戏出错，没能确认这一下生效没有");
         }
         return poll(context, pending);
     }
@@ -202,7 +204,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (pending == null || pending != active && pending != auxiliary
                 || pending.kind() != PendingInteraction.Kind.USE_ITEM
                         && pending.kind() != PendingInteraction.Kind.USE_BLOCK) {
-            throw new IllegalArgumentException("the pending interaction is not the active native action");
+            throw new IllegalArgumentException("这条等待记录不是正在等确认的那一下");
         }
         PendingInteraction release = oneShot(
                 PendingInteraction.Kind.RELEASE_ITEM,
@@ -212,8 +214,8 @@ public final class DefaultInteractionSender implements InteractionSender {
         try {
             gameMode(context).releaseUsingItem(context.localPlayer());
         } catch (RuntimeException failure) {
-            release.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native use release threw before the outcome was confirmed");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            release.finish(PendingInteraction.Status.UNCERTAIN, "松开使用键时游戏出错，没能确认松没松开");
         }
         return poll(context, release);
     }
@@ -229,8 +231,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             connection(context).send(new ServerboundPlayerCommandPacket(
                     context.localPlayer(), ServerboundPlayerCommandPacket.Action.STOP_SLEEPING));
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native wake-from-bed threw before the outcome was confirmed");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "起床时游戏出错，没能确认起没起来");
         }
         return poll(context, pending);
     }
@@ -243,7 +245,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         int selectionLimit = Inventory.getSelectionSize();
         if (slot < 0 || slot >= selectionLimit) {
             throw new IllegalArgumentException(
-                    "hotbar slot must be between 0 and " + (selectionLimit - 1));
+                    "快捷栏格号要在 0 到 " + (selectionLimit - 1) + " 之间");
         }
         // 本刻不收时交回 null，槽位保持原样，由调用方下一刻再选。
         if (!acceptSubmission(context)) return null;
@@ -258,8 +260,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             context.localPlayer().getInventory().selected = slot;
             connection(context).send(new ServerboundSetCarriedItemPacket(slot));
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native hotbar selection threw before the outcome was confirmed");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "切快捷栏时游戏出错，没能确认切没切过去");
         }
         return poll(context, pending);
     }
@@ -270,13 +272,13 @@ public final class DefaultInteractionSender implements InteractionSender {
         // 只有创造模式且物品栏界面已显示才允许设置槽位；发包后等物品栏实际出现期望物品，不直接在这里改本地数量。
         if (inventorySlot < 0 || inventorySlot >= Math.min(
                 36, context.localPlayer().getInventory().getContainerSize())) {
-            throw new IllegalArgumentException("creative inventory slot must be between 0 and 35");
+            throw new IllegalArgumentException("创造模式放东西的背包格号要在 0 到 35 之间");
         }
         if (!context.localPlayer().getAbilities().instabuild) {
-            throw new IllegalStateException("creative slot mutation requires creative mode");
+            throw new IllegalStateException("不在创造模式，不能凭空往背包里放东西");
         }
         if (!menuActions.ensureVisible(context)) {
-            throw new IllegalStateException("creative inventory changes require a rendered player inventory GUI");
+            throw new IllegalStateException("创造模式往背包放东西要先把背包界面画出来");
         }
         // 本刻不收时交回 null，背包保持原样，由调用方下一刻再放。
         if (!acceptSubmission(context)) return null;
@@ -292,8 +294,8 @@ public final class DefaultInteractionSender implements InteractionSender {
                     new ServerboundSetCreativeModeSlotPacket(protocolSlot, frozen.copy()));
             menuActions.interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "creative slot packet threw before synchronized inventory confirmation");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "创造模式往背包放东西时游戏出错，没能确认放没放进去");
         }
         return poll(context, pending);
     }
@@ -326,15 +328,16 @@ public final class DefaultInteractionSender implements InteractionSender {
             int timeoutTicks,
             boolean usesMenu) {
         // 模组菜单协议必须有可见菜单，世界控制协议则要求合适的世界界面；两者仍共用同一交互机会和等待位置。
-        if (submission == null) throw new IllegalArgumentException("submission is required");
-        if (confirmation == null) throw new IllegalArgumentException("confirmation is required");
-        String name = operation == null || operation.isBlank() ? "mod protocol action" : operation;
+        if (submission == null) throw new IllegalArgumentException("缺少要发的那一下");
+        if (confirmation == null) throw new IllegalArgumentException("缺少确认条件");
+        // 出错时的说明以调用方给的这一下叫什么开头（例如"按一下使用键"），没给就按模组协议的一下说。
+        String name = operation == null || operation.isBlank() ? "发模组协议的一下" : operation;
         if (usesMenu) {
             if (!menuActions.ensureVisible(context)) {
-                throw new IllegalStateException("mod menu protocols require a rendered GUI");
+                throw new IllegalStateException("模组界面协议要先把界面画出来");
             }
         } else if (!MenuVisibility.worldInputAllowed(Minecraft.getInstance().screen)) {
-            throw new IllegalStateException("mod control protocols require a world interaction screen");
+            throw new IllegalStateException("模组控制协议要在世界画面里发，眼前不能开着界面");
         }
         // 本刻不收时交回 null，协议下一刻再发，不算发送失败。
         if (!acceptSubmission(context)) return null;
@@ -345,8 +348,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             submission.run();
             if (usesMenu) menuActions.interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    name + " threw after protocol submission began; application is unknown");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, name + "时游戏出错，没能确认这一下生效没有");
         }
         return poll(context, pending);
     }
@@ -376,7 +379,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         requireActive(pending, PendingInteraction.Kind.USE_ITEM);
         if (context.localPlayer().isUsingItem()
                 && context.localPlayer().getUsedItemHand() != InteractionHand.MAIN_HAND)
-            throw new IllegalStateException("main-hand cancellation cannot stop an offhand action");
+            throw new IllegalStateException("主手停手停不了副手正在用的东西");
         // 切到剑斧、空格这类，别切到挨着弓的那格箭上（停手后一直拿着箭走）。
         int replacement = UseCancelSlot.pick(context.localPlayer().getInventory());
         LOG.info("[主手停手] 切槽停手：从 {} 格（{}）切到 {} 格，正在用 {}", context.localPlayer().getInventory().selected,
@@ -398,7 +401,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             context.localPlayer().getInventory().selected = replacement;
             context.localPlayer().stopUsingItem();
         } catch (RuntimeException failure) {
-            cancelled.finish(PendingInteraction.Status.UNCERTAIN, "main-hand cancellation was not confirmed");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            cancelled.finish(PendingInteraction.Status.UNCERTAIN, "切槽停下主手的使用时游戏出错，没能确认停没停下");
         }
         return poll(context, cancelled);
     }
@@ -422,8 +426,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             gameMode(context).attack(context.localPlayer(), target);
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native attack threw after entering the client action path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "攻击时游戏出错，没能确认打没打中");
         }
         return poll(context, pending);
     }
@@ -456,8 +460,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             }
             if (result.shouldSwing()) player.swing(hand);
         } catch (RuntimeException failure) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "native entity interaction threw after entering the client action path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "右键实体时游戏出错，没能确认这一下生效没有");
         }
         return poll(context, pending);
     }
@@ -468,20 +472,16 @@ public final class DefaultInteractionSender implements InteractionSender {
             PendingInteraction pending,
             String boundaryReason) {
         // 一次性操作已提交后不能假装撤销；任务结束而结果未定时标记不确定。挖掘和持续使用必须另发停止操作。
-        if (pending == null) throw new IllegalArgumentException("pending is required");
+        if (pending == null) throw new IllegalArgumentException("缺少要收场的等待记录");
         requireActive(pending, pending.kind());
         if (pending.kind() == PendingInteraction.Kind.BREAK_BLOCK
                 || pending.kind() == PendingInteraction.Kind.USE_ITEM) {
             throw new IllegalArgumentException(
-                    "continuous native actions require their dedicated physical stop operation");
+                    "挖掘和按住使用要走各自的停手，不能按一次性动作收场");
         }
         poll(context, pending);
         if (!pending.terminal()) {
-            String reason = boundaryReason == null || boundaryReason.isBlank()
-                    ? "the owning task ended before native confirmation"
-                    : boundaryReason;
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    reason + "; the submitted one-shot effect may already have applied");
+            pending.finish(PendingInteraction.Status.UNCERTAIN, mayHaveApplied(boundaryReason));
         }
         return pending;
     }
@@ -494,8 +494,7 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (pending.terminal()) return pending;
         requireActive(pending, pending.kind());
         if (!pending.fromSamePlayer(context)) {
-            pending.finish(PendingInteraction.Status.UNCERTAIN,
-                    "body or control authority changed before confirmation");
+            pending.finish(PendingInteraction.Status.UNCERTAIN, "等确认时角色换了或控制权换了手，这一下的结果不再算数");
             return pending;
         }
         InteractionConfirmation.Verdict verdict;
@@ -507,15 +506,12 @@ public final class DefaultInteractionSender implements InteractionSender {
         switch (verdict) {
             case APPLIED -> {
                 if (pending.countStable(context.clientTick())) pending.finish(
-                        PendingInteraction.Status.CONFIRMED_APPLIED,
-                        "authoritative client facts confirmed the native action");
+                        PendingInteraction.Status.CONFIRMED_APPLIED, "游戏确认这一下生效了");
             }
             case NOT_APPLIED -> pending.finish(
-                    PendingInteraction.Status.CONFIRMED_NOT_APPLIED,
-                    "authoritative client facts confirmed that the action was not applied");
+                    PendingInteraction.Status.CONFIRMED_NOT_APPLIED, "游戏确认这一下没有生效");
             case DIVERGED -> pending.finish(
-                    PendingInteraction.Status.DIVERGED,
-                    "live facts diverged from both the frozen before and expected after state");
+                    PendingInteraction.Status.DIVERGED, "现场既不是提交前的样子，也不是预期生效后的样子");
             case PENDING -> pending.resetStable(context.clientTick());
         }
         if (!pending.terminal() && context.clientTick() >= pending.deadlineTick()) {
@@ -524,9 +520,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             // 拿不准的手势照旧按没能确认交上去，不冒充知道。射线命中了什么由提交现场的插桩事实随结果带出。
             PendingInteraction.Status expiry = expiryStatus(pending.confirmation());
             pending.finish(expiry, expiry == PendingInteraction.Status.CONFIRMED_NOT_APPLIED
-                    ? "the confirmation window expired with no net change in hand item, target block,"
-                            + " menu or nearby entities; the submitted action did not take effect"
-                    : "the bounded read-only confirmation window expired"
+                    ? "确认时限内手上的东西、目标格、界面、附近实体都没有变化，这一下没有生效"
+                    : "确认时限到了还没看到结果"
                             + ExpiryContext.of(pending.nativeAnswer(), pending.entityUseScene()));
         }
         if (pending.terminal() && (pending.kind() == PendingInteraction.Kind.CREATIVE_SET_SLOT
@@ -557,12 +552,19 @@ public final class DefaultInteractionSender implements InteractionSender {
         if (pending.kind() == PendingInteraction.Kind.BREAK_BLOCK
                 || pending.kind() == PendingInteraction.Kind.USE_ITEM) {
             throw new IllegalArgumentException(
-                    "continuous native actions require their dedicated physical stop operation");
+                    "挖掘和按住使用要走各自的停手，不能按一次性动作收场");
         }
+        pending.finish(PendingInteraction.Status.UNCERTAIN, mayHaveApplied(boundaryReason));
+    }
+
+    /**
+     * 一次性动作在任务边界收场的那句话：先说任务为什么不等了（调用方没给就说任务在确认前结束了），
+     * 再说提交出去的这一下可能已经生效——收场不等于撤销，后来者不能当它没点过。
+     */
+    static String mayHaveApplied(String boundaryReason) {
         String reason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before native confirmation" : boundaryReason;
-        pending.finish(PendingInteraction.Status.UNCERTAIN,
-                reason + "; the submitted one-shot effect may already have applied");
+                ? "任务在游戏确认前就结束了" : boundaryReason;
+        return reason + "；提交出去的这一下可能已经生效";
     }
 
     /** 换角色或交还控制权时结束旧等待：旧结果不再可信，这里只改等待记录，不再次发世界操作。 */
@@ -592,9 +594,8 @@ public final class DefaultInteractionSender implements InteractionSender {
             return pending;
         }
         String reason = boundaryReason == null || boundaryReason.isBlank()
-                ? "the owning task ended before the item-use confirmation" : boundaryReason;
-        pending.finish(PendingInteraction.Status.UNCERTAIN,
-                reason + "; the submitted item use may still have applied");
+                ? "任务在使用物品的确认到来前就结束了" : boundaryReason;
+        pending.finish(PendingInteraction.Status.UNCERTAIN, reason + "；这次使用可能仍然生效了");
         return pending;
     }
 
@@ -620,7 +621,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     // 上下文必须属于本刻：旧刻的上下文可能指着已经换掉的玩家或连接。
     static void requireCurrent(PlayerContext context) {
-        if (context == null || !context.isCurrent()) throw new IllegalArgumentException("the player context must belong to the current tick");
+        if (context == null || !context.isCurrent()) throw new IllegalArgumentException("角色上下文不是这一刻的");
     }
 
     // 发包前：角色仍归自动化控制（F8 交还后不能再发），并占用本刻唯一的交互机会。
@@ -667,7 +668,7 @@ public final class DefaultInteractionSender implements InteractionSender {
             LOG.warn("[maicraft-interaction] reclaiming stale native action {} (kind={}, status={}, submitted_tick={}, deadline_tick={})",
                     stale.id(), stale.kind(), stale.status(), stale.submittedTick(), stale.deadlineTick());
             stale.finish(PendingInteraction.Status.UNCERTAIN,
-                    "the pending native action outlived its deadline or its player; reclaimed before a new submission");
+                    "等确认超过了时限或角色已经换了，接下一个动作前按没能确认收场");
             return true;
         }
         // 前一项操作还没结束时这一刻不收新提交，防止多次点击共用一份结果后分不清谁做了什么；
@@ -686,7 +687,7 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     void requireActive(PendingInteraction pending, PendingInteraction.Kind kind) {
         if (pending == null || pending != active && pending != auxiliary || pending.kind() != kind) {
-            throw new IllegalArgumentException("the pending interaction is not the active native action");
+            throw new IllegalArgumentException("这条等待记录不是正在等确认的那一下");
         }
     }
 
@@ -715,13 +716,13 @@ public final class DefaultInteractionSender implements InteractionSender {
 
     static MultiPlayerGameMode gameMode(PlayerContext context) {
         Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.gameMode == null) throw new IllegalStateException("no active client game mode");
+        if (minecraft.gameMode == null) throw new IllegalStateException("客户端还没进游戏，没有可用的操作入口");
         return minecraft.gameMode;
     }
 
     private static ClientPacketListener connection(PlayerContext context) {
         ClientPacketListener connection = context.localPlayer().connection;
-        if (connection == null) throw new IllegalStateException("no active server connection");
+        if (connection == null) throw new IllegalStateException("没连着服务端");
         return connection;
     }
 }

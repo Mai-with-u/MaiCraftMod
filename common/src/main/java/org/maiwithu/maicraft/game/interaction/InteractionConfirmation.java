@@ -197,7 +197,7 @@ public interface InteractionConfirmation {
     public static InteractionConfirmation anyOf(InteractionConfirmation... confirmations) {
         // 任一条件匹配就通过；没有匹配但还有等待项就继续等，全部结束后再综合未生效或不一致。
         InteractionConfirmation[] frozen = Arrays.copyOf(confirmations, confirmations.length);
-        if (frozen.length == 0) throw new IllegalArgumentException("at least one confirmation is required");
+        if (frozen.length == 0) throw new IllegalArgumentException("至少要给一条确认条件");
         return context -> {
             boolean pending = false;
             boolean notApplied = false;

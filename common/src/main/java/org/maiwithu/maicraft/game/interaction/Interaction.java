@@ -120,8 +120,8 @@ public final class Interaction {
     private int cooldown;             // 距下一次重复点击还需等待的游戏刻数。
     private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private boolean hardFail;         // 一次点击遇到不可恢复错误时阻止后续操作。
-    private String failReason = "interaction failed";
-    private String lastUseResult = "not fired";
+    private String failReason = "交互没成";
+    private String lastUseResult = "还没出手";
     /** 近战上一次记下的"还没出手"原因。 */
     private String lastAttackWait = "";
     /** 镜头已经转到位、准星却连着落在方块或空气上的刻数：到了上限这一下按打不到收场，不无限等。 */
@@ -276,7 +276,7 @@ public final class Interaction {
 
     /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
     public Interaction requireBlock(BlockPos position, Block required) {
-        if (required != null && position == null) throw new IllegalArgumentException("required block needs a position");
+        if (required != null && position == null) throw new IllegalArgumentException("点名要点的方块就要给出它的位置");
         requiredBlockPos = position == null ? null : position.immutable();
         requiredBlock = required;
         return this;
@@ -286,7 +286,7 @@ public final class Interaction {
     private boolean requiredBlockPresent() {
         if (requiredBlock == null || player.level().isLoaded(requiredBlockPos)
                 && player.level().getBlockState(requiredBlockPos).is(requiredBlock)) return true;
-        failReason = "the required interaction target changed or unloaded before native use";
+        failReason = "要点的方块在出手前变了或没加载";
         hardFail = true;
         return false;
     }
@@ -349,7 +349,7 @@ public final class Interaction {
             // 关界面本身占用了这一刻的交互机会；世界动作留到下一刻，不在同一刻再出手。
             return context.canInteractThisTick() ? null : Status.RUNNING;
         }
-        failReason = "could not close the active menu before the world action: " + detail;
+        failReason = "出手前没能关掉开着的界面：" + detail;
         return Status.FAILED;
     }
 
@@ -358,7 +358,7 @@ public final class Interaction {
     // 目标已经是空气就算挖完；否则交给 BlockDigger 逐刻挖。看不到可挖面时区分太远还是被挡住。
     private Status breakBlock(PlayerContext context) {
         if (!player.level().isLoaded(block)) {
-            failReason = "the target block is outside the local client's loaded world";
+            failReason = "目标方块不在客户端已加载的范围里";
             return Status.FAILED;
         }
         if (player.level().getBlockState(block).isAir()) return Status.DONE;
@@ -367,12 +367,12 @@ public final class Interaction {
             return Status.DONE;
         }
         if (result == BlockDigger.DigResult.NO_ROOM) {
-            failReason = "the backpack has no free slot to stow the item in hand, so the hand cannot be cleared";
+            failReason = "背包没有空格放手上的东西，腾不出空手";
             return Status.FAILED;
         }
         // 点名工具找不到：照准星点一下的入口不点名工具（给的是 HELD），这里仍按失败收，不继续对着方块挥。
         if (result == BlockDigger.DigResult.MISSING_TOOL) {
-            failReason = "the tool named in dig_tool is not carried, so the block was not broken";
+            failReason = "dig_tool 点名的工具不在身上，这一格没挖";
             return Status.FAILED;
         }
         if (result == BlockDigger.DigResult.NO_SHOT) {
@@ -380,8 +380,8 @@ public final class Interaction {
             boolean beyondReach = player.getEyePosition().distanceToSqr(Vec3.atCenterOf(block))
                     > reach * reach;
             failReason = beyondReach
-                    ? "the target block is outside first-person reach"
-                    : "no visible safe face or removable occluder reaches the target block";
+                    ? "目标方块超出了伸手够得着的距离"
+                    : "目标方块没有看得见、能安全下手的面，也没有能挖开的遮挡通过去";
             return Status.FAILED;
         }
         return Status.RUNNING;
@@ -396,7 +396,7 @@ public final class Interaction {
         if (pending == null) {
             if (!requiredBlockPresent()) return Status.FAILED;
             if (player.isUsingItem()) {
-                failReason = "another item use was already active; it was left untouched";
+                failReason = "手上已经在用别的东西，没去动它";
                 return Status.FAILED;
             }
             if (!context.canInteractThisTick()) return Status.RUNNING;
@@ -427,11 +427,11 @@ public final class Interaction {
             if (pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED) {
                 return Status.DONE;
             }
-            failReason = "native item release was not confirmed: " + pending.detail();
+            failReason = "松开使用键没得到确认：" + pending.detail();
             return Status.FAILED;
         }
         if (pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
-            failReason = "native item use was not confirmed: " + pending.detail();
+            failReason = "使用手上的东西没得到确认：" + pending.detail();
             return Status.FAILED;
         }
         if (!timing.hold) {
@@ -439,7 +439,7 @@ public final class Interaction {
         }
         // 持续使用是否还归本交互管，以交互提交方认不认这笔使用为准。
         if (player.isUsingItem() && !sender.ownsItemUse(pending)) {
-            failReason = "the held item use no longer belongs to this interaction";
+            failReason = "按着的这次使用已经不归这次交互管了";
             return Status.FAILED;
         }
         if (!player.isUsingItem()) {
@@ -467,7 +467,7 @@ public final class Interaction {
         // 有限持续操作到期后只结算已经发出的这一次，不能在最后一个确认尚未完成时宣布整段成功。
         if (finishRequested && pending == null) {
             if (fires > 0 && !hardFail) return Status.DONE;
-            failReason = "finite interaction ended without a confirmed native use"; return Status.FAILED;
+            failReason = "限定次数的交互结束了，一次都没确认生效"; return Status.FAILED;
         }
         if (cooldown > 0) {
             cooldown--;
@@ -489,7 +489,7 @@ public final class Interaction {
     private boolean fireAttackEntity(PlayerContext context) {
         if (pending != null) return settleAttack(context);
         if (entity == null || !entity.isAlive()) {
-            failReason = "the attack target is gone";
+            failReason = "要打的目标已经不在了";
             hardFail = true;
             return false;
         }
@@ -561,7 +561,7 @@ public final class Interaction {
         PendingInteraction.Status status = pending.status();
         String detail = pending.detail(); pending = null;
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) return true;
-        failReason = "native attack was not confirmed: " + detail;
+        failReason = "攻击没得到确认：" + detail;
         hardFail = true;
         return false;
     }
@@ -569,11 +569,11 @@ public final class Interaction {
     // 每次新点击都重新瞄准目标。指定面的操作还必须让当前准星真正落在那个面上。
     private boolean fireUseBlock(PlayerContext context) {
         if (pending != null) {
-            return settleUse(context, "block use");
+            return settleUse(context, "右键方块");
         }
         if (!requiredBlockPresent()) return false;
         if (!player.level().isLoaded(block)) {
-            failReason = "the target block is outside the local client's loaded world";
+            failReason = "目标方块不在客户端已加载的范围里";
             hardFail = true;
             return false;
         }
@@ -630,7 +630,7 @@ public final class Interaction {
         lastUsePending = pending;
         pending = null;
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
-            lastUseResult = "confirmed (" + action + ")";
+            lastUseResult = "已确认（" + action + "）";
             fallingThrough = false;
             return true;
         }
@@ -641,13 +641,13 @@ public final class Interaction {
         }
         // 失败的提交必须携带提交现场的插桩事实，否则“点击被谁拒了”只能靠猜。
         String trace = lastUsePending.useOnTrace();
-        failReason = action + " was not confirmed: " + detail + (trace.isEmpty() ? "" : "; " + trace);
+        failReason = action + "没得到确认：" + detail + (trace.isEmpty() ? "" : "；" + trace);
         hardFail = true;
         return false;
     }
 
     /**
-     * 最近一次使用动作的简短说明。目前成功时只写 confirmed，未出手时为 not fired，
+     * 最近一次使用动作的简短说明。目前成功时只写已确认，未出手时为还没出手，
      * 不包含原版每只手的 PASS／FAIL 返回值，也不能拿这段文字代替成品检查。
      */
     public String lastUseResult() {
@@ -684,10 +684,10 @@ public final class Interaction {
     // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
     private boolean fireUseEntity(PlayerContext context) {
         if (pending != null) {
-            return settleUse(context, "entity interaction");
+            return settleUse(context, "右键实体");
         }
         if (entity == null || !entity.isAlive()) {
-            failReason = "the entity is gone";
+            failReason = "要点的实体已经不在了";
             hardFail = true;
             return false;
         }

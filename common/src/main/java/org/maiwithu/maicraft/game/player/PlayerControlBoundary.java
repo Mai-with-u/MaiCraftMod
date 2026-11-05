@@ -110,7 +110,7 @@ public final class PlayerControlBoundary {
             input.playerReplaced(player, preserveControl);
             // 换了身体（重生、过门、换世界、退出）：旧身体上还在等确认的点击与菜单操作按不确定结清，
             // 不让旧结果落到新身体上，也不让一条没人推进的等待挡住新身体的第一次出手；站定朝向也从头算。
-            forBoundaryEntry(entry -> entry.revokeForBoundary("the local player was replaced"));
+            forBoundaryEntry(entry -> entry.revokeForBoundary("角色换了（重生、过传送门或换了世界）"));
             standingFacing.forget();
             observedPlayer = player;
             playerEpoch = nextRevision(playerEpoch, "body epoch");
@@ -142,10 +142,10 @@ public final class PlayerControlBoundary {
                 mutationClaimedTick = tickRevision;
                 // 控制权换手时结清旧等待：旧点击不能算到新操作者头上。人收回角色（F8）时还要把自动化开着的
                 // 箱子界面按原版关掉、光标上的东西还回去，人接手时不用自己收拾；交给自动化时不动人开着的界面。
-                if (interactionSender != null) interactionSender.revokeForBoundary("control ownership changed before native confirmation");
+                if (interactionSender != null) interactionSender.revokeForBoundary("等游戏确认时控制权换了手");
                 if (menuActions != null) {
-                    if (ownedAfter) menuActions.revokeForBoundary("control ownership changed before menu confirmation");
-                    else menuActions.revokeForHumanHandoff(player, "control ownership changed before menu confirmation");
+                    if (ownedAfter) menuActions.revokeForBoundary("等界面确认时控制权换了手");
+                    else menuActions.revokeForHumanHandoff(player, "等界面确认时控制权换了手");
                 }
             }
         }
@@ -345,7 +345,7 @@ public final class PlayerControlBoundary {
     public void shutdown() {
         requireClientThread();
         // 客户端停机：还在等确认的点击与菜单操作一并按不确定结清，停机后没人再推进它们。
-        forBoundaryEntry(entry -> entry.revokeForBoundary("the client is stopping"));
+        forBoundaryEntry(entry -> entry.revokeForBoundary("客户端正在关闭"));
         input.shutdown();
         restoreMouseOnRelease = false;
         updateWindowControl(false);
