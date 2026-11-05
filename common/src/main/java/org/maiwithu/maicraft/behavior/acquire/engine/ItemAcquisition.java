@@ -78,7 +78,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final int maxDepth;
     /** 估算：只问价不拿，和动手时同一套挑路。 */
     private final AcquisitionEstimates estimates;
-    /** 问价不拿：来源排做法先后、挑可以互换的原料时用。 */
+    /** 问价不拿：来源排做法先后、挑可以互换的原料时用；动手问一轮价时由它记着这一轮问过的原料价、记下问价的账。 */
     private final PriceAsks priceAsks;
     /**
      * 此刻正在推进的请求链，栈顶是最里层：外层的拿东西推进到来源、来源再回引擎要原料时一层层压进来，
@@ -432,8 +432,14 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
-        // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
+        // 这一轮问价在这一刻里同步算完：做法类来源排做法时回头问的原料价记下来，同一种问法只问遍一次来源，
+        // 挑法和不记时一样；问完就忘，下一轮（下一刻）背包和世界都可能变了，重新问。问得慢时记一行日志。
         private ActionStatus consult(int carried) {
+            return priceAsks.duringConsult(request.just(target - carried), () -> quoteAndChoose(carried));
+        }
+
+        // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
+        private ActionStatus quoteAndChoose(int carried) {
             int stillNeeded = target - carried;
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
                     scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool).withUnreachable(unreachable());
@@ -446,7 +452,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     // via 指定了别条路：这条不参与，也不算"问过没货"，不必写进结果。
                     continue;
                 }
-                switch (source.quote(request.just(stillNeeded), context)) {
+                // 经问价那边问：这一轮里问了谁、花了多久记在账上，问得慢时说得出是哪个来源拖的。
+                switch (priceAsks.quote(source, request.just(stillNeeded), context)) {
                     case SourceQuote.Offer offer -> {
                         // 报价写的来源名和来源自称的不一样时（同一来源分好几路报价），也按报价上的名字认划掉的：
                         // 不然做砸了划掉的名字对不上，又来问价、又去跑同一趟，原地转圈。划掉的来源必在
