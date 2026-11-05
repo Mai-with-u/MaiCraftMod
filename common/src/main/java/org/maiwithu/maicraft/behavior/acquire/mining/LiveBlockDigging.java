@@ -8,13 +8,12 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.world.level.block.LiquidBlock;
-import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BlockGone;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -107,17 +106,27 @@ public final class LiveBlockDigging implements DigsBlocks {
 
     // 目标格没了：空气，或只剩流体（含水的方块挖掉后留下原来的水）。没加载时不冒充挖完了。
     private static boolean gone(PlayerContext player, BlockPos cell) {
-        // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
-        if (player == null || player.level() == null || !player.level().isLoaded(cell)) return false;
-        BlockState now = player.level().getBlockState(cell);
-        return now.isAir() || now.getBlock() instanceof LiquidBlock;
+        if (player == null) return false;
+        return BlockGone.gone(player.level(), cell);
+    }
+
+    /**
+     * 方块先在客户端消失时能不能就报做完。
+     *
+     * <p>原版先在本地把方块挖掉，这一下挖掘记录还没结清；这时直接报做完，挖掘器就没机会收这一下，
+     * 挖下来的那一格就进不了结果里的工具现场，这一趟磨掉多少耐久也没处说（耐久本身照常由服务器扣）。
+     * 所以方块没了还要先把这一下交给挖掘器收掉
+     * （它收的时候会看到方块已经没了，走"先没了、只等确认"那一条），收完才算做完。
+     */
+    static boolean finishable(boolean gone, boolean swingPending) {
+        return gone && !swingPending;
     }
 
     /** 挖到目标格没了才做完：每刻先看现场，还在就再挖一刻。 */
     private record UntilGone(BlockPos cell, BlockBreaking digging) implements TellsToolUse {
 
         @Override public ActionStatus tick(TickContext context) {
-            if (gone(context.player(), cell)) {
+            if (finishable(gone(context.player(), cell), digging.swingPending())) {
                 return ActionStatus.done();
             }
             return digging.tick(context);

@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.interaction.DigTool;
+import org.maiwithu.maicraft.game.world.BlockGone;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -119,8 +120,10 @@ public final class NativeBlockBreaking implements BlockBreaking {
         }
         // 挥下去的那一下还没确认、方块在客户端已经没了（原版先在本地把方块挖掉）：射线已经打不中它，
         // 只等游戏确认这一下，不再对着空气重新挖。连锁键要按到这里结清才松。
+        // 水底下挖的方块挖掉后水会补回这一格，这一格照样算"没了"；只认空气的话这一下永远结不清，
+        // 挖的这一格既报不了完成，也结算不了工具现场。
         if (digger.hasPendingBreak() && cell.equals(digger.current())
-                && player.level() != null && player.level().getBlockState(cell).isAir()) {
+                && BlockGone.gone(player.level(), cell)) {
             return switch (digger.settleGone(player, true)) {
                 case BROKE_TARGET, BROKE_OCCLUDER -> ActionStatus.progressed();
                 case PROGRESSING, NO_SHOT, NO_ROOM -> ActionStatus.running();
