@@ -179,10 +179,27 @@ class ItemUseAimTest {
     @Test
     void transformBlockedSaysWhetherTargetIsNotSolidOrWhatSitsOnTop() {
         // 两种原因分开说：不是实心方块；上面压着什么，说出是什么。
-        assertEquals("不是实心方块，锄、锹、斧用不上",
+        assertEquals("不是实心方块，锄、锹用不上",
                 ItemUseAim.whyTransformBlocked(ItemUseAim.CellNature.AIR_OR_REPLACEABLE, ItemUseAim.AboveCell.OPEN));
-        assertEquals("上面压着 minecraft:stone，锄、锹、斧用不上",
+        assertEquals("上面压着 minecraft:stone，锄、锹用不上",
                 ItemUseAim.whyTransformBlocked(ItemUseAim.CellNature.SOLID, STONE_ABOVE));
+    }
+
+    @Test
+    void axeStripsWhateverSitsAboveLikeVanilla() {
+        // 原版斧头去皮、刮铜、去蜡不看上方：原木上叠着原木、铜块上压着东西照样能用；锄和锹才要求上方是空气。
+        assertEquals(ItemUseAim.Gesture.STRIP_TOOL, ItemUseAim.gestureOf("minecraft:iron_axe"));
+        assertEquals(ItemUseAim.Gesture.TRANSFORM_TOOL, ItemUseAim.gestureOf("minecraft:iron_shovel"));
+        Optional<ItemUseAim.Aim> covered = ItemUseAim.aim(ItemUseAim.Gesture.STRIP_TOOL, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false));
+        assertTrue(covered.isPresent(), "上方压着方块也照样削");
+        assertEquals(target, covered.get().clickCell());
+        assertEquals(ItemUseAim.Confirmation.BLOCK_TURNS_INTO, covered.get().confirmation());
+        assertTrue(ItemUseAim.aim(ItemUseAim.Gesture.STRIP_TOOL, target,
+                ItemUseAim.CellNature.AIR_OR_REPLACEABLE, around(Set.of(), Set.of(), true, false)).isEmpty(),
+                "对着空气削不了");
+        assertTrue(ItemUseAim.clearFirst(ItemUseAim.Gesture.STRIP_TOOL, target, ItemUseAim.CellNature.SOLID,
+                around(Set.of(), Set.of(), false, false)).isEmpty(), "斧头不用先清上面");
     }
 
     @Test

@@ -31,8 +31,10 @@ public final class ItemUseAim {
         POUR,
         /** 打火石、火焰弹：点火。 */
         IGNITE,
-        /** 锄、锹、斧：耕地、压土径、去皮。 */
+        /** 锄、锹：耕地、压土径；原版要求目标上方是空气。 */
         TRANSFORM_TOOL,
+        /** 斧：去皮、刮铜、去蜡；原版不看目标上方压着什么。 */
+        STRIP_TOOL,
         /** 刷子：对可疑的沙子、沙砾按住刷完。 */
         BRUSH,
         /** 其他对东西用的物品：骨粉、染料、剪刀、拴绳、鞍、给牛挤奶的桶……对目标本身用。 */
@@ -145,7 +147,8 @@ public final class ItemUseAim {
         if (id.endsWith(":bucket")) return Gesture.SCOOP;
         if (id.endsWith("_bucket")) return Gesture.POUR;
         if (id.endsWith(":flint_and_steel") || id.endsWith(":fire_charge")) return Gesture.IGNITE;
-        if (id.endsWith("_hoe") || id.endsWith("_shovel") || id.endsWith("_axe")) return Gesture.TRANSFORM_TOOL;
+        if (id.endsWith("_hoe") || id.endsWith("_shovel")) return Gesture.TRANSFORM_TOOL;
+        if (id.endsWith("_axe")) return Gesture.STRIP_TOOL;
         if (id.endsWith(":brush")) return Gesture.BRUSH;
         // 船与竹筏（含运输船）：原版里它们没有"点中方块"的用法，放下去靠物品自己的使用行为，
         // 沿视线按流体的规则找落点；所以放船走的是"使用手里物品"，不是右键水那一格。
@@ -197,6 +200,7 @@ public final class ItemUseAim {
                     ? Optional.of(new Aim(target, target, Confirmation.FIRE_APPEARS, "点着目标本身"))
                     : aimEffect(gesture, target, nature, around, Confirmation.FIRE_APPEARS, face);
             case TRANSFORM_TOOL -> aimTransform(target, nature, around);
+            case STRIP_TOOL -> aimStrip(target, nature);
             case UNSUPPORTED -> Optional.empty();
         };
     }
@@ -208,7 +212,7 @@ public final class ItemUseAim {
     }
 
     /**
-     * 锄、锹、斧被上方挡住时，先打掉哪一格：目标是实心方块、上方压着一下就能打掉的野生草木，就先打掉它再锄，
+     * 锄、锹被上方挡住时，先打掉哪一格：目标是实心方块、上方压着一下就能打掉的野生草木，就先打掉它再锄，
      * 玩家锄草地前也是先把草拨掉；上方空着、压着别的东西、目标本身不是实心、或不是这类工具，给空。
      */
     public static Optional<BlockPos> clearFirst(Gesture gesture, BlockPos target, CellNature nature, Around around) {
@@ -217,20 +221,27 @@ public final class ItemUseAim {
     }
 
     /**
-     * 锄、锹、斧用不上的原因，分开说：目标本身不是实心方块，或者上面压着什么（说出是什么）。
-     * 说明跟在目标的描述后面，例如"上面压着 minecraft:snow，锄、锹、斧用不上"。
+     * 锄、锹用不上的原因，分开说：目标本身不是实心方块，或者上面压着什么（说出是什么）。
+     * 说明跟在目标的描述后面，例如"上面压着 minecraft:snow，锄、锹用不上"。
      */
     public static String whyTransformBlocked(CellNature nature, AboveCell above) {
-        if (nature != CellNature.SOLID) return "不是实心方块，锄、锹、斧用不上";
-        if (above.open()) return "锄、锹、斧用不上";
-        return "上面压着 " + above.blockId() + "，锄、锹、斧用不上";
+        if (nature != CellNature.SOLID) return "不是实心方块，锄、锹用不上";
+        if (above.open()) return "锄、锹用不上";
+        return "上面压着 " + above.blockId() + "，锄、锹用不上";
     }
 
-    // 锄、锹、斧：只点侧面或顶面（不点底面），目标上方必须是空气；效果是目标自己变样子。
+    // 锄、锹：只点侧面或顶面（不点底面），目标上方必须是空气，和原版耕地、压土径一样；效果是目标自己变样子。
     private static Optional<Aim> aimTransform(BlockPos target, CellNature nature, Around around) {
         if (nature != CellNature.SOLID || !around.aboveOpen()) return Optional.empty();
         return Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO,
-                "点目标的侧面或顶面，让它变成耕地、土径或去皮的样子"));
+                "点目标的侧面或顶面，让它变成耕地或土径"));
+    }
+
+    // 斧：原版去皮、刮铜、去蜡只看点中的方块，上面压着东西也照样用（原木上叠着原木照样能削）；只要目标是实心方块。
+    private static Optional<Aim> aimStrip(BlockPos target, CellNature nature) {
+        if (nature != CellNature.SOLID) return Optional.empty();
+        return Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO,
+                "点目标的侧面或顶面，让它去皮、刮掉铜锈或去掉蜡"));
     }
 
     /**

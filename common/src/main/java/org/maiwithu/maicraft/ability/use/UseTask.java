@@ -327,7 +327,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Next<Phase> clearAbove(UseSeams.Built.ClearAbove blocked) {
         String sits = target.describe() + " 上面压着 " + blocked.blockId();
         if (services.clearsAbove() == null || blocked.cell().equals(clearedCell)) {
-            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, sits + "，锄、锹、斧用不上", null));
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, sits + "，锄、锹用不上", null));
         }
         Optional<Problem> refused = services.clearsAbove().allowed(input.permissions(), blocked.cell(),
                 blocked.blockId());

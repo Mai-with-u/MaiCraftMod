@@ -150,7 +150,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
     }
 
     // 瞄不出来的原因按手势说：工具与空桶是这一格用不了；倒和点火是旁边没有能点的面（落到自己身上不算瞄不出，照做）。
-    // 锄、锹、斧分开说是目标本身不是实心，还是上面压着什么（说出是什么），LLM 才知道该换目标还是先清上面。
+    // 锄、锹分开说是目标本身不是实心，还是上面压着什么（说出是什么），LLM 才知道该换目标还是先清上面；斧只看目标实不实心。
     private static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target, ItemUseAim.CellNature nature,
             ItemUseAim.AboveCell above) {
         return switch (gesture) {
@@ -158,6 +158,8 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                     target.describe() + " 不是流体源格，空桶舀不起来", null);
             case TRANSFORM_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " " + ItemUseAim.whyTransformBlocked(nature, above), null);
+            case STRIP_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    target.describe() + " 不是实心方块，斧头用不上", null);
             case POUR, IGNITE -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 是空气或流体，旁边又没有实心方块当支撑面，倒、点火落不到那一格",
                     "点名它旁边的实心方块，或先在旁边放一块方块再对着那一面倒、点");
