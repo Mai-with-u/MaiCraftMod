@@ -54,6 +54,7 @@ import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalWatch;
 import org.maiwithu.maicraft.behavior.perception.SkyChanges;
@@ -217,6 +218,8 @@ public final class Bootstrap {
         private HurtEpisodes hurtEpisodes;
         /** 别的玩家冲角色做的肢体动作：每刻采样，按人归段发事件。 */
         private NonverbalWatch nonverbal;
+        /** 正在和谁切磋：fight 开打时登记，拍一下的账、挨打片段与自卫都看它。 */
+        private final SparPartner sparPartner = new SparPartner();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
@@ -322,26 +325,7 @@ public final class Bootstrap {
             reminders = new PlayerReminders(taskEvents,
                     PlayerViews.foods(() -> playerControl.activeContext().orElse(null)), restStatistics);
             ClientHooks.registerRestStatistics(restStatistics);
-            // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
-            CombatMemory memory = combatMemory;
-            PlayerReminders playerReminders = reminders;
-            // 挨打的片段：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
-            hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
-                    : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
-                    ? Optional.empty() : worldScope[0].pains().culpritOf(type));
-            HurtEpisodes hurts = hurtEpisodes;
-            // 别的玩家冲角色做的肢体动作：看得见的带观察编号；发出一段就让闲时看先看他。
-            nonverbal = new NonverbalWatch(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
-                    : worldScope[0].scene().seen().idOfEntity(entityId), who -> {
-                        if (worldScope[0] != null) worldScope[0].idleLooking().someoneMotioned(who);
-                    });
-            ClientHooks.registerOthersSeen(nonverbal, nonverbal, nonverbal);
-            ClientHooks.registerDamageObserver((player, source, tick) -> {
-                memory.hurt(player, source, tick);
-                if (worldScope[0] != null) worldScope[0].pains().hurt(player, source, tick);
-                playerReminders.hurt(player, source, tick);
-                hurts.hurt(player, source, tick);
-            });
+            wireDamageObservers();
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
             // 没进世界时的占位存储：进世界时换成那个世界的存盘（见 enterWorld），不在世界里也下达不了目标。
@@ -360,6 +344,40 @@ public final class Bootstrap {
             // 控制权交接接在玩家控制权边界上：目标成为主任务时向输入层请求控制权（下一刻生效），
             // 查询端读此刻自动化是否真的拥有控制权。启动与查询都发生在客户端刻里，线程要求满足。
             goals = buildGoalRunTable(goalRuns, places);
+        }
+
+        /**
+         * 伤害包交给谁：自卫的伤害证据、吃过亏的方块、提醒、挨打片段，与别的玩家冲角色做的肢体动作；
+         * 被玩家打中的那一下由肢体动作那边分拍一下还是连打，连打再交回挨打片段与战斗证据。
+         */
+        private void wireDamageObservers() {
+            // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
+            CombatMemory memory = combatMemory;
+            PlayerReminders playerReminders = reminders;
+            // 挨打的片段：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
+            hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
+                    : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
+                    ? Optional.empty() : worldScope[0].pains().culpritOf(type));
+            HurtEpisodes hurts = hurtEpisodes;
+            // 别的玩家冲角色做的肢体动作：看得见的带观察编号；发出一段就让闲时看先看他。
+            // 被玩家连打的那一下交给挨打片段与战斗证据（自卫据此退开举盾）；拍一下只在肢体动作事件里说。
+            nonverbal = new NonverbalWatch(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
+                    : worldScope[0].scene().seen().idOfEntity(entityId), who -> {
+                        if (worldScope[0] != null) worldScope[0].idleLooking().someoneMotioned(who);
+                    }, sparPartner, beating -> {
+                        hurts.beaten(beating.called(), beating.entityId(), beating.damageType(), beating.lost(),
+                                beating.tick());
+                        memory.beaten(beating.who(), beating.tick(), beating.damageType());
+                    });
+            NonverbalWatch others = nonverbal;
+            ClientHooks.registerOthersSeen(nonverbal, nonverbal, nonverbal);
+            ClientHooks.registerDamageObserver((player, source, tick) -> {
+                memory.hurt(player, source, tick);
+                if (worldScope[0] != null) worldScope[0].pains().hurt(player, source, tick);
+                playerReminders.hurt(player, source, tick);
+                hurts.hurt(player, source, tick);
+                others.hurt(player, source, tick);
+            });
         }
 
         /**

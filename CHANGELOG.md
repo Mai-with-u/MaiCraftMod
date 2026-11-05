@@ -59,6 +59,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 ### 改动
 
 - `suicide` 结果细节里的 `keep_inventory` 改名为 `keep_inventory_known_by`（取值不变：`game_rule` / `caller_confirmed`），免得和 `observe(self)` 里写死亡不掉落开没开的 `keep_inventory` 混淆。
+- 被别的玩家拍一下不再退开、举盾、停工了：拍一两下（10 秒内不到 3 下或掉血不到 6 点，雪球鸡蛋也算）当刻在 `player_body_language` 里说"拍了你一下"，不进 `hurt`；PvP 关着时对着角色挥手也算。连打（10 秒内 3 下且掉了 6 点以上、打到拒战线下，或者拿箭射）才进 `hurt`，陌生人连打照旧退开举盾、停下等你决定。
 - 走路时路上的花草改按种类认：模组的花草、火把花照样挖开走过去；庄稼、树苗、长在耕地上的、睡莲不挖。
 - 走路不再顺手挖掉火把、南瓜、西瓜、黑曜石、苔藓地毯（缺材料时南瓜、西瓜、睡莲、黑曜石照样能采）。
 - `config/maicraft-clearance.json` 只放额外允许路上挖的方块，旧版自动写进去的默认条目不再起作用；空表不再表示关掉清障，不想动土用 `change_blocks=none`。

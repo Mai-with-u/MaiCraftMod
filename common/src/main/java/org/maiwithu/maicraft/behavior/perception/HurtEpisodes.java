@@ -24,7 +24,9 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
  * 每条都是自成一体的"刚才这阵"，不分开始与结束；「还剩多少血」写最后一下扣完当刻的血，不写发出去时回了血的数。
  * 服务器伤害包确认的命中直接算；没收到伤害包、
  * 只看到血掉了的，单独一段写明"只看到血掉了"。只看血量，黄心（伤害吸收）到期掉的不算挨打。
- * 死了的时候没发出的段丢掉（角色死了已有自己的事件），换世界、断线时也丢掉。被玩家打照样只发一条，不替 LLM 决定怎么回应。
+ * 死了的时候没发出的段丢掉（角色死了已有自己的事件），换世界、断线时也丢掉。
+ * 别的玩家打中的分开算：拍一下不进片段（它在别的玩家的肢体动作事件里说一次），连打从变成连打的那一下起
+ * 经 {@link #beaten} 补进来，切磋对手的出手不进；同一下伤害只出现在一条事件里。
  */
 public final class HurtEpisodes implements DamageObserver {
 
@@ -35,6 +37,8 @@ public final class HurtEpisodes implements DamageObserver {
     /** 伤害包到了以后，这么多刻里血掉的算这一下的。 */
     private static final int ATTRIBUTE_TICKS = 2;
     private static final String UNSEEN = "unseen";
+    /** 别的玩家刚打中的那一下：拍一下还是连打要过 2 刻才分得清，这一下掉的血不记到任何片段上。 */
+    private static final String BY_PLAYER = "by-player";
 
     private final TaskEventSink events;
     private final Function<Integer, Optional<String>> seenIdOf;
@@ -74,6 +78,11 @@ public final class HurtEpisodes implements DamageObserver {
     @Override public void hurt(LocalPlayer player, DamageSource source, long gameTick) {
         Entity attacker = source.getEntity() != null ? source.getEntity() : source.getDirectEntity();
         String type = source.type().msgId();
+        // 别的玩家打中的：先只记下"这一下是玩家打的"，掉的血不算别人头上，也不算"只看到血掉了"。
+        if (attacker instanceof Player other && other != player) {
+            byPlayer(gameTick);
+            return;
+        }
         if (attacker == null) {
             hit(new Hit("type:" + type, null, type), gameTick);
             return;
@@ -92,11 +101,33 @@ public final class HurtEpisodes implements DamageObserver {
         health(self.getHealth(), self.isDeadOrDying(), context.level().getGameTime());
     }
 
+    /**
+     * 被别的玩家连打的一下（拍一下的账判出来的，掉了多少血已经看清）：进这名玩家的片段，照常 5 秒没再挨就发。
+     *
+     * @param attacker   "玩家 Alex（e4）"这样的称呼
+     * @param entityId   他的实体编号：同一个人连着挨的归一段
+     * @param damageType 原版伤害类型（msgId）
+     */
+    public void beaten(String attacker, int entityId, String damageType, float lost, long tick) {
+        Hit hit = new Hit("entity:" + entityId, attacker, damageType);
+        Episode episode = open.computeIfAbsent(hit.key(), key -> new Episode(hit, tick));
+        episode.hits++;
+        episode.lost += lost;
+        episode.lastTick = tick;
+        if (lastHealth != null) episode.healthAfter = lastHealth;
+    }
+
     /** 换世界、断线：没发出的段丢掉，血量基准重来。 */
     public void forget() {
         open.clear();
         lastHealth = null;
         lastHitKey = null;
+    }
+
+    // 别的玩家打中的这一下：接下来 2 刻里掉的血留给拍一下的账去分，不记到片段上。
+    void byPlayer(long tick) {
+        lastHitKey = BY_PLAYER;
+        lastHitTick = tick;
     }
 
     void hit(Hit hit, long tick) {
@@ -116,7 +147,8 @@ public final class HurtEpisodes implements DamageObserver {
             forget();
             return;
         }
-        if (lastHealth != null && health < lastHealth) {
+        boolean byPlayer = BY_PLAYER.equals(lastHitKey) && tick - lastHitTick <= ATTRIBUTE_TICKS;
+        if (lastHealth != null && health < lastHealth && !byPlayer) {
             float lost = lastHealth - health;
             Episode episode = lastHitKey != null && tick - lastHitTick <= ATTRIBUTE_TICKS ? open.get(lastHitKey) : null;
             if (episode == null) {

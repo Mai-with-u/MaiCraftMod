@@ -10,6 +10,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -24,6 +25,7 @@ import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.Projectile;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
@@ -31,7 +33,10 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
+import org.maiwithu.maicraft.game.player.DamageObserver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.DiggingSeen;
 import org.maiwithu.maicraft.game.world.EntityHurtSeen;
@@ -47,11 +52,13 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
  *
  * <p>每刻给 16 格内看得见的玩家各采一份样子（{@link PlayerPose}），蹲起、点头、摇头、跳、拿出东西从采样里认；
  * 挥手从挥手包认，过 2 刻再判（这 2 刻前后他在挖方块、打中了别的东西、准星那里冒出或少了一格方块，就不算挥手）；
- * 扔东西从新掉落物认，看它落在哪。同一个人 1.5 秒没有新动作就把这一段发出去，一直在做的每 6 秒发一条；
+ * 扔东西从新掉落物认，看它落在哪。被别的玩家打中（伤害包）、或他对着够得着的角色挥手却没打出伤害，按
+ * {@link PlayerHitTally} 分拍一下还是连打：拍一下等 2 刻看清掉了多少血就当刻发出去，连打交给挨打事件与自卫，
+ * 正在和他切磋的不记。同一个人 1.5 秒没有新动作就把这一段发出去，一直在做的每 6 秒发一条；
  * 他做完走开、5 秒内又回头看角色的，等他回头一起说。一段里至少有一下冲着角色才发；
  * 一个人一分钟超过 12 条，这一分钟剩下的合成一条写总数。只在客户端线程读写。
  */
-public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurtSeen {
+public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurtSeen, DamageObserver {
 
     /** 同一个人这么久（刻）没有新动作，这一段就发出去：1.5 秒。 */
     static final int QUIET_TICKS = 30;
@@ -69,10 +76,18 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     static final int TOSS_FLIGHT_TICKS = 40;
     /** 这么久（刻）没再看见的人不再记。 */
     static final int FORGET_TICKS = 200;
+    /** 被打中以后等几刻看清掉了多少血。 */
+    static final int HIT_SETTLE_TICKS = 2;
 
     private final TaskEventSink events;
     private final Function<Integer, Optional<String>> seenIdOf;
     private final Consumer<UUID> noticed;
+    private final PlayerHitTally tally = new PlayerHitTally();
+    private final SparPartner sparring;
+    private final Consumer<Beating> beatings;
+    private final List<SelfHit> selfHits = new ArrayList<>();
+    private final Map<UUID, Long> lastSelfHit = new HashMap<>();
+    private float health = -1;
     private final Map<UUID, Watched> watched = new LinkedHashMap<>();
     private final List<PendingSwing> swings = new ArrayList<>();
     private final Map<Integer, Long> lastDigging = new HashMap<>();
@@ -84,13 +99,38 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     private long lastTowardTick = Long.MIN_VALUE;
 
     /**
+     * 被一名玩家连打的那一下：谁、哪刻、什么伤、掉了多少血。挨打事件与战斗证据从这里接。
+     *
+     * @param called "玩家 Alex（e4）"这样的称呼
+     */
+    public record Beating(UUID who, int entityId, String called, long tick, String damageType, float lost) {}
+
+    /**
      * @param seenIdOf 游戏实体编号 → 这会儿的观察编号（看得见才有）
      * @param noticed  发出一段冲着角色的肢体动作时告诉谁（闲时看把他和刚说过话的人排在一起）
+     * @param sparring 正在和谁切磋：他打中角色的不进拍一下的账
+     * @param beatings 被玩家连打的每一下交给谁（挨打事件、战斗证据）
      */
-    public NonverbalWatch(TaskEventSink events, Function<Integer, Optional<String>> seenIdOf, Consumer<UUID> noticed) {
+    public NonverbalWatch(TaskEventSink events, Function<Integer, Optional<String>> seenIdOf, Consumer<UUID> noticed,
+                          SparPartner sparring, Consumer<Beating> beatings) {
         this.events = Objects.requireNonNull(events, "events");
         this.seenIdOf = Objects.requireNonNull(seenIdOf, "seenIdOf");
         this.noticed = Objects.requireNonNull(noticed, "noticed");
+        this.sparring = Objects.requireNonNull(sparring, "sparring");
+        this.beatings = Objects.requireNonNull(beatings, "beatings");
+    }
+
+    // 角色被打中：出手的是别的玩家（直接打的、射箭扔雪球的都算他）就记下来，等 2 刻看清掉了多少血再分拍一下还是连打；
+    // 正在和他切磋的不记，切磋自己记。背后打的也记：身体被打中感觉得到。
+    @Override public void hurt(LocalPlayer player, DamageSource source, long gameTick) {
+        if (!(source.getEntity() instanceof Player other) || other == player || sparring.with(other.getUUID())) return;
+        Watched who = watched.computeIfAbsent(other.getUUID(), uuid -> new Watched(uuid, gameTick - 1));
+        who.name = other.getGameProfile().getName();
+        who.entityId = other.getId();
+        boolean missile = source.getDirectEntity() instanceof Projectile;
+        String hand = other.getMainHandItem().isEmpty() ? "" : other.getMainHandItem().getHoverName().getString();
+        selfHits.add(new SelfHit(who, gameTick, health, missile, source.type().msgId(), hand));
+        lastSelfHit.put(other.getUUID(), gameTick);
     }
 
     /** 最近一个冲角色做过肢体动作的玩家，限 withinTicks 刻内；没有为空。 */
@@ -115,9 +155,13 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         if (source.getDirectEntity() != null) lastHitOther.put(source.getDirectEntity().getId(), gameTick);
     }
 
-    /** 换世界、断线：记的人、没发出的段、在飞的东西都丢掉。 */
+    /** 换世界、断线：记的人、没发出的段、在飞的东西、拍一下的账都丢掉。 */
     public void forget() {
         watched.clear();
+        selfHits.clear();
+        lastSelfHit.clear();
+        tally.clear();
+        health = -1;
         swings.clear();
         lastDigging.clear();
         lastHitOther.clear();
@@ -136,6 +180,8 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         sample(level, now);
         watchTosses(level, now);
         settleSwings(level, now);
+        settleHits(now);
+        health = me.getHealth();
         for (Watched who : watched.values()) {
             decide(who, now);
             flushOverflow(who, now);
@@ -230,10 +276,46 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
             it.remove();
             Watched who = swing.who;
             if (near(lastDigging.get(who.entityId), swing.tick) || near(lastHitOther.get(who.entityId), swing.tick)
-                    || near(who.tossedAt, swing.tick) || blockChanged(who, level, swing.tick)) continue;
+                    || near(who.tossedAt, swing.tick) || near(lastSelfHit.get(who.uuid), swing.tick)
+                    || blockChanged(who, level, swing.tick)) continue;
+            // 对着够得着的角色挥手却没打出伤害（服务器关了 PvP、无敌帧里）：也是拍了一下，没伤到。
+            if (swing.target.reachesMe) {
+                who.events.add(poke(swing.tick, "", 0));
+                continue;
+            }
             who.events.add(new NonverbalAct(NonverbalAct.Kind.SWING, swing.tick, 1, swing.target.towardMe,
                     swing.target.words));
         }
+    }
+
+    // 打中角色的那一下过 2 刻：掉了多少血看清了，按账分拍一下还是连打。拍一下进这一段当刻发，连打交出去。
+    private void settleHits(long now) {
+        Iterator<SelfHit> it = selfHits.iterator();
+        float lostSoFar = 0;
+        while (it.hasNext()) {
+            SelfHit hit = it.next();
+            if (now - hit.tick < HIT_SETTLE_TICKS) continue;
+            it.remove();
+            float lost = hit.healthBefore < 0 ? 0 : Math.max(0, hit.healthBefore - me.getHealth() - lostSoFar);
+            lostSoFar += lost;
+            double effective = ThreatAssessment.effectiveHealth(me.getHealth(), me.getArmorValue());
+            PlayerHitTally.Verdict verdict = tally.hit(hit.who.uuid, hit.tick, lost, effective, hit.missile && lost > 0);
+            if (verdict == PlayerHitTally.Verdict.POKE) {
+                hit.who.events.add(poke(hit.tick, hit.hand, lost));
+                hit.who.pokedAt = hit.tick;
+            } else {
+                beatings.accept(new Beating(hit.who.uuid, hit.who.entityId, hit.who.called(seenIdOf), hit.tick,
+                        hit.damageType, lost));
+            }
+        }
+    }
+
+    // 拍一下的那句细节：拿着什么（空手）、掉没掉血。
+    private static NonverbalAct poke(long tick, String hand, float lost) {
+        String with = hand.isEmpty() ? "空手" : "拿着" + hand;
+        String hurt = lost <= 0 ? "没伤到" : "掉了 " + (lost == Math.rint(lost) ? String.valueOf((int) lost)
+                : String.format(Locale.ROOT, "%.1f", lost)) + " 点血";
+        return new NonverbalAct(NonverbalAct.Kind.POKE, tick, 1, true, with + "，" + hurt);
     }
 
     private static boolean near(Long at, long tick) {
@@ -257,7 +339,9 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         boolean walkedBack = acts.get(acts.size() - 1).kind() == NonverbalAct.Kind.WALK;
         boolean inFlight = flying.values().stream().anyMatch(toss -> toss.who == who);
         boolean waiting = inFlight || NonverbalReading.walkingAway(List.copyOf(who.poses), last, now);
-        if (due(first, last, now, walkedBack, waiting)) publish(who, acts, now);
+        // 拍一下当刻发：不等 1.5 秒，这一段之前攒下的一起带上。
+        boolean poked = who.pokedAt != null && who.pokedAt > who.cut;
+        if (poked || due(first, last, now, walkedBack, waiting)) publish(who, acts, now);
     }
 
     /**
@@ -362,6 +446,9 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
 
     private record PendingSwing(Watched who, long tick, SwingTarget target) {}
 
+    /** 被别的玩家打中的一下：谁、哪刻、挨打前的血、是不是投射物、什么伤、他手上拿着什么。 */
+    private record SelfHit(Watched who, long tick, float healthBefore, boolean missile, String damageType, String hand) {}
+
     private record AimedBlock(long tick, BlockPos pos, BlockState state, BlockPos front, BlockState frontState) {}
 
     /** 在飞的一件东西：谁扔的、哪刻扔的、是什么、几个。 */
@@ -379,6 +466,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         long lastSeen;
         long cut;
         Long tossedAt;
+        Long pokedAt;
         long minuteStart;
         int publishedThisMinute;
 

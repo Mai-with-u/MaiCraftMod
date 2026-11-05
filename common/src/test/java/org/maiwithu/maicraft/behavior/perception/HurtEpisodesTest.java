@@ -126,4 +126,25 @@ class HurtEpisodesTest {
         assertEquals(List.of(TaskEvent.Kind.DIMENSION_CHANGED), kinds);
         assertEquals("从主世界到了下界，落在 12, 70, -8", messages.getFirst());
     }
+
+    @Test
+    void 别的玩家拍一下掉的血不进片段_也不算只看到血掉了() {
+        // 玩家拍了一下：掉的 1 点血留给拍一下的账，挨打事件不发。
+        hurts.health(20f, false, 0);
+        hurts.byPlayer(10);
+        hurts.health(19f, false, 11);
+        hurts.health(19f, false, 300);
+        assertTrue(messages.isEmpty(), "拍一下只在肢体动作事件里说：" + messages);
+    }
+
+    @Test
+    void 被玩家连打的那几下照常进片段() {
+        hurts.health(20f, false, 0);
+        hurts.byPlayer(10);
+        hurts.health(17f, false, 11);
+        hurts.beaten("玩家 Alex（e4）", 4, "player", 3f, 12);
+        hurts.health(17f, false, 120);
+        assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
+        assertEquals("被玩家 Alex（e4）打了一下，掉了 3 点血，还剩 17 点", messages.getFirst());
+    }
 }

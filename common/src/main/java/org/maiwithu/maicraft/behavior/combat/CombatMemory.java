@@ -49,11 +49,22 @@ public final class CombatMemory implements DamageObserver {
         String kind = source.type().msgId();
         boolean hostile = attacker instanceof Enemy;
         lastHurt = new Hurt(gameTick, kind, attacker == null ? null : typeId(attacker), hostile);
-        // 怪和别的玩家都记：被玩家打也要退开、举盾、停下手上的事等 LLM 决定（自家人除外，由自卫需求判断）。
-        if (attacker instanceof Mob || attacker instanceof Player other && other != player) {
+        // 怪打的记成证据。别的玩家打的这一下先不记：拍一下不算结仇，连打由 beaten 记；
+        // 这一刻照样算服务器说过是谁打的，不按血掉落去怪旁边的怪。
+        if (attacker instanceof Mob) {
             record(new Evidence(attacker.getUUID(), typeId(attacker), gameTick, kind));
             authoritativeTick = gameTick;
+        } else if (attacker instanceof Player other && other != player) {
+            authoritativeTick = gameTick;
         }
+    }
+
+    /**
+     * 被一名玩家连打的一下（拍一下的账判出来的）：记成证据，自卫据此退开、举盾、不还手（自家人除外，由自卫需求判断）。
+     * 拍一下不记，免得朋友拍一下角色就退开停工。
+     */
+    public void beaten(UUID who, long gameTick, String damageKind) {
+        record(new Evidence(who, EntityType.getKey(EntityType.PLAYER).toString(), gameTick, damageKind));
     }
 
     /** 这一刻挨的那一下（服务器伤害包）；这一刻没挨打为空。 */
