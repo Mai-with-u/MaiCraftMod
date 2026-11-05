@@ -28,10 +28,12 @@ final class NonverbalWords {
         int i = 0;
         while (i < acts.size()) {
             NonverbalAct first = acts.get(i);
-            int count = 0;
-            boolean toward = false;
-            int j = i;
-            // 连着做的同一种、同一个细节合成一句：蹲起 4 下、对着你挥了 2 下。扔东西每次单说。
+            // 先把眼前这一个算进来，每一轮至少往后走一个：扔东西、走开又回头不和谁合（和自己比也不合），
+            // 要是从它自己开始比，一个都吃不进去，下标不动，这一段就永远说不完。
+            int count = first.count();
+            boolean toward = first.towardMe();
+            int j = i + 1;
+            // 后面连着做的同一种、同一个细节合成一句：蹲起 4 下、对着你挥了 2 下。扔东西、走开又回头每次单说。
             while (j < acts.size() && sameRun(first, acts.get(j))) {
                 count += acts.get(j).count();
                 toward |= acts.get(j).towardMe();
