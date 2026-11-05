@@ -23,6 +23,8 @@ public final class ParamNames {
             Map.entry("structure", "要找的结构 ID（命名空间 id），例如 minecraft:village_plains"),
             Map.entry("count", "这次要多做多少：拿东西就是再多拿几件（不是背包里的总数），做动作就是做几次"),
             Map.entry("radius", "工作或搜索范围，单位格"),
+            Map.entry("spar", "fight 用：和点名的一位玩家友好切磋，打到停手线或对方停手为止"),
+            Map.entry("stop_at_health", "切磋的停手线，单位血量点（一颗心 2 点）；0 是打到有人倒下"),
             Map.entry("max_distance", "出行或搜索的最远距离，单位格"),
             Map.entry("max_seconds", "最多花多少秒"),
             Map.entry("strict_arrival", "出行要不要严格到达：true 时目的地落在水里等站不住的地方就失败并给建议落点，false（默认）时自动挪到能站的岸格算到达"),

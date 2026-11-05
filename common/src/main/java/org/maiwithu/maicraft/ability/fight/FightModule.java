@@ -6,6 +6,8 @@ import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
+import org.maiwithu.maicraft.behavior.combat.Sparring;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
@@ -39,23 +41,25 @@ public final class FightModule implements AbilityModule {
     private final FightMoves moves;
     private final PermissionCheck permission;
     private final SuicideWayOut wayOut;
-
-    public FightModule(CombatSenses senses, SeenTargets seenTargets, FightMoves moves, PermissionCheck permission) {
-        this(senses, seenTargets, moves, permission, SuicideWayOut.NONE);
-    }
+    private final SparView sparView;
+    private final SparPartner sparPartner;
 
     /**
      * 生产用：战斗感观、目标解析、动手实现与许可检查点由启动一侧创建并登记。
      *
-     * @param wayOut 撤离后回不了血时提的那句寻死出路
+     * @param wayOut      撤离后回不了血时提的那句寻死出路
+     * @param sparView    切磋看对手
+     * @param sparPartner 正在和谁切磋：开打时登记、收场时清掉，挨打那边读同一份
      */
     public FightModule(CombatSenses senses, SeenTargets seenTargets, FightMoves moves, PermissionCheck permission,
-            SuicideWayOut wayOut) {
+                       SuicideWayOut wayOut, SparView sparView, SparPartner sparPartner) {
         this.wayOut = wayOut;
         this.senses = senses;
         this.seenTargets = seenTargets;
         this.moves = moves;
         this.permission = permission;
+        this.sparView = sparView;
+        this.sparPartner = sparPartner;
     }
 
     private final AbilitySpec spec = new AbilitySpec(
@@ -74,8 +78,15 @@ public final class FightModule implements AbilityModule {
                     ParamSpec.of("count", ParamType.INTEGER)
                             .range(1, 64)
                             .doc("区域清扫时最多处理几只；省略即开打那一刻看得见的这一批")
+                            .build(),
+                    ParamSpec.of("spar", ParamType.BOOLEAN)
+                            .doc("true 是和点名的一位玩家切磋：点名即许可，打到停手线或他停手为止，不撤离，不打出把他打倒的那一刀")
+                            .build(),
+                    ParamSpec.of("stop_at_health", ParamType.INTEGER)
+                            .range(0, 19)
+                            .doc("切磋的停手线，单位血量点（一颗心 2 点），默认 6；0 是打到有人倒下")
                             .build()),
-            Set.of(TargetKind.SEEN),
+            Set.of(TargetKind.SEEN, TargetKind.PLAYER),
             ExecutionMode.CONTROLS_PLAYER,
             Set.of(),
             List.of(),
@@ -86,6 +97,16 @@ public final class FightModule implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         var params = step.goal().params();
+        // 切磋：只点一位玩家（玩家名或观察编号），点名即许可，不走清扫与点名打的那一套。
+        if (params.has("spar") && params.bool("spar")) {
+            Target opponent = step.goal().target();
+            if (!(opponent instanceof Target.Player) && !(opponent instanceof Target.Seen)) {
+                return new StepDecision.Finish(TaskResult.failed("切磋要点名一位玩家", Problem.of(
+                        Problem.Kind.INVALID_PARAMETER, "切磋要点名一位玩家", "target 给 player（玩家名）或他的观察编号")));
+            }
+            int stopAt = params.has("stop_at_health") ? (int) params.integer("stop_at_health") : Sparring.DEFAULT_STOP_AT;
+            return new StepDecision.Run(new SparInput(opponent, stopAt));
+        }
         List<String> named = step.goal().target() instanceof Target.Seen seen
                 ? List.of(seen.id()) : List.of();
         int radius = (int) (params.has("radius") ? params.integer("radius") : FightInput.DEFAULT_RADIUS);
@@ -109,5 +130,6 @@ public final class FightModule implements AbilityModule {
         NamedTargetConsent consent = (target, permissions) -> permission.namedCreatureAllowed(permissions,
                 PermissionCheck.WorldAction.FIGHT, target.uuid(), target.type() + "（实体 " + target.entityId() + "）");
         factories.register(FightInput.class, input -> new FightTask(input, senses, seenTargets, moves, consent, wayOut));
+        factories.register(SparInput.class, input -> new SparTask(input, senses, moves, sparView, sparPartner));
     }
 }

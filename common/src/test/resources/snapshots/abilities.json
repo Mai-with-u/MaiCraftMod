@@ -202,8 +202,9 @@
       {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
-        "parameters": "entity?: string, radius: integer = 32, count?: integer",
+        "parameters": "entity?: string, radius: integer = 32, count?: integer, spar?: boolean, stop_at_health?: integer",
         "targets": [
+          "player",
           "seen"
         ],
         "mode": "controls_player"
@@ -1324,9 +1325,24 @@
           "doc": "区域清扫时最多处理几只；省略即开打那一刻看得见的这一批",
           "min": 1,
           "max": 64
+        },
+        {
+          "name": "spar",
+          "type": "boolean",
+          "required": false,
+          "doc": "true 是和点名的一位玩家切磋：点名即许可，打到停手线或他停手为止，不撤离，不打出把他打倒的那一刀"
+        },
+        {
+          "name": "stop_at_health",
+          "type": "integer",
+          "required": false,
+          "doc": "切磋的停手线，单位血量点（一颗心 2 点），默认 6；0 是打到有人倒下",
+          "min": 0,
+          "max": 19
         }
       ],
       "targets": [
+        "player",
         "seen"
       ],
       "mode": "controls_player",

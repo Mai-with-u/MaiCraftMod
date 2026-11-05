@@ -55,6 +55,8 @@
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
     "sneak": "按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；不给就不潜行",
     "source": "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同",
+    "spar": "fight 用：和点名的一位玩家友好切磋，打到停手线或对方停手为止",
+    "stop_at_health": "切磋的停手线，单位血量点（一颗心 2 点）；0 是打到有人倒下",
     "strict_arrival": "出行要不要严格到达：true 时目的地落在水里等站不住的地方就失败并给建议落点，false（默认）时自动挪到能站的岸格算到达",
     "structure": "要找的结构 ID（命名空间 id），例如 minecraft:village_plains",
     "target": "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天",

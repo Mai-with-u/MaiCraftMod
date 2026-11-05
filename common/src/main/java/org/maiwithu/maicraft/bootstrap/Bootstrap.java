@@ -600,7 +600,8 @@ public final class Bootstrap {
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
                         dropConfirmations,
                         taskEvents, lightLevels, lightingWorld, followLighting, timers, chatEvents,
-                        new UnreachableFromHere(this::mainGoalRun), NonverbalExchange.live(() -> nonverbal, lookBack));
+                        new UnreachableFromHere(this::mainGoalRun), NonverbalExchange.live(() -> nonverbal, lookBack),
+                        sparPartner);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();

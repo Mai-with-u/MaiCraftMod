@@ -8,6 +8,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
@@ -171,6 +172,6 @@ final class OfflineCatalog {
                 // 离线清单里没有预留，身上件数也读不到。
                 new ReservedItems(LiveCarryReads.itemTags(), Map::of),
                 new DropConfirmations(),
-                config);
+                config, new SparPartner());
     }
 }

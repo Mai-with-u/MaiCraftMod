@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.io.IOException;
@@ -192,7 +193,7 @@ public final class WorldScope {
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents,
-            UnreachableFromHere unreachable, NonverbalExchange nonverbal) {
+            UnreachableFromHere unreachable, NonverbalExchange nonverbal, SparPartner sparPartner) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
@@ -266,7 +267,8 @@ public final class WorldScope {
                         () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
                         events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
-                compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig),
+                compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig,
+                sparPartner),
                 abilities);
     }
 

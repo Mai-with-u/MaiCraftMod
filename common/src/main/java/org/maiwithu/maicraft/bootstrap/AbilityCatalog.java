@@ -44,8 +44,10 @@ import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
 import org.maiwithu.maicraft.ability.explore.ExploreAbility;
 import org.maiwithu.maicraft.ability.fight.FightModule;
+import org.maiwithu.maicraft.ability.fight.LiveSparView;
 import org.maiwithu.maicraft.ability.fish.FishModule;
 import org.maiwithu.maicraft.ability.fight.LiveFightMoves;
+import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.LiveBattleMoves;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
@@ -187,7 +189,9 @@ public final class AbilityCatalog {
             /** 掉落物的事实确认：捡掉落物、战斗拾荒按服务器的拾取包认东西进没进包。 */
             DropConfirmations dropConfirmations,
             /** 启动游戏的所有者放在配置文件里的开关与上限。 */
-            InstanceConfig config) {
+            InstanceConfig config,
+            /** 正在和谁切磋：fight(spar=true) 开打时登记，挨打片段、拍一下的账与自卫读同一份。 */
+            SparPartner sparPartner) {
 
         public Deps {
             Objects.requireNonNull(character, "character");
@@ -207,6 +211,7 @@ public final class AbilityCatalog {
             Objects.requireNonNull(reserved, "reserved");
             Objects.requireNonNull(dropConfirmations, "dropConfirmations");
             Objects.requireNonNull(config, "config");
+            Objects.requireNonNull(sparPartner, "sparPartner");
         }
 
         /** 要留的东西：预留加上正要用的，角色自己做主花东西时全仓只过这一道。 */
@@ -531,16 +536,8 @@ public final class AbilityCatalog {
             Function<Permissions, ConstructionServices> construction) {
         PermissionCheck permission = shared.permission();
         PlayerServices services = shared.playerServices();
-        // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上。
-        registry.register(new FightModule(deps.senses(),
-                new LiveSeenTargets(deps.world().scene().seen()),
-                new LiveFightMoves(deps.travel().walks(), deps.dropConfirmations(), deps.hands().useKeyProjection(),
-                        new ModRangedWeapons(deps.compat()::rangedWeapons, deps.character().foods()),
-                        // 拾荒和采集、打猎共用一套捡掉落物。
-                        new ClientDropPickup(deps.character().context(), deps.travel().walks(),
-                                deps.dropConfirmations()),
-                        deps.kept()),
-                permission, deps.character().suicideWayOut()));
+        // 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上，见 fightModule。
+        registry.register(fightModule(deps, permission));
 
         // 跨维度出行的现场部件一次拼好：找门、进门、建门与末地门房间，出行与跟着过门共用。
         DimensionTravelServices portals = dimensionPortals(deps, shared, construction);
@@ -606,6 +603,21 @@ public final class AbilityCatalog {
         // 任务书：提交、勾选、领奖经登记表交来的任务书操作做；FTB 任务没装时能力不登记。
         registry.register(new QuestModule(deps.compat().questBooks(services)));
         VehicleWiring.registerVehicles(registry, deps, services);
+    }
+
+    /** 战斗：感观与生存需求共用一份，观察编号与动手都接在真实客户端上；切磋的对手读同步数据。 */
+    private static FightModule fightModule(Deps deps, PermissionCheck permission) {
+        return new FightModule(deps.senses(),
+                new LiveSeenTargets(deps.world().scene().seen()),
+                new LiveFightMoves(deps.travel().walks(), deps.dropConfirmations(), deps.hands().useKeyProjection(),
+                        new ModRangedWeapons(deps.compat()::rangedWeapons, deps.character().foods()),
+                        // 拾荒和采集、打猎共用一套捡掉落物。
+                        new ClientDropPickup(deps.character().context(), deps.travel().walks(),
+                                deps.dropConfirmations()),
+                        deps.kept()),
+                permission, deps.character().suicideWayOut(),
+                // 切磋：点名的玩家按名字或观察编号认，他的血与手上拿什么读同步数据；"正在和谁切磋"与挨打那边共用一份。
+                new LiveSparView(deps.world().scene().seen()), deps.sparPartner());
     }
 
     /**

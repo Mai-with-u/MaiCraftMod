@@ -195,7 +195,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         String who = String.join("、", names);
         displacedWhy = "被玩家 " + who + " 打了，没有还手，" + whereNow(context);
         events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
-                + "主任务已暂停，等你决定（要还手就用 fight 点名他，不理就让主任务继续）");
+                + "主任务已暂停，等你决定（要还手就用 fight 点名他，想当切磋就 fight(target=他, spar=true)，不理就让主任务继续）");
         return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
                 .details(details(distanceFromAnchor(context), heartsLost(context))).build());
     }
