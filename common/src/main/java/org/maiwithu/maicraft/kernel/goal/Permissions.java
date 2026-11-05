@@ -65,7 +65,15 @@ public record Permissions(
         /** 天然方块，以及不属于任何玩家的东西（村庄的床、废弃矿井的铁轨……，放在最后考虑）。 */
         NATURAL,
         /** 一切不受保护的方块。 */
-        ANY
+        ANY;
+
+        /**
+         * 这一档能不能挖角色自己放的之外的方块（受不受保护另算）：natural 与 any 能；temporary 只收回自己放的；
+         * none 一格都不动。单独下令挖一格的许可检查按它放行，卡坑没出去时说"能不能单独下令挖掉那一格"也按它说。
+         */
+        public boolean digsBeyondOwn() {
+            return this == NATURAL || this == ANY;
+        }
     }
 
     /** 战斗的主动程度。 */

@@ -393,11 +393,12 @@ final class BaritoneWalkRun implements WalkRun {
         safeToPause = (onGround || inWater) && pathing.isSafeToCancel();
 
         // 走不通：把起点几格、垫料、许可与附近岩浆补进问题，LLM 据此调整；程序出错不补现场，免得把程序问题说成地形问题。
+        // 脱困没出去的再补一句身边坑壁是什么、为什么没挖开、还剩哪条出路。
         var spare = owner.spareScaffold(player);
         progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
                 : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty(),
-                        owner -> TrapEscape.nameOf(owner, context))),
-                        context.level(), player, permit, spare));
+                        owner -> TrapEscape.nameOf(owner, context)), () -> TrapWalls.around(context, feet),
+                        !spare.isEmpty()), context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
             return;

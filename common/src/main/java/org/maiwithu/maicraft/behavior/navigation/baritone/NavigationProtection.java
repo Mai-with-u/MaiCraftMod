@@ -52,6 +52,11 @@ public final class NavigationProtection {
         default Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
             return Optional.empty();
         }
+
+        /** 归属记录写着这一格是别人放的：给放它的人的编号；没记录、没问到、角色自己放的给空。卡坑没出去时说是谁放的用。 */
+        default Optional<String> placedByOther(int x, int y, int z) {
+            return Optional.empty();
+        }
     }
 
     private NavigationProtection() {}
@@ -96,6 +101,11 @@ public final class NavigationProtection {
     /** 此刻生效的保护要求下，这一格是不是放开给脱困的别人的普通方块：走路时挖之前再问一次。 */
     public static Optional<String> escapeOwner(BlockPos pos, BlockState state) {
         return pos == null ? Optional.empty() : escapeOwner(CURRENT.get(), pos.getX(), pos.getY(), pos.getZ(), state);
+    }
+
+    /** 归属记录写着这一格是别人放的，给放它的人的编号：卡坑没出去时说挡着的是谁放的。 */
+    public static Optional<String> placedByOther(BlockPos pos) {
+        return pos == null ? Optional.empty() : WORLD.get().placedByOther(pos.getX(), pos.getY(), pos.getZ());
     }
 
     /** 走到结束后清空保护，避免上一次任务的保护格挡住下一次无关路线。 */

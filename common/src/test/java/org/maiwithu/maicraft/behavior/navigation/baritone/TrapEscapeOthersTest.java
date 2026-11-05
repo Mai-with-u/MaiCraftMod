@@ -31,6 +31,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  */
 class TrapEscapeOthersTest {
 
+    private static final Problem NO_ROUTE = Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null);
+
     private static final String OWNER = "11111111-2222-3333-4444-555555555555";
     private static final BlockPos FEET = new BlockPos(5, 64, 5);
 
@@ -102,8 +104,7 @@ class TrapEscapeOthersTest {
         assertEquals(1, events.size());
         assertTrue(events.getFirst().contains(FEET.toShortString()) && events.getFirst().contains(OWNER + " 放的 1 格")
                 && events.getFirst().contains("出来了"), events.getFirst());
-        assertTrue(escape.notes().getFirst().contains("挖开别人放的普通方块") && escape.notes().getFirst().contains("挖开 2 格"),
-                escape.notes().getFirst());
+        assertTrue(escape.notes().getFirst().contains("挖开 2 格，其中" + OWNER + " 放的 1 格"), escape.notes().getFirst());
         assertEquals(1, escape.othersBroken().size(), "出坑后整趟的账还在，出行结算要列出来");
     }
 
@@ -124,12 +125,12 @@ class TrapEscapeOthersTest {
         assertTrue(closed, "第二十四格挖开就收回放开，调用方重新算路");
         assertFalse(escape.throughOthers());
         assertFalse(escape.raise(FEET, () -> true, 10), "这一趟到上限后不再放开");
-        Problem stuck = escape.explain(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null));
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
         assertTrue(stuck.message().contains("24 格的上限") && stuck.message().contains("还是没出去"), stuck.message());
         assertEquals(1, events.size());
         assertTrue(events.getFirst().contains("还是没出去"), events.getFirst());
         // 同一次脱困的说明可能被问好几次，事件只报一次。
-        escape.explain(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null));
+        escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
         assertEquals(1, events.size());
     }
 

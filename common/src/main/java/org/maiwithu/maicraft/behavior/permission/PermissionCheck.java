@@ -131,14 +131,12 @@ public final class PermissionCheck {
         return Optional.empty();
     }
 
-    /** 挖方块按档位放行：none 都不行；temporary 只放行收回自己搭的；natural 与 any 都行。 */
+    /** 挖方块按档位放行：natural 与 any 都行；temporary 只放行收回自己搭的；none 都不行。 */
     private boolean digBlockedByTier(Permissions permissions, WorldAction action, WorldPosition position) {
         if (action != WorldAction.DIG_BLOCK) return false;
-        return switch (permissions.changeBlocks()) {
-            case NONE -> true;
-            case TEMPORARY -> !protection.selfPlaced(position);
-            case NATURAL, ANY -> false;
-        };
+        Permissions.BlockChanges tier = permissions.changeBlocks();
+        if (tier.digsBeyondOwn()) return false;
+        return tier == Permissions.BlockChanges.NONE || !protection.selfPlaced(position);
     }
 
     /**

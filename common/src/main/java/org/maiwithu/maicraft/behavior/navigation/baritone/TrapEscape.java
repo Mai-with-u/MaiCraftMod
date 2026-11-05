@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.StringJoiner;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -212,20 +213,36 @@ final class TrapEscape {
         return List.copyOf(othersAll);
     }
 
-    /** 升到头还是出不去：走不通的说明里补上试过什么；挖过别人的方块就当场报一条事件。 */
-    Problem explain(Problem problem) {
+    /**
+     * 升到头还是出不去：走不通的说明里补上这次脱困实际做了什么，再说身边挡着什么、为什么没挖开、还剩哪条出路；
+     * 挖过别人的方块就当场报一条事件。
+     *
+     * @param walls           身边的坑壁，只在这次确实在脱困时才读
+     * @param carriesScaffold 手边有没有能垫的料：只能垫上去时说得出有没有料可垫
+     */
+    Problem explain(Problem problem, Supplier<TrapWalls> walls, boolean carriesScaffold) {
         if (raised == null || problem == null) return problem;
         report(Boolean.FALSE);
         String capped = othersAll.size() >= MAX_OTHERS_BLOCKS
                 ? "，挖别人放的方块到了一趟 " + MAX_OTHERS_BLOCKS + " 格的上限" : "";
-        return Problem.of(problem.kind(), problem.message() + "；" + story() + capped + "，还是没出去",
+        // 垫过、挖过还是没出去才说"还是没出去"；一格没动的直接接着说挡着的是什么，那才是 LLM 要的原因。
+        String tried = story() + capped + (placed > 0 || dug > 0 ? "，还是没出去" : "");
+        // 出路按任务原来的许可说：脱困临时升的那一档只管寻路，单独下令挖一格仍按任务许可检查。
+        String around = walls.get().describe(base.changes(), carriesScaffold);
+        return Problem.of(problem.kind(), problem.message() + "；" + tried + (around.isEmpty() ? "" : "；" + around),
                 problem.suggestion());
     }
 
+    /**
+     * 这次脱困实际发生了什么：垫了几块、挖开几格，一格没动就说一格没动。只有任务许可本来只垫不挖、
+     * 这次临时升到能挖天然方块时才说"没等许可"；"别人放的"只在真挖开了有放置记录的格子时才说，并按放的人分开数。
+     */
     private String story() {
-        String how = throughOthers || !othersThisTime.isEmpty() ? "挖开别人放的普通方块"
-                : raised.changes() == Permissions.BlockChanges.TEMPORARY ? "垫方块往上搭" : "挖开天然方块";
-        String told = "卡在坑里，没等许可自动" + how + "脱困：垫了 " + placed + " 块、挖开 " + dug + " 格";
+        String loosened = raised.changes() != base.changes() ? "没等许可临时放开挖天然方块，" : "";
+        List<String> did = new ArrayList<>();
+        if (placed > 0) did.add("垫了 " + placed + " 块");
+        if (dug > 0) did.add("挖开 " + dug + " 格");
+        String told = "卡在坑里，" + loosened + "自动脱困" + (did.isEmpty() ? "一格没动" : "：" + String.join("、", did));
         return othersThisTime.isEmpty() ? told : told + "，其中" + whose(othersThisTime);
     }
 

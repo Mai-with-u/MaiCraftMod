@@ -32,6 +32,15 @@ class ProtectionTest {
     }
 
     @Test
+    void 记录写着别人放的_给出放的人_自己放的和没记录的给空() {
+        var protection = protection(Map.of(WALL, OTHER, new WorldPosition(1, 64, 1, "minecraft:overworld"), SELF),
+                List.of(), Map.of(), GuessesPlayerMade.NOTHING);
+        assertEquals(Optional.of(OTHER), protection.placedByOther(WALL));
+        assertEquals(Optional.empty(), protection.placedByOther(new WorldPosition(1, 64, 1, "minecraft:overworld")));
+        assertEquals(Optional.empty(), protection.placedByOther(new WorldPosition(2, 64, 2, "minecraft:overworld")));
+    }
+
+    @Test
     void 自己放的临时方块_不受保护_收得回() {
         var protection = protection(Map.of(WALL, SELF), List.of(), Map.of(), GuessesPlayerMade.NOTHING);
         assertFalse(protection.blockProtected(WALL, null, Set.of()));

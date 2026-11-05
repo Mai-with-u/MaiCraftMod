@@ -293,6 +293,11 @@ public final class WorldScope {
                 return protection.breakableWhenTrapped(new WorldPosition(x, y, z, dimension),
                         FunctionalBlocks.functional(state));
             }
+
+            // 卡坑没出去时说挡着的方块是谁放的：和保护判断读同一份归属记录。
+            @Override public Optional<String> placedByOther(int x, int y, int z) {
+                return protection.placedByOther(new WorldPosition(x, y, z, dimension));
+            }
         });
     }
 

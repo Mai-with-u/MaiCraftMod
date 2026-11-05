@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 /** 卡坑判断与自动脱困的升降：小坑、走得出的浅坑、水柱游上去、封死的洞穴；只垫 → 挖，none 不升，出坑降回。 */
 class TrapCheckTest {
 
+    private static final Problem NO_ROUTE = Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null);
+
     /** 平地：63 层及以下是实心，挖掉的格子和放进去的水另记。 */
     private static final class Ground implements TrapCheck.Cells {
         final Set<BlockPos> dugOut = new HashSet<>();
@@ -126,7 +128,7 @@ class TrapCheckTest {
         assertTrue(escape.throughOthers());
         assertEquals(Permissions.BlockChanges.NATURAL, escape.effective().changes(), "许可档位不变，只放开别人的普通方块");
         assertFalse(escape.raise(null, () -> true, 18), "升到头了");
-        Problem stuck = escape.explain(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null));
+        Problem stuck = escape.explain(NO_ROUTE, () -> TrapWalls.NONE, true);
         assertTrue(stuck.message().contains("还是没出去"), stuck.message());
         escape.noteBroken(new BlockPos(0, 64, 0));
         escape.restore();

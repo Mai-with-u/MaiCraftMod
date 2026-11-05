@@ -196,9 +196,17 @@ public final class Protection {
      * 不等于床就是角色的）。记录没问到、或问到了又没写着谁放的，都不算——那两种由收回来源按"睡过的床"的规矩办。
      */
     public boolean placedByAnotherPlayer(WorldPosition position) {
+        return placedByOther(position).isPresent();
+    }
+
+    /**
+     * 归属记录写着这一格是别人放的：给放它的人的编号（自家人也算别人，他们只放行取用存储）。
+     * 记录没问到、没写着谁放的、是角色自己放的都给空。卡坑没出去时说"那是谁放的"用它。
+     */
+    public Optional<String> placedByOther(WorldPosition position) {
         return ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z())
-                .map(placedBy -> !placedBy.playerId().equals(selfPlayerId))
-                .orElse(false);
+                .map(ReadsBlockOwnership.PlacedBy::playerId)
+                .filter(playerId -> !playerId.equals(selfPlayerId));
     }
 
     /**
