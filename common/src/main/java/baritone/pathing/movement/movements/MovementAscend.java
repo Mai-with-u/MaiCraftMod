@@ -116,11 +116,11 @@ public class MovementAscend extends Movement {
         if (MovementHelper.isClimbable(srcDown.getBlock())) {
             return COST_INF;
         }
-        // we can jump from soul sand, but not from a bottom slab
-        boolean jumpingFromBottomSlab = MovementHelper.isBottomSlab(srcDown);
-        boolean jumpingToBottomSlab = MovementHelper.isBottomSlab(toPlace);
-        if (jumpingFromBottomSlab && !jumpingToBottomSlab) {
-            return COST_INF;// the only thing we can ascend onto from a bottom slab is another bottom slab
+        // 站在下半台阶、床这类矮平顶上起跳：只能登上另一块矮平顶，而且实际要抬的高度要够得着，不然这一步走不了。
+        boolean jumpingFromBottomSlab = MovementHelper.isHalfHigh(srcDown);
+        boolean jumpingToBottomSlab = MovementHelper.isHalfHigh(toPlace);
+        if (!MovementHelper.ascendReachable(srcDown, toPlace)) {
+            return COST_INF;
         }
         if (toPlace.is(Blocks.FARMLAND)) {
             return COST_INF; // 跳跃落在耕地顶面会把耕地踩回泥土,落点禁耕地
@@ -197,8 +197,9 @@ public class MovementAscend extends Movement {
 
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && jumpingOnto.is(Blocks.MAGMA_BLOCK));
 
-        if (MovementHelper.isBottomSlab(jumpingOnto) && !MovementHelper.isBottomSlab(BlockStateInterface.get(ctx, src.below()))) {
-            return state; // don't jump while walking from a non double slab into a bottom slab
+        // 从整块地面迈上下半台阶、床这类矮平顶：一步就迈上去，不按跳。
+        if (MovementHelper.isHalfHigh(jumpingOnto) && !MovementHelper.isHalfHigh(BlockStateInterface.get(ctx, src.below()))) {
+            return state;
         }
 
         if (Baritone.settings().assumeStep.value || ctx.playerFeet().equals(src.above())) {

@@ -90,7 +90,8 @@ public class MovementParkour extends Movement {
             return;
         }
         BlockState standingOn = context.get(x, y - 1, z);
-        if (MovementHelper.isClimbable(standingOn.getBlock()) || standingOn.getBlock() instanceof StairBlock || MovementHelper.isBottomSlab(standingOn)) {
+        // 站在楼梯、下半台阶、床这类矮平顶上起跳够不着远，不从这里跑酷。
+        if (MovementHelper.isClimbable(standingOn.getBlock()) || standingOn.getBlock() instanceof StairBlock || MovementHelper.isHalfHigh(standingOn)) {
             return;
         }
         // we can't jump from (frozen) water with assumeWalkOnWater because we can't be sure it will be frozen

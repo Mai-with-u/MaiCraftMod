@@ -7,8 +7,15 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
+import net.minecraft.world.level.block.TrapDoorBlock;
+import net.minecraft.world.level.block.state.properties.BedPart;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.Half;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
@@ -137,6 +144,75 @@ class BlockPassabilityTest {
         assertEquals(new BlockPos(4, 65, 0), BlockPassability.playerFeet(world, 4.5, 64.9375, 0.5), "耕地");
         assertEquals(new BlockPos(6, 65, 0), BlockPassability.playerFeet(world, 6.5, 64.9375, 0.5), "土径");
         assertEquals(new BlockPos(8, 65, 0), BlockPassability.playerFeet(world, 8.5, 64.5, 0.5), "下半砖");
+    }
+
+    @Test
+    void lowFlatTopsCountAsGroundByShape() {
+        // 实机 11-05：起点旁边一张床，寻路把床当墙，从床底挖过去；从柱顶往床上落，先在床上垫一块圆石。
+        // 顶面平、盖满整格、高出 2/16 又不超过一步高的都按形状认作地面，不写方块名单。
+        assertEquals(9.0 / 16, BlockPassability.halfHighTop(Blocks.RED_BED.defaultBlockState()), 1.0e-9, "床脚那半");
+        assertEquals(9.0 / 16, BlockPassability.halfHighTop(
+                Blocks.RED_BED.defaultBlockState().setValue(BedBlock.PART, BedPart.HEAD)), 1.0e-9, "床头那半");
+        assertEquals(9.0 / 16, BlockPassability.halfHighTop(Blocks.STONECUTTER.defaultBlockState()), 1.0e-9);
+        assertEquals(6.0 / 16, BlockPassability.halfHighTop(Blocks.DAYLIGHT_DETECTOR.defaultBlockState()), 1.0e-9);
+        assertEquals(3.0 / 16, BlockPassability.halfHighTop(Blocks.OAK_TRAPDOOR.defaultBlockState()), 1.0e-9,
+                "关着、贴底的活板门");
+        assertEquals(4.0 / 16, BlockPassability.halfHighTop(
+                Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, 3)), 1.0e-9, "三层雪");
+        assertEquals(8.0 / 16, BlockPassability.halfHighTop(
+                Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, 5)), 1.0e-9, "五层雪");
+        assertEquals(7.0 / 16, BlockPassability.halfHighTop(
+                Blocks.CAMPFIRE.defaultBlockState().setValue(CampfireBlock.LIT, false)), 1.0e-9, "熄灭的营火");
+        assertEquals(0.5, BlockPassability.halfHighTop(Blocks.STONE_SLAB.defaultBlockState()), 1.0e-9,
+                "下半台阶照旧按半格");
+
+        Grid world = new Grid();
+        world.put(new BlockPos(3, 64, 3), Blocks.RED_BED.defaultBlockState());
+        assertTrue(BlockPassability.canWalkOn(world, new BlockPos(3, 64, 3)), "床能站");
+        assertTrue(BlockPassability.isStandable(world, new BlockPos(3, 65, 3)), "床上面那一格是能站的脚位");
+    }
+
+    @Test
+    void burningCampfireAndSummoningShriekerAreNotGround() {
+        // 点着的营火站上去会烫，能招来监守者的幽匿尖啸体踩上去会叫：按方块状态的属性排除，熄灭、不能招的照常能站。
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.CAMPFIRE.defaultBlockState())), "点着的营火");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.SOUL_CAMPFIRE.defaultBlockState())));
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.SCULK_SHRIEKER.defaultBlockState()
+                .setValue(BlockStateProperties.CAN_SUMMON, true))), "能招来监守者的尖啸体");
+        assertEquals(0.5, BlockPassability.halfHighTop(Blocks.SCULK_SHRIEKER.defaultBlockState()
+                .setValue(BlockStateProperties.CAN_SUMMON, false)), 1.0e-9, "玩家摆的尖啸体不招监守者");
+        Grid world = new Grid();
+        world.put(new BlockPos(3, 64, 3), Blocks.CAMPFIRE.defaultBlockState());
+        assertFalse(BlockPassability.canWalkOn(world, new BlockPos(3, 64, 3)), "点着的营火不当地面");
+    }
+
+    @Test
+    void thinLayersAndTallOrPartialTopsStayAsBefore() {
+        // 地毯、一两层雪、中继器这类不高于 2/16 的薄层照旧；高过一步的、顶面没盖满整格的、开着的或贴顶的活板门不算矮平顶。
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.WHITE_CARPET.defaultBlockState())), "地毯");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(
+                Blocks.SNOW.defaultBlockState().setValue(SnowLayerBlock.LAYERS, 2))), "两层雪");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.REPEATER.defaultBlockState())), "中继器");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.COMPARATOR.defaultBlockState())), "比较器");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.ENCHANTING_TABLE.defaultBlockState())), "高过一步");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.CAKE.defaultBlockState())), "顶面没盖满整格");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(
+                Blocks.OAK_TRAPDOOR.defaultBlockState().setValue(TrapDoorBlock.OPEN, true))), "开着的活板门");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(
+                Blocks.OAK_TRAPDOOR.defaultBlockState().setValue(TrapDoorBlock.HALF, Half.TOP))), "贴顶的活板门");
+        assertTrue(Double.isNaN(BlockPassability.halfHighTop(Blocks.STONE.defaultBlockState())), "整块");
+    }
+
+    @Test
+    void standingOnLowFlatTopsCountsTheCellAbove() {
+        // 站在床、阳光探测器、关着的活板门上：脚位是上面那一格，和寻路把矮平顶当成站在它上面一格一致。
+        Grid world = new Grid();
+        world.put(new BlockPos(0, 64, 0), Blocks.RED_BED.defaultBlockState());
+        world.put(new BlockPos(2, 64, 0), Blocks.DAYLIGHT_DETECTOR.defaultBlockState());
+        world.put(new BlockPos(4, 64, 0), Blocks.OAK_TRAPDOOR.defaultBlockState());
+        assertEquals(new BlockPos(0, 65, 0), BlockPassability.playerFeet(world, 0.5, 64.5625, 0.5), "床");
+        assertEquals(new BlockPos(2, 65, 0), BlockPassability.playerFeet(world, 2.5, 64.375, 0.5), "阳光探测器");
+        assertEquals(new BlockPos(4, 65, 0), BlockPassability.playerFeet(world, 4.5, 64.1875, 0.5), "关着的活板门");
     }
 
     @Test

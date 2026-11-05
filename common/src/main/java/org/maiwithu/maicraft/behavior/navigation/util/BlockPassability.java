@@ -9,6 +9,7 @@ import java.util.function.Function;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.AbstractSkullBlock;
 import net.minecraft.world.level.block.AmethystClusterBlock;
 import net.minecraft.world.level.block.AzaleaBlock;
@@ -35,7 +36,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.shapes.BooleanOp;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.world.item.Items;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationHazards;
@@ -51,6 +54,13 @@ public final class BlockPassability {
 
     private static final Direction[] HORIZONTAL = {
             Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+
+    /** 薄层的碰撞顶：地毯、一两层雪、中继器这类不高于 2/16 的，照旧按走得进去或者挡路处理，不算矮平顶。 */
+    private static final double THIN_LAYER_TOP = 2.0 / 16;
+    /** 一步高：人不跳就能迈上去的高度。 */
+    private static final double STEP_HEIGHT = 0.6;
+    /** 下半台阶的顶高。 */
+    private static final double BOTTOM_SLAB_TOP = 0.5;
 
     /**
      * 判断角色身体能否占据此格：格内无碰撞，且不是禁止进入的液体。空气、草和花等均可通行。
@@ -202,6 +212,8 @@ public final class BlockPassability {
         }
         // 岩浆块和蜂蜜块虽然是完整方块，但会造成伤害或粘滞，因此不能作为地面。
         if (hurtsToStandOn(state) || state.is(Blocks.HONEY_BLOCK)) return false;
+        // 床、石切机、阳光探测器、关着的活板门这类矮平顶：按形状认，人踩得上去，站立高度按下半台阶算。
+        if (!Double.isNaN(halfHighTop(level, pos, state))) return true;
         // 其他情况按普通完整碰撞方块处理。
         return state.isCollisionShapeFullBlock(level, pos);
     }
@@ -225,15 +237,48 @@ public final class BlockPassability {
         if (block instanceof SlabBlock || block instanceof StairBlock) {
             return f.above();
         }
-        // 站在半格以上高的矮方块顶上（置物台、箱子、附魔台、切石机这类）：人在这一格的碰撞外形顶上，脚位算上面那一格。
-        // 原先只认半砖与楼梯，站在置物台、箱子顶上时脚位读成方块里面那一格，寻路找不到起点，人下不来。
-        // 地毯、雪片这类不到半格的照旧算这一格。
+        // 站在比薄层高的方块顶上（床、阳光探测器、关着的活板门、置物台、箱子这类）：人在这一格的碰撞外形顶上，
+        // 脚位算上面那一格，和寻路把矮平顶当成站在它上面一格一致。地毯、一两层雪这类薄层照旧算这一格。
         VoxelShape shape = state.getCollisionShape(level, f);
         if (!shape.isEmpty()) {
             double top = shape.max(Direction.Axis.Y);
-            if (top >= 0.5 && f.getY() + top <= y + 1.0e-3) return f.above();
+            if (top > THIN_LAYER_TOP && f.getY() + top <= y + 1.0e-3) return f.above();
         }
         return f;
+    }
+
+    /**
+     * 矮平顶的顶高：碰撞外形顶面平、盖满整格，比这一格底高出 2/16 以上又不超过一步高（床、石切机、阳光探测器、
+     * 关着贴底的活板门、三到五层雪、熄灭的营火这类，模组里同样形状的也算）。人站得上去，站立高度按下半台阶算。
+     * 点着的（营火）站上去会烫，能招来监守者的幽匿尖啸体踩上去会叫，都不算。不是矮平顶给 NaN；下半台阶给 0.5。
+     */
+    public static double halfHighTop(BlockGetter level, BlockPos pos, BlockState state) {
+        if (isBottomSlab(state)) return BOTTOM_SLAB_TOP;
+        if (burnsOrSummons(state)) return Double.NaN;
+        VoxelShape shape;
+        try {
+            shape = state.getCollisionShape(level, pos);
+        } catch (RuntimeException unreadable) {
+            // 模组方块离开世界读不出外形：拿不准就不当能站的。
+            return Double.NaN;
+        }
+        if (shape.isEmpty()) return Double.NaN;
+        double top = shape.max(Direction.Axis.Y);
+        if (top <= THIN_LAYER_TOP || top > STEP_HEIGHT) return Double.NaN;
+        // 顶面要盖满整格：贴着顶面的薄薄一层整格都在碰撞外形里，人站在哪儿都踩得到，不是一根柱子或一圈边。
+        VoxelShape topSkin = Shapes.box(0, top - 1.0e-3, 0, 1, top, 1);
+        return Shapes.joinIsNotEmpty(topSkin, shape, BooleanOp.ONLY_FIRST) ? Double.NaN : top;
+    }
+
+    /** 只看方块状态的矮平顶顶高：外形不随位置变的方块（原版的都是）用它，算路缓存按状态记。 */
+    public static double halfHighTop(BlockState state) {
+        return halfHighTop(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state);
+    }
+
+    // 站上去要吃亏的状态，按方块状态的属性认：点着的（营火这类）会烫人，能招来监守者的幽匿尖啸体。
+    private static boolean burnsOrSummons(BlockState state) {
+        return state.hasProperty(BlockStateProperties.LIT) && state.getValue(BlockStateProperties.LIT)
+                || state.hasProperty(BlockStateProperties.CAN_SUMMON) && state.getValue(BlockStateProperties.CAN_SUMMON);
     }
 
     /** 判断半砖是否占据所在方块格的下半部。 */

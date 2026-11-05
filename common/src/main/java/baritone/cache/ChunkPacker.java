@@ -142,7 +142,8 @@ public final class ChunkPacker {
             return PathingBlockType.WATER;
         }
 
-        if (MovementHelper.avoidWalkingInto(state) || MovementHelper.isBottomSlab(state)) {
+        // 远处区块缓存只记方块大类：下半台阶、床这类矮平顶和原来的下半台阶一样记成要避开的，近了再按实况算。
+        if (MovementHelper.avoidWalkingInto(state) || MovementHelper.isHalfHigh(state)) {
             return PathingBlockType.AVOID;
         }
         // We used to do an AABB check here

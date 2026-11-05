@@ -178,7 +178,9 @@ public class CalculationContext {
             boolean forUseOnAnotherThread,
             boolean forceTerrainMutation,
             NavigationProtection.Snapshot frozenPolicy) {
-        this.precomputedData = new PrecomputedData();
+        // 矮平顶模组方块的日志去重跟着这名角色走：每次算路都新建缓存，同一种方块整局只记一次。
+        this.precomputedData = new PrecomputedData(baritone instanceof Baritone owner
+                ? owner.loggedHalfHighBlocks() : ConcurrentHashMap.newKeySet());
         this.safeForThreadedUse = forUseOnAnotherThread;
         this.baritone = baritone;
         LocalPlayer player = baritone.getPlayerContext().player();

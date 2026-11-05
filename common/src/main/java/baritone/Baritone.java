@@ -43,6 +43,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.world.level.block.Block;
 import java.util.concurrent.Executor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -98,6 +101,8 @@ public class Baritone implements IBaritone {
 
     private final IPlayerContext playerContext;
     private final WorldProvider worldProvider;
+    /** 寻路已经在日志里记过的矮平顶模组方块：每种整局只记一次。 */
+    private final Set<Block> loggedHalfHighBlocks = ConcurrentHashMap.newKeySet();
 
     public BlockStateInterface bsi;
 
@@ -179,6 +184,11 @@ public class Baritone implements IBaritone {
     @Override
     public GetToBlockProcess getGetToBlockProcess() {
         return this.getToBlockProcess;
+    }
+
+    /** 寻路已经在日志里记过的矮平顶模组方块，算路缓存往里添。 */
+    public Set<Block> loggedHalfHighBlocks() {
+        return loggedHalfHighBlocks;
     }
 
     @Override

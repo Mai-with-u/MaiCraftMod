@@ -64,6 +64,7 @@ import static baritone.pathing.precompute.Ternary.*;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationHazards;
 import org.maiwithu.maicraft.behavior.navigation.HazardEscapePolicy;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 
 /**
  * Static helpers for cost calculation
@@ -499,6 +500,10 @@ public interface MovementHelper extends ActionCosts, Helper {
             }
             return YES;
         }
+        // 床、石切机、阳光探测器、关着的活板门这类矮平顶按形状认作地面：不再当成墙从底下挖过去或者在上面垫一块。
+        if (isHalfHigh(state)) {
+            return YES;
+        }
         return MAYBE; // Generic supports require their contextual collision shape.
     }
 
@@ -693,9 +698,21 @@ public interface MovementHelper extends ActionCosts, Helper {
         return 0; // we won't actually mine it, so don't check fallings above
     }
 
-    static boolean isBottomSlab(BlockState state) {
-        return state.getBlock() instanceof SlabBlock
-                && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM;
+    /** 下半台阶或者矮平顶（床、石切机这类）：站在上面的高度按下半台阶算。 */
+    static boolean isHalfHigh(BlockState state) {
+        return !Double.isNaN(BlockPassability.halfHighTop(state));
+    }
+
+    /**
+     * 往上一格登上去够不够得着：站在矮平顶上只能登上另一块矮平顶，而且实际要抬的高度（一格加落点顶高减起跳顶高）
+     * 不超过从灵魂沙起跳那一跳（一格加 1/8 格），再高就跳不稳；从整块、灵魂沙这类上起跳照旧。
+     */
+    static boolean ascendReachable(BlockState standingOn, BlockState onto) {
+        double from = BlockPassability.halfHighTop(standingOn);
+        if (Double.isNaN(from)) return true;
+        double to = BlockPassability.halfHighTop(onto);
+        double maxRise = 1.125;
+        return !Double.isNaN(to) && 1 + to - from <= maxRise + 1.0e-6;
     }
 
     /**
