@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 
 /**
- * 随包技能的加载与门控：索引里的十一篇都在，按模组筛，正文原样读出。
+ * 随包技能的加载与门控：索引里的十二篇都在，按模组筛，正文原样读出。
  *
  * <p>技能文件在 main 资源里，测试直接读真文件；这样名字、目录、frontmatter 一起被检查，
  * 不会出现测试替身全绿、真实资源却少一篇的情况。
@@ -25,7 +25,7 @@ class SkillLibraryTest {
     void loadsEveryIndexedSkillWithItsAddress() {
         SkillLibrary library = new SkillLibrary(mod -> true);
         List<Skill> catalog = library.catalog();
-        assertEquals(11, catalog.size(), "索引里的十一篇都加载");
+        assertEquals(12, catalog.size(), "索引里的十二篇都加载");
         Set<String> uris = catalog.stream().map(Skill::uri).collect(Collectors.toSet());
         assertTrue(uris.contains("skill://survival/survival-opening/SKILL.md"));
         assertTrue(uris.contains("skill://create/create-machine-workflow/SKILL.md"));
@@ -34,29 +34,30 @@ class SkillLibraryTest {
         assertTrue(uris.contains("skill://building/building-workflow/SKILL.md"));
         assertTrue(uris.contains("skill://create/create-vehicles/SKILL.md"));
         assertTrue(uris.contains("skill://touhoulittlemaid/maid-getting-started/SKILL.md"));
+        assertTrue(uris.contains("skill://social/player-body-language/SKILL.md"));
         assertTrue(uris.stream().allMatch(uri -> uri.endsWith("/SKILL.md")), "地址都以 SKILL.md 结尾");
     }
 
     @Test
     void hidesSkillsWhoseModsAreMissing() {
         SkillLibrary vanillaOnly = new SkillLibrary(mod -> false);
-        assertEquals(4, vanillaOnly.catalog().size(), "没装联动模组时只剩四篇不依赖模组的技能");
+        assertEquals(5, vanillaOnly.catalog().size(), "没装联动模组时只剩五篇不依赖模组的技能");
         assertFalse(vanillaOnly.catalog().stream().anyMatch(skill -> skill.name().equals("create-machine-workflow")));
         assertFalse(vanillaOnly.catalog().stream().anyMatch(skill -> skill.name().equals("maid-getting-started")),
                 "没装车万女仆时女仆入门不上架");
         assertThrows(IllegalArgumentException.class,
                 () -> vanillaOnly.read("skill://create/create-machine-workflow/SKILL.md"));
-        assertEquals(4, vanillaOnly.list().getAsJsonArray("resources").size(), "目录也不列不发布的技能");
+        assertEquals(5, vanillaOnly.list().getAsJsonArray("resources").size(), "目录也不列不发布的技能");
 
         SkillLibrary withCreate = new SkillLibrary(mod -> mod.equals("create"));
-        assertEquals(6, withCreate.catalog().size(), "装了 Create 多出两篇");
+        assertEquals(7, withCreate.catalog().size(), "装了 Create 多出两篇");
         assertTrue(withCreate.catalog().stream().anyMatch(skill -> skill.name().equals("create-power-network")));
         assertThrows(IllegalArgumentException.class,
                 () -> withCreate.read("skill://mekanism/mekanism-ore-processing/SKILL.md"));
         // 载具技能只看 Simulated 接没接上：光装机械动力不列，装了 Simulated 才列。
         assertFalse(withCreate.catalog().stream().anyMatch(skill -> skill.name().equals("create-vehicles")));
         SkillLibrary withSimulated = new SkillLibrary(mod -> mod.equals("simulated"));
-        assertEquals(5, withSimulated.catalog().size(), "装了 Simulated 多出载具一篇");
+        assertEquals(6, withSimulated.catalog().size(), "装了 Simulated 多出载具一篇");
         assertTrue(withSimulated.catalog().stream().anyMatch(skill -> skill.name().equals("create-vehicles")));
     }
 
