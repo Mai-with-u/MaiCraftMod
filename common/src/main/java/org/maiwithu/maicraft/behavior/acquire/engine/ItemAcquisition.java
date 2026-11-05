@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -114,8 +115,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         this.space = space;
         if (maxDepth < 1) throw new IllegalArgumentException("递归深度上限至少为 1：" + maxDepth);
         this.maxDepth = maxDepth;
-        this.priceAsks = new PriceAsks(this.sources, position);
-        this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth, this.priceAsks);
+        // 问价记忆按做法不拿来当原料的那段外层分开记：这段外层不同，做法剔掉的就不同。
+        Supplier<List<WantedItem>> outer = () -> outerWanted().stream().map(ItemRequest::wanted).toList();
+        this.priceAsks = new PriceAsks(this.sources, position, outer);
+        this.estimates = new AcquisitionEstimates(this.sources, position, maxDepth, this.priceAsks, outer);
     }
 
     // 估算：只问价不拿，按此刻会走的路往下估原料。内部需求不带限定（夜里比床和武器哪个费事）。
@@ -146,6 +149,22 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             chain.addAll(run.alsoWanted.remaining());
         });
         return List.copyOf(chain);
+    }
+
+    /**
+     * 做法不拿来当原料的那段外层（外层在前）：从最里层往外到最近一次备工具的那一层为止（含）。外层要的被里层拿去做原料是
+     * 白白压回去（把刚做好的合金压成块）；工具不会被做进外层的东西里，为它花掉更外层的东西不算压回去。只在客户端线程读。
+     */
+    public List<ItemRequest> outerWanted() {
+        // 从最里层往外一层层往前插，插完外层在前；碰到备工具的那一层收进来就停。
+        List<ItemRequest> outerFirst = new ArrayList<>();
+        for (Run run : advancing) {
+            List<ItemRequest> layer = new ArrayList<>(run.alsoWanted.remaining());
+            layer.addFirst(run.request);
+            outerFirst.addAll(0, layer);
+            if (run.forTool) break;
+        }
+        return List.copyOf(outerFirst);
     }
 
     /** 这一場拿到现在为止试过的办法与结果，由最外层那一场交代；不在拿东西的半路上时为空串。 */
@@ -234,6 +253,13 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     @Override public Action actionFor(ItemRequest request, Permissions permissions, TaskRecords records) {
         return new Run(request, permissions, Scope.ALL, null, records, List.of(), null);
+    }
+
+    /** 备一把干活用的工具：引擎记下这一层是备工具，更外层正在拿的东西这一层以里的做法可以拿来当原料。 */
+    @Override public Action actionForTool(ItemRequest request, Permissions permissions, TaskRecords records) {
+        Run run = new Run(request, permissions, Scope.ALL, null, records, List.of(), null);
+        run.forTool = true;
+        return run;
     }
 
     /**
@@ -338,6 +364,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final AlsoWantedTargets alsoWanted;
         /** 目标里点名的挖方块工具：途中要挖方块时只用那一件；null 按每格代价自动挑。 */
         private final DigTool digTool;
+        /** 这一层是为了干活备一把工具：做法不拿来当原料的那段外层看到这一层为止。 */
+        private boolean forTool;
 
         private Run(ItemRequest request, Permissions permissions, Scope scope, Consumer<String> onDelivered,
                 TaskRecords records, List<ItemRequest> alsoWanted, DigTool digTool) {

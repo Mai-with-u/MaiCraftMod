@@ -251,8 +251,8 @@ public final class MiningSource implements ItemSource {
                 if (bootstrap > 0) {
                     batch = batchOf(certain, Math.min(request.count(), bootstrap));
                 } else {
-                    steps.add(new TriesFirst(needs.actionFor(new ItemRequest(WantedItem.ofItem(workTool.get()), 1,
-                            "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions)));
+                    steps.add(new TriesFirst(needs.actionForTool(new ItemRequest(WantedItem.ofItem(workTool.get()), 1,
+                            "成批采掘" + request.wanted().describe() + "前先备一把顺手的工具"), permissions, null)));
                 }
             }
         }
@@ -623,8 +623,8 @@ public final class MiningSource implements ItemSource {
             return Optional.empty();
         }
         WantedItem tool = new WantedItem(required.get());
-        return Optional.of(needs.actionFor(new ItemRequest(tool, 1,
-                "采掘" + request.wanted().describe() + "要用的工具"), permissions));
+        return Optional.of(needs.actionForTool(new ItemRequest(tool, 1,
+                "采掘" + request.wanted().describe() + "要用的工具"), permissions, null));
     }
 
     /**

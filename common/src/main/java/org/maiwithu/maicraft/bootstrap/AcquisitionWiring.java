@@ -136,12 +136,12 @@ final class AcquisitionWiring {
                 carried, deps.character().offhand(), deps.items().itemTags(),
                 deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
         innerNeeds.attach(acquisition);
-        // 备料时不把外层正要的东西当原料用掉（做合金不先把做好的合金压成块）。
-        craftSource.watchChain(acquisition::inProgress);
+        // 备料不把外层正要的当原料用掉（不把做好的合金压成块），外层只看到最近一次备工具为止（为斧头可用身上的原木）。
+        craftSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
         miningSource.prepareWorkTools(new LiveWorkTools(deps.character().context()), acquisition::inProgress);
-        smeltSource.watchChain(acquisition::inProgress);
-        smithSource.watchChain(acquisition::inProgress);
+        smeltSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
+        smithSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         // 饿了身上没吃的：吃饭的临时任务经同一个引擎去弄口粮。
         deps.survivalWiring().attachFood(acquisition);
         // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。

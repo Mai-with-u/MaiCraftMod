@@ -102,6 +102,8 @@ public final class RecipeSource implements ItemSource {
     private final RememberedStations stations;
     /** 拿东西的引擎此刻在推进的那一串请求（外层在前）；没接上为空串。 */
     private Supplier<List<ItemRequest>> chain = List::of;
+    /** 做法不拿来当原料的那段外层（外层在前，到最近一次备工具为止）；没单独接上时整串都算。 */
+    private Supplier<List<ItemRequest>> outerWanted = () -> chain.get();
     /**
      * 正在给一批做法算材料可得性：算它要向引擎问价，引擎会回来问本来源自己的报价，
      * 里层那一次不再算可得性、也不再划掉原料拿不到的做法，按配方注册顺序直接给出去，
@@ -159,6 +161,15 @@ public final class RecipeSource implements ItemSource {
     /** 接上拿东西的引擎：它此刻在推进的那一串请求，备料时不把外层正要的东西当原料用掉。 */
     public void watchChain(Supplier<List<ItemRequest>> chain) {
         this.chain = Objects.requireNonNull(chain, "chain");
+    }
+
+    /**
+     * 接上拿东西的引擎：整串用来挑偏好的材料；做法不拿来当原料的只看 outerWanted 那一段（到最近一次备工具为止），
+     * 为做一把工具可以花掉更外层正在拿的东西。
+     */
+    public void watchChain(Supplier<List<ItemRequest>> chain, Supplier<List<ItemRequest>> outerWanted) {
+        watchChain(chain);
+        this.outerWanted = Objects.requireNonNull(outerWanted, "outerWanted");
     }
 
     @Override public AcquireVia via() {
@@ -459,8 +470,9 @@ public final class RecipeSource implements ItemSource {
     // 实机要 38 个安山合金，引擎选了"合金块拆成合金"，把做好的合金压成一个块，拆的配方没解锁，76 块安山岩做的合金进了块里。
     // 这次请求自己也在推进的那一串里（同一样东西排在最里面那条）：它做一次净不净多出来由 eatsWhatIsWanted 管，
     // 这里只看真正的外层——外层也在要同一样东西时（复制模板时缺的那个模板）照旧不拿它当原料，不绕回自己头上。
+    // 外层只看到最近一次备工具为止：为了砍原木去做斧头，用身上的原木做木板是花在工具上，不是把要的东西压回去。
     private boolean consumesOuterWanted(WorkstationRecipe recipe, ItemRequest request) {
-        List<ItemRequest> outer = new ArrayList<>(chain.get());
+        List<ItemRequest> outer = new ArrayList<>(outerWanted.get());
         for (int i = outer.size() - 1; i >= 0; i--) {
             if (outer.get(i).wanted().equals(request.wanted())) {
                 outer.remove(i);

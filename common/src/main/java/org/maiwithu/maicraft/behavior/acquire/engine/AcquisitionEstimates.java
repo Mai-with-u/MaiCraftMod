@@ -10,12 +10,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate.Effort;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -57,11 +59,16 @@ final class AcquisitionEstimates {
     /** 做法排先后时问原料价走的那一份：估算期间由它记住问过的原料价，问一遍从这次估算的额度里扣一次。 */
     private final PriceAsks priceAsks;
 
-    AcquisitionEstimates(List<ItemSource> sources, ReadsCharacterPosition position, int maxDepth, PriceAsks priceAsks) {
+    /** 做法不拿来当原料的那段外层此刻要的东西：估过的、问过的价按它分开记，和动手问价同一个口径。 */
+    private final Supplier<List<WantedItem>> outerWanted;
+
+    AcquisitionEstimates(List<ItemSource> sources, ReadsCharacterPosition position, int maxDepth, PriceAsks priceAsks,
+            Supplier<List<WantedItem>> outerWanted) {
         this.sources = List.copyOf(sources);
         this.position = position;
         this.maxDepth = maxDepth;
         this.priceAsks = priceAsks;
+        this.outerWanted = outerWanted;
     }
 
     /** 估一样东西：限定照最外层的写法，原料不带。 */
@@ -156,7 +163,7 @@ final class AcquisitionEstimates {
                 return Part.unknown(what, "原料链超过 " + maxDepth + " 层", false);
             }
             // 原料链别处估过同样的东西：只要这回往下走不会碰到不同的转圈与限深，结果和重估一遍一样，直接用。
-            Asked asked = new Asked(request, scope);
+            Asked asked = new Asked(request, scope, outerWanted.get());
             Recalled earlier = recalled.get(asked);
             if (earlier != null && earlier.fits(chain, maxDepth)) {
                 if (caller != null) caller.absorb(earlier.reaches(), earlier.height(), earlier.depthCut(), false);
@@ -196,7 +203,7 @@ final class AcquisitionEstimates {
         // 同一来源对同一请求只问一次价；没问过的要新问时先看还剩几次，问满了返回空。
         private SourceQuote quote(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
                 SourceContext context) {
-            Quoted asked = new Quoted(source, request, scope);
+            Quoted asked = new Quoted(source, request, scope, outerWanted.get());
             SourceQuote known = quotes.get(asked);
             if (known != null) return known;
             if (!budget.takeQuote()) return null;
@@ -386,11 +393,15 @@ final class AcquisitionEstimates {
 
     private record Planned(ItemSource source, SourceQuote.Offer offer) {}
 
-    /** 估过的是哪一样：同样的请求、同样的限定。 */
-    private record Asked(ItemRequest request, ItemAcquisition.Scope scope) {}
+    /** 估过的是哪一样：同样的请求、同样的限定、做法不拿来当原料的同一段外层。 */
+    private record Asked(ItemRequest request, ItemAcquisition.Scope scope, List<WantedItem> outerWanted) {}
 
-    /** 问过的是哪一次价：同一来源、同样的请求、同样的限定（限定决定问价时的半径与距离）。 */
-    private record Quoted(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope) {}
+    /**
+     * 问过的是哪一次价：同一来源、同样的请求、同样的限定（限定决定问价时的半径与距离）、
+     * 做法不拿来当原料的同一段外层（它决定做法剔掉哪几种）。
+     */
+    private record Quoted(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
+            List<WantedItem> outerWanted) {}
 
     /**
      * 估过一样东西记下的：结果，往下问到过的东西，当时链上已有的几样里被问到的，当时链有多长，往下最深几层，

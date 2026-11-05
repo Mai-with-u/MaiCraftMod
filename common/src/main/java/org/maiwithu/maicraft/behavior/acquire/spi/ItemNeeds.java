@@ -39,6 +39,15 @@ public interface ItemNeeds {
     }
 
     /**
+     * 为了干活去备一把工具（成批采掘前备的、挖这种方块必须有的、挖路前现做的）：和上面一样推进，引擎记下这一层是备工具。
+     * 工具做出来是拿来用的，不会被做进外层要的东西里，所以这一层以里的做法可以拿更外层正在拿的东西当原料
+     * （为了砍原木做斧头，用身上的原木做木板）。records 为 null 时接外层的记账口。默认实现等价于上面两个。
+     */
+    default Action actionForTool(ItemRequest request, Permissions permissions, TaskRecords records) {
+        return records == null ? actionFor(request, permissions) : actionFor(request, permissions, records);
+    }
+
+    /**
      * 带"这一趟还要的另外几样"的内部需求：来源动手时能把好几样一起拿（开一次箱拿几样）就用上它，
      * 用不上的来源照旧只拿自己那一样。每样写着这一刻还缺几件，已经拿够的不放进来。
      * 默认实现忽略它，等价于上面那个。

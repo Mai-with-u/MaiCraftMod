@@ -129,6 +129,23 @@ class ItemAcquisitionPriceMemoryTest {
         assertEquals(3, chest.asked.get(PLANKS), "三种问法各问一次");
     }
 
+    @Test
+    void 做法不吃的那段外层不同_问价分开记() {
+        // 同一种问法，做法不拿来当原料的那段外层不同（直接要原木，和为砍原木备斧头），做法剔掉的不同、答案可能不同：
+        // 同一段外层问两遍只问一次来源，换了一段外层再问一次，不拿一个答另一个。
+        CountingChest chest = new CountingChest(new SourceQuote.Offer("记得的箱子", 2, new AcquisitionCost(20, 2), null));
+        List<WantedItem> outer = new ArrayList<>(List.of(WantedItem.ofItem("minecraft:oak_log")));
+        PriceAsks asks = new PriceAsks(List.of(chest), new FixedSpot(0, 64, 0), () -> List.copyOf(outer));
+        asks.during(new QuoteBudget(100), () -> {
+            asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+            asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+            outer.clear();
+            outer.add(WantedItem.ofItem("minecraft:wooden_axe"));
+            return asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+        });
+        assertEquals(2, chest.asked.get(PLANKS));
+    }
+
     /** 记得的箱子替身：只答木板，按给定的答案依次答（用完重复最后一条），记下每样东西被问了几次。 */
     private static final class CountingChest implements ItemSource {
         final Map<String, Integer> asked = new HashMap<>();

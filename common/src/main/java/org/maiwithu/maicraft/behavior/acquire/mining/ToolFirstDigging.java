@@ -202,8 +202,8 @@ public final class ToolFirstDigging implements DigsBlocks {
             if (settledFor().contains("gave-up:" + make.option().itemId())) return Optional.empty();
             makingItem = make.option().itemId();
             ItemRequest request = new ItemRequest(WantedItem.ofItem(makingItem), 1, PURPOSE);
-            making = prep.records() == null ? needs.actionFor(request, prep.permissions())
-                    : needs.actionFor(request, prep.permissions(), prep.records());
+            // 现做的是干活用的工具：引擎记下这一层是备工具，做法可以花更外层正在拿的东西。
+            making = needs.actionForTool(request, prep.permissions(), prep.records());
             deadline = context.gameTick() + MAKE_BUDGET_TICKS;
             note("现做 " + makingItem, "挖 " + blockId + " 徒手一格 " + none.handTicks() + " 刻，有它每格省 "
                     + make.savedPerBlock() + " 刻，这一趟约 " + prep.expectedBlocks() + " 格，划得来");

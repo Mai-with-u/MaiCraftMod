@@ -103,6 +103,108 @@ class ItemAcquisitionTest {
     }
 
     @Test
+    void 备工具那一层以里_更外层正在拿的东西不算做法不吃的外层() {
+        // 实机 11-04：海边要 6 根橡木，先备斧头，斧头要木板：用身上的橡木做木板是花在工具上，不是把要的原木压回去。
+        // 做法不吃的外层看到备工具那一层（斧头）为止；整串照旧都在推进链上（路上垫脚不动它们）。
+        List<List<String>> outerSeen = new ArrayList<>();
+        List<List<String>> chainSeen = new ArrayList<>();
+        ItemAcquisition[] engine = new ItemAcquisition[1];
+        engine[0] = engine(new ToolChainSource(engine, backpack, outerSeen, chainSeen, true));
+        ActionStatus status = runToSettlement(engine[0].need(
+                new ItemRequest(WantedItem.ofItem(ToolChainSource.LOG), 6, "砍树"), PERMISSIONS));
+
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(List.of(ToolChainSource.AXE, ToolChainSource.PLANKS), outerSeen.getFirst());
+        assertEquals(List.of(ToolChainSource.LOG, ToolChainSource.AXE, ToolChainSource.PLANKS), chainSeen.getFirst());
+        assertTrue(engine[0].outerWanted().isEmpty(), "做完就不在链上了");
+    }
+
+    @Test
+    void 没有备工具的一串_外层正要的整串都不拿来当原料() {
+        // 要安山合金去弄合金块：中间没有备工具，合金一直算外层正要的，做块的做法不能吃它（不把刚做好的合金压成块）。
+        List<List<String>> outerSeen = new ArrayList<>();
+        List<List<String>> chainSeen = new ArrayList<>();
+        ItemAcquisition[] engine = new ItemAcquisition[1];
+        engine[0] = engine(new ToolChainSource(engine, backpack, outerSeen, chainSeen, false));
+        ActionStatus status = runToSettlement(engine[0].need(
+                new ItemRequest(WantedItem.ofItem(ToolChainSource.LOG), 6, "砍树"), PERMISSIONS));
+
+        assertEquals(ActionStatus.done(), status);
+        assertEquals(chainSeen.getFirst(), outerSeen.getFirst());
+        assertEquals(List.of(ToolChainSource.LOG, ToolChainSource.AXE, ToolChainSource.PLANKS), outerSeen.getFirst());
+    }
+
+    /**
+     * 一层套一层要东西的来源替身：要原木先要一把斧头，要斧头先要木板，要木板那一刻记下做法不吃的外层与整条推进链。
+     * asTool 为真时斧头按备工具去要，为假时当普通原料去要。
+     */
+    private static final class ToolChainSource implements ItemSource {
+        static final String LOG = "minecraft:oak_log";
+        static final String AXE = "minecraft:wooden_axe";
+        static final String PLANKS = "minecraft:oak_planks";
+        private final ItemAcquisition[] engine;
+        private final FakeBackpack backpack;
+        private final List<List<String>> outerSeen;
+        private final List<List<String>> chainSeen;
+        private final boolean asTool;
+
+        ToolChainSource(ItemAcquisition[] engine, FakeBackpack backpack, List<List<String>> outerSeen,
+                List<List<String>> chainSeen, boolean asTool) {
+            this.engine = engine;
+            this.backpack = backpack;
+            this.outerSeen = outerSeen;
+            this.chainSeen = chainSeen;
+            this.asTool = asTool;
+        }
+
+        @Override public String describe() {
+            return "替身";
+        }
+
+        @Override public AcquireVia via() {
+            return AcquireVia.CRAFT;
+        }
+
+        @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+            return new SourceQuote.Offer("替身", request.count(), new AcquisitionCost(1, 1), null);
+        }
+
+        @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+            String wanted = request.wanted().itemId();
+            ItemRequest inner = switch (wanted) {
+                case LOG -> new ItemRequest(WantedItem.ofItem(AXE), 1, "备斧头");
+                case AXE -> new ItemRequest(WantedItem.ofItem(PLANKS), 3, "斧头的木板");
+                default -> null;
+            };
+            return Optional.of(new Action() {
+                private Action fetching;
+
+                // 先把里层要的弄到，再把自己这一样放进背包；最里层（木板）放进去之前记下此刻看得见的两段。
+                @Override public ActionStatus tick(TickContext tick) {
+                    if (inner != null) {
+                        if (fetching == null) {
+                            fetching = asTool && wanted.equals(LOG)
+                                    ? engine[0].actionForTool(inner, PERMISSIONS, null)
+                                    : engine[0].actionFor(inner, PERMISSIONS);
+                        }
+                        ActionStatus status = fetching.tick(tick);
+                        if (!(status instanceof ActionStatus.Done)) return status;
+                    } else {
+                        outerSeen.add(engine[0].outerWanted().stream().map(r -> r.wanted().itemId()).toList());
+                        chainSeen.add(engine[0].inProgress().stream().map(r -> r.wanted().itemId()).toList());
+                    }
+                    backpack.add(wanted, request.count());
+                    return ActionStatus.done();
+                }
+
+                @Override public String describe() {
+                    return "弄" + wanted;
+                }
+            });
+        }
+    }
+
+    @Test
     void 来源还在看现场_等它看完再问_不立刻说拿不到() {
         // 方块索引分刻建：头两问采掘说"还没扫完"，第三问才报价；引擎该等它，不把没扫完当成没有。
         ScriptedSource mine = new ScriptedSource("采掘", AcquireVia.MINE, backpack)

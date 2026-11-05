@@ -47,20 +47,26 @@ final class PriceAsks {
     /** 动手问价那一轮的账：问了谁几次、各花多久、几次用了记下的；不在那一轮里时为 null，不记账。 */
     private QuoteTally tally;
 
-    PriceAsks(List<ItemSource> sources, ReadsCharacterPosition position) {
+    /** 做法不拿来当原料的那段外层此刻要的东西：同一种问法在这段外层不同的时候，做法挑得出的不一样，分开记。 */
+    private final Supplier<List<WantedItem>> outerWanted;
+
+    PriceAsks(List<ItemSource> sources, ReadsCharacterPosition position, Supplier<List<WantedItem>> outerWanted) {
         this.sources = List.copyOf(sources);
         this.position = position;
+        this.outerWanted = outerWanted;
     }
 
     /** 一遍问价的结果：最省一条路的总代价（问不出时为空），以及有没有来源还没看清现场。 */
     record Price(Optional<Double> cost, boolean looking) {}
 
     /**
-     * 一种问法：要什么、要几件、偏好与掉落线索、别人的箱子放不放行、许可、算不算现做。用途只是说明，不影响报价。
-     * 放行不一样，容器报的价就不一样（饿急了别人的箱子也算），不能借用不放行时记下的价。
+     * 一种问法：要什么、要几件、偏好与掉落线索、别人的箱子放不放行、许可、算不算现做，以及做法不拿来当原料的那段外层。
+     * 用途只是说明，不影响报价。放行不一样，容器报的价就不一样（饿急了别人的箱子也算），不能借用不放行时记下的价；
+     * 那段外层不一样，做法里剔掉的就不一样，也不能借用。
      */
     private record Question(WantedItem wanted, int count, List<String> prefer, DropsFrom dropsFrom,
-                            OthersStorageAllowance othersStorage, Permissions permissions, boolean includeMaking) {}
+                            OthersStorageAllowance othersStorage, Permissions permissions, boolean includeMaking,
+                            List<WantedItem> outerWanted) {}
 
     /**
      * 一次估算期间：问过的价记下来，问遍各来源一次从这次估算的额度里扣一次；干完就忘掉、不再扣。
@@ -123,7 +129,7 @@ final class PriceAsks {
      */
     Price ask(ItemRequest request, Permissions permissions, boolean includeMaking) {
         Question question = new Question(request.wanted(), request.count(), request.prefer(), request.dropsFrom(),
-                request.othersStorage(), permissions, includeMaking);
+                request.othersStorage(), permissions, includeMaking, outerWanted.get());
         // 估算期间、动手问价那一轮里问过同一种问法：直接用记下的，不算又问了一遍。
         if (remembered != null) {
             Price known = remembered.get(question);

@@ -1198,6 +1198,44 @@ class RecipeSourceTest {
         SourceQuote quote = recipeSource.quote(
                 new ItemRequest(WantedItem.ofItem("create:andesite_alloy_block"), 1, "拆成合金"), CONTEXT);
         assertInstanceOf(SourceQuote.Unavailable.class, quote, "做块要用外层正要的合金：不算做法");
+
+        // 接上引擎的两段时照旧：合金到合金块中间没有备工具，做法不吃的外层里有合金，做块仍不算做法。
+        ItemRequest alloy = new ItemRequest(WantedItem.ofItem("create:andesite_alloy"), 38, "做轴");
+        ItemRequest alloyBlock = new ItemRequest(WantedItem.ofItem("create:andesite_alloy_block"), 1, "拆成合金");
+        recipeSource.watchChain(() -> List.of(alloy, alloyBlock), () -> List.of(alloy, alloyBlock));
+        assertInstanceOf(SourceQuote.Unavailable.class, recipeSource.quote(alloyBlock, CONTEXT),
+                "没有备工具的一串整串都不吃");
+    }
+
+    @Test
+    void 为做工具可以花更外层正在拿的东西() {
+        // 实机 11-04：海边要 6 根橡木，先备斧头，斧头要木板。做法不吃的外层只到斧头为止，身上的橡木能做木板；
+        // 同一串没有备工具那一层时（外层整串都算），橡木照旧不拿来当原料。
+        WorkstationRecipe planks = new WorkstationRecipe("minecraft:oak_planks", WorkstationRecipe.Kind.CRAFTING,
+                WantedItem.ofItem("minecraft:oak_planks"), 4,
+                List.of(new WorkstationRecipe.IngredientStack(WantedItem.ofItem("minecraft:oak_log"), 1)), true);
+        backpack.add("minecraft:oak_log", 4);
+        ItemNeeds needs = (request, permissions) -> new Action() {
+            @Override public ActionStatus tick(TickContext context) {
+                return ActionStatus.done();
+            }
+
+            @Override public String describe() {
+                return "替身";
+            }
+        };
+        RecipeSource recipeSource = new RecipeSource(wanted -> List.of(planks), memory(),
+                itemId -> 0, new InventoryRuns(), backpack, offhand, tags, needs);
+        ItemRequest logs = new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "砍树");
+        ItemRequest axe = new ItemRequest(WantedItem.ofItem("minecraft:wooden_axe"), 1, "成批砍树前先备一把顺手的工具");
+        ItemRequest wanted = new ItemRequest(WantedItem.ofItem("minecraft:oak_planks"), 3, "斧头的木板");
+        recipeSource.watchChain(() -> List.of(logs, axe, wanted), () -> List.of(axe, wanted));
+        SourceQuote forAxe = recipeSource.quote(wanted, CONTEXT);
+        assertInstanceOf(SourceQuote.Offer.class, forAxe, "为斧头做木板可以用身上的橡木：" + forAxe);
+
+        recipeSource.watchChain(() -> List.of(logs, axe, wanted), () -> List.of(logs, axe, wanted));
+        assertInstanceOf(SourceQuote.Unavailable.class, recipeSource.quote(wanted, CONTEXT),
+                "没有备工具那一层时橡木照旧不吃");
     }
 
     @Test
