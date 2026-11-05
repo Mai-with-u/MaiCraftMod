@@ -222,15 +222,7 @@ final class ConstructionSite {
 
     /** 全部格都对了（或这次放好、清好、倒好、交给机器）。 */
     boolean allSettled() {
-        for (CellEnding ending : endings.values()) {
-            switch (ending) {
-                case MATCHES, PLACED, CLEARED, POURED, CHECKED_BY_MACHINE -> { }
-                default -> {
-                    return false;
-                }
-            }
-        }
-        return true;
+        return notDone() == 0;
     }
 
     /** 还有几格没做成（不算交给机器的、受保护的）。 */
@@ -269,18 +261,34 @@ final class ConstructionSite {
         return groups;
     }
 
-    /** 没做成的格按原因合并计数，每句原因带着它算哪种问题：收场时拼成交给上一层的结论。 */
+    /**
+     * 没做成的格按原因合并计数，每句原因带着它算哪种问题：收场时拼成交给上一层的结论。
+     * 只数收场时还没做成的格：中途记过缺料、后来补料放上了的格不再算进去，原因的格数才和开头的格数对得上。
+     */
     ReasonCounts reasonCounts() {
         ReasonCounts counts = new ReasonCounts();
-        problems.forEach((reason, cells) -> counts.add(problemKinds.get(reason), reason, cells.size()));
+        problems.forEach((reason, cells) -> counts.add(problemKinds.get(reason), reason,
+                (int) cells.stream().filter(pos -> notDone(endings.get(pos))).count()));
         return counts;
     }
 
-    /** 记了原因的格一共几格：一格记了两句原因也只算一格。 */
-    int problemCells() {
-        Set<BlockPos> cells = new HashSet<>();
-        problems.values().forEach(cells::addAll);
-        return cells.size();
+    /**
+     * 收场时没做成的格一共几格：还缺、不对、没加载、挖不动（基岩、世界边界）、受保护没动的都算，
+     * 对上了、这次做好、交给机器的不算。结果的总述和问题开头的格数都用这一个数，两处说的才一样。
+     */
+    int notDone() {
+        int count = 0;
+        for (CellEnding ending : endings.values()) if (notDone(ending)) count++;
+        return count;
+    }
+
+    // 这个结局算不算没做成：和"全部格都对了"的判断互为反面。
+    private static boolean notDone(CellEnding ending) {
+        return switch (ending) {
+            case MATCHES, PLACED, CLEARED, POURED, CHECKED_BY_MACHINE -> false;
+            case null -> false;
+            default -> true;
+        };
     }
 
     /** 受保护的格有几格。 */

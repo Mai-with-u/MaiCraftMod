@@ -201,7 +201,8 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         }
         if (site.allSettled() && temporariesLeft.isEmpty()) return Next.done(result("按图建好了"));
         Problem problem = problem();
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "按图建了一部分：" + site.unsettled() + " 格没做成")
+        // 总述的格数和问题开头的格数是同一个数：挖不动、受保护没动的格也是没做成的格。
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "按图建了一部分：" + site.notDone() + " 格没做成")
                 .problem(problem).remaining(remaining()).details(details()).build());
     }
 
@@ -221,13 +222,13 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         }
         ReasonCounts reasons = site.reasonCounts();
         if (!reasons.isEmpty()) {
-            return Problem.of(reasons.kind(), reasons.message(site.problemCells() + " 格没做成", "格"));
+            return Problem.of(reasons.kind(), reasons.message(site.notDone() + " 格没做成", "格"));
         }
         if (!temporariesLeft.isEmpty()) {
             return Problem.of(Problem.Kind.STUCK, "有 " + temporariesLeft.size() + " 块临时方块没收回", "下一次施工会接着收");
         }
         // 没记下原因的格（验收时每格都会记一句，正常走不到这里）：照实说几格没对上，算卡住。
-        return Problem.of(Problem.Kind.STUCK, "有 " + site.unsettled() + " 格没对上", null);
+        return Problem.of(Problem.Kind.STUCK, "有 " + site.notDone() + " 格没对上", null);
     }
 
     private String positions(CellEnding ending) {

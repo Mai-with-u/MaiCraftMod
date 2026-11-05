@@ -654,6 +654,26 @@ class ConstructionTaskTest {
     }
 
     @Test
+    void 挖不动的格也算没做成_总述和问题开头的格数一样() {
+        // 一格底下是基岩挖不动、一格视线被挡放不上：两格都没做成。总述和问题开头都说 2 格，
+        // 调用方拿哪一处的数字都一样；种类按格数并列时先记下的基岩算在这里做不到。
+        Fake fake = new Fake().ground(63);
+        BlockPos bedrock = new BlockPos(0, 64, 0);
+        BlockPos hidden = new BlockPos(2, 64, 0);
+        fake.world.put(bedrock, Blocks.BEDROCK.defaultBlockState());
+        fake.hiddenCells.add(hidden);
+        fake.carried.put("minecraft:stone", 2);
+        fake.carried.put("minecraft:cobblestone", 8);
+        List<PlannedCell> cells = List.of(PlannedCell.block(bedrock, STONE, Set.of()), PlannedCell.block(hidden, STONE, Set.of()));
+        TaskResult result = run(fake, new Blueprint(DIM, bedrock, cells));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals("按图建了一部分：2 格没做成", result.summary());
+        assertTrue(result.problem().message().startsWith("2 格没做成："), result.problem().message());
+        assertTrue(result.problem().message().contains("挖不动（基岩或世界边界）"), result.problem().message());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+    }
+
+    @Test
     void 同一层按蓝图里写的先后倒桶() {
         // 刷石机写了先岩浆后水：照写的先后倒，不按坐标排（按坐标是先倒 x=0 的水）。
         Fake fake = new Fake().ground(63);
