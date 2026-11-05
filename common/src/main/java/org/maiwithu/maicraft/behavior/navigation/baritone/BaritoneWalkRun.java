@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.behavior.survival.SurvivalSituation;
 import org.maiwithu.maicraft.behavior.survival.breath.UnderwaterWalkBudget;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.navigation.calc.NavGoal;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -247,9 +248,10 @@ final class BaritoneWalkRun implements WalkRun {
         }
     }
 
-    // 角色此刻脚下的格子；不在世界里为 null。
+    // 角色此刻的脚位，和寻路引擎同一个口径：站在床、下半台阶、灵魂沙上算上面那一格，到没到、停在哪都按它；不在世界里为 null。
     private static BlockPos feetOf(PlayerContext context) {
-        return context == null || context.localPlayer() == null ? null : context.localPlayer().blockPosition();
+        LocalPlayer player = context == null ? null : context.localPlayer();
+        return player == null ? null : BlockPassability.playerFeet(player.level(), player.getX(), player.getY(), player.getZ());
     }
 
     /** 排队期间被更新的请求顶掉：结算自己，不再占队位。 */
@@ -375,7 +377,7 @@ final class BaritoneWalkRun implements WalkRun {
 
         routePresent = pathing.getCurrent() != null;
         calculating = pathing.getInProgress().isPresent();
-        BlockPos feet = player.blockPosition();
+        BlockPos feet = feetOf(context);
         handleStall(pathing, engine, context.level(), feet);
         restoreAfterEscape(context, player, feet);
         boolean onGround = player.onGround();
