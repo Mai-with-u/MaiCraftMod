@@ -101,6 +101,8 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
     private boolean stopRequested;
     private boolean crossedWater;
     private double bestRemaining = Double.MAX_VALUE;
+    /** 离目的地没近时按路线站上、挖开、垫下新格也算进展；先往远处挖的正经路线不被当成原地打转。 */
+    private final DetourProgress detour = new DetourProgress();
     /** 最近一刻身体所在的方块格：空转收尾与取消结算都从这里取现场。 */
     private BlockPos lastFeet;
     /** 垫块记账的光标：跟着当前走到运行走，换段重新记。 */
@@ -447,7 +449,14 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         } else {
             wrapped = underlying;
         }
-        return withHazardsNearDestination(wrapped);
+        return withHazardsNearDestination(withDetourSpent(wrapped));
+    }
+
+    // 绕路额度用完才收的场：说清离上次变近多久、这期间挖开几格、站上几个新格，不让人以为一直站着没动。
+    private Problem withDetourSpent(Problem problem) {
+        return detour.summary()
+                .map(line -> Problem.of(problem.kind(), problem.message() + "；" + line, problem.suggestion()))
+                .orElse(problem);
     }
 
     /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走；深得走路起步不了、许能动土
@@ -503,7 +512,12 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
             // 剩余距离是进展信号：比上次记进展时真近了一格以上才算前进，原地蹭动攒不出来的
             // 就不再刷新，站着不动或来回横跳早晚被判卡住。
             bestRemaining = progressGap(remaining);
+            detour.closer(report.feet());
             recordProgress("离目的地还剩 " + remaining.describe());
+        } else if (remaining != null) {
+            // 离目的地没近，但按路线站上、挖开、垫下了这一趟没碰过的格：往下挖、在墙底下打洞的正经绕路也在往前走；
+            // 离上次变近满 2 分钟就不再认，只看距离。
+            detour.advanced(report.feet(), progressGap(remaining), bestRemaining).ifPresent(this::recordProgress);
         }
         progressListener.onTravelProgress(new TravelProgress(
                 describeStage(report), report.feet(), remaining, crossedWater));
@@ -527,6 +541,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         List<BlockPos> placed = placedBlocks.placedDuringCurrentWalk();
         for (int i = recordedPlacements; i < placed.size(); i++) {
             BlockPos cell = placed.get(i);
+            detour.placed(cell);
             // 垫路用的临时方块先不自动收回；要不要拆由玩家看了结果再决定。
             recordChange(new Change(Change.Kind.BLOCK_PLACED, cell.toShortString(), 1,
                     "垫路用的临时方块，没有自动收回"));
@@ -535,6 +550,7 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         // 开路挖掉的方块也进变化：挖了哪几格要说清，none 许可下根本不该有这一路。
         List<String> dug = placedBlocks.brokenDuringCurrentWalk();
         for (int i = recordedBreaks; i < dug.size(); i++) {
+            detour.dug(dug.get(i));
             recordChange(new Change(Change.Kind.BLOCK_BROKEN, dug.get(i), 1, placedBlocks.breakNote(dug.get(i))));
         }
         recordedBreaks = dug.size();

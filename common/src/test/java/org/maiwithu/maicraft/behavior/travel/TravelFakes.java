@@ -233,6 +233,13 @@ public final class TravelFakes {
         @Override public List<BlockPos> placedDuringCurrentWalk() {
             return List.copyOf(placed);
         }
+
+        /** 开路挖掉的方块账："x, y, z 的 方块ID"，按先后。 */
+        public final List<String> broken = new ArrayList<>();
+
+        @Override public List<String> brokenDuringCurrentWalk() {
+            return List.copyOf(broken);
+        }
     }
 
     /** 进展记录替身：把逐刻报告收下来。 */
