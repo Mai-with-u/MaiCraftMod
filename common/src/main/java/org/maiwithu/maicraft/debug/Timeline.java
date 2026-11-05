@@ -110,6 +110,8 @@ final class Timeline {
             case TIMER_DUE -> PanelColor.WAITING;
             // 被困挖开了别人的方块：拆了谁的东西主播要看一眼，用等待色提醒
             case OTHERS_BLOCKS_BROKEN, OTHERS_FOOD_TAKEN -> PanelColor.WAITING;
+            // 别人冲角色蹲起、挥手：有人在找角色玩，用等待色让主播看一眼角色回没回他
+            case PLAYER_BODY_LANGUAGE -> PanelColor.WAITING;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;
             case DISCOVERED -> PanelColor.MINOR;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {

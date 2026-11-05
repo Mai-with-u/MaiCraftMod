@@ -55,6 +55,7 @@ import org.maiwithu.maicraft.behavior.lighting.LiveLightingWorld;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
 import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalWatch;
 import org.maiwithu.maicraft.behavior.perception.SkyChanges;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
@@ -214,6 +215,8 @@ public final class Bootstrap {
         private CompatRegistry compat = CompatRegistry.empty();
         /** 挨打的片段：每刻看一眼，到点发事件。 */
         private HurtEpisodes hurtEpisodes;
+        /** 别的玩家冲角色做的肢体动作：每刻采样，按人归段发事件。 */
+        private NonverbalWatch nonverbal;
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
@@ -327,6 +330,12 @@ public final class Bootstrap {
                     : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
                     ? Optional.empty() : worldScope[0].pains().culpritOf(type));
             HurtEpisodes hurts = hurtEpisodes;
+            // 别的玩家冲角色做的肢体动作：看得见的带观察编号；发出一段就让闲时看先看他。
+            nonverbal = new NonverbalWatch(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
+                    : worldScope[0].scene().seen().idOfEntity(entityId), who -> {
+                        if (worldScope[0] != null) worldScope[0].idleLooking().someoneMotioned(who);
+                    });
+            ClientHooks.registerOthersSeen(nonverbal, nonverbal, nonverbal);
             ClientHooks.registerDamageObserver((player, source, tick) -> {
                 memory.hurt(player, source, tick);
                 if (worldScope[0] != null) worldScope[0].pains().hurt(player, source, tick);
@@ -594,6 +603,7 @@ public final class Bootstrap {
         private void leaveWorld() {
             // 换世界、断线：没发出的挨打片段丢掉，维度与天色基准重来。
             if (hurtEpisodes != null) hurtEpisodes.forget();
+            if (nonverbal != null) nonverbal.forget();
             dimensionChanges.forget();
             skyChanges.forget();
             // 没到点的计时属于刚离开的那个世界，不跟到下一个；预留也换回不存，进下一个世界读那个世界的。
@@ -661,6 +671,7 @@ public final class Bootstrap {
             if (reminders != null) tickGuard.run("提醒", () -> reminders.tick(current));
             // 挨打的片段到点发、维度变了发、天黑天亮下雨雨停发：人自己玩的时候也照样发。
             if (hurtEpisodes != null) tickGuard.run("挨打片段", () -> hurtEpisodes.tick(current));
+            if (nonverbal != null) tickGuard.run("别人的肢体动作", () -> nonverbal.tick(current));
             tickGuard.run("换维度", () -> dimensionChanges.tick(current));
             tickGuard.run("天色变化", () -> skyChanges.tick(current));
             // 计时到点照样叫：人按 F8 接过角色时也发，计时是 LLM 自己的事。

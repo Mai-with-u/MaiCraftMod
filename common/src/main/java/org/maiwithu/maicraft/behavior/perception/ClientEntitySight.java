@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation.TamedBy;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.LooksAt;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -101,7 +102,7 @@ public final class ClientEntitySight implements EntitySight {
 
     /**
      * 看得出来的特征：着火、幼年、羊的毛与剪毛、驯服的是谁的、坐着没有、掉落物是什么几件、展示框里放着什么、
-     * 手持物、身上穿的盔甲。看不出来就不写。观察与找东西共用这一份。
+     * 手持物、身上穿的盔甲，别的玩家蹲没蹲着、看没看着角色。看不出来就不写。观察与找东西共用这一份。
      */
     public static Map<String, String> traits(Entity entity, Player viewer, TrustedPlayers trusted) {
         Map<String, String> traits = new LinkedHashMap<>();
@@ -152,6 +153,15 @@ public final class ClientEntitySight implements EntitySight {
             }
             if (!armor.isEmpty()) {
                 traits.put("盔甲", String.join("，", armor));
+            }
+        }
+        // 别的玩家蹲着（按住潜行）、看着角色（视线离角色身体不到 1 格）：LLM 认"他在跟你打招呼"要看这两样。
+        if (entity instanceof Player other && other != viewer) {
+            if (other.isCrouching()) {
+                traits.put("蹲着", "是");
+            }
+            if (LooksAt.looksAt(other, viewer)) {
+                traits.put("看着你", "是");
             }
         }
         return traits;

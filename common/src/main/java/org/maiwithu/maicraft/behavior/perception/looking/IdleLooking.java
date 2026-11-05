@@ -118,6 +118,11 @@ public final class IdleLooking implements LooksAfterReading {
         if (enabled && who != null) spokeAt.put(who, lastTick);
     }
 
+    /** 有人冲角色做了肢体动作（蹲起、挥手、点头……）：和说过话的人一样，十秒内闲看先看他。 */
+    public void someoneMotioned(UUID who) {
+        someoneSpoke(who);
+    }
+
     /** 推进一刻：在控制循环推进之前调，新目标或临时任务来的那一刻先收手，任务这一刻照常开始。 */
     public void tick(TickContext context, Availability availability) {
         if (!enabled) return;

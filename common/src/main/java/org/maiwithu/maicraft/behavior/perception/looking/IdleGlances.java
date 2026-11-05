@@ -11,6 +11,7 @@ import java.util.random.RandomGenerator;
 
 /**
  * 闲看挑什么：没读什么时隔一会儿看一样，按"说话的人 > 声音来处 > 玩家 > 生物 > 随便一个方向"挑。纯函数。
+ * "说话的人"也包括刚冲角色做过肢体动作的人：他蹲几下、挥挥手，和在聊天里叫了一声一样，是在找角色。
  *
  * <p>只看看得见的东西和听见的声音来处（候选由现场给，墙后、地下的不在里面）：盯着一面墙看、
  * 过一会儿那里挖出矿来，观众一看就知道角色在透视。连着两回不看同一处（说话的人除外）；
@@ -77,7 +78,7 @@ final class IdleGlances {
         return Optional.of(anywhere(standingYaw, lastOffset, random));
     }
 
-    // 最近十秒在聊天里说过话、看得见、二十四格内的玩家：最近说话的那个，看着他二到四秒，他动就跟着看。
+    // 最近十秒在聊天里说过话（或冲角色做过肢体动作）、看得见、二十四格内的玩家：最近的那个，看着他二到四秒，他动就跟着看。
     private static Optional<Glance> speaker(List<LookingWorld.Candidate> around, Map<UUID, Long> spokeAgo,
             RandomGenerator random) {
         return around.stream()

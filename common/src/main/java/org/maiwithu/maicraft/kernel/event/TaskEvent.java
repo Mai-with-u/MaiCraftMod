@@ -108,7 +108,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 饿到危险线、身上和能用的箱子里都没口粮，从别人的箱子拿了刚好够的口粮：每确认拿到一次发一条；
          * 谁的、在哪、拿了什么几件、当时多饿在消息里，按字段的在附带的 others_food_taken。
          */
-        OTHERS_FOOD_TAKEN
+        OTHERS_FOOD_TAKEN,
+        /**
+         * 别的玩家冲角色做的肢体动作：蹲起、挥手、拍一下、拿出东西、点头、摇头、原地跳、扔东西、走开又回头。
+         * 按人归成一段发一条，拍一下当刻发；谁、做了什么、几下、对着谁、在哪在消息里，是谁在附带的 player 里。
+         */
+        PLAYER_BODY_LANGUAGE
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

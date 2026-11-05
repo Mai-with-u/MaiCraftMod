@@ -178,7 +178,8 @@
     "sky_changed",
     "timer_due",
     "others_blocks_broken",
-    "others_food_taken"
+    "others_food_taken",
+    "player_body_language"
   ],
   "chat_kinds": [
     "player",
