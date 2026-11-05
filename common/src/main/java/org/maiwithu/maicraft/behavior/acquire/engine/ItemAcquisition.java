@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.behavior.acquire.engine;
 
 import java.util.ArrayDeque;
-import java.util.LinkedHashSet;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
@@ -686,49 +685,18 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 return Problem.of(Problem.Kind.NEED_APPROVAL, approvalMessages.getFirst(),
                         "放宽对应的许可，或指一个可以用的来源");
             }
-            // 结论句在前，这一层问过、试过的一条一句接在后面；备料时里层没拿到的摊平讲一次，接在最后。
             // 这一次里问遍了都没拿到，记在最外层：换一种做法又要到它时不再问一遍。
-            List<String> reasons = new ArrayList<>();
-            for (SourceQuote refusal : refusals) {
-                // 只是跳过了走不到的地方：不算一条原因，最外层统一说一次。
-                if (refusal instanceof SourceQuote.Unavailable skipped && UnreachablePlaces.SKIPPED.equals(skipped.reason())) continue;
-                reasons.add(describeRefusal(refusal));
-            }
-            for (String deadEnd : deadEnds) {
-                reasons.add("试过" + deadEnd);
-            }
             String key = request.wanted().specifier();
-            shortage = new Shortage(key, request.wanted().describe(), target - carried, request.purpose(), reasons, causes);
+            shortage = new Shortage(key, request.wanted().describe(), target - carried, request.purpose(),
+                    Shortage.reasons(refusals, deadEnds), causes);
             advancing.getLast().unobtainable.put(key, shortage);
-            StringBuilder message = new StringBuilder("还要").append(target - carried).append("个")
-                    .append(request.wanted().describe()).append("（").append(request.purpose())
-                    .append("），问过各来源都拿不到");
-            for (String reason : reasons) {
-                message.append("；").append(reason);
-            }
-            String explained = Shortage.explain(causes);
-            if (!explained.isEmpty()) {
-                message.append("；").append(explained);
-            }
-            if (advancing.size() <= 1) unreachable.lines().forEach(line -> message.append("；").append(line));
+            // 走不到跟前的地方只由最外层说一次，备料的里层不重复。
+            String message = shortage.message(advancing.size() <= 1 ? unreachable.lines() : List.of());
             // 指定了途径（例如只从 ME 网络取）时如实说只走了这几条：没有现货不等于做不出来，
             // 实机用 via=ae2 试探"有没有铁粒"得到"没有"，其实网络里的铁块合成下去就有。
             String suggestion = scope.vias().isEmpty() || advancing.size() > 1 ? null
                     : "这次只走了 " + String.join("、", scope.vias()) + "；不指定 via 再下达一次，会试合成、烧炼等别的途径（例如用网络里的整块拆出来）";
-            return Problem.of(Problem.Kind.NEED_ITEM, message.toString(), suggestion);
-        }
-
-        private String describeRefusal(SourceQuote refusal) {
-            return switch (refusal) {
-                case SourceQuote.Unavailable unavailable -> refusal.source() + "：" + unavailable.reason();
-                case SourceQuote.NeedsApproval approval -> refusal.source() + "：超出许可（"
-                        + approval.problem().message() + "）";
-                case SourceQuote.Unsupported unsupported -> refusal.source() + "：不支持（"
-                        + unsupported.reason() + "）";
-                case SourceQuote.NotYet notYet -> refusal.source() + "：等了 " + MAX_CONSULT_WAIT_TICKS
-                        + " 刻还没看完现场（" + notYet.reason() + "）";
-                case SourceQuote.Offer offer -> refusal.source();
-            };
+            return Problem.of(Problem.Kind.NEED_ITEM, message, suggestion);
         }
 
         @Override public void pause() {
@@ -773,18 +741,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         /** 卡住收场时讲给人听的经过：这一场试过哪些来源、各为什么不成，一句一条；备料里没拿到的摊平接在后面。 */
         String explanation() {
-            LinkedHashSet<String> distinct = new LinkedHashSet<>(deadEnds);
-            StringBuilder text = new StringBuilder(String.join("；", distinct));
-            String shortage = Shortage.explain(causes);
-            if (!shortage.isEmpty()) {
-                if (!text.isEmpty()) text.append("；");
-                text.append(shortage);
-            }
-            for (String line : unreachable.lines()) {
-                if (!text.isEmpty()) text.append("；");
-                text.append(line);
-            }
-            return text.toString();
+            return Shortage.explanation(deadEnds, causes, unreachable.lines());
         }
 
         // 这一次拿东西里走不到跟前的地方：最外层那一场的那一份，备料的每一层共用。
