@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Cell;
+import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Commands;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Gear;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Moves;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Player;
@@ -27,7 +28,8 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 
 /**
  * 寻死的离线场景：收护具 → 挑死法 → 走过去 → 接触 → 死过重生 → 按原件穿回；没死成先穿回再失败；
- * 暂停先穿回、恢复后重新收；造危险右键没效果不换格反复试；放弃的原因合并计数，结果长度有界。
+ * 暂停先穿回、恢复后重新收；造危险右键没效果不换格反复试；放弃的原因合并计数，结果长度有界；
+ * 服务器给了寻死命令先发命令，发了不死再照原来的死法找。
  */
 class SuicideTaskTest {
 
@@ -344,6 +346,95 @@ class SuicideTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
                 && "minecraft:fire".equals(change.what()) && change.note().contains("0, 64, 0")), result.changes().toString());
+    }
+
+    @Test
+    void 能用_kill_就直接发_不脱甲不收图腾() {
+        // /kill 不经护甲、不触发图腾：穿着、拿着都照发，死亡不掉落开着护甲本来不掉。
+        player.wear(GearSlotName.HEAD, HELMET, "头盔");
+        player.totems.add(GearSlotName.OFFHAND);
+        Commands commands = new Commands().offer("kill");
+        SuicideTask task = task(null, 120, commands);
+        run(task, 5, () -> !commands.sent.isEmpty());
+        assertEquals(List.of("kill @s"), commands.sent);
+        assertTrue(gear.calls.isEmpty(), "没脱甲、没收图腾：" + gear.calls);
+
+        player.respawns = 1;
+        TaskResult result = finished(run(task, 50, () -> false));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        SuicideTask.SuicideDetails details = (SuicideTask.SuicideDetails) result.details();
+        assertEquals("command", details.way());
+        assertEquals("/kill @s", details.command());
+        assertEquals(SuicideModule.BY_GAME_RULE, details.keepInventoryKnownBy());
+    }
+
+    @Test
+    void 有_suicide_先收图腾再发_护甲不脱() {
+        // 插件的 /suicide 怎么杀核对不了：先把图腾收进背包，免得被图腾救回来。
+        player.wear(GearSlotName.HEAD, HELMET, "头盔");
+        player.totems.add(GearSlotName.OFFHAND);
+        Commands commands = new Commands().offer("suicide").offer("kill");
+        SuicideTask task = task(null, 120, commands);
+        run(task, 20, () -> !commands.sent.isEmpty());
+        assertEquals(List.of("suicide"), commands.sent);
+        assertEquals(List.of("takeOff:offhand"), gear.calls);
+        assertTrue(player.worn.containsKey(GearSlotName.HEAD), "头盔还穿着");
+    }
+
+    @Test
+    void 发了命令五秒没死_收起护甲照原来的死法找_原因带服务器回话() {
+        player.wear(GearSlotName.HEAD, HELMET, "头盔");
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        Commands commands = new Commands().offer("suicide");
+        commands.replies.add("你没有权限");
+        SuicideTask task = task(null, 120, commands);
+        run(task, 300, () -> moves.calls.contains("stepInto:lava"));
+        assertEquals(List.of("suicide"), commands.sent, "只发一次，不换写法重发");
+        assertTrue(gear.calls.contains("takeOff:head"), "命令不管用以后照原来先脱甲：" + gear.calls);
+
+        player.respawns = 1;
+        TaskResult result = finished(run(task, 100, () -> false));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.attempts().toString().contains("服务器回：你没有权限"), result.attempts().toString());
+        assertEquals("lava", ((SuicideTask.SuicideDetails) result.details()).way());
+        assertEquals("/suicide", ((SuicideTask.SuicideDetails) result.details()).command());
+    }
+
+    @Test
+    void 点名用命令_发了不死按卡住结束_不换别的死法() {
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        Commands commands = new Commands().offer("kill");
+        commands.replies.add("Unknown or incomplete command");
+        SuicideTask task = task(WayToDie.COMMAND, 120, commands);
+        TaskResult result = finished(run(task, 300, () -> false));
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertTrue(result.problem().message().contains("5 秒没死") && result.problem().message().contains("Unknown"),
+                result.problem().message());
+        assertFalse(moves.calls.contains("stepInto:lava"), "点名只用命令，不去踩岩浆");
+    }
+
+    @Test
+    void 命令没发出去_当场换别的死法() {
+        world.put(new BlockPos(3, 64, 0), Cell.LAVA);
+        Commands commands = new Commands().offer("kill");
+        commands.offline = true;
+        SuicideTask task = task(null, 120, commands);
+        run(task, 200, () -> moves.calls.contains("stepInto:lava"));
+        assertTrue(moves.calls.contains("stepInto:lava"), moves.calls.toString());
+    }
+
+    @Test
+    void 没有寻死命令也没有死法_原因里说服务器没给命令() {
+        SuicideTask task = task(null, 120, new Commands());
+        TaskResult result = finished(run(task, 500, () -> false));
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("寻死命令：服务器没给角色能用的 /suicide 或 /kill"),
+                result.problem().message());
+    }
+
+    private SuicideTask task(WayToDie via, long seconds, Commands commands) {
+        return new SuicideTask(new SuicideInput(via, 8, seconds, Permissions.DEFAULT, SuicideModule.BY_GAME_RULE),
+                player, world, moves, gear, commands);
     }
 
     private SuicideTask task(WayToDie via, long seconds) {

@@ -13,16 +13,16 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param radius        找现成死法的范围（格）
  * @param maxSeconds    最多花多少秒去死；死亡停摆、暂停、穿回护甲都不算在里面
  * @param permissions   这次目标的许可：走过去能动多少地形；随身点火、倒岩浆是寻死的手段，不看它的 change_blocks
- * @param keepInventory 怎么知道开着死亡不掉落的：game_rule 读到真实规则 / caller_confirmed 调用方确认
+ * @param keepInventoryKnownBy 怎么知道开着死亡不掉落的：game_rule 读到真实规则 / caller_confirmed 调用方确认
  */
-record SuicideInput(WayToDie via, int radius, long maxSeconds, Permissions permissions, String keepInventory)
+record SuicideInput(WayToDie via, int radius, long maxSeconds, Permissions permissions, String keepInventoryKnownBy)
         implements TaskInput {
 
     SuicideInput {
         permissions = permissions == null ? Permissions.DEFAULT : permissions;
     }
 
-    /** 这次能用的死法：指定了只有那一种，不指定六种都在；随身点火、倒岩浆不因 change_blocks=none 去掉。 */
+    /** 这次能用的死法：指定了只有那一种，不指定七种都在；随身点火、倒岩浆不因 change_blocks=none 去掉。 */
     Set<WayToDie> allowedWays() {
         return via == null ? EnumSet.allOf(WayToDie.class) : EnumSet.of(via);
     }

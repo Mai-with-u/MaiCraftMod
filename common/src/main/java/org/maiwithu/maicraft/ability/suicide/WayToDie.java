@@ -4,11 +4,13 @@ package org.maiwithu.maicraft.ability.suicide;
 import java.util.List;
 
 /**
- * 死法：六种，参数 {@code via} 的取值同名。档位是不指定死法时挑的先后——
- * 死得快、几乎不失手的先（岩浆、摔得死的落差），原地就能点的火其次，慢又可能被打断的再次（仙人掌、敌对生物），
+ * 死法：七种，参数 {@code via} 的取值同名。档位是不指定死法时挑的先后——
+ * 服务器给了寻死命令就先发命令（一下就死，不用走路、不脱甲），
+ * 再是死得快、几乎不失手的（岩浆、摔得死的落差），原地就能点的火其次，慢又可能被打断的再次（仙人掌、敌对生物），
  * 倒出来收不回去的岩浆桶最后。
  */
 enum WayToDie {
+    COMMAND("command", "寻死命令", 0),
     LAVA("lava", "现成岩浆", 1),
     FALL("fall", "摔得死的落差", 1),
     FIRE("fire", "随身点火", 2),
@@ -34,6 +36,11 @@ enum WayToDie {
     /** 用身上带的东西在身边造出来的（点火、倒岩浆），不是去找现成的；要放方块，许可不让动方块时不用。 */
     boolean carried() {
         return this == FIRE || this == LAVA_BUCKET;
+    }
+
+    /** 去找、去造一处能死的地方的死法：除了发命令都是，找死法的扫描只管这几种。 */
+    boolean needsSpot() {
+        return this != COMMAND;
     }
 
     /** 扫地形找得到的（岩浆、落差、仙人掌）。 */

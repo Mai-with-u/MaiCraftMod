@@ -28,6 +28,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 寻死：收起护甲与图腾 → 挑一种死法 → 走过去 → 接触危险 → 死 → 重生后按原件穿回护甲。
+ * 服务器给了寻死命令就先发命令：/kill 不经护甲、不触发图腾，直接发；/suicide 是插件给的，先收图腾再发；
+ * 都不脱甲。发了 5 秒没死再照上面那套走。
  *
  * <p>死了以后这个任务什么都不用做：控制循环停摆，挂死亡恢复问题，普通世界 2 秒自动点重生，重生后接着推进它；
  * 它看到重生次数比开始时多了，就知道死过了，转去穿回护甲，穿完算完成。死在哪一步都算。
@@ -39,7 +41,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements SurvivalNeedsOff {
 
     /** 寻死的进度。 */
-    enum Phase { STOW, CHOOSE, APPROACH, EXPOSE, STAND_IN, HOLD, MAKE, ENDURE, RE_EQUIP }
+    enum Phase { COMMAND, STOW, CHOOSE, APPROACH, EXPOSE, STAND_IN, HOLD, MAKE, ENDURE, RE_EQUIP }
+
+    /** 类别 F：发了寻死命令这么多刻（5 秒）还没死，就当这条命令不管用；服务器卡时重生包会晚到，不等得太短。 */
+    static final int COMMAND_WAIT_TICKS = 100;
 
     /** 类别 C：接触一处危险后这么多刻（20 秒）没再掉血，就放弃这一处换下一处。 */
     static final int NO_HURT_TICKS = 400;
@@ -59,6 +64,12 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     private final SuicideWorld world;
     private final SuicideMoves moves;
     private final GearChanges gear;
+    private final DeathCommands commands;
+    /** 这次用来死的命令（不带斜杠）：服务器没给、或点名了别的死法时为 null。 */
+    private final String command;
+    /** 发命令时聊天栏的记号与这次寻死推进到第几刻：还没发为 -1。 */
+    private long commandMark = -1;
+    private long commandSentAt = -1;
     private final StowedGear stowed = new StowedGear();
     private final Set<String> abandoned = new HashSet<>();
     private final Set<WayToDie> givenUp = EnumSet.noneOf(WayToDie.class);
@@ -95,13 +106,31 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     private int unmovedTrips;
 
     SuicideTask(SuicideInput input, SuicidePlayer player, SuicideWorld world, SuicideMoves moves, GearChanges gear) {
-        super("寻死", Phase.STOW, new ProgressTracker(input.maxSeconds() * 20 + RE_EQUIP_ALLOWANCE,
+        this(input, player, world, moves, gear, DeathCommands.NONE);
+    }
+
+    SuicideTask(SuicideInput input, SuicidePlayer player, SuicideWorld world, SuicideMoves moves, GearChanges gear,
+            DeathCommands commands) {
+        this(input, player, world, moves, gear, commands, input.allowedWays().contains(WayToDie.COMMAND)
+                ? DeathCommands.pick(commands).orElse(null) : null);
+    }
+
+    private SuicideTask(SuicideInput input, SuicidePlayer player, SuicideWorld world, SuicideMoves moves,
+            GearChanges gear, DeathCommands commands, String command) {
+        super("寻死", firstPhase(command), new ProgressTracker(input.maxSeconds() * 20 + RE_EQUIP_ALLOWANCE,
                 input.maxSeconds() * 20 + RE_EQUIP_ALLOWANCE));
         this.input = input;
         this.player = Objects.requireNonNull(player, "player");
         this.world = Objects.requireNonNull(world, "world");
         this.moves = Objects.requireNonNull(moves, "moves");
         this.gear = Objects.requireNonNull(gear, "gear");
+        this.commands = Objects.requireNonNull(commands, "commands");
+        this.command = command;
+    }
+
+    // /kill 直接发；/suicide 先收图腾（插件怎么杀核对不了）再发；没有命令照原来先收护具。
+    private static Phase firstPhase(String command) {
+        return DeathCommands.KILL_SELF.equals(command) ? Phase.COMMAND : Phase.STOW;
     }
 
     @Override protected Action enter(Phase phase) {
@@ -114,7 +143,7 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
             case HOLD -> enterHold();
             case MAKE -> moves.makeHazard(spot.way(), spot.entry());
             case RE_EQUIP -> enterReEquip();
-            case CHOOSE, ENDURE -> null;
+            case COMMAND, CHOOSE, ENDURE -> null;
         };
     }
 
@@ -140,6 +169,7 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
                     "换个有岩浆或高崖的地方再试，或带上打火石"));
         }
         return switch (phase) {
+            case COMMAND -> command();
             case STOW -> stow(context);
             case CHOOSE -> choose();
             case APPROACH -> approach(context);
@@ -153,11 +183,13 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     }
 
     // 按头、胸、腿、脚、副手、主手的顺序找下一件要收的：护甲有就脱，手上只收不死图腾。
+    // 还要先发寻死命令时不脱甲：命令死不磨护甲，死亡不掉落开着护甲本来不掉。
     private Action enterStow() {
         stowing = null;
         while (stowIndex < StowedGear.ORDER.size()) {
             GearSlotName slot = StowedGear.ORDER.get(stowIndex++);
-            boolean needs = StowedGear.armor(slot) ? player.worn(slot).isPresent() : player.holdsTotem(slot);
+            boolean needs = StowedGear.armor(slot) ? !commandPending() && player.worn(slot).isPresent()
+                    : player.holdsTotem(slot);
             if (!needs) continue;
             Optional<Action> takeOff = gear.takeOff(slot);
             SuicidePlayer.WornPiece piece = player.worn(slot).orElse(null);
@@ -173,7 +205,9 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     }
 
     private Next<Phase> stow(TickContext context) {
-        if (stowing == null) return Next.go(Phase.CHOOSE, "护甲与图腾收好了");
+        if (stowing == null) {
+            return commandPending() ? Next.go(Phase.COMMAND, "图腾收好了，发寻死命令") : Next.go(Phase.CHOOSE, "护甲与图腾收好了");
+        }
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
             case ActionStatus.Done done -> {
@@ -215,9 +249,45 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
         return piece == null ? "minecraft:totem_of_undying" : piece.itemId();
     }
 
+    // 还有没发过、没放弃的寻死命令：收护具时不脱甲，收完图腾就去发。
+    private boolean commandPending() {
+        return command != null && !givenUp.contains(WayToDie.COMMAND);
+    }
+
+    // 发寻死命令：只发一次，重生次数涨了就是死成了（每刻开头看）；5 秒没死就当这条命令不管用。
+    private Next<Phase> command() {
+        if (commandSentAt < 0) {
+            lastWay = WayToDie.COMMAND;
+            commandSentAt = attemptTicks;
+            commandMark = commands.send(command);
+            if (commandMark < 0) return commandFailed("/" + command + " 没发出去（没连上服务器）");
+            recordProgress("发了 /" + command);
+            return Next.stay();
+        }
+        if (attemptTicks - commandSentAt < COMMAND_WAIT_TICKS) return Next.stay();
+        List<String> replies = commands.repliesSince(commandMark);
+        return commandFailed("发了 /" + command + "，" + COMMAND_WAIT_TICKS / 20 + " 秒没死"
+                + (replies.isEmpty() ? "" : "，服务器回：" + String.join(" / ", replies)));
+    }
+
+    // 命令不管用：记下原因，点名只用命令的按卡住结束；否则收起护甲和图腾，照原来的死法找。不换写法重发。
+    private Next<Phase> commandFailed(String why) {
+        givenUp.add(WayToDie.COMMAND);
+        tally.computeIfAbsent(WayToDie.COMMAND, way -> new LinkedHashMap<>()).merge(why, 1, Integer::sum);
+        recordAttempt(WayToDie.COMMAND.label, why);
+        if (input.via() == WayToDie.COMMAND) {
+            return endWith(Problem.of(Problem.Kind.STUCK, why, "这个服务器的寻死命令不管用，不给 via 再下一次，按死得快慢挑别的死法"));
+        }
+        stowIndex = 0;
+        return Next.go(Phase.STOW, "寻死命令不管用，收起护甲找别的死法");
+    }
+
     private Next<Phase> choose() {
         if (finder == null) {
-            finder = new DeathSpotFinder(world, player, player.feet(), input.radius(), input.allowedWays());
+            // 找死法的扫描只管要去找、去造一处地方的那几种，发命令不在里面。
+            Set<WayToDie> spotWays = EnumSet.noneOf(WayToDie.class);
+            input.allowedWays().stream().filter(WayToDie::needsSpot).forEach(spotWays::add);
+            finder = new DeathSpotFinder(world, player, player.feet(), input.radius(), spotWays);
         }
         if (!finder.scanned()) {
             finder.scan();
@@ -442,8 +512,10 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
             Map<String, Integer> tried = tally.get(way);
             if (tried != null) {
                 List<String> reasons = new ArrayList<>();
-                tried.forEach((reason, count) -> reasons.add(reason + " " + count + " 处"));
+                tried.forEach((reason, count) -> reasons.add(way == WayToDie.COMMAND ? reason : reason + " " + count + " 处"));
                 parts.add(way.label + "：" + String.join("、", reasons));
+            } else if (way == WayToDie.COMMAND && input.allowedWays().contains(way) && command == null) {
+                parts.add(way.label + "：服务器没给角色能用的 /suicide 或 /kill");
             } else if (unavailable.containsKey(way)) {
                 parts.add(way.label + "：" + unavailable.get(way));
             }
@@ -558,6 +630,7 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
 
     @Override protected String describePhase(Phase value) {
         return switch (value) {
+            case COMMAND -> "发寻死命令";
             case STOW -> "收起护甲和图腾";
             case CHOOSE -> "找死法";
             case APPROACH -> "走过去";
@@ -577,20 +650,21 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
     @Override protected ResultDetails details() {
         List<String> notRestored = new ArrayList<>(stowed.notRestored());
         for (StowedGear.Piece piece : stowed.toRestore()) notRestored.add(piece.label() + "：还在背包里，没来得及穿回");
-        return new SuicideDetails(lastWay == null ? null : lastWay.param, input.keepInventory(),
-                stowed.stillWorn(), stowed.totemsStillHeld(), notRestored);
+        return new SuicideDetails(lastWay == null ? null : lastWay.param, commandSentAt < 0 ? null : "/" + command,
+                input.keepInventoryKnownBy(), stowed.stillWorn(), stowed.totemsStillHeld(), notRestored);
     }
 
     /**
      * 寻死特有的结果细节。
      *
-     * @param way              最后用的死法；一处都没挑到为 null
-     * @param keepInventory    怎么知道开着死亡不掉落的：game_rule / caller_confirmed
-     * @param armorStillWorn   没脱下来、带着死的护甲与原因
-     * @param totemsStillHeld  没收起来的不死图腾与原因
-     * @param armorNotRestored 脱下了、没穿回的护甲与原因
+     * @param way                  最后用的死法；一处都没挑到为 null
+     * @param command              发过的寻死命令（/suicide 或 /kill @s）；没发为 null
+     * @param keepInventoryKnownBy 怎么知道开着死亡不掉落的：game_rule / caller_confirmed
+     * @param armorStillWorn       没脱下来、带着死的护甲与原因
+     * @param totemsStillHeld      没收起来的不死图腾与原因
+     * @param armorNotRestored     脱下了、没穿回的护甲与原因
      */
-    record SuicideDetails(String way, String keepInventory, List<String> armorStillWorn,
+    record SuicideDetails(String way, String command, String keepInventoryKnownBy, List<String> armorStillWorn,
             List<String> totemsStillHeld, List<String> armorNotRestored) implements ResultDetails {
         SuicideDetails {
             armorStillWorn = List.copyOf(armorStillWorn);

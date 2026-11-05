@@ -201,6 +201,30 @@ final class SuicideFakes {
         }
     }
 
+    /** 命令替身：命令树里给了哪几条根命令；发出去的按先后记下，服务器回的话按脚本给。 */
+    static final class Commands implements DeathCommands {
+        final Set<String> offered = new HashSet<>();
+        final List<String> sent = new ArrayList<>();
+        final List<String> replies = new ArrayList<>();
+        /** 没连上：发不出去。 */
+        boolean offline;
+
+        Commands offer(String root) {
+            offered.add(root);
+            return this;
+        }
+
+        @Override public boolean offered(String root) { return offered.contains(root); }
+
+        @Override public long send(String command) {
+            if (offline) return -1;
+            sent.add(command);
+            return sent.size();
+        }
+
+        @Override public List<String> repliesSince(long mark) { return List.copyOf(replies); }
+    }
+
     /** 穿卸替身：取下放进背包第一个空格（背包满时取不下），从背包那一格穿回原部位。 */
     static final class Gear implements GearChanges {
         final Player player;

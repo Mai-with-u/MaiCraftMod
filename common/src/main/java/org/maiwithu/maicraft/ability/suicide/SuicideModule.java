@@ -12,8 +12,10 @@ import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.game.ChatChannel;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.ReadsEffects;
+import org.maiwithu.maicraft.game.world.ClientCommandTree;
 import org.maiwithu.maicraft.game.world.KeepInventoryRule;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -58,28 +60,38 @@ public final class SuicideModule implements AbilityModule {
     private final Function<Permissions, SuicideWorld> worlds;
     private final SuicideMoves moves;
     private final GearChanges gear;
+    private final DeathCommands commands;
 
     /**
      * @param worlds 按这次目标的许可建看地形的读端（放火、倒岩浆按许可过放方块的检查）
      */
     SuicideModule(SuicidePlayer player, Function<Permissions, SuicideWorld> worlds, SuicideMoves moves,
             GearChanges gear) {
+        this(player, worlds, moves, gear, DeathCommands.NONE);
+    }
+
+    /** @param commands 服务器给了哪几条命令、怎么发：给了寻死命令就先用命令死 */
+    SuicideModule(SuicidePlayer player, Function<Permissions, SuicideWorld> worlds, SuicideMoves moves,
+            GearChanges gear, DeathCommands commands) {
         this.player = Objects.requireNonNull(player, "player");
         this.worlds = Objects.requireNonNull(worlds, "worlds");
         this.moves = Objects.requireNonNull(moves, "moves");
         this.gear = Objects.requireNonNull(gear, "gear");
+        this.commands = Objects.requireNonNull(commands, "commands");
     }
 
     /**
-     * 接在真实客户端上的一份：读角色与世界、走到、直接按键、换手、瞄准交互、穿卸装备、保护与许可都用共用的那一套。
+     * 接在真实客户端上的一份：读角色与世界、走到、直接按键、换手、瞄准交互、穿卸装备、保护与许可都用共用的那一套；
+     * 寻死命令读客户端收到的命令树、经聊天输入发出去。
      */
     public static SuicideModule live(Supplier<PlayerContext> context, WalkTo walks, Interactions interactions,
             ClientMovesToMainhand toMainhand, GearChanges gear, ReadsEffects effects, Protection protection,
-            PermissionCheck permission) {
+            PermissionCheck permission, ChatChannel chat) {
         LiveSuicidePlayer player = new LiveSuicidePlayer(context, new KeepInventoryRule(), effects);
         return new SuicideModule(player,
                 permissions -> new LiveSuicideWorld(context, protection, permission, permissions),
-                new LiveSuicideMoves(context, walks, interactions, toMainhand), gear);
+                new LiveSuicideMoves(context, walks, interactions, toMainhand), gear,
+                new LiveDeathCommands(new ClientCommandTree(), chat));
     }
 
     @Override public AbilitySpec spec() {
@@ -87,8 +99,9 @@ public final class SuicideModule implements AbilityModule {
                 AbilityDoc.forAbility("suicide"),
                 ParamSpecs.of(
                         ParamSpec.of("via", ParamType.CHOICE).choices(WayToDie.params())
-                                .doc("死法：lava 现成岩浆 / fall 摔得死的落差 / cactus 仙人掌 / hostile_mob 敌对生物 / "
-                                        + "fire 随身点火 / lava_bucket 随身倒岩浆；不给按死得快慢自己挑，给了只用它").build(),
+                                .doc("死法：command 寻死命令（服务器给了 /suicide，或角色能用 /kill）/ lava 现成岩浆 / "
+                                        + "fall 摔得死的落差 / cactus 仙人掌 / hostile_mob 敌对生物 / fire 随身点火 / "
+                                        + "lava_bucket 随身倒岩浆；不给按死得快慢自己挑（有寻死命令先发命令），给了只用它").build(),
                         ParamSpec.of("radius", ParamType.INTEGER).range(MIN_RADIUS, MAX_RADIUS).defaultValue(DEFAULT_RADIUS)
                                 .doc("找现成死法的范围（格）").build(),
                         ParamSpec.of("max_seconds", ParamType.INTEGER).range(MIN_SECONDS, MAX_SECONDS)
@@ -110,6 +123,11 @@ public final class SuicideModule implements AbilityModule {
         }
         if (player.hardcore()) {
             return fail("极限模式死了不能重生，回不了家", Problem.Kind.NOT_POSSIBLE_HERE, null);
+        }
+        // 点名用命令死、服务器又没给 /suicide 也没给 /kill：这里做不到，不悄悄换成别的死法。
+        if (via == WayToDie.COMMAND && DeathCommands.pick(commands).isEmpty()) {
+            return fail("这个服务器没给角色能用的寻死命令（/suicide、/kill）", Problem.Kind.NOT_POSSIBLE_HERE,
+                    "不给 via 再下一次，按死得快慢挑别的死法");
         }
         if (via == WayToDie.FIRE && WayToDie.IGNITERS.stream().noneMatch(player::carries)) {
             return fail("身上没有打火石或火焰弹", Problem.Kind.NEED_ITEM, null);
@@ -155,6 +173,6 @@ public final class SuicideModule implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(SuicideInput.class,
-                input -> new SuicideTask(input, player, worlds.apply(input.permissions()), moves, gear));
+                input -> new SuicideTask(input, player, worlds.apply(input.permissions()), moves, gear, commands));
     }
 }

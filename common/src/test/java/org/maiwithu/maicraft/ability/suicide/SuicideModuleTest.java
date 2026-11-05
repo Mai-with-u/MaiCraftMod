@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.google.gson.JsonParser;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Commands;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Gear;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Moves;
 import org.maiwithu.maicraft.ability.suicide.SuicideFakes.Player;
@@ -27,13 +28,14 @@ class SuicideModuleTest {
 
     private final Player player = new Player();
     private final World world = new World();
+    private final Commands commands = new Commands();
     private final SuicideModule module = new SuicideModule(player, permissions -> world,
-            new Moves(player, world), new Gear(player));
+            new Moves(player, world), new Gear(player), commands);
 
     @Test
     void 开着死亡不掉落就去寻死_参数按默认() {
         SuicideInput input = run(decide("{}", Permissions.DEFAULT, List.of()));
-        assertEquals(SuicideModule.BY_GAME_RULE, input.keepInventory());
+        assertEquals(SuicideModule.BY_GAME_RULE, input.keepInventoryKnownBy());
         assertEquals(SuicideModule.DEFAULT_RADIUS, input.radius());
         assertEquals(SuicideModule.DEFAULT_SECONDS, input.maxSeconds());
         assertEquals(null, input.via());
@@ -68,7 +70,7 @@ class SuicideModuleTest {
     void 连别人的服务器_给了确认就做() {
         player.keepInventory = KeepInventoryRule.Reading.UNREADABLE;
         SuicideInput input = run(decide("{\"keep_inventory_confirmed\": true}", Permissions.DEFAULT, List.of()));
-        assertEquals(SuicideModule.BY_CALLER, input.keepInventory());
+        assertEquals(SuicideModule.BY_CALLER, input.keepInventoryKnownBy());
     }
 
     @Test
@@ -77,10 +79,17 @@ class SuicideModuleTest {
         StepDecision asked = decide("{}", Permissions.DEFAULT, List.of());
         assertTrue(asked instanceof StepDecision.Ask, asked.toString());
         assertEquals(Question.Reason.NEED_APPROVAL, ((StepDecision.Ask) asked).question().reason());
-        assertEquals(SuicideModule.BY_CALLER, run(decide("{}", Permissions.DEFAULT, List.of("yes"))).keepInventory());
+        assertEquals(SuicideModule.BY_CALLER, run(decide("{}", Permissions.DEFAULT, List.of("yes"))).keepInventoryKnownBy());
         StepDecision no = decide("{}", Permissions.DEFAULT, List.of("no"));
         assertTrue(no instanceof StepDecision.Finish finish && finish.result().status() == TaskResult.Status.CANCELLED,
                 no.toString());
+    }
+
+    @Test
+    void 点名用命令_服务器没给寻死命令_不进游戏() {
+        assertProblem(decide("{\"via\": \"command\"}", Permissions.DEFAULT, List.of()), Problem.Kind.NOT_POSSIBLE_HERE);
+        commands.offer("kill");
+        assertEquals(WayToDie.COMMAND, run(decide("{\"via\": \"command\"}", Permissions.DEFAULT, List.of())).via());
     }
 
     @Test
@@ -102,7 +111,7 @@ class SuicideModuleTest {
     void 死法取值拼错在参数校验就拒绝() {
         ParseResult parsed = module.spec().paramSpecs()
                 .parse(JsonParser.parseString("{\"via\": \"jump\"}").getAsJsonObject());
-        assertTrue(!parsed.ok(), "via 只认六种死法");
+        assertTrue(!parsed.ok(), "via 只认七种死法");
         ParseResult far = module.spec().paramSpecs()
                 .parse(JsonParser.parseString("{\"radius\": 65}").getAsJsonObject());
         assertTrue(!far.ok(), "半径最多 64");
