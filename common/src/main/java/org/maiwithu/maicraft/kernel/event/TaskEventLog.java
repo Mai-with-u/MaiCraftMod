@@ -27,6 +27,11 @@ public final class TaskEventLog implements TaskEventSink {
         append(kind, NO_GOAL, message, null);
     }
 
+    /** 生存需求带结构化事实的事件（饿急了从别人的箱子拿了吃的）：同样不挂在任何目标上，事实跟着事件走。 */
+    @Override public void publish(TaskEvent.Kind kind, String message, EventFacts facts) {
+        log.append(cursor -> new TaskEvent(cursor, kind, NO_GOAL, message, null, null, List.of(), facts));
+    }
+
     /** 记一条事件并叫醒正在等的读者；返回带上序号的事件。 */
     public TaskEvent append(TaskEvent.Kind kind, long goalRunId, String message, TaskResult.Status status) {
         return append(kind, goalRunId, message, status, null);

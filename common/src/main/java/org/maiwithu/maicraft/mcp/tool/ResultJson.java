@@ -157,6 +157,10 @@ public final class ResultJson {
             }
             json.add("ready_now", ready);
         }
+        // 附带的结构化事实按发事件一侧给的字段名整份挂上，和结果细节同一种转法（小写下划线）。
+        if (event.facts() != null) {
+            json.add(event.facts().field(), DETAILS.toJsonTree(event.facts()));
+        }
         return json;
     }
 

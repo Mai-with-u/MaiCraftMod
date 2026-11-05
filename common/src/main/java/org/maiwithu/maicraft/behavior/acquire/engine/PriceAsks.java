@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -54,9 +55,12 @@ final class PriceAsks {
     /** 一遍问价的结果：最省一条路的总代价（问不出时为空），以及有没有来源还没看清现场。 */
     record Price(Optional<Double> cost, boolean looking) {}
 
-    /** 一种问法：要什么、要几件、偏好与掉落线索、许可、算不算现做。用途只是说明，不影响报价。 */
+    /**
+     * 一种问法：要什么、要几件、偏好与掉落线索、别人的箱子放不放行、许可、算不算现做。用途只是说明，不影响报价。
+     * 放行不一样，容器报的价就不一样（饿急了别人的箱子也算），不能借用不放行时记下的价。
+     */
     private record Question(WantedItem wanted, int count, List<String> prefer, DropsFrom dropsFrom,
-                            Permissions permissions, boolean includeMaking) {}
+                            OthersStorageAllowance othersStorage, Permissions permissions, boolean includeMaking) {}
 
     /**
      * 一次估算期间：问过的价记下来，问遍各来源一次从这次估算的额度里扣一次；干完就忘掉、不再扣。
@@ -119,7 +123,7 @@ final class PriceAsks {
      */
     Price ask(ItemRequest request, Permissions permissions, boolean includeMaking) {
         Question question = new Question(request.wanted(), request.count(), request.prefer(), request.dropsFrom(),
-                permissions, includeMaking);
+                request.othersStorage(), permissions, includeMaking);
         // 估算期间、动手问价那一轮里问过同一种问法：直接用记下的，不算又问了一遍。
         if (remembered != null) {
             Price known = remembered.get(question);

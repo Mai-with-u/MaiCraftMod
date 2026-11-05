@@ -17,6 +17,14 @@ public interface TaskEventSink {
      */
     void publish(TaskEvent.Kind kind, String message);
 
+    /**
+     * 发一条带结构化事实的任务事件：消息照样说一句话，宿主要按字段处理的放在事实里。
+     * 不认识事实的出口照只发消息处理。
+     */
+    default void publish(TaskEvent.Kind kind, String message, EventFacts facts) {
+        publish(kind, message);
+    }
+
     /** 没有接上出口时的空实现：事件就地丢弃。 */
     TaskEventSink NONE = (kind, message) -> {};
 }

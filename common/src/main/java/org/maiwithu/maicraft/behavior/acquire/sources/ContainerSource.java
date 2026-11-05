@@ -43,6 +43,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
  * <p>别人的箱子不碰：别人放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
  * 记得里面有货也不去翻——默认绝不碰玩家的箱子。自己放的、自家人（所有者信任的玩家）放的照常翻。
  * 跳过的箱子在说明里按原因合并计数，说清记在谁名下或是哪一路挡的，以及自家人怎么写进实例配置。
+ * 唯一的例外是请求带着别人的箱子放行（饿到危险线弄口粮）：能用的箱子都没有这样东西时，才报最近一只
+ * 有货或没开过的别人的箱子，开箱时只拿放行的那一样、刚好够的件数，额外保护的地标旁照旧不碰。
  *
  * <p>一只箱子这一次拿东西里走不到跟前，记进这一次的"走不到的地方"：后面的原料不再拿去问它，
  * 只记下又问到了它，失败说明里由引擎合成一句。
@@ -104,6 +106,9 @@ public final class ContainerSource implements ItemSource {
         ContainerChooser.Candidate stale = null;
         // 跳过的别人的箱子按为什么不能用、记在谁名下合并计数：几只同一个原因只说一次带只数。
         Map<StorageUse, Integer> skippedOthers = new LinkedHashMap<>();
+        // 带着别人的箱子放行时，最近一只有货或没开过的别人的箱子：能用的箱子都没有时才报它。
+        ContainerChooser.Candidate others = null;
+        StorageUse othersUse = null;
         boolean skippedUnreachable = false;
         int considered = 0;
         UnreachablePlaces unreachable = context.unreachable();
@@ -117,6 +122,10 @@ public final class ContainerSource implements ItemSource {
             // 这次任务额外保护的地标读端不知道，在这里按任务许可再问一遍保护判断。
             StorageUse use = storageUse(candidate, context);
             if (!use.usable()) {
+                if (others == null && othersWorthTrying(candidate, use, request)) {
+                    others = candidate;
+                    othersUse = use;
+                }
                 skippedOthers.merge(use, 1, Integer::sum);
                 continue;
             }
@@ -162,8 +171,16 @@ public final class ContainerSource implements ItemSource {
         if (!spots.scanComplete()) {
             return new SourceQuote.NotYet(describe(), "附近的容器还没扫完，扫完再答有没有");
         }
-        // 能翻的都是这一次走不到跟前的：不另说一条原因，引擎在最外层合成一句说。
-        if (skippedUnreachable && considered == 0 && skippedOthers.isEmpty()) {
+        // 能用的箱子里都没有，又带着别人的箱子放行（饿急了弄口粮）：报最近那只别人的箱子，说清是谁的。
+        if (others != null) return othersOffer(others, othersUse, request, context);
+        return nothingHere(request, skippedOthers, skippedUnreachable && considered == 0);
+    }
+
+    // 哪只都拿不了：能翻的都是这一次走不到跟前的，不另说一条原因，引擎在最外层合成一句说；
+    // 否则说记得的容器里没有，跳过的别人的箱子按原因合并计数接在后面。
+    private SourceQuote.Unavailable nothingHere(ItemRequest request, Map<StorageUse, Integer> skippedOthers,
+            boolean onlyUnreachable) {
+        if (onlyUnreachable && skippedOthers.isEmpty()) {
             return new SourceQuote.Unavailable(describe(), UnreachablePlaces.SKIPPED);
         }
         return new SourceQuote.Unavailable(describe(),
@@ -200,17 +217,23 @@ public final class ContainerSource implements ItemSource {
             return Optional.empty();
         }
         ContainerChooser.Candidate container = found.get();
-        // 报价之后才知道它是玩家的（归属刚问到）：同样不翻，交回空让引擎换路。
-        if (!storageUse(container, context).usable()) {
+        // 报价之后才知道它是玩家的（归属刚问到）：同样不翻，交回空让引擎换路；带着放行、能拿吃的除外。
+        StorageUse use = storageUse(container, context);
+        if (!use.usable() && !takableUnderAllowance(use, request)) {
             return Optional.empty();
         }
         KnownContainer known = new KnownContainer(
                 container.name(), container.at(), container.blockTypeId());
-        // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
         List<ItemRequest> wants = new ArrayList<>();
-        wants.add(request);
-        for (ItemRequest extra : context.alsoWanted()) {
-            if (!extra.wanted().specifier().equals(request.wanted().specifier())) wants.add(extra);
+        if (!use.usable()) {
+            // 别人的箱子：放行绑到这一只上，开箱时只拿放行的那一样、刚好够的件数，拿到了报回去；顺路的别样一件不拿。
+            wants.add(request.withOthersStorage(request.othersStorage().at(use, container.at())));
+        } else {
+            // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
+            wants.add(request);
+            for (ItemRequest extra : context.alsoWanted()) {
+                if (!extra.wanted().specifier().equals(request.wanted().specifier())) wants.add(extra);
+            }
         }
         Optional<Action> take = takes.take(known, wants, context.permissions());
         UnreachablePlaces unreachable = context.unreachable();
@@ -254,6 +277,27 @@ public final class ContainerSource implements ItemSource {
      */
     private StorageUse storageUse(ContainerChooser.Candidate candidate, SourceContext context) {
         return protection.storageUse(candidate.at(), candidate.blockTypeId(), context.permissions().protectedLandmarks());
+    }
+
+    /** 带着放行时值不值得去翻这只别人的箱子：能拿，而且记得里面有要的东西或者没开过。 */
+    private boolean othersWorthTrying(ContainerChooser.Candidate candidate, StorageUse use, ItemRequest request) {
+        return takableUnderAllowance(use, request)
+                && (candidate.knownContents() == null || holdsWanted(candidate, request));
+    }
+
+    /** 带着别人的箱子放行时，这只别人的箱子能不能拿：放行还开着、又不是额外保护的地标旁的。 */
+    private static boolean takableUnderAllowance(StorageUse use, ItemRequest request) {
+        return request.othersStorage().open() && use.usableWhenStarving();
+    }
+
+    // 别人的箱子的报价：记得有货报件数，没开过报不知道多少；说明里写是谁的，LLM 和日志都看得出为什么去翻它。
+    private SourceQuote.Offer othersOffer(ContainerChooser.Candidate candidate, StorageUse use, ItemRequest request,
+            SourceContext context) {
+        int count = candidate.knownContents() == null ? SourceQuote.Offer.UNKNOWN_COUNT
+                : Math.min(countWanted(candidate, request), request.count());
+        return new SourceQuote.Offer(describe(), count, new AcquisitionCost(reachableCost(candidate, context), 4),
+                depthNote(candidate, context, "能用的箱子里没有，饿急了从别人的箱子（" + use.describe(ownerNames)
+                        + "）拿刚好够吃的"), positionHint(candidate));
     }
 
     /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

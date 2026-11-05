@@ -53,6 +53,14 @@ public record StorageUse(Kind kind, String placedBy, String place) {
     }
 
     /**
+     * 饿到危险线、身上和能用的箱子里都没口粮时，能不能从这只拿吃的：别人放的、归属没问到的、记住的区域里的、
+     * 看着像玩家放的都能拿；这次任务额外保护的地标旁不行，那是调用方点名保护的，饿了也不越过。
+     */
+    public boolean usableWhenStarving() {
+        return kind != Kind.NEAR_PROTECTED_LANDMARK;
+    }
+
+    /**
      * 为什么不能用，说成一小句接在只数后面，例如"记在 bob 名下""不知道是谁的（按别人的算）"；能用的给空串。
      *
      * @param names 玩家编号换成名字：在线写名字，不在线写编号

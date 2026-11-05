@@ -22,9 +22,10 @@ import java.util.Objects;
  * @param selfBrief 目标或某一步结束那一刻角色的一行自身摘要（在哪、血、饱食、氧气、主手、开着的界面）；
  *                  其余事件、或结束时读不到角色时为 null
  * @param readyNow  sequence 的一步做完时，后面还没开始的步骤里此刻不用走路就能做的那几步；其余事件为空
+ * @param facts     附带的结构化事实（例如饿急了从别人的箱子拿了什么）；没有为 null
  */
 public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
-                        String selfBrief, List<ReadyStep> readyNow) {
+                        String selfBrief, List<ReadyStep> readyNow, EventFacts facts) {
 
     /**
      * sequence 后面还没开始的一步，此刻不用走路就能做。
@@ -112,6 +113,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
     public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
                      String selfBrief) {
         this(cursor, kind, goalRunId, message, status, selfBrief, List.of());
+    }
+
+    /** 不附结构化事实的事件：除了要宿主按字段处理的几种，都是这一种。 */
+    public TaskEvent(long cursor, Kind kind, long goalRunId, String message, TaskResult.Status status,
+                     String selfBrief, List<ReadyStep> readyNow) {
+        this(cursor, kind, goalRunId, message, status, selfBrief, readyNow, null);
     }
 
     public TaskEvent {
