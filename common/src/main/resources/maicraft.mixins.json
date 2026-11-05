@@ -20,6 +20,7 @@
     "UseKeyHoldMixin",
     "SprintKeyHoldMixin",
     "MinecraftUseKeyInvoker",
+    "MinecraftAttackKeyInvoker",
     "ScreenVisibilityMixin",
     "InventoryScreenModeMixin",
     "MinecraftLevelSubtitleMixin",
