@@ -68,6 +68,14 @@ interface LookingWorld {
     /** 观察编号或地标名对应的东西；不认识为空。 */
     Optional<Sighted> resolve(TickContext context, String idOrLandmark);
 
+    /**
+     * 拍画面要看的那样东西：和 {@link #resolve} 一样认，只是看得见的不论多远都精确对准
+     * （读后看把六十四格外的也当成只朝方位瞥；拍画面要的是把它拍进画面中间）。
+     */
+    default Optional<Sighted> resolveForPicture(TickContext context, String idOrLandmark) {
+        return resolve(context, idOrLandmark);
+    }
+
     /** 世界里的这几处：不在当前维度的跳过。 */
     List<Sighted> places(TickContext context, List<WorldPosition> places);
 }

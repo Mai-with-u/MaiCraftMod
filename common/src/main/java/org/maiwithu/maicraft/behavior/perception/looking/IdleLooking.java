@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.random.RandomGenerator;
@@ -36,7 +37,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 收手时自己开着的界面关上，镜头停在哪就是哪，不往回甩；站定朝向留到别的事把镜头转走为止。
  * 它不进控制循环的栈、不发任务事件，observe(self) 的 doing 照旧。
  */
-public final class IdleLooking implements LooksAfterReading {
+public final class IdleLooking implements LooksAfterReading, LooksForPicture {
 
     /** 此刻角色能不能拿来看东西。 */
     public enum Availability {
@@ -80,6 +81,14 @@ public final class IdleLooking implements LooksAfterReading {
     private final Map<String, Long> lastRead = new HashMap<>();
     private final Map<UUID, Long> spokeAt = new HashMap<>();
     private final Map<String, Long> heardSince = new HashMap<>();
+    /** 上一刻启动交过来的「能不能用角色」：拍画面在两刻之间问能不能转头，按它答。 */
+    private Availability lastAvailability = Availability.TAKEN;
+    /** 拍画面要看的地方：下一刻开始转；没有为 null。 */
+    private LookTarget pictureTarget;
+    /** 正在为拍画面看的那一回。 */
+    private LookOnce pictureOnce;
+    /** 拍画面在等的「转到位没有」。 */
+    private CompletableFuture<Boolean> pictureArrived;
 
     /**
      * @param enabled 所有者实例配置里的「闲时看」；关着时什么都不做，读信息不转头、不开界面
@@ -123,12 +132,37 @@ public final class IdleLooking implements LooksAfterReading {
         someoneSpoke(who);
     }
 
+    /**
+     * 为拍画面转头：腾得出头就排到下一刻开始转（正在看的那一下让给它），到位了交回真；
+     * 腾不出就说为什么，照镜头此刻拍。实例配置关掉闲时看时也转：这是 LLM 要看，不是演给观众看。
+     */
+    @Override public PictureLook.Turn lookForPicture(TickContext context, PictureLook.Subject subject,
+            boolean automationOwns, boolean temporaryTask) {
+        Optional<PictureLook.WhyNot> why = PictureLook.whyNotTurn(lastAvailability, automationOwns, temporaryTask,
+                world.playerCanLook(context), screens.othersOpen());
+        if (why.isPresent()) return new PictureLook.Turn.NotTurning(why.get());
+        LookTarget target = switch (subject) {
+            case PictureLook.Subject.Seen seen -> world.resolveForPicture(context, seen.idOrLandmark())
+                    .map(LookingWorld.Sighted::target).orElse(null);
+            case PictureLook.Subject.Point point -> new LookTarget.Spot(point.x(), point.y(), point.z(), point.roughly());
+            // 不看哪样东西：闲时看正转头看着别处才要转回站定朝向，镜头本来就在那儿就直接拍。
+            case PictureLook.Subject.Standing standing -> current == null ? null : new LookTarget.Standing();
+        };
+        if (target == null) return new PictureLook.Turn.NoNeed();
+        finishPicture(false);
+        pictureTarget = target;
+        pictureArrived = new CompletableFuture<>();
+        return new PictureLook.Turn.Turning(pictureArrived);
+    }
+
     /** 推进一刻：在控制循环推进之前调，新目标或临时任务来的那一刻先收手，任务这一刻照常开始。 */
     public void tick(TickContext context, Availability availability) {
-        if (!enabled) return;
+        lastAvailability = availability;
+        // 闲时看关着时只做拍画面要的那一回转头，别的一概不演。
+        if (!enabled && pictureTarget == null && pictureOnce == null) return;
         long now = context.gameTick();
         lastTick = now;
-        acceptIncoming(now);
+        if (enabled) acceptIncoming(now);
         TurnsHead head = heads.apply(context);
         if (availability == Availability.TAKEN || head == null || !world.playerCanLook(context) || screens.othersOpen()) {
             stop();
@@ -147,12 +181,37 @@ public final class IdleLooking implements LooksAfterReading {
         head.hold();
         if (pending != null && LookPace.expired(pendingArrived, now)) pending = null;
         boolean readReady = pending != null && now >= pendingReady;
-        if (readReady && (current == null || heldEnough(current))) {
+        if (pictureTarget != null) {
+            // LLM 在等这张画面：不等正在看的那一下看够，当刻让给拍画面。
+            startPicture();
+        } else if (!enabled || pictureOnce != null) {
+            // 正在为拍画面看着（或闲时看关着）：读后看和闲看等它看完再说。
+            readReady = false;
+        } else if (readReady && (current == null || heldEnough(current))) {
             startRead(context, head, now);
         } else if (current == null && now >= nextGlanceAt) {
             startGlance(context, head, now);
         }
         if (current != null) advance(context, now);
+        // 闲时看关着：拍画面那一回看完转回来就松手，不接着闲看。
+        if (!enabled && current == null) stop();
+    }
+
+    // 拍画面那一回：一处，转过去停零点八秒，再转回站定朝向；转头速度按读后看。
+    private void startPicture() {
+        if (current != null) current.close();
+        int hold = pictureTarget instanceof LookTarget.Standing
+                ? PictureLook.STANDING_HOLD_TICKS : PictureLook.HOLD_TICKS;
+        pictureOnce = new LookOnce(new LookPlans.Plan(List.of(new LookPlans.Step(pictureTarget, hold,
+                new LookPlans.Screen.None())), LookPace.READ_DEGREES_PER_SECOND, false),
+                heads, world, screens, random, restPitch);
+        current = pictureOnce;
+        pictureTarget = null;
+    }
+
+    // 告诉拍画面转到位没有：只交一次，交过就不再管。
+    private void finishPicture(boolean arrived) {
+        if (pictureArrived != null && !pictureArrived.isDone()) pictureArrived.complete(arrived);
     }
 
     /** 此刻在看东西（测试与调试面板读）。 */
@@ -232,16 +291,26 @@ public final class IdleLooking implements LooksAfterReading {
                 false), heads, world, screens, random, restPitch);
     }
 
-    // 看完一回：从头计下一回闲看的间隔。
+    // 看完一回：从头计下一回闲看的间隔。拍画面那一回第一处停下来看的那一刻，告诉拍画面可以拍了。
     private void advance(TickContext context, long now) {
-        if (current.tick(context) instanceof ActionStatus.Running) return;
+        ActionStatus status = current.tick(context);
+        if (current == pictureOnce && pictureOnce.reachedFirstHold()) finishPicture(pictureOnce.firstTurnArrived());
+        if (status instanceof ActionStatus.Running) return;
+        if (current == pictureOnce) {
+            finishPicture(false);
+            pictureOnce = null;
+        }
         current.close();
         current = null;
         nextGlanceAt = now + LookPace.glanceGap(now - idleSince, random);
     }
 
     // 收手：开着的界面关上，松开转头（镜头停在哪就是哪），站定朝向留到别的事把镜头转走为止。
+    // 拍画面还在等转头的，告诉它没转到位：它照镜头此刻拍。
     private void stop() {
+        finishPicture(false);
+        pictureTarget = null;
+        pictureOnce = null;
         if (current != null) {
             current.close();
             current = null;

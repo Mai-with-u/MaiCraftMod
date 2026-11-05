@@ -129,11 +129,11 @@ final class ClientLookingWorld implements LookingWorld {
         }
         for (TerrainFeature feature : scene.features()) {
             if (feature.distance() > SPOT_BLOCKS) continue;
-            addIfSeen(spots, at(self, eye, feature.id(), feature.center(), Kind.OTHER, null));
+            addIfSeen(spots, at(self, eye, feature.id(), feature.center(), Kind.OTHER, null, true));
         }
         for (FacilitySighting facility : scene.facilities()) {
             if (facility.distance() > SPOT_BLOCKS) continue;
-            addIfSeen(spots, at(self, eye, facility.id(), facility.position(), Kind.OTHER, null));
+            addIfSeen(spots, at(self, eye, facility.id(), facility.position(), Kind.OTHER, null, true));
         }
         return spots;
     }
@@ -145,6 +145,15 @@ final class ClientLookingWorld implements LookingWorld {
 
     // 观察编号换回场景里的那样东西（已经不在场景里的用最后看到的位置），不是编号的按地标名找世界记忆。
     @Override public Optional<Sighted> resolve(TickContext context, String idOrLandmark) {
+        return resolve(context, idOrLandmark, true);
+    }
+
+    // 拍画面：看得见的不论多远都对准它，只有此刻看不见的才只朝大致方位瞥。
+    @Override public Optional<Sighted> resolveForPicture(TickContext context, String idOrLandmark) {
+        return resolve(context, idOrLandmark, false);
+    }
+
+    private Optional<Sighted> resolve(TickContext context, String idOrLandmark, boolean farIsRough) {
         LocalPlayer self = self(context);
         if (self == null) return Optional.empty();
         Vec3 eye = self.getEyePosition();
@@ -152,7 +161,8 @@ final class ClientLookingWorld implements LookingWorld {
         if (!normalized.matches("[efbs][0-9]+")) {
             if (memory == null) return Optional.empty();
             return memory.place(idOrLandmark.trim()).filter(position -> sameDimension(context, position))
-                    .map(position -> at(self, eye, "landmark:" + idOrLandmark.trim(), position, Kind.OTHER, null));
+                    .map(position -> at(self, eye, "landmark:" + idOrLandmark.trim(), position, Kind.OTHER, null,
+                            farIsRough));
         }
         Optional<SeenRegistry.Entry> entry = scene.lookup(normalized);
         if (entry.isEmpty()) return Optional.empty();
@@ -172,13 +182,15 @@ final class ClientLookingWorld implements LookingWorld {
         }
         WorldPosition position = entry.get().position();
         for (SceneSighting sighting : scene.sighting(normalized)) {
-            if (sighting instanceof SceneSign) return Optional.of(at(self, eye, normalized, position, Kind.SIGN, null));
+            if (sighting instanceof SceneSign) {
+                return Optional.of(at(self, eye, normalized, position, Kind.SIGN, null, farIsRough));
+            }
             if (sighting instanceof FacilitySighting facility && kinds.isContainer(facility.blockType())) {
                 return Optional.of(at(self, eye, normalized, position, Kind.CONTAINER,
-                        containerFacts(context, self, eye, position, facility.blockType())));
+                        containerFacts(context, self, eye, position, facility.blockType()), farIsRough));
             }
         }
-        return Optional.of(at(self, eye, normalized, position, Kind.OTHER, null));
+        return Optional.of(at(self, eye, normalized, position, Kind.OTHER, null, farIsRough));
     }
 
     @Override public List<Sighted> places(TickContext context, List<WorldPosition> places) {
@@ -187,7 +199,7 @@ final class ClientLookingWorld implements LookingWorld {
         if (self == null) return sighted;
         Vec3 eye = self.getEyePosition();
         for (WorldPosition place : places) {
-            if (sameDimension(context, place)) sighted.add(at(self, eye, "place:" + place, place, Kind.OTHER, null));
+            if (sameDimension(context, place)) sighted.add(at(self, eye, "place:" + place, place, Kind.OTHER, null, true));
         }
         return sighted;
     }
@@ -209,13 +221,13 @@ final class ClientLookingWorld implements LookingWorld {
     // 方块位置看它的中心。此刻看不见的（隔着墙、在地下，与感知判断"看见"同一份视线）和太远的标上，
     // 看的时候只朝大致方位瞥：LLM 读的可能是世界记忆里的矿、墙那边的箱子，盯着墙看过会儿挖出矿来像透视。
     private static Sighted at(LocalPlayer self, Vec3 eye, String key, WorldPosition position, Kind kind,
-            ContainerFacts container) {
+            ContainerFacts container, boolean farIsRough) {
         double x = position.x() + 0.5;
         double y = position.y() + 0.5;
         double z = position.z() + 0.5;
         double distance = Math.sqrt(eye.distanceToSqr(x, y, z));
         boolean seenNow = ObservationVisibility.block(self, new BlockPos(position.x(), position.y(), position.z()));
-        return new Sighted(key, new LookTarget.Spot(x, y, z, LookPlans.far(distance) || !seenNow), kind,
+        return new Sighted(key, new LookTarget.Spot(x, y, z, farIsRough && LookPlans.far(distance) || !seenNow), kind,
                 Aim.between(eye.x, eye.y, eye.z, x, y, z).yaw(), distance, container);
     }
 

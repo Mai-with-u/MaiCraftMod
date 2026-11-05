@@ -58,6 +58,10 @@ final class LookOnce implements Action {
     private float driftPitch;
     private int nextDrift;
     private Aim lastAim;
+    /** 第一处转到位了（拍画面要知道镜头是不是真的对准了）。 */
+    private boolean firstArrived;
+    /** 第一处已经停下来看了（转到位，或转够了时限）。 */
+    private boolean firstHeld;
 
     /**
      * @param restPitch 看完转回站定朝向时俯仰停在哪（闲着时平常的高度）
@@ -101,6 +105,7 @@ final class LookOnce implements Action {
         }
         motion.aim(aim.get().yaw(), aim.get().pitch());
         boolean arrived = motion.step(head);
+        if (arrived && index == 0) firstArrived = true;
         if (arrived || ticks >= TURN_LIMIT_TICKS) {
             enter(step().opensScreen() ? Stage.OPEN : Stage.HOLD);
         }
@@ -206,6 +211,8 @@ final class LookOnce implements Action {
         stage = next;
         ticks = 0;
         if (next == Stage.HOLD) held = 0;
+        // 拍画面等的就是这一刻：第一处停下来看了，镜头在那儿，下一帧就能拍。
+        if (next == Stage.HOLD && index == 0) firstHeld = true;
     }
 
     // 停着时视线每隔一会儿挪一点点：零点六到一点二秒换一次，幅度一度半以内。
@@ -254,6 +261,16 @@ final class LookOnce implements Action {
             case HOLD -> held >= (screenOpened ? LookPace.MIN_SCREEN_TICKS : LookPace.MIN_HOLD_TICKS);
             case CLOSE, BACK, DONE -> true;
         };
+    }
+
+    /** 第一处已经停下来看了：转到位了，或转够两秒还没到位。 */
+    boolean reachedFirstHold() {
+        return firstHeld;
+    }
+
+    /** 第一处真的转到位了（镜头离要看的方向不到两度半）。 */
+    boolean firstTurnArrived() {
+        return firstArrived;
     }
 
     /** 此刻开着配方页：连着查几样配方时不关界面，交给下一回直接翻过去。 */
