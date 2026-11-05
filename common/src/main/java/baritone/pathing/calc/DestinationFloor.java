@@ -13,40 +13,58 @@ import baritone.pathing.movement.Movement;
 import net.minecraft.core.BlockPos;
 
 /**
- * 找不到整条路线时搜索给的"离目标最近的半截路"值不值得走。
+ * 目的地自己脚下的地板：一条路线走完时它被挖掉了、又没垫回去，这条路线就不走。
  *
- * <p>半截路要挖掉目的地自己脚下的地板就不走：照着走下去，就算走到了终点，目的地也站不住了，
- * 还要先徒手挖上半天才发现到不了（实机：点着的营火挡住唯一入口时，它绕到墙外往目的地底下挖，挖了 600 刻报卡住）。
+ * <p>真人不会为了够到一个地方，先把那个地方的地板拆了。算路时每一步都按开工前的世界算，看不出前面几步已经把地板挖掉：
+ * 实机里点着的营火挡住走廊唯一的入口，引擎交回一条"绕到墙外往下挖、从墙底下钻到目的地正下方、挖穿地板、
+ * 再踩着这块地板爬进目的地"的整条路线，照着走只会徒手挖半分钟然后卡住。找不到整条路线时给的半截路要挖穿地板也一样白挖。
  *
- * <p>"终点比起点离目的地还远"的半截路搜索本来就不会给：起点自己就在各档排位里，换下它的节点估价必定比它小，
- * 离起点 5 格以外又没有比起点近的节点时，搜索交回的是没有路线。
+ * <p>后面哪一步要往这格垫块、身上又有能垫的，就算垫回去了（挖穿后垫着方块爬上来），路线照走。
  */
 final class DestinationFloor {
 
     private DestinationFloor() {}
 
-    /** 这段半截路一路上要挖开的实心格里，有没有目的地自己脚下的地板。路线要先校验过（每一步移动组装好）。 */
-    static boolean digsDestinationFloor(Goal goal, IPath path, CalculationContext context) {
-        return digsFloor(goal, solidCellsBroken(path, context));
+    /**
+     * 路线里的一步：要挖开的实心格，和这一步站上去之前缺了会往哪一格垫块（不垫块的走法为空）。
+     *
+     * @param broken 要挖开的实心格
+     * @param placed 缺了会垫块的格，可为空
+     */
+    record Step(Collection<BlockPos> broken, BlockPos placed) {}
+
+    /** 这条路线（已校验，每一步移动组装好）走完时，目的地脚下的地板是不是被挖掉了没垫回去。 */
+    static boolean leftDug(Goal goal, IPath path, CalculationContext context) {
+        return leftDug(goal, steps(path, context), context.hasThrowaway);
     }
 
-    /** 要挖开的格里有没有目的地脚下的地板；目标没有要恰好站进的格时一律答否。 */
-    static boolean digsFloor(Goal goal, Collection<BlockPos> broken) {
-        for (BlockPos cell : broken) {
-            if (goal.isFloor(cell.getX(), cell.getY(), cell.getZ())) return true;
+    /** 按顺序走完这些步，目的地脚下的地板是不是挖掉了没垫回去；目标没有要恰好站进的格时一律答否。 */
+    static boolean leftDug(Goal goal, List<Step> steps, boolean canPlace) {
+        boolean dug = false;
+        for (Step step : steps) {
+            // 先挖后垫：这一步挖开的格里有地板就算挖掉了；这一步站上去前要往地板那格垫块、身上又有能垫的，就补回来了。
+            for (BlockPos cell : step.broken()) {
+                if (goal.isFloor(cell.getX(), cell.getY(), cell.getZ())) dug = true;
+            }
+            BlockPos placed = step.placed();
+            if (dug && canPlace && placed != null && goal.isFloor(placed.getX(), placed.getY(), placed.getZ())) {
+                dug = false;
+            }
         }
-        return false;
+        return dug;
     }
 
-    // 每一步身体要穿过的格里，此刻不是空气的就是要挖开的。
-    private static List<BlockPos> solidCellsBroken(IPath path, CalculationContext context) {
-        List<BlockPos> broken = new ArrayList<>();
+    // 每一步身体要穿过的格里，此刻不是空气的就是要挖开的；垫块的格照这一步的走法给，到时缺了才垫。
+    private static List<Step> steps(IPath path, CalculationContext context) {
+        List<Step> steps = new ArrayList<>();
         for (IMovement step : path.movements()) {
             if (!(step instanceof Movement movement)) continue;
+            List<BlockPos> broken = new ArrayList<>();
             for (BlockPos cell : movement.toBreakAll()) {
                 if (!context.get(cell).isAir()) broken.add(cell);
             }
+            steps.add(new Step(broken, movement.positionToPlace()));
         }
-        return broken;
+        return steps;
     }
 }

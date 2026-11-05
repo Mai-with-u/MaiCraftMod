@@ -393,4 +393,9 @@ public abstract class Movement implements IMovement, MovementHelper {
     public BlockPos[] toBreakAll() {
         return positionsToBreak;
     }
+
+    /** 这一步站上去之前缺了会往哪一格垫块（看走法，不看此刻缺不缺）；不垫块的走法为空。 */
+    public BlockPos positionToPlace() {
+        return positionToPlace;
+    }
 }
