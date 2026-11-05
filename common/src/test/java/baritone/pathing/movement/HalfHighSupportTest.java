@@ -39,6 +39,26 @@ class HalfHighSupportTest {
     }
 
     @Test
+    void 从地面迈上床不按跳_站在床上往上不算迈() {
+        BlockState stone = Blocks.STONE.defaultBlockState();
+        BlockState bed = Blocks.RED_BED.defaultBlockState();
+        BlockState slab = Blocks.STONE_SLAB.defaultBlockState();
+        assertTrue(MovementHelper.stepsUpWithoutJump(stone, bed), "从地面一步迈上床");
+        assertTrue(MovementHelper.stepsUpWithoutJump(stone, slab), "下半台阶照旧");
+        assertFalse(MovementHelper.stepsUpWithoutJump(bed, bed), "床到高一格的床要跳");
+        assertFalse(MovementHelper.stepsUpWithoutJump(stone, stone), "整块到整块要跳");
+    }
+
+    @Test
+    void 站在床和下半台阶上不起跳跑酷() {
+        assertTrue(MovementHelper.parkourTakeoffBlocked(Blocks.RED_BED.defaultBlockState()));
+        assertTrue(MovementHelper.parkourTakeoffBlocked(Blocks.DAYLIGHT_DETECTOR.defaultBlockState()));
+        assertTrue(MovementHelper.parkourTakeoffBlocked(Blocks.STONE_SLAB.defaultBlockState()));
+        assertTrue(MovementHelper.parkourTakeoffBlocked(Blocks.OAK_STAIRS.defaultBlockState()));
+        assertFalse(MovementHelper.parkourTakeoffBlocked(Blocks.STONE.defaultBlockState()));
+    }
+
+    @Test
     void 站在矮平顶上只能登上够得着的另一块矮平顶() {
         BlockState stone = Blocks.STONE.defaultBlockState();
         BlockState bed = Blocks.RED_BED.defaultBlockState();

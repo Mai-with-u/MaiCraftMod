@@ -703,6 +703,16 @@ public interface MovementHelper extends ActionCosts, Helper {
         return !Double.isNaN(BlockPassability.halfHighTop(state));
     }
 
+    /** 往上一格是一步迈上去、不按跳：落点是矮平顶（下半台阶、床这类），脚下站的不是。 */
+    static boolean stepsUpWithoutJump(BlockState standingOn, BlockState onto) {
+        return isHalfHigh(onto) && !isHalfHigh(standingOn);
+    }
+
+    /** 站在这块上起跳跳不远，不从这里跑酷：梯子藤蔓这类、楼梯、下半台阶和床这类矮平顶。 */
+    static boolean parkourTakeoffBlocked(BlockState standingOn) {
+        return isClimbable(standingOn.getBlock()) || standingOn.getBlock() instanceof StairBlock || isHalfHigh(standingOn);
+    }
+
     /**
      * 往上一格登上去够不够得着：站在矮平顶上只能登上另一块矮平顶，而且实际要抬的高度（一格加落点顶高减起跳顶高）
      * 不超过从灵魂沙起跳那一跳（一格加 1/8 格），再高就跳不稳；从整块、灵魂沙这类上起跳照旧。

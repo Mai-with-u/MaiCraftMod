@@ -115,7 +115,7 @@ public final class ChunkPacker {
         return new CachedChunk(chunk.getPos().x, chunk.getPos().z, height, bitSet, blocks, specialBlocks, System.currentTimeMillis());
     }
 
-    private static PathingBlockType getPathingBlockType(BlockState state, LevelChunk chunk, int x, int y, int z) {
+    static PathingBlockType getPathingBlockType(BlockState state, LevelChunk chunk, int x, int y, int z) {
         Block block = state.getBlock();
         if (MovementHelper.isWater(state)) {
             // only water source blocks are plausibly usable, flowing water should be avoid

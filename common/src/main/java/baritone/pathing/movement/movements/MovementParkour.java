@@ -30,7 +30,6 @@ import baritone.utils.pathing.MutableMoveResult;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.WaterFluid;
 
@@ -91,7 +90,7 @@ public class MovementParkour extends Movement {
         }
         BlockState standingOn = context.get(x, y - 1, z);
         // 站在楼梯、下半台阶、床这类矮平顶上起跳够不着远，不从这里跑酷。
-        if (MovementHelper.isClimbable(standingOn.getBlock()) || standingOn.getBlock() instanceof StairBlock || MovementHelper.isHalfHigh(standingOn)) {
+        if (MovementHelper.parkourTakeoffBlocked(standingOn)) {
             return;
         }
         // we can't jump from (frozen) water with assumeWalkOnWater because we can't be sure it will be frozen

@@ -198,7 +198,7 @@ public class MovementAscend extends Movement {
         state.setInput(Input.SNEAK, Baritone.settings().allowWalkOnMagmaBlocks.value && jumpingOnto.is(Blocks.MAGMA_BLOCK));
 
         // 从整块地面迈上下半台阶、床这类矮平顶：一步就迈上去，不按跳。
-        if (MovementHelper.isHalfHigh(jumpingOnto) && !MovementHelper.isHalfHigh(BlockStateInterface.get(ctx, src.below()))) {
+        if (MovementHelper.stepsUpWithoutJump(BlockStateInterface.get(ctx, src.below()), jumpingOnto)) {
             return state;
         }
 

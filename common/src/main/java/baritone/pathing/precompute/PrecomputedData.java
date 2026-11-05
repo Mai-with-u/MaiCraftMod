@@ -87,7 +87,7 @@ public class PrecomputedData {
         return blockData;
     }
 
-    // 模组方块第一次被认作矮平顶能站时，在日志里记一行方块名：模组里这种形状的方块离线扫不出来，
+    // 模组方块第一次被认作矮平顶能站时，在调试日志（debug.log）里记一行方块名和碰撞顶高：模组里这种形状的方块离线扫不出来，
     // 事后翻日志就知道实例里认进来了哪些，站上去有问题再按属性加排除。
     private void noteModHalfHigh(BlockState state) {
         if (state.getBlock() instanceof SlabBlock) return;
@@ -95,7 +95,7 @@ public class PrecomputedData {
         if (Double.isNaN(top)) return;
         ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
         if ("minecraft".equals(id.getNamespace()) || !loggedHalfHigh.add(state.getBlock())) return;
-        LOG.info("寻路把模组方块认作能站的矮平顶：{}（顶高 {}/16）", id, Math.round(top * 16));
+        LOG.debug("寻路把模组方块认作能站的矮平顶：{}（碰撞顶高 {}/16）", id, Math.round(top * 16));
     }
 
     public boolean canWalkOn(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
