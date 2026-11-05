@@ -283,6 +283,8 @@ public final class Bootstrap {
         private boolean automationOwned;
         // 每刻推进的各子系统各包一层：哪个抛了异常只跳过它这一刻，不把整个客户端带崩。
         private final TickGuard tickGuard = new TickGuard();
+        // 每刻记一笔"还活着"：客户端卡死或被强杀时没有退出记录，靠这行看出它停在哪一刻。
+        private final ClientPulse clientPulse = new ClientPulse();
 
         ClientEntry(LoaderEnvironment loader, List<SupportedMod<CompatModule>> compatCatalog) {
             this.abilities = new AbilityRegistry(new TaskFactories(), loader::isModLoaded);
@@ -584,6 +586,8 @@ public final class Bootstrap {
             tickGuard.run("服务端会话", () -> session.tick(minecraft));
             // 调试面板最后取现状：这一刻控制循环与会话都推进完了，读到的是这一刻的结果。
             if (debugPanel != null) tickGuard.run("调试面板", () -> debugPanel.tick(minecraft));
+            // 最后记一笔"还活着"：这一行之间隔太久没出现，就是客户端停在了这一刻。
+            tickGuard.run("客户端推进记录", () -> clientPulse.tick());
         }
 
         /** 进世界建现场、退世界丢现场：世界记忆按世界身份分开，感知场景不跨世界残留。

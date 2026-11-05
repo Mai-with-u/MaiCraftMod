@@ -178,6 +178,7 @@ public final class GoalRunTable {
         if (requestKey != null) {
             Long existing = requestKeys.get(requestKey);
             if (existing != null && runners.containsKey(existing)) {
+                LOG.info("请求键 {} 已经下过目标 {}，这次不再新开", requestKey, existing);
                 return new Launch(runners.get(existing), true);
             }
         }
@@ -189,8 +190,10 @@ public final class GoalRunTable {
         }
         if (cutsIn(goal)) {
             cutIn(runner);
+            LOG.info("目标 {} 下达了：能力 {}（插一下）", id, goal.ability());
         } else {
             makeMain(runner);
+            LOG.info("目标 {} 下达了：能力 {}（主目标）", id, goal.ability());
         }
         dropOldFinished();
         return new Launch(runner, false);

@@ -4,6 +4,8 @@ package org.maiwithu.maicraft.kernel.event;
 import java.util.List;
 
 import org.maiwithu.maicraft.game.ReceivedChat;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 聊天事件流：聊天栏收到的消息按游标往后读，没有新消息时可以等一会儿。宿主用 events(topic=chat) 读。
@@ -14,10 +16,14 @@ import org.maiwithu.maicraft.game.ReceivedChat;
 public final class ChatEventLog {
     static final int CAPACITY = 256;
 
+    private static final Logger LOG = LoggerFactory.getLogger(ChatEventLog.class);
+
     private final CursorLog<ChatEvent> log = new CursorLog<>(CAPACITY, ChatEvent::cursor);
 
     /** 记一条收到的聊天并叫醒正在等的读者；返回带上序号的事件。 */
     public ChatEvent append(ReceivedChat chat) {
+        // 收到的聊天也记一行：对方说了什么，只有这一处事后能对证。
+        LOG.info("收到聊天[{}] {}：{}", chat.kind(), chat.sender(), chat.text());
         return log.append(cursor -> new ChatEvent(cursor, chat));
     }
 

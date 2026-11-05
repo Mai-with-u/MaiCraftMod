@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -34,6 +35,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.maiwithu.maicraft.mcp.tool.ToolCatalog;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 游戏进程里的内嵌 MCP 服务：接收请求、检查连接和格式，再把工具调用交给工具层。
@@ -54,6 +57,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private static final int MAX_SESSIONS = 64;
     private static final long DEFAULT_SESSION_TTL_NANOS = Duration.ofMinutes(10).toNanos();
     private static final long SESSION_REAP_SECONDS = 30L;
+    private static final Logger LOG = LoggerFactory.getLogger(EmbeddedMcpService.class);
 
     private final McpConfig config;
     private final long sessionTtlNanos;
@@ -156,6 +160,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             } catch (IOException bindFailure) {
                 closeQuietly(candidate);
                 lastBindFailure = bindFailure;
+                LOG.info("MCP 端口 {} 绑不上，改用下一个端口", port);
             }
         }
         throw lastBindFailure != null ? lastBindFailure
@@ -186,6 +191,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         maintenance = null;
         if (currentMaintenance != null) currentMaintenance.shutdownNow();
 
+        int closedSessions = sessions.size();
         sessions.values().forEach(McpSession::close);
         sessions.clear();
 
@@ -197,6 +203,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         executor = null;
         if (currentExecutor != null) currentExecutor.shutdownNow();
         removeShutdownHook();
+        LOG.info("MCP 服务停掉了，关掉了 {} 个会话", closedSessions);
     }
 
     @Override
@@ -208,14 +215,17 @@ public final class EmbeddedMcpService implements AutoCloseable {
         // 先查是否停服、浏览器来源是否允许、口令是否正确，再按 POST／DELETE 处理请求。
         try {
             if (stopping.get()) {
+                LOG.info("MCP 服务正在停止，这次请求没有接着做");
                 sendStatus(exchange, 503, "MCP endpoint is stopping");
                 return;
             }
             if (!validOrigin(exchange.getRequestHeaders().getFirst("Origin"))) {
+                LOG.warn("MCP 请求的来源地址不在本机允许的范围里，这次请求没有接着做");
                 sendStatus(exchange, 403, "Origin is not allowed");
                 return;
             }
             if (!authenticated(exchange.getRequestHeaders().getFirst("Authorization"))) {
+                LOG.warn("MCP 请求没带对口令，这次请求没有接着做");
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
                 sendStatus(exchange, 401, "Authentication required");
                 return;
@@ -225,12 +235,15 @@ public final class EmbeddedMcpService implements AutoCloseable {
                 case "DELETE" -> handleDelete(exchange);
                 default -> {
                     exchange.getResponseHeaders().set("Allow", "POST, DELETE");
+                    LOG.warn("MCP 请求用了不支持的方法 {}", exchange.getRequestMethod());
                     sendStatus(exchange, 405, "Method not allowed");
                 }
             }
         } catch (PayloadTooLargeException exception) {
+            LOG.warn("MCP 请求体超过上限：{}", exception.getMessage());
             sendStatusSafely(exchange, 413, exception.getMessage());
         } catch (Exception exception) {
+            LOG.error("MCP 请求处理中出了没接住的错", exception);
             sendStatusSafely(exchange, 500, "Internal MCP transport error");
         }
     }
@@ -239,11 +252,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         // 普通 MCP 请求用 JSON；先检查内容类型和大小，再解析 JSON-RPC 方法与请求编号。
         String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
         if (contentType == null || !contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
+            LOG.warn("MCP 请求的内容类型不是 JSON，这次请求没有接着做");
             sendStatus(exchange, 415, "Content-Type must be application/json");
             return;
         }
         String accept = exchange.getRequestHeaders().getFirst("Accept");
         if (accept != null && !accept.contains("application/json") && !accept.contains("*/*")) {
+            LOG.warn("MCP 请求没有接受 JSON 回话，这次请求没有接着做");
             sendStatus(exchange, 406, "Accept must include application/json");
             return;
         }
@@ -252,11 +267,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try {
             JsonElement parsed = JsonParser.parseString(readBody(exchange));
             if (!parsed.isJsonObject()) {
+                LOG.warn("MCP 请求的正文不是一个对象，按非法请求回绝");
                 sendJson(exchange, 200, JsonRpc.error(JsonNull.INSTANCE, -32600, "Invalid Request"), null);
                 return;
             }
             request = parsed.getAsJsonObject();
         } catch (JsonParseException exception) {
+            LOG.warn("MCP 请求的正文不是合法 JSON：{}", exception.getMessage());
             sendJson(exchange, 200, JsonRpc.error(JsonNull.INSTANCE, -32700, "Parse error"), null);
             return;
         }
@@ -269,6 +286,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
             }
             method = JsonRpc.requiredString(request, "method");
         } catch (IllegalArgumentException exception) {
+            LOG.warn("MCP 请求不是合法的 JSON-RPC 请求：{}", exception.getMessage());
             sendJson(exchange, 200, JsonRpc.error(JsonRpc.idOrNull(id), -32600, "Invalid Request"), null);
             return;
         }
@@ -295,10 +313,13 @@ public final class EmbeddedMcpService implements AutoCloseable {
         try {
             response = JsonRpc.success(id, dispatch(method, JsonRpc.optionalObject(request.get("params"))));
         } catch (JsonRpc.RpcException exception) {
+            LOG.warn("MCP 请求 {} 没被受理（{}）：{}", method, exception.code(), exception.getMessage());
             response = JsonRpc.error(id, exception.code(), exception.getMessage());
         } catch (IllegalArgumentException exception) {
+            LOG.warn("MCP 请求 {} 的参数不对：{}", method, exception.getMessage());
             response = JsonRpc.error(id, -32602, exception.getMessage());
         } catch (Exception exception) {
+            LOG.error("MCP 请求 {} 处理中出了没接住的错", method, exception);
             response = JsonRpc.error(id, -32603, "Internal error");
         }
         sendJson(exchange, 200, response, session);
@@ -348,7 +369,10 @@ public final class EmbeddedMcpService implements AutoCloseable {
             case "resources/list" -> listResources(params);
             case "resources/templates/list" -> templates();
             case "resources/read" -> readResource(params);
-            default -> throw new JsonRpc.RpcException(-32601, "Method not found");
+            default -> {
+                LOG.warn("MCP 请求了不认识的接口方法：{}", method);
+                throw new JsonRpc.RpcException(-32601, "Method not found");
+            }
         };
     }
 
@@ -409,6 +433,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         if (session == null || !validVersionHeader(exchange, session)) return;
         sessions.remove(session.id, session);
         session.close();
+        LOG.info("MCP 会话 {} 关掉了", shortId(session.id));
         exchange.sendResponseHeaders(204, -1);
         exchange.close();
     }
@@ -419,23 +444,33 @@ public final class EmbeddedMcpService implements AutoCloseable {
         McpSession created = new McpSession(UUID.randomUUID().toString(), negotiatedVersion);
         sessions.put(created.id, created);
         trimSessions();
+        LOG.info("MCP 会话 {} 建好了，谈定的协议版本 {}", shortId(created.id), negotiatedVersion);
         return created;
     }
 
     private void reapSessionsSafely() {
         try {
             reapSessions();
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException failure) {
             // 维护操作尽力执行；单个格式错误或过期会话不能取消周期性回收器。
+            LOG.warn("回收空闲会话时出错，这一遍跳过", failure);
         }
     }
 
     /** 关闭空闲超过时限的会话，并把总数压回上限；测试直接调它，不等三十秒的周期。 */
     void reapSessions() {
         long now = System.nanoTime();
-        sessions.forEach((id, session) -> {
-            if (session.expired(now, sessionTtlNanos) && sessions.remove(id, session)) session.close();
-        });
+        int expired = 0;
+        for (Map.Entry<String, McpSession> entry : sessions.entrySet()) {
+            McpSession session = entry.getValue();
+            if (session.expired(now, sessionTtlNanos) && sessions.remove(entry.getKey(), session)) {
+                session.close();
+                expired++;
+            }
+        }
+        if (expired > 0) {
+            LOG.info("回收了 {} 个空闲超时的 MCP 会话", expired);
+        }
         trimSessions();
     }
 
@@ -445,21 +480,28 @@ public final class EmbeddedMcpService implements AutoCloseable {
         if (overflow <= 0) return;
         List<McpSession> oldest = new ArrayList<>(sessions.values());
         oldest.sort(Comparator.comparingLong(McpSession::lastActivityNanos));
+        int closed = 0;
         for (McpSession session : oldest) {
             if (overflow-- <= 0) break;
-            if (sessions.remove(session.id, session)) session.close();
+            if (sessions.remove(session.id, session)) {
+                session.close();
+                closed++;
+            }
         }
+        LOG.info("MCP 会话数超过 {}，关掉了最久没活动的 {} 个", MAX_SESSIONS, closed);
     }
 
     private McpSession requireSession(HttpExchange exchange) throws IOException {
         // 普通请求必须带初始化得到的连接编号；过期编号要重新初始化，不能当新连接直接使用。
         String id = exchange.getRequestHeaders().getFirst(SESSION_HEADER);
         if (id == null || id.isBlank()) {
+            LOG.warn("MCP 请求没有带会话编号，这次请求没有接着做");
             sendStatus(exchange, 400, "MCP session header is required");
             return null;
         }
         McpSession session = sessions.get(id);
         if (session == null || session.closed()) {
+            LOG.warn("MCP 会话 {} 不在了：可能空闲太久被回收，也可能从没建过", shortId(id));
             sendStatus(exchange, 404, "Unknown or expired MCP session");
             return null;
         }
@@ -472,10 +514,12 @@ public final class EmbeddedMcpService implements AutoCloseable {
         String supplied = exchange.getRequestHeaders().getFirst(VERSION_HEADER);
         String effective = supplied == null ? OLDEST_SUPPORTED_VERSION : supplied;
         if (!SUPPORTED_VERSIONS.contains(effective)) {
+            LOG.warn("MCP 请求写的协议版本 {} 不受支持", effective);
             sendStatus(exchange, 400, "Unsupported MCP protocol version");
             return false;
         }
         if (supplied != null && !session.version.equals(supplied)) {
+            LOG.warn("MCP 请求写的协议版本 {} 与会话谈定的 {} 不一致", supplied, session.version);
             sendStatus(exchange, 400, "MCP protocol version does not match the session");
             return false;
         }
@@ -595,7 +639,8 @@ public final class EmbeddedMcpService implements AutoCloseable {
     private static void sendStatusSafely(HttpExchange exchange, int status, String message) {
         try {
             sendStatus(exchange, status, message);
-        } catch (IOException ignored) {
+        } catch (IOException failure) {
+            LOG.warn("回 MCP 状态码 {} 时连接已经断了，这条请求对方收不到", status, failure);
             exchange.close();
         }
     }
@@ -604,8 +649,14 @@ public final class EmbeddedMcpService implements AutoCloseable {
         if (closeable == null) return;
         try {
             closeable.close();
-        } catch (Exception ignored) {
+        } catch (Exception failure) {
+            LOG.warn("关 MCP 服务时有一处没收干净", failure);
         }
+    }
+
+    /** 会话编号只留开头一段：日志里认得出是哪一次会话就够，不必把整串编号抄进去。 */
+    private static String shortId(String id) {
+        return id.length() <= 8 ? id : id.substring(0, 8);
     }
 
     /** 请求体超过配置上限；在读取过程中就拒绝，不把超限内容读进内存。 */

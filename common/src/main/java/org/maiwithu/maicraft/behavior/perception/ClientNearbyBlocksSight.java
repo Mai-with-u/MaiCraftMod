@@ -33,6 +33,8 @@ import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * 附近功能方块的读端：在已登记的方块扫描上查角色附近看得见的设施方块。
@@ -48,10 +50,14 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  */
 public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
 
+    private static final Logger LOG = LoggerFactory.getLogger(ClientNearbyBlocksSight.class);
+
     // 观察要的是"附近有什么"，不是最近的一个：给够数量，超出由场景按远近取舍。
     private static final int WANT = 32;
     private static final int MAX_CHUNK_RADIUS = 2;
     private static final int BUILD_BUDGET = 4096;
+    // 设施感知每刻查一遍，逐刻全记会把日志刷满：查够这么多遍才记一行完整口径。
+    private static final int REPORT_EVERY_QUERIES = 600;
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
@@ -64,6 +70,12 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
     private Set<Block> signBlocks;
     /** 客户端开着文字过滤：开着时牌子上显示的是过滤后的字，读的也是它。 */
     private final BooleanSupplier textFiltering;
+    /** 已经查过多少遍：够数了记一行扫描口径，让事后看得清设施这一轮查到了什么。 */
+    private int queriesSinceReport;
+    /** 上一遍有没有扫完：扫完与否变了就记一行，"没扫完"和"真没有"必须分得开。 */
+    private boolean lastQueryComplete = true;
+    /** 类型认不得的方块只记一次，不每刻重复。 */
+    private boolean warnedUnknownTypes;
 
     /**
      * @param textFiltering 客户端此刻开没开文字过滤；读告示牌时按它取画面上显示的那一份字
@@ -88,6 +100,10 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
         ClientLevel level = current.level();
         Collection<Block> targets = blocksOf(blockTypes);
         if (targets.isEmpty()) {
+            if (!warnedUnknownTypes) {
+                warnedUnknownTypes = true;
+                LOG.warn("设施感知认不得要查的方块类型，这一遍什么都查不了：{}", blockTypes);
+            }
             return List.of();
         }
         // 设施种类常驻登记；这次要看的方块不在其中时一并补登记，否则索引里查不到。
@@ -95,9 +111,39 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
         registered.ensure(level, targets);
         var result = scans.query(level, player.blockPosition(), targets,
                 WANT, MAX_CHUNK_RADIUS, BUILD_BUDGET);
-        List<BlockSighting> sightings =
-                seenFacilities(result.hits(), p -> ObservationVisibility.block(player, p), level::getBlockState);
-        return sightings;
+        SeenFacilities seen = seenFacilitiesWithCounts(result.hits(),
+                p -> ObservationVisibility.block(player, p), level::getBlockState);
+        reportScan(result.complete(), result.hits().size(), seen);
+        return seen.sightings();
+    }
+
+    /**
+     * 记下设施这一遍查到了什么：扫到几格、报出几处、视线挡掉几格、床折格去掉几处、扫完没有。
+     *
+     * <p>这一层每刻都查一遍，逐刻全记会把日志刷满，所以完整的一遍每查够 {@link #REPORT_EVERY_QUERIES}
+     * 遍才记一行；没扫完的那一遍另外记一行——"没扫完"和"真没有"分不开，事后就说不清床为什么没报出来。
+     */
+    private void reportScan(boolean complete, int hits, SeenFacilities seen) {
+        if (!complete && lastQueryComplete) {
+            LOG.info("设施这一遍还没扫完：扫到 {} 格，报出 {} 处；没扫完的部分不能当成没有",
+                    hits, seen.sightings().size());
+        }
+        lastQueryComplete = complete;
+        queriesSinceReport++;
+        if (queriesSinceReport < REPORT_EVERY_QUERIES) return;
+        queriesSinceReport = 0;
+        LOG.info("设施这一遍：扫到 {} 格，报出 {} 处，视线挡掉 {} 格，床折格去掉 {} 处，扫完={}",
+                hits, seen.sightings().size(), seen.blocked(), seen.duplicates(), complete);
+    }
+
+    /**
+     * 设施这一遍查完的账：报出去的、视线挡掉的、床折格去掉的各是多少。
+     *
+     * @param sightings 看得见、也没被折格去掉的设施
+     * @param blocked 被视线挡住的命中格数
+     * @param duplicates 同一张床命中两次时去掉的那一次
+     */
+    record SeenFacilities(List<BlockSighting> sightings, int blocked, int duplicates) {
     }
 
     /**
@@ -107,10 +153,21 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
      */
     static List<BlockSighting> seenFacilities(Collection<BlockPos> hits, Predicate<BlockPos> visible,
             Function<BlockPos, BlockState> stateAt) {
+        return seenFacilitiesWithCounts(hits, visible, stateAt).sightings();
+    }
+
+    /**
+     * 同上，另外把被挡掉与被折格去掉的算出来：这几样决定"为什么这处设施没报出来"。
+     */
+    static SeenFacilities seenFacilitiesWithCounts(Collection<BlockPos> hits, Predicate<BlockPos> visible,
+            Function<BlockPos, BlockState> stateAt) {
         List<BlockSighting> sightings = new ArrayList<>();
         Set<BlockPos> seenBeds = new HashSet<>();
+        int blocked = 0;
+        int duplicates = 0;
         for (BlockPos hit : hits) {
             if (!visible.test(hit)) {
+                blocked++;
                 continue;
             }
             BlockState state = stateAt.apply(hit);
@@ -120,6 +177,7 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
                 BlockState stateTowardHead = stateAt.apply(hit.relative(state.getValue(BedBlock.FACING)));
                 cell = BedCandidate.clickCell(hit, state, stateTowardHead);
                 if (!seenBeds.add(cell)) {
+                    duplicates++;
                     continue;
                 }
             }
@@ -127,7 +185,7 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
             sightings.add(new BlockSighting(
                     WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()), typeId));
         }
-        return sightings;
+        return new SeenFacilities(sightings, blocked, duplicates);
     }
 
     @Override
@@ -200,6 +258,7 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
             blockOf(typeId).ifPresent(facilities::add);
         }
         this.facilities = Set.copyOf(facilities);
+        LOG.info("设施感知认了 {} 种方块：{}", facilities.size(), kinds.facilityBlockTypes());
         return this.facilities;
     }
 

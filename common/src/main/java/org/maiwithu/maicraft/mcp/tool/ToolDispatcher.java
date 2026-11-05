@@ -49,6 +49,7 @@ public final class ToolDispatcher {
             throw new IllegalArgumentException("工具 " + name + " 没有接上");
         }
         long callId = recentCalls.started(name, arguments);
+        long startedAtNanos = System.nanoTime();
         JsonObject reply = null;
         try {
             reply = dispatch(name, tool, arguments);
@@ -56,6 +57,30 @@ public final class ToolDispatcher {
         } finally {
             // 连 Error 这类没接住的情况也要结账：不然这次调用会一直挂成"处理中"，面板就误以为宿主还在等。
             recentCalls.ended(callId, reply);
+            logCall(name, callId, System.nanoTime() - startedAtNanos);
+        }
+    }
+
+    /**
+     * 每次调用在文件日志里留一行：工具名、用了多久、成没成。
+     *
+     * <p>调试面板上的记录进程一退就没了，宿主事后查"对端为什么这么答"只剩这一行。
+     * 成没成、错误码与说明都取自这次调用在 {@link RecentToolCalls} 里的记录，不在这里另解一遍回话；
+     * 出错时把参数一并记下——宿主那边只留着发出去的一份，对端收到后为什么这么答就靠这一行对得上。
+     */
+    private void logCall(String name, long callId, long elapsedNanos) {
+        RecentToolCalls.Call call = recentCalls.recent().stream()
+                .filter(entry -> entry.id() == callId)
+                .findFirst()
+                .orElse(null);
+        long elapsedMillis = elapsedNanos / 1_000_000;
+        if (call == null) {
+            LOG.info("MCP 工具 {} 用时 {}ms，这一条没记上", name, elapsedMillis);
+        } else if (call.errorCode() == null) {
+            LOG.info("MCP 工具 {} 用时 {}ms，完成", name, elapsedMillis);
+        } else {
+            LOG.warn("MCP 工具 {} 用时 {}ms，失败：{} {}；参数 {}", name, elapsedMillis,
+                    call.errorCode(), call.errorMessage(), call.arguments());
         }
     }
 

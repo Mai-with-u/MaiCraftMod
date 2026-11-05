@@ -516,6 +516,7 @@ public final class ControlLoop {
         if (task == null) {
             // 判出要处理、建任务时却给不出（落地的接缝还没接上这类）：这一刻不占身体，照常推进手上的任务；
             // 下一刻需求自己再判，不按出错缓着。
+            LOG.warn("生存需求「{}」判出来要处理，却没给出临时任务，这一刻没占身体", choice.chosen.name());
             return stack.isEmpty() ? Decision.IDLE : advance(top(), context, null);
         }
         if (interrupted != null) {
