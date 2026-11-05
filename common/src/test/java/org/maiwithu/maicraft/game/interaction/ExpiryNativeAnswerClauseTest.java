@@ -17,15 +17,15 @@ class ExpiryNativeAnswerClauseTest {
     @Test
     void aRefusedClickSaysTheServerMostLikelyRefusedItToo() {
         String clause = ExpiryContext.nativeAnswerClause(false);
-        assertTrue(clause.contains("settled this click as not accepted"));
-        assertFalse(clause.contains("lost between"));
+        assertTrue(clause.contains("原版当场就没接受这一下"));
+        assertFalse(clause.contains("丢在了客户端到服务端之间"));
     }
 
     @Test
     void anAcceptedClickPointsAtTheClientServerGap() {
         String clause = ExpiryContext.nativeAnswerClause(true);
-        assertTrue(clause.contains("accepted this click"));
-        assertTrue(clause.contains("lost between this client and the server"));
+        assertTrue(clause.contains("原版发出时接受了这一下"));
+        assertTrue(clause.contains("丢在了客户端到服务端之间"));
     }
 
     @Test
@@ -37,7 +37,7 @@ class ExpiryNativeAnswerClauseTest {
     @Test
     void aRefusedEntityClickCarriesTheOnSightConditionsItHit() {
         EntityUseScene sneakHeld = new EntityUseScene(true, 1.5, 3.0, false, null);
-        assertTrue(ExpiryContext.of(false, sneakHeld).contains("sneak key was still held"));
-        assertFalse(ExpiryContext.of(true, sneakHeld).contains("sneak key was still held"));
+        assertTrue(ExpiryContext.of(false, sneakHeld).contains("潜行键还按着"));
+        assertFalse(ExpiryContext.of(true, sneakHeld).contains("潜行键还按着"));
     }
 }

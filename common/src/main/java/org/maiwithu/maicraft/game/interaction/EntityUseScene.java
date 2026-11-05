@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import java.util.Locale;
+import java.util.StringJoiner;
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.Boat;
@@ -34,35 +37,25 @@ record EntityUseScene(boolean sneakHeld, double eyeDistance, double interactionR
      * 客户端看得见的拒收条件一条都没命中时，说明拒收发生在服务端一侧，也如实说明。
      */
     String explain() {
-        StringBuilder text = new StringBuilder();
-        boolean anyMatched = false;
+        // 命中的条件逐条列出、用分号隔开；一条都没命中时只说拒收在服务端一侧，不编原因。
+        StringJoiner matched = new StringJoiner("；");
         if (sneakHeld) {
-            text.append("the sneak key was still held (a sneak-click on a vehicle is read as wanting to dismount)");
-            anyMatched = true;
+            matched.add("潜行键还按着（对载具潜行右键会被当成要下来）");
         }
         if (eyeDistance > interactionRange) {
-            if (anyMatched) text.append("; ");
-            text.append(String.format(
-                    "the click was %.1f blocks from the eyes, beyond the entity interaction range of %.1f",
+            matched.add(String.format(Locale.ROOT, "点击点离眼睛 %.1f 格，超出了实体交互距离 %.1f 格",
                     eyeDistance, interactionRange));
-            anyMatched = true;
         }
         if (targetOccupied) {
-            if (anyMatched) text.append("; ");
-            text.append("the target already carries a passenger");
-            anyMatched = true;
+            matched.add("目标身上已经有乘客");
         }
         if (boatSubmergedTicks != null && boatSubmergedTicks >= BOAT_SUBMERGED_REFUSAL_TICKS) {
-            if (anyMatched) text.append("; ");
-            text.append(String.format(
-                    "the boat had been under the water surface for %.1f seconds"
-                            + " (vanilla stops accepting boarding after 60 ticks (3 seconds) of it staying submerged)",
+            matched.add(String.format(Locale.ROOT, "船已经在水面下泡了 %.1f 秒（原版对泡水超过 3 秒的船不再让人上去）",
                     boatSubmergedTicks / 20.0));
-            anyMatched = true;
         }
-        if (!anyMatched) {
-            return "; none of the client-visible refusal rules matched, so the refusal happened on the server's side";
+        if (matched.length() == 0) {
+            return "；客户端看得见的拒收条件一条都没命中，拒收发生在服务端一侧";
         }
-        return "; the on-sight rules it hit: " + text;
+        return "；当场命中的拒收条件：" + matched;
     }
 }
