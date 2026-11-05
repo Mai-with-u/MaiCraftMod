@@ -176,4 +176,18 @@ class PartialPathRankingTest {
         assertFalse(ranking.hasSegmentPastStart(), "没有接近目标的节点不该算像样分段");
         assertNull(ranking.firstNodePastStart(), "没有够远的节点时取不到部分路线");
     }
+
+    @Test
+    void 离起点5格以外没有比起点近的节点_搜索不给半截路() {
+        // 起点紧挨目的地，四周能去的地方都比起点远：排位里留着起点自己，交回的是没有路线，不会领着人越走越远。
+        Goal goal = exact(2, 64, 0);
+        PathNode start = node(goal, 0, 64, 0, 0);
+        PartialPathRanking ranking = new PartialPathRanking(0, 64, 0, start, 0.01);
+        for (int z = 6; z <= 12; z++) {
+            ranking.consider(node(goal, 0, 64, z, z * 4.6));
+            ranking.consider(node(goal, -z, 64, 0, z * 4.6));
+        }
+        assertNull(ranking.firstNodePastStart());
+        assertFalse(ranking.hasSegmentPastStart());
+    }
 }

@@ -21,9 +21,9 @@ import net.minecraft.core.BlockPos;
  * <p>"终点比起点离目的地还远"的半截路搜索本来就不会给：起点自己就在各档排位里，换下它的节点估价必定比它小，
  * 离起点 5 格以外又没有比起点近的节点时，搜索交回的是没有路线。
  */
-final class PartialSegments {
+final class DestinationFloor {
 
-    private PartialSegments() {}
+    private DestinationFloor() {}
 
     /** 这段半截路一路上要挖开的实心格里，有没有目的地自己脚下的地板。路线要先校验过（每一步移动组装好）。 */
     static boolean digsDestinationFloor(Goal goal, IPath path, CalculationContext context) {
