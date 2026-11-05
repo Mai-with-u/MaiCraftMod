@@ -408,7 +408,20 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         Problem judged = descentLegs > 0 && lastFeet != null
                 ? DescentSegments.stillShort(destination, lastFeet, descentLegs, problem)
                 : problem;
-        return Next.fail(judged);
+        return Next.fail(withHazardsNearDestination(judged));
+    }
+
+    // 走不通收场（没有路线、卡住）时点名目的地旁边因为危险没踩的格（门口那堆点着的营火这类），
+    // 游戏 Agent 才知道先灭火、绕开还是换目的地；程序出错不是地形问题，不点名。
+    // 只给 x/z 的目的地高度不知道，不读；没有出行世界读端（离线替身）时照原样。
+    private Problem withHazardsNearDestination(Problem problem) {
+        if (problem == null || world == null || !destination.heightConfirmed()) return problem;
+        if (problem.kind() != Problem.Kind.UNREACHABLE && problem.kind() != Problem.Kind.STUCK) return problem;
+        BlockPos center = destination.center();
+        return DestinationHazards.describe(center, world.hazardsNear(center, DestinationHazards.RADIUS))
+                .map(line -> Problem.of(problem.kind(), problem.message() + "；" + line,
+                        DestinationHazards.suggestion(problem.suggestion())))
+                .orElse(problem);
     }
 
     /** 空转满时限的收尾：换成本领域的现场说明，只给不出更好解释时沿用进度跟踪的通用说法；
@@ -425,12 +438,16 @@ public final class TravelTask extends PhasedTask<TravelTask.Phase> implements To
         };
         Problem judged = TravelStuckCheck.judge(destination, permit, lastFeet, lastProgress, idleTicks);
         Problem underlying = judged == null ? generic : judged;
+        // 拆段的包装只转述下一层的结论句，危险格要在包完之后接在最外层，不然被截掉。
+        Problem wrapped;
         if (climbLegs > 0 && lastFeet != null) {
-            return ClimbSegments.stillShort(destination, lastFeet, climbLegs, underlying);
+            wrapped = ClimbSegments.stillShort(destination, lastFeet, climbLegs, underlying);
+        } else if (descentLegs > 0 && lastFeet != null) {
+            wrapped = DescentSegments.stillShort(destination, lastFeet, descentLegs, underlying);
+        } else {
+            wrapped = underlying;
         }
-        return descentLegs > 0 && lastFeet != null
-                ? DescentSegments.stillShort(destination, lastFeet, descentLegs, underlying)
-                : underlying;
+        return withHazardsNearDestination(wrapped);
     }
 
     /** 空转要收场前问一次：目的地还高得远、许能动土就先爬一段再接着走；深得走路起步不了、许能动土

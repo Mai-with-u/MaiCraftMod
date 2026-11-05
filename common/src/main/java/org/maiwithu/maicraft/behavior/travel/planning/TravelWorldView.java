@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.planning;
 
+import java.util.List;
 import java.util.OptionalInt;
+import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -48,5 +50,13 @@ public interface TravelWorldView {
      */
     default boolean inWater() {
         return false;
+    }
+
+    /**
+     * 这一格周围水平 {@code radius} 格、上下 1 格里，寻路因为危险不踩不进的格（岩浆块、点着的营火、
+     * 会招监守者的尖啸体、火、仙人掌、甜浆果丛）。没加载的格不算；读不到世界时为空。
+     */
+    default List<HazardCell> hazardsNear(BlockPos center, int radius) {
+        return List.of();
     }
 }

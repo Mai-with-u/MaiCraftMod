@@ -39,6 +39,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelWorldView;
+import org.maiwithu.maicraft.behavior.travel.planning.HazardCell;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
@@ -170,6 +171,17 @@ public final class TravelFakes {
 
         @Override public boolean inWater() {
             return inWaterNow;
+        }
+
+        /** 目的地旁边摆的危险格；问过哪一格、多大一圈记下来，好判断该不该问。 */
+        public final List<HazardCell> hazards = new ArrayList<>();
+        public BlockPos hazardsAskedAt;
+        public int hazardsAskedRadius;
+
+        @Override public List<HazardCell> hazardsNear(BlockPos center, int radius) {
+            hazardsAskedAt = center;
+            hazardsAskedRadius = radius;
+            return hazards;
         }
     }
 

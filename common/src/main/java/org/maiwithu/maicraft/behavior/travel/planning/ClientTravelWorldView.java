@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.travel.planning;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.explore.ClientExplorationWorld;
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
@@ -49,6 +53,21 @@ public final class ClientTravelWorldView implements TravelWorldView {
         BlockPos feet = new BlockPos(x, y, z);
         if (!current.level().isLoaded(feet)) return true;
         return BlockPassability.isStandable(current.level(), feet);
+    }
+
+    // 目的地周围一圈逐格问"寻路为什么不踩它"，问得出原因的就是危险格；没加载的格读出来是空气，跳过。
+    @Override
+    public List<HazardCell> hazardsNear(BlockPos center, int radius) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null) return List.of();
+        List<HazardCell> found = new ArrayList<>();
+        for (BlockPos cell : BlockPos.betweenClosed(center.offset(-radius, -1, -radius), center.offset(radius, 1, radius))) {
+            if (!current.level().isLoaded(cell)) continue;
+            BlockState state = current.level().getBlockState(cell);
+            BlockPassability.whyNotStoodOn(current.level(), cell, state).ifPresent(why -> found.add(new HazardCell(
+                    cell.immutable(), BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), why)));
+        }
+        return found;
     }
 
     @Override

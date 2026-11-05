@@ -425,9 +425,8 @@ public interface MovementHelper extends ActionCosts, Helper {
         Block block = state.getBlock();
         return !state.getFluidState().isEmpty()
                 || (block == Blocks.MAGMA_BLOCK && !Baritone.settings().allowWalkOnMagmaBlocks.value)
-                || block == Blocks.CACTUS
-                || block == Blocks.SWEET_BERRY_BUSH
-                || block instanceof BaseFireBlock
+                // 火、仙人掌、甜浆果丛碰着就掉血：和走不通时点名的危险格读同一份。
+                || BlockPassability.hurtsToTouch(state)
                 || block == Blocks.END_PORTAL
                 || block == Blocks.COBWEB
                 || block == Blocks.BUBBLE_COLUMN

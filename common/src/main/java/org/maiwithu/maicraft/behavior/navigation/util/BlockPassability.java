@@ -5,6 +5,7 @@ package org.maiwithu.maicraft.behavior.navigation.util;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import java.util.function.Function;
+import java.util.Optional;
 
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.Container;
@@ -255,6 +256,11 @@ public final class BlockPassability {
     public static double halfHighTop(BlockGetter level, BlockPos pos, BlockState state) {
         if (isBottomSlab(state)) return BOTTOM_SLAB_TOP;
         if (burnsOrSummons(state)) return Double.NaN;
+        return flatTopWithinStep(level, pos, state);
+    }
+
+    // 只看碰撞外形：顶面平、盖满整格，高出薄层又不超过一步高；吃不吃亏另外认。
+    private static double flatTopWithinStep(BlockGetter level, BlockPos pos, BlockState state) {
         VoxelShape shape;
         try {
             shape = state.getCollisionShape(level, pos);
@@ -273,6 +279,24 @@ public final class BlockPassability {
     /** 只看方块状态的矮平顶顶高：外形不随位置变的方块（原版的都是）用它，算路缓存按状态记。 */
     public static double halfHighTop(BlockState state) {
         return halfHighTop(EmptyBlockGetter.INSTANCE, BlockPos.ZERO, state);
+    }
+
+    /** 碰着就掉血的方块：火、仙人掌、甜浆果丛。寻路不往里走，走不通时点名。 */
+    public static boolean hurtsToTouch(BlockState state) {
+        return state.getBlock() instanceof BaseFireBlock || state.is(Blocks.CACTUS) || state.is(Blocks.SWEET_BERRY_BUSH);
+    }
+
+    /**
+     * 这格寻路因为站上去、碰着要吃亏而不踩不进时，为什么：岩浆块烫脚；点着的营火这类本来能站的矮平顶会烧伤人；
+     * 能招来监守者的幽匿尖啸体；火、仙人掌、甜浆果丛碰着就掉血。别的方块（包括点着的熔炉这类本来就站不上去的）给空。
+     * 走不通时点名目的地旁边这些格，游戏 Agent 才知道可以先灭火、绕开或换目的地。
+     */
+    public static Optional<String> whyNotStoodOn(BlockGetter level, BlockPos pos, BlockState state) {
+        if (hurtsToStandOn(state)) return Optional.of("站上去烫脚");
+        if (hurtsToTouch(state)) return Optional.of("碰着就掉血");
+        if (!burnsOrSummons(state) || Double.isNaN(flatTopWithinStep(level, pos, state))) return Optional.empty();
+        boolean lit = state.hasProperty(BlockStateProperties.LIT) && state.getValue(BlockStateProperties.LIT);
+        return Optional.of(lit ? "点着了，站上去会烧伤" : "站上去会招来监守者");
     }
 
     // 站上去要吃亏的状态，按方块状态的属性认：点着的（营火这类）会烫人，能招来监守者的幽匿尖啸体。

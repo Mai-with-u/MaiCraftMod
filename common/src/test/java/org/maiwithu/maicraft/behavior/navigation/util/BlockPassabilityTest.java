@@ -29,6 +29,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -225,6 +226,30 @@ class BlockPassabilityTest {
         assertFalse(BlockPassability.hurtsToStandOn(Blocks.NETHERRACK.defaultBlockState()));
         assertFalse(BlockPassability.canWalkOn(world, new BlockPos(0, 64, 0)), "岩浆块不当地面");
         assertTrue(BlockPassability.canWalkOn(world, new BlockPos(2, 64, 0)), "下界岩照常能站");
+    }
+
+    @Test
+    void whyNotStoodOnNamesOnlyCellsSkippedForHarm() {
+        // 寻路因为吃亏才不踩的格给原因，走不通时点名；熄灭的营火、点着的熔炉（本来就站不上去）、石头给空。
+        Grid world = new Grid();
+        BlockPos at = new BlockPos(0, 64, 0);
+        assertEquals("站上去烫脚", why(world, at, Blocks.MAGMA_BLOCK.defaultBlockState()));
+        assertEquals("点着了，站上去会烧伤", why(world, at, Blocks.CAMPFIRE.defaultBlockState()));
+        assertEquals("站上去会招来监守者", why(world, at, Blocks.SCULK_SHRIEKER.defaultBlockState()
+                .setValue(BlockStateProperties.CAN_SUMMON, true)));
+        assertEquals("碰着就掉血", why(world, at, Blocks.FIRE.defaultBlockState()));
+        assertEquals("碰着就掉血", why(world, at, Blocks.CACTUS.defaultBlockState()));
+        assertEquals("碰着就掉血", why(world, at, Blocks.SWEET_BERRY_BUSH.defaultBlockState()));
+        assertNull(why(world, at, Blocks.CAMPFIRE.defaultBlockState().setValue(CampfireBlock.LIT, false)), "熄灭的营火");
+        assertNull(why(world, at, Blocks.FURNACE.defaultBlockState().setValue(BlockStateProperties.LIT, true)), "点着的熔炉");
+        assertNull(why(world, at, Blocks.SCULK_SHRIEKER.defaultBlockState()
+                .setValue(BlockStateProperties.CAN_SUMMON, false)), "玩家摆的尖啸体");
+        assertNull(why(world, at, Blocks.STONE.defaultBlockState()), "石头");
+    }
+
+    private static String why(Grid world, BlockPos at, BlockState state) {
+        world.put(at, state);
+        return BlockPassability.whyNotStoodOn(world, at, state).orElse(null);
     }
 
     private static final class Grid implements BlockGetter {
