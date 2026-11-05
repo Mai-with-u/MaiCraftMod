@@ -128,10 +128,12 @@ final class AcquisitionWiring {
         }
         // 清点身上几件时连穿着的护甲一起数：锻造台上升级好穿回身上的那件照样算拿到了。
         BackpackWithArmor carried = new BackpackWithArmor(deps.character().backpack(), deps.character().equipment());
+        // 来源装好一炉就走时，这一场拿东西当场收场：引擎、烧炼来源、obtain 看的是同一份留着烧的记录。
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 carried, deps.character().offhand(), deps.items().itemTags(),
-                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH, leftCooking);
         innerNeeds.attach(acquisition);
+        smeltSource.watchLeftCooking(leftCooking);
         // 备料不把外层正要的当原料用掉（不把做好的合金压成块），外层只看到最近一次备工具为止（为斧头可用身上的原木）。
         craftSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
@@ -145,7 +147,7 @@ final class AcquisitionWiring {
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
         return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
-                deps.items().itemTags(), ClientRegisteredIds.builtIn());
+                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking);
     }
 
     /**

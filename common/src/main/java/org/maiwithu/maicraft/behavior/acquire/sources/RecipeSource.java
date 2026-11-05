@@ -42,6 +42,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.sources.IngredientChoice;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
+import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.sources.TakesBackPlacedStation;
 import org.maiwithu.maicraft.behavior.acquire.sources.StationFallbacks;
 import org.maiwithu.maicraft.behavior.acquire.cook.SetsUpWorkstation;
@@ -59,7 +61,8 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsFuels;
  * 引擎按拿到几件、还差几件报部分完成，弄不来的原因一并交代；身上的料连一份都不够才以备料的原因失败。
  * 某样原料弄不来、身上连一份的量都没有时当场放弃这个做法，不再去弄其余原料（没有羊毛就不去砍做床板的木头）。
  * 一格收好几样的原料（给床换颜色要"别的颜色的任一张床"）身上有哪样用哪样，缺了挑最省的那样去弄。
- * 附近没有工作台、石切台、锻造台时就地摆一台，做完就挖回背包；熔炉要关着界面等它烧，放下就留着。
+ * 附近没有工作台、石切台、锻造台时就地摆一台，做完就挖回背包；熔炉放下就留着。obtain 这一场一炉要烧很久时
+ * 装好炉就走，回来再要同一样东西时先回留着烧的那台取，不先去备料，取完还缺的下一轮再按还差多少备。
  * 锻造台上要升级的那件背包里没有、身上正穿着时，先脱下来再升级（见 {@link TakesOffWornGear}）。
  */
 public final class RecipeSource implements ItemSource {
@@ -76,6 +79,8 @@ public final class RecipeSource implements ItemSource {
     private static final int MAX_VARIANTS = 12;
     /** 一趟最多做几份：分批做，料不够时中间件和最后一步交替用料，不把共用的料先全做成中间件。 */
     static final int MAX_CRAFTS_PER_RUN = 16;
+    /** 烧炼一趟最多烧几份：一炉，投入口一格放得下一组。 */
+    static final int COOKS_PER_RUN = 64;
     /** 现做时身上每缺一件原料报价加几格（和"说不准有没有"同一把尺子）：野外现成的床先拆回来，不先打三只羊做一张。 */
     public static final double SHORTFALL_BLOCKS_PER_ITEM = 32;
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
@@ -100,6 +105,8 @@ public final class RecipeSource implements ItemSource {
     private final IngredientChoice choice;
     /** 记得的工作站：挑哪台、烧炉子正忙时换哪几台。 */
     private final RememberedStations stations;
+    /** 装炉就走留下的那几台：回来再要同一样东西时先回那台；没接上时从来没留下过。 */
+    private FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE);
     /** 拿东西的引擎此刻在推进的那一串请求（外层在前）；没接上为空串。 */
     private Supplier<List<ItemRequest>> chain = List::of;
     /** 做法不拿来当原料的那段外层（外层在前，到最近一次备工具为止）；没单独接上时整串都算。 */
@@ -172,6 +179,11 @@ public final class RecipeSource implements ItemSource {
         this.outerWanted = Objects.requireNonNull(outerWanted, "outerWanted");
     }
 
+    /** 接上装炉就走留下的那几台：和烧炉子的动作记的是同一份。 */
+    public void watchLeftCooking(FurnacesLeftCooking leftCooking) {
+        this.leftCooking = Objects.requireNonNull(leftCooking, "leftCooking");
+    }
+
     @Override public AcquireVia via() {
         if (smithingOnly()) return AcquireVia.SMITH;
         return kinds.contains(WorkstationRecipe.Kind.CRAFTING) ? AcquireVia.CRAFT : AcquireVia.SMELT;
@@ -188,7 +200,17 @@ public final class RecipeSource implements ItemSource {
             return new SourceQuote.NotYet(describe(), "有做出" + request.wanted().describe()
                     + "的做法，但有的原料附近的方块还没扫完，这一刻排不出先做哪种");
         }
-        WorkstationRecipe recipe = ranked.candidates().getFirst();
+        // 装炉就走留下的那一炉还在烧：回来按那条配方、那台炉子报价，不先去备料，缺的原料不加价。
+        WorkstationRecipe recipe = ranked.candidates().stream().filter(candidate -> leftFor(candidate, context).isPresent())
+                .findFirst().orElse(ranked.candidates().getFirst());
+        Optional<LeftCooking> back = leftFor(recipe, context);
+        if (back.isPresent()) {
+            return new SourceQuote.Offer(describe(), request.count(),
+                    new AcquisitionCost(RememberedStations.distance(back.get().furnace(), context.characterAt()),
+                            6 + recipe.ingredients().size())
+                            .withWait(cookWait(recipe, timesNeeded(recipe, request.count()))),
+                    "回 " + back.get().where() + " 的" + recipe.kind().displayName() + "取留着烧的那一炉", recipe.id());
+        }
         // 身上缺几件原料就把先去弄它们的麻烦算进报价：缺料的做法排在现成的、近的来路后面。
         double shortfall = missingFor(recipe, request.count()) * SHORTFALL_BLOCKS_PER_ITEM;
         // 摆得进 2×2 的合成在背包合成格里做：不用找工作台，也不用先摆一个，新世界开局做木板、工作台就靠它。
@@ -238,6 +260,8 @@ public final class RecipeSource implements ItemSource {
                 .filter(candidate -> candidate.id().equals(offer.hint()))
                 .findFirst();
         if (recipe.isEmpty()) return List.of();
+        // 回留着烧的那台取：不先去备料，没有要先去弄的。
+        if (leftFor(recipe.get(), context).isPresent()) return List.of();
         int times = timesNeeded(recipe.get(), request.count());
         List<ItemRequest> missing = new ArrayList<>(new RecipeShortfall(recipe.get(), context, choice, needs, backpack,
                 offhand, tags, this::pick).stillMissing(times));
@@ -270,6 +294,8 @@ public final class RecipeSource implements ItemSource {
                 return run(variantsFor(same, now, request, context), same, request, context);
             }));
         }
+        // 回留着烧的那台取：就按那条配方，不换别的做法。
+        if (leftFor(recipe, context).isPresent()) return Optional.of(attempt(recipe, request, context));
         List<WorkstationRecipe> variants = variantsFor(recipe, candidates, request, context);
         // 排头两种原料一样近（多半是身上的 AE 终端这五分钟没开过，每种木头都报"看一眼"）：先打开看一眼再挑，
         // 不按配方表的顺序先试橡木、去砍附近的橡树。原先 AE 里堆着云杉原木，照样跑去砍橡树。
@@ -457,10 +483,18 @@ public final class RecipeSource implements ItemSource {
     // 照一种配方做的一整串：摆得进背包合成格的在背包里做，否则到设施上做（没有就先摆一个）。
     // 一次最多做 MAX_CRAFTS_PER_RUN 份，做完由引擎清点、还差再来：料不够时不会先把共用的料全做成中间件，
     // 最后一步没料可用（实机要 50 个大齿轮，13 根原木全做成了齿轮，只出了 1 个大齿轮）。
+    // 烧炼一趟最多一炉（一组）：装炉就走时一次装满一炉，回来取完再装下一炉。
     private Action attempt(WorkstationRecipe recipe, ItemRequest request, SourceContext context) {
-        int times = Math.min(timesNeeded(recipe, request.count()), MAX_CRAFTS_PER_RUN);
+        int times = Math.min(timesNeeded(recipe, request.count()), recipe.kind().cooks() ? COOKS_PER_RUN : MAX_CRAFTS_PER_RUN);
         if (inInventory(recipe)) {
             return assembleInInventory(recipe, times, context);
+        }
+        // 装炉就走留下的那一炉还在烧：先回那台取，不先去备料；取完、装上身上有的，还缺的下一轮按还差多少再备。
+        Optional<LeftCooking> back = leftFor(recipe, context);
+        if (back.isPresent()) {
+            return runs.runAtAnyOf(recipe, stations.nearestFirst(recipe.kind(), back.get().furnace(), context.characterAt()),
+                    times, context.permissions(), context.records(), context.leavesLongCooking())
+                    .orElseGet(() -> StationFallbacks.nothingToDo(recipe));
         }
         Optional<MemoryRecord> station = handyStation(recipe.kind(), context);
         return assemble(recipe, station.map(MemoryRecord::position).orElse(null), times, context);
@@ -553,7 +587,8 @@ public final class RecipeSource implements ItemSource {
             // 工作台、石切台站在跟前一口气做完：做完就把这台收回背包；熔炉要关着界面等它烧，放下就留着。
             AtomicReference<WorldPosition> placedAt = new AtomicReference<>();
             steps.addAll(placeSteps(recipe, permissions, placedAt));
-            Action run = shortfall.explaining(new RunsAtPlacedStation(runs, recipe, times, permissions, context.records()));
+            Action run = shortfall.explaining(new RunsAtPlacedStation(runs, recipe, times, permissions, context.records(),
+                    context.leavesLongCooking()));
             steps.add(recipe.kind().cooks() ? run : new TakesBackPlacedStation(run, recipe.kind(), placedAt,
                     permissions, context.records(), placer, memory, backpack, () -> CarriedItems.matching(backpack,
                             offhand, WantedItem.ofItem(recipe.kind().blockType()), tags)));
@@ -563,7 +598,7 @@ public final class RecipeSource implements ItemSource {
         // 烧炉子时把记得的同种炉子都按远近交过去：挑中的那台点开发现在烧别人的东西，关上换下一台。
         Optional<Action> run = recipe.kind().cooks()
                 ? runs.runAtAnyOf(recipe, stations.nearestFirst(recipe.kind(), station, context.characterAt()), times,
-                        permissions, context.records())
+                        permissions, context.records(), context.leavesLongCooking())
                 : runs.run(recipe, station, times, permissions, context.records());
         if (run.isEmpty()) {
             // 备齐了也动不了手（设施没了、界面进不去）：整串放弃，由引擎换别的路。
@@ -676,6 +711,18 @@ public final class RecipeSource implements ItemSource {
                         .withWait(cookWait(recipe, timesNeeded(recipe, count))),
                 "附近没有" + recipe.kind().displayName() + placing,
                 recipe.id());
+    }
+
+    // 装炉就走留下、还在烧这条配方的那一台（这一维度里，近的先）；没有为空。炉子已经不在了的划掉，不往那儿跑。
+    private Optional<LeftCooking> leftFor(WorkstationRecipe recipe, SourceContext context) {
+        if (!recipe.kind().cooks()) return Optional.empty();
+        WorldPosition at = context.characterAt();
+        for (LeftCooking gone : leftCooking.cooking(recipe.result().itemId(), at.dimension())) {
+            if (placer != null && placer.gone(gone.furnace(), recipe.kind().blockType())) leftCooking.collected(gone.furnace());
+        }
+        return leftCooking.cooking(recipe.result().itemId(), at.dimension()).stream()
+                .filter(cooking -> cooking.recipeId().equals(recipe.id()))
+                .min(Comparator.comparingDouble(cooking -> RememberedStations.distance(cooking.furnace(), at)));
     }
 
     private int timesNeeded(WorkstationRecipe recipe, int count) {

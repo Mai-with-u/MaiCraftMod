@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.CookingLeftBehind;
 import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -76,6 +77,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     private final ReadsCharacterPosition position;
     private final Optional<InventorySpace> space;
     private final int maxDepth;
+    /** 拿东西途中有没有装好一炉就走：每推进一步看一眼，这一步留下了就整场收场。 */
+    private final CookingLeftBehind cookingLeft;
     /** 估算：只问价不拿，和动手时同一套挑路。 */
     private final AcquisitionEstimates estimates;
     /** 问价不拿：来源排做法先后、挑可以互换的原料时用；动手问一轮价时由它记着这一轮问过的原料价、记下问价的账。 */
@@ -106,6 +109,14 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      */
     public ItemAcquisition(List<ItemSource> sources, BackpackView backpack, OffhandContents offhand,
             ReadsItemTags tags, ReadsCharacterPosition position, Optional<InventorySpace> space, int maxDepth) {
+        this(sources, backpack, offhand, tags, position, space, maxDepth, CookingLeftBehind.NONE);
+    }
+
+    /** 同上，再接上装炉就走的记录：来源装好一炉就走时，这一场拿东西当场收场。 */
+    public ItemAcquisition(List<ItemSource> sources, BackpackView backpack, OffhandContents offhand,
+            ReadsItemTags tags, ReadsCharacterPosition position, Optional<InventorySpace> space, int maxDepth,
+            CookingLeftBehind cookingLeft) {
+        this.cookingLeft = cookingLeft;
         this.sources = List.copyOf(sources);
         this.backpack = backpack;
         this.offhand = offhand;
@@ -220,14 +231,21 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * @param vias            允许的途径（来源自报的门户）；空集合表示除了只有点名才做的（交易）全部参与
      * @param maxDistanceBlocks 愿意为此走多远（格）；来源报的距离超过它的不参与
      * @param radiusBlocks      容器与采掘的搜索半径（格）；传给来源，给了就不越界
+     * @param leavesLongCooking 一炉要烧很久时能不能装好炉就走、到点回来取：obtain 打开，连同它备料的每一层都这样；
+     *                          别的能力途中缺料去拿不打开，照旧在炉边等
      */
-    public record Scope(Set<String> vias, Double maxDistanceBlocks, Integer radiusBlocks) {
+    public record Scope(Set<String> vias, Double maxDistanceBlocks, Integer radiusBlocks, boolean leavesLongCooking) {
 
-        /** 什么都不限：问遍所有来源，按代价挑。 */
+        /** 什么都不限：问遍所有来源，按代价挑；一炉再久也在炉边等。 */
         public static final Scope ALL = new Scope(Set.of(), null, null);
 
         public Scope {
             vias = Set.copyOf(vias);
+        }
+
+        /** 不装炉就走的限定：一炉再久也在炉边等。 */
+        public Scope(Set<String> vias, Double maxDistanceBlocks, Integer radiusBlocks) {
+            this(vias, maxDistanceBlocks, radiusBlocks, false);
         }
 
         /** 这条途径这次能不能参与：点名了只走点名的；没点名时按代价自己挑，只有点名才做的（交易）不参与。 */
@@ -343,6 +361,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final UnreachablePlaces unreachable = new UnreachablePlaces();
         /** 当前来源动手前记着几处走不到的地方：多了就是这一步败在走不到跟前。 */
         private int unreachableAtStepStart;
+        /** 当前来源动手前一共装炉就走过几回：多了就是这一步留下了一炉。 */
+        private int leftAtStepStart;
         /** 这一场没拿到的经过，失败时定下；交给外层的就是它。 */
         private Shortage shortage;
         private Stage stage = Stage.CONSULT;
@@ -575,7 +595,9 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、重新问价换下一个；只坏在现场几处的不划，换别处接着拿。
         private ActionStatus runStep(TickContext tick) {
-            return switch (step.tick(tick)) {
+            ActionStatus status = step.tick(tick);
+            if (cookingLeft.timesLeft() > leftAtStepStart) return leftCooking();
+            return switch (status) {
                 case ActionStatus.Running running -> running;
                 case ActionStatus.Done done -> {
                     // 来源动作里点了但没能确认结果的交互先交回，白跑与失败的归并都不吞掉它。
@@ -617,6 +639,19 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             };
         }
 
+        // 这一步里装好了一炉就走：东西还在炉子里烧着，整场当场收场，不再换别的路（换路去弄是白跑一趟）。
+        // 备料的里层留下的也一样，外层看到留下过就跟着收场，手上没做完的这一步收掉。这一步里已经进包的照记途径。
+        private ActionStatus leftCooking() {
+            step.close();
+            forwardUnconfirmed();
+            if (onDelivered != null && CarriedItems.matching(backpack, offhand, request, tags) > carriedAtStepStart) {
+                onDelivered.accept(stepSourceVia);
+            }
+            step = null;
+            stage = Stage.CONSULT;
+            return ActionStatus.failed(cookingLeft.lastLeft());
+        }
+
         // 这一趟要的东西一件没进包时，别的进了什么：挖了掉的、打了掉的不是要的东西，照实写给 LLM 改线索或换做法；
         // 什么都没进为空。
         private String otherGains() {
@@ -648,8 +683,11 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         }
 
         private ActionStatus startStep() {
+            // 能不能装炉就走看最外层那一场：obtain 打开的，备料的每一层都跟着。
+            Run outermost = advancing.peekLast();
+            boolean leaves = (outermost == null ? scope : outermost.scope).leavesLongCooking();
             SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
-                    scope.maxDistanceBlocks(), bookedRecords(), alsoWanted.remaining(), digTool, unreachable());
+                    scope.maxDistanceBlocks(), bookedRecords(), alsoWanted.remaining(), digTool, unreachable(), leaves);
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
@@ -669,6 +707,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             carriedAtStepStart = CarriedItems.matching(backpack, offhand, request, tags);
             carriedByItemAtStepStart = CarriedItems.byItem(backpack, offhand);
             unreachableAtStepStart = unreachable().size();
+            leftAtStepStart = cookingLeft.timesLeft();
             forwardedFacts = 0;
             stage = Stage.RUN;
             // 起了一步还没有世界效果；走没走动、拿没拿到由这一步自己的推进状态如实报告。

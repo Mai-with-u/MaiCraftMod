@@ -7,7 +7,10 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
@@ -31,6 +34,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 一次要几样时引擎逐样推进；哪一样走在路上被开箱顺手拿到了，就不再为它单独去弄。
  * 引擎做完算拿到；引擎认输时，这次已经拿到几件照实结算——
  * 部分拿到是 partial 加还差几件，一件没拿到才是失败，两条路不混淆。
+ * 一炉要烧很久、装好炉先走了的，东西在炉子里烧着：一件都还没进包也是 partial，结果里逐台写留着烧的那一炉。
  */
 final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
 
@@ -52,10 +56,21 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     private final Map<String, Map<String, Integer>> byItemAtStart = new LinkedHashMap<>();
     /** 实际拿到东西的途径，按拿到先后排，一条不重复。 */
     private final Set<String> obtainedVia = new LinkedHashSet<>();
+    /** 装炉就走留下的那几台：开场记下回数，收场时挑出这一场留下的。 */
+    private final FurnacesLeftCooking leftCooking;
+    /** 开场时一共装炉就走过几回：收场时比它多出来的就是这一场留下的。 */
+    private int leftMark;
 
+    /** 不接装炉就走的记录：从来没留下过一炉。 */
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
+        this(input, acquisition, backpack, offhand, tags, new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
+    }
+
+    ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
+            OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking) {
         super("拿东西", Phase.COUNT, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
+        this.leftCooking = leftCooking;
         this.input = input;
         this.acquisition = acquisition;
         this.backpack = backpack;
@@ -81,6 +96,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
 
     // 先逐样记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
+        leftMark = leftCooking.timesLeft();
         int total = 0;
         int wanted = 0;
         for (ItemRequest request : input.requests()) {
@@ -121,6 +137,10 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
                 missing.add("还差 " + (request.count() - Math.max(0, gained)) + " 个" + request.wanted().describe());
             }
         }
+        List<LeftCooking> left = failure == null ? List.of() : leftCooking.since(leftMark);
+        if (!left.isEmpty()) {
+            return settleLeftCooking(left, parts, missing, failure);
+        }
         if (failure == null) {
             String got = parts.isEmpty()
                     ? "拿到了：这次经 " + viaText()
@@ -140,6 +160,27 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
                     .details(details()).build());
         }
         return Next.fail(failure);
+    }
+
+    // 装好炉先走了：东西在炉子里烧着，一件都还没进包也是 partial，不算失败。结论句说拿到了什么、几炉留着烧、
+    // 约几分钟后回来取；问题按"还没到取的时候"讲清每一炉和到点怎么做（一次要几样、别的那样另有原因时照原样交，
+    // 里面已经写着这一炉）；details.left_cooking 逐台给数。
+    private Next<Phase> settleLeftCooking(List<LeftCooking> left, List<String> parts, List<String> missing,
+            Problem failure) {
+        long minutes = left.stream().mapToLong(LeftCooking::readyInMinutes).min().orElse(1);
+        String got = parts.isEmpty() ? "还没拿到" : "部分拿到：经 " + viaText() + " 拿到 " + String.join("、", parts);
+        String where = left.size() == 1 ? "一炉留在" + left.getFirst().kind().displayName() + "里烧"
+                : left.size() + " 炉留在炉子里烧";
+        Problem problem = failure.kind() != Problem.Kind.WRONG_TIME ? failure
+                : Problem.of(Problem.Kind.WRONG_TIME,
+                        "装好炉先走了：" + left.stream().map(LeftCooking::sentence).collect(Collectors.joining("；")),
+                        left.stream().map(LeftCooking::suggestion).collect(Collectors.joining("；")));
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                        got + "；" + where + "，约 " + minutes + " 分钟后回来取")
+                .problem(problem)
+                .remaining(List.copyOf(missing))
+                .details(new ObtainedVia(List.copyOf(obtainedVia), left.stream().map(ObtainedVia.LeftFurnace::of).toList()))
+                .build());
     }
 
     // 这一样拿到几件的写法：要的是一类（标签）时括号里说清拿到的是哪几样。

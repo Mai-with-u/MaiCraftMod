@@ -14,6 +14,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
+import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -67,6 +68,8 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
     private final ReadsItemTags tags;
     /** 方块与实体注册了哪些 ID：掉落线索按它分出方块与生物，写错的给相近的名字。 */
     private final ReadsRegisteredIds registeredIds;
+    /** 装炉就走留下的那几台：obtain 收场时挑出这一场留下的，写进结果。 */
+    private final FurnacesLeftCooking leftCooking;
 
     /**
      * @param vias 登记的来源自报的途径，按来源顺序、去重：via 的可选值与说明从它生成，
@@ -74,6 +77,15 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
      */
     public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds) {
+        this(acquisition, vias, registry, backpack, offhand, tags, registeredIds,
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
+    }
+
+    /** 同上，再接上装炉就走留下的那几台：和烧炉子的动作、拿东西的引擎记的是同一份。 */
+    public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
+            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds,
+            FurnacesLeftCooking leftCooking) {
+        this.leftCooking = Objects.requireNonNull(leftCooking, "leftCooking");
         this.acquisition = acquisition;
         this.vias = List.copyOf(Objects.requireNonNull(vias, "vias"));
         if (this.vias.isEmpty()) throw new IllegalArgumentException("拿东西至少要有一条途径");
@@ -287,7 +299,7 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(ObtainItems.class, input ->
-                new ObtainTask(input, acquisition, backpack, offhand, tags));
+                new ObtainTask(input, acquisition, backpack, offhand, tags, leftCooking));
     }
 
     /** 每条途径一句说明，写进参数表：craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来…… */
@@ -322,11 +334,14 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
                 .collect(Collectors.joining("、"));
     }
 
-    /** 把 via、radius、max_distance 换成引擎认的限定；via 没给就是全部途径都参与。 */
+    /**
+     * 把 via、radius、max_distance 换成引擎认的限定；via 没给就是全部途径都参与。
+     * obtain 这一场一炉要烧一分钟以上就装好炉先走、到点回来取，不在炉边守着。
+     */
     private ItemAcquisition.Scope scope(ParamValues params) {
         Set<String> vias = params.has("via") ? Set.of(params.text("via")) : Set.of();
         Double maxDistance = params.has("max_distance") ? Double.valueOf(params.integer("max_distance")) : null;
         Integer radius = params.has("radius") ? Integer.valueOf((int) params.integer("radius")) : null;
-        return new ItemAcquisition.Scope(vias, maxDistance, radius);
+        return new ItemAcquisition.Scope(vias, maxDistance, radius, true);
     }
 }

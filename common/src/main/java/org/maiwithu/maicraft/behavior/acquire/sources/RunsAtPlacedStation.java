@@ -24,21 +24,24 @@ final class RunsAtPlacedStation implements Action {
     private final Permissions permissions;
     /** 发起任务的记账口；null 表示这次不记。 */
     private final TaskRecords records;
+    /** 一炉要烧很久时能不能装好炉就走：只有 obtain 这一场能。 */
+    private final boolean leavesLongCooking;
     /** 认出位置后在那台设施上做的动作；还没认出为 null。 */
     private Action run;
 
     RunsAtPlacedStation(RecipeRuns runs, WorkstationRecipe recipe, int times, Permissions permissions,
-            TaskRecords records) {
+            TaskRecords records, boolean leavesLongCooking) {
         this.runs = runs;
         this.recipe = recipe;
         this.times = times;
         this.permissions = permissions;
         this.records = records;
+        this.leavesLongCooking = leavesLongCooking;
     }
 
     @Override public ActionStatus tick(TickContext tick) {
         if (run == null) {
-            run = runs.runAtRememberedStation(recipe, times, permissions, records).orElse(null);
+            run = runs.runAtRememberedStation(recipe, times, permissions, records, leavesLongCooking).orElse(null);
             if (run == null) {
                 return ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         recipe.kind().displayName() + "摆下了，但记忆里没有它的位置，做不了"
