@@ -660,6 +660,21 @@ class MiningSourceTest {
     }
 
     @Test
+    void 正在为做木斧砍木头_身上没有原木_不再套一层备斧头_徒手砍() {
+        // 身上没有原木，为做木斧去砍木头：旁边看得见石头也不再先要石斧或木斧，徒手把木头砍来。
+        FakeDigs digs = new FakeDigs();
+        List<MinableSpot> spots = new ArrayList<>(tree(6));
+        spots.add(new MinableSpot(new BlockPos(5, 63, 0), "minecraft:stone", "minecraft:cobblestone"));
+        MiningSource source = source(new FakeMinables(spots, true), digs);
+        source.prepareWorkTools(axeFirst(0),
+                () -> List.of(new ItemRequest(WantedItem.ofItem("minecraft:wooden_axe"), 1, "成批采掘前先备一把顺手的工具")));
+        runAll(source.begin(new ItemRequest(WantedItem.ofItem("minecraft:oak_log"), 6, "做木斧的木板"),
+                new SourceQuote.Offer("采掘", 6, new AcquisitionCost(3, 6), null), CONTEXT).orElseThrow());
+        assertTrue(needs.asked.isEmpty(), "不为做斧头再要斧头");
+        assertEquals(6, digs.dug.size());
+    }
+
+    @Test
     void 斧头备不来照样徒手砍() {
         FakeDigs digs = new FakeDigs();
         ItemNeeds failing = new ItemNeeds() {

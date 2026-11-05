@@ -248,7 +248,7 @@ public final class MiningSource implements ItemSource {
             // 挖得动但成批干：先备一把石制工具（砍一片树先做石斧，拿木镐挖石头先换石镐）。开局什么都没有时
             // 先徒手弄够做第一把工具的料（这一趟只挖那几件，引擎清点后再来，那时去备工具）；正在为做这把工具
             // 挖料时不再要求先有它。工具只是建议：备不来照样徒手干。
-            Optional<String> workTool = workTools.toolFor(blockType, request.count()).filter(tool -> !inChain(tool));
+            Optional<String> workTool = workTools.toolFor(blockType, request.count()).filter(tool -> !makingKindOf(tool));
             if (workTool.isPresent()) {
                 int bootstrap = workTools.bootstrap(blockType);
                 if (bootstrap > 0) {
@@ -605,6 +605,11 @@ public final class MiningSource implements ItemSource {
     }
 
     // 引擎正在推进的请求里已经有要这把工具的（正在为做它挖料）：不再先要它，免得为做斧头先要斧头。
+    // 正在为做这一类工具攒料（基准的那把，或者改备的同类木制的）：不再先要它，徒手干，不一层套一层地为斧头砍树。
+    private boolean makingKindOf(String reference) {
+        return inChain(reference) || WorkTools.stoneTier(reference) && inChain(WorkTools.woodenOf(reference));
+    }
+
     private boolean inChain(String toolId) {
         for (ItemRequest outer : chain.get()) {
             if (outer.wanted().matches(toolId, Set.of())) return true;
