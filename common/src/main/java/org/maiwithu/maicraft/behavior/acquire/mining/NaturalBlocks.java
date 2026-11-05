@@ -44,6 +44,7 @@ import net.minecraft.world.level.block.VineBlock;
 import net.minecraft.world.level.block.WaterlilyBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 
 /**
  * 地图上自然生成的方块。路上挡着时能挖开的（{@link #wildAt}）：天然地形（土石沙砾冰雪、矿石，含模组的地层石头；
@@ -52,7 +53,8 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
  * 机器零件、机壳、房子的木板砖块玻璃、平台、刷石机的圆石这些搭出来的一律不拆，不管是自己搭的还是地图上本来就有的；
  * 缺料先从 AE、箱子拿，再去挖天然的。
  *
- * <p>地形按方块标签认，草木按方块类别认（模组的花草多半继承原版的草木类别），都不写方块 ID 名单。
+ * <p>地形按方块标签认，再加上这个世界的世界生成往地上铺的实心方块（服务端报的清单，只往里加）；
+ * 草木按方块类别认（模组的花草多半继承原版的草木类别），都不写方块 ID 名单。
  */
 public final class NaturalBlocks {
 
@@ -78,10 +80,14 @@ public final class NaturalBlocks {
 
     private NaturalBlocks() {}
 
-    /** 这一格是不是地图上自然长出来的、缺材料时能挖的。 */
+    /**
+     * 这一格是不是地图上自然长出来的、缺材料时能挖的。
+     *
+     * @param generated 这个世界的世界生成铺的地形方块；读不到时传 {@link GeneratedTerrain#NONE}
+     */
     public static boolean grown(BlockState state, BlockPos pos, BlockGetter level, Predicate<BlockPos> loaded,
-            Map<BlockPos, Boolean> trunks) {
-        if (wildAt(state, pos, level, loaded, trunks)) return true;
+            Map<BlockPos, Boolean> trunks, GeneratedTerrain generated) {
+        if (wildAt(state, pos, level, loaded, trunks, generated)) return true;
         // 缺材料时还能采、路上不随手挖的天然方块：挨着传送门的黑曜石是门框，不算（拆了门就没了）。
         if (state.is(Blocks.OBSIDIAN)) return !touchesPortal(pos, level, loaded);
         return state.getBlock() instanceof PumpkinBlock || state.is(Blocks.MELON)
@@ -96,10 +102,11 @@ public final class NaturalBlocks {
      * @param world  读这一格周围的方块（算路在后台线程上读它自己那份）
      * @param loaded 哪些格读得到
      * @param trunks 一次算路里查过的树干（键是树干顶），同一棵树不重复数叶子
+     * @param generated 这个世界的世界生成铺的地形方块
      */
     public static boolean wildAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
-            Map<BlockPos, Boolean> trunks) {
-        if (terrain(state)) return true;
+            Map<BlockPos, Boolean> trunks, GeneratedTerrain generated) {
+        if (terrain(state, generated)) return true;
         // 树叶、原木按长没长在树上认，模组的也算：实机在 BOP 冷杉林里缺原木，冷杉树叶挖不开，一千多个站位全被树叶挡住。
         if (state.getBlock() instanceof LeavesBlock) {
             return !(state.hasProperty(LeavesBlock.PERSISTENT) && state.getValue(LeavesBlock.PERSISTENT));
@@ -113,9 +120,11 @@ public final class NaturalBlocks {
      * 天然地形，只看方块种类：土石沙砾、陶瓦、下界岩与菌岩、末地石、冰雪、矿石、滴水石锥；下界的岩浆块（Y27–36 成团）、
      * 萤石（挂在洞顶）、巨型菌的菌盖（疣块、菌光体）。模组的地层石头（机械动力的辉绿岩、赭金岩这类）不在原版石头标签里，
      * 但会登记进"幽匿块能长上去""洞穴里长苔藓、长滴水石"这几个地形生成用的标签，照样认得出来。
+     * 标签之外，这个世界的世界生成往地上铺的实心方块也算（火山群系的黑沙岩这类哪个地形标签都没登记的）；
+     * 神殿里切制、錾制的沙岩世界生成不铺，照旧不算。基岩这类挖不动的也会算进来，挖不挖得动由硬度另外拦。
      */
-    public static boolean terrain(BlockState state) {
-        return state.is(ORES) || state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)
+    public static boolean terrain(BlockState state, GeneratedTerrain generated) {
+        return generated.laid(state) || state.is(ORES) || state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)
                 || state.is(BlockTags.DIRT) || state.is(BlockTags.SAND) || state.is(BlockTags.TERRACOTTA)
                 || state.is(BlockTags.NYLIUM) || state.is(BlockTags.SCULK_REPLACEABLE)
                 || state.is(BlockTags.DRIPSTONE_REPLACEABLE) || state.is(BlockTags.MOSS_REPLACEABLE)

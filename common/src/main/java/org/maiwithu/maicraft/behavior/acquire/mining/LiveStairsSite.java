@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.navigation.FillerPlacement;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -41,14 +42,18 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
     private final ClientMovesToMainhand toMainhand;
     /** 要留的东西：填空洞只垫多出来的废料；只读现场时为空。 */
     private final ItemsToKeep keeps;
+    /** 这个世界的世界生成铺的地形方块：搭出来的不为挖楼梯拆，这些算地里本来就有的。 */
+    private final GeneratedTerrain generated;
 
     /** 只读现场、只走不垫（往上挖楼梯用）。 */
-    public LiveStairsSite(WalkTo walks) {
-        this(walks, null, null, null);
+    public LiveStairsSite(WalkTo walks, GeneratedTerrain generated) {
+        this(walks, null, null, null, generated);
     }
 
     /** 往下挖楼梯用：下一级脚下空着时能垫一块。 */
-    public LiveStairsSite(WalkTo walks, Interactions interactions, ClientMovesToMainhand toMainhand, ItemsToKeep keeps) {
+    public LiveStairsSite(WalkTo walks, Interactions interactions, ClientMovesToMainhand toMainhand, ItemsToKeep keeps,
+            GeneratedTerrain generated) {
+        this.generated = Objects.requireNonNull(generated, "generated");
         this.walks = Objects.requireNonNull(walks, "walks");
         this.interactions = interactions;
         this.toMainhand = toMainhand;
@@ -97,7 +102,7 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
             return ClientStairsDown.Ground.FACILITY;
         }
         // 搭出来的（平台、地板、机器垫着的那层）不为挖楼梯拆：站在主城平台上要石头，不从平台往下挖穿。
-        if (!NaturalBlocks.grown(state, cell, level, level::isLoaded, new HashMap<>())) {
+        if (!NaturalBlocks.grown(state, cell, level, level::isLoaded, new HashMap<>(), generated)) {
             return ClientStairsDown.Ground.BUILT;
         }
         return ClientStairsDown.Ground.DIGGABLE;

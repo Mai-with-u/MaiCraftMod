@@ -26,12 +26,14 @@ import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalTrees;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * 寻路挖路与施工清场共用的"路上能挖开哪些方块"：天然地形、自然长的树叶、长在树上的原木、野生草木
- * （按标签和方块类别认，见 {@link NaturalBlocks#wildAt}），再加上这个实例在配置文件里额外列的方块或标签。
+ * （按标签和方块类别认，见 {@link NaturalBlocks#wildAt}；地形还认这个世界的世界生成往地上铺的方块），
+ * 再加上这个实例在配置文件里额外列的方块或标签。
  * 不依赖服务端安装本模组。替换许可、流体和保护格仍由各执行段另行核验。
  */
 public final class ClearanceWhitelist {
@@ -91,12 +93,20 @@ public final class ClearanceWhitelist {
                 LOG.info("[clearance] {} 里有 {} 条旧版默认条目不再起作用：地形和草木改按标签与类别认，"
                         + "火把、黑曜石、南瓜这些不再默认挖开", file, rules.legacyIgnored());
             }
-            CURRENT.set(rules);
+            CURRENT.set(rules.withGenerated(CURRENT.get().generated()));
         } catch (IOException | RuntimeException invalid) {
-            CURRENT.set(Rules.NONE_EXTRA);
+            CURRENT.set(Rules.NONE_EXTRA.withGenerated(CURRENT.get().generated()));
             LOG.warn("[clearance] {} 读不出来（{}），按没有额外条目处理：天然方块照常挖开，文件里列的不生效",
                     file, invalid.getMessage());
         }
+    }
+
+    /**
+     * 进世界时换上这个世界的世界生成铺的地形方块：算路线程读的是同一份规则，配置文件里额外列的照旧。
+     * 下一个世界进来时再换；服务端没报时换成 {@link GeneratedTerrain#NONE}，只按标签认。
+     */
+    public static void useGeneratedTerrain(GeneratedTerrain generated) {
+        CURRENT.updateAndGet(rules -> rules.withGenerated(generated));
     }
 
     /**
@@ -105,8 +115,9 @@ public final class ClearanceWhitelist {
      */
     public static boolean allows(BlockState state) {
         if (state.isAir()) return true;
-        return NaturalBlocks.terrain(state) || NaturalBlocks.wildPlant(state)
-                || state.getBlock() instanceof LeavesBlock || NaturalTrees.isLog(state) || CURRENT.get().extra(state);
+        Rules rules = CURRENT.get();
+        return NaturalBlocks.terrain(state, rules.generated()) || NaturalBlocks.wildPlant(state)
+                || state.getBlock() instanceof LeavesBlock || NaturalTrees.isLog(state) || rules.extra(state);
     }
 
     /**
@@ -121,7 +132,7 @@ public final class ClearanceWhitelist {
     public static boolean allowsAt(BlockState state, BlockPos pos, BlockGetter world, Predicate<BlockPos> loaded,
             Map<BlockPos, Boolean> trunks) {
         if (state.isAir()) return true;
-        if (NaturalBlocks.wildAt(state, pos, world, loaded, trunks)) return true;
+        if (NaturalBlocks.wildAt(state, pos, world, loaded, trunks, CURRENT.get().generated())) return true;
         // 实例额外列了黑曜石也不拆门框：挨着传送门的是门的一部分，拆了门就没了。
         // 实机 10-14 进门失败后为了自己建门去挖黑曜石，把旁边那扇亮着的门框整个拆了。
         if (state.is(Blocks.OBSIDIAN) && NaturalBlocks.touchesPortal(pos, world, loaded)) return false;
@@ -151,14 +162,19 @@ public final class ClearanceWhitelist {
                 blocks.add(id);
             }
         }
-        return new Rules(Set.copyOf(blocks), Set.copyOf(tags), legacy);
+        return new Rules(Set.copyOf(blocks), Set.copyOf(tags), legacy, GeneratedTerrain.NONE);
     }
 
     /**
-     * 实例的清障配置：额外能挖的方块和标签、旧版默认条目跳过了几条。
+     * 清障规则：实例配置里额外能挖的方块和标签、旧版默认条目跳过了几条，以及当前世界的世界生成铺的地形方块。
      */
-    record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags, int legacyIgnored) {
-        static final Rules NONE_EXTRA = new Rules(Set.of(), Set.of(), 0);
+    record Rules(Set<ResourceLocation> blocks, Set<TagKey<Block>> tags, int legacyIgnored, GeneratedTerrain generated) {
+        static final Rules NONE_EXTRA = new Rules(Set.of(), Set.of(), 0, GeneratedTerrain.NONE);
+
+        /** 换成另一个世界的世界生成铺的地形方块，配置里的条目不动。 */
+        Rules withGenerated(GeneratedTerrain next) {
+            return new Rules(blocks, tags, legacyIgnored, next);
+        }
 
         /** 这个方块是不是实例额外列出来能挖的。 */
         boolean extra(BlockState state) {

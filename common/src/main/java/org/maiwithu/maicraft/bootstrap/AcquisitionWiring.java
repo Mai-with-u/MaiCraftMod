@@ -76,7 +76,7 @@ final class AcquisitionWiring {
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         MenuRecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
                 recipeReads, deps.world().memory(), deps.character().context());
-        ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context());
+        ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context(), deps.world().generatedTerrain());
         // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects);

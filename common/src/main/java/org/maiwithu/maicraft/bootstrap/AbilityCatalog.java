@@ -362,7 +362,8 @@ public final class AbilityCatalog {
     /** 往下挖楼梯的现场部件：拿到物品在看不见石头时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
     private static ClientStairsDown stairsDown(Deps deps, Shared shared) {
         return new ClientStairsDown(
-                new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(), shared.toMainhand(), deps.kept()),
+                new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(), shared.toMainhand(), deps.kept(),
+                        deps.world().generatedTerrain()),
                 shared.digging(), shared.drops(), shared.permission());
     }
 
@@ -464,7 +465,7 @@ public final class AbilityCatalog {
         // 读现场按这一刻的客户端世界读：看不看得见与观察同一套遮挡，自己放的问这个世界的保护判断。
         BuildingRecords buildings = buildingRecords(deps);
         registry.register(new DesignModule(designs, anchors, deps.preview(), schematics, buildings,
-                new LiveSiteCells(deps.character().context(), deps.guards().protection())));
+                new LiveSiteCells(deps.character().context(), deps.guards().protection(), deps.world().generatedTerrain())));
         registry.register(new BuildModule(designs, anchors, schematics, construction, buildings));
     }
 
@@ -577,7 +578,8 @@ public final class AbilityCatalog {
                         new SceneSeenTargets(deps.world()::scene)),
                 deps.travel().walkInternals(), deps.travel().travelProgress(), portals,
                 deps.travel().travelWorld(), VehicleWiring.travelModes(deps, services, portals),
-                new ClientStairsUp(new LiveStairsSite(deps.travel().walks()), shared.digging(), permission),
+                new ClientStairsUp(new LiveStairsSite(deps.travel().walks(), deps.world().generatedTerrain()),
+                        shared.digging(), permission),
                 stairsDown(deps, shared), new RememberedCaveEntrances(deps.world().memory())));
 
         registerFind(registry, deps, shared);

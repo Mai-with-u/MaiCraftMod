@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.construction.ShowsPreview;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -144,7 +145,7 @@ final class OfflineCatalog {
                             @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
                             @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
                         },
-                        new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE),
+                        new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE, GeneratedTerrain.NONE),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary()),
                         new LiveDigToolRule(ItemsToKeep.NOTHING, blockId -> true)),

@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.UseKeyProjection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
+import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.ClientVillagers;
 import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
@@ -75,6 +76,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.maiwithu.maicraft.game.world.KeepInventoryRule;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.game.world.RespawnPoint;
@@ -235,6 +237,7 @@ public final class WorldScope {
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
         // 死亡不掉落：单人读本机，连服务器读服务端握手时报的（改了再推）；寻死、寻死出路和 observe(self) 读同一份。
         this.keepInventory = new KeepInventoryRule(() -> session.capabilities().keepInventory());
+        GeneratedTerrain generatedTerrain = generatedTerrain(session);
         this.suicideWayOut = new LiveSuicideWayOut(now, keepInventory);
         this.menus = new MenuView.Reads(new ClientOpenScreenReads(now, compat.menuLayouts()), new ClientTradeMenuReads(now));
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
@@ -257,7 +260,7 @@ public final class WorldScope {
                         LiveCarryReads.characterPosition(now), suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
-                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal),
+                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
@@ -290,6 +293,13 @@ public final class WorldScope {
             LOG.warn("旧版本存下的世界记忆搬不过来，这次从空记忆开始，下次进来再试", failure);
             return newWorld || save.legacyKey() == null ? save.key() : save.legacyKey();
         }
+    }
+
+    // 世界生成铺的地形方块：现场等握手认出世界才建，这时欢迎包已经到了；按它建一份，换上寻路清障，采掘与挖楼梯也读这一份。
+    private static GeneratedTerrain generatedTerrain(ServerLinkSession session) {
+        GeneratedTerrain generated = GeneratedTerrain.reported(session.capabilities().generatedTerrain());
+        ClearanceWhitelist.useGeneratedTerrain(generated);
+        return generated;
     }
 
     /**

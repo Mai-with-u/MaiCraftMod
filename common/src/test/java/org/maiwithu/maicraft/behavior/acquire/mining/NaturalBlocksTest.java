@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
@@ -28,8 +29,12 @@ import net.minecraft.world.level.block.state.BlockBehaviour;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.material.FluidState;
+import baritone.utils.ToolSet;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 
 /**
  * 缺材料时只挖地图上自然长的：石头、矿、树上的原木、野生草木算；圆石墙、木板、刷石机里的圆石这些搭出来的不算。
@@ -88,7 +93,7 @@ class NaturalBlocksTest {
     private static boolean grown(World world, BlockState state, int x, int y, int z) {
         BlockPos pos = new BlockPos(x, y, z);
         world.put(x, y, z, state);
-        return NaturalBlocks.grown(state, pos, world, ignored -> true, new HashMap<>());
+        return NaturalBlocks.grown(state, pos, world, ignored -> true, new HashMap<>(), GeneratedTerrain.NONE);
     }
 
     @Test
@@ -129,7 +134,7 @@ class NaturalBlocksTest {
                 world.put(side[0], y, side[1], leaf);
             }
         }
-        assertTrue(NaturalBlocks.grown(log, new BlockPos(0, 64, 0), world, ignored -> true, new HashMap<>()));
+        assertTrue(NaturalBlocks.grown(log, new BlockPos(0, 64, 0), world, ignored -> true, new HashMap<>(), GeneratedTerrain.NONE));
     }
 
     @Test
@@ -157,23 +162,23 @@ class NaturalBlocksTest {
         world.put(0, 63, 0, Blocks.GRASS_BLOCK.defaultBlockState());
         world.put(0, 64, 0, Blocks.SWEET_BERRY_BUSH.defaultBlockState());
         assertTrue(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), onGrass, world, ignored -> true,
-                new HashMap<>()), "草地上的甜浆果丛是野生的");
+                new HashMap<>(), GeneratedTerrain.NONE), "草地上的甜浆果丛是野生的");
 
         BlockPos onFarmland = new BlockPos(2, 64, 0);
         world.put(2, 63, 0, Blocks.FARMLAND.defaultBlockState());
         world.put(2, 64, 0, Blocks.SWEET_BERRY_BUSH.defaultBlockState());
         assertFalse(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), onFarmland, world,
-                ignored -> true, new HashMap<>()), "耕地上的是人种的");
+                ignored -> true, new HashMap<>(), GeneratedTerrain.NONE), "耕地上的是人种的");
 
         BlockState lower = Blocks.SUNFLOWER.defaultBlockState().setValue(DoublePlantBlock.HALF, DoubleBlockHalf.LOWER);
         BlockState upper = Blocks.SUNFLOWER.defaultBlockState().setValue(DoublePlantBlock.HALF, DoubleBlockHalf.UPPER);
         world.put(4, 63, 0, Blocks.FARMLAND.defaultBlockState());
         world.put(4, 64, 0, lower);
         world.put(4, 65, 0, upper);
-        assertFalse(NaturalBlocks.wildAt(upper, new BlockPos(4, 65, 0), world, ignored -> true, new HashMap<>()),
+        assertFalse(NaturalBlocks.wildAt(upper, new BlockPos(4, 65, 0), world, ignored -> true, new HashMap<>(), GeneratedTerrain.NONE),
                 "两格高的上半截也看下半截底下是不是耕地");
         assertFalse(NaturalBlocks.wildAt(Blocks.SWEET_BERRY_BUSH.defaultBlockState(), new BlockPos(6, 64, 0), world,
-                pos -> pos.getY() != 63, new HashMap<>()), "底下那格没加载时拿不准，不挖");
+                pos -> pos.getY() != 63, new HashMap<>(), GeneratedTerrain.NONE), "底下那格没加载时拿不准，不挖");
     }
 
     @Test
@@ -186,5 +191,31 @@ class NaturalBlocksTest {
         world.put(10, 65, 0, Blocks.NETHER_PORTAL.defaultBlockState());
         assertFalse(grown(world, Blocks.OBSIDIAN.defaultBlockState(), 10, 64, 0), "门框");
         assertFalse(grown(world, Blocks.CARVED_PUMPKIN.defaultBlockState(), 12, 64, 0), "雕刻过的南瓜是人做的");
+    }
+
+    @Test
+    void 世界生成铺的方块也算天然地形_只往标签认的里加() {
+        // 粗铁块是矿脉里铺的、哪个地形标签都没登记；服务端报了它，就和标签认出的一样算天然。
+        BlockState rawIron = Blocks.RAW_IRON_BLOCK.defaultBlockState();
+        GeneratedTerrain generated = new GeneratedTerrain(Set.of(Blocks.RAW_IRON_BLOCK, Blocks.STONE));
+        assertFalse(NaturalBlocks.terrain(rawIron, GeneratedTerrain.NONE), "读不到世界生成数据时只按标签认");
+        assertTrue(NaturalBlocks.terrain(rawIron, generated));
+        // 只往里加：清单里没有的石头、泥土照样按标签算；世界生成不铺的切制沙岩照旧不算。
+        assertTrue(NaturalBlocks.terrain(Blocks.DIRT.defaultBlockState(), generated));
+        assertTrue(NaturalBlocks.terrain(Blocks.STONE.defaultBlockState(), GeneratedTerrain.NONE));
+        assertFalse(NaturalBlocks.terrain(Blocks.CUT_SANDSTONE.defaultBlockState(), generated));
+        assertTrue(NaturalBlocks.grown(rawIron, new BlockPos(0, 64, 0), new World(), ignored -> true, new HashMap<>(),
+                generated), "缺材料时也能挖");
+    }
+
+    @Test
+    void 基岩进了清单算天然_照旧挖不动() {
+        // 地表规则会把基岩收进来：天然不等于挖得动，寻路按挖速算挖它的代价，挖不动就是走不通。
+        BlockState bedrock = Blocks.BEDROCK.defaultBlockState();
+        GeneratedTerrain generated = new GeneratedTerrain(Set.of(Blocks.BEDROCK));
+        assertTrue(NaturalBlocks.terrain(bedrock, generated));
+        assertTrue(ToolSet.calculateSpeedVsBlock(new ItemStack(Items.NETHERITE_PICKAXE), bedrock) < 0,
+                "下界合金镐也挖不动");
+        assertTrue(ToolSet.calculateSpeedVsBlock(ItemStack.EMPTY, bedrock) < 0, "空手挖不动");
     }
 }

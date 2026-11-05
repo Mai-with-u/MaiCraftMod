@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -28,6 +29,7 @@ import net.minecraft.world.level.material.FluidState;
 import net.minecraft.core.Direction;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
@@ -183,6 +185,22 @@ class ClearanceWhitelistTest {
             // 登记册是全进程一份：测完改回空表，不影响别的测试。
             Files.writeString(file, "[]", StandardCharsets.UTF_8);
             ClearanceWhitelist.initialize(game);
+        }
+    }
+
+    @Test
+    void 进世界换上世界生成铺的地形方块_路上照样挖开_配置条目不受影响() {
+        try {
+            assertFalse(ClearanceWhitelist.allows(Blocks.RAW_IRON_BLOCK.defaultBlockState()), "读不到世界生成数据时不算");
+            ClearanceWhitelist.useGeneratedTerrain(new GeneratedTerrain(Set.of(Blocks.RAW_IRON_BLOCK)));
+            assertTrue(ClearanceWhitelist.allows(Blocks.RAW_IRON_BLOCK.defaultBlockState()));
+            World world = new World();
+            world.put(0, 64, 0, Blocks.RAW_IRON_BLOCK.defaultBlockState());
+            assertTrue(clearable(world, 0, 64, 0), "按格判断也挖开");
+            assertFalse(ClearanceWhitelist.allows(Blocks.CUT_SANDSTONE.defaultBlockState()), "清单里没有的做出来的方块照旧不挖");
+        } finally {
+            // 清障规则是全进程一份：测完换回读不到，不影响别的测试。
+            ClearanceWhitelist.useGeneratedTerrain(GeneratedTerrain.NONE);
         }
     }
 }

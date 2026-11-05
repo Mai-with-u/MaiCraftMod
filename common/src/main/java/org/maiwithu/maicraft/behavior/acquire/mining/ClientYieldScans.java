@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.game.interaction.ToolSelect;
 import org.maiwithu.maicraft.game.player.EverydayFood;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.game.world.ScanQuietness;
 import org.maiwithu.maicraft.game.world.ScanTargets;
@@ -63,6 +64,8 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
 
     private final BlockScanService scans;
     private final Supplier<PlayerContext> context;
+    /** 这个世界的世界生成铺的地形方块：只挖地图上自然长的，这些也算。 */
+    private final GeneratedTerrain generated;
     /** 每次要找的方块都不一样（要煤找煤矿、要土豆找土豆地）：每次查询前按维度补登记。 */
     private final ScanTargets registered;
     /** 附近索引的视野账安静了没有：补账没停时空的结果只是"还没看清"，来源要回答"再问"。 */
@@ -70,9 +73,10 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
     /** 最近一次查索引有没有把附近扫完；没扫完时空结果不等于没有。 */
     private boolean lastScanComplete = true;
 
-    public ClientYieldScans(BlockScanService scans, Supplier<PlayerContext> context) {
+    public ClientYieldScans(BlockScanService scans, Supplier<PlayerContext> context, GeneratedTerrain generated) {
         this.scans = Objects.requireNonNull(scans, "scans");
         this.context = Objects.requireNonNull(context, "context");
+        this.generated = Objects.requireNonNull(generated, "generated");
         this.registered = new ScanTargets(scans);
     }
 
@@ -112,7 +116,7 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             // 这些搭出来的不管谁搭的都不拆，缺料先从 AE、箱子拿。砍树只砍长着的树，木屋、栅栏柱、横梁的原木不算。
             // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
             if (!NaturalBlocks.grown(current.level().getBlockState(hit), hit, current.level(), current.level()::isLoaded,
-                    trunksChecked)) {
+                    trunksChecked, generated)) {
                 continue;
             }
             // 箱子、熔炉、机器这类带方块实体的是摆着用的设施，不当矿挖：实机要箱子去建进料口，
@@ -209,7 +213,9 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
         BlockState state = current.level().getBlockState(pos);
         // 和找候选同一套：只挖地图上自然长的、不拆设施；挖了掉的正是要的东西才算。
         if (state.isAir() || state.hasBlockEntity()) return Optional.empty();
-        if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>())) return Optional.empty();
+        if (!NaturalBlocks.grown(state, pos, current.level(), current.level()::isLoaded, new HashMap<>(), generated)) {
+            return Optional.empty();
+        }
         String blockTypeId = blockTypeIdOf(current, pos);
         // 连锁挖逐格核：线索点名的方块、原版对照里掉要的东西的方块、有机会掉它的方块都算。
         List<String> productIds = expand(wanted);

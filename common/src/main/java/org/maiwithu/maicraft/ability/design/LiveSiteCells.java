@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.GeneratedTerrain;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -24,12 +25,15 @@ public final class LiveSiteCells implements ReadsSiteCells {
 
     private final Supplier<PlayerContext> context;
     private final Protection protection;
+    /** 这个世界的世界生成铺的地形方块：自动框沿"不是天然地形"走，这些算天然。 */
+    private final GeneratedTerrain generated;
     /** 一次读现场里查过的树干：同一根树干不重复数树冠。 */
     private final Map<BlockPos, Boolean> trunks = new HashMap<>();
 
-    public LiveSiteCells(Supplier<PlayerContext> context, Protection protection) {
+    public LiveSiteCells(Supplier<PlayerContext> context, Protection protection, GeneratedTerrain generated) {
         this.context = Objects.requireNonNull(context, "context");
         this.protection = Objects.requireNonNull(protection, "protection");
+        this.generated = Objects.requireNonNull(generated, "generated");
     }
 
     @Override public String dimension() {
@@ -60,7 +64,7 @@ public final class LiveSiteCells implements ReadsSiteCells {
         ClientLevel level = level();
         BlockState state = level.getBlockState(pos);
         if (state.isAir() || !state.getFluidState().isEmpty() || state.canBeReplaced()) return true;
-        return NaturalBlocks.grown(state, pos, level, this::loaded, trunks);
+        return NaturalBlocks.grown(state, pos, level, this::loaded, trunks, generated);
     }
 
     private ClientLevel level() {
