@@ -2,17 +2,20 @@
 package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
+import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
  * 放一格的一次尝试：这一格能从哪几面点（先直接点目标格里可替换的东西，再按先下、四周、上的顺序点邻格的支撑面），
- * 现在试到第几面、预测到的放法、点了几下。换一面就是换一个站位重来。
+ * 现在试到第几面、预测到的放法、点了几下、各面没放成的缘故。换一面就是换一个站位重来。
  *
  * <p>对着放的那一格（placeAt）多数就是目标格；联动的放置规则说要对着别的格放时（动力辊会被下面的实心面抬高一格），
  * 候选面围着 placeAt 找，原版以为在放 placeAt，落下来的是目标格。
@@ -21,6 +24,33 @@ final class PlacementAttempt {
 
     /** 一个候选：点哪一格的哪一面；direct 表示点的就是目标格里现有的东西（水、草、半砖的第一片）。 */
     record Candidate(BlockPos clicked, Direction face, boolean direct) {}
+
+    /**
+     * 一面没放成的缘故。这一格每一面都试过还没放成时，按出现次数最多的那种交代（并列取排在前面的）：
+     * 前三种是站位和视线的事，算到不了；后三种是点了不成，算卡住。原因写成不带坐标的一句，同样的格合成一组。
+     */
+    enum WhyNotPlaced {
+        /** 站到跟前也点不着那一面：视线被挡住、看不见，或点下去射线先碰上了别的方块。 */
+        HIDDEN(Problem.Kind.UNREACHABLE, "要贴的那一面站到跟前也被挡住或看不见"),
+        /** 走不到能点那一面的站位。 */
+        NO_SPOT(Problem.Kind.UNREACHABLE, "走不到能点着要贴那一面的站位"),
+        /** 旁边没有能贴着放的面。 */
+        NO_FACE(Problem.Kind.UNREACHABLE, "旁边没有能贴着放的面"),
+        /** 原版从能点的几面放下去都不是要的样子。 */
+        WRONG_SHAPE(Problem.Kind.STUCK, "原版从能点的面都放不成要的样子"),
+        /** 点下去没生效。 */
+        NO_EFFECT(Problem.Kind.STUCK, "点下去没生效"),
+        /** 材料换不到手上。 */
+        NOT_IN_HAND(Problem.Kind.STUCK, "材料换不到手上");
+
+        final Problem.Kind kind;
+        final String reason;
+
+        WhyNotPlaced(Problem.Kind kind, String reason) {
+            this.kind = kind;
+            this.reason = reason;
+        }
+    }
 
     final PlannedCell cell;
     final BlockPos placeAt;
@@ -39,6 +69,8 @@ final class PlacementAttempt {
     boolean turnAfter;
     /** 还能拿扳手点几下。 */
     int turnsLeft = 4;
+    /** 这一轮各面没放成的缘故各几次。 */
+    private final Map<WhyNotPlaced, Integer> misses = new EnumMap<>(WhyNotPlaced.class);
 
     PlacementAttempt(PlannedCell cell, BlockPos placeAt, boolean temporary, List<Candidate> candidates) {
         this.cell = cell;
@@ -87,6 +119,20 @@ final class PlacementAttempt {
 
     int candidateCount() {
         return candidates.size();
+    }
+
+    /** 这一面没放成，记下缘故。 */
+    void missed(WhyNotPlaced why) {
+        misses.merge(why, 1, Integer::sum);
+    }
+
+    /** 这一轮各面试下来出现最多的缘故（并列取排在前面的）；一面都没记过时为 null。 */
+    WhyNotPlaced mostly() {
+        WhyNotPlaced most = null;
+        for (var entry : misses.entrySet()) {
+            if (most == null || entry.getValue() > misses.get(most)) most = entry.getKey();
+        }
+        return most;
     }
 
     /** 放下这一格会占住的格：目标格、对着放的那一格和它的另一半；站位的脚下与头顶都要避开。 */

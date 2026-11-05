@@ -15,6 +15,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.ReasonCounts;
 
 /**
  * 工地的账：蓝图里每一格现在是什么结局、哪些格不碰（受保护、做不了、交给机器）、没做成的按原因分组、
@@ -26,6 +28,8 @@ final class ConstructionSite {
     private final CellPlacements placements;
     private final Map<BlockPos, CellEnding> endings = new LinkedHashMap<>();
     private final Map<String, List<BlockPos>> problems = new LinkedHashMap<>();
+    /** 每句原因算哪种问题：收场时按格数最多的原因定整次施工的问题种类。 */
+    private final Map<String, Problem.Kind> problemKinds = new LinkedHashMap<>();
     private final Map<String, Integer> materialsUsed = new LinkedHashMap<>();
     /** 施工中自己补进来的材料：备料一趟下来每样实际多出几件；其余材料来自开工时的背包。 */
     private final Map<String, Integer> materialsSupplemented = new LinkedHashMap<>();
@@ -100,19 +104,20 @@ final class ConstructionSite {
         excluded.remove(pos);
         problems.values().forEach(cells -> cells.remove(pos));
         problems.values().removeIf(List::isEmpty);
+        problemKinds.keySet().retainAll(problems.keySet());
     }
 
-    /** 这一格这次不碰了：受保护或做不了，记原因。 */
-    void exclude(BlockPos pos, CellEnding ending, String reason) {
+    /** 这一格这次不碰了：受保护或做不了，记原因和它算哪种问题。 */
+    void exclude(BlockPos pos, CellEnding ending, Problem.Kind kind, String reason) {
         excluded.add(pos);
         endings.put(pos, ending);
-        problem(reason, pos);
+        problem(kind, reason, pos);
     }
 
-    /** 够不着也垫不了：结局照核对的记，原因记一笔，这次不再回头。 */
-    void unreachable(BlockPos pos, String reason) {
+    /** 这一格这次放弃了（够不着也垫不了、走不到、挖不下来）：结局照核对的记，原因记一笔，这次不再回头。 */
+    void giveUp(BlockPos pos, Problem.Kind kind, String reason) {
         excluded.add(pos);
-        problem(reason, pos);
+        problem(kind, reason, pos);
     }
 
     boolean needsWork(BlockPos pos) {
@@ -207,9 +212,11 @@ final class ConstructionSite {
         materialsUsed.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), 1, Integer::sum);
     }
 
-    void problem(String reason, BlockPos pos) {
+    /** 记一格没做成的原因：原因写成不带坐标的结论句，同样的事合成一组；种类按这句原因头一次记的。 */
+    void problem(Problem.Kind kind, String reason, BlockPos pos) {
         // 同一格同一个原因只记一次：验收后再修一轮会把缺料的格又过一遍，原先三台机械手报成"还缺 6 格的量"。
         List<BlockPos> cells = problems.computeIfAbsent(reason, ignored -> new ArrayList<>());
+        problemKinds.putIfAbsent(reason, kind);
         if (!cells.contains(pos)) cells.add(pos.immutable());
     }
 
@@ -260,6 +267,20 @@ final class ConstructionSite {
         List<ConstructionDetails.ProblemGroup> groups = new ArrayList<>();
         problems.forEach((reason, cells) -> groups.add(new ConstructionDetails.ProblemGroup(reason, cells.size(), cells)));
         return groups;
+    }
+
+    /** 没做成的格按原因合并计数，每句原因带着它算哪种问题：收场时拼成交给上一层的结论。 */
+    ReasonCounts reasonCounts() {
+        ReasonCounts counts = new ReasonCounts();
+        problems.forEach((reason, cells) -> counts.add(problemKinds.get(reason), reason, cells.size()));
+        return counts;
+    }
+
+    /** 记了原因的格一共几格：一格记了两句原因也只算一格。 */
+    int problemCells() {
+        Set<BlockPos> cells = new HashSet<>();
+        problems.values().forEach(cells::addAll);
+        return cells.size();
     }
 
     /** 受保护的格有几格。 */

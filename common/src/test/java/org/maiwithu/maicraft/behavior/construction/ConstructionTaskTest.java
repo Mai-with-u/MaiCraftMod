@@ -98,6 +98,8 @@ class ConstructionTaskTest {
         final List<String> pouredItems = new ArrayList<>();
         /** 点下去方块落成了、交互却报出岔子的格：模拟确认说不清，方块其实已经在那里。 */
         final Set<BlockPos> clickFailsAfterPlacing = new HashSet<>();
+        /** 点下去视线总被挡住的格：射线先碰上了别的方块，从哪一面、站哪里点都放不下去。 */
+        final Set<BlockPos> hiddenCells = new HashSet<>();
         /** 像保护判断里"像玩家放的门"那条推断：现场是门就当别人的东西，归属记录还没到。 */
         boolean doorsLookPlayerMade;
         int digCalls;
@@ -168,6 +170,7 @@ class ConstructionTaskTest {
                 for (var half : PlacementPrediction.generatedBy(cell.pos(), placement.predicted())) world.put(half.pos(), half.expected());
                 carried.merge(BuiltInRegistries.ITEM.getKey(cell.item()).toString(), -1, Integer::sum);
             };
+            if (hiddenCells.contains(cell.pos())) return new Click(new Blocked(), () -> null);
             if (clickFailsAfterPlacing.contains(cell.pos())) return new Click(new FailingAfter(effect, "交互结果出乎预料"), () -> null);
             // 视线上挡着生物：点到的是它，方块没放下去；挡够了次数它走开。
             if (creatureInView != null) {
@@ -281,6 +284,15 @@ class ConstructionTaskTest {
             return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, why));
         }
         @Override public String describe() { return "替身出岔子"; }
+    }
+
+    /** 点下去视线被挡住的一下：射线先碰上了别的方块，什么都没放下去，和实机交互确认给的结论一样。 */
+    private record Blocked() implements Action {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE,
+                    "从当前位置看要点的那一面被挡住：射线命中了别的方块，需要换站位"));
+        }
+        @Override public String describe() { return "替身视线被挡"; }
     }
 
     /** 悬空走着的一下：叫它先停稳就再推进两刻落地，落地了就算这一下做完；落地前停不稳。 */
@@ -503,6 +515,7 @@ class ConstructionTaskTest {
         TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertEquals(Problem.Kind.NEED_APPROVAL, result.problem().kind());
+        assertEquals("有 1 格是玩家的东西或在玩家的地盘里，没动：1, 64, 0", result.problem().message());
         assertEquals(1, details(result).cells().get("protected"));
         assertEquals(1, details(result).cells().get("placed"), "其余照建");
         assertEquals(Blocks.DIRT, fake.state(new BlockPos(1, 64, 0)).getBlock(), "受保护的格没动");
@@ -516,6 +529,7 @@ class ConstructionTaskTest {
         TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0), new BlockPos(1, 64, 0)));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertEquals("材料用完了：minecraft:stone 还缺 1 格的量", result.problem().message());
         assertEquals(1, details(result).cells().get("placed"));
         assertEquals(1, details(result).cells().get("missing"));
         assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().equals("缺 minecraft:stone")));
@@ -591,6 +605,52 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertEquals(0, count(result, Change.Kind.BLOCK_PLACED), "一块也不垫");
         assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("不垫临时方块")));
+    }
+
+    @Test
+    void 一格视线被挡_垫过临时方块还放不上_问题直接说原因算到不了() {
+        // 实机 11-05 那格橡木栅栏：每一面点下去射线都先碰上别的方块，垫了临时方块再试还是被挡。
+        // 问题要直接说出这一句原因、算到不了，不写成"原因见结果细节"的不支持。
+        Fake fake = new Fake().ground(63);
+        BlockPos at = new BlockPos(0, 64, 0);
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        fake.hiddenCells.add(at);
+        TaskResult result = run(fake, wall(STONE, at));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertEquals("1 格没做成：要贴的那一面站到跟前也被挡住或看不见", result.problem().message());
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("为 0, 64, 0 垫临时方块")),
+                "垫过临时方块的经过在试过的办法里：" + result.attempts());
+        assertTrue(fake.temporaries.isEmpty(), "垫的临时方块收回了");
+    }
+
+    @Test
+    void 两种原因各几格_都点名带格数_种类跟着格数多的() {
+        // 三格视线被挡、两格原版放出来朝向不对身上又没扳手：两种原因都说到、各带格数，格数多的在前，
+        // 种类跟着它；说明里不逐格列坐标，格再多也不变长。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 3);
+        fake.carried.put("minecraft:observer", 2);
+        fake.carried.put("minecraft:cobblestone", 32);
+        List<PlannedCell> cells = new ArrayList<>();
+        for (int x = 0; x <= 4; x += 2) {
+            BlockPos at = new BlockPos(x, 64, 0);
+            fake.hiddenCells.add(at);
+            cells.add(PlannedCell.block(at, STONE, Set.of()));
+        }
+        BlockState wanted = Blocks.OBSERVER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.DOWN);
+        for (int x = 0; x <= 2; x += 2) {
+            BlockPos at = new BlockPos(x, 64, 4);
+            fake.placesAs.put(at, wanted.setValue(BlockStateProperties.FACING, Direction.SOUTH));
+            cells.add(PlannedCell.block(at, wanted, Set.of("facing")));
+        }
+        TaskResult result = run(fake, new Blueprint(DIM, new BlockPos(0, 64, 0), cells));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertEquals("5 格没做成：3 格要贴的那一面站到跟前也被挡住或看不见、2 格原版从能点的面都放不成要的样子",
+                result.problem().message());
+        assertEquals(2, details(result).problems().size(), details(result).problems().toString());
     }
 
     @Test
@@ -700,7 +760,7 @@ class ConstructionTaskTest {
         Blueprint blueprint = wall(STONE, at);
         ConstructionSite site = new ConstructionSite(blueprint);
         site.check(fake);
-        site.exclude(at, CellEnding.PROTECTED, "是玩家的东西");
+        site.exclude(at, CellEnding.PROTECTED, Problem.Kind.NEED_APPROVAL, "是玩家的东西");
         fake.world.put(at, STONE);
         site.check(fake);
         assertEquals(CellEnding.MATCHES, site.ending(at));
@@ -867,8 +927,12 @@ class ConstructionTaskTest {
         fake.approach = new 走着不动();
         TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
-        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().contains("做了 400 刻还没做成")),
+        // 结果里只说结论（走不到，算到不了）；走了多久没走到记在试过的办法里。
+        assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().equals("走不到能挖这一格的位置")),
                 details(result).problems().toString());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("做了 400 刻还没做成")),
+                result.attempts().toString());
     }
 
     /** 放置规则替身：认一种方块，说拿什么放、对着哪一格放、要等哪几格。 */

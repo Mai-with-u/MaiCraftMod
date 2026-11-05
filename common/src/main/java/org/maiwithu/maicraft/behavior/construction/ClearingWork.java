@@ -90,17 +90,18 @@ final class ClearingWork extends ConstructionWork {
             if (before.isAir()) continue;
             // 要清的格现场已经是要的样子（上一轮其实放成了、别人先换好了）：先认下，不再问保护也不挖。
             if (site.alreadyMatches(cell, services.site())) continue;
+            // 基岩、世界边界按游戏规则挖不动；受保护的格照保护判断给的种类记；没接挖掘是施工这边不支持。
             if (services.site().unbreakable(pos)) {
-                site.exclude(pos, CellEnding.IMPOSSIBLE, "挖不动（基岩或世界边界）");
+                site.exclude(pos, CellEnding.IMPOSSIBLE, Problem.Kind.NOT_POSSIBLE_HERE, "挖不动（基岩或世界边界）");
                 continue;
             }
             Optional<Problem> refused = services.guards().allows(PermissionCheck.WorldAction.DIG_BLOCK, pos, blockId(before));
             if (refused.isPresent()) {
-                site.exclude(pos, CellEnding.PROTECTED, refused.get().message());
+                site.exclude(pos, CellEnding.PROTECTED, refused.get().kind(), refused.get().message());
                 continue;
             }
             if (services.digs() == null) {
-                site.unreachable(pos, "挖掘没接上，清不了");
+                site.giveUp(pos, Problem.Kind.UNSUPPORTED, "挖掘没接上，清不了");
                 continue;
             }
             step = Step.APPROACH;
@@ -174,7 +175,7 @@ final class ClearingWork extends ConstructionWork {
                 BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable,
                 new DigsBlocks.ToolPrep(queue.size() + 1, false, permissions, records, digTool));
         if (digging.isEmpty()) {
-            site.unreachable(cell.pos(), "挖掘没接上，清不了");
+            site.giveUp(cell.pos(), Problem.Kind.UNSUPPORTED, "挖掘没接上，清不了");
             cell = null;
             return nextCell();
         }
@@ -267,7 +268,13 @@ final class ClearingWork extends ConstructionWork {
         // 模组的工具没拆成：记一笔，这一格照原来的办法挖；走不到或挖不下去的记一笔接着清别的，不让一格卡住整个工地。
         records.attempt("清掉 " + cell.pos().toShortString(), failure.problem().message());
         if (step == Step.DISMANTLE) return dig();
-        site.unreachable(cell.pos(), failure.problem().message());
+        // 结果里只转述结论：走不到跟前（包括走了很久没走到）算到不了，同样的格合成一句；
+        // 挖的那一下没成照它自己的种类和结论句记。经过已经记进试过的办法。
+        if (step == Step.APPROACH) {
+            site.giveUp(cell.pos(), Problem.Kind.UNREACHABLE, "走不到能挖这一格的位置");
+        } else {
+            site.giveUp(cell.pos(), failure.problem().kind(), failure.problem().headline());
+        }
         around = Map.of();
         cell = null;
         return nextCell();

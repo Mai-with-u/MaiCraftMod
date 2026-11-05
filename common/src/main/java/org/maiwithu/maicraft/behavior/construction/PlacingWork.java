@@ -37,7 +37,8 @@ import org.slf4j.LoggerFactory;
  * 砌筑：按施工顺序一格一格放。每格先看能从哪几面点，走到能点那一面的站位，用原版放置预测核对落下来是不是要的样子，
  * 把材料换到手上，点下去，按放置确认看结果。放不上的格先做别的，情况变了（旁边新放了方块、人换了一层站、
  * 挡着的生物过一会儿可能走开）再回头；什么都没变就想别的办法：只差站高一格就垫一级台阶站上去，没有能点的面就垫一条临时方块链；
- * 垫不了的记"够不着"。材料用完就停在材料尽头，缺的格如实记下。
+ * 垫不了、垫了也放不上的，照各面试下来最常见的缘故（看不见要贴的那一面、走不到站位、放出来不是要的样子）记进结果。
+ * 材料用完就停在材料尽头，缺的格如实记下。
  *
  * <p>像真人一样站一处把够得着的都放完再挪：同一层同一阶段里挑离人最近的那格先放，点哪一面先挑站着不动就够得着的。
  * 原先按蓝图顺序一格一格来，两排墙交替写的水槽就在两边来回跑，镜头跟着乱甩。
@@ -60,6 +61,8 @@ final class PlacingWork extends ConstructionWork {
     private long now;
     /** 已经为它垫过临时方块的格：同一格只垫一回。 */
     private final Set<BlockPos> scaffolded = new HashSet<>();
+    /** 每一面都试过还没放成的格，最近一轮最常见的缘故：最后放弃这一格时照它交代。 */
+    private final Map<BlockPos, PlacementAttempt.WhyNotPlaced> whyNot = new HashMap<>();
     /** 这次垫的临时方块：不在蓝图里，放好记进账本而不是工地。 */
     private final Set<BlockPos> temporaries = new HashSet<>();
     private PlacementAttempt attempt;
@@ -120,12 +123,12 @@ final class PlacingWork extends ConstructionWork {
             if (!temporary && site.alreadyMatches(cell, services.site())) continue;
             String itemId = itemId(cell);
             if (!services.site().creative() && services.site().carried(itemId) <= 0) {
-                if (!temporary) site.problem("缺 " + itemId, cell.pos());
+                if (!temporary) site.problem(Problem.Kind.NEED_ITEM, "缺 " + itemId, cell.pos());
                 continue;
             }
             Optional<Problem> refused = services.guards().allows(PermissionCheck.WorldAction.PLACE_BLOCK, cell.pos(), null);
             if (refused.isPresent()) {
-                if (!temporary) site.exclude(cell.pos(), CellEnding.PROTECTED, refused.get().message());
+                if (!temporary) site.exclude(cell.pos(), CellEnding.PROTECTED, refused.get().kind(), refused.get().message());
                 continue;
             }
             // 联动规则说要等别的格先放好（带漏斗等下面的带子）：等的格还没好就先放一放，做别的再回头。
@@ -136,13 +139,14 @@ final class PlacingWork extends ConstructionWork {
             // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
             BlockPos placeAt = site.placements().placeAt(cell, services.site());
             if (!placeAt.equals(cell.pos()) && occupied(placeAt)) {
-                site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, "要对着另一格放才落得到这里（动力辊这类会被下面的实心面抬高一格），那一格被占着");
+                site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, Problem.Kind.NOT_POSSIBLE_HERE,
+                        "要对着另一格放才落得到这里（动力辊这类会被下面的实心面抬高一格），那一格被占着");
                 continue;
             }
             List<PlacementAttempt.Candidate> candidates = reachableFirst(
                     PlacementAttempt.candidates(services.site(), cell, placeAt));
             if (candidates.isEmpty()) {
-                defer(cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+                deferStuck(cell, PlacementAttempt.WhyNotPlaced.NO_FACE);
                 continue;
             }
             attempt = new PlacementAttempt(cell, placeAt, temporary, candidates);
@@ -213,21 +217,22 @@ final class PlacingWork extends ConstructionWork {
             if (deferred.waitingForTime()) return Refill.WAIT;
             // 剩下的只有等别的格的、和生物回头几次还挡着的：生物挡着的写明是谁、在哪、等了多久，
             // LLM 能叫它挪开再下一次同样的目标；不为它垫方块，垫方块挪不走生物。
+            // 等了一阵生物没走开、等的格没放成，都是干等没有进展，算卡住。
             for (DeferredPlacements.Left left : deferred.drain()) {
-                site.unreachable(left.cell().pos(), left.reason() == DeferredPlacements.Reason.CREATURE_IN_THE_WAY
+                site.giveUp(left.cell().pos(), Problem.Kind.STUCK, left.reason() == DeferredPlacements.Reason.CREATURE_IN_THE_WAY
                         ? "被" + left.creature() + "挡着，前后等了 " + CREATURE_WAIT_SECONDS + " 秒没走开"
                         : "要等别的格先放好，那些格没放成");
             }
             return Refill.REFILLED;
         }
-        // 垫过一回临时方块还是放不上：再垫也一样（实机放一张工作台垫了四块圆石、试了八千多次），如实记下这格放不成。
+        // 垫过一回临时方块还是放不上：再垫也一样（实机放一张工作台垫了四块圆石、试了八千多次），如实记下这格为什么放不成。
         if (!scaffolded.add(stuck.pos().immutable())) {
-            site.unreachable(stuck.pos(), "垫了临时方块，每一面还是放不上");
+            giveUp(stuck, null);
             return Refill.REFILLED;
         }
         // 这个工地不许垫（组装好的物理结构上，垫上去就成了船的一部分）：够不着就照实记够不着。
         if (!services.site().temporaryBlocksAllowed()) {
-            site.unreachable(stuck.pos(), "够不着，在物理结构上不垫临时方块（会改船的重量和样子）");
+            giveUp(stuck, "够不着，在物理结构上不垫临时方块（会改船的重量和样子）");
             return Refill.REFILLED;
         }
         Optional<String> material = services.site().temporaryMaterial();
@@ -240,7 +245,7 @@ final class PlacingWork extends ConstructionWork {
         List<BlockPos> blocks = step.map(List::of).orElseGet(() -> !mayPlace ? List.of()
                 : TemporaryBlocks.chain(services.site(), stuck.pos(), this::mayPlaceTemporary, pos -> true));
         if (blocks.isEmpty() || material.isEmpty() || !services.site().creative() && services.site().carried(material.get()) < blocks.size()) {
-            site.unreachable(stuck.pos(), blocks.isEmpty() ? "够不着，也找不到能垫临时方块接过去的路" : "够不着，身上的建材不够垫临时方块");
+            giveUp(stuck, blocks.isEmpty() ? "够不着，也找不到能垫临时方块接过去的路" : "够不着，身上的建材不够垫临时方块");
             return Refill.REFILLED;
         }
         BlockState state = BuiltInRegistries.BLOCK.get(ResourceLocation.parse(material.get())).defaultBlockState();
@@ -264,14 +269,30 @@ final class PlacingWork extends ConstructionWork {
         deferred.defer(cell, reason, services.site().feet(), now);
     }
 
-    // 每一面都试过还没放成：有生物挡着就等它走开再回头，不然按普通放不上的格放一放。
+    // 这一下放不上的格先放一放，并记下为什么放不上：之后垫了临时方块还是不成、最后放弃它时照这句交代。
+    private void deferStuck(PlannedCell cell, PlacementAttempt.WhyNotPlaced why) {
+        whyNot.put(cell.pos().immutable(), why);
+        defer(cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+    }
+
+    // 每一面都试过还没放成：有生物挡着就等它走开再回头，不然按各面试下来最常见的缘故放一放。
     private void deferTried(PlacementAttempt tried) {
         if (tried.creatureInTheWay != null) {
             deferred.defer(tried.cell, DeferredPlacements.Reason.CREATURE_IN_THE_WAY, tried.creatureInTheWay,
                     services.site().feet(), now);
         } else {
-            defer(tried.cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+            PlacementAttempt.WhyNotPlaced why = tried.mostly();
+            deferStuck(tried.cell, why == null ? PlacementAttempt.WhyNotPlaced.NO_FACE : why);
         }
+    }
+
+    // 这一格这次放弃：照每一面试下来最常见的缘故记进现场问题，不只记在试过的办法里。
+    // 站位、视线这类到不了的缘故，没垫成临时方块时说垫不成的那一句（最后卡在那里）；垫过还是放不上就说原来的缘故
+    // （垫过的经过在试过的办法里）。点了不生效、放出来不对这类缘故照它自己说，不说成够不着。
+    private void giveUp(PlannedCell cell, String notScaffolded) {
+        PlacementAttempt.WhyNotPlaced why = whyNot.getOrDefault(cell.pos(), PlacementAttempt.WhyNotPlaced.NO_FACE);
+        boolean scaffoldSentence = notScaffolded != null && why.kind == Problem.Kind.UNREACHABLE;
+        site.giveUp(cell.pos(), why.kind, scaffoldSentence ? notScaffolded : why.reason);
     }
 
     // 原版说这一下落不下来时，放下后会占住的那几格里有没有站着生物（门的上半格里站着女仆也算）。
@@ -332,6 +353,7 @@ final class PlacingWork extends ConstructionWork {
         // 从这里去点这一面刚才走过去没走到：人没挪、附近也没新放方块，再算一次路还是一样，直接看下一面。
         while (attempt.hasNext() && failedApproaches.contains(approachKey(attempt.peek()))) {
             PlacementAttempt.Candidate skipped = attempt.next();
+            attempt.missed(PlacementAttempt.WhyNotPlaced.NO_SPOT);
             LOG.info("[施工] 放 {}：刚才从 {} 走不到能点 {} 的 {} 面的位置，人没挪，不再算路", attempt.cell.pos().toShortString(),
                     services.site().feet().toShortString(), skipped.clicked().toShortString(), skipped.face());
         }
@@ -401,6 +423,9 @@ final class PlacingWork extends ConstructionWork {
                             .orElse("会放成 " + predicted.get().predicted());
             LOG.info("[施工] 放 {}：从 {} 的 {} 面不行（{}）", attempt.cell.pos().toShortString(),
                     candidate.clicked().toShortString(), candidate.face(), why);
+            // 站过几处都点不到这一面算看不见；原版说放出来不是要的样子算放不成那个样子。生物挡着的另有交代。
+            if (predicted.isEmpty()) attempt.missed(PlacementAttempt.WhyNotPlaced.HIDDEN);
+            else if (creatureHere.isEmpty()) attempt.missed(PlacementAttempt.WhyNotPlaced.WRONG_SHAPE);
             records.attempt("从 " + candidate.clicked().toShortString() + " 的 " + candidate.face() + " 面放 " + attempt.cell.pos().toShortString(),
                     predicted.isEmpty() ? "从这里点不到那一面"
                             : creatureHere.map(creature -> "这一格里站着 " + creature + "，原版不让放")
@@ -422,13 +447,13 @@ final class PlacingWork extends ConstructionWork {
                 yield ActionStatus.progressed();
             }
             case ConstructionSeams.HoldPlan.NotCarried notCarried -> {
-                if (!attempt.temporary) site.problem("缺 " + itemId, attempt.cell.pos());
+                if (!attempt.temporary) site.problem(Problem.Kind.NEED_ITEM, "缺 " + itemId, attempt.cell.pos());
                 attempt = null;
                 yield nextCell();
             }
             case ConstructionSeams.HoldPlan.Cannot cannot -> {
                 records.attempt("把 " + itemId + " 换到手上", cannot.problem().message());
-                defer(attempt.cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+                deferStuck(attempt.cell, PlacementAttempt.WhyNotPlaced.NOT_IN_HAND);
                 attempt = null;
                 yield nextCell();
             }
@@ -474,6 +499,7 @@ final class PlacingWork extends ConstructionWork {
             }
             case NOT_APPLIED -> {
                 records.attempt("放 " + cell.pos().toShortString(), "没生效：" + result.scene());
+                attempt.missed(PlacementAttempt.WhyNotPlaced.NO_EFFECT);
                 yield tryNextCandidate();
             }
             case UNEXPECTED, UNCONFIRMED -> unconfirmed(cell, itemId, result.scene());
@@ -556,7 +582,8 @@ final class PlacingWork extends ConstructionWork {
 
     private ActionStatus unconfirmed(PlannedCell cell, String itemId, String scene) {
         records.unconfirmed(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, cell.pos().toShortString() + "：" + scene));
-        site.problem("放置结果没能确认，不敢再点", cell.pos());
+        // 说不清放没放上就不再点第二下：这一格停在这里，算卡住。
+        site.problem(Problem.Kind.STUCK, "放置结果没能确认，不敢再点", cell.pos());
         attempt = null;
         consumed = 0;
         return nextCell();
@@ -580,17 +607,21 @@ final class PlacingWork extends ConstructionWork {
         // 扳手转到一半出了岔子：方块已经放下了，照现在的样子收下，差异交给整机比对。
         if (step == Step.TURN_HOLD || step == Step.TURN_CLICK) return finish();
         if (step == Step.HOLD) {
-            defer(attempt.cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+            deferStuck(attempt.cell, PlacementAttempt.WhyNotPlaced.NOT_IN_HAND);
             attempt = null;
             return nextCell();
         }
         // 走不到那一面：记下人停在哪、要点哪一面，人没挪就不再为它算路；然后换一面再试。
-        if (step == Step.APPROACH && services.site().feet() != null && attempt.current() != null) {
-            failedApproaches.add(approachKey(attempt.current()));
+        if (step == Step.APPROACH) {
+            attempt.missed(PlacementAttempt.WhyNotPlaced.NO_SPOT);
+            if (services.site().feet() != null && attempt.current() != null) failedApproaches.add(approachKey(attempt.current()));
         }
         // 点下去没点到那一面：看眼睛和那一面之间是不是挡着生物（跟到跟前的女仆）。是就记下它，
         // 每一面都试过还没放成时，这格等它走开再回头，而不是当成站位不好去垫方块。
+        // 点的那一下说视线被挡、够不着（射线先碰上了别的方块）算看不见那一面，别的出岔子算点了没生效。
         if (step == Step.CLICK && attempt.current() != null) {
+            attempt.missed(failure.problem().kind() == Problem.Kind.UNREACHABLE
+                    ? PlacementAttempt.WhyNotPlaced.HIDDEN : PlacementAttempt.WhyNotPlaced.NO_EFFECT);
             services.site().creatureBetween(attempt.current().clicked(), attempt.current().face())
                     .ifPresent(creature -> attempt.creatureInTheWay = "挡在人和要点的那一面之间的 " + creature);
         }

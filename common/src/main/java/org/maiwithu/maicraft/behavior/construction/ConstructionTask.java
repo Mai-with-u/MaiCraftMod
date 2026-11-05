@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.ReasonCounts;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -92,12 +93,14 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
                 return Next.go(Phase.CHECK, "有格没加载，先走过去让它加载出来");
             }
         }
-        for (BlockPos pos : unloaded) site.unreachable(pos, "那一片没加载，看不到");
+        // 走过去一趟还没加载的格看不到现场，算到不了。
+        for (BlockPos pos : unloaded) site.giveUp(pos, Problem.Kind.UNREACHABLE, "那一片没加载，看不到");
         recordProgress("对图核完：还有 " + site.unsettled() + " 格要做");
         if (site.allSettled()) return Next.done(result("开始时已满足，一个动作都没做"));
         for (PlannedCell cell : input.blueprint().cells()) {
             if (site.needsWork(cell.pos()) && services.site().loaded(cell.pos()) && services.site().unbreakable(cell.pos())) {
-                site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, "挖不动（基岩或世界边界）");
+                // 基岩、世界边界按游戏规则挖不动：这一格在这里做不到，不是施工不支持。
+                site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, Problem.Kind.NOT_POSSIBLE_HERE, "挖不动（基岩或世界边界）");
             }
         }
         return toSupply();
@@ -157,7 +160,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
             recordAttempt("验收", "有 " + needing.size() + " 格不对，再修一轮");
             return toClear();
         }
-        for (BlockPos pos : needing) site.problem(endingReason(site.ending(pos)), pos);
+        for (BlockPos pos : needing) site.problem(endingKind(site.ending(pos)), endingReason(site.ending(pos)), pos);
         return toCleanup();
     }
 
@@ -168,6 +171,11 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
             case MISSING -> "结束时仍是空的";
             default -> "结束时没对上";
         };
+    }
+
+    // 修了几轮还不对的格算卡住；点名的属性施工调不了（除了门的开关）才是真不支持。
+    private static Problem.Kind endingKind(CellEnding ending) {
+        return ending == CellEnding.WRONG_STATE ? Problem.Kind.UNSUPPORTED : Problem.Kind.STUCK;
     }
 
     private Next<Phase> toCleanup() {
@@ -197,7 +205,8 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
                 .problem(problem).remaining(remaining()).details(details()).build());
     }
 
-    // 问题按轻重挑一个说：受保护的格要同意；缺料；够不着；其余按不支持。
+    // 问题按轻重挑：受保护的格要同意；缺料说还缺什么；其余把没做成的格按原因合并计数转述出来，
+    // 种类跟着格数最多的那种原因走（站位、视线、走不到是到不了，修不好、点了不生效是卡住）。
     private Problem problem() {
         if (site.protectedCount() > 0) {
             return Problem.of(Problem.Kind.NEED_APPROVAL,
@@ -210,15 +219,15 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
                         "拿到材料后再下达一次同样的目标，会从没建完的地方接着做");
             }
         }
-        for (var group : site.problemGroups()) {
-            if (group.reason().startsWith("够不着")) {
-                return Problem.of(Problem.Kind.UNREACHABLE, group.count() + " 格够不着：" + group.reason(), null);
-            }
+        ReasonCounts reasons = site.reasonCounts();
+        if (!reasons.isEmpty()) {
+            return Problem.of(reasons.kind(), reasons.message(site.problemCells() + " 格没做成", "格"));
         }
         if (!temporariesLeft.isEmpty()) {
             return Problem.of(Problem.Kind.STUCK, "有 " + temporariesLeft.size() + " 块临时方块没收回", "下一次施工会接着收");
         }
-        return Problem.of(Problem.Kind.UNSUPPORTED, "有 " + site.unsettled() + " 格没对上，原因见结果细节", null);
+        // 没记下原因的格（验收时每格都会记一句，正常走不到这里）：照实说几格没对上，算卡住。
+        return Problem.of(Problem.Kind.STUCK, "有 " + site.unsettled() + " 格没对上", null);
     }
 
     private String positions(CellEnding ending) {

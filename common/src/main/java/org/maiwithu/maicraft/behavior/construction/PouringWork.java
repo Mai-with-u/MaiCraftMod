@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.world.LavaFlow;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -73,8 +74,9 @@ final class PouringWork extends ConstructionWork {
         while (!strays.isEmpty()) {
             stray = strays.poll();
             if (!services.site().loaded(stray) || !services.site().state(stray).getFluidState().isSource()) continue;
+            // 缺桶、缺岩浆桶水桶都算缺东西。
             if (!services.site().creative() && services.site().carried(EMPTY_BUCKET) <= 0) {
-                site.problem("没有空桶收不走源液体", stray);
+                site.problem(Problem.Kind.NEED_ITEM, "没有空桶收不走源液体", stray);
                 continue;
             }
             return hold(EMPTY_BUCKET);
@@ -89,7 +91,7 @@ final class PouringWork extends ConstructionWork {
             }
             String bucket = BuiltInRegistries.ITEM.getKey(cell.item()).toString();
             if (!services.site().creative() && services.site().carried(bucket) <= 0) {
-                site.problem("缺 " + bucket, cell.pos());
+                site.problem(Problem.Kind.NEED_ITEM, "缺 " + bucket, cell.pos());
                 continue;
             }
             return hold(bucket);
@@ -107,7 +109,7 @@ final class PouringWork extends ConstructionWork {
                 yield ActionStatus.progressed();
             }
             case ConstructionSeams.HoldPlan.NotCarried notCarried -> {
-                site.problem("缺 " + itemId, target());
+                site.problem(Problem.Kind.NEED_ITEM, "缺 " + itemId, target());
                 stray = null;
                 cell = null;
                 yield next();
@@ -164,10 +166,11 @@ final class PouringWork extends ConstructionWork {
             if (cell != null) site.poured(cell);
         } else if (result == null || result.verdict() == InteractionVerdict.NOT_APPLIED) {
             records.attempt((stray != null ? "收走 " : "倒进 ") + pos.toShortString(), result == null ? "没有结论" : "没生效：" + result.scene());
-            if (cell != null) site.problem("倒不进去", pos);
+            // 倒下去没生效、结果说不清都算卡住：再倒一次多半还是一样，不是到不了也不是不支持。
+            if (cell != null) site.problem(Problem.Kind.STUCK, "倒不进去", pos);
         } else {
             records.unconfirmed(new Change(Change.Kind.ITEM_CONSUMED, what, 1, pos.toShortString() + "：" + result.scene()));
-            if (cell != null) site.problem("倒桶结果没能确认", pos);
+            if (cell != null) site.problem(Problem.Kind.STUCK, "倒桶结果没能确认", pos);
         }
         stray = null;
         cell = null;
@@ -190,7 +193,12 @@ final class PouringWork extends ConstructionWork {
             return ActionStatus.progressed();
         }
         records.attempt(describe(), failure.problem().message());
-        if (cell != null) site.problem(failure.problem().message(), cell.pos());
+        // 结果里只转述结论：走不到能倒的位置算到不了，同样的格合成一句；换手、倒的那一下没成照它自己的种类和结论句记。
+        if (cell != null && step == Step.APPROACH) {
+            site.problem(Problem.Kind.UNREACHABLE, "走不到能倒桶的位置", cell.pos());
+        } else if (cell != null) {
+            site.problem(failure.problem().kind(), failure.problem().headline(), cell.pos());
+        }
         stray = null;
         cell = null;
         return next();
