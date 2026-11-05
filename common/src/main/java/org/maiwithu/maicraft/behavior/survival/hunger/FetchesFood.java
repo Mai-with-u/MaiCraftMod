@@ -11,6 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.game.player.EverydayFood;
@@ -28,6 +29,8 @@ import org.slf4j.LoggerFactory;
  * 饿了身上没吃的：像玩家一样去弄点现成的口粮。面包、熟肉、熟鱼、蔬菜、水果几类和"能吃的口粮"一大类
  * （含生肉、模组食物）同一轮问拿东西的估算哪类整条路走得最近（网络里、箱子里有就拿，没有再做、再打猎），
  * 挑最近的那类拿几件，一样近时熟食优先；有预算，超时或哪儿都没有如实说。
+ * 饿到危险线时带着别人的箱子放行：叫得出名字的那几类现成口粮能从别人的箱子拿刚好够的，
+ * "能吃的口粮"一大类不带（生肉、生鱼要现做），现做时要的燃料、原料也照旧不碰别人的箱子。
  * 估算在主线程上做、一类可能要估好一会儿，所以每刻只估一类，几类估齐了再排先后，不在同一刻连估六类卡住游戏。
  * 没弄满也不要紧：吃饭任务每刻看身上，弄到第一件这会儿能吃的（打到的生肉、烤好的第一块熟肉）就把这里叫停、先吃。
  */
@@ -49,6 +52,8 @@ final class FetchesFood implements Action {
 
     private final ItemNeeds needs;
     private final long budgetTicks;
+    /** 别人的箱子放不放行：饿到危险线时由吃饭任务给，平时不放行。 */
+    private final OthersStorageAllowance others;
     private long deadline = -1;
     private Action current;
     private String chosen;
@@ -61,8 +66,13 @@ final class FetchesFood implements Action {
     private Problem lastFailure;
 
     FetchesFood(ItemNeeds needs, long budgetTicks) {
+        this(needs, budgetTicks, OthersStorageAllowance.NONE);
+    }
+
+    FetchesFood(ItemNeeds needs, long budgetTicks, OthersStorageAllowance others) {
         this.needs = Objects.requireNonNull(needs, "needs");
         this.budgetTicks = budgetTicks;
+        this.others = Objects.requireNonNull(others, "others");
     }
 
     @Override public ActionStatus tick(TickContext context) {
@@ -128,8 +138,10 @@ final class FetchesFood implements Action {
                 .findFirst();
     }
 
-    private static ItemRequest requestFor(String kind) {
-        return new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
+    // 一类口粮的请求：叫得出名字的现成口粮带着别人的箱子放行；"能吃的口粮"一大类里有要现做的生肉生鱼，不带。
+    private ItemRequest requestFor(String kind) {
+        ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
+        return KINDS.contains(kind) ? request.withOthersStorage(others) : request;
     }
 
     // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮估齐，挑整条路最远走多远最近的去拿：

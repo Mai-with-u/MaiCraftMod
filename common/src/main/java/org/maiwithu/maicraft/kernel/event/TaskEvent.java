@@ -101,7 +101,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 被别人放的方块封死在小坑里，按卡坑脱困挖开了别人放的普通方块：那次脱困一收场（出了坑或走不通）当场发一条；
          * 在哪被封住、挖了谁的几格、出没出来在消息里，逐格的明细在出行结果的 others_blocks_broken。
          */
-        OTHERS_BLOCKS_BROKEN
+        OTHERS_BLOCKS_BROKEN,
+        /**
+         * 饿到危险线、身上和能用的箱子里都没口粮，从别人的箱子拿了刚好够的口粮：每确认拿到一次发一条；
+         * 谁的、在哪、拿了什么几件、当时多饿在消息里，按字段的在附带的 others_food_taken。
+         */
+        OTHERS_FOOD_TAKEN
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

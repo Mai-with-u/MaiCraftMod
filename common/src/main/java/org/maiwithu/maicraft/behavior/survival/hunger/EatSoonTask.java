@@ -55,6 +55,14 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         Action fetching(long budgetTicks);
 
         /**
+         * 同上，再按此刻的饥饿处境决定别人的箱子放不放行：饿到危险线时能从别人的箱子拿刚好够的口粮，
+         * 拿到了经 told 告诉吃饭任务。默认不放行，等于上面那个。
+         */
+        default Action fetching(long budgetTicks, HungerNeed.Facts hunger, StarvingTake.Told told) {
+            return fetching(budgetTicks);
+        }
+
+        /**
          * 身上此刻有没有这会儿该吃的一口（和 {@link #eating} 挑的是同一样）。弄吃的路上每刻问一句，
          * 弄到第一件就回来先吃；饥饿需求歇着不找吃的时，也靠它看身上是不是已经有吃的了。
          */
@@ -77,6 +85,8 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
     private HungerNeed.Facts latest;
     private int failedBites;
     private boolean fetchedSomething;
+    /** 这一次从别人的箱子拿了什么（"从 Alex 家的箱子（…）拿了 2 个面包"）；没拿为 null。结束时那句带上它。 */
+    private String tookFromOthers;
 
     EatSoonTask(FoodMoves moves, HungerNeed.ReadsFacts reader, TaskEventSink events, HungerNeed.Facts initial) {
         this(moves, reader, events, initial, new HungerBout());
@@ -101,7 +111,7 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
     @Override
     protected Action enter(Phase phase) {
         if (phase == Phase.FETCH) {
-            return moves.fetching(fetchBudgetTicks);
+            return moves.fetching(fetchBudgetTicks, latest, this::tookFromOthers);
         }
         return latest == null ? null : moves.eating(latest);
     }
@@ -149,9 +159,9 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
                 HungerNeed.Facts after = reader.read(context);
                 latest = after != null ? after : latest;
                 if (after != null && !hungry(after)) {
-                    yield Next.done(TaskResult.done("吃上了，不再饿着"));
+                    yield Next.done(TaskResult.done("吃上了，不再饿着" + tookNote()));
                 }
-                yield Next.done(TaskResult.done("吃了一口；还饿的话下一次报急再接着吃"));
+                yield Next.done(TaskResult.done("吃了一口；还饿的话下一次报急再接着吃" + tookNote()));
             }
             case ActionStatus.Failed failed -> {
                 failedBites++;
@@ -223,6 +233,17 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         return latest.losingHealth()
                 ? "饿得更急了：饱食度 " + latest.food() + "/20，已经在掉血"
                 : "饿得更急了：饱食度 " + latest.food() + "/20，已经不能疾跑";
+    }
+
+    // 饿急了从别人的箱子拿到了吃的：当场发一条事件让宿主知道拿了谁的什么，结束时那句也带上。
+    private void tookFromOthers(OthersFoodTaken facts, String what) {
+        tookFromOthers = what;
+        events.publish(TaskEvent.Kind.OTHERS_FOOD_TAKEN, facts.message(what), facts);
+    }
+
+    // 结束时那句末尾的"从谁家的箱子拿了什么"；没从别人的箱子拿为空串。
+    private String tookNote() {
+        return tookFromOthers == null ? "" : "；" + tookFromOthers;
     }
 
     // 前面那份说明是多久前的：不满一分钟说"刚才"，其余按整分钟。

@@ -23,11 +23,13 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.survival.hunger.OthersFoodTaken;
 import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.ChatEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
@@ -35,6 +37,7 @@ import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.param.ParamNames;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Attempt;
@@ -178,6 +181,12 @@ class InterfaceSnapshotTest {
                 "第 1 步（maicraft:obtain，砍木）：拿到 8 根原木；后面第 3 步（maicraft:obtain，做木剑）现在就能做，不用走路",
                 TaskResult.Status.DONE, "在 minecraft:overworld 12, 64, -8；血 20，饱食 18；手上 minecraft:oak_log",
                 List.of(new TaskEvent.ReadyStep(3, "maicraft:obtain", "做木剑", "自己做：在背包的合成格里做，不用工作台")))));
+        // 饿急了从别人的箱子拿了吃的：消息一句话，按字段的事实挂在 others_food_taken 上，不带 goal_id。
+        shapes.add("others_food_taken_event", ResultJson.event(new TaskEvent(11, TaskEvent.Kind.OTHERS_FOOD_TAKEN,
+                TaskEventLog.NO_GOAL, "饿到饱食度 3，从 Alex 家的箱子（12, 64, -8）拿了 1 个面包", null, null, List.of(),
+                new OthersFoodTaken(OthersFoodTaken.Whose.PLAYER, "Alex", null,
+                        new WorldPosition(12, 64, -8, "minecraft:overworld"),
+                        List.of(new OthersFoodTaken.Item("minecraft:bread", 1)), 3, false))));
         // 聊天流里一条玩家说的话：发言人名字、UUID，以及发言人是不是此刻在线玩家列表里的那个玩家。
         ReceivedChat said = ReceivedChat.fromPlayer("麦麦过来", UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
                 "Steve", true, false, null).orElseThrow();

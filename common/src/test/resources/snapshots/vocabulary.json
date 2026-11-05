@@ -177,7 +177,8 @@
     "follow_status",
     "sky_changed",
     "timer_due",
-    "others_blocks_broken"
+    "others_blocks_broken",
+    "others_food_taken"
   ],
   "chat_kinds": [
     "player",
@@ -300,6 +301,29 @@
           "how": "自己做：在背包的合成格里做，不用工作台"
         }
       ]
+    },
+    "others_food_taken_event": {
+      "cursor": 11,
+      "kind": "others_food_taken",
+      "message": "饿到饱食度 3，从 Alex 家的箱子（12, 64, -8）拿了 1 个面包",
+      "others_food_taken": {
+        "whose": "player",
+        "owner": "Alex",
+        "at": {
+          "x": 12,
+          "y": 64,
+          "z": -8,
+          "dimension": "minecraft:overworld"
+        },
+        "items": [
+          {
+            "item": "minecraft:bread",
+            "count": 1
+          }
+        ],
+        "food": 3,
+        "losing_health": false
+      }
     },
     "chat_event": {
       "cursor": 3,

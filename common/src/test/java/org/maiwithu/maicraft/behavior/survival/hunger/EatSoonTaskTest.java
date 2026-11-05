@@ -11,7 +11,13 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.permission.StorageUse;
 import org.maiwithu.maicraft.behavior.survival.SurvivalFakes;
+import org.maiwithu.maicraft.kernel.event.EventFacts;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -136,6 +142,58 @@ class EatSoonTaskTest {
         assertEquals(3, moves.fetchTicks, "第一件到手后不再接着弄");
         assertEquals(1, moves.fetchClosed, "弄吃的动作要收尾");
         assertEquals(1, moves.bites);
+    }
+
+    @Test
+    void takingFromSomeoneElsesChestIsToldAsAnEventAndInTheEnding() {
+        // 饿到饱食度 3、身上没吃的：弄吃的从 Alex 家的箱子拿了 1 个面包。当场发一条 others_food_taken，
+        // 带上结构化事实；吃完收场那句末尾也说从谁家的箱子拿了什么。
+        List<TaskEvent.Kind> kinds = new ArrayList<>();
+        List<EventFacts> attached = new ArrayList<>();
+        TaskEventSink sink = new TaskEventSink() {
+            @Override public void publish(TaskEvent.Kind kind, String message) {
+                kinds.add(kind);
+                events.add(message);
+            }
+
+            @Override public void publish(TaskEvent.Kind kind, String message, EventFacts facts) {
+                publish(kind, message);
+                attached.add(facts);
+            }
+        };
+        FetchThenBite fetched = new FetchThenBite(1, null);
+        EatSoonTask.FoodMoves moves = new EatSoonTask.FoodMoves() {
+            @Override public Action eating(HungerNeed.Facts hunger) {
+                return fetched.eating(hunger);
+            }
+
+            @Override public Action fetching(long budgetTicks) {
+                return fetched.fetching(budgetTicks);
+            }
+
+            @Override public Action fetching(long budgetTicks, HungerNeed.Facts hunger, StarvingTake.Told told) {
+                OthersStorageAllowance.Taken bread = new OthersStorageAllowance.Taken("minecraft:bread", "面包", 1);
+                StorageUse alex = new StorageUse(StorageUse.Kind.PLACED_BY_OTHER, "alex-id", null);
+                WorldPosition chest = new WorldPosition(12, 64, -8, "minecraft:overworld");
+                told.took(OthersFoodTaken.of(alex, chest, List.of(bread), hunger.food(), hunger.losingHealth(), id -> "Alex"),
+                        OthersFoodTaken.what(alex, chest, List.of(bread), id -> "Alex"));
+                return fetched.fetching(budgetTicks);
+            }
+        };
+        EatSoonTask task = new EatSoonTask(moves, context -> facts(3, fetched.carrying), sink, facts(3, false),
+                new HungerBout());
+        TickContext context = new SurvivalFakes.TestTick(player);
+        task.start(context);
+        TaskResult result = null;
+        for (int i = 0; i < 100 && result == null; i++) {
+            if (task.tick(context) instanceof TickResult.Finished finished) result = finished.result();
+            player.nextTick();
+        }
+
+        assertEquals(List.of(TaskEvent.Kind.OTHERS_FOOD_TAKEN), kinds);
+        assertEquals("饿到饱食度 3，从 Alex 家的箱子（12, 64, -8）拿了 1 个面包", events.getFirst());
+        assertEquals("others_food_taken", attached.getFirst().field());
+        assertTrue(result.summary().endsWith("；从 Alex 家的箱子（12, 64, -8）拿了 1 个面包"), result.summary());
     }
 
     @Test

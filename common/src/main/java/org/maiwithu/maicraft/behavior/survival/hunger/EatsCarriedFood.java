@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.survival.hunger;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.Optional;
 
@@ -42,6 +43,8 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     private final ItemsToKeep keeps;
     /** 拿东西的引擎：进世界、能力清单建好后才有；没有时弄不了吃的。 */
     private final Supplier<Optional<ItemNeeds>> sources;
+    /** 玩家编号换成名字：饿急了拿了别人的吃的，事件里写是谁家的。 */
+    private final Function<String, String> ownerNames;
 
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps) {
@@ -52,7 +55,15 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
     public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
             MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps,
             Supplier<Optional<ItemNeeds>> sources) {
+        this(backpack, foods, toMainhand, projection, keeps, sources, Function.identity());
+    }
+
+    /** @param ownerNames 玩家编号换成名字（在线写名字，不在线写编号）：饿急了拿了别人的吃的时写是谁家的 */
+    public EatsCarriedFood(BackpackView backpack, ReadsFoodValues foods,
+            MovesToMainhand toMainhand, UseKeyProjection projection, ItemsToKeep keeps,
+            Supplier<Optional<ItemNeeds>> sources, Function<String, String> ownerNames) {
         this.sources = Objects.requireNonNull(sources, "sources");
+        this.ownerNames = Objects.requireNonNull(ownerNames, "ownerNames");
         this.backpack = Objects.requireNonNull(backpack, "backpack");
         this.foods = Objects.requireNonNull(foods, "foods");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
@@ -90,6 +101,13 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
         // 饿了身上没吃的：经拿东西的引擎有预算地弄几件现成口粮（网络、箱子、做、打猎），弄到第一件能吃的吃饭任务就叫停先吃；
         // 引擎还没接上给 null，任务如实说。
         return sources.get().map(needs -> (Action) new FetchesFood(needs, budgetTicks)).orElse(null);
+    }
+
+    @Override
+    public Action fetching(long budgetTicks, HungerNeed.Facts hunger, StarvingTake.Told told) {
+        // 饿到危险线：这一次弄吃的带上别人的箱子放行，能用的箱子都没有时从别人的箱子拿刚好够的；没到线照旧不放行。
+        return sources.get().map(needs -> (Action) new FetchesFood(needs, budgetTicks,
+                StarvingTake.when(hunger, foods, ownerNames, told))).orElse(null);
     }
 
     /** 吃一口的动作：换到主手 → 按住使用键；食物已经在主手就直接按住。 */

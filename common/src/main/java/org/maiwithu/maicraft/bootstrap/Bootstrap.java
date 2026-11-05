@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.behavior.reminder.PlayerReminders;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
@@ -411,12 +412,14 @@ public final class Bootstrap {
             ReadsFoodValues foods = PlayerViews.foods(() -> playerControl.activeContext().orElse(null));
             // 换手一份：吃饭换手与随行插火把换手共用同一套界面搬运。
             ClientMovesToMainhand hands = new ClientMovesToMainhand(() -> playerControl.activeContext().orElse(null));
-            // 饿了身上没吃的：经进世界后接上的拿东西引擎去弄口粮（网络、箱子、做、打猎）。
+            // 饿了身上没吃的：经进世界后接上的拿东西引擎去弄口粮（网络、箱子、做、打猎）；
+            // 饿急了拿了别人箱子里的吃的，事件里写是谁家的：在线写名字，不在线写编号。
             EatsCarriedFood foodMoves = new EatsCarriedFood(
                     PlayerViews.backpack(() -> playerControl.activeContext().orElse(null)),
                     foods,
                     hands,
-                    useKeyProjection, kept, survivalWiring::food);
+                    useKeyProjection, kept, survivalWiring::food,
+                    owner -> OnlinePlayers.nameOrId(playerControl.activeContext().orElse(null), owner));
             // 战斗感观一份：生存需求的自卫与战斗能力看的是同一份伤害证据。
             combatMemory = new CombatMemory();
             // 联动的远程武器（土豆加农炮）：登记表在启动完成时才定，这里给取表的办法；口粮不当弹药按同一份食物数值认。
