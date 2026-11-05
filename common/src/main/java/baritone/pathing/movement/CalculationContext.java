@@ -132,6 +132,12 @@ public class CalculationContext {
     public final LongSet portalEntryCells;
 
     /**
+     * 目的地自己脚下的地板（只有要恰好站进某一格的目标才有）；身上没有能垫回去的方块时这次算路不挖它，
+     * 有能垫的、或目标没有要站进的格时为空。
+     */
+    private final BlockPos destinationFloor;
+
+    /**
      * Fluid-placement settings are copied into the context for the same reason as the other
      * movement switches: a worker must see one coherent policy for its entire search. A
      * read-only terrain probe may deliberately enable these without mutating global settings.
@@ -283,9 +289,11 @@ public class CalculationContext {
         this.flyUpTicksPerBlock = flyUp.map(FlyUpGear.Reach::ticksPerBlock).orElse(0.0);
         this.waterLandingWindow = new WaterLandingWindow(fallDamageBudget.gravity(), player.blockInteractionRange(),
                 player.getEyeHeight(), Math.max(0, -player.getDeltaMovement().y));
-        this.portalEntryCells = portalEntryCells(
-                MaiCraftGoals.unwrap(
-                        baritone.getPathingBehavior().getGoal()));
+        NavGoal navGoal = MaiCraftGoals.unwrap(baritone.getPathingBehavior().getGoal());
+        this.portalEntryCells = portalEntryCells(navGoal);
+        // 挖穿了目的地的地板就站不进去：身上没有能垫回去的方块时这次算路把它当成挖不得的格，
+        // 引擎直接去找从隔壁格钻上来之类的进法，而不是算出一条踩着已挖掉的地板进去的路再整条否掉。
+        this.destinationFloor = hasThrowaway ? null : destinationFloor(navGoal);
     }
 
     public final IBaritone getBaritone() {
@@ -378,6 +386,10 @@ public class CalculationContext {
     }
 
     public double breakCostMultiplierAt(int x, int y, int z, BlockState current) {
+        if (destinationFloor != null && destinationFloor.getX() == x && destinationFloor.getY() == y
+                && destinationFloor.getZ() == z) {
+            return COST_INF;
+        }
         // 被封死在小坑里、这一趟放开了别人放的普通方块：能挖，但按很高的倍数算，路线先走空当与天然方块，只挖绕不开的那几格。
         if (allowBreak && NavigationProtection.escapeOwner(maicraftPolicy, x, y, z, current).isPresent()) {
             return NavigationProtection.ESCAPE_BREAK_MULTIPLIER;
@@ -471,6 +483,11 @@ public class CalculationContext {
         return passCells.contains(pos.asLong())
                 || passCells.contains(pos.below().asLong())
                 || passCells.contains(pos.below().below().asLong());
+    }
+
+    /** 要恰好站进的那一格正下方（目的地自己的地板）；目标没有要站进的格时为空。 */
+    static BlockPos destinationFloor(NavGoal goal) {
+        return goal == null ? null : goal.standingCell().map(BlockPos::below).orElse(null);
     }
 
     static LongSet portalEntryCells(NavGoal goal) {
