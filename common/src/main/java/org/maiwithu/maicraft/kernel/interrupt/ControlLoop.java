@@ -57,6 +57,9 @@ import java.util.function.Consumer;
  * （吃饭、睡觉、补光、捡回遗物），对眼前危险的反应（自卫、换气、脱险）照插，角色能把手里的一件事
  * 干完又不至于干活干到淹死；寻死这类任务自己声明时一个生存需求都不插。换主任务时按新的主任务算：
  * 新主任务关掉起居类需求时，已经在跑的起居类临时任务立即让位收场。
+ *
+ * <p>LLM 下达的插一下（看着人蹲几下、点个头）也从这里进来：它排在需求表最后，按同一套打断规则插到栈顶，
+ * 做完弹出，主任务从原地接着做；它在做时只让立刻要处理的急事打断，不发临时任务事件，结果不并进主任务。
  */
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
@@ -64,7 +67,12 @@ public final class ControlLoop {
     /** 手上的任务连着停下不安全多久（刻），不急的需求才叫它先到安全的地方：两秒，一会儿就过去的不打扰。 */
     static final long ASK_SAFE_STOP_AFTER_TICKS = 40;
 
+    /** 插一下最多排几件：再多就是一口气下得太多，前面的还没做完。 */
+    public static final int CUT_IN_QUEUE = CutIns.MAX_QUEUED;
+
     private final List<SurvivalNeed> needs;
+    /** 插一下的排队：挂在需求表最后，和生存需求用同一套打断规则；插进来以后只让立刻的需求打断。 */
+    private final CutIns cutIns = new CutIns();
     /** 角色死亡这类循环自身的处境变化从这里告诉宿主。 */
     private final TaskEventSink events;
     /** 死亡决策的挂载对象：停摆的第一刻把死亡事实交给它去挂「死亡恢复」问题。 */
@@ -115,7 +123,9 @@ public final class ControlLoop {
      * @param deathDecisions 死亡决策的挂载对象；没接时死亡照常停摆，只是不挂「死亡恢复」问题。
      */
     public ControlLoop(List<SurvivalNeed> needs, TaskEventSink events, DeathDecisionHost deathDecisions) {
-        this.needs = List.copyOf(needs);
+        List<SurvivalNeed> all = new ArrayList<>(needs);
+        all.add(cutIns);
+        this.needs = List.copyOf(all);
         this.events = Objects.requireNonNull(events, "events");
         this.deathDecisions = Objects.requireNonNull(deathDecisions, "deathDecisions");
     }
@@ -133,6 +143,22 @@ public final class ControlLoop {
         stack.add(0, new Frame(task, null, null));
         closeRoutineTempTasks();
         return replaced;
+    }
+
+    /**
+     * 插一下：LLM 下达的、几秒做完的控制角色的事排进队尾，不替换主任务。轮到它、手上的事腾得出身子时
+     * 压到栈顶做完弹出；3 秒腾不出身子、角色不在了，经 giveUp 交代为什么没做。排满了不收，回 false。
+     */
+    public boolean cutIn(Task task, Consumer<TaskResult> giveUp) {
+        return cutIns.offer(task, giveUp);
+    }
+
+    /** 此刻在做（或被立刻的急事压着等恢复）的插一下；没有时为 null。查询端据此说清主目标为什么停了几秒。 */
+    public Task cutInRunning() {
+        for (Frame frame : stack) {
+            if (frame.from == cutIns) return frame.task;
+        }
+        return null;
     }
 
     /**
@@ -156,6 +182,7 @@ public final class ControlLoop {
                 reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
         }
+        cutIns.dropAll("角色不在了");
         retries.clearWaits();
         brokenNeeds.clear();
         parkedWhere = null;
@@ -171,7 +198,7 @@ public final class ControlLoop {
         if (!routineNeedsOff()) return;
         for (int i = stack.size() - 1; i > 0; i--) {
             Frame frame = stack.get(i);
-            if (frame.from != null && !frame.from.reactsToImmediateDanger()) {
+            if (frame.from != null && frame.from.routine()) {
                 stack.remove(i);
                 LOG.info("{}收场：主任务不要起居打断", frame.task.describe());
                 reportTempClosedEarly(frame, frame.close(CloseReason.ROUTINE_NEEDS_OFF), "主任务不要起居打断");
@@ -207,12 +234,13 @@ public final class ControlLoop {
 
     // 这个需求此刻参不参与挑选：全关时都不参与；只关起居类时，眼前危险的反应照常参与。
     private boolean excluded(SurvivalNeed need, boolean allOff, boolean routineOff) {
-        return allOff || routineOff && !need.reactsToImmediateDanger();
+        return allOff || routineOff && need.routine();
     }
 
     // 没走到结局就被收场（角色不在了、新主任务不要起居打断）的临时任务也发一条结束事件：
     // 开始那条已经发过，缺了这条，读事件流的一方分不清身体已经交还还是还在被占着。
     private void reportTempClosedEarly(Frame frame, TaskResult result, String why) {
+        if (!frame.from.announcesTempTask()) return;
         events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
                 why + "，" + frame.task.describe() + "收场：" + result.summary());
     }
@@ -226,14 +254,14 @@ public final class ControlLoop {
      * 此刻占着角色身体的临时任务：栈顶是生存需求插进来的那一层时就是它；主任务自己在推进、
      * 或者栈上一个任务都没有时为 null。没有主任务时临时任务照样能占身（角色闲着被打了就自卫），
      * 所以不要求它下面压着主任务。查询端据此说清"目标为什么迟迟不动"与"没有目标时角色在干什么"：
-     * 不是卡住也不是空闲，是身体被生存需求借走了。
+     * 不是卡住也不是空闲，是身体被生存需求借走了。插一下不算（它是 LLM 自己下达的目标，见 {@link #cutInRunning}）。
      */
     public Task occupyingTemporaryTask() {
         if (stack.isEmpty()) {
             return null;
         }
         Frame topFrame = stack.getLast();
-        return topFrame.from == null ? null : topFrame.task;
+        return topFrame.from == null || topFrame.from == cutIns ? null : topFrame.task;
     }
 
     /** 运行栈每一层此刻的样子，从下往上（最底是主任务，最上是此刻在推进的）：给调试面板看角色听谁的。 */
@@ -354,8 +382,9 @@ public final class ControlLoop {
     // 不急的需求只因为手上的任务一直停下不安全才插不进来：叫它先到安全的地方再停，停稳了下一刻需求就插得进来。
     // 正在等着再试的需求不算（它本来就插不进来，不值得为它落地）；需求没了或缓成 LATER，就叫它照原样接着做。
     private void windDownFor(Frame current, Choice choice, TickContext context) {
+        // 插一下不值得叫手上的事先落地、刹停：等不到空当它自己 3 秒后收场。
         boolean wanted = choice.deferred != null && choice.deferredUrgency == Urgency.SOON
-                && !retries.has(choice.deferred);
+                && choice.deferred != cutIns && !retries.has(choice.deferred);
         boolean longUnsafe = askedInterruptibility == Interruptibility.UNSAFE_TO_STOP
                 && context.gameTick() - current.unsafeSince >= ASK_SAFE_STOP_AFTER_TICKS;
         if (wanted && !current.stopAsked && longUnsafe) {
@@ -399,6 +428,7 @@ public final class ControlLoop {
                 reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
         }
+        cutIns.dropAll("角色死了");
         // 主任务停在原地：先停手上的动作，别让上一刻的输入继续压在一个死掉的身体上。
         if (!stack.isEmpty()) {
             stack.getFirst().pause();
@@ -508,7 +538,7 @@ public final class ControlLoop {
             frame.started = true;
             // 临时任务占住身体的头一刻发一条开始事件：主目标停住期间，读事件流的一方靠它确认
             // 身体被哪个生存需求借走、拿去做什么；不发这条，占身什么时候开始就查不到。
-            if (frame.from != null) {
+            if (frame.from != null && frame.from.announcesTempTask()) {
                 events.publish(TaskEvent.Kind.TEMPORARY_TASK_STARTED,
                         "生存需求「" + frame.from.name() + "」插进临时任务：" + frame.task.describe());
             }
@@ -525,7 +555,7 @@ public final class ControlLoop {
         stack.remove(frame);
         // 收场事件统一在这里发，与开始那条成对：观察者才确认得了身体什么时候被借走、什么时候还回来。
         // 任务能给更具体的收场说明（夜里自己去睡了一觉、自卫的战况）就用它的；给不出就用结果的结论句。
-        if (frame.from != null) {
+        if (frame.from != null && frame.from.announcesTempTask()) {
             String note = frame.task instanceof AnnouncesFinish announces
                     ? announces.finishedNote(finished.result()) : null;
             events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
@@ -533,11 +563,13 @@ public final class ControlLoop {
         }
         // 临时任务做成的事发生在主任务身上：插了一支灯、垫了一块料，把交代的结果递给主任务记账，
         // 不让变化跟着临时任务的结果一起消失。
-        if (frame.from != null && !stack.isEmpty()
+        // 插一下是 LLM 另下的目标，结果记在它自己名下，不并进主任务。
+        if (frame.from != null && frame.from != cutIns && !stack.isEmpty()
                 && stack.getFirst().task instanceof KeepsTempTaskFacts keeps) {
             keeps.keepTempTaskFacts(finished.result());
         }
-        if (frame.from != null && finished.result().status() != TaskResult.Status.DONE
+        // 插一下每一件都是新下达的目标，一件出错不按住排在后面的。
+        if (frame.from != null && frame.from != cutIns && finished.result().status() != TaskResult.Status.DONE
                 && (frame.from.waitsAfterFailure() || programError(finished.result()))) {
             // 自救没做成：处境不更急就先缓一阵再插，让主任务有机会动；做没做成都不影响主任务。
             // 声明不缓的需求（被攻击）不按住：每一下新挨的打都要接着处理，不让它站着挨打；
@@ -574,6 +606,8 @@ public final class ControlLoop {
     // 手上是主任务或没有任务时都能（照打断规则）。
     private boolean outranks(SurvivalNeed need, Urgency urgency, Frame top) {
         if (top == null || top.from == null) return true;
+        // 插一下最多十几秒：只让立刻要处理的急事打断，尽快、找空当的等它做完。
+        if (top.from == cutIns) return urgency == Urgency.NOW;
         int compared = urgency.compareTo(top.urgency);
         if (compared != 0) return compared > 0;
         return needs.indexOf(need) < needs.indexOf(top.from);

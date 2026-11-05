@@ -114,8 +114,10 @@ public final class ExecuteTool implements McpTool {
         return start(reading.goal(), requestKey, notes);
     }
 
+    // 控制角色的目标：成为主目标的，和插一下做完就让回去的。
     private boolean controlsPlayer(Goal goal) {
-        return registry.find(goal.ability()).orElseThrow().spec().mode() == ExecutionMode.CONTROLS_PLAYER;
+        ExecutionMode mode = registry.find(goal.ability()).orElseThrow().spec().mode();
+        return mode == ExecutionMode.CONTROLS_PLAYER || mode == ExecutionMode.CUTS_IN;
     }
 
     private JsonObject start(Goal goal, String requestKey, List<String> notes) {

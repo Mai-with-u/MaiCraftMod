@@ -3,8 +3,11 @@ package org.maiwithu.maicraft.kernel.goal;
 
 import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -14,12 +17,14 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 目标运行表：LLM 下达过的目标都在这里按编号找到，查看、暂停、解除暂停、取消、回答都经过它。
@@ -63,6 +68,8 @@ public final class GoalRunTable {
     };
     /** 现在作为主任务交给控制循环的目标；没有时为 -1。 */
     private long mainRunId = -1;
+    /** 以插一下下达的目标编号：不替换主目标，不能暂停，离开世界时取消、不存成暂停。 */
+    private final Set<Long> cutInIds = new HashSet<>();
 
     public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop,
                         PlayerControlHandover handover) {
@@ -142,6 +149,11 @@ public final class GoalRunTable {
         for (GoalRunner runner : runners.values()) {
             if (!runner.run().unfinished()) continue;
             try {
+                // 插一下几秒的事不跨世界：取消，不存成暂停等下次进世界恢复。
+                if (cutInIds.contains(runner.run().id())) {
+                    runner.close(CloseReason.PLAYER_GONE);
+                    continue;
+                }
                 runner.leaveWorld();
             } catch (RuntimeException failure) {
                 // 一个目标停手时出错不能拦住其余目标存盘：记下来，接着处理下一个。
@@ -151,6 +163,7 @@ public final class GoalRunTable {
         loop.leaveWorld();
         runners.clear();
         requestKeys.clear();
+        cutInIds.clear();
         mainRunId = -1;
         deathRecovery.forget();
         places = detachedPlaceholder;
@@ -174,9 +187,35 @@ public final class GoalRunTable {
         if (requestKey != null) {
             requestKeys.put(requestKey, id);
         }
-        makeMain(runner);
+        if (cutsIn(goal)) {
+            cutIn(runner);
+        } else {
+            makeMain(runner);
+        }
         dropOldFinished();
         return new Launch(runner, false);
+    }
+
+    private boolean cutsIn(Goal goal) {
+        return registry.find(goal.ability()).map(module -> module.spec().mode() == ExecutionMode.CUTS_IN).orElse(false);
+    }
+
+    // 插一下：排进控制循环的队，不替换主目标。人按 F8 拿着角色时不抢；排满了不收。都如实收场，LLM 看结果就知道没做。
+    private void cutIn(GoalRunner runner) {
+        cutInIds.add(runner.run().id());
+        if (handover.humanTookOver()) {
+            runner.giveUp(notNow("人在操作角色（按过 F8），这会儿不做"));
+            return;
+        }
+        if (!loop.cutIn(runner, runner::giveUp)) {
+            runner.giveUp(notNow("前面还排着 " + ControlLoop.CUT_IN_QUEUE + " 件插一下的事，等它们做完再下"));
+            return;
+        }
+        handover.requestControl();
+    }
+
+    private static TaskResult notNow(String why) {
+        return TaskResult.failed(why + "，这件插一下的事没做", Problem.of(Problem.Kind.WRONG_TIME, why));
     }
 
     /**
@@ -219,6 +258,10 @@ public final class GoalRunTable {
         // 主目标在推进中却轮不到它：生存需求的临时任务（夜里自保、睡觉这类）占着身体，目标要等它做完。
         // 这个事实不说明，对面会把"等天亮"当成卡死，反复取消重下——临时任务不随换活退场，重下还是一样。
         if (runner.run().state() == GoalRunState.RUNNING && id == mainRunId) {
+            Task cutting = loop.cutInRunning();
+            if (cutting != null) {
+                return Optional.of("先做插一下的「" + cutting.describe() + "」，几秒后从原地接着推进：" + describe);
+            }
             Task occupying = loop.occupyingTemporaryTask();
             if (occupying != null) {
                 return Optional.of("生存需求的临时任务「" + occupying.describe() + "」占着角色，"
@@ -321,6 +364,9 @@ public final class GoalRunTable {
     public void pause(long id) {
         requireNotDeathDecision(id);
         GoalRunner runner = require(id);
+        if (cutInIds.contains(id)) {
+            throw new WrongGoalRunState("目标 " + id + " 是插一下的事，做完就结束，不能暂停；要停用 cancel");
+        }
         GoalRunState state = runner.run().state();
         if (state != GoalRunState.RUNNING && state != GoalRunState.AWAITING_ANSWER) {
             throw new WrongGoalRunState("目标 " + id + " 现在是 " + state + "，不能暂停");
@@ -443,7 +489,9 @@ public final class GoalRunTable {
         long finished = runners.values().stream().filter(runner -> !runner.run().unfinished()).count();
         Iterator<GoalRunner> iterator = runners.values().iterator();
         while (finished > KEPT_FINISHED && iterator.hasNext()) {
-            if (!iterator.next().run().unfinished()) {
+            GoalRun run = iterator.next().run();
+            if (!run.unfinished()) {
+                cutInIds.remove(run.id());
                 iterator.remove();
                 finished--;
             }

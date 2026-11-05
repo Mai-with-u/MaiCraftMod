@@ -4,10 +4,12 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.event.TaskEventLog;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
 import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeed;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -185,6 +187,75 @@ class GoalRunTableTest {
         assertSame(second, loop.currentTask());
         assertFalse(first.run().unfinished());
         assertEquals(TaskResult.Status.CANCELLED, first.run().result().status());
+    }
+
+    /** 再登记一个插一下的替身能力，和主目标共用一条任务时间线。 */
+    private GoalTestAbility cutInAbility() {
+        GoalTestAbility cutting = new GoalTestAbility("maicraft:test_cut_in", ability.shared());
+        cutting.mode = ExecutionMode.CUTS_IN;
+        registry.register(cutting);
+        return cutting;
+    }
+
+    @Test
+    void aCutInDoesNotReplaceTheMainGoalAndTheMainGoalResumes() {
+        // 角色在挖矿时 LLM 让它点个头：点头插在上面做完，挖矿不被替换，查询说清主目标在等几秒。
+        GoalTestAbility cutting = cutInAbility();
+        GoalRunner main = table.launch(GOAL, null).runner();
+        runTicks(1);
+
+        GoalRunner nod = table.launch(Goal.of("maicraft:test_cut_in", null, ParamValues.EMPTY), null).runner();
+        assertTrue(main.run().unfinished(), "主目标没被替换");
+        assertSame(main.run(), table.mainGoal().orElseThrow());
+        assertEquals(2, handover.requests, "插一下也要把控制权要回来");
+
+        runTicks(1);
+        assertSame(nod, loop.currentTask(), "两步之间插进来");
+        String doing = table.doing(main.run().id()).orElseThrow();
+        assertTrue(doing.contains("插一下"), doing);
+        assertThrows(GoalRunTable.WrongGoalRunState.class, () -> table.pause(nod.run().id()),
+                "插一下做完就结束，不能暂停");
+
+        cutting.next(new StepDecision.Finish(TaskResult.done("点过头了")));
+        runTicks(2);
+        assertEquals(TaskResult.Status.DONE, nod.run().result().status());
+        assertSame(main, loop.currentTask(), "点完头回到主目标");
+        assertTrue(main.run().unfinished());
+    }
+
+    @Test
+    void aCutInIsRefusedWhileAHumanHoldsTheControls() {
+        // 人按 F8 在操作角色：插一下不抢控制权，如实以"这会儿不做"收场。
+        cutInAbility();
+        handover.humanTookOver = true;
+        GoalRunner nod = table.launch(Goal.of("maicraft:test_cut_in", null, ParamValues.EMPTY), null).runner();
+
+        assertFalse(nod.run().unfinished());
+        assertEquals(TaskResult.Status.FAILED, nod.run().result().status());
+        assertEquals(Problem.Kind.WRONG_TIME, nod.run().result().problem().kind());
+        assertEquals(0, handover.requests);
+    }
+
+    @Test
+    void aCutInBeyondTheQueueIsRefused() {
+        cutInAbility();
+        Goal nod = Goal.of("maicraft:test_cut_in", null, ParamValues.EMPTY);
+        for (int i = 0; i < ControlLoop.CUT_IN_QUEUE; i++) {
+            assertTrue(table.launch(nod, null).runner().run().unfinished());
+        }
+        GoalRunner fifth = table.launch(nod, null).runner();
+        assertEquals(Problem.Kind.WRONG_TIME, fifth.run().result().problem().kind());
+    }
+
+    @Test
+    void leavingTheWorldCancelsACutInInsteadOfPausingIt() {
+        // 插一下几秒的事不跨世界：离开世界时取消，不存成暂停等下次恢复。
+        cutInAbility();
+        GoalRunner nod = table.launch(Goal.of("maicraft:test_cut_in", null, ParamValues.EMPTY), null).runner();
+        runTicks(1);
+
+        table.leaveWorld();
+        assertEquals(TaskResult.Status.CANCELLED, nod.run().result().status());
     }
 
     @Test

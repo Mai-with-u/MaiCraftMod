@@ -49,4 +49,21 @@ public interface SurvivalNeed {
     default boolean waitsAfterFailure() {
         return true;
     }
+
+    /**
+     * 是不是起居类：吃饭、睡觉、补光、捡回遗物这类按身体状态安排的活。主目标的许可是 survival_needs=off 时
+     * 控制循环只停起居类的需求。默认不是眼前危险的反应就算起居类；被拍了回头看这种一两秒的反应不是起居，
+     * 关掉起居需求也照样回头，不然盖房子开着 off 时谁拍它都不理人。
+     */
+    default boolean routine() {
+        return !reactsToImmediateDanger();
+    }
+
+    /**
+     * 临时任务开始与结束时要不要发任务事件。默认要：读事件流的一方靠它确认身体被谁借走、什么时候还回来。
+     * 回头看这种一两秒的小动作不发：引起它的那条事件已经说了，宿主也不会把它讲成"先放下手上的事"。
+     */
+    default boolean announcesTempTask() {
+        return true;
+    }
 }

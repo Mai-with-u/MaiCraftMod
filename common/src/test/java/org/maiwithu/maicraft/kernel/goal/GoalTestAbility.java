@@ -160,6 +160,8 @@ final class GoalTestAbility implements AbilityModule {
     AbilityHooks hooks = AbilityHooks.NONE;
     /** 这个替身能力在哪做都一样（像去某地、拿东西）；默认守着原地。 */
     boolean anywhere;
+    /** 这个替身能力的执行方式；默认控制角色、替换主目标，拨成插一下时不替换主目标。 */
+    ExecutionMode mode = ExecutionMode.CONTROLS_PLAYER;
 
     GoalTestAbility(String id) {
         this(id, new SharedTasks());
@@ -173,7 +175,7 @@ final class GoalTestAbility implements AbilityModule {
 
     @Override public AbilitySpec spec() {
         return new AbilitySpec(id, "替身能力", AbilityDoc.forAbility("test"),
-                ParamSpecs.EMPTY, Set.of(), ExecutionMode.CONTROLS_PLAYER, Set.of(), List.of(), Listing.LISTED);
+                ParamSpecs.EMPTY, Set.of(), mode, Set.of(), List.of(), Listing.LISTED);
     }
 
     @Override public StepDecision decide(StepContext step) {

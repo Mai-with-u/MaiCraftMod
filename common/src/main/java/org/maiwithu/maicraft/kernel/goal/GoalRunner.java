@@ -143,6 +143,15 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         return runner;
     }
 
+    /**
+     * 插一下还没轮上就放弃（3 秒腾不出身子、排满了、人在操作角色）：以给定的结果收场，不推进。
+     * 已经结束时什么都不做。
+     */
+    public void giveUp(TaskResult why) {
+        if (result != null) return;
+        settle(why, null);
+    }
+
     /** 这条推进的记录；LLM 查询目标进展时看的就是它。 */
     public GoalRun run() {
         return run;
