@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
+import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCreatureScans;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCreatureSight;
@@ -25,6 +26,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHunts;
 import org.maiwithu.maicraft.behavior.acquire.cook.ClientBrewingReads;
+import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.sources.BrewingSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveTransformSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveWorkTools;
@@ -73,9 +75,11 @@ final class AcquisitionWiring {
             ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource,
             ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
+        // 装炉就走留下的那几台：这个世界一份，挂计时走 LLM 用的同一张计时表。
+        FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(timersOf(deps.channels().timers()));
         // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
         MenuRecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
-                recipeReads, deps.world().memory(), deps.character().context());
+                recipeReads, deps.world().memory(), deps.character().context(), leftCooking);
         ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context(), deps.world().generatedTerrain());
         // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
@@ -104,25 +108,17 @@ final class AcquisitionWiring {
                 permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.hands().interactions(), deps.character().context()));
-        MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.character().context(), bringsClose, deps.hands().interactions(),
-                deps.items().itemTags(), new ClientTradeMenuReads(deps.character().context()), deps.character().backpack(), deps.character().offhand(), innerNeeds);
-        // 狩猎的出手与走位走战斗同一条攻击事实（游戏接口层的攻击交互），狩猎只管选目标与收掉落。
-        LiveHunts hunts = new LiveHunts(new LiveHuntMoves(deps.travel().walks()), drops,
-                new ClientCreatureSight(deps.character().context()), deps.guards().creatures(),
-                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags());
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
                 containerSource, craftSource, smeltSource, smithSource, brewSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
-                new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags()),
-                new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
-                        deps.guards().protection(), tradeTakes),
-                new HuntSource(new ClientCreatureScans(deps.character().context()), deps.guards().creatures(), permission,
-                        deps.items().itemTags(), hunts),
-                // 缺水桶时拿空桶去池塘、河边舀（只舀舀了会自己补回来的水，不碰机器里的）。
-                new WaterFillSource(playerServices),
-                // 自己放下的床、工作台、熔炉、酿造台按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
-                new ReclaimSource(deps.world().memory(), placer, deps.guards().protection(), permission, collects, deps.items().itemTags())));
+                new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags())));
+        sources.addAll(tradeAndHunt(deps, bringsClose, drops, innerNeeds, permission));
+        // 缺水桶时拿空桶去池塘、河边舀（只舀舀了会自己补回来的水，不碰机器里的）。
+        sources.add(new WaterFillSource(playerServices));
+        // 自己放下的床、工作台、熔炉、酿造台按路程算一条来路：野外那张床拆回来，不为一张床去打羊、打鱿鱼。
+        sources.add(new ReclaimSource(deps.world().memory(), placer, deps.guards().protection(), permission, collects,
+                deps.items().itemTags()));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
         // 联动交来的"扔进水里会变"的配方表（AE2 的转化）：每一份一条途径，扔料、退开、等、捡用和捡掉落物同一套。
@@ -161,6 +157,38 @@ final class AcquisitionWiring {
         return new ItemAcquisition(List.of(containerSource),
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(),
                 deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH);
+    }
+
+    /** 和村民买、打掉会掉出它的生物两条来路：交易开村民的交易界面一笔一笔买，狩猎只管选目标与收掉落。 */
+    private static List<ItemSource> tradeAndHunt(AbilityCatalog.Deps deps, LiveApproaches bringsClose,
+            ClientDropPickup drops, DeferredInnerNeeds innerNeeds, PermissionCheck permission) {
+        MerchantTradeTakes tradeTakes = new MerchantTradeTakes(deps.character().context(), bringsClose, deps.hands().interactions(),
+                deps.items().itemTags(), new ClientTradeMenuReads(deps.character().context()), deps.character().backpack(), deps.character().offhand(), innerNeeds);
+        // 狩猎的出手与走位走战斗同一条攻击事实（游戏接口层的攻击交互），狩猎只管选目标与收掉落。
+        LiveHunts hunts = new LiveHunts(new LiveHuntMoves(deps.travel().walks()), drops,
+                new ClientCreatureSight(deps.character().context()), deps.guards().creatures(),
+                deps.character().backpack(), deps.character().offhand(), deps.items().itemTags());
+        return List.of(
+                new TradeSource(new ClientMerchantScans(deps.character().context()), deps.guards().creatures(), deps.world().memory(),
+                        deps.guards().protection(), tradeTakes),
+                new HuntSource(new ClientCreatureScans(deps.character().context()), deps.guards().creatures(), permission,
+                        deps.items().itemTags(), hunts));
+    }
+
+    /**
+     * 留着烧的那几台挂计时、摘计时走 LLM 用的同一张计时表：到点一样在事件里发 timer_due，
+     * LLM 用 timer 列得出、也能按编号取消。
+     */
+    private static FurnacesLeftCooking.SetsTimers timersOf(Timers timers) {
+        return new FurnacesLeftCooking.SetsTimers() {
+            @Override public Optional<Integer> set(int afterSeconds, String note, long gameTick) {
+                return timers.set(afterSeconds, note, gameTick).map(Timers.Timer::id);
+            }
+
+            @Override public void cancel(int timerId) {
+                timers.cancel(timerId);
+            }
+        };
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */

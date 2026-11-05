@@ -48,6 +48,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 炉子里是别人的东西（投入口是别的原料、产出格是别的成品）就是正忙，不动它：这台里还没放过这次的东西，
  * 就关上界面换记得的下一台同种炉子（近的在前，连第一台最多三台，见 {@link FurnaceChoices}），换过去的那台
  * 走不到、点不开也接着换；都没用上才收场，逐台说清在哪、为什么。已经放过东西的那台不丢下，照旧在那台收场。
+ *
+ * <p>obtain 这一场里一炉还要烧一分钟以上：添燃料只按这一炉算、不够烧完先补，然后装好炉就走——原料燃料留在
+ * 炉子里接着烧，记进留着烧的那几台（{@link FurnacesLeftCooking}）并挂上计时，关上界面这一趟就做完了。
+ * 回到记着的那台点开先核对：还是那一炉就算自己的东西在里面，照旧在这台收场；到点了没烧完、
+ * 或者已经不是那一炉了，如实记一笔。别的能力途中缺料来烧，照旧关着界面在旁边等。
  */
 final class FurnaceRun implements Action {
 
@@ -98,6 +103,10 @@ final class FurnaceRun implements Action {
     private final Function<WorldPosition, StationVisit> visits;
     private final ReadsFuels fuels;
     private final WorldMemory memory;
+    /** 装炉就走留下的那几台：走的时候记一笔、挂计时，回到记着的那台时核对并划掉。 */
+    private final FurnacesLeftCooking leftCooking;
+    /** 这一场能不能装好炉就走：只有 obtain 这一场能，别的能力途中缺料来烧照旧在旁边等。 */
+    private final boolean leavesLongCooking;
     private final int targetItems;
     private final int cookTicks;
     /** 总期限：烧的时间加上照看的余量，每换一台炉子再多给一些。 */
@@ -111,6 +120,12 @@ final class FurnaceRun implements Action {
     private boolean awayAfterClose;
     /** 关上界面以后换下一台炉子：这台正忙，里面又没有这次放的东西。 */
     private boolean moveOnAfterClose;
+    /** 装好炉就走：关上界面以后这一趟就做完了，炉子接着烧。 */
+    private boolean leaveAfterClose;
+    /** 这一台点开以后核对过"是不是装炉就走留下的那台"没有：每到一台核对一次。 */
+    private boolean checkedLeft;
+    /** 装好就走前补过一次燃料：补一次就走，补不上也照走。 */
+    private boolean fuelToppedUp;
     private long awayTicks;
     private long awayUntil;
     private long unlitSince = -1;
@@ -144,7 +159,8 @@ final class FurnaceRun implements Action {
      * @param visits   到某一台炉子跟前点开的一趟
      */
     FurnaceRun(RecipeHolder<?> holder, WorkstationRecipe recipe, List<WorldPosition> stations, int times,
-            Function<WorldPosition, StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records) {
+            Function<WorldPosition, StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records,
+            FurnacesLeftCooking leftCooking, boolean leavesLongCooking) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.choices = new FurnaceChoices(stations);
@@ -154,6 +170,8 @@ final class FurnaceRun implements Action {
         this.fuels = Objects.requireNonNull(fuels, "fuels");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.records = records;
+        this.leftCooking = Objects.requireNonNull(leftCooking, "leftCooking");
+        this.leavesLongCooking = leavesLongCooking;
         this.targetItems = times * recipe.resultCount();
         this.cookTicks = holder.value() instanceof AbstractCookingRecipe cooking && cooking.getCookingTime() > 0
                 ? cooking.getCookingTime() : DEFAULT_COOK_TICKS;
@@ -219,6 +237,11 @@ final class FurnaceRun implements Action {
             return run.tickAction(this::onMoveSettled);
         }
         MenuContent.Reading open = reading.get();
+        // 每到一台先看是不是装炉就走留下的那台：是就核对里面还是不是那一炉，再按炉子里实际有什么照看。
+        if (!checkedLeft) {
+            checkedLeft = true;
+            checkLeft(open, tick);
+        }
         SlotSnapshot input = open.containerSnapshots().get(INPUT);
         SlotSnapshot output = open.containerSnapshots().get(OUTPUT);
         // 炉子里是别人的东西：不动它。这台里还没放过这次的东西就关上换下一台，放过的照旧如实说正忙。
@@ -245,31 +268,47 @@ final class FurnaceRun implements Action {
             return fueled ? loadInput(tick, open, source) : addFuel(tick, open);
         }
         // 投入口有料：没在烧又没燃料就补燃料，都齐了关上界面去旁边等。
-        return fueled ? leaveToWait(tick, input.count()) : addFuel(tick, open);
+        return fueled ? leaveToWait(tick, open, input.count()) : addFuel(tick, open);
+    }
+
+    // 回到装炉就走留下的那台：划掉记着的那一炉（人已经回来了，还挂着的计时摘掉）。里面还是那一炉，
+    // 就算自己的东西在里面——收拾时收回自己的原料和燃料，炉子正忙也不丢下它；到点了还没烧完，
+    // 如实记一笔（角色走远时区块不加载，炉子就停着）；已经不是那一炉了，记下当时里面是什么，不当成烧好了。
+    // 别的配方留下的那一炉不归这一趟管，原样记着。
+    private void checkLeft(MenuContent.Reading open, TickContext tick) {
+        Optional<LeftCooking> left = leftCooking.at(station).filter(cooking -> cooking.recipeId().equals(recipe.id()));
+        if (left.isEmpty()) return;
+        leftCooking.collected(station);
+        SlotSnapshot input = open.containerSnapshots().get(INPUT);
+        SlotSnapshot output = open.containerSnapshots().get(OUTPUT);
+        int oursIn = !input.isEmpty() && isIngredient(input.stack()) ? input.count() : 0;
+        int oursOut = !output.isEmpty() && isResult(output.stack()) ? output.count() : 0;
+        FurnaceLeaving.Return seen = FurnaceLeaving.onReturn(left.get(), oursIn, oursOut,
+                "投入口" + slotText(input) + "，产出格" + slotText(output), tick.gameTick());
+        if (seen.finding() != null && records != null) {
+            records.attempt(FurnaceLeaving.returnTried(left.get()), seen.finding());
+        }
+        if (oursIn > 0) inputLoaded = true;
+        if (seen.ours() && left.get().fuelItemId() != null) fuelPlaced = left.get().fuelItemId();
     }
 
     // 装原料：身上一堆配方认的原料分出还要烧的件数放进投入口，一次最多一组。
     private ActionStatus loadInput(TickContext tick, MenuContent.Reading open, int source) {
         ItemStack kind = open.playerSnapshots().get(source).stack();
-        int amount = Math.min(Math.min(stillToSmelt(), kind.getCount()), Math.min(kind.getMaxStackSize(), STACK));
+        int amount = loadAmount(kind);
         inputLoaded = true;
         return load(open.playerSlotIds().get(source), open.containerSlotIds().get(INPUT), kind, amount,
                 "往投入口装" + kind.getHoverName().getString());
     }
 
-    // 添燃料：按还要烧的件数挑一堆最合适的燃料，分出够烧完的件数放进燃料槽；身上没有能烧的就收场说明。
+    // 这一组装几件：还要烧的件数、这一堆有几件、一格放得下几件，取最小的。
+    private int loadAmount(ItemStack kind) {
+        return Math.min(Math.min(stillToSmelt(), kind.getCount()), Math.min(kind.getMaxStackSize(), STACK));
+    }
+
+    // 添燃料：按要烧的件数挑一堆最合适的燃料，分出够烧完的件数放进燃料槽；身上没有能烧的就收场说明。
     private ActionStatus addFuel(TickContext tick, MenuContent.Reading open) {
-        List<FuelStack> stacks = new ArrayList<>();
-        for (int i = 0; i < open.playerSnapshots().size(); i++) {
-            SlotSnapshot stack = open.playerSnapshots().get(i);
-            // 工具、武器这类一格一件的不烧，这次要烧的原料和烧出来的成品也不烧。
-            if (stack.isEmpty() || stack.stack().getMaxStackSize() <= 1
-                    || isIngredient(stack.stack()) || isResult(stack.stack())) continue;
-            // 燃料表给的是熔炉里烧多久；高炉、烟熏炉里同一件燃料只顶一半。
-            int burn = fuels.burnTicks(itemId(stack.stack())) / recipe.kind().fuelBurnDivisor();
-            if (burn > 0) stacks.add(new FuelStack(i, stack.count(), burn));
-        }
-        FuelPick pick = pickFuel(stacks, (long) stillToSmelt() * cookTicks);
+        FuelPick pick = pickFuel(fuelStacks(open, null), (long) fuelFor(open) * cookTicks);
         if (pick == null) {
             return finish(Problem.of(Problem.Kind.NEED_ITEM, "身上没有能烧的燃料（工具、要烧的原料和成品不算），烧不了"
                     + recipe.result().describe()));
@@ -278,6 +317,36 @@ final class FurnaceRun implements Action {
         fuelPlaced = itemId(kind);
         return load(open.playerSlotIds().get(pick.index()), open.containerSlotIds().get(FUEL), kind,
                 pick.count(), "往燃料槽添" + kind.getHoverName().getString());
+    }
+
+    // 这次添燃料按几件算：能装好就走的这一场只按这一炉（投入口里的，或马上要装的那一组），
+    // 走的时候不把后面几炉的燃料一次塞进炉子；不然按还要烧的全部，站着等时少添几回。
+    private int fuelFor(MenuContent.Reading open) {
+        if (!leavesLongCooking) return stillToSmelt();
+        SlotSnapshot input = open.containerSnapshots().get(INPUT);
+        if (!input.isEmpty()) return input.count();
+        int source = ingredientSource(open);
+        return source < 0 ? stillToSmelt() : loadAmount(open.playerSnapshots().get(source).stack());
+    }
+
+    // 身上能当燃料的几堆：工具、武器这类一格一件的不烧，这次要烧的原料和烧出来的成品也不烧；
+    // onlyItem 给了就只要这一种（燃料槽里已经有燃料时只补得进同一种）。
+    private List<FuelStack> fuelStacks(MenuContent.Reading open, String onlyItem) {
+        List<FuelStack> stacks = new ArrayList<>();
+        for (int i = 0; i < open.playerSnapshots().size(); i++) {
+            SlotSnapshot stack = open.playerSnapshots().get(i);
+            if (stack.isEmpty() || stack.stack().getMaxStackSize() <= 1
+                    || isIngredient(stack.stack()) || isResult(stack.stack())) continue;
+            if (onlyItem != null && !onlyItem.equals(itemId(stack.stack()))) continue;
+            int burn = burnTicksOf(itemId(stack.stack()));
+            if (burn > 0) stacks.add(new FuelStack(i, stack.count(), burn));
+        }
+        return stacks;
+    }
+
+    // 一件燃料在这种炉子里烧多少刻：燃料表给的是熔炉里烧多久，高炉、烟熏炉里同一件燃料只顶一半。
+    private int burnTicksOf(String itemId) {
+        return fuels.burnTicks(itemId) / recipe.kind().fuelBurnDivisor();
     }
 
     /**
@@ -307,10 +376,16 @@ final class FurnaceRun implements Action {
         return new FuelPick(best.index(), (int) count);
     }
 
-    // 料和燃料都齐了：关上界面去旁边等，估摸这一炉烧完的时刻再回来；烧得多时隔一阵回来收一次货。
-    private ActionStatus leaveToWait(TickContext tick, int loaded) {
+    // 料和燃料都齐了。这一场能装好就走、这一炉还要烧一分钟以上：燃料不够烧完先补，补好了装好炉就走；
+    // 不然关上界面去旁边等，估摸这一炉烧完的时刻再回来，烧得多时隔一阵回来收一次货。
+    private ActionStatus leaveToWait(TickContext tick, MenuContent.Reading open, int loaded) {
         float cooking = tick.player().localPlayer().containerMenu instanceof AbstractFurnaceMenu furnace
                 ? furnace.getBurnProgress() : 0f;
+        long left = FurnaceLeaving.cookTicksLeft(loaded, cooking, cookTicks);
+        if (leavesLongCooking && FurnaceLeaving.leavesNow(left)) {
+            Optional<ActionStatus> topUp = topUpFuel(open, left);
+            return topUp.isPresent() ? topUp.get() : leaveCooking(tick, open, loaded, left);
+        }
         awayTicks = waitTicks(loaded, cooking, cookTicks);
         awayAfterClose = true;
         stage = Stage.CLOSE;
@@ -319,8 +394,42 @@ final class FurnaceRun implements Action {
 
     /** 投入口 loaded 件、手上这件烧了 cooking 成，估摸多久烧完再回来看（有上下限）。 */
     static long waitTicks(int loaded, float cooking, int cookTicks) {
-        long left = Math.round((loaded - Math.max(0f, Math.min(1f, cooking))) * cookTicks) + CHECK_MARGIN_TICKS;
+        long left = FurnaceLeaving.cookTicksLeft(loaded, cooking, cookTicks) + CHECK_MARGIN_TICKS;
         return Math.max(MIN_AWAY_TICKS, Math.min(MAX_AWAY_TICKS, left));
+    }
+
+    // 装好就走前看燃料槽里的够不够烧完这一炉：按槽里那种燃料一件烧多久乘件数算，正在烧的那块剩的不算，
+    // 宁可多添一点。不够就补：槽里有燃料只补同一种（一格只放得下一种），空着按身上最合适的挑；
+    // 补一次就走，补不上也照走，回来时炉子停着就如实说烧了几件。
+    private Optional<ActionStatus> topUpFuel(MenuContent.Reading open, long needTicks) {
+        if (fuelToppedUp) return Optional.empty();
+        fuelToppedUp = true;
+        SlotSnapshot slot = open.containerSnapshots().get(FUEL);
+        String inSlot = slot.isEmpty() ? null : itemId(slot.stack());
+        long covered = slot.isEmpty() ? 0 : (long) slot.count() * burnTicksOf(inSlot);
+        if (covered >= needTicks) return Optional.empty();
+        FuelPick pick = pickFuel(fuelStacks(open, inSlot), needTicks - covered);
+        int room = slot.isEmpty() ? STACK : slot.stack().getMaxStackSize() - slot.count();
+        if (pick == null || room <= 0) return Optional.empty();
+        ItemStack kind = open.playerSnapshots().get(pick.index()).stack();
+        if (fuelPlaced == null) fuelPlaced = itemId(kind);
+        return Optional.of(load(open.playerSlotIds().get(pick.index()), open.containerSlotIds().get(FUEL), kind,
+                Math.min(pick.count(), room), "往燃料槽补" + kind.getHoverName().getString()));
+    }
+
+    // 装炉就走：原料燃料留在炉子里接着烧，记下这一炉、挂上计时（同一台原先记着的旧计时摘掉），
+    // 这台记成用过的工作站；关上界面这一趟就做完了，拿东西的引擎看到留下了一炉就当场收场。
+    private ActionStatus leaveCooking(TickContext tick, MenuContent.Reading open, int loaded, long cookLeft) {
+        ItemStack ingredient = open.containerSnapshots().get(INPUT).stack();
+        long now = tick.gameTick();
+        leftCooking.leave(new LeftCooking(station, recipe.kind(), recipe.id(), recipe.result().itemId(),
+                recipe.result().describe(), itemId(ingredient), ingredient.getHoverName().getString(), fuelPlaced,
+                loaded, loaded * recipe.resultCount(), carriedIngredients(open), now, now + cookLeft, null));
+        memory.rememberWorkstationUsed(station, MenuRecipeRuns.workstationBlockType(recipe.kind()), Instant.now());
+        leaveAfterClose = true;
+        awayAfterClose = false;
+        stage = Stage.CLOSE;
+        return ActionStatus.progressed();
     }
 
     // 关着界面在旁边等：到了估摸的时刻回去看；炉子灭了一阵（燃料烧完或已经烧完）就提前回去。
@@ -411,6 +520,10 @@ final class FurnaceRun implements Action {
             }
         }
         dropVisit();
+        if (leaveAfterClose) {
+            // 装好炉就走：炉子接着烧，这一趟做完了。
+            return ActionStatus.done();
+        }
         if (moveOnAfterClose) {
             // 正忙的那台关好了：走去下一台，从点开看一眼重新来。
             moveOnAfterClose = false;
@@ -476,6 +589,9 @@ final class FurnaceRun implements Action {
     private void goTo(WorldPosition next) {
         station = next;
         at = new BlockPos(next.x(), next.y(), next.z());
+        // 换了一台：点开以后重新核对是不是留下的那台，补燃料也按这一台重新算。
+        checkedLeft = false;
+        fuelToppedUp = false;
         dropVisit();
         stage = Stage.VISIT;
     }
@@ -590,6 +706,20 @@ final class FurnaceRun implements Action {
     private boolean blockLit(TickContext tick) {
         BlockState state = tick.player().level().getBlockState(at);
         return state.hasProperty(AbstractFurnaceBlock.LIT) && state.getValue(AbstractFurnaceBlock.LIT);
+    }
+
+    // 背包里还有几件这次的原料：装炉就走时说给 LLM，回来还要装几炉心里有数。
+    private int carriedIngredients(MenuContent.Reading open) {
+        int total = 0;
+        for (SlotSnapshot stack : open.playerSnapshots()) {
+            if (!stack.isEmpty() && isIngredient(stack.stack())) total += stack.count();
+        }
+        return total;
+    }
+
+    // 一格里放着什么的说法：空着，或放着几个什么。
+    private static String slotText(SlotSnapshot slot) {
+        return slot.isEmpty() ? "空着" : "放着 " + slot.count() + " 个" + slot.stack().getHoverName().getString();
     }
 
     private int carriedResults(MenuContent.Reading open) {

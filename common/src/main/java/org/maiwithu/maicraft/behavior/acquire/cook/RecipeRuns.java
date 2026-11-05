@@ -39,6 +39,15 @@ public interface RecipeRuns {
     }
 
     /**
+     * 同上；leavesLongCooking 为真时（只有 obtain 这一场）烧炉子一炉还要烧一分钟以上就装好炉先走、挂计时，
+     * 这一趟当场做完。不会装炉就走的实现照旧在旁边等。
+     */
+    default Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations, int times,
+            Permissions permissions, TaskRecords records, boolean leavesLongCooking) {
+        return runAtAnyOf(recipe, stations, times, permissions, records);
+    }
+
+    /**
      * 在"刚记进世界记忆的那台设施"上做：附近本来没有设施、就地放了一个新的时，
      * 动手前才从世界记忆里读它的位置。实现从记忆里按方块类型找最新一台；
      * 还没接上就地摆放的执行时返回 empty，来源如实报告做不了。
@@ -46,6 +55,12 @@ public interface RecipeRuns {
     default Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions,
             TaskRecords records) {
         return Optional.empty();
+    }
+
+    /** 同上；leavesLongCooking 的意思同 {@link #runAtAnyOf(WorkstationRecipe, List, int, Permissions, TaskRecords, boolean)}。 */
+    default Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions,
+            TaskRecords records, boolean leavesLongCooking) {
+        return runAtRememberedStation(recipe, times, permissions, records);
     }
 
     /** 能不能在背包的 2×2 合成格里做：能的话摆得进 2×2 的合成配方不用工作台。 */

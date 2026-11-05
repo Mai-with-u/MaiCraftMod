@@ -55,7 +55,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *   <li>背包合成格：摆得进 2×2 的合成不用工作台，打开背包照工作台的做法做（见 {@link InventoryCrafting}）；</li>
  *   <li>工作台：经配方簿一次摆一份原料，取走产出再摆下一份；配方簿点不了（还没解锁、原料带附魔或改过名）
  *       就逐格摆（见 {@link CraftingGridFill}），一次摆几份、一下取走；</li>
- *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取（见 {@link FurnaceRun}）；</li>
+ *   <li>熔炉：装好原料和燃料就关上界面在旁边等，烧好了回来取；obtain 这一场一炉要烧一分钟以上就装好炉先走、
+ *       挂计时，到点回来取（见 {@link FurnaceRun}）；</li>
  *   <li>锻造台：模板、要升级的物品、升级材料依次 shift 点进三格，一件一件升级（见 {@link SmithingRun}）；</li>
  *   <li>酿造台：燃料、瓶子、材料各放一件，看见冒泡就关上界面等，酿完一步回来放下一步的材料（见 {@link BrewingRun}）；</li>
  *   <li>石切台：配方簿不管石切台。把原料拿到手上，右键一件一件放进投入口，放够要切的件数，
@@ -97,14 +98,17 @@ public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
     private final ReadsFuels fuels;
     private final WorldMemory memory;
     private final Supplier<PlayerContext> context;
+    /** 装炉就走留下的那几台：烧炉子的动作走的时候记一笔，回来时核对。 */
+    private final FurnacesLeftCooking leftCooking;
 
     public MenuRecipeRuns(BringsPlayerClose close, Interactions interactions, ReadsFuels fuels,
-            WorldMemory memory, Supplier<PlayerContext> context) {
+            WorldMemory memory, Supplier<PlayerContext> context, FurnacesLeftCooking leftCooking) {
         this.close = Objects.requireNonNull(close, "close");
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.fuels = Objects.requireNonNull(fuels, "fuels");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.context = Objects.requireNonNull(context, "context");
+        this.leftCooking = Objects.requireNonNull(leftCooking, "leftCooking");
     }
 
     @Override
@@ -117,6 +121,13 @@ public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
     @Override
     public Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations, int times,
             Permissions permissions, TaskRecords records) {
+        return runAtAnyOf(recipe, stations, times, permissions, records, false);
+    }
+
+    // 只有 obtain 这一场 leavesLongCooking 为真：一炉要烧一分钟以上时装好炉先走；别的能力途中来烧照旧在旁边等。
+    @Override
+    public Optional<Action> runAtAnyOf(WorkstationRecipe recipe, List<WorldPosition> stations, int times,
+            Permissions permissions, TaskRecords records, boolean leavesLongCooking) {
         PlayerContext current = context.get();
         ClientLevel level = current == null ? null : current.level();
         if (level == null) {
@@ -132,7 +143,7 @@ public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
         return level.getRecipeManager().byKey(id).flatMap(holder -> {
             if (recipe.kind().cooks()) {
                 return Optional.<Action>of(new FurnaceRun(holder, recipe, stations, times, at -> visit(recipe, at, permissions),
-                        fuels, memory, records));
+                        fuels, memory, records, leftCooking, leavesLongCooking));
             }
             if (recipe.kind() == WorkstationRecipe.Kind.SMITHING) {
                 return holder.value() instanceof SmithingRecipe upgrade
@@ -203,6 +214,12 @@ public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
     @Override
     public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions,
             TaskRecords records) {
+        return runAtRememberedStation(recipe, times, permissions, records, false);
+    }
+
+    @Override
+    public Optional<Action> runAtRememberedStation(WorkstationRecipe recipe, int times, Permissions permissions,
+            TaskRecords records, boolean leavesLongCooking) {
         // 刚就地摆下的那台就是最新记下的：按方块类型从记忆里找记录时刻最新的工作站。
         String blockType = workstationBlockType(recipe.kind());
         return memory.allRecords().stream()
@@ -210,7 +227,8 @@ public final class MenuRecipeRuns implements RecipeRuns, BrewingRuns {
                 .filter(record -> blockType.equals(record.blockType()))
                 .sorted((a, b) -> b.recordedAt().compareTo(a.recordedAt()))
                 .findFirst()
-                .flatMap(record -> run(recipe, record.position(), times, permissions, records));
+                .flatMap(record -> runAtAnyOf(recipe, List.of(record.position()), times, permissions, records,
+                        leavesLongCooking));
     }
 
     /** 一下点击确认之后要做的结算；拿到的是这下点击最后的状态。 */
