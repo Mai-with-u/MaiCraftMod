@@ -10,6 +10,7 @@ import static org.maiwithu.maicraft.behavior.navigation.calc.HeuristicCosts.poin
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Optional;
 import java.util.List;
 import java.util.Objects;
 
@@ -40,6 +41,13 @@ public interface NavGoal {
      * 返回用于定位、诊断和发现目标移动的代表点；单高度目标的 X/Z 为零，并不表示要求玩家去世界原点。
      */
     BlockPos center();
+    /**
+     * 要恰好站进的那一格：只有"站进这一格"的目标才有；范围目标、组合目标、站到方块旁这类答空。
+     * 寻路据此认出目的地自己脚下的地板，找不到整条路线时不为了靠近而把它挖掉。
+     */
+    default Optional<BlockPos> standingCell() {
+        return Optional.empty();
+    }
 
     /**
      * 把类型和具体要求变成可比较的值；位置相同但半径或威胁变化时，也能认出目标已经不同。
@@ -214,6 +222,10 @@ public interface NavGoal {
 
         @Override public BlockPos center() {
             return goal;
+        }
+
+        @Override public Optional<BlockPos> standingCell() {
+            return Optional.of(goal);
         }
     }
 

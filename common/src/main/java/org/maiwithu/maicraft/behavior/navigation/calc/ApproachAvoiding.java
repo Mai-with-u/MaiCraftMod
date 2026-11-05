@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.navigation.calc;
 
 import java.util.List;
+import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
@@ -56,6 +57,12 @@ public final class ApproachAvoiding implements NavGoal {
     @Override
     public BlockPos center() {
         return approach.center();
+    }
+
+    // 绕着怪去目的地也还是站进同一格：认得出目的地自己脚下的地板。
+    @Override
+    public Optional<BlockPos> standingCell() {
+        return approach.standingCell();
     }
 
     @Override

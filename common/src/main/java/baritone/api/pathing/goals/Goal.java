@@ -46,6 +46,14 @@ public interface Goal {
      */
     double heuristic(int x, int y, int z);
 
+    /**
+     * 这一格是不是目的地自己脚下的地板：只有要求恰好站进某一格的目标才有，别的目标一律答否。
+     * 找不到整条路线时给的半截路要是得把它挖掉，就不走那段半截路。
+     */
+    default boolean isFloor(int x, int y, int z) {
+        return false;
+    }
+
     default boolean isInGoal(BlockPos pos) {
         return isInGoal(pos.getX(), pos.getY(), pos.getZ());
     }

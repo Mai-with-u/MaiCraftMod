@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.navigation.calc;
 
 import java.util.Objects;
+import java.util.Optional;
 import net.minecraft.core.BlockPos;
 
 /**
@@ -43,6 +44,11 @@ public final class StandingDry implements NavGoal {
 
     @Override public BlockPos center() {
         return inner.center();
+    }
+
+    // 站实不改要站进哪一格：出行 radius=0 的目的地照样认得出自己脚下的地板。
+    @Override public Optional<BlockPos> standingCell() {
+        return inner.standingCell();
     }
 
     @Override public NavGoalFingerprint semanticFingerprint() {

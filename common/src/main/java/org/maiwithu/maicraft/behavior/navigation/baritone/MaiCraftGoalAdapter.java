@@ -67,6 +67,13 @@ final class MaiCraftGoalAdapter implements Goal {
         return delegate.heuristic(new BlockPos(x, y, z));
     }
 
+    // 目的地自己脚下的地板：要恰好站进的那一格正下方。
+    @Override
+    public boolean isFloor(int x, int y, int z) {
+        return delegate.standingCell().map(cell -> cell.getX() == x && cell.getY() - 1 == y && cell.getZ() == z)
+                .orElse(false);
+    }
+
     @Override public boolean equals(Object other) {
         return other instanceof MaiCraftGoalAdapter adapter && fingerprint.equals(adapter.fingerprint);
     }

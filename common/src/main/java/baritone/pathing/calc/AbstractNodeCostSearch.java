@@ -122,6 +122,12 @@ public abstract class AbstractNodeCostSearch implements IPathFinder, Helper {
             if (path == null) {
                 return new PathCalculationResult(PathCalculationResult.Type.FAILURE);
             }
+            // 找不到整条路线时给的是离目标最近的半截路：它要把目的地自己脚下的地板挖掉（真人不会为了够到一个地方先拆它的地板），
+            // 就不走，按没有路线收场，不去白挖半天再报卡住。只看搜索交出来的原样半截路，按已加载区域截短的整条路线不算。
+            if (!goal.isInGoal(path.getDest()) && PartialSegments.digsDestinationFloor(goal, path, context)) {
+                Helper.HELPER.logDebug("半截路要挖掉目的地自己脚下的地板，不走");
+                return new PathCalculationResult(PathCalculationResult.Type.FAILURE);
+            }
             path = path.postProcess();
             if (cancelRequested) {
                 return new PathCalculationResult(PathCalculationResult.Type.CANCELLATION);

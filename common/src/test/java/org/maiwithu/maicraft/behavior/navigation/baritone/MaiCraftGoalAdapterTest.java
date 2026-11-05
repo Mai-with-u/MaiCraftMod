@@ -127,4 +127,18 @@ class MaiCraftGoalAdapterTest {
         assertTrue(new MaiCraftGoalAdapter(delegate, () -> dry)
                 .equals(new MaiCraftGoalAdapter(delegate, () -> wet)));
     }
+
+    @Test
+    void 只有站进某一格的目标才认得出自己脚下的地板() {
+        // 站进 (10, 64, 10)：它正下方那格是目的地自己的地板；旁边、上面的格都不是。
+        MaiCraftGoalAdapter exact = new MaiCraftGoalAdapter(NavGoal.exact(new BlockPos(10, 64, 10)));
+        assertTrue(exact.isFloor(10, 63, 10));
+        assertFalse(exact.isFloor(10, 64, 10));
+        assertFalse(exact.isFloor(11, 63, 10));
+        // 出行的目的地外面套着站实那一层：照样认得出。
+        assertTrue(new MaiCraftGoalAdapter(new StandingDry(NavGoal.exact(new BlockPos(10, 64, 10)))).isFloor(10, 63, 10));
+        // 范围目标、站到方块旁的目标没有要恰好站进的格，一律答否，找不到整条路线时照旧走半截路。
+        assertFalse(new MaiCraftGoalAdapter(NavGoal.nearGround(new BlockPos(10, 64, 10), 3)).isFloor(10, 63, 10));
+        assertFalse(new MaiCraftGoalAdapter(NavGoal.getToBlock(new BlockPos(10, 64, 10))).isFloor(10, 63, 10));
+    }
 }
