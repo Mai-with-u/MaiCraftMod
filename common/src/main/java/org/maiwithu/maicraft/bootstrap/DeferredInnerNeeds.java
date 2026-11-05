@@ -38,6 +38,15 @@ final class DeferredInnerNeeds implements ItemNeeds {
         return engine.actionFor(request, permissions, records);
     }
 
+    // 为干活备工具（成批砍树前做斧头）要原样转给引擎，引擎才记得这一层是备工具：不转的话退回普通内需，
+    // 为斧头做木板时身上正攒的原木被当成外层正要的东西，不拿来做木板，转去找竹子。
+    @Override public Action actionForTool(ItemRequest request, Permissions permissions, TaskRecords records) {
+        if (engine == null) {
+            throw new IllegalStateException("拿到物品的引擎还没建好，内需没有可以回的地方");
+        }
+        return engine.actionForTool(request, permissions, records);
+    }
+
     // 引擎还没建好时谁也没在拿东西，没有已知拿不到的。
     @Override public boolean knownUnobtainable(WantedItem wanted) {
         return engine != null && engine.knownUnobtainable(wanted);

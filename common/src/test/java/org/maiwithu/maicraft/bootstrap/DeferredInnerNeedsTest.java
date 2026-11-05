@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -34,10 +35,22 @@ class DeferredInnerNeedsTest {
         }
     };
 
+    private static final Action MAKE_TOOL = new Action() {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.done();
+        }
+        @Override public String describe() {
+            return "备一把斧头";
+        }
+    };
+
     /** 引擎替身：每一问都给一个认得出的答案。 */
     private static final ItemNeeds ENGINE = new ItemNeeds() {
         @Override public Action actionFor(ItemRequest request, Permissions permissions) {
             return LOOK;
+        }
+        @Override public Action actionForTool(ItemRequest request, Permissions permissions, TaskRecords records) {
+            return MAKE_TOOL;
         }
         @Override public boolean knownUnobtainable(WantedItem wanted) {
             return true;
@@ -72,5 +85,7 @@ class DeferredInnerNeedsTest {
         assertEquals(Optional.of(118.0), needs.cheapestCost(PLANKS, Permissions.DEFAULT, false));
         assertTrue(needs.knownUnobtainable(PLANKS.wanted()));
         assertSame(LOOK, needs.actionFor(PLANKS, Permissions.DEFAULT));
+        // 实机 11-05：备斧头没转给引擎，引擎不知道这一层是备工具，为斧头做木板时不肯用身上的原木。
+        assertSame(MAKE_TOOL, needs.actionForTool(PLANKS, Permissions.DEFAULT, null), "备工具原样转给引擎");
     }
 }
