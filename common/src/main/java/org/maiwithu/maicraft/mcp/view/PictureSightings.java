@@ -109,7 +109,7 @@ public final class PictureSightings {
         return landmark.map(at -> blockToward(self, origin, idOrLandmark.trim(), at, turned, notTurnedBecause));
     }
 
-    /** 建筑档案那一栋的外框：中心或八个角里有一处看得见就算看得见。 */
+    /** 建筑档案那一栋的外框：八个角与六个面正中那几格里有一格看得见就算看得见。 */
     public static PictureView.Toward building(TickContext context, CameraPicture picture, String name, BlockPos min,
             BlockPos max, boolean turned, String notTurnedBecause) {
         LocalPlayer self = self(context);
@@ -118,20 +118,34 @@ public final class PictureSightings {
         boolean visible = false;
         if (self != null) {
             Vec3 origin = new Vec3(picture.cameraX(), picture.cameraY(), picture.cameraZ());
-            List<double[]> points = new ArrayList<>(box.corners());
-            points.add(new double[] {box.centerX(), box.centerY(), box.centerZ()});
-            for (double[] point : points) {
-                // 角落往里缩半格：角上那一点贴着方块表面，射线容易被它自己挡住。
-                Vec3 inset = new Vec3(point[0] + Math.signum(box.centerX() - point[0]) * 0.5,
-                        point[1] + Math.signum(box.centerY() - point[1]) * 0.5,
-                        point[2] + Math.signum(box.centerZ() - point[2]) * 0.5);
-                if (ObservationVisibility.pointFrom(self, origin, inset)) {
+            // 按格看：外框八个角那一格和六个面正中那一格，哪一格从镜头看得见（射线打到的就是那一格本身也算），
+            // 这一栋就算看得见。不按点看：墙是实心的，角上、中心那一点都在方块里头，射线总先打到墙面。
+            for (BlockPos cell : outlineCells(min, max)) {
+                if (ObservationVisibility.blockFrom(self, origin, cell)) {
                     visible = true;
                     break;
                 }
             }
         }
         return new PictureView.Toward(name, turned, notTurnedBecause, box, visible, false);
+    }
+
+    // 外框上的代表格：八个角，加上六个面各自正中的那一格。
+    private static List<BlockPos> outlineCells(BlockPos min, BlockPos max) {
+        int midX = (min.getX() + max.getX()) / 2;
+        int midY = (min.getY() + max.getY()) / 2;
+        int midZ = (min.getZ() + max.getZ()) / 2;
+        List<BlockPos> cells = new ArrayList<>();
+        for (int x : new int[] {min.getX(), max.getX()})
+            for (int y : new int[] {min.getY(), max.getY()})
+                for (int z : new int[] {min.getZ(), max.getZ()}) cells.add(new BlockPos(x, y, z));
+        cells.add(new BlockPos(midX, midY, min.getZ()));
+        cells.add(new BlockPos(midX, midY, max.getZ()));
+        cells.add(new BlockPos(min.getX(), midY, midZ));
+        cells.add(new BlockPos(max.getX(), midY, midZ));
+        cells.add(new BlockPos(midX, max.getY(), midZ));
+        cells.add(new BlockPos(midX, min.getY(), midZ));
+        return cells;
     }
 
     /**

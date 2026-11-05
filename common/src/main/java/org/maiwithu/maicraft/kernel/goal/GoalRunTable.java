@@ -288,8 +288,16 @@ public final class GoalRunTable {
      * 对面才不用靠事件流猜角色为什么在跑动、战斗。
      */
     public Optional<String> occupiedByTemporaryTask() {
+        return temporaryTaskDoing().map(GoalRunTable::occupiedWithoutMainGoal);
+    }
+
+    /**
+     * 此刻占着身体的生存需求临时任务自己的一句话（例如"自卫：正在打僵尸"）；没有为空。
+     * 不管有没有主目标都照实给，调用方自己决定怎么说。
+     */
+    public Optional<String> temporaryTaskDoing() {
         Task occupying = loop.occupyingTemporaryTask();
-        return occupying == null ? Optional.empty() : Optional.of(occupiedWithoutMainGoal(occupying.describe()));
+        return occupying == null ? Optional.empty() : Optional.of(occupying.describe());
     }
 
     /** 没有主目标、身体被临时任务占着时 doing 的一句话：先说被谁占着，再说清没有在做的目标。 */

@@ -288,6 +288,9 @@ public final class ObserveTool implements McpTool {
         boolean temporary = table.occupiedByTemporaryTask().isPresent();
         boolean automation = context.player() != null && context.player().input() != null
                 && context.player().input().automationOwnsControls();
+        // 人按了 F8 收回，和进世界以后还没下过目标、控制权还没交给自动化，是两种处境，没转的原因分开说。
+        boolean tookOver = context.player() != null && context.player().input() != null
+                && context.player().input().humanTookOver();
         LooksForPicture looks = Objects.requireNonNullElse(pictures.looks().get(), LooksForPicture.NONE);
         if (id == null) {
             PictureLook.Turn turn = looks.lookForPicture(context, new PictureLook.Subject.Standing(), automation, temporary);
@@ -300,7 +303,7 @@ public final class ObserveTool implements McpTool {
                 return unknown("没有观察编号 " + normalized + "；观察编号只在短时间内有效，重新 observe(scene) 拿新的编号");
             }
             PictureLook.Turn turn = looks.lookForPicture(context, new PictureLook.Subject.Seen(normalized), automation, temporary);
-            return new Prepared(normalized, null, Optional.empty(), turn, whyNot(turn), menuOpen, null);
+            return new Prepared(normalized, null, Optional.empty(), turn, whyNot(turn, tookOver), menuOpen, null);
         }
         Optional<BuildingArchive> building = building(context, trimmed);
         if (building.isPresent()) {
@@ -309,7 +312,7 @@ public final class ObserveTool implements McpTool {
             double y = (bounds.min().getY() + bounds.max().getY() + 1) / 2.0;
             double z = (bounds.min().getZ() + bounds.max().getZ() + 1) / 2.0;
             PictureLook.Turn turn = looks.lookForPicture(context, new PictureLook.Subject.Point(x, y, z, false), automation, temporary);
-            return new Prepared(trimmed, building.get(), Optional.empty(), turn, whyNot(turn), menuOpen, null);
+            return new Prepared(trimmed, building.get(), Optional.empty(), turn, whyNot(turn, tookOver), menuOpen, null);
         }
         Optional<WorldPosition> place = currentMemory.place(trimmed);
         if (place.isEmpty()) {
@@ -317,7 +320,7 @@ public final class ObserveTool implements McpTool {
                     + "；观察编号只在短时间内有效，重新 observe(scene) 拿新的编号");
         }
         PictureLook.Turn turn = looks.lookForPicture(context, new PictureLook.Subject.Seen(trimmed), automation, temporary);
-        return new Prepared(trimmed, null, place, turn, whyNot(turn), menuOpen, null);
+        return new Prepared(trimmed, null, place, turn, whyNot(turn, tookOver), menuOpen, null);
     }
 
     private static Prepared unknown(String message) {
@@ -333,13 +336,15 @@ public final class ObserveTool implements McpTool {
     }
 
     // 没转的原因说成调用方照着就能做的话：手上的目标带上编号，告诉它怎么暂停、怎么恢复。
-    private String whyNot(PictureLook.Turn turn) {
+    private String whyNot(PictureLook.Turn turn, boolean tookOver) {
         if (!(turn instanceof PictureLook.Turn.NotTurning notTurning)) {
             return turn instanceof PictureLook.Turn.NoNeed ? "它此刻不在场景里，没处可转" : null;
         }
         return switch (notTurning.why()) {
-            case HUMAN_CONTROLS -> "人按 F8 拿着角色，镜头在人手里；拍的是人正看着的";
-            case TEMPORARY_TASK -> "生存需求的临时任务「" + table.occupiedByTemporaryTask().orElse("") + "」占着身体；"
+            case HUMAN_CONTROLS -> tookOver ? "人按 F8 拿着角色，镜头在人手里；拍的是人正看着的"
+                    : "进世界以后还没下过目标，控制权还没交给自动化，镜头照人看着的拍；下一个目标开始后再拍就会转头";
+            // 临时任务自己的一句话只包一层：不借 observe(self) 那句"没有在做的目标"，有主目标时那句话不对。
+            case TEMPORARY_TASK -> "生存需求的临时任务「" + table.temporaryTaskDoing().orElse("") + "」占着身体；"
                     + "等它做完再拍";
             case WORKING -> working();
             case NOT_ON_FOOT -> "没脚踏实地（骑着、坐着、在飞、在睡或悬在空中），转头会带着坐骑转或把飞行带歪";
