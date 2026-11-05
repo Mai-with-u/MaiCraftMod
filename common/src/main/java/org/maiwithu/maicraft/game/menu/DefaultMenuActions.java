@@ -34,6 +34,8 @@ public final class DefaultMenuActions implements MenuActions {
     private final MenuVisibility visibility;
     /** 界面打开记录：每刻推进时看一眼界面变没变，记下哪一刻出现、谁开的。 */
     private final ScreenOpenings openings = new ScreenOpenings();
+    /** 哪个界面此刻有动作在用：开背包、在上面挪东西、等确认时每刻续记，走路收拾界面时不关它。 */
+    private final ScreenInUse screenInUse = new ScreenInUse();
     private AbstractContainerMenu closingMenu;
     /** 关界面前已经把光标上的东西点进背包的哪一格；没点过为 -1。每次关界面只放一次，放不下就照常关。 */
     private int stowedSlot = -1;
@@ -78,6 +80,10 @@ public final class DefaultMenuActions implements MenuActions {
                 || !MenuVisibility.worldInputAllowed(Minecraft.getInstance().screen);
     }
 
+    @Override public boolean screenInUse(PlayerContext context) {
+        return context != null && screenInUse.inUse(Minecraft.getInstance().screen, context.clientTick());
+    }
+
     @Override
     public boolean ensureVisible(PlayerContext context) {
         // 先停输入。需要背包界面时打开它，并等它真的绘制过；不会直接在隐藏的物品栏对象上点击。
@@ -97,6 +103,8 @@ public final class DefaultMenuActions implements MenuActions {
             context.tryClaimInteraction();
             minecraft.setScreen(new MenuVisibility.PlayerInventoryScreen(player));
         }
+        // 要这个界面的动作这一刻在用它：等它画出来的这几刻也算，走路收拾界面时不把它当成挡路的关掉。
+        screenInUse.used(minecraft.screen, context.clientTick());
         return context.canInteractThisTick() && visibility.ready(minecraft, context);
     }
 
@@ -389,6 +397,7 @@ public final class DefaultMenuActions implements MenuActions {
         // 反击或补食可在旧关闭已确认后创建新交易；恢复的任务仍须读回自己的冻结结果，不能因端口已换交易而报内部错误。
         if (pending != null && pending.terminal()) return pending;
         requireActive(pending);
+        stillUsing(context, pending);
         if (!pending.fromSamePlayer(context)) {
             pending.finish(PendingMenuAction.Status.UNCERTAIN,
                     "body or control authority changed before menu confirmation");
@@ -494,6 +503,13 @@ public final class DefaultMenuActions implements MenuActions {
         }
     }
 
+    // 等这一下确认的每一刻都还在用这个界面，确认前走路不把它关掉；等关界面的确认不算用，走路照常等它关好。
+    private void stillUsing(PlayerContext context, PendingMenuAction pending) {
+        if (pending.kind() != PendingMenuAction.Kind.CLOSE) {
+            screenInUse.used(Minecraft.getInstance().screen, context.clientTick());
+        }
+    }
+
     private PendingMenuAction create(PendingMenuAction.Kind kind, PlayerContext context,
                                      AbstractContainerMenu menu, int slot, int timeoutTicks,
                                      boolean allowContainerChange, MenuConfirmation confirmation) {
@@ -504,6 +520,8 @@ public final class DefaultMenuActions implements MenuActions {
         PendingMenuAction pending = PendingMenuAction.forMenu(kind, context, menu, slot, budget,
                 allowContainerChange, confirmation);
         active = pending;
+        // 在界面上点格子、换快捷栏、摆配方：这一刻在用它；关界面那一下不算用，走路照常等它关好。
+        if (kind != PendingMenuAction.Kind.CLOSE) screenInUse.used(Minecraft.getInstance().screen, context.clientTick());
         // 提交行与确认终态行构成一次菜单事务的完整时间线；超时预算是否过短，两行对照即得。
         LOG.debug("menu {} slot={} containerId={} stateId={} budget={}t submitted",
                 kind, slot, menu.containerId, menu.getStateId(), budget);

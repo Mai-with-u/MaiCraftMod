@@ -34,6 +34,14 @@ public interface MenuActions extends BoundaryLifecycle {
         return false;
     }
 
+    /**
+     * 眼前开着的界面这一刻或上一刻刚有动作在用（打开它、等它画出来、在上面挪东西、等确认）：
+     * 走路收拾挡路的界面前先问它，正在用的不关；用它的动作结束、界面换了一份，就不算了。替身默认没人用。
+     */
+    default boolean screenInUse(PlayerContext context) {
+        return false;
+    }
+
     /** 必要时显示玩家背包，并等对应界面真正可操作。 */
     boolean ensureVisible(PlayerContext context);
 

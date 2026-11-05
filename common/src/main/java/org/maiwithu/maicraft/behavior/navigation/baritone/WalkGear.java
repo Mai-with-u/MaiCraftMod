@@ -92,10 +92,14 @@ final class WalkGear {
     }
 
     // 有界面挡着就请它关上，关好前算挡着；关不掉照常走，走不动由走路的卡住判定收场。
-    private static boolean screenInTheWay(PlayerContext context) {
+    // 正有动作在用的那一个界面不关：落地前把干草块换到快捷栏要开背包，原先这里一见背包开着就关，
+    // 备料再开、这里再关，来回争到备料认输"背包界面一直开不出来"，该跳的那一跳没跳成。
+    // 用它的动作结束或被打断后不再续记，下一刻起留下的界面照关；服务端自己弹出的界面没人用，也照关。
+    static boolean screenInTheWay(PlayerContext context) {
         MenuActions menus = context.menuActions();
-        if (menus == null || !menus.blocksWorld(context)) return false;
+        if (menus == null || !menus.blocksWorld(context) || menus.screenInUse(context)) return false;
         try {
+            LOG.debug("[maicraft-path] 走路先关挡路的界面：没有动作在用它");
             return !menus.ensureWorldVisible(context);
         } catch (RuntimeException stuck) {
             LOG.info("[maicraft-path] 开着的界面关不掉，照常走：{}", stuck.getMessage());
