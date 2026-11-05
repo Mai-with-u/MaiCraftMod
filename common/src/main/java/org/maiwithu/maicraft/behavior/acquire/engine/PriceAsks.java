@@ -85,14 +85,13 @@ final class PriceAsks {
         // 动手问价里不会再套一轮、也不会做估算：真套上了沿用外层那一份记忆和账，由外层收尾。
         if (remembered != null) return work.get();
         remembered = new HashMap<>();
-        tally = new QuoteTally();
-        long started = System.nanoTime();
+        tally = new QuoteTally(AcquisitionEstimates.describe(asked), System::nanoTime);
         try {
             return work.get();
         } finally {
             // 问得慢时记一行：哪样东西、多少毫秒、问了几次、几次用了记下的、哪个来源拖的，实机卡顿时拿它查。
-            long millis = (System.nanoTime() - started) / 1_000_000;
-            if (QuoteTally.slow(millis)) LOG.info(tally.report(AcquisitionEstimates.describe(asked), millis));
+            long millis = tally.elapsedMillis();
+            if (QuoteTally.slow(millis)) LOG.info(tally.report(millis));
             remembered = null;
             tally = null;
         }
@@ -104,6 +103,8 @@ final class PriceAsks {
      */
     SourceQuote quote(ItemSource source, ItemRequest request, SourceContext context) {
         if (tally == null) return source.quote(request, context);
+        // 这一轮问了一秒多还没问完：问这个来源之前先记一行进度，客户端要是卡死在这里，最后一行指得出是卡在哪个来源前面。
+        tally.progressBefore(source.describe()).ifPresent(LOG::info);
         long started = System.nanoTime();
         try {
             return source.quote(request, context);
