@@ -56,7 +56,9 @@ import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.DimensionChanges;
 import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.perception.HurtEpisodes;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.LookBackNeed;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalWatch;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.PokesFelt;
 import org.maiwithu.maicraft.behavior.perception.SkyChanges;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
@@ -218,6 +220,7 @@ public final class Bootstrap {
         private HurtEpisodes hurtEpisodes;
         /** 别的玩家冲角色做的肢体动作：每刻采样，按人归段发事件。 */
         private NonverbalWatch nonverbal;
+        private LookBackNeed lookBack;
         /** 正在和谁切磋：fight 开打时登记，拍一下的账、挨打片段与自卫都看它。 */
         private final SparPartner sparPartner = new SparPartner();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
@@ -464,6 +467,8 @@ public final class Bootstrap {
             interactions = new Interactions(useKeyProjection);
             Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
+            // 被拍了回头看：看肢体动作的那一份在伤害包接好时才建，用的时候再取。
+            lookBack = new LookBackNeed(PokesFelt.later(() -> nonverbal));
             controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
                     combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection), diggings,
                     survivalWiring, kept, protection, followLighting, lightLevels, hands, ranged,
@@ -478,7 +483,7 @@ public final class Bootstrap {
                     // 岩浆里垫不垫落脚看主目标许可的方块档位；手上没有目标时按默认许可。
                     () -> goals == null ? Permissions.DEFAULT.changeBlocks()
                             : goals.mainGoal().map(run -> run.goal().permissions().changeBlocks())
-                                    .orElse(Permissions.DEFAULT.changeBlocks()));
+                                    .orElse(Permissions.DEFAULT.changeBlocks()), lookBack);
         }
 
         /**

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.landing.spi.LandingMaterials;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LiveTorchMoves;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.LookBackNeed;
 import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
@@ -84,7 +85,7 @@ final class SurvivalNeedCatalog {
             ModRangedWeapons ranged, Function<PlayerContext, CatchesFall> fallRescues,
             Supplier<List<LandingMaterials>> landingMaterials, Predicate<UUID> trusted,
             PicksUpDrops lostDrops, Supplier<ReadsRememberedPlaces> places,
-            Supplier<Permissions.BlockChanges> mainBlockChanges) {
+            Supplier<Permissions.BlockChanges> mainBlockChanges, LookBackNeed lookBack) {
         // 角色死亡这类循环自身的处境变化也从同一条事件流出去；死亡决策从挂载口交给目标运行表。
         ControlLoop loop = new ControlLoop(List.of(
                 // 被埋挖开头顶：和换气挖顶、挖格同一份原生挖掘，工具照挑工具换。
@@ -113,7 +114,9 @@ final class SurvivalNeedCatalog {
                         LiveNightAndEdgeMoves.retreat(walks)),
                 // 刚重生、身上的东西撒在死的地方：五分钟内跑回去捡。
                 new LostItemsNeed(LiveNightAndEdgeMoves.players(),
-                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops))), events, deathDecisions);
+                        LiveNightAndEdgeMoves.lostItems(walks, lostDrops)),
+                // 被别的玩家拍了一下回头看他几秒：登记在最后，同样尽快的生存需求在跑时不插。
+                lookBack), events, deathDecisions);
         // 换一件事做之前先关掉上一件留下的界面（工作台、过滤器），再让新的那件动手。
         loop.onTaskSwitch(context -> LeftoverScreens.close(context.player()));
         return loop;

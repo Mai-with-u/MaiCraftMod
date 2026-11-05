@@ -56,9 +56,10 @@ import org.maiwithu.maicraft.kernel.event.TaskEventSink;
  * {@link PlayerHitTally} 分拍一下还是连打：拍一下等 2 刻看清掉了多少血就当刻发出去，连打交给挨打事件与自卫，
  * 正在和他切磋的不记。同一个人 1.5 秒没有新动作就把这一段发出去，一直在做的每 6 秒发一条；
  * 他做完走开、5 秒内又回头看角色的，等他回头一起说。一段里至少有一下冲着角色才发；
- * 一个人一分钟超过 12 条，这一分钟剩下的合成一条写总数。只在客户端线程读写。
+ * 一个人一分钟超过 12 条，这一分钟剩下的合成一条写总数。最近被谁拍了一下、他最近一下冲角色做动作在哪刻，
+ * 交给被拍了回头看。只在客户端线程读写。
  */
-public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurtSeen, DamageObserver {
+public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurtSeen, DamageObserver, PokesFelt {
 
     /** 同一个人这么久（刻）没有新动作，这一段就发出去：1.5 秒。 */
     static final int QUIET_TICKS = 30;
@@ -95,6 +96,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     private final Map<Integer, Toss> flying = new HashMap<>();
     private final Set<Integer> knownItems = new HashSet<>();
     private LocalPlayer me;
+    private Poke latestPoke;
     private UUID lastToward;
     private long lastTowardTick = Long.MIN_VALUE;
 
@@ -155,9 +157,19 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         if (source.getDirectEntity() != null) lastHitOther.put(source.getDirectEntity().getId(), gameTick);
     }
 
+    @Override public Optional<Poke> latestPoke() {
+        return Optional.ofNullable(latestPoke);
+    }
+
+    @Override public long lastActTowardMe(UUID who) {
+        Watched watching = watched.get(who);
+        return watching == null ? Long.MIN_VALUE : watching.lastActTowardMe;
+    }
+
     /** 换世界、断线：记的人、没发出的段、在飞的东西、拍一下的账都丢掉。 */
     public void forget() {
         watched.clear();
+        latestPoke = null;
         selfHits.clear();
         lastSelfHit.clear();
         tally.clear();
@@ -280,7 +292,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
                     || blockChanged(who, level, swing.tick)) continue;
             // 对着够得着的角色挥手却没打出伤害（服务器关了 PvP、无敌帧里）：也是拍了一下，没伤到。
             if (swing.target.reachesMe) {
-                who.events.add(poke(swing.tick, "", 0));
+                poked(who, poke(swing.tick, "", 0));
                 continue;
             }
             who.events.add(new NonverbalAct(NonverbalAct.Kind.SWING, swing.tick, 1, swing.target.towardMe,
@@ -301,13 +313,19 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
             double effective = ThreatAssessment.effectiveHealth(me.getHealth(), me.getArmorValue());
             PlayerHitTally.Verdict verdict = tally.hit(hit.who.uuid, hit.tick, lost, effective, hit.missile && lost > 0);
             if (verdict == PlayerHitTally.Verdict.POKE) {
-                hit.who.events.add(poke(hit.tick, hit.hand, lost));
-                hit.who.pokedAt = hit.tick;
+                poked(hit.who, poke(hit.tick, hit.hand, lost));
             } else {
                 beatings.accept(new Beating(hit.who.uuid, hit.who.entityId, hit.who.called(seenIdOf), hit.tick,
                         hit.damageType, lost));
             }
         }
+    }
+
+    // 被拍了一下：进这一段当刻发出去，并记成最近一次被拍（回头看他）。
+    private void poked(Watched who, NonverbalAct act) {
+        who.events.add(act);
+        who.pokedAt = act.tick();
+        latestPoke = new Poke(who.uuid, who.entityId, who.name, act.tick());
     }
 
     // 拍一下的那句细节：拿着什么（空手）、掉没掉血。
@@ -334,6 +352,9 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     private void decide(Watched who, long now) {
         List<NonverbalAct> acts = who.pending(now);
         if (acts.isEmpty()) return;
+        // 他接着冲角色做动作：回头看他的就多看一会儿。
+        acts.stream().filter(NonverbalAct::towardMe).mapToLong(NonverbalAct::tick).max()
+                .ifPresent(tick -> who.lastActTowardMe = Math.max(who.lastActTowardMe, tick));
         long first = acts.get(0).tick();
         long last = acts.get(acts.size() - 1).tick();
         boolean walkedBack = acts.get(acts.size() - 1).kind() == NonverbalAct.Kind.WALK;
@@ -454,7 +475,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     /** 在飞的一件东西：谁扔的、哪刻扔的、是什么、几个。 */
     private record Toss(Watched who, long since, String name, int count) {}
 
-    /** 看着的一个人：采样、事件型的动作（挥手、扔东西）、上一段发到哪刻、这一分钟发了几条。 */
+    /** 看着的一个人：采样、事件型的动作（挥手、扔东西）、上一段发到哪刻、最近一下冲角色做动作在哪刻、这一分钟发了几条。 */
     private static final class Watched {
         final UUID uuid;
         final Deque<PlayerPose> poses = new ArrayDeque<>();
@@ -467,6 +488,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         long cut;
         Long tossedAt;
         Long pokedAt;
+        long lastActTowardMe = Long.MIN_VALUE;
         long minuteStart;
         int publishedThisMinute;
 
