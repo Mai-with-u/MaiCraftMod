@@ -191,8 +191,9 @@ public final class Battle {
         Moment back = swapping ? null : returnFire(context, senses.returnableIncoming(context));
         if (back != null) return back;
         boolean mayPillar = !pillarTried && cornered && moves.canPillar(context);
-        Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating, cornered, unreachable,
-                bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched,
+        // 名单说不撤离（切磋）：按退无可退的打法就地打，拒战线不叫撤，也不为它垫高。
+        Tactic.Plan plan = Tactic.decide(field, new Tactic.Memory(locked, retreating,
+                cornered || roster.standsGround(), unreachable, bow.givenUp(), bow.shooting(), mayPillar || pillar != null, perched,
                 dragon == null ? null : dragon.memory(context)));
         // 普通打法接手（先对付贴上来的别的怪）：打龙那边的出手、寻路、拉了一半的弓收尾。
         if (dragon != null && dragonActive && !(plan instanceof Tactic.Dragon)) dragon.stand();

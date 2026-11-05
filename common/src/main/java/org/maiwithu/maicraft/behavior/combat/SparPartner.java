@@ -12,10 +12,30 @@ import java.util.UUID;
 public final class SparPartner {
 
     private UUID partner;
+    private int hitsTaken;
+    private long lastHitTaken = Long.MIN_VALUE;
 
-    /** 开打：从这一刻起他打中角色的都算切磋里的。 */
+    /** 开打：从这一刻起他打中角色的都算切磋里的，从零数。 */
     public void begin(UUID who) {
         partner = who;
+        hitsTaken = 0;
+        lastHitTaken = Long.MIN_VALUE;
+    }
+
+    /** 切磋对手打中了角色一下。 */
+    public void tookHit(long tick) {
+        hitsTaken++;
+        lastHitTaken = tick;
+    }
+
+    /** 这场切磋他打中角色几下。 */
+    public int hitsTaken() {
+        return hitsTaken;
+    }
+
+    /** 他最近一次打中角色在哪一刻；还没打中过为 Long.MIN_VALUE。 */
+    public long lastHitTaken() {
+        return lastHitTaken;
     }
 
     /** 收场：切磋结束，他再打中角色就从零按拍一下、连打记。 */

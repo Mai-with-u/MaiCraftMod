@@ -125,9 +125,14 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     }
 
     // 角色被打中：出手的是别的玩家（直接打的、射箭扔雪球的都算他）就记下来，等 2 刻看清掉了多少血再分拍一下还是连打；
-    // 正在和他切磋的不记，切磋自己记。背后打的也记：身体被打中感觉得到。
+    // 正在和他切磋的不记，记进切磋自己的数，他之前拍的几下也清掉（切磋完再打从零记）。背后打的也记：身体被打中感觉得到。
     @Override public void hurt(LocalPlayer player, DamageSource source, long gameTick) {
-        if (!(source.getEntity() instanceof Player other) || other == player || sparring.with(other.getUUID())) return;
+        if (!(source.getEntity() instanceof Player other) || other == player) return;
+        if (sparring.with(other.getUUID())) {
+            sparring.tookHit(gameTick);
+            tally.forget(other.getUUID());
+            return;
+        }
         Watched who = watched.computeIfAbsent(other.getUUID(), uuid -> new Watched(uuid, gameTick - 1));
         who.name = other.getGameProfile().getName();
         who.entityId = other.getId();

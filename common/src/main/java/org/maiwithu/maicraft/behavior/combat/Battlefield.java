@@ -143,6 +143,16 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         default Set<String> protectedLandmarks() {
             return Set.of();
         }
+
+        /** 不撤离：拒战线不管用，什么时候收手由这一仗自己定（切磋按停手线）。 */
+        default boolean standsGround() {
+            return false;
+        }
+
+        /** 只用近战：身上有弓也不射（切磋时他没先射箭）。 */
+        default boolean meleeOnly() {
+            return false;
+        }
     }
 
     /** 手上的本事值几分：按威胁评估的武器分口径挑中的那件算，空手 0。战场与我方处境都按它读。 */
@@ -197,7 +207,7 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
         int weaponScore = weaponScore(profile);
         Me me = new Me(at[0], at[1], at[2], PLAYER_HALF_WIDTH, profile.health(), profile.armorPoints(),
                 profile.reach(), moves.ticksToReady(context), moves.hasMeleeWeapon(context),
-                moves.canShoot(context), weaponScore, profile.foodCount());
+                moves.canShoot(context) && !roster.meleeOnly(), weaponScore, profile.foodCount());
         Set<UUID> attackers = new HashSet<>();
         for (CombatSenses.Attacker attacker : senses.recentAttackers(context)) attackers.add(attacker.uuid());
         List<Foe> foes = new ArrayList<>();
