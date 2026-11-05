@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -144,7 +143,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         advancing.descendingIterator().forEachRemaining(run -> {
             chain.add(run.request);
             // 这一趟顺手还要拿的也是手上正在拿的：路上垫脚不先动它们。
-            chain.addAll(run.remainingAlsoWanted());
+            chain.addAll(run.alsoWanted.remaining());
         });
         return List.copyOf(chain);
     }
@@ -335,12 +334,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private int forwardedFacts;
         /** 拿够了是身上有几件：第一次推进时身上原有的加上这次要多拿的；还没推进过为 -1。 */
         private int target = -1;
-        /** 这一趟顺手还要拿的另外几样（同一次要货里还缺的）；没有为空。 */
-        private final List<ItemRequest> alsoWanted;
-        /** 顺手还要的那几样第一次推进时定的目标件数（身上原有加还缺的），按物品写法记。 */
-        private final Map<String, Integer> alsoTargets = new LinkedHashMap<>();
-        /** 顺手还要的那几样的目标定过没有。 */
-        private boolean alsoStarted;
+        /** 这一趟顺手还要拿的另外几样（同一次要货里还缺的）各要拿到几件；没有为空。 */
+        private final AlsoWantedTargets alsoWanted;
         /** 目标里点名的挖方块工具：途中要挖方块时只用那一件；null 按每格代价自动挑。 */
         private final DigTool digTool;
 
@@ -351,33 +346,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             this.scope = scope;
             this.onDelivered = onDelivered;
             this.records = records;
-            this.alsoWanted = List.copyOf(alsoWanted);
+            this.alsoWanted = new AlsoWantedTargets(request, alsoWanted, backpack, offhand, tags);
             this.digTool = digTool;
-        }
-
-        // 顺手还要的那几样这一刻还缺几件：第一次推进时按"身上原有加还缺的"定目标，之后按身上的重新算。
-        // 已经拿够的不再交给来源，免得开箱时多拿。
-        private List<ItemRequest> remainingAlsoWanted() {
-            if (!alsoStarted) return List.of();
-            List<ItemRequest> pending = new ArrayList<>();
-            for (ItemRequest extra : alsoWanted) {
-                Integer goal = alsoTargets.get(extra.wanted().specifier());
-                if (goal == null) continue;
-                int remaining = goal - CarriedItems.matching(backpack, offhand, extra, tags);
-                if (remaining > 0) pending.add(extra.just(remaining));
-            }
-            return pending;
-        }
-
-        private void startAlsoWanted() {
-            if (alsoStarted) return;
-            alsoStarted = true;
-            for (ItemRequest extra : alsoWanted) {
-                String key = extra.wanted().specifier();
-                if (key.equals(request.wanted().specifier())) continue;
-                alsoTargets.putIfAbsent(key,
-                        CarriedItems.matching(backpack, offhand, extra, tags) + extra.count());
-            }
         }
 
         // 推进一刻：先压进"正在推进"的链，来源在这一刻里回引擎要原料时才看得见外层；推进完不管成败都弹出。
@@ -387,7 +357,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 Problem refused = refusedByChain();
                 if (refused != null) return settle(refused);
             }
-            startAlsoWanted();
+            alsoWanted.start();
             ActionStatus status;
             advancing.push(this);
             try {
@@ -645,7 +615,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
 
         private ActionStatus startStep() {
             SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
-                    scope.maxDistanceBlocks(), bookedRecords(), remainingAlsoWanted(), digTool, unreachable());
+                    scope.maxDistanceBlocks(), bookedRecords(), alsoWanted.remaining(), digTool, unreachable());
             Planned planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
