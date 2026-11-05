@@ -203,12 +203,14 @@ class RequestRouterTest {
     /** 服务端那一侧的假对端：只为握手，死亡不掉落按字段报。 */
     private static final class ServerSide implements ServerProtocolDispatcher.Peer {
         Boolean keepInventory;
+        List<String> generatedTerrain;
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return 100; }
         @Override public boolean admitted() { return true; }
         @Override public String worldId() { return null; }
         @Override public Boolean keepInventory() { return keepInventory; }
+        @Override public List<String> generatedTerrain() { return generatedTerrain; }
         @Override public boolean mayMutate() { return true; }
         @Override public List<ServerFeature> features() { return List.of(); }
         @Override public JsonObject execute(String operationId, JsonObject body) { return new JsonObject(); }
@@ -249,6 +251,58 @@ class RequestRouterTest {
         handshake(router, transport, new ServerSide(), 2);
         assertTrue(router.serverConfirmed());
         assertNull(session.capabilities.keepInventory());
+    }
+
+    @Test
+    void 新服务端报世界生成铺的地形方块_握手往返记下_旧服务端不报时读不到() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        assertNull(session.capabilities.generatedTerrain(), "还没握好手：读不到");
+
+        // 新客户端配新服务端：清单原样记下，不像方块 ID 的条目丢掉，别的照收。
+        var server = new ServerSide();
+        server.keepInventory = true;
+        server.generatedTerrain = List.of("biomesoplenty:black_sandstone", "Not A Block", "create:asurine");
+        handshake(router, transport, server, 1);
+        assertTrue(router.serverConfirmed());
+        assertEquals(List.of("biomesoplenty:black_sandstone", "create:asurine"), session.capabilities.generatedTerrain());
+        assertEquals(Boolean.TRUE, session.capabilities.keepInventory(), "多了清单，旧字段照读");
+
+        // 新客户端配旧服务端（不报这一项）：握手照常成功，清单读不到，客户端只按方块标签认。
+        router.bind(2, 2, "minecraft:overworld", 0, true, 1);
+        router.observe(1);
+        handshake(router, transport, new ServerSide(), 2);
+        assertTrue(router.serverConfirmed());
+        assertNull(session.capabilities.generatedTerrain());
+    }
+
+    @Test
+    void 新服务端的欢迎包_只认旧字段的客户端照旧握手() {
+        // 旧客户端读欢迎包只取能力协商、会话、世界编号、死亡不掉落和限额，多出来的字段不读；
+        // 这里核的是新服务端发出的欢迎包在线上解码得回来（旧客户端用同一套解码上限），旧字段一个不少。
+        var server = new ServerSide();
+        server.keepInventory = false;
+        List<String> many = new ArrayList<>();
+        for (int i = 0; i < 600; i++) many.add("somemod:generated_rock_" + i);
+        server.generatedTerrain = many;
+        JsonObject hello = new JsonObject();
+        hello.addProperty("kind", "hello");
+        hello.addProperty("bootstrap", 1);
+        hello.addProperty("clientNonce", "old-client");
+        hello.addProperty("controlGeneration", 0);
+        hello.add("features", new JsonObject());
+        JsonObject welcome = ProtocolJson.decode(ProtocolJson.encode(new ServerProtocolDispatcher().receive(hello, server)));
+        assertEquals("succeeded", welcome.get("status").getAsString());
+        assertEquals("old-client", welcome.get("clientNonce").getAsString());
+        assertNotNull(welcome.get("sessionId"));
+        assertFalse(welcome.get("keepInventory").getAsBoolean());
+        assertTrue(welcome.has("features") && welcome.has("limits"));
+        assertEquals(600, welcome.getAsJsonArray("generatedTerrain").size());
     }
 
     @Test

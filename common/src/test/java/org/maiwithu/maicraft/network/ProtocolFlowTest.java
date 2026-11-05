@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
@@ -20,12 +21,14 @@ class ProtocolFlowTest {
         boolean admitted = true;
         String worldId = "ab".repeat(32);
         Boolean keepInventory = true;
+        List<String> generatedTerrain;
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return clock.get(); }
         @Override public boolean admitted() { return admitted; }
         @Override public String worldId() { return worldId; }
         @Override public Boolean keepInventory() { return keepInventory; }
+        @Override public List<String> generatedTerrain() { return generatedTerrain; }
         @Override public boolean mayMutate() { return mayMutate; }
         @Override public List<ServerFeature> features() {
             return List.of(new ServerFeature("ownership.query", 1, false, true, new JsonObject()),
@@ -61,6 +64,41 @@ class ProtocolFlowTest {
         var unknown = new FakePeer();
         unknown.keepInventory = null;
         assertFalse(new ServerProtocolDispatcher().receive(hello(), unknown).has("keepInventory"));
+    }
+
+    @Test
+    void 欢迎包报世界生成铺的地形方块_读不到时不带() {
+        var peer = new FakePeer();
+        peer.generatedTerrain = List.of("biomesoplenty:black_sandstone", "minecraft:deepslate");
+        JsonObject welcome = new ServerProtocolDispatcher().receive(hello(), peer);
+        assertEquals("succeeded", welcome.get("status").getAsString());
+        assertEquals(2, welcome.getAsJsonArray("generatedTerrain").size());
+        assertEquals("biomesoplenty:black_sandstone", welcome.getAsJsonArray("generatedTerrain").get(0).getAsString());
+        // 旧版服务端、读不出世界生成数据：这一项不带，握手照常。
+        var without = new FakePeer();
+        JsonObject plain = new ServerProtocolDispatcher().receive(hello(), without);
+        assertEquals("succeeded", plain.get("status").getAsString());
+        assertFalse(plain.has("generatedTerrain"));
+    }
+
+    @Test
+    void 清单大到挤爆欢迎包时整项不带_握手照常成功() {
+        // 模组极多的整合包：清单超过预算就整项不带，客户端退回只按标签认；不截半截，也不让握手因为欢迎包超限失败。
+        var peer = new FakePeer();
+        List<String> huge = new ArrayList<>();
+        for (int i = 0; i < 3000; i++) huge.add("somemod:generated_rock_with_a_long_name_" + i);
+        peer.generatedTerrain = huge;
+        JsonObject welcome = new ServerProtocolDispatcher().receive(hello(), peer);
+        assertEquals("succeeded", welcome.get("status").getAsString());
+        assertFalse(welcome.has("generatedTerrain"));
+        // 预算之内最大的一份清单，加上协商和限额，编码后仍在信封上限内，客户端解码得回来。
+        List<String> fits = new ArrayList<>();
+        String id = "somemod:rock_" + "x".repeat(16);
+        while (ProtocolSession.fitsInWelcome(fits)) fits.add(id + fits.size());
+        fits.remove(fits.size() - 1);
+        peer.generatedTerrain = fits;
+        JsonObject full = new ServerProtocolDispatcher().receive(hello(), peer);
+        assertEquals(fits.size(), ProtocolJson.decode(ProtocolJson.encode(full)).getAsJsonArray("generatedTerrain").size());
     }
 
     @Test

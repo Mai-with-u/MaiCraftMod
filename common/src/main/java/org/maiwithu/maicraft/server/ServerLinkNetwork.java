@@ -90,6 +90,7 @@ public final class ServerLinkNetwork {
             @Override public Boolean keepInventory() {
                 return server.getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
             }
+            @Override public List<String> generatedTerrain() { return ServerLinkServices.generatedTerrain(server); }
             @Override public boolean mayMutate() { return player.isAlive() && !player.isSpectator(); }
             @Override public List<ServerFeature> features() { return operations.features(player); }
             @Override public JsonObject execute(String operationId, JsonObject body) {

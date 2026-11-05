@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.server.CharacterAccountCommand;
 import org.maiwithu.maicraft.server.CharacterAccounts;
+import org.maiwithu.maicraft.server.GeneratedTerrainBlocks;
 import org.maiwithu.maicraft.server.OwnershipFile;
 import org.maiwithu.maicraft.server.OwnershipQuery;
 import org.maiwithu.maicraft.server.OwnershipSaver;
@@ -47,6 +48,16 @@ final class ServerStartup {
      *
      * @param compatCatalog 这个加载器服务端一侧的联动清单；没有联动的加载器传空列表
      */
+    // 世界生成数据读不出来（模组的数据坏了）不影响开服和握手：欢迎包里不带清单，客户端只按方块标签认天然地形。
+    private static List<String> generatedTerrain(MinecraftServer server) {
+        try {
+            return GeneratedTerrainBlocks.collect(server.registryAccess());
+        } catch (RuntimeException unreadable) {
+            LOG.warn("读世界生成数据失败，握手时不报世界生成铺的地形方块，客户端只按方块标签认天然地形", unreadable);
+            return null;
+        }
+    }
+
     static ServerLifecycle start(LoaderEnvironment loader, ServerConfirmations.Push push,
                                  List<SupportedMod<ServerCompatModule>> compatCatalog) {
         LOG.info("{} 通用部分启动（加载器：{}）", ModIdentity.NAME, loader.loaderName());
@@ -61,11 +72,13 @@ final class ServerStartup {
         ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
         // 方块归属存盘：主线程只拍快照，压缩写盘在后台，存盘时不卡服。
         OwnershipSaver ownershipSaver = new OwnershipSaver();
-        // 这台服务器的服务只建一份：从存档读回归属记录、登记确认通道，再读出（第一次就生成）这个存档的世界编号。
+        // 这台服务器的服务只建一份：从存档读回归属记录、登记确认通道，再读出（第一次就生成）这个存档的世界编号，
+        // 最后读一遍世界生成数据，记下往地上铺的实心方块，握手时报给客户端当天然地形认。
         Consumer<MinecraftServer> attach = server -> ServerLinkServices.attachIfAbsent(server,
                 () -> OwnershipFile.of(server).load(),
                 () -> new ServerConfirmations(push, network::hasSession),
-                () -> WorldIdFile.of(server).loadOrCreate());
+                () -> WorldIdFile.of(server).loadOrCreate(),
+                () -> generatedTerrain(server));
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
                 // 首刻建好本服务器的服务；之后每五分钟把归属记录的改动存一次盘，停服时再存一次。

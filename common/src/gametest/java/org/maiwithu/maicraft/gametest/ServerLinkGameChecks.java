@@ -44,11 +44,12 @@ public final class ServerLinkGameChecks {
         // 换入与放置在同一个服务器刻里完成，不会撞上启动在刻末的重新登记。
         BlockOwnershipRecord ownership = ServerLinkServices.ownership(server);
         String worldId = ServerLinkServices.worldId(server);
+        List<String> generatedTerrain = ServerLinkServices.generatedTerrain(server);
         List<JsonObject> pushed = new ArrayList<>();
         ServerLinkServices.detach(server);
         ServerLinkServices.attachIfAbsent(server, () -> ownership,
                 () -> new ServerConfirmations((player, envelope) -> pushed.add(envelope),
-                        player -> player == active), () -> worldId);
+                        player -> player == active), () -> worldId, () -> generatedTerrain);
         // 有会话的角色放：推一条确认，信封写清动作、世界、格子、方块与服务器刻。
         helper.setBlock(4, 2, 4, Blocks.STONE);
         BlockPos placed = helper.absolutePos(new BlockPos(4, 3, 4));

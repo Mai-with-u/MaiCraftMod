@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.server;
 
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import net.minecraft.server.MinecraftServer;
@@ -13,8 +14,12 @@ import net.minecraft.server.MinecraftServer;
  * 因此每个服务器实例（包括单人游戏的每次开局）都有自己的归属记录与世界编号，不跨服残留。
  */
 public final class ServerLinkServices {
-    /** 一台服务器的服务：方块归属记录、交互确认通道，以及这个存档的世界编号（写不进编号文件时为 null）。 */
-    private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations, String worldId) {}
+    /**
+     * 一台服务器的服务：方块归属记录、交互确认通道、这个存档的世界编号（写不进编号文件时为 null），
+     * 以及世界生成往地上铺的实心方块（读不出来时为 null）。
+     */
+    private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations, String worldId,
+                            List<String> generatedTerrain) {}
 
     private static final Map<MinecraftServer, Services> ATTACHED =
             Collections.synchronizedMap(new IdentityHashMap<>());
@@ -25,8 +30,10 @@ public final class ServerLinkServices {
     public static void attachIfAbsent(MinecraftServer server,
                                       Supplier<BlockOwnershipRecord> ownership,
                                       Supplier<ServerConfirmations> confirmations,
-                                      Supplier<String> worldId) {
-        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get(), worldId.get()));
+                                      Supplier<String> worldId,
+                                      Supplier<List<String>> generatedTerrain) {
+        ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get(), worldId.get(),
+                generatedTerrain.get()));
     }
 
     public static void detach(MinecraftServer server) {
@@ -49,5 +56,11 @@ public final class ServerLinkServices {
     public static String worldId(MinecraftServer server) {
         var services = ATTACHED.get(server);
         return services == null ? null : services.worldId();
+    }
+
+    /** 该服务器的世界生成往地上铺的实心方块 ID：握手时报给客户端；尚未登记或读不出来时返回 null。 */
+    public static List<String> generatedTerrain(MinecraftServer server) {
+        var services = ATTACHED.get(server);
+        return services == null ? null : services.generatedTerrain();
     }
 }

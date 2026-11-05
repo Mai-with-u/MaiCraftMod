@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.serverlink;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
 
 /** 协商出的服务端支持、客户端已登记能力和每次执行条件分别判断。 */
@@ -13,6 +17,8 @@ public final class ServerCapabilityState {
     /** 服务端拒绝握手的原因之一：这个号不是服务器认的角色账号，服主要把它写进服务端配置才开放。 */
     public static final String NOT_CHARACTER_ACCOUNT = ServerProtocolDispatcher.NOT_CHARACTER_ACCOUNT;
     public record Scope(long connection, String sessionId, String dimension) {}
+    /** 方块 ID 的样子：命名空间加路径，都是小写；欢迎包里别的样子的条目不收。 */
+    private static final Pattern BLOCK_ID = Pattern.compile("[a-z0-9_.-]+:[a-z0-9_./-]+");
     public record Feature(int version, boolean mutating, boolean enabled, JsonObject limits) {
         public Feature { limits = limits.deepCopy(); }
         @Override public JsonObject limits() { return limits.deepCopy(); }
@@ -27,6 +33,8 @@ public final class ServerCapabilityState {
     String worldId;
     /** 服务端报的死亡不掉落；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
     Boolean keepInventory;
+    /** 服务端报的世界生成往地上铺的实心方块 ID；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
+    List<String> generatedTerrain;
 
     public State state() { return state; }
     public String reason() { return reason; }
@@ -36,6 +44,8 @@ public final class ServerCapabilityState {
     public String worldId() { return worldId; }
     /** 服务端报的死亡不掉落（握手时报、改了再推）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
     public Boolean keepInventory() { return keepInventory; }
+    /** 服务端报的世界生成铺的地形方块 ID（握手时报）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
+    public List<String> generatedTerrain() { return generatedTerrain; }
     public Map<String, Feature> features() { return Map.copyOf(features); }
     public JsonObject limits() { return limits.deepCopy(); }
 
@@ -56,6 +66,7 @@ public final class ServerCapabilityState {
         scope = null;
         worldId = null;
         keepInventory = null;
+        generatedTerrain = null;
         features.clear();
         limits = new JsonObject();
     }
@@ -85,6 +96,8 @@ public final class ServerCapabilityState {
         worldId = reported.matches("[0-9a-f]{64}") ? reported : null;
         // 死亡不掉落只收布尔值：旧版本服务端不报、报来别的样子都按没报，客户端照旧读不到。
         keepInventory = bool(envelope, "keepInventory");
+        // 世界生成铺的地形方块：旧版本服务端不报就按没报，客户端只按方块标签认；不像方块 ID 的条目丢掉，别的照收。
+        generatedTerrain = blockIds(envelope, "generatedTerrain");
         features.clear();
         features.putAll(discovered);
         limits = object(envelope, "limits").deepCopy();
@@ -126,6 +139,17 @@ public final class ServerCapabilityState {
     static Boolean bool(JsonObject object, String name) {
         return object.has(name) && object.get(name).isJsonPrimitive() && object.getAsJsonPrimitive(name).isBoolean()
                 ? object.get(name).getAsBoolean() : null;
+    }
+    static List<String> blockIds(JsonObject object, String name) {
+        if (!object.has(name) || !object.get(name).isJsonArray()) return null;
+        List<String> ids = new ArrayList<>();
+        for (JsonElement item : object.getAsJsonArray(name)) {
+            if (item.isJsonPrimitive() && item.getAsJsonPrimitive().isString()
+                    && BLOCK_ID.matcher(item.getAsString()).matches()) {
+                ids.add(item.getAsString());
+            }
+        }
+        return List.copyOf(ids);
     }
     static JsonObject object(JsonObject object, String name) {
         return object.has(name) && object.get(name).isJsonObject()
