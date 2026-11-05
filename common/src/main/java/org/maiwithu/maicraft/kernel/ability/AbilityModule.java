@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.kernel.ability;
 
 import org.maiwithu.maicraft.kernel.goal.AbilityHooks;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
@@ -16,6 +17,16 @@ public interface AbilityModule {
 
     /** 这个能力的规格：ID、用途、能力说明、参数、目标对象种类、执行方式、需要的模组。 */
     AbilitySpec spec();
+
+    /**
+     * 这一次的目标按哪种执行方式跑。默认就是规格里声明的那一种；同一个能力按参数做的事轻重不同时
+     * （公屏说一句话几秒做完，对一只生物说话要走过去、站着等回话），由能力按这次的目标答。
+     * 下达时内核据此决定插一下还是换主目标，只认答出来的执行方式，不认能力、不看参数。
+     * 必须便宜、没有副作用，只看目标本身。
+     */
+    default ExecutionMode modeFor(Goal goal) {
+        return spec().mode();
+    }
 
     /**
      * 看现场，决定当前这一步下一件做什么。

@@ -273,7 +273,7 @@
       },
       {
         "ability": "maicraft:chat",
-        "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）",
+        "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）；公屏说一句话插一下，不替换手上的目标",
         "parameters": "message: string, max_seconds?: integer",
         "targets": [
           "seen"
@@ -1683,7 +1683,7 @@
     },
     {
       "ability": "maicraft:chat",
-      "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）",
+      "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）；公屏说一句话插一下，不替换手上的目标",
       "parameters": [
         {
           "name": "message",

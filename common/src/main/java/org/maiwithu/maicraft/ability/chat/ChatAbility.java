@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
@@ -34,6 +35,9 @@ import java.util.Set;
  *
  * <p>给了 target（一只生物的 e#）就是对那只生物说：不进公屏、不当命令，经联动登记的说话办法走到它跟前、
  * 开它的对话框说（车万女仆的女仆）；它不会听人说话就如实说做不到。
+ *
+ * <p>公屏说一句话是插一下：原地打字、回车，几秒做完，不替换手上的目标，说完手上的事从原地接着做。
+ * 发游戏命令（可能把角色传送走、改游戏状态）和对一只生物说话（要走过去、站着等回话）仍是主目标。
  */
 public final class ChatAbility implements AbilityModule {
 
@@ -81,9 +85,10 @@ public final class ChatAbility implements AbilityModule {
                 ? "要发到游戏聊天或游戏命令栏的话，全体可见；以 / 开头的按游戏命令发，本实例连管理员命令也放行，以角色自己的权限执行"
                 : "要发到游戏聊天的话，全体玩家可见；以 / 开头的按游戏命令发：/msg、/home、/help 这类普通玩家命令照发，"
                         + "/tp、/give、/gamemode 这类管理员命令角色不执行";
-        String summary = allowGameCommands
+        String summary = (allowGameCommands
                 ? "向游戏聊天发一句话，或发一条游戏命令（对全体玩家可见；本实例连管理员命令也允许执行）"
-                : "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）";
+                : "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）")
+                + "；公屏说一句话插一下，不替换手上的目标";
         AbilityDoc doc = AbilityDoc.forAbility("chat");
         if (allowGameCommands) {
             doc = doc.withExtraNote("本实例连管理员命令也允许执行：`message` 以 `/` 开头时不论哪种命令都不拒绝"
@@ -105,6 +110,15 @@ public final class ChatAbility implements AbilityModule {
                 Set.of(),
                 List.of(),
                 Listing.LISTED);
+    }
+
+    // 公屏说一句话原地打字、几秒做完：插一下，手上的事从原地接着做。游戏命令会把角色传送走、改游戏状态，
+    // 对一只生物说话要走过去、站着等回话，这两种仍替换手上的目标。和决定阶段一样按"/ 开头"认命令。
+    @Override
+    public ExecutionMode modeFor(Goal goal) {
+        if (goal.target() != null) return ExecutionMode.CONTROLS_PLAYER;
+        String message = goal.params().has("message") ? goal.params().text("message") : "";
+        return message.startsWith("/") ? ExecutionMode.CONTROLS_PLAYER : ExecutionMode.CUTS_IN;
     }
 
     @Override

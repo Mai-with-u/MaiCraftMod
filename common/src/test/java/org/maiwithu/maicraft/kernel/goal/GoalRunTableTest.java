@@ -224,6 +224,26 @@ class GoalRunTableTest {
     }
 
     @Test
+    void theAbilityAnswersTheModeForEachGoal() {
+        // 同一个能力按参数分：没点名对象的（公屏说一句话）插一下，主目标不动；点名了的（对一只生物说话）换主目标。
+        GoalTestAbility talking = new GoalTestAbility("maicraft:test_talk", ability.shared());
+        talking.modeForGoal = goal -> goal.target() == null ? ExecutionMode.CUTS_IN : ExecutionMode.CONTROLS_PLAYER;
+        registry.register(talking);
+        GoalRunner main = table.launch(GOAL, null).runner();
+        runTicks(1);
+
+        GoalRunner say = table.launch(Goal.of("maicraft:test_talk", null, ParamValues.EMPTY), null).runner();
+        assertTrue(main.run().unfinished(), "公屏说一句话不替换主目标");
+        assertSame(main.run(), table.mainGoal().orElseThrow());
+
+        GoalRunner talk = table.launch(Goal.of("maicraft:test_talk", new Target.Seen("e3"), ParamValues.EMPTY), null)
+                .runner();
+        assertSame(talk.run(), table.mainGoal().orElseThrow(), "对一只生物说话换成主目标");
+        assertEquals(TaskResult.Status.CANCELLED, main.run().result().status());
+        assertTrue(say.run().unfinished(), "排着的插一下不跟着被替换");
+    }
+
+    @Test
     void aCutInIsRefusedWhileAHumanHoldsTheControls() {
         // 人按 F8 在操作角色：插一下不抢控制权，如实以"这会儿不做"收场。
         cutInAbility();

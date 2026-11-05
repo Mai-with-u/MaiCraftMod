@@ -114,9 +114,9 @@ public final class ExecuteTool implements McpTool {
         return start(reading.goal(), requestKey, notes);
     }
 
-    // 控制角色的目标：成为主目标的，和插一下做完就让回去的。
+    // 控制角色的目标：成为主目标的，和插一下做完就让回去的。按这一次的目标问能力，和下达时内核的判断一致。
     private boolean controlsPlayer(Goal goal) {
-        ExecutionMode mode = registry.find(goal.ability()).orElseThrow().spec().mode();
+        ExecutionMode mode = registry.find(goal.ability()).orElseThrow().modeFor(goal);
         return mode == ExecutionMode.CONTROLS_PLAYER || mode == ExecutionMode.CUTS_IN;
     }
 

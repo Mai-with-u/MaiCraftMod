@@ -196,8 +196,9 @@ public final class GoalRunTable {
         return new Launch(runner, false);
     }
 
+    // 执行方式问能力这一次怎么跑：同一个能力按参数有的插一下、有的换主目标（公屏说一句话插一下，对生物说话换主目标）。
     private boolean cutsIn(Goal goal) {
-        return registry.find(goal.ability()).map(module -> module.spec().mode() == ExecutionMode.CUTS_IN).orElse(false);
+        return registry.find(goal.ability()).map(module -> module.modeFor(goal) == ExecutionMode.CUTS_IN).orElse(false);
     }
 
     // 插一下：排进控制循环的队，不替换主目标。人按 F8 拿着角色时不抢；排满了不收。都如实收场，LLM 看结果就知道没做。

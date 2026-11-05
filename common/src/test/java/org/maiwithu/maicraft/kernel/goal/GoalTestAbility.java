@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * 替身能力：决定按脚本逐个给出，任务做完就按约定结局交结果。用来离线走通
@@ -162,6 +163,8 @@ final class GoalTestAbility implements AbilityModule {
     boolean anywhere;
     /** 这个替身能力的执行方式；默认控制角色、替换主目标，拨成插一下时不替换主目标。 */
     ExecutionMode mode = ExecutionMode.CONTROLS_PLAYER;
+    /** 按这一次的目标答执行方式；默认就是声明的那一种，拨了就像 chat 那样按参数分。 */
+    Function<Goal, ExecutionMode> modeForGoal;
 
     GoalTestAbility(String id) {
         this(id, new SharedTasks());
@@ -176,6 +179,10 @@ final class GoalTestAbility implements AbilityModule {
     @Override public AbilitySpec spec() {
         return new AbilitySpec(id, "替身能力", AbilityDoc.forAbility("test"),
                 ParamSpecs.EMPTY, Set.of(), mode, Set.of(), List.of(), Listing.LISTED);
+    }
+
+    @Override public ExecutionMode modeFor(Goal goal) {
+        return modeForGoal == null ? mode : modeForGoal.apply(goal);
     }
 
     @Override public StepDecision decide(StepContext step) {

@@ -5,9 +5,11 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
+import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -81,6 +83,17 @@ class ChatAbilityTest {
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
                 new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false).decide(step(goal("大家好"))));
         assertEquals("大家好", assertInstanceOf(ChatInput.class, run.input()).message());
+    }
+
+    @Test
+    void publicSpeechCutsInWhileCommandsAndTalkingToACreatureReplaceTheGoal() {
+        // 公屏说一句话插一下，手上的目标不动；发命令、对一只生物说话仍替换手上的目标。
+        ChatAbility ability = new ChatAbility(message -> true, SILENT_ECHO, NO_BOX, false);
+        assertEquals(ExecutionMode.CUTS_IN, ability.modeFor(goal("我先把这面墙砌完")));
+        assertEquals(ExecutionMode.CONTROLS_PLAYER, ability.modeFor(goal("/home")));
+        Goal toMaid = new Goal("maicraft:chat", null, new Target.Seen("e3"), messageParam("坐下"), null, List.of(), null);
+        assertEquals(ExecutionMode.CONTROLS_PLAYER, ability.modeFor(toMaid));
+        assertTrue(ability.spec().summary().contains("插一下"), ability.spec().summary());
     }
 
     @Test
