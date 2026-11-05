@@ -14,8 +14,8 @@ public final class SimilarIds {
 
     /**
      * 在候选里找和写错的 ID 最像的那个。只比较冒号后面的名字：名字完全一样（只是命名空间写错）记零分，
-     * 互相包含记一分，共有一个五个字母以上的词记两分，其余按要改几个字符算。分数越低越像，同分保留先遇到的；
-     * 最像的那个也超过 max(2, 名字长度 / 3) 就算一个都不像，给空。
+     * 互相包含记一分，同一个命名空间里共有一个五个字母以上的词记两分，其余按要改几个字符算。分数越低越像，
+     * 同分保留先遇到的；最像的那个也超过 max(2, 名字长度 / 3) 就算一个都不像，给空。
      *
      * <p>{@code #} 开头的是标签：候选应当是不带 {@code #} 的标签 ID，给出的建议补上 {@code #}。
      *
@@ -24,6 +24,7 @@ public final class SimilarIds {
      */
     public static Optional<String> closest(Iterable<String> candidates, String input) {
         boolean tag = input.startsWith("#");
+        String wantNamespace = namespaceOf(tag ? input.substring(1) : input);
         String want = pathOf(tag ? input.substring(1) : input);
         String best = null;
         int bestDistance = Integer.MAX_VALUE;
@@ -36,8 +37,9 @@ public final class SimilarIds {
             } else if (want.contains(path) || path.contains(want)) {
                 // 例如 woodland_mansion 包含 mansion，就认为它们很接近。
                 distance = 1;
-            } else if (sharesMeaningfulWord(want, path)) {
-                // 例如 jungle_temple 和 jungle_pyramid 都带 jungle，虽然后半段不同，也给出提示。
+            } else if (namespaceOf(candidate).equals(wantNamespace) && sharesMeaningfulWord(want, path)) {
+                // 例如 jungle_temple 和 jungle_pyramid 都带 jungle，虽然后半段不同，也给出提示。只在同一个模组里算：
+                // 跨模组只撞上一个词的（女仆的 smart_slab_init 和航空学的 smart_propeller）不是一样东西，推荐了只会带偏。
                 distance = 2;
             } else {
                 distance = editDistance(want, path);
@@ -75,6 +77,12 @@ public final class SimilarIds {
             }
         }
         return false;
+    }
+
+    // 没写命名空间的按原版算，和游戏读 ID 的规矩一样。
+    private static String namespaceOf(String id) {
+        int colon = id.indexOf(':');
+        return colon >= 0 ? id.substring(0, colon).toLowerCase(Locale.ROOT) : "minecraft";
     }
 
     private static String pathOf(String id) {

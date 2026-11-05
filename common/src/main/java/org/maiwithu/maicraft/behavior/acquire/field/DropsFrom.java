@@ -8,7 +8,6 @@ import java.util.Set;
 
 import org.maiwithu.maicraft.game.world.IdKind;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
-import org.maiwithu.maicraft.game.world.SimilarIds;
 
 /**
  * 掉落线索（参数 drops_from）：LLM 告诉 Mod "要的这样东西从这些方块挖得到、从这些生物身上打得到"。
@@ -38,14 +37,12 @@ public record DropsFrom(List<String> blocks, List<String> blockTags, List<String
 
     /**
      * 把 LLM 写的线索分成方块、方块标签与实体：# 开头的按方块标签认；其余先查方块注册表再查实体注册表，
-     * 两边都有的（TNT 这类既是方块也是实体）按方块。哪样都不是就记一句"不存在；你是不是要 …"，
+     * 两边都有的（TNT 这类既是方块也是实体）按方块。哪样都不是就记一句"不存在；你是不是要 …"或"是物品"，
      * 一次报全，不进世界。
      */
     public static Sorted sort(List<String> written, ReadsRegisteredIds registered) {
-        List<String> registeredBlocks = registered.ids(IdKind.BLOCK);
-        List<String> registeredEntities = registered.ids(IdKind.ENTITY_TYPE);
-        Set<String> blockIds = new HashSet<>(registeredBlocks);
-        Set<String> entityIds = new HashSet<>(registeredEntities);
+        Set<String> blockIds = new HashSet<>(registered.ids(IdKind.BLOCK));
+        Set<String> entityIds = new HashSet<>(registered.ids(IdKind.ENTITY_TYPE));
         Set<String> filledBlockTags = new HashSet<>(registered.tags(IdKind.BLOCK));
         List<String> blocks = new ArrayList<>();
         List<String> blockTags = new ArrayList<>();
@@ -62,11 +59,9 @@ public record DropsFrom(List<String> blocks, List<String> blockTags, List<String
             } else if (entityIds.contains(id)) {
                 entities.add(id);
             } else {
-                // 方块与实体都没有：从两边一起挑最像的那个，写错的 minecraft:zombi 提示 minecraft:zombie；
-                // 候选按注册表排好的先后比，同样像时每次给的建议都一样。
-                List<String> both = new ArrayList<>(registeredBlocks);
-                both.addAll(registeredEntities);
-                problems.add(SimilarIds.missing("方块或实体", id, SimilarIds.closest(both, id)));
+                // 方块与实体都没有：写成了要的那样物品（minecraft:diamond）就直说它是物品；否则从两边一起挑最像的那个，
+                // 写错的 minecraft:zombi 提示 minecraft:zombie，候选按注册表排好的先后比，同样像时每次给的建议都一样。
+                problems.add(registered.missing(List.of(IdKind.BLOCK, IdKind.ENTITY_TYPE), id));
             }
         }
         return new Sorted(new DropsFrom(blocks, blockTags, entities), problems);

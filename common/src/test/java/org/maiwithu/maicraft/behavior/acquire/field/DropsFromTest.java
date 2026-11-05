@@ -16,10 +16,11 @@ import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
  */
 class DropsFromTest {
 
-    /** 替身：本实例注册了锌矿、石头、TNT 这几种方块，僵尸、TNT 这两种实体，挂着东西的方块标签只有锌矿那个。 */
+    /** 替身：本实例注册了锌矿、石头、TNT 这几种方块，僵尸、TNT 这两种实体，钻石这样物品，挂着东西的方块标签只有锌矿那个。 */
     private static final ReadsRegisteredIds REGISTERED = new ReadsRegisteredIds() {
         @Override public List<String> ids(IdKind kind) {
             return switch (kind) {
+                case ITEM -> List.of("minecraft:diamond");
                 case BLOCK -> List.of("create:zinc_ore", "minecraft:stone", "minecraft:tnt");
                 case ENTITY_TYPE -> List.of("minecraft:tnt", "minecraft:zombie");
                 default -> List.of();
@@ -57,5 +58,11 @@ class DropsFromTest {
                 "方块或实体 minecraft:zombi 不存在；你是不是要 minecraft:zombie",
                 "方块标签 #c:ores/zin 不存在；你是不是要 #c:ores/zinc"), sorted.problems());
         assertTrue(sorted.dropsFrom().isEmpty(), "写错的一项都不进线索");
+    }
+
+    @Test
+    void 写成要的那样物品的直说是物品() {
+        DropsFrom.Sorted sorted = DropsFrom.sort(List.of("minecraft:diamond"), REGISTERED);
+        assertEquals(List.of("minecraft:diamond 是物品，不是方块或实体"), sorted.problems());
     }
 }
