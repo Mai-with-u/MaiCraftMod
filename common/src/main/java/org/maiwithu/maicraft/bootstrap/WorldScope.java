@@ -49,6 +49,7 @@ import org.maiwithu.maicraft.behavior.perception.ClientSubtitleEar;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
 import org.maiwithu.maicraft.behavior.survival.LiveSuicideWayOut;
@@ -191,7 +192,7 @@ public final class WorldScope {
             SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
             ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
             LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents,
-            UnreachableFromHere unreachable) {
+            UnreachableFromHere unreachable, NonverbalExchange nonverbal) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
@@ -255,7 +256,7 @@ public final class WorldScope {
                         LiveCarryReads.characterPosition(now), suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
-                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory),
+                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),

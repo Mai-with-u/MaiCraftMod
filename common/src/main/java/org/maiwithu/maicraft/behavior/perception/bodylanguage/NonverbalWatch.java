@@ -95,6 +95,8 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     private final Map<Integer, Long> lastHitOther = new HashMap<>();
     private final Map<Integer, Toss> flying = new HashMap<>();
     private final Set<Integer> knownItems = new HashSet<>();
+    /** 别的玩家扔过来、落在角色身边的东西：掉落物实体编号 → 落地那刻。角色捡他扔来的东西时从这里找。 */
+    private final Map<Integer, Long> tossedNear = new HashMap<>();
     private LocalPlayer me;
     private Poke latestPoke;
     private UUID lastToward;
@@ -166,6 +168,15 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         return watching == null ? Long.MIN_VALUE : watching.lastActTowardMe;
     }
 
+    /** 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西（掉落物实体编号）。 */
+    public Set<Integer> tossedToMe(long now, long withinTicks) {
+        Set<Integer> items = new HashSet<>();
+        tossedNear.forEach((id, at) -> {
+            if (now - at <= withinTicks) items.add(id);
+        });
+        return items;
+    }
+
     /** 换世界、断线：记的人、没发出的段、在飞的东西、拍一下的账都丢掉。 */
     public void forget() {
         watched.clear();
@@ -179,6 +190,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         lastHitOther.clear();
         flying.clear();
         knownItems.clear();
+        tossedNear.clear();
         me = null;
         lastToward = null;
     }
@@ -236,6 +248,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
             }
         }
         knownItems.retainAll(present);
+        tossedNear.keySet().retainAll(present);
         Iterator<Map.Entry<Integer, Toss>> it = flying.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, Toss> entry = it.next();
@@ -274,6 +287,8 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         double dz = item.getZ() - me.getZ();
         double distance = Math.hypot(dx, dz);
         boolean near = distance <= TOSS_NEAR_BLOCKS;
+        // 落在身边的记下来：LLM 叫角色捡别人扔来的东西时，不点名就捡这些。
+        if (near) tossedNear.put(itemId, now);
         String landed = distance < 1 ? "落在你脚边"
                 : "落在你" + DirectionWords.relative(dx, dz, me.getYRot()) + " " + Math.round(distance) + " 格";
         return new NonverbalAct(NonverbalAct.Kind.TOSS, now, 1, near, (near ? "朝你扔了 " : "扔了 ") + what + "，" + landed);

@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
@@ -142,7 +143,7 @@ final class OfflineCatalog {
                             @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
                             @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
                         },
-                        new UnloadedWorld(), new KeepInventoryRule()),
+                        new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary()),
                         new LiveDigToolRule(ItemsToKeep.NOTHING, blockId -> true)),
