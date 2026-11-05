@@ -115,7 +115,7 @@ public final class DefaultMenuActions implements MenuActions {
 
     private void requireVisible(PlayerContext context) {
         if (!visibility.ready(Minecraft.getInstance(), context))
-            throw new IllegalStateException("the matching menu GUI must be rendered before operating it");
+            throw new IllegalStateException("要点的界面还没画出来");
     }
 
     @Override
@@ -128,7 +128,7 @@ public final class DefaultMenuActions implements MenuActions {
         AbstractContainerMenu menu = context.localPlayer().containerMenu;
         // 满背包分出余量后允许原生界面外左键整份投掷；其他负槽号和操作仍是无效菜单请求。
         boolean outsideDrop = slot == -999 && clickType == ClickType.PICKUP && (button == 0 || button == 1);
-        if (!outsideDrop && (slot < 0 || slot >= menu.slots.size())) throw new IllegalArgumentException("menu slot is out of range");
+        if (!outsideDrop && (slot < 0 || slot >= menu.slots.size())) throw new IllegalArgumentException("界面格号超出了这个界面的格子");
         PendingMenuAction pending = create(PendingMenuAction.Kind.CLICK, context, menu, slot, timeoutTicks, false, confirmation);
         try {
             // 菜单丢弃也按服务端朝向出手；先同步已经转到的真实视角，避免打开背包后仍按旧的低头方向丢在脚边。
@@ -140,8 +140,8 @@ public final class DefaultMenuActions implements MenuActions {
             gameMode(context).handleInventoryMouseClick(menu.containerId, slot, button, clickType, context.localPlayer());
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "menu click threw after entering the client transaction path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "点界面格子时游戏出错，没能确认点没点上");
         }
         return pending;
     }
@@ -152,11 +152,11 @@ public final class DefaultMenuActions implements MenuActions {
         // 只把普通背包第九格以后的物品换到快捷栏；交换前复制两边物品，之后必须证明它们真的对调。
         requireSubmission(context);
         if (sourceInventorySlot < 9 || sourceInventorySlot > 35) {
-            throw new IllegalArgumentException("sourceInventorySlot must be a non-hotbar main inventory slot");
+            throw new IllegalArgumentException("要换到快捷栏的东西得在背包主格（快捷栏以外）里");
         }
-        if (hotbarSlot < 0 || hotbarSlot > 8) throw new IllegalArgumentException("hotbarSlot is out of range");
+        if (hotbarSlot < 0 || hotbarSlot > 8) throw new IllegalArgumentException("快捷栏格号要在 0 到 8 之间");
         if (context.localPlayer().containerMenu != context.localPlayer().inventoryMenu) {
-            throw new IllegalStateException("the player inventory menu must be active for hotbar staging");
+            throw new IllegalStateException("换到快捷栏要在背包界面里做");
         }
         requireIdle();
         requireVisible(context);
@@ -174,8 +174,8 @@ public final class DefaultMenuActions implements MenuActions {
                     menu.containerId, sourceInventorySlot, hotbarSlot, ClickType.SWAP, context.localPlayer());
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "hotbar staging threw after entering the client transaction path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "把东西换到快捷栏时游戏出错，没能确认换没换过去");
         }
         return pending;
     }
@@ -187,7 +187,7 @@ public final class DefaultMenuActions implements MenuActions {
         if (inventorySlot < 0 || inventorySlot >= 36 || Minecraft.getInstance().screen != null
                 || player.containerMenu != player.inventoryMenu
                 || !player.inventoryMenu.getCarried().isEmpty() || player.isUsingItem())
-            throw new IllegalStateException("offhand staging requires an idle player inventory and world view");
+            throw new IllegalStateException("换到副手要先回到世界画面、光标上不挂东西、手上没在用东西");
         requireIdle();
         var inventory = player.getInventory();
         var confirmation = MenuConfirmation.inventorySwap(inventorySlot, 40,
@@ -199,7 +199,8 @@ public final class DefaultMenuActions implements MenuActions {
             gameMode(context).handleInventoryMouseClick(menu.containerId, menuSlot, 40, ClickType.SWAP, player);
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN, "offhand swap entered native submission; outcome unknown");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "把东西换到副手时游戏出错，没能确认换没换过去");
         }
         return pending;
     }
@@ -218,8 +219,8 @@ public final class DefaultMenuActions implements MenuActions {
             gameMode(context).handlePlaceRecipe(menu.containerId, recipe, shift);
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "recipe placement threw after entering the client transaction path");
+            // 调用原版途中出错：这一下可能已经发出去了，生效没有不知道，如实按没能确认收场，不自动再做一次。
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "用配方书摆配方时游戏出错，没能确认摆没摆上");
         }
         return pending;
     }
@@ -235,7 +236,7 @@ public final class DefaultMenuActions implements MenuActions {
                 && menu.getCarried().isEmpty() && !GuiPreparation.inventoryGridOccupied(player)) {
             PendingMenuAction pending = create(PendingMenuAction.Kind.CLOSE, context, menu, -1, timeoutTicks, true,
                     MenuConfirmation.closedToInventory());
-            pending.finish(PendingMenuAction.Status.CONFIRMED_APPLIED, "the inventory menu was already active");
+            pending.finish(PendingMenuAction.Status.CONFIRMED_APPLIED, "已经是背包界面，不用再关");
             return pending;
         }
         PendingMenuAction pending = create(PendingMenuAction.Kind.CLOSE, context, menu, -1, timeoutTicks, true,
@@ -253,15 +254,15 @@ public final class DefaultMenuActions implements MenuActions {
         requireSubmission(context);
         requireIdle();
         requireVisible(context);
-        if (button < 0) throw new IllegalArgumentException("menu button must be nonnegative");
-        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
-        Objects.requireNonNull(confirmation, "menu button requires an exact postcondition");
+        if (button < 0) throw new IllegalArgumentException("界面按钮编号不能是负数");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("等确认的期限至少要 1 刻");
+        Objects.requireNonNull(confirmation, "按界面按钮要给出按成了是什么样的确认条件");
         AbstractContainerMenu menu = context.localPlayer().containerMenu;
         PendingMenuAction pending = create(PendingMenuAction.Kind.BUTTON, context, menu, button, timeoutTicks, false, confirmation);
         try {
             // 按1.21.1附魔界面的顺序，先让当前菜单校验报价；客户端拒绝时没有按钮包，不进入等待扣费阶段。
             if (!menu.clickMenuButton(context.localPlayer(), button)) {
-                pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED, "the native menu rejected the button before submission");
+                pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED, "界面当场不接受这个按钮，没有发给服务端");
                 return pending;
             }
             pending.awaitButtonSynchronization(menu.getStateId());
@@ -269,7 +270,7 @@ public final class DefaultMenuActions implements MenuActions {
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
             // 原生校验或发包途中异常时无法证明是否执行，保留不确定结果供上层收尾，不能自动再点一次。
-            pending.finish(PendingMenuAction.Status.UNCERTAIN, "menu button threw after entering the client transaction path");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "按界面按钮时游戏出错，没能确认按没按成");
         }
         return pending;
     }
@@ -281,16 +282,15 @@ public final class DefaultMenuActions implements MenuActions {
         requireSubmission(context);
         requireIdle();
         requireVisible(context);
-        if (offerIndex < 0) throw new IllegalArgumentException("trade offer index must be nonnegative");
-        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
-        Objects.requireNonNull(confirmation, "trade offer selection requires an exact postcondition");
+        if (offerIndex < 0) throw new IllegalArgumentException("交易报价编号不能是负数");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("等确认的期限至少要 1 刻");
+        Objects.requireNonNull(confirmation, "选交易报价要给出选上了是什么样的确认条件");
         AbstractContainerMenu menu = context.localPlayer().containerMenu;
         PendingMenuAction pending = create(PendingMenuAction.Kind.BUTTON, context, menu, offerIndex, timeoutTicks, false, confirmation);
         try {
             // 交易菜单没有按钮校验这一步：原版界面点报价行是本地改选并按库存自动付款，再发选择报价的包。
             if (!(menu instanceof MerchantMenu merchant)) {
-                pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED,
-                        "the open menu is not a trade menu");
+                pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED, "开着的界面不是交易界面");
                 return pending;
             }
             merchant.setSelectionHint(offerIndex);
@@ -300,8 +300,7 @@ public final class DefaultMenuActions implements MenuActions {
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
             // 本地改选或发包途中异常时无法证明是否执行，保留不确定结果供上层收尾，不能自动再点一次。
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "trade offer selection threw after entering the client transaction path");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "选交易报价时游戏出错，没能确认选没选上");
         }
         return pending;
     }
@@ -315,7 +314,7 @@ public final class DefaultMenuActions implements MenuActions {
         requireIdle();
         requireVisible(context);
         Objects.requireNonNull(send, "send");
-        Objects.requireNonNull(confirmation, "mod menu action requires an exact postcondition");
+        Objects.requireNonNull(confirmation, "模组界面操作要给出做成了是什么样的确认条件");
         if (!context.tryClaimInteraction()) return null;
         AbstractContainerMenu menu = context.localPlayer().containerMenu;
         PendingMenuAction pending = create(
@@ -326,8 +325,10 @@ public final class DefaultMenuActions implements MenuActions {
             interactionSubmitted(context);
         } catch (RuntimeException failure) {
             // 发包途中出错时证明不了服务器收没收到，按不确定收场交给调用方核对现场，不自动重发。
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "mod menu action threw after entering the client transaction path: " + failure);
+            // 异常本身只进日志：给人看的说法以调用方说的这一下开头，不夹异常类名。
+            LOG.warn("模组界面操作（{}）发包时出错", what, failure);
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, (what == null || what.isBlank() ? "模组界面操作" : what)
+                    + "时游戏出错，没能确认生效没有");
         }
         return pending;
     }
@@ -336,7 +337,7 @@ public final class DefaultMenuActions implements MenuActions {
         // 只关当时那一个菜单；等最后操作被显示过并且本刻还有交互机会，再调用原版关闭流程。
         if (context.localPlayer().containerMenu != closingMenu) {
             closingMenu = null;
-            pending.finish(PendingMenuAction.Status.UNCERTAIN, "the menu changed before its GUI could be closed");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "还没关上，开着的界面已经换成了别的");
             return;
         }
         boolean visible = MenuVisibility.matches(Minecraft.getInstance(), closingMenu);
@@ -369,9 +370,9 @@ public final class DefaultMenuActions implements MenuActions {
             closingMenu = null;
             visibility.reset();
         } catch (RuntimeException failure) {
+            // 原版关界面途中出错：关没关上不知道，不再追着关第二次，如实按没能确认收场。
             closingMenu = null;
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "menu close threw after entering the client transaction path");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "关界面时游戏出错，没能确认关没关上");
         }
     }
 
@@ -384,7 +385,7 @@ public final class DefaultMenuActions implements MenuActions {
         if (active != null && !active.terminal()) {
             active.finish(PendingMenuAction.Status.UNCERTAIN,
                     boundaryReason == null || boundaryReason.isBlank()
-                            ? "the owning task ended before menu confirmation"
+                            ? "任务在界面操作确认前就结束了"
                             : boundaryReason);
         }
         // close() 会登记新的关闭确认；即使原任务不再持有它，边界收尾也会在后续游戏刻继续确认。
@@ -399,8 +400,7 @@ public final class DefaultMenuActions implements MenuActions {
         requireActive(pending);
         stillUsing(context, pending);
         if (!pending.fromSamePlayer(context)) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "body or control authority changed before menu confirmation");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "等界面确认时角色换了或控制权换了手，这一下的结果不再算数");
             return pending;
         }
         if (closingMenu != null) {
@@ -408,7 +408,7 @@ public final class DefaultMenuActions implements MenuActions {
             if (pending.terminal()) return pending;
             if (closingMenu != null) {
                 if (context.clientTick() >= pending.deadlineTick()) {
-                    pending.finish(PendingMenuAction.Status.UNCERTAIN, "the GUI close presentation window expired");
+                    pending.finish(PendingMenuAction.Status.UNCERTAIN, "关界面的时限到了，界面还没关上");
                     closingMenu = null;
                 }
                 return pending;
@@ -419,8 +419,7 @@ public final class DefaultMenuActions implements MenuActions {
         // 按钮排除本地报价校验改变的版本；其他菜单事务仍从提交前版本开始等服务端同步。
         boolean stateChanged = !containerChanged && menu.getStateId() != pending.synchronizationStateId();
         if (containerChanged && !pending.allowContainerChange()) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "the active container changed before the submitted click was confirmed");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "等确认时开着的界面换成了别的，没能确认这一下的结果");
             return pending;
         }
         MenuConfirmation.Verdict verdict;
@@ -437,8 +436,7 @@ public final class DefaultMenuActions implements MenuActions {
             case APPLIED -> {
                 // 附魔按钮会真实花费经验和青金石，必须同时收到新菜单版本；不能借用普通槽位的稳定等待退路。
                 if (synchronizationObserved) {
-                    pending.finish(PendingMenuAction.Status.CONFIRMED_APPLIED,
-                            "the exact synchronized menu postcondition confirmed the transaction");
+                    pending.finish(PendingMenuAction.Status.CONFIRMED_APPLIED, "服务端同步回来的界面确认这一下生效了");
                 } else if (pending.kind() != PendingMenuAction.Kind.BUTTON && pending.appliedStableWithoutRevision(
                         context.clientTick(), MenuSynchronization.windowTicks(context))) {
                     // 没有菜单版本更新时，目前允许本地期望状态稳定一段时间后当作成功，不是收到了专门的服务器确认。
@@ -446,28 +444,25 @@ public final class DefaultMenuActions implements MenuActions {
                     // 若点击没有带来 stateId 更新，需等待已观测往返延迟加少量游戏刻余量，
                     // 期间始终没有修正，才可将稳定的后置状态作为当前可取得的确认依据。
                     pending.finish(PendingMenuAction.Status.CONFIRMED_APPLIED,
-                            "the exact menu postcondition remained stable beyond the server round-trip window");
+                            "界面变成了预期的样子，并且稳定超过一个来回没被服务端改回，按生效算");
                 }
             }
             case NOT_APPLIED -> {
                 pending.clearUnacknowledgedApplied();
                 if (synchronizationObserved) {
-                    pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED,
-                            "server-synchronized menu facts confirmed that the transaction was rejected");
+                    pending.finish(PendingMenuAction.Status.CONFIRMED_NOT_APPLIED, "服务端同步回来的界面确认这一下没有生效");
                 }
             }
             case DIVERGED -> {
                 pending.clearUnacknowledgedApplied();
                 if (synchronizationObserved) {
-                    pending.finish(PendingMenuAction.Status.DIVERGED,
-                            "menu slots diverged from both the exact before and expected after state");
+                    pending.finish(PendingMenuAction.Status.DIVERGED, "界面格子既不是操作前的样子，也不是预期操作后的样子");
                 }
             }
             case PENDING -> pending.clearUnacknowledgedApplied();
         }
         if (!pending.terminal() && context.clientTick() >= pending.deadlineTick()) {
-            pending.finish(PendingMenuAction.Status.UNCERTAIN,
-                    "the bounded menu confirmation window expired");
+            pending.finish(PendingMenuAction.Status.UNCERTAIN, "确认时限到了，界面还没同步出结果");
         }
         if (pending.terminal() && pending.kind() != PendingMenuAction.Kind.CLOSE) visibility.changed(context);
         return pending;
@@ -513,7 +508,7 @@ public final class DefaultMenuActions implements MenuActions {
     private PendingMenuAction create(PendingMenuAction.Kind kind, PlayerContext context,
                                      AbstractContainerMenu menu, int slot, int timeoutTicks,
                                      boolean allowContainerChange, MenuConfirmation confirmation) {
-        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("等确认的期限至少要 1 刻");
         // 普通一秒超时不能比已知往返还短；留出首次观察和稳定检查的时间，关闭本地界面则沿用调用方预算。
         int budget = kind == PendingMenuAction.Kind.CLOSE ? timeoutTicks
                 : Math.max(timeoutTicks, MenuSynchronization.windowTicks(context) + 3);
@@ -530,20 +525,20 @@ public final class DefaultMenuActions implements MenuActions {
 
     private static void requireSubmission(PlayerContext context) {
         if (context == null || !context.isCurrent()) {
-            throw new IllegalArgumentException("the player context must belong to the current tick");
+            throw new IllegalArgumentException("角色上下文不是这一刻的");
         }
     }
 
     private void requireIdle() {
         // 还有上一项菜单操作没确认时不能再点，避免后续结果无法对应到哪次点击。
         if (active != null && !active.terminal()) {
-            throw new IllegalStateException("a menu transaction is already awaiting confirmation");
+            throw new IllegalStateException("上一下界面操作还在等确认");
         }
     }
 
     private void requireActive(PendingMenuAction pending) {
         if (pending == null || pending != active) {
-            throw new IllegalArgumentException("the pending menu action is not the active transaction");
+            throw new IllegalArgumentException("这条等待记录不是正在等确认的那一下界面操作");
         }
     }
 
@@ -568,13 +563,13 @@ public final class DefaultMenuActions implements MenuActions {
 
     private static MultiPlayerGameMode gameMode(PlayerContext context) {
         MultiPlayerGameMode gameMode = Minecraft.getInstance().gameMode;
-        if (gameMode == null) throw new IllegalStateException("no active client game mode");
+        if (gameMode == null) throw new IllegalStateException("客户端还没进游戏，没有可用的操作入口");
         return gameMode;
     }
 
     private static ClientPacketListener connection(PlayerContext context) {
         ClientPacketListener connection = context.localPlayer().connection;
-        if (connection == null) throw new IllegalStateException("no active server connection");
+        if (connection == null) throw new IllegalStateException("没连着服务端");
         return connection;
     }
 }

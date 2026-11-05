@@ -26,6 +26,8 @@ public final class GuiPreparation {
     private PendingMenuAction closing;
     private Screen screen;
     private String screenClass;
+    /** 正在退出的界面在给人看的句子里怎么叫：按标题说，没有标题就说没有标题的界面。 */
+    private String screenTitle;
     private long screenDeadline;
     private int screenAttempts;
     private String failure;
@@ -63,7 +65,7 @@ public final class GuiPreparation {
             closing = menuActions.poll(context, closing);
             if (!closing.terminal()) return false;
             if (closing.status() != PendingMenuAction.Status.CONFIRMED_APPLIED)
-                throw failed("Native menu closure was not confirmed: " + closing.detail());
+                throw failed("关界面没得到确认：" + closing.detail());
         }
         if (menuActions.hasPendingTransaction()) return false;
         // 菜单协议和普通槽位点击分别等确认；持续挖掘不在此阻塞，以免导航无法继续完成同一次破坏。
@@ -76,7 +78,7 @@ public final class GuiPreparation {
         if (returnPending) {
             // 页面可能先消失、退料同步稍后才到；等待同一次原生返还，不能对未清空的旧合成格反复发关闭。
             if (context.clientTick() >= closing.deadlineTick())
-                throw failed("Native inventory return was not confirmed after menu closure");
+                throw failed("界面关了，但合成格和光标上的东西没确认还回背包");
             return false;
         }
         if (player.containerMenu != player.inventoryMenu || current instanceof AbstractContainerScreen<?>
@@ -96,15 +98,18 @@ public final class GuiPreparation {
         if (current != screen) {
             screen = current;
             screenClass = current.getClass().getSimpleName();
+            // 给人看的说法用界面标题，类名只进 screen_class 这条排查字段。
+            screenTitle = current.getTitle() == null || current.getTitle().getString().isBlank()
+                    ? "一个没有标题的界面" : "「" + current.getTitle().getString() + "」界面";
             screenDeadline = context.clientTick() + CLOSE_TICKS;
             screenAttempts++;
             try { current.onClose(); }
             catch (RuntimeException unavailable) {
                 screenUncertain = true;
-                throw failed("Native screen exit threw before completion: " + screenClass);
+                throw failed("退出" + screenTitle + "时游戏出错，没能确认退没退出");
             }
         } else if (context.clientTick() >= screenDeadline) {
-            throw failed("The screen did not exit after native closure: " + screenClass);
+            throw failed("按原版关了" + screenTitle + "，但它一直没退出");
         }
         return false;
     }

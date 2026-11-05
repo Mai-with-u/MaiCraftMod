@@ -31,14 +31,15 @@ public final class PendingMenuAction {
     private AbstractContainerMenu submittedMenu;
     private int synchronizationStateId;
     private Status status = Status.PENDING;
-    private String detail = "awaiting the server-synchronized menu state";
+    /** 写给人和 LLM 看的一句结论：确认到了什么、没确认到什么；收场前是"还在等"。 */
+    private String detail = "还在等服务端同步界面";
     /** 记录首次满足精确后置条件的游戏刻，供没有菜单版本更新时等待稳定确认。 */
     private long unacknowledgedAppliedSince = Long.MIN_VALUE;
 
     /** 只留角色对象本身做身份标记；重生、换世界后旧提交的结果不再可信。 */
     PendingMenuAction(Kind kind, PlayerContext context, int containerId, int beforeStateId,
                       int slot, int timeoutTicks, boolean allowContainerChange, MenuConfirmation confirmation) {
-        if (timeoutTicks < 1) throw new IllegalArgumentException("timeoutTicks must be positive");
+        if (timeoutTicks < 1) throw new IllegalArgumentException("等确认的期限至少要 1 刻");
         this.kind = kind;
         this.submittedPlayer = context.localPlayer();
         this.submittedTick = context.clientTick();

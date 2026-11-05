@@ -17,7 +17,7 @@ public interface MenuActions extends BoundaryLifecycle {
 
     /** 一次原生副手交换，保持世界画面和主手槽不变；不支持时由调用方等待。 */
     default PendingMenuAction swapInventoryToOffhand(PlayerContext context, int inventorySlot, int timeoutTicks) {
-        throw new UnsupportedOperationException("native offhand staging is unavailable");
+        throw new UnsupportedOperationException("这个界面入口不会把东西换到副手");
     }
 
     /** 聊天等后继动作先等已提交的搬运或关闭结清，不能用新界面打断物品同步。 */
@@ -59,7 +59,7 @@ public interface MenuActions extends BoundaryLifecycle {
      */
     default PendingMenuAction submitModAction(PlayerContext context, String what, Runnable send,
                                               MenuConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("mod menu actions are not supported");
+        throw new UnsupportedOperationException("这个界面入口不会发模组界面协议");
     }
 
     PendingMenuAction click(PlayerContext context, int slot, int button, ClickType clickType,
@@ -68,7 +68,7 @@ public interface MenuActions extends BoundaryLifecycle {
     /** 附魔等菜单按钮先走原生本地校验，再提交一次；调用方必须提供具体物品和成本变化的确认条件。 */
     default PendingMenuAction pressButton(PlayerContext context, int button,
                                           MenuConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("native menu buttons are not supported");
+        throw new UnsupportedOperationException("这个界面入口不会按界面按钮");
     }
 
     /**
@@ -78,7 +78,7 @@ public interface MenuActions extends BoundaryLifecycle {
      */
     default PendingMenuAction selectTradeOffer(PlayerContext context, int offerIndex,
                                                MenuConfirmation confirmation, int timeoutTicks) {
-        throw new UnsupportedOperationException("trade offer selection is not supported");
+        throw new UnsupportedOperationException("这个界面入口不会选交易报价");
     }
 
     PendingMenuAction swapInventoryToHotbar(
