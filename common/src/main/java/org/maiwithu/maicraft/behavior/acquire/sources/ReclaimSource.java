@@ -16,8 +16,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
-import org.maiwithu.maicraft.behavior.worldmemory.MemoryOrigin;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -167,7 +167,7 @@ public final class ReclaimSource implements ItemSource {
             if (!type.equals(blocks.blockTypeAt(at).orElse(null)) || protection.insideHome(at)) continue;
             // 记忆里亲手睡过的床是自己的：不用等归属问到、也不看是不是写着自己放的；
             // 记录写明是别人放的让开，村里的床也让开（睡过一张村民的床不等于床是自己的，村民还要睡）。
-            boolean sleptIn = type.endsWith("_bed") && record.origin() == MemoryOrigin.USED;
+            boolean sleptIn = SleptBeds.sleptIn(record);
             if (sleptIn) {
                 if (protection.placedByAnotherPlayer(at) || protection.inVillage(at)) continue;
             } else {

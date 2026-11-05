@@ -51,6 +51,7 @@ import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
+import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
 import org.maiwithu.maicraft.behavior.travel.planning.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
@@ -70,7 +71,9 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.KeepInventoryRule;
 import org.maiwithu.maicraft.game.world.ReadsLightLevels;
+import org.maiwithu.maicraft.game.world.RespawnPoint;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
@@ -149,6 +152,9 @@ public final class WorldScope {
     private final SelfView.Identity selfIdentity;
     /** 认出的是哪个世界：这一趟进世界里不再变，宿主读事件、看自己时都带着它。 */
     private final SaveIdentity world;
+    /** observe(self) 读的死亡不掉落与重生点：本机服务端上要交给服务端线程读，读到的记在这一份里，换世界跟着换。 */
+    private final KeepInventoryRule keepInventory = new KeepInventoryRule();
+    private final RespawnPoint respawnPoint = new RespawnPoint();
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -392,6 +398,15 @@ public final class WorldScope {
     /** observe(self) 带的角色是谁：账号名、UUID 与所在的世界。 */
     public SelfView.Identity identity() {
         return selfIdentity;
+    }
+
+    /**
+     * observe(self) 带的死一次会怎样：死亡不掉落开没开、会在哪重生。别人的服务器读不到重生点时，
+     * 按世界记忆里最近睡过的床推断。只在客户端线程调用。
+     */
+    public SelfView.AfterDeath afterDeath() {
+        return SelfView.afterDeath(keepInventory.read(), respawnPoint.read(), SleptBeds.latest(memory),
+                respawnPoint.worldSpawn());
     }
 
     /** 认出的是哪个世界：events 每一页都带它。 */

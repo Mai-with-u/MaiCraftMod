@@ -9,13 +9,18 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.KeepInventoryRule;
+import org.maiwithu.maicraft.game.world.RespawnPoint;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -54,6 +59,68 @@ public final class SelfView {
         if (identity.uuid() != null) view.addProperty("uuid", identity.uuid().toString());
         if (identity.world() != null) view.add("world", WorldIdentityView.of(identity.world()));
         if (identity.worldKey() != null) view.addProperty("world_key", identity.worldKey());
+    }
+
+    /**
+     * 死一次会怎样：东西掉不掉、会在哪重生。LLM 看着它和血、饱食度，自己决定要不要寻死回家。
+     *
+     * @param keepInventory 死亡不掉落：{@code on} / {@code off} / 别人的服务器读不到 {@code unknown}；规则还在读为 null
+     * @param respawn       会在哪重生；刚进世界什么都读不到为 null
+     */
+    public record AfterDeath(String keepInventory, Respawn respawn) {}
+
+    /**
+     * 会在哪重生。
+     *
+     * @param dimension 维度 ID；记忆里的床没写维度时为 null
+     * @param source    {@code bed} / {@code respawn_anchor} / {@code command}（/spawnpoint 设的） / {@code world_spawn}
+     * @param confirmed true：单人世界、局域网主机在服务端读到的；false：别人的服务器不告诉客户端，是推断
+     */
+    public record Respawn(int x, int y, int z, String dimension, String source, boolean confirmed) {}
+
+    /**
+     * 拼出死一次会怎样：死亡不掉落读到什么写什么，还在读就不写；
+     * 重生点本机读到真实的就用它（还在读就不写），别人的服务器按最近睡过的床推断，没睡过就是世界出生点。
+     *
+     * @param lastBed    世界记忆里最近一次睡过的床
+     * @param worldSpawn 客户端知道的世界出生点
+     */
+    public static AfterDeath afterDeath(KeepInventoryRule.Reading keepInventory, RespawnPoint.Reading respawn,
+            Optional<WorldPosition> lastBed, Optional<RespawnPoint.Spot> worldSpawn) {
+        String keep = switch (keepInventory) {
+            case ON -> "on";
+            case OFF -> "off";
+            case UNREADABLE -> "unknown";
+            case READING -> null;
+        };
+        Respawn at = switch (respawn.status()) {
+            case READ -> respawn(respawn.spot(), true);
+            case READING -> null;
+            case UNREADABLE -> lastBed.map(bed -> new Respawn(bed.x(), bed.y(), bed.z(), bed.dimension(), "bed", false))
+                    .orElseGet(() -> worldSpawn.map(spawn -> respawn(spawn, false)).orElse(null));
+        };
+        return new AfterDeath(keep, at);
+    }
+
+    private static Respawn respawn(RespawnPoint.Spot spot, boolean confirmed) {
+        return new Respawn(spot.x(), spot.y(), spot.z(), spot.dimension(),
+                spot.source().name().toLowerCase(Locale.ROOT), confirmed);
+    }
+
+    /** 把死一次会怎样写进自己这一栏：读不到的项不写，不编一个。 */
+    public static void addAfterDeath(JsonObject view, AfterDeath afterDeath) {
+        if (afterDeath == null) return;
+        if (afterDeath.keepInventory() != null) view.addProperty("keep_inventory", afterDeath.keepInventory());
+        Respawn respawn = afterDeath.respawn();
+        if (respawn == null) return;
+        JsonObject json = new JsonObject();
+        json.addProperty("x", respawn.x());
+        json.addProperty("y", respawn.y());
+        json.addProperty("z", respawn.z());
+        if (respawn.dimension() != null) json.addProperty("dimension", respawn.dimension());
+        json.addProperty("source", respawn.source());
+        json.addProperty("confirmed", respawn.confirmed());
+        view.add("respawn", json);
     }
 
     /** 把预留写进自己这一栏：每样留几件、身上几件；全都留着写 all。没有预留时不写，免得多一项空数组。 */

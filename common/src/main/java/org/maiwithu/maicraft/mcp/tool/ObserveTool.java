@@ -55,6 +55,8 @@ public final class ObserveTool implements McpTool {
     private final LooksAfterReading looks;
     /** 角色是谁、在哪个世界：observe(self) 每次都带上；不在世界里时给 null。 */
     private final Supplier<SelfView.Identity> identity;
+    /** 死一次会怎样（死亡不掉落开没开、会在哪重生）：observe(self) 每次都带上；在客户端线程上读，不在世界里时给 null。 */
+    private final Supplier<SelfView.AfterDeath> afterDeath;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -92,6 +94,16 @@ public final class ObserveTool implements McpTool {
                        ClientThread clientThread, Supplier<List<Reminder>> reminders,
                        Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
                        LooksAfterReading looks, Supplier<SelfView.Identity> identity) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, () -> null);
+    }
+
+    /** @param afterDeath 死一次会怎样；在客户端线程上读，不在世界里时给 null */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity,
+                       Supplier<SelfView.AfterDeath> afterDeath) {
+        this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
         this.reserved = Objects.requireNonNull(reserved, "reserved");
@@ -188,6 +200,8 @@ public final class ObserveTool implements McpTool {
         SelfView.addReserved(view, reserved.get());
         // 角色是谁、在哪个世界：宿主认出聊天和播报里哪个名字是角色自己，按世界分开记事。
         SelfView.addIdentity(view, identity.get());
+        // 死一次会怎样：死亡不掉落开没开、会在哪重生；LLM 看着它决定要不要寻死回家。
+        SelfView.addAfterDeath(view, afterDeath.get());
         return view;
     }
 }
