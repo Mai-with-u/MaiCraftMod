@@ -161,9 +161,17 @@ public final class ResultJson {
             }
             json.add("ready_now", ready);
         }
-        // 附带的结构化事实按发事件一侧给的字段名整份挂上，和结果细节同一种转法（小写下划线）。
+        // 附带的结构化事实按发事件一侧给的字段名整份挂上，和结果细节同一种转法（小写下划线）；
+        // 没给字段名的各字段直接铺在事件上（计时到点的 timer_id、note），宿主按字段认，不盖掉事件自己的字段。
         if (event.facts() != null) {
-            json.add(event.facts().field(), DETAILS.toJsonTree(event.facts()));
+            JsonElement facts = DETAILS.toJsonTree(event.facts());
+            if (event.facts().field() != null) {
+                json.add(event.facts().field(), facts);
+            } else {
+                facts.getAsJsonObject().entrySet().forEach(entry -> {
+                    if (!json.has(entry.getKey())) json.add(entry.getKey(), entry.getValue());
+                });
+            }
         }
         return json;
     }

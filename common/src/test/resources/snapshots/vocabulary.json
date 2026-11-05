@@ -331,6 +331,13 @@
         "losing_health": false
       }
     },
+    "timer_due_event": {
+      "cursor": 12,
+      "kind": "timer_due",
+      "message": "计时 3 到点：回 (12, 64, -30) 的熔炉取干海带 ×64（641 秒前设的；此刻白天）",
+      "timer_id": 3,
+      "note": "回 (12, 64, -30) 的熔炉取干海带 ×64"
+    },
     "chat_event": {
       "cursor": 3,
       "kind": "player",

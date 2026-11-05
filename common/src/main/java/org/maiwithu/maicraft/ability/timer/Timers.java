@@ -11,6 +11,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.event.EventFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 
@@ -52,6 +53,21 @@ public final class Timers {
         }
     }
 
+    /**
+     * timer_due 事件上按字段给的事实，直接铺在事件上：宿主按 timer_id 认是哪一个计时（自己设的，或装炉就走自动挂的），
+     * 不用从消息里抠编号；note 是设的时候写的备注，原样带回。
+     *
+     * @param timerId 计时编号，和 timer 结果、obtain 的 left_cooking 里的 timer_id 是同一个数
+     * @param note    设的时候写的备注
+     */
+    public record Due(int timerId, String note) implements EventFacts {
+
+        // 不另套一层：timer_id、note 就是这条事件本身。
+        @Override public String field() {
+            return null;
+        }
+    }
+
     /** 设一个计时；已经挂满时为空，交给能力如实拒。 */
     public Optional<Timer> set(int afterSeconds, String note, long now) {
         if (pending.size() >= MAX_PENDING) return Optional.empty();
@@ -90,8 +106,9 @@ public final class Timers {
         for (Timer timer : pending()) {
             if (timer.dueTick() > now) break;
             pending.remove(timer);
+            // 消息照旧一句话说清；编号和备注另按字段带上，宿主认是哪个计时不用解析这句话。
             events.publish(TaskEvent.Kind.TIMER_DUE, "计时 " + timer.id() + " 到点：" + timer.note()
-                    + "（" + timer.afterSeconds() + " 秒前设的；此刻" + timeText + "）");
+                    + "（" + timer.afterSeconds() + " 秒前设的；此刻" + timeText + "）", new Due(timer.id(), timer.note()));
         }
     }
 

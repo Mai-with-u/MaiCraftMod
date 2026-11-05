@@ -9,6 +9,10 @@ package org.maiwithu.maicraft.kernel.event;
  */
 public interface EventFacts {
 
-    /** 挂在事件上的字段名（小写下划线），例如 {@code others_food_taken}。 */
+    /**
+     * 挂在事件上的字段名（小写下划线），例如 {@code others_food_taken}。
+     * 为 null 时各字段直接铺在事件上、不另套一层：只有一两个字段、说的就是这条事件本身时这样给
+     * （计时到点的 {@code timer_id}、{@code note}）；事件自己的字段（cursor、kind、message……）不会被盖掉。
+     */
     String field();
 }

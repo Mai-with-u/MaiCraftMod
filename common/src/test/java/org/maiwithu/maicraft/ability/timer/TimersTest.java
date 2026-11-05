@@ -2,12 +2,15 @@
 package org.maiwithu.maicraft.ability.timer;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.kernel.event.EventFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 计时表：按游戏时间到点发事件、先到先发、挂满拒、取消与换世界清空。 */
@@ -72,6 +75,28 @@ class TimersTest {
         assertTrue(published.isEmpty(), "换过世界不该再叫");
         // 编号只增不减：新世界的计时不会和旧编号撞上，LLM 手里的旧编号取消不到新计时。
         assertEquals(2, timers.set(10, "新世界的事", 0).orElseThrow().id());
+    }
+
+    @Test
+    void dueEventCarriesTheTimerIdAndNoteAsFields() {
+        // 到点的事件除了一句话，另按字段带编号和备注：宿主认是哪个计时（比如哪台炉子的回炉计时）不用解析消息。
+        List<EventFacts> attached = new ArrayList<>();
+        Timers withFacts = new Timers(new TaskEventSink() {
+            @Override public void publish(TaskEvent.Kind kind, String message) {
+                throw new AssertionError("计时到点要带字段发");
+            }
+
+            @Override public void publish(TaskEvent.Kind kind, String message, EventFacts facts) {
+                assertEquals(TaskEvent.Kind.TIMER_DUE, kind);
+                attached.add(facts);
+            }
+        });
+        withFacts.set(10, "收作物", 0);
+        withFacts.set(640, "回 (12, 64, -30) 的熔炉取干海带 ×64", 0);
+        withFacts.fireDue(20_000, "白天");
+        assertEquals(List.of(new Timers.Due(1, "收作物"), new Timers.Due(2, "回 (12, 64, -30) 的熔炉取干海带 ×64")),
+                attached);
+        assertNull(attached.getFirst().field(), "编号和备注直接铺在事件上");
     }
 
     @Test

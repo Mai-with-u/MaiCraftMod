@@ -23,6 +23,7 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.survival.hunger.OthersFoodTaken;
 import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -191,6 +192,10 @@ class InterfaceSnapshotTest {
                 new OthersFoodTaken(OthersFoodTaken.Whose.PLAYER, "Alex", null,
                         new WorldPosition(12, 64, -8, "minecraft:overworld"),
                         List.of(new OthersFoodTaken.Item("minecraft:bread", 1)), 3, false))));
+        // 计时到点：编号和备注直接铺在事件上（timer_id、note），宿主按字段认是哪个计时，不解析消息。
+        shapes.add("timer_due_event", ResultJson.event(new TaskEvent(12, TaskEvent.Kind.TIMER_DUE,
+                TaskEventLog.NO_GOAL, "计时 3 到点：回 (12, 64, -30) 的熔炉取干海带 ×64（641 秒前设的；此刻白天）", null, null,
+                List.of(), new Timers.Due(3, "回 (12, 64, -30) 的熔炉取干海带 ×64"))));
         // 聊天流里一条玩家说的话：发言人名字、UUID，以及发言人是不是此刻在线玩家列表里的那个玩家。
         ReceivedChat said = ReceivedChat.fromPlayer("麦麦过来", UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
                 "Steve", true, false, null).orElseThrow();
