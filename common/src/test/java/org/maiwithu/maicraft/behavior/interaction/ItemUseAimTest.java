@@ -20,8 +20,14 @@ class ItemUseAimTest {
 
     private ItemUseAim.Around around(Set<Direction> solid, Set<Direction> clickable,
             boolean aboveOpen, boolean ignitesItself) {
-        return new ItemUseAim.Around(feet, solid, clickable, aboveOpen, ignitesItself);
+        return new ItemUseAim.Around(feet, solid, clickable, aboveOpen ? ItemUseAim.AboveCell.OPEN : STONE_ABOVE,
+                ignitesItself);
     }
+
+    /** 上方压着一块石头：不是草木，锄之前打不掉。 */
+    private static final ItemUseAim.AboveCell STONE_ABOVE = new ItemUseAim.AboveCell("minecraft:stone", false);
+    /** 上方是一株短草：一下就能打掉的野生草木。 */
+    private static final ItemUseAim.AboveCell GRASS_ABOVE = new ItemUseAim.AboveCell("minecraft:short_grass", true);
 
     @Test
     void emptyHandUsesTargetItself() {
@@ -115,7 +121,7 @@ class ItemUseAimTest {
         BlockPos below = feet.below();
         Optional<ItemUseAim.Aim> aim = ItemUseAim.aim(ItemUseAim.Gesture.POUR, below,
                 ItemUseAim.CellNature.SOLID,
-                new ItemUseAim.Around(feet, Set.of(), Set.of(), false, false));
+                new ItemUseAim.Around(feet, Set.of(), Set.of(), STONE_ABOVE, false));
         assertTrue(aim.isPresent());
         assertEquals(below, aim.get().clickCell());
         assertEquals(feet, aim.get().effectCell());
@@ -150,6 +156,33 @@ class ItemUseAimTest {
         // 上方压着方块：锄不动，给不出瞄准。
         assertTrue(ItemUseAim.aim(ItemUseAim.Gesture.TRANSFORM_TOOL, target,
                 ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false)).isEmpty());
+    }
+
+    @Test
+    void wildPlantAboveIsClearedFirstButOtherBlocksAreNot() {
+        // 草方块上长着短草：先打掉上面那一格再锄；上面压着石头、目标本身不是实心、上方空着、手上不是锄锹斧，都不先打。
+        ItemUseAim.Around grass = new ItemUseAim.Around(feet, Set.of(), Set.of(), GRASS_ABOVE, false);
+        assertEquals(Optional.of(target.above()), ItemUseAim.clearFirst(ItemUseAim.Gesture.TRANSFORM_TOOL, target,
+                ItemUseAim.CellNature.SOLID, grass));
+        assertTrue(ItemUseAim.aim(ItemUseAim.Gesture.TRANSFORM_TOOL, target,
+                ItemUseAim.CellNature.SOLID, grass).isEmpty(), "草还没打掉之前照样瞄不出");
+        assertTrue(ItemUseAim.clearFirst(ItemUseAim.Gesture.TRANSFORM_TOOL, target, ItemUseAim.CellNature.SOLID,
+                around(Set.of(), Set.of(), false, false)).isEmpty());
+        assertTrue(ItemUseAim.clearFirst(ItemUseAim.Gesture.TRANSFORM_TOOL, target,
+                ItemUseAim.CellNature.AIR_OR_REPLACEABLE, grass).isEmpty());
+        assertTrue(ItemUseAim.clearFirst(ItemUseAim.Gesture.TRANSFORM_TOOL, target, ItemUseAim.CellNature.SOLID,
+                around(Set.of(), Set.of(), true, false)).isEmpty());
+        assertTrue(ItemUseAim.clearFirst(ItemUseAim.Gesture.USE_TARGET, target, ItemUseAim.CellNature.SOLID,
+                grass).isEmpty());
+    }
+
+    @Test
+    void transformBlockedSaysWhetherTargetIsNotSolidOrWhatSitsOnTop() {
+        // 两种原因分开说：不是实心方块；上面压着什么，说出是什么。
+        assertEquals("不是实心方块，锄、锹、斧用不上",
+                ItemUseAim.whyTransformBlocked(ItemUseAim.CellNature.AIR_OR_REPLACEABLE, ItemUseAim.AboveCell.OPEN));
+        assertEquals("上面压着 minecraft:stone，锄、锹、斧用不上",
+                ItemUseAim.whyTransformBlocked(ItemUseAim.CellNature.SOLID, STONE_ABOVE));
     }
 
     @Test

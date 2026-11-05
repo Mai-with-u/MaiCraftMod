@@ -610,6 +610,47 @@ class UseTaskTest {
         assertTrue(result.problem().message().contains("都是别人的"), result.problem().message());
     }
 
+    @Test
+    void 锄地被短草压着_先打掉草再锄() {
+        // 草方块上长着短草：先过许可、打掉那一格草，记下拆掉了什么，再回来锄成耕地。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.interactions.clearAbove(LEVER.above(), "minecraft:short_grass");
+        rig.interactions.applied("耕成了耕地");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:wooden_hoe", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of(LEVER.above()), rig.clears.cleared);
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_BROKEN
+                && change.what().equals("minecraft:short_grass")), result.changes().toString());
+        assertEquals(2, rig.interactions.builds);
+    }
+
+    @Test
+    void 锄地被短草压着_许可不让就说压着什么() {
+        // change_blocks 不够或草是别人种的：不打、不锄，说清目标上面压着什么和为什么不能动。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.clears.refusal = Problem.of(Problem.Kind.NEED_APPROVAL, "这次任务的 change_blocks=none", "提到 natural");
+        rig.interactions.clearAbove(LEVER.above(), "minecraft:short_grass");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:wooden_hoe", null, null, 1));
+        assertProblem(result, Problem.Kind.NEED_APPROVAL);
+        assertTrue(result.problem().message().contains("上面压着 minecraft:short_grass"), result.problem().message());
+        assertTrue(rig.clears.cleared.isEmpty());
+    }
+
+    @Test
+    void 同一格草打过还压着_不打第二遍() {
+        // 打完那一格还是压着（又长出来、被别人放回去）：不在同一格上来回打，如实说压着什么。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.interactions.clearAbove(LEVER.above(), "minecraft:short_grass");
+        rig.interactions.clearAbove(LEVER.above(), "minecraft:short_grass");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:wooden_hoe", null, null, 1));
+        assertProblem(result, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertTrue(result.problem().message().contains("上面压着 minecraft:short_grass"), result.problem().message());
+        assertEquals(1, rig.clears.cleared.size());
+    }
+
     private static Target position(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }
@@ -634,6 +675,8 @@ class UseTaskTest {
         final FakeTravel travel = new FakeTravel();
         final FakeMenus menus = new FakeMenus();
         final FakeOthers others = new FakeOthers();
+        /** 打掉压在目标上面的草木：默认放行，一刻打掉。 */
+        final FakeClears clears = new FakeClears();
         /** 世界记忆：默认没接；补账的测试自己摆一份。 */
         WorldMemory memory;
         /** 设施分类：默认空标签的一套（床按种类认，原版工作台按 ID 表认）。 */
@@ -676,7 +719,7 @@ class UseTaskTest {
             };
             UseServices services = new UseServices(world, interactions, close, hand, needs,
                     id -> Optional.ofNullable(seen.get(id)), search, refusal, FakeSignEditor::open,
-                    drops, travel, menus, memory, others, space, facilities, sneak);
+                    drops, travel, menus, memory, others, space, facilities, sneak, clears);
             UseTask task = new UseTask(input, services);
             task.start(tick());
             return task;
@@ -809,6 +852,11 @@ class UseTaskTest {
                     heldBefore, 0, null));
         }
 
+        /** 一次锄地被压在上面的草木挡着：要先打掉那一格。 */
+        void clearAbove(BlockPos cell, String blockId) {
+            script.add(new UseSeams.Built.ClearAbove(cell, blockId));
+        }
+
         void aimFails(Problem problem) {
             script.add(new UseSeams.Built.Ready(new Scripted(1, ActionStatus.failed(problem), () -> { }),
                     () -> null, ItemUseAim.Gesture.EMPTY_HAND, null, 0, null));
@@ -825,6 +873,20 @@ class UseTaskTest {
             lastTarget = target;
             return script.isEmpty() ? new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.STUCK, "脚本用完了", null))
                     : script.poll();
+        }
+    }
+
+    /** 打掉压着的草木的替身：记下打过哪几格；给了拒绝就不放行。 */
+    private static final class FakeClears implements UseSeams.ClearsAbove {
+        final List<BlockPos> cleared = new ArrayList<>();
+        Problem refusal;
+
+        @Override public Optional<Problem> allowed(Permissions permissions, BlockPos cell, String blockId) {
+            return Optional.ofNullable(refusal);
+        }
+
+        @Override public Action clear(BlockPos cell, String blockId) {
+            return new Scripted(1, ActionStatus.done(), () -> cleared.add(cell));
         }
     }
 

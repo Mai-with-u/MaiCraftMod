@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.GestureConfirmations;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -121,10 +122,14 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                     InteractionConfirmation.blockChangedNotAir(cell, state), BRUSH_HOLD_LIMIT_TICKS);
             return new UseSeams.Built.Ready(brush, brush::result, gesture, held, menuBefore, null);
         }
-        Optional<ItemUseAim.Aim> planned = ItemUseAim.aim(gesture, cell, natureOf(state),
-                aroundOf(level, player, cell, state), target.face());
+        ItemUseAim.CellNature nature = natureOf(state);
+        ItemUseAim.Around around = aroundOf(level, player, cell, state);
+        Optional<ItemUseAim.Aim> planned = ItemUseAim.aim(gesture, cell, nature, around, target.face());
         if (planned.isEmpty()) {
-            return new UseSeams.Built.CannotAim(whyNoAim(gesture, target));
+            // 锄、锹被上面一下就能打掉的野生草木挡着：交给任务先过许可、打掉它，再回来出手。
+            Optional<BlockPos> clear = ItemUseAim.clearFirst(gesture, cell, nature, around);
+            if (clear.isPresent()) return new UseSeams.Built.ClearAbove(clear.get(), around.above().blockId());
+            return new UseSeams.Built.CannotAim(whyNoAim(gesture, target, nature, around.above()));
         }
         ItemUseAim.Aim aim = planned.get();
         var confirmation = GestureConfirmations.forGesture(aim.confirmation(), aim.effectCell(),
@@ -145,12 +150,14 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
     }
 
     // 瞄不出来的原因按手势说：工具与空桶是这一格用不了；倒和点火是旁边没有能点的面（落到自己身上不算瞄不出，照做）。
-    private static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target) {
+    // 锄、锹、斧分开说是目标本身不是实心，还是上面压着什么（说出是什么），LLM 才知道该换目标还是先清上面。
+    private static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target, ItemUseAim.CellNature nature,
+            ItemUseAim.AboveCell above) {
         return switch (gesture) {
             case SCOOP -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 不是流体源格，空桶舀不起来", null);
             case TRANSFORM_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                    target.describe() + " 不是实心方块或上面压着东西，锄、锹、斧用不上", null);
+                    target.describe() + " " + ItemUseAim.whyTransformBlocked(nature, above), null);
             case POUR, IGNITE -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 是空气或流体，旁边又没有实心方块当支撑面，倒、点火落不到那一格",
                     "点名它旁边的实心方块，或先在旁边放一块方块再对着那一面倒、点");
@@ -179,7 +186,16 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             if (handlesRightClick(level, at, neighbor)) clickable.add(direction);
         }
         return new ItemUseAim.Around(player.blockPosition(), solid, clickable,
-                level.getBlockState(cell.above()).isAir(), ignitesItself(state));
+                aboveOf(level, cell.above()), ignitesItself(state));
+    }
+
+    // 目标正上方那一格：空着；压着什么，是不是一下就能打掉的野生草木（草木按种类认，种的、树苗不算；
+    // 挖掘耗时为零才算一下打得掉）。
+    private static ItemUseAim.AboveCell aboveOf(ClientLevel level, BlockPos above) {
+        BlockState state = level.getBlockState(above);
+        if (state.isAir()) return ItemUseAim.AboveCell.OPEN;
+        boolean oneHit = NaturalBlocks.wildPlant(state) && state.getDestroySpeed(level, above) == 0;
+        return new ItemUseAim.AboveCell(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), oneHit);
     }
 
     // 右键会先触发方块自己的行为：开界面的（箱子、熔炉、工作台、织布机）、带方块实体的、门与活板门、

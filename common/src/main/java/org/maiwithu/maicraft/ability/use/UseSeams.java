@@ -141,6 +141,23 @@ final class UseSeams {
 
         /** 组装不出来：从这里瞄不准、这样用不了、或目标已经不在了。 */
         record CannotAim(Problem problem) implements Built {}
+
+        /**
+         * 锄、锹被压在目标上面的野生草木挡着（短草、蕨、花）：先打掉那一格再出手。
+         *
+         * @param cell    压着的那一格
+         * @param blockId 压着的是什么
+         */
+        record ClearAbove(BlockPos cell, String blockId) implements Built {}
+    }
+
+    /** 锄地、压土径前打掉压在目标上面的野生草木：先过挖方块的许可，再用挖一格的动作打掉。 */
+    interface ClearsAbove {
+        /** 为了锄地、压土径打掉这一格行不行：别人的、受保护的、change_blocks 不到 natural 的给拒绝。 */
+        Optional<Problem> allowed(Permissions permissions, BlockPos cell, String blockId);
+
+        /** 打掉这一格的动作：那一格不再是原来的东西就算做完。 */
+        Action clear(BlockPos cell, String blockId);
     }
 
     /** 告示牌编辑界面：右键提交后界面的读取入口；界面没开着给空。 */

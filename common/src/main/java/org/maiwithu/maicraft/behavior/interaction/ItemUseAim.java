@@ -96,15 +96,37 @@ public final class ItemUseAim {
      * @param feet                     角色脚下的格子；用来猜目标朝向角色的面，效果格正是自己站的地方时写进说明
      * @param solidNeighbors           目标的六个邻居里哪些是实心方块（可当支撑面）
      * @param rightClickableNeighbors  邻居里哪些自己有右键行为（箱子、门、工作台），点它会先触发方块的行为
-     * @param aboveOpen                目标正上方是不是空气；锄和锹要求上方敞开
+     * @param above                    目标正上方那一格：空着，还是压着什么；锄和锹要求上方敞开
      * @param ignitesItself            目标本身是不是能点着的方块（TNT、营火、蜡烛），点它本身就生效
      */
     public record Around(BlockPos feet, Set<Direction> solidNeighbors,
-                         Set<Direction> rightClickableNeighbors, boolean aboveOpen, boolean ignitesItself) {
+                         Set<Direction> rightClickableNeighbors, AboveCell above, boolean ignitesItself) {
         public Around {
             Objects.requireNonNull(feet, "feet");
+            Objects.requireNonNull(above, "above");
             solidNeighbors = Set.copyOf(solidNeighbors);
             rightClickableNeighbors = Set.copyOf(rightClickableNeighbors);
+        }
+
+        /** 目标正上方是不是空气。 */
+        public boolean aboveOpen() {
+            return above.open();
+        }
+    }
+
+    /**
+     * 目标正上方那一格，由调用方读世界得到。
+     *
+     * @param blockId           压在上面的方块 ID；上方是空气时为 null
+     * @param wildPlantOneHit   压着的是不是一下就能打掉的野生草木（短草、蕨、花、蘑菇）：玩家锄草地前顺手拨掉的那种
+     */
+    public record AboveCell(String blockId, boolean wildPlantOneHit) {
+
+        /** 上方是空气。 */
+        public static final AboveCell OPEN = new AboveCell(null, false);
+
+        public boolean open() {
+            return blockId == null;
         }
     }
 
@@ -183,6 +205,25 @@ public final class ItemUseAim {
     private static Optional<Aim> aimScoop(CellNature nature, BlockPos target) {
         if (nature == CellNature.FLUID_SOURCE) return Optional.of(scoop(target));
         return Optional.empty();
+    }
+
+    /**
+     * 锄、锹、斧被上方挡住时，先打掉哪一格：目标是实心方块、上方压着一下就能打掉的野生草木，就先打掉它再锄，
+     * 玩家锄草地前也是先把草拨掉；上方空着、压着别的东西、目标本身不是实心、或不是这类工具，给空。
+     */
+    public static Optional<BlockPos> clearFirst(Gesture gesture, BlockPos target, CellNature nature, Around around) {
+        if (gesture != Gesture.TRANSFORM_TOOL || nature != CellNature.SOLID) return Optional.empty();
+        return around.above().wildPlantOneHit() ? Optional.of(target.above()) : Optional.empty();
+    }
+
+    /**
+     * 锄、锹、斧用不上的原因，分开说：目标本身不是实心方块，或者上面压着什么（说出是什么）。
+     * 说明跟在目标的描述后面，例如"上面压着 minecraft:snow，锄、锹、斧用不上"。
+     */
+    public static String whyTransformBlocked(CellNature nature, AboveCell above) {
+        if (nature != CellNature.SOLID) return "不是实心方块，锄、锹、斧用不上";
+        if (above.open()) return "锄、锹、斧用不上";
+        return "上面压着 " + above.blockId() + "，锄、锹、斧用不上";
     }
 
     // 锄、锹、斧：只点侧面或顶面（不点底面），目标上方必须是空气；效果是目标自己变样子。

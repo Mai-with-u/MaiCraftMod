@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -108,7 +109,7 @@ public final class UseModule implements AbilityModule {
             ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
             ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
-            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts) {
+            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -138,7 +139,9 @@ public final class UseModule implements AbilityModule {
                 new LiveOthersThings(context, protection, creatures),
                 space,
                 facilities,
-                sneak), ClientRegisteredIds.builtIn());
+                sneak,
+                // 锄地、压土径前打掉压在上面的草：许可问同一份保护判断，打掉用全仓那份挖一格的动作。
+                new LiveClearsAbove(diggings, protection, creatures)), ClientRegisteredIds.builtIn());
     }
 
     @Override public AbilitySpec spec() {

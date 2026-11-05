@@ -42,8 +42,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class UseTask extends PhasedTask<UseTask.Phase> {
 
-    /** 找目标 → 走到没加载的地方 → 去拿缺的东西 → 备手 → 靠近 → 交互 → 写字/看界面 → 捡东西/下一次。 */
-    enum Phase { RESOLVE, TRAVEL, FETCH, HAND, APPROACH, INTERACT, WRITE, LOOK, COLLECT }
+    /**
+     * 找目标 → 走到没加载的地方 → 去拿缺的东西 → 备手 → 靠近 → （锄地被草压着时先打掉草）→ 交互
+     * → 写字/看界面 → 捡东西/下一次。
+     */
+    enum Phase { RESOLVE, TRAVEL, FETCH, HAND, APPROACH, CLEAR, INTERACT, WRITE, LOOK, COLLECT }
 
     /** 空桶点到流动的流体时，改舀多少格以内最近的同种源格。 */
     static final int SOURCE_SEARCH_RADIUS = 8;
@@ -100,6 +103,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             case FETCH -> fetch(context);
             case HAND -> follow(context, this::afterHand);
             case APPROACH -> follow(context, this::interactNow);
+            case CLEAR -> follow(context, this::cleared);
             case INTERACT -> interact(context);
             case WRITE -> follow(context, this::signWritten);
             case LOOK -> look(context);
@@ -296,6 +300,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         return switch (services.interactions().build(target, input.writesText())) {
             case UseSeams.Built.CannotAim cannot -> aimFailed(cannot.problem());
+            case UseSeams.Built.ClearAbove blocked -> clearAbove(blocked);
             case UseSeams.Built.Ready ready -> {
                 // 要潜行着右键却没接上按住潜行：如实说做不了，不改成直接右键（那是另一种用法，开的不是同一个东西）。
                 if (input.sneak() && services.sneak() == null) {
@@ -311,6 +316,37 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 yield goWith(Phase.INTERACT, strike, input.sneak() ? "到了能动手的位置，按住潜行出手" : "到了能动手的位置，出手");
             }
         };
+    }
+
+    /** 为锄地打掉过的那一格与它原来是什么：同一格打完还压着就不再打第二遍；没打过为 null。 */
+    private BlockPos clearedCell;
+    private String clearedBlock;
+
+    // 锄、锹被压在上面的野生草木挡着：过了挖方块的许可就先打掉它，打掉后回到出手那一步。
+    // 没接上、许可不让、同一格打过一遍还压着，就如实说目标上面压着什么、为什么没打，不绕过许可硬锄。
+    private Next<Phase> clearAbove(UseSeams.Built.ClearAbove blocked) {
+        String sits = target.describe() + " 上面压着 " + blocked.blockId();
+        if (services.clearsAbove() == null || blocked.cell().equals(clearedCell)) {
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, sits + "，锄、锹、斧用不上", null));
+        }
+        Optional<Problem> refused = services.clearsAbove().allowed(input.permissions(), blocked.cell(),
+                blocked.blockId());
+        if (refused.isPresent()) {
+            return stop(Problem.of(refused.get().kind(), sits + "，要先打掉它才能用；" + refused.get().message(),
+                    refused.get().suggestion()));
+        }
+        clearedCell = blocked.cell();
+        clearedBlock = blocked.blockId();
+        return goWith(Phase.CLEAR, services.clearsAbove().clear(blocked.cell(), blocked.blockId()),
+                sits + "，先打掉它");
+    }
+
+    // 草打掉了：记下拆掉的那一格，回到出手那一步。打的时候挖掘可能换了手上的东西，出手前再核一遍手。
+    private Next<Phase> cleared() {
+        recordChange(new Change(Change.Kind.BLOCK_BROKEN, clearedBlock, 1,
+                "用之前打掉压在 " + target.describe() + " 上面的"));
+        handRechecked = false;
+        return interactNow();
     }
 
     // 交互有了结论就结算；没出手就失败的（瞄不准、目标没了）按站位问题处理。
@@ -542,6 +578,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             case FETCH -> "去拿要用的东西";
             case HAND -> "准备手上的东西";
             case APPROACH -> "靠近目标";
+            case CLEAR -> "打掉压在目标上面的草木";
             case INTERACT -> "对目标用一下";
             case WRITE -> "在告示牌上写字";
             case LOOK -> "看看点开的界面";
