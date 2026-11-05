@@ -78,6 +78,7 @@ import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.ChatLog;
 import org.maiwithu.maicraft.game.ClientReceivedChat;
 import org.maiwithu.maicraft.game.ClientHooks;
+import org.maiwithu.maicraft.game.picture.CameraPictures;
 import org.maiwithu.maicraft.game.SubtitleFeed;
 import org.maiwithu.maicraft.game.menu.DefaultMenuActions;
 import org.maiwithu.maicraft.game.menu.RenderedScreens;
@@ -226,6 +227,8 @@ public final class Bootstrap {
         private final SparPartner sparPartner = new SparPartner();
         // MCP 请求线程排工作、客户端刻里做：下达、暂停、回答与控制循环推进在同一个线程上。
         private final ClientTickWork clientWork = new ClientTickWork();
+        /** 取画面的观察口：客户端全程一份，渲染的 Mixin 与 observe(picture) 共用。 */
+        private final CameraPictures cameraPictures = new CameraPictures();
         // 任务事件流一份：目标处境变化与生存需求的事件都进它，events 工具从这里读。
         private final TaskEventLog taskEvents = new TaskEventLog();
         // 换维度与天色变化（天黑天亮、下雨雨停）：每刻看一眼，变了发事件，LLM 靠后者安排睡觉和户外的活。
@@ -331,6 +334,8 @@ public final class Bootstrap {
             reminders = new PlayerReminders(taskEvents,
                     PlayerViews.foods(() -> playerControl.activeContext().orElse(null)), restStatistics);
             ClientHooks.registerRestStatistics(restStatistics);
+            // 取画面：渲染的 Mixin 每一帧在取图点叫它，observe(picture) 经它要一幅画面。
+            ClientHooks.registerCameraPictures(cameraPictures);
             wireDamageObservers();
             // 目标执行与 MCP 工具：LLM 用 execute 下达的目标经目标运行表成为控制循环的主任务；
             // 目标处境与生存需求的事件都进同一条任务事件流，宿主用 events 读。
@@ -536,7 +541,7 @@ public final class Bootstrap {
             // 卡在坑里出不去、水下从这里到不了时，走不通的建议末尾接寻死出路。
             walks.offerSuicideWith(wayOutInWorld);
             tools = McpTools.dispatcher(abilities, goals, clientWork, taskEvents, chatEvents, () -> worldScope[0], recentCalls,
-                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot(), reserved);
+                    lookupTool(), () -> reminders == null ? List.of() : reminders.snapshot(), reserved, cameraPictures);
             // 随包的玩法技能按联动登记表筛：需要的模组都真的接上了才发布，没接上的不进目录。
             // 每次问登记表此刻的样子：运行中某个联动因版本对不上停用时，靠它的技能也跟着消失。
             SkillLibrary skills = new SkillLibrary(modId -> compat.installedModIds().contains(modId));

@@ -34,6 +34,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.maiwithu.maicraft.mcp.tool.ToolCatalog;
+import org.maiwithu.maicraft.mcp.tool.ToolReply;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -422,9 +423,9 @@ public final class EmbeddedMcpService implements AutoCloseable {
         if (arguments != null && !arguments.isJsonNull() && !arguments.isJsonObject()) {
             throw new JsonRpc.RpcException(-32602, "arguments must be an object");
         }
-        JsonObject reply = tools.call(name, arguments == null || arguments.isJsonNull()
+        ToolReply.WithImages answer = tools.answer(name, arguments == null || arguments.isJsonNull()
                 ? new JsonObject() : arguments.getAsJsonObject());
-        return ToolCatalog.wrap(reply);
+        return ToolCatalog.wrap(answer.reply(), answer.images());
     }
 
     private void handleDelete(HttpExchange exchange) throws IOException {

@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
@@ -23,6 +24,7 @@ import org.maiwithu.maicraft.behavior.perception.SubtitleEar;
 import org.maiwithu.maicraft.behavior.travel.planning.SceneSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
+import org.maiwithu.maicraft.game.picture.CameraPictures;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.ScreenOpening;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -68,9 +70,10 @@ import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** observe 的五种视图：场景、自己、细节（观察编号或地标名）、世界记忆、开着的界面；不在世界里时如实回答。 */
+/** observe 的六种视图：场景、自己、细节（观察编号或地标名）、世界记忆、开着的界面、画面；不在世界里时如实回答。 */
 class ObserveToolTest {
 
     /** 本刻上下文替身：刻号由测试推进；角色上下文替身只在看背包的用例里给。 */
@@ -175,6 +178,9 @@ class ObserveToolTest {
 
     /** observe 告诉闲时看的读：按顺序收着。 */
     private final List<WhatWasRead> reads = new ArrayList<>();
+    /** 目标表与客户端线程替身：拍画面的用例另装一份带取画面的 observe 时共用。 */
+    private GoalRunTable table;
+    private ClientThread direct;
 
     @BeforeEach
     void world() {
@@ -194,7 +200,7 @@ class ObserveToolTest {
         registry.register(new RememberAbility(memory, () -> new WorldPosition(0, 64, 0, "minecraft:overworld"),
                 new SceneSeenTargets(() -> scene)));
         loop = new ControlLoop(List.of(defense));
-        GoalRunTable table = new GoalRunTable(registry, new InMemoryGoalRunStore(),
+        table = new GoalRunTable(registry, new InMemoryGoalRunStore(),
                 memory, loop, new PlayerControlHandover() {
                     @Override public boolean automationOwnsControls() {
                         return true;
@@ -203,7 +209,7 @@ class ObserveToolTest {
                     @Override public void requestControl() {
                     }
                 });
-        ClientThread direct = new ClientThread() {
+        direct = new ClientThread() {
             @Override public <T> T call(Function<TickContext, T> work) {
                 return work.apply(new Tick(10, heldPlayer));
             }
@@ -490,6 +496,64 @@ class ObserveToolTest {
         assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"menu\", \"id\": \"b5\"}")));
         inWorld = false;
         assertEquals("not_in_world", errorCode(observe("{\"what\": \"menu\"}")));
+    }
+
+    // 另装一份接上取画面的 observe：转头用什么都不转的替身，没有建筑档案；渲染线程不在，画面永远不来。
+    private ToolDispatcher pictureTools(CameraPictures cameras) {
+        return new ToolDispatcher(List.of(new ObserveTool(() -> inWorld ? scene : null,
+                () -> inWorld ? memory : null, table, direct, () -> reminders,
+                () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null, List::of, reads::add,
+                () -> inWorld ? identity : null, () -> null,
+                new ObserveTool.Pictures(cameras, () -> LooksForPicture.NONE, () -> null))));
+    }
+
+    private static JsonObject arguments(String json) {
+        return JsonParser.parseString(json).getAsJsonObject();
+    }
+
+    @Test
+    void pictureSwitchesBelongToPictureAndPictureTakesAnId() {
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"with_menu\": true}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"detail\", \"id\": \"e1\", \"unlabeled\": true}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"picture\", \"grid\": true}")));
+        // id 收下了：没接上取画面才是这里的错，不是参数错。
+        assertEquals("unavailable", errorCode(observe("{\"what\": \"picture\", \"id\": \"e1\"}")));
+    }
+
+    @Test
+    void pictureSaysPlainlyWhenNoCameraIsHookedUp() {
+        JsonObject reply = observe("{\"what\": \"picture\"}");
+        assertEquals("unavailable", errorCode(reply));
+        assertTrue(reply.getAsJsonObject("error").get("message").getAsString().contains("没有接上取画面"));
+    }
+
+    @Test
+    void pictureRejectsUnknownIdsBeforeAskingForAFrame() {
+        CameraPictures cameras = new CameraPictures();
+        ToolDispatcher withCamera = pictureTools(cameras);
+        assertEquals("unknown_id", errorCode(withCamera.call("observe",
+                arguments("{\"what\": \"picture\", \"id\": \"e99\"}"))));
+        assertEquals("unknown_id", errorCode(withCamera.call("observe",
+                arguments("{\"what\": \"picture\", \"id\": \"没记过的地方\"}"))));
+        assertNull(cameras.refusal(System.nanoTime()), "没要过画面");
+    }
+
+    @Test
+    void pictureIsBusyWhileTheLastOneIsBeingTaken() {
+        CameraPictures cameras = new CameraPictures();
+        cameras.request(false, System.nanoTime());
+        assertEquals("busy", errorCode(pictureTools(cameras).call("observe", arguments("{\"what\": \"picture\"}"))));
+    }
+
+    @Test
+    void pictureGivesUpAfterASecondWithoutAFrameAndFreesTheCamera() {
+        CameraPictures cameras = new CameraPictures();
+        ToolDispatcher withCamera = pictureTools(cameras);
+        ToolReply.WithImages answer = withCamera.answer("observe", arguments("{\"what\": \"picture\", \"id\": \"e1\"}"));
+        assertEquals("unavailable", errorCode(answer.reply()));
+        assertTrue(answer.reply().getAsJsonObject("error").get("message").getAsString().contains("最小化"));
+        assertTrue(answer.images().isEmpty(), "没有图");
+        assertNull(cameras.refusal(System.nanoTime()), "撤掉了这一张，不占着");
     }
 
     @Test

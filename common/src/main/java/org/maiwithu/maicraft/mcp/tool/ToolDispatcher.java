@@ -44,19 +44,24 @@ public final class ToolDispatcher {
 
     /** 调用一个已接上的工具；进来和结束都记进最近的调用，面板上看得到 LLM 发了什么、成没成。 */
     public JsonObject call(String name, JsonObject arguments) {
+        return answer(name, arguments).reply();
+    }
+
+    /** 同 {@link #call}，连同工具另带的图一起交回；最近的调用只记 JSON，图的字节不进面板。 */
+    public ToolReply.WithImages answer(String name, JsonObject arguments) {
         McpTool tool = tools.get(name);
         if (tool == null) {
             throw new IllegalArgumentException("工具 " + name + " 没有接上");
         }
         long callId = recentCalls.started(name, arguments);
         long startedAtNanos = System.nanoTime();
-        JsonObject reply = null;
+        ToolReply.WithImages answer = null;
         try {
-            reply = dispatch(name, tool, arguments);
-            return reply;
+            answer = dispatch(name, tool, arguments);
+            return answer;
         } finally {
             // 连 Error 这类没接住的情况也要结账：不然这次调用会一直挂成"处理中"，面板就误以为宿主还在等。
-            recentCalls.ended(callId, reply);
+            recentCalls.ended(callId, answer == null ? null : answer.reply());
             logCall(name, callId, System.nanoTime() - startedAtNanos);
         }
     }
@@ -84,21 +89,21 @@ public final class ToolDispatcher {
         }
     }
 
-    private JsonObject dispatch(String name, McpTool tool, JsonObject arguments) {
+    private ToolReply.WithImages dispatch(String name, McpTool tool, JsonObject arguments) {
         try {
-            return tool.call(arguments == null ? new JsonObject() : arguments);
+            return tool.answer(arguments == null ? new JsonObject() : arguments);
         } catch (ClientThread.NotInWorld exception) {
-            return ToolReply.error(ErrorCode.NOT_IN_WORLD, "角色不在世界里：进入世界后再试");
+            return ToolReply.WithImages.of(ToolReply.error(ErrorCode.NOT_IN_WORLD, "角色不在世界里：进入世界后再试"));
         } catch (ClientThread.Busy exception) {
-            return ToolReply.error(ErrorCode.BUSY, exception.getMessage());
+            return ToolReply.WithImages.of(ToolReply.error(ErrorCode.BUSY, exception.getMessage()));
         } catch (GoalRunTable.UnknownGoalRun exception) {
-            return ToolReply.error(ErrorCode.UNKNOWN_ID, exception.getMessage());
+            return ToolReply.WithImages.of(ToolReply.error(ErrorCode.UNKNOWN_ID, exception.getMessage()));
         } catch (GoalRunTable.WrongGoalRunState exception) {
-            return ToolReply.error(ErrorCode.INVALID_PARAMETER, exception.getMessage());
+            return ToolReply.WithImages.of(ToolReply.error(ErrorCode.INVALID_PARAMETER, exception.getMessage()));
         } catch (RuntimeException exception) {
             LOG.warn("MCP 工具 {} 出错", name, exception);
-            return ToolReply.error(ErrorCode.INTERNAL_ERROR, "工具 " + name + " 出错：" + exception.getClass().getSimpleName()
-                    + (exception.getMessage() == null ? "" : "：" + exception.getMessage()));
+            return ToolReply.WithImages.of(ToolReply.error(ErrorCode.INTERNAL_ERROR, "工具 " + name + " 出错：" + exception.getClass().getSimpleName()
+                    + (exception.getMessage() == null ? "" : "：" + exception.getMessage())));
         }
     }
 }

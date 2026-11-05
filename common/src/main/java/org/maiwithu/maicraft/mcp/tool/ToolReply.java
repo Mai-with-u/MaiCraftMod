@@ -20,6 +20,27 @@ import java.util.Objects;
 public final class ToolReply {
     private ToolReply() {}
 
+    /** 结果里另带的一张图（MCP 的图片内容块）：只有 observe(picture) 带，JSON 里不放它的字节。 */
+    public record Image(String mimeType, byte[] bytes) {
+        public Image {
+            Objects.requireNonNull(mimeType, "mimeType");
+            Objects.requireNonNull(bytes, "bytes");
+        }
+    }
+
+    /** 一次调用的完整结果：统一格式的 JSON，加上另带的图（大多数工具没有图）。 */
+    public record WithImages(JsonObject reply, List<Image> images) {
+        public WithImages {
+            Objects.requireNonNull(reply, "reply");
+            images = List.copyOf(images);
+        }
+
+        /** 只有 JSON、没有图。 */
+        public static WithImages of(JsonObject reply) {
+            return new WithImages(reply, List.of());
+        }
+    }
+
     public static JsonObject ok(JsonElement data) {
         return ok(data, List.of(), null);
     }

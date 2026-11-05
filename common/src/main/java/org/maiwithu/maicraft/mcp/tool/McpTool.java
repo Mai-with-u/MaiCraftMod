@@ -16,4 +16,9 @@ public interface McpTool {
 
     /** 处理一次调用；参数为空对象时表示没给参数。 */
     JsonObject call(JsonObject arguments);
+
+    /** 处理一次调用，连同另带的图一起交回；没有图的工具照 {@link #call} 回。 */
+    default ToolReply.WithImages answer(JsonObject arguments) {
+        return ToolReply.WithImages.of(call(arguments));
+    }
 }

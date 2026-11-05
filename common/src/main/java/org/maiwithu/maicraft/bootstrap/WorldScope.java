@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.bootstrap;
 
+import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
@@ -152,6 +153,11 @@ public final class WorldScope {
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
     /** 闲时看：闲着时像人一样看看；看什么从这个世界的场景来，开箱看到的记进这个世界的记忆。 */
     private final IdleLooking idleLooking;
+    /**
+     * 这个世界的建筑档案库：observe(picture) 按档案名转过去看那一栋时读它的范围。
+     * 和施工记账读写同一个文档库、同一个世界键，档案库本身不缓存，两边读到的一样。
+     */
+    private final BuildingArchives buildingArchives;
     /** 看界面要读的东西：开着的界面按这个世界认得出的界面（原版加联动模组的证明）读，交易界面再读报价。 */
     private final MenuView.Reads menus;
     /** 角色是谁、在哪个世界：进世界时读一次。 */
@@ -243,6 +249,7 @@ public final class WorldScope {
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
                 compat::recipePages, instanceConfig.idleLooking());
+        this.buildingArchives = new BuildingArchives(documents, identity.key());
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
@@ -452,6 +459,10 @@ public final class WorldScope {
     /** 闲时看：启动每刻在控制循环之前推进它，读信息的路径读完告诉它读了什么。 */
     public IdleLooking idleLooking() {
         return idleLooking;
+    }
+
+    public BuildingArchives buildingArchives() {
+        return buildingArchives;
     }
 
     public Scene scene() {
