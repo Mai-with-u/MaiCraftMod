@@ -98,6 +98,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     /** 第二遍施工（装完安装段后放压在上面的格）的结果；没有第二遍为 null。 */
     private TaskResult laterConstruction;
     private Problem carriedProblem;
+    /** 没做成的安装段、部件、设置和各自的原因：部分完成时拼成问题。 */
+    private final UndoneMachineEntries undone = new UndoneMachineEntries();
 
     private final Deque<MachineBlueprint.Segment> toInstall = new ArrayDeque<>();
     private final Deque<MachineBlueprint.Part> toMount = new ArrayDeque<>();
@@ -235,8 +237,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (action() != null) {
             return switch (runAction(context)) {
                 case ActionStatus.Running running -> Next.stay();
-                case ActionStatus.Done done -> segmentFinished("");
-                case ActionStatus.Failed failed -> segmentFinished(failed.problem().message());
+                case ActionStatus.Done done -> segmentFinished(null);
+                case ActionStatus.Failed failed -> segmentFinished(failed.problem());
             };
         }
         MachineBlueprint.Segment next = toInstall.poll();
@@ -246,7 +248,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         installing = next;
         Installation installation = absolute(next);
         if (services.installedBy(installation).isPresent()) {
-            return segmentFinished("");
+            return segmentFinished(null);
         }
         // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。结构上只有胶这种发一包就成的装得了。
         Optional<Action> offered = onStructure != null
@@ -258,25 +260,29 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             laying = prepared;
             return Next.go(Phase.INSTALL, "装 " + next.kind() + " 这一段");
         }
-        return segmentFinished(onStructure != null ? "结构上还不会装 " + next.kind() + "（只有胶能在结构上补）"
-                : noTypeFor(installation.kind()));
+        // 没有机器类型认、结构上还不会装：这一段现在确实不支持。
+        return segmentFinished(Problem.of(Problem.Kind.UNSUPPORTED, onStructure != null
+                ? "结构上还不会装 " + next.kind() + "（只有胶能在结构上补）" : noTypeFor(installation.kind())));
     }
 
-    // 一段收场：装没装成以机器类型按最终结构核对的结论为准，动作的失败原因带在说明里；
-    // 装的动作顺手做成的事（清掉手上记着的接线起点）照实记进变化。
-    private Next<Phase> segmentFinished(String why) {
+    // 一段收场：装没装成以机器类型按最终结构核对的结论为准，动作的失败原因带在说明里；动作说做完了、核对却没装上的
+    // 记成卡住。没装成的连同原因记进没做成的条目。装的动作顺手做成的事（清掉手上记着的接线起点）照实记进变化。
+    private Next<Phase> segmentFinished(Problem trouble) {
         if (laying instanceof InstallReport report) {
             report.changes().forEach(childRecords()::change);
         }
         laying = null;
         Installation installation = absolute(installing);
         boolean done = services.installedBy(installation).isPresent();
+        Problem why = trouble != null || done ? trouble : Problem.of(Problem.Kind.STUCK, "装的动作做完了，按最终结构核对没装成");
+        String note = why == null ? "" : why.message();
         segmentResults.add(new MachineBuildDetails.SegmentResult(installing.kind(),
-                installation.cells().stream().map(this::where).toList(), done, why));
+                installation.cells().stream().map(this::where).toList(), done, note));
         if (done) {
             recordProgress("装好了 " + installing.kind());
         } else {
-            recordAttempt("装 " + installing.kind(), why);
+            recordAttempt("装 " + installing.kind(), note);
+            undone.segment(why);
         }
         installing = null;
         return Next.go(toInstall.isEmpty() ? nextWorkPhase() : Phase.INSTALL,
@@ -288,8 +294,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (action() != null) {
             return switch (runAction(context)) {
                 case ActionStatus.Running running -> Next.stay();
-                case ActionStatus.Done done -> partFinished("");
-                case ActionStatus.Failed failed -> partFinished(failed.problem().message());
+                case ActionStatus.Done done -> partFinished(null);
+                case ActionStatus.Failed failed -> partFinished(failed.problem());
             };
         }
         MachineBlueprint.Part next = toMount.poll();
@@ -297,13 +303,14 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             return Next.go(nextWorkPhase(), "部件做完");
         }
         mounting = next;
+        // 结构上还不会装部件是不支持；宿主那一格没加载是够不着那里。
         if (onStructure != null) {
-            return partFinished("结构上还不会装部件");
+            return partFinished(Problem.of(Problem.Kind.UNSUPPORTED, "结构上还不会装部件"));
         }
         PartCell part = absolute(next);
         Optional<BlockState> host = services.world().stateAt(part.host());
         if (host.isEmpty()) {
-            return partFinished("宿主那一格还没加载");
+            return partFinished(Problem.of(Problem.Kind.UNREACHABLE, "宿主那一格还没加载"));
         }
         for (MachineType type : services.machineTypes()) {
             if (type.partProblem(part, host.get()).isPresent()) {
@@ -316,26 +323,23 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             prepared = willing.get();
             return Next.go(Phase.MOUNT, "把 " + next.itemId() + " 装到宿主的" + next.side().getName() + "面");
         }
-        return partFinished(noTypeForPart());
+        return partFinished(Problem.of(Problem.Kind.UNSUPPORTED, noTypeForPart()));
     }
 
-    private Next<Phase> partFinished(String why) {
+    // 一个部件收场：动作出了岔子就算没装上；动作做完了以部件出现在那一面为准，没出现记成卡住。
+    // 没装上的连同原因记进没做成的条目。
+    private Next<Phase> partFinished(Problem trouble) {
         PartCell part = absolute(mounting);
-        boolean done;
-        if (!why.isEmpty()) {
-            done = false;
-        } else {
-            done = services.mounted(part);
-            if (!done) {
-                why = "动作做完了，部件没有出现在那一面";
-            }
-        }
+        Problem why = trouble != null || services.mounted(part) ? trouble
+                : Problem.of(Problem.Kind.STUCK, "动作做完了，部件没有出现在那一面");
+        boolean done = why == null;
         partResults.add(new MachineBuildDetails.PartResult(mounting.itemId(), where(part.host()),
-                part.side().getName(), done, why));
+                part.side().getName(), done, done ? "" : why.message()));
         if (done) {
             recordProgress("装上了部件 " + mounting.itemId());
         } else {
-            recordAttempt("装部件 " + mounting.itemId(), why);
+            recordAttempt("装部件 " + mounting.itemId(), why.message());
+            undone.part(why);
         }
         mounting = null;
         return Next.go(toMount.isEmpty() ? nextWorkPhase() : Phase.MOUNT,
@@ -355,6 +359,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 // 结构上的格改设置还不会（machine_configure 指船上的格也还不会）：照实记下没改，不去点。
                 settingResults.add(new MachineBuildDetails.SettingResult(next.key(), where(at), false, ""));
                 recordAttempt("改设置 " + next.key(), "结构上还不会改设置");
+                undone.setting(Problem.of(Problem.Kind.UNSUPPORTED, "结构上还不会改设置"));
                 configuring = null;
                 return Next.go(Phase.CONFIGURE, "结构上的设置还不会改，接着下一条");
             }
@@ -382,6 +387,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         } else {
             recordAttempt("改设置 " + done.key(), result.summary());
             carriedProblem = carriedProblem != null ? carriedProblem : result.problem();
+            // 改设置的子任务没交出问题时按它的一句话结论记，算卡住。
+            undone.setting(result.problem() != null ? result.problem() : Problem.of(Problem.Kind.STUCK, result.summary()));
         }
         return Next.go(Phase.CONFIGURE, "这一条改完，接着下一条");
     }
@@ -458,7 +465,10 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return structureOk ? "整机与蓝图一致" : "还有 " + unsettledCells() + " 格没对上";
     }
 
-    /** 组装问题：先说施工没做完的原因，再说机器条目哪几件没做成。 */
+    /**
+     * 组装问题：结构停手、施工或改设置交上来的问题照转述；其余把整机比对没对上的格数和没做成的机器条目
+     * 按原因合并计数说出来，种类跟着件数最多的那种原因走，不一律算不支持。
+     */
     private Problem problem() {
         if (structureStop != null) {
             return structureStop;
@@ -466,24 +476,7 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         if (carriedProblem != null) {
             return carriedProblem;
         }
-        List<String> undone = new ArrayList<>();
-        countUndone(segmentResults.stream().filter(result -> !result.installed()).count(), "段安装段", undone);
-        countUndone(partResults.stream().filter(result -> !result.mounted()).count(), "个部件", undone);
-        countUndone(settingResults.stream().filter(result -> !result.applied()).count(), "条设置", undone);
-        if (unsettledCells() > 0) {
-            undone.add(unsettledCells() + " 格没对上");
-        }
-        if (undone.isEmpty()) {
-            return Problem.of(Problem.Kind.STUCK, "没有全部做成，原因见结果细节", null);
-        }
-        return Problem.of(Problem.Kind.UNSUPPORTED, "还有 " + String.join("、", undone) + " 没做成",
-                "缺的联动装上后，再下达一次同样的目标会接着做");
-    }
-
-    private void countUndone(long count, String unit, List<String> into) {
-        if (count > 0) {
-            into.add(count + " " + unit);
-        }
+        return undone.problem(unsettledCells());
     }
 
     @Override protected List<String> remaining() {

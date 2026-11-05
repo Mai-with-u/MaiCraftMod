@@ -339,6 +339,44 @@ Rig rig = new Rig(tempDir);
         MachineBuildDetails details = (MachineBuildDetails) result.details();
         assertFalse(details.installations().get(0).installed());
         assertTrue(details.installations().get(0).note().contains("没有机器类型认"), result.summary());
+        // 没有机器类型认这种安装段才是真不支持：问题里直接说原因，并提示装上联动再来。
+        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
+        assertEquals("还有 1 段安装段没做成：没有机器类型认安装段 test:belt", result.problem().message());
+        assertTrue(result.problem().suggestion().contains("联动"), result.problem().suggestion());
+    }
+
+    @Test
+    void 几段安装段各有原因_合并计数_种类跟着件数多的() {
+        // 两段装的时候够不着、一段没有机器类型认：问题里两种原因都说到并带件数，种类按够不着的那两段算到不了，
+        // 不再一律报不支持。
+        Rig rig = new Rig(tempDir);
+        List<MachineBlueprint.Segment> segments = List.of(
+                new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(0, 1, 0))),
+                new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(1, 1, 0))),
+                new MachineBlueprint.Segment("test:belt", List.of(new BlockPos(2, 1, 0))));
+        MachineBlueprint plan = new MachineBlueprint(List.of(PlannedCell.block(new BlockPos(0, 0, 0), FURNACE, Set.of())),
+                List.of(), segments, List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new FailingInstall(Problem.of(Problem.Kind.UNREACHABLE, "够不着带子的两端；试过 3 个站位")));
+        rig.type.installActions.add(new FailingInstall(Problem.of(Problem.Kind.UNREACHABLE, "够不着带子的两端；试过 5 个站位")));
+        TaskResult result = rig.run(buildInput(plan, null, "带子"));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
+        assertEquals("还有 3 段安装段没做成：2 件够不着带子的两端、1 件没有机器类型认安装段 test:belt",
+                result.problem().message());
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertEquals("够不着带子的两端；试过 3 个站位", details.installations().get(0).note(), "细节里照旧给整句经过");
+    }
+
+    /** 一刻失败的安装段动作替身。 */
+    private record FailingInstall(Problem problem) implements Action {
+        @Override public ActionStatus tick(TickContext context) {
+            return ActionStatus.failed(problem);
+        }
+
+        @Override public String describe() {
+            return "装不上的安装段替身";
+        }
     }
 
     @Test
@@ -353,6 +391,9 @@ Rig rig = new Rig(tempDir);
         TaskResult result = rig.run(buildInput(plan, null, "压机"));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertTrue(result.changes().contains(cleared), result.changes().toString());
+        // 装的动作自己说卡住：照它的种类和结论句转述，不改成不支持。
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertEquals("还有 1 段安装段没做成：第二下没连上", result.problem().message());
     }
 
     /** 一刻失败、交得出附带变化的安装段动作替身。 */
