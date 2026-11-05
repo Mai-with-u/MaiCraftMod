@@ -488,13 +488,13 @@ class ControlLoopTest {
         ControlLoop loop = new ControlLoop(List.of(buried));
         loop.setMainTask(main);
 
-        for (long tick = 0; tick < ControlLoop.RETRY_AFTER_FAILED_TICKS; tick++) {
+        for (long tick = 0; tick < NeedRetries.RETRY_AFTER_FAILED_TICKS; tick++) {
             loop.tick(new TestContext(tick));
         }
 
         assertEquals(1, buried.created, "同样急的需求在缓冲期内不再重建临时任务");
         assertTrue(main.ticks > 0, "缓冲期里主任务照常推进");
-        loop.tick(new TestContext(ControlLoop.RETRY_AFTER_FAILED_TICKS + 1));
+        loop.tick(new TestContext(NeedRetries.RETRY_AFTER_FAILED_TICKS + 1));
         assertEquals(2, buried.created, "缓冲期过了再试一次");
     }
 
@@ -704,8 +704,8 @@ class ControlLoopTest {
         ControlLoop loop = new ControlLoop(List.of(hunger));
         loop.setMainTask(main);
 
-        long secondTry = ControlLoop.RETRY_AFTER_FAILED_TICKS;
-        long thirdTry = secondTry + 2 * ControlLoop.RETRY_AFTER_FAILED_TICKS;
+        long secondTry = NeedRetries.RETRY_AFTER_FAILED_TICKS;
+        long thirdTry = secondTry + 2 * NeedRetries.RETRY_AFTER_FAILED_TICKS;
         for (long tick = 0; tick < thirdTry; tick++) {
             loop.tick(new TestContext(tick));
         }
@@ -844,7 +844,7 @@ class ControlLoopTest {
         assertEquals("刨出", waits.get(0).needName());
         assertEquals("做不了", waits.get(0).why(), "原因用问题本身的说法");
         assertEquals(1, waits.get(0).failures());
-        assertEquals(10 + ControlLoop.RETRY_AFTER_FAILED_TICKS, waits.get(0).untilTick());
+        assertEquals(10 + NeedRetries.RETRY_AFTER_FAILED_TICKS, waits.get(0).untilTick());
     }
 
     /** 一推进就失败的临时任务：模拟刨不动、换不上气这类自救没成功的处境。 */

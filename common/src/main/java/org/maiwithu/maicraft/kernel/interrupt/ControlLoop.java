@@ -19,10 +19,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -63,15 +61,6 @@ import java.util.function.Consumer;
 public final class ControlLoop {
     private static final Logger LOG = LoggerFactory.getLogger(ControlLoop.class);
 
-    /**
-     * 临时任务没做成后，同一个需求在同样急（或更缓）时先等多少刻再插进来：五秒。
-     * 类别：玩家常识——自救没成功就先缓一缓，处境变了再试；处境变得更急则马上再试。
-     */
-    static final long RETRY_AFTER_FAILED_TICKS = 100;
-
-    /** 接连没做成时等待逐次加倍，最长五分钟：弄不到吃的这类一时解决不了的事，不每隔几秒就打断一次手上的活。 */
-    static final long MAX_RETRY_AFTER_FAILED_TICKS = 20L * 60 * 5;
-
     /** 手上的任务连着停下不安全多久（刻），不急的需求才叫它先到安全的地方：两秒，一会儿就过去的不打扰。 */
     static final long ASK_SAFE_STOP_AFTER_TICKS = 40;
 
@@ -88,10 +77,8 @@ public final class ControlLoop {
     private String parkedWhere;
     /** 从底到顶的运行栈；最底是主任务，上面是插进来的临时任务。只在客户端线程读写。 */
     private final List<Frame> stack = new ArrayList<>();
-    /** 临时任务刚没做成的需求：在这一刻之前、且不比当时更急，就先不插。 */
-    private final Map<SurvivalNeed, Backoff> backoffs = new HashMap<>();
-    /** 各需求接连没做成的次数；处境解除或做成一次就清零。 */
-    private final Map<SurvivalNeed, Integer> failureStreaks = new HashMap<>();
+    /** 临时任务没做成的需求在等着再试：没到时间、处境也没更急就先不插。 */
+    private final NeedRetries retries = new NeedRetries();
     /** 判断时抛过异常的需求；同一个需求的异常只记一次日志，免得每刻刷屏。 */
     private final Set<SurvivalNeed> brokenNeeds = new HashSet<>();
     /** 本刻问到的手上任务能不能打断；本刻没问（手上没任务、停在半路、等重生）时为 null。只给面板看。 */
@@ -169,7 +156,7 @@ public final class ControlLoop {
                 reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
         }
-        backoffs.clear();
+        retries.clearWaits();
         brokenNeeds.clear();
         parkedWhere = null;
         waitingRespawn = false;
@@ -275,15 +262,7 @@ public final class ControlLoop {
 
     /** 临时任务没做成、正在等着再试的需求，按登记顺序。 */
     public List<RetryWait> retryWaits() {
-        List<RetryWait> waits = new ArrayList<>();
-        for (SurvivalNeed need : needs) {
-            Backoff backoff = backoffs.get(need);
-            if (backoff != null) {
-                waits.add(new RetryWait(need.name(), backoff.urgency(), backoff.untilTick(),
-                        failureStreaks.getOrDefault(need, 0), backoff.why()));
-            }
-        }
-        return List.copyOf(waits);
+        return retries.waits(needs);
     }
 
     /** 本刻问到的手上任务此刻能不能打断；被按住的需求为什么插不进来就看它。本刻没问时为 null。 */
@@ -338,13 +317,13 @@ public final class ControlLoop {
                 if (hasLiveTask(need)) continue;
                 Urgency urgency = urgencyOf(need, context, null);
                 // 停着时也按没做成的等待来：救不成的需求不每刻重建一遍。
-                if (urgency == null || heldBack(need, urgency, context)) continue;
+                if (urgency == null || retries.waiting(need, urgency, context.gameTick())) continue;
                 Task rescue;
                 try {
                     rescue = need.createTask(context);
                 } catch (RuntimeException exception) {
                     LOG.warn("生存需求「{}」创建临时任务时出错", need.name(), exception);
-                    holdBack(need, urgency, context, "创建临时任务时程序出错：" + exception.getClass().getSimpleName());
+                    retries.failed(need, urgency, context.gameTick(), "创建临时任务时程序出错：" + exception.getClass().getSimpleName());
                     continue;
                 }
                 stack.add(new Frame(rescue, need, urgency));
@@ -376,7 +355,7 @@ public final class ControlLoop {
     // 正在等着再试的需求不算（它本来就插不进来，不值得为它落地）；需求没了或缓成 LATER，就叫它照原样接着做。
     private void windDownFor(Frame current, Choice choice, TickContext context) {
         boolean wanted = choice.deferred != null && choice.deferredUrgency == Urgency.SOON
-                && !backoffs.containsKey(choice.deferred);
+                && !retries.has(choice.deferred);
         boolean longUnsafe = askedInterruptibility == Interruptibility.UNSAFE_TO_STOP
                 && context.gameTick() - current.unsafeSince >= ASK_SAFE_STOP_AFTER_TICKS;
         if (wanted && !current.stopAsked && longUnsafe) {
@@ -398,8 +377,7 @@ public final class ControlLoop {
      */
     private Decision diedBetweenTicks(TickContext context) {
         endTempTasks();
-        backoffs.clear();
-        failureStreaks.clear();
+        retries.clear();
         PlayerContext body = context.player();
         DeathFacts facts = body.deathFacts();
         String cause = facts == null || facts.cause() == null ? "" : "（" + facts.cause() + "）";
@@ -470,12 +448,11 @@ public final class ControlLoop {
             Urgency urgency = urgencyOf(need, context, currentTask);
             if (urgency == null) {
                 // 处境已经不需要处理：之前没做成留下的等待一并作废，下次需要时马上能插。
-                backoffs.remove(need);
-                failureStreaks.remove(need);
+                retries.settled(need);
                 continue;
             }
             if (!outranks(need, urgency, top)) continue;
-            boolean waiting = heldBack(need, urgency, context);
+            boolean waiting = retries.waiting(need, urgency, context.gameTick());
             if (!waiting && InterruptRule.canInterrupt(urgency, interruptibility)) {
                 // 同样急的先来先得：只有真的更急才顶掉前面选中的。
                 if (choice.chosen == null || urgency.ordinal() > choice.urgency.ordinal()) {
@@ -502,7 +479,7 @@ public final class ControlLoop {
             task = choice.chosen.createTask(context);
         } catch (RuntimeException exception) {
             LOG.warn("生存需求「{}」创建临时任务时出错", choice.chosen.name(), exception);
-            holdBack(choice.chosen, choice.urgency, context,
+            retries.failed(choice.chosen, choice.urgency, context.gameTick(),
                     "创建临时任务时程序出错：" + exception.getClass().getSimpleName());
             return stack.isEmpty() ? Decision.IDLE : advance(top(), context, choice.chosen);
         }
@@ -565,10 +542,10 @@ public final class ControlLoop {
             // 自救没做成：处境不更急就先缓一阵再插，让主任务有机会动；做没做成都不影响主任务。
             // 声明不缓的需求（被攻击）不按住：每一下新挨的打都要接着处理，不让它站着挨打；
             // 但程序出错照样缓，免得一个坏掉的临时任务每刻重建、把主任务停停走走。
-            holdBack(frame.from, frame.urgency, context, failureOf(finished.result()));
+            retries.failed(frame.from, frame.urgency, context.gameTick(), NeedRetries.failureOf(finished.result()));
         } else if (frame.from != null) {
             // 做成了一次：之前接连没做成的次数清零，下次再出事从五秒等起。
-            failureStreaks.remove(frame.from);
+            retries.succeeded(frame.from);
         }
         // 临时任务回不到原来的岗位时不让主任务在新地点悄悄续上：停住等 LLM 决定。
         // 去某地、拿东西这类在哪做都一样的主任务不停：从新地点接着做就是了（原先一被撤离就停在半路，
@@ -621,29 +598,6 @@ public final class ControlLoop {
         return result.problem() != null && result.problem().kind() == Problem.Kind.INTERNAL_ERROR;
     }
 
-    // 记一次没做成：这个需求先缓一阵，接连没做成就缓得更久；为什么没做成一并记下，面板上照实说。
-    private void holdBack(SurvivalNeed need, Urgency urgency, TickContext context, String why) {
-        int streak = failureStreaks.merge(need, 1, Integer::sum);
-        long delay = Math.min(RETRY_AFTER_FAILED_TICKS << Math.min(streak - 1, 12), MAX_RETRY_AFTER_FAILED_TICKS);
-        backoffs.put(need, new Backoff(context.gameTick() + delay, urgency, why));
-    }
-
-    // 临时任务没做成的原因：有问题就用问题本身的说法，没有就用结果的一句话结论。
-    private static String failureOf(TaskResult result) {
-        return result.problem() != null ? result.problem().message() : result.summary();
-    }
-
-    // 临时任务刚没做成的需求：没到时间、处境也没更急，就先不插。
-    private boolean heldBack(SurvivalNeed need, Urgency urgency, TickContext context) {
-        Backoff backoff = backoffs.get(need);
-        if (backoff == null) return false;
-        if (context.gameTick() >= backoff.untilTick() || urgency.ordinal() > backoff.urgency().ordinal()) {
-            backoffs.remove(need);
-            return false;
-        }
-        return true;
-    }
-
     private Frame top() {
         return stack.get(stack.size() - 1);
     }
@@ -652,9 +606,6 @@ public final class ControlLoop {
     private boolean hasLiveTask(SurvivalNeed need) {
         return stack.stream().anyMatch(frame -> frame.from == need);
     }
-
-    /** 一个需求的临时任务没做成后的等待：到哪一刻为止、当时有多急、为什么没做成。 */
-    private record Backoff(long untilTick, Urgency urgency, String why) {}
 
     /** 一刻的挑选结果：插进来的需求与它多急，以及最急的那个被按住的需求。 */
     private static final class Choice {
