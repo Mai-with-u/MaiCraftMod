@@ -25,7 +25,7 @@ final class PartialSegments {
 
     private PartialSegments() {}
 
-    /** 这段半截路一路上要挖开的实心格里，有没有目的地自己脚下的地板。 */
+    /** 这段半截路一路上要挖开的实心格里，有没有目的地自己脚下的地板。路线要先校验过（每一步移动组装好）。 */
     static boolean digsDestinationFloor(Goal goal, IPath path, CalculationContext context) {
         return digsFloor(goal, solidCellsBroken(path, context));
     }
