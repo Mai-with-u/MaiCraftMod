@@ -219,6 +219,16 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:body_language",
+        "summary": "看着一个人做一个肢体动作（蹲起、挥手、点头、摇头、跳、递东西、拍一下）",
+        "parameters": "operation: string, count?: integer, item?: string, max_seconds?: integer",
+        "targets": [
+          "player",
+          "seen"
+        ],
+        "mode": "cuts_in"
+      },
+      {
         "ability": "maicraft:timer",
         "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
         "parameters": "operation: string = set, after_seconds?: integer, note?: string, timer_id?: integer",
@@ -1346,6 +1356,60 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/follow.md"
+    },
+    {
+      "ability": "maicraft:body_language",
+      "summary": "看着一个人做一个肢体动作（蹲起、挥手、点头、摇头、跳、递东西、拍一下）",
+      "parameters": [
+        {
+          "name": "operation",
+          "type": "string",
+          "required": true,
+          "doc": "做哪种：look 看着 / crouch 蹲起 / swing 挥手 / nod 点头 / shake_head 摇头 / jump 原地跳 / hold 拿出 / toss 扔给他 / pick_up 捡起扔过来的 / poke 拍一下",
+          "choices": [
+            "look",
+            "crouch",
+            "swing",
+            "nod",
+            "shake_head",
+            "jump",
+            "hold",
+            "toss",
+            "pick_up",
+            "poke"
+          ]
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "doc": "做几下（crouch 默认 3 最多 10，swing 默认 2 最多 6，nod、shake_head、jump 默认 2 最多 5）；toss 是扔几件，默认 1",
+          "min": 1,
+          "max": 64
+        },
+        {
+          "name": "item",
+          "type": "string",
+          "required": false,
+          "doc": "hold、toss 是拿出、扔出的东西；别的是做的时候手里拿着什么"
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "只用于 look：看多久，默认 2 秒",
+          "min": 1,
+          "max": 10
+        }
+      ],
+      "targets": [
+        "player",
+        "seen"
+      ],
+      "mode": "cuts_in",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/body_language.md"
     },
     {
       "ability": "maicraft:timer",

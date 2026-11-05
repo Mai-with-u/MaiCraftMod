@@ -43,6 +43,11 @@ public final class NonverbalModule implements AbilityModule {
         this.moves = Objects.requireNonNull(moves, "moves");
     }
 
+    /** 生产的一份：现场接在真实客户端上。 */
+    public static NonverbalModule live(LiveNonverbalMoves moves) {
+        return new NonverbalModule(moves);
+    }
+
     @Override
     public AbilitySpec spec() {
         return new AbilitySpec("maicraft:body_language", "看着一个人做一个肢体动作（蹲起、挥手、点头、摇头、跳、递东西、拍一下）",

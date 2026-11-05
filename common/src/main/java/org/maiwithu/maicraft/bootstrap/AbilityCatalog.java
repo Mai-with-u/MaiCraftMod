@@ -12,6 +12,8 @@ import java.util.random.RandomGenerator;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ToolFirstDigging;
+import org.maiwithu.maicraft.ability.bodylanguage.LiveNonverbalMoves;
+import org.maiwithu.maicraft.ability.bodylanguage.NonverbalModule;
 import org.maiwithu.maicraft.ability.build.BuildModule;
 import org.maiwithu.maicraft.ability.machine.MachineAbilities;
 import org.maiwithu.maicraft.ability.machine.MachineVehicles;
@@ -81,6 +83,7 @@ import org.maiwithu.maicraft.behavior.acquire.sources.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
+import org.maiwithu.maicraft.game.interaction.AttackKeyPress;
 import org.maiwithu.maicraft.game.world.ClientCommandTree;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
@@ -553,6 +556,11 @@ public final class AbilityCatalog {
                                 deps.kept()),
                         new LiveHoldsSneak(deps.hands().inputs(), deps.character().context())),
                 deps.channels().events()));
+
+        // 肢体动作：看着人蹲起、点头、挥手、拍一下、扔东西给他、捡他扔来的；换手、走过去、捡东西用共用的那几份，
+        // 不点名时对着最近冲角色做过肢体动作的人，做完告诉回头看回过他了。
+        registry.register(NonverbalModule.live(new LiveNonverbalMoves(deps.world().scene().seen(), deps.world().nonverbal(),
+                shared.toMainhand(), deps.travel().walks(), shared.drops(), new AttackKeyPress())));
 
         // 计时：不占身体的"过 N 秒叫我"，往启动侧每刻看钟的那份计时表里挂；想过一会儿回来看都走它，角色这期间照常干活。
         registry.register(new TimerAbility(deps.channels().timers()));
