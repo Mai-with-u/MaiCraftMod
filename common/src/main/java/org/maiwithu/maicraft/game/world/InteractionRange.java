@@ -38,8 +38,8 @@ public final class InteractionRange {
 
     private InteractionRange() {}
 
-    /** 方块交互触及距离：原版生存模式约 4.5 格，属性可被装备与效果改变。 */
-    public static double blockReach(LocalPlayer player) {
+    /** 方块交互触及距离：原版生存模式约 4.5 格，属性可被装备与效果改变；别的玩家的也读得到。 */
+    public static double blockReach(Player player) {
         return player.getAttributeValue(Attributes.BLOCK_INTERACTION_RANGE);
     }
 

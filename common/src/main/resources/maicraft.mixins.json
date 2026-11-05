@@ -27,6 +27,8 @@
     "ItemEntityConfirmationMixin",
     "EquipmentConfirmationMixin",
     "DamageEventMixin",
+    "SwingSeenMixin",
+    "BlockDestructionSeenMixin",
     "DeathMessageMixin",
     "AwardStatsMixin",
     "BackpackContentsMixin"

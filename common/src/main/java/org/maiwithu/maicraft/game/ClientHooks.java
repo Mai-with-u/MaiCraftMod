@@ -7,7 +7,10 @@ import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.game.player.DamageObserver;
 import org.maiwithu.maicraft.game.player.EquipmentConfirmations;
+import org.maiwithu.maicraft.game.world.DiggingSeen;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
+import org.maiwithu.maicraft.game.world.EntityHurtSeen;
+import org.maiwithu.maicraft.game.world.SwingsSeen;
 import org.maiwithu.maicraft.game.player.UseKeyHold;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.menu.RenderedScreens;
@@ -29,6 +32,9 @@ public final class ClientHooks {
     private static final AtomicReference<DropConfirmations> DROP_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<EquipmentConfirmations> EQUIPMENT_CONFIRMATIONS = new AtomicReference<>();
     private static final AtomicReference<DamageObserver> DAMAGE_OBSERVER = new AtomicReference<>();
+    private static final AtomicReference<SwingsSeen> SWINGS_SEEN = new AtomicReference<>();
+    private static final AtomicReference<DiggingSeen> DIGGING_SEEN = new AtomicReference<>();
+    private static final AtomicReference<EntityHurtSeen> ENTITY_HURT_SEEN = new AtomicReference<>();
     /** 最近一次本地玩家死亡包里的死因与收到时的游戏刻。 */
     private static final AtomicReference<DeathMessage> LAST_DEATH_MESSAGE = new AtomicReference<>();
     private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
@@ -121,6 +127,28 @@ public final class ClientHooks {
     /** 启动时登记伤害观察：本玩家挨打的伤害包由 Mixin 转过来。传 null 表示停止。 */
     public static void registerDamageObserver(DamageObserver observer) {
         DAMAGE_OBSERVER.set(observer);
+    }
+
+    /**
+     * 启动时登记看别的玩家的三个观察口：别人挥手的包、挖方块进度包、别的实体挨打的伤害包由 Mixin 转过来。
+     * 认别的玩家冲角色做的肢体动作要三样一起看。传 null 表示停止。
+     */
+    public static void registerOthersSeen(SwingsSeen swings, DiggingSeen digging, EntityHurtSeen hurts) {
+        SWINGS_SEEN.set(swings);
+        DIGGING_SEEN.set(digging);
+        ENTITY_HURT_SEEN.set(hurts);
+    }
+
+    public static SwingsSeen swingsSeen() {
+        return SWINGS_SEEN.get();
+    }
+
+    public static DiggingSeen diggingSeen() {
+        return DIGGING_SEEN.get();
+    }
+
+    public static EntityHurtSeen entityHurtSeen() {
+        return ENTITY_HURT_SEEN.get();
     }
 
     public static DropConfirmations dropConfirmations() {
