@@ -35,9 +35,11 @@ public final class ClientTravelWorldView implements TravelWorldView {
         if (current == null || current.localPlayer() == null) {
             return null;
         }
+        // 脚位和寻路引擎同一个口径：站在床、下半台阶、灵魂沙上算上面那一格。规划时判站到没有、每段停在哪
+        // （legs 的 to）和走路段报的到达位置都按它，不会一个写床那一格、一个写床上面那一格。
         LocalPlayer player = current.localPlayer();
-        return new WorldPosition((int) Math.floor(player.getX()), (int) Math.floor(player.getY()),
-                (int) Math.floor(player.getZ()), player.level().dimension().location().toString());
+        BlockPos feet = BlockPassability.playerFeet(player.level(), player.getX(), player.getY(), player.getZ());
+        return new WorldPosition(feet.getX(), feet.getY(), feet.getZ(), player.level().dimension().location().toString());
     }
 
     @Override
