@@ -83,6 +83,7 @@ import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.game.world.ClientCommandTree;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
+import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.sources.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.acquire.mining.LiveBlockDigging;
@@ -357,14 +358,18 @@ public final class AbilityCatalog {
                 shared.digging(), shared.drops(), shared.permission());
     }
 
-    /** 从记得的箱子与现场容器拿东西的来源：候选由找容器的读端给出（现场扫描与世界记忆并成一份）。 */
+    /**
+     * 从记得的箱子与现场容器拿东西的来源：候选由找容器的读端给出（现场扫描与世界记忆并成一份）。
+     * 跳过别人的箱子时写记在谁名下：放的人在线写名字，不在线写编号。
+     */
     private static ContainerSource containerSource(Deps deps, Shared shared) {
         return new ContainerSource(
                 new ClientSpotsContainers(deps.world().blockScans(), deps.character().context(), deps.world().memory(),
                         deps.guards().protection(), deps.world().facilities()),
                 deps.items().itemTags(), deps.guards().protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.hands().interactions(), deps.items().itemTags(),
-                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts()));
+                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts()),
+                owner -> OnlinePlayers.nameOrId(deps.character().context().get(), owner));
     }
 
     /**

@@ -20,6 +20,9 @@ import java.util.stream.Collectors;
  */
 public final class TrustedPlayers {
 
+    /** 自家人名单写在哪：实例配置文件里的这一项。跳过别人的箱子时教人怎么放开，照这个写。 */
+    public static final String LISTED_IN = "实例配置 config/maicraft.json 的 trustedPlayers";
+
     /** 一个自家人都没有：没配置时用它，谁的存储都按别人的算。 */
     public static final TrustedPlayers NOBODY = new TrustedPlayers(List.of(), name -> Optional.empty());
 

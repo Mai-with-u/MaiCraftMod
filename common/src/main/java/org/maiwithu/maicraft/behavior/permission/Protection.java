@@ -131,18 +131,31 @@ public final class Protection {
      * @param protectedLandmarks 这次任务额外保护的地标名
      */
     public boolean mayUseStorage(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
-        if (inProtectedLandmark(position, protectedLandmarks)) return false;
-        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return false;
+        return storageUse(position, blockType, protectedLandmarks).usable();
+    }
+
+    /**
+     * 同 {@link #mayUseStorage}，多给出不能用时是哪一路挡的、记在谁名下：跳过别人的箱子时说明里照它说清是谁的。
+     * 判断顺序：额外保护的地标、归属没问到、归属记录（自己或自家人放的能用）、记住的区域、玩家放置推断。
+     */
+    public StorageUse storageUse(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        Optional<String> landmark = protectedLandmarkHit(position, protectedLandmarks);
+        if (landmark.isPresent()) return StorageUse.inside(StorageUse.Kind.NEAR_PROTECTED_LANDMARK, landmark.get());
+        // 归属还没问到服务端：不知道是谁的，按别人的算，宁可少翻一只箱子。
+        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) {
+            return new StorageUse(StorageUse.Kind.OWNER_UNKNOWN, null, null);
+        }
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
                 ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
         if (placedBy.isPresent()) {
             String owner = placedBy.get().playerId();
-            return owner.equals(selfPlayerId) || trusted.includes(owner);
+            return owner.equals(selfPlayerId) || trusted.includes(owner) ? StorageUse.USABLE : StorageUse.placedBy(owner);
         }
         for (RememberedRegion region : regions.regions()) {
-            if (region.contains(position)) return false;
+            if (region.contains(position)) return StorageUse.inside(StorageUse.Kind.IN_REMEMBERED_REGION, region.name());
         }
-        return !guesses.likelyPlayerMade(position, blockType);
+        return guesses.likelyPlayerMade(position, blockType)
+                ? new StorageUse(StorageUse.Kind.LOOKS_PLAYER_MADE, null, null) : StorageUse.USABLE;
     }
 
     /**

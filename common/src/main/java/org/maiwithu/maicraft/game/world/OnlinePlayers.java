@@ -37,6 +37,18 @@ public final class OnlinePlayers {
     }
 
     /**
+     * 说明里写一个玩家：在线写名字，不在线写编号；编号读不出来、没有当刻的角色上下文，都照原样写。
+     * 被别人的方块封住挖开时写是谁放的、跳过别人的箱子时写记在谁名下，都用它。
+     */
+    public static String nameOrId(PlayerContext context, String playerId) {
+        try {
+            return context == null ? playerId : nameById(context, UUID.fromString(playerId)).orElse(playerId);
+        } catch (IllegalArgumentException notUuid) {
+            return playerId;
+        }
+    }
+
+    /**
      * 这个编号的玩家此刻在不在玩家列表里：看不见他不等于他下线了，走出能看见的范围时他照样在列表里。
      * 还没连上服务器时答不在。
      */

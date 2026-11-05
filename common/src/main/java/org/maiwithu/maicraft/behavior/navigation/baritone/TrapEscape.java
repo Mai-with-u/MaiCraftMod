@@ -6,7 +6,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.StringJoiner;
-import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -267,10 +266,6 @@ final class TrapEscape {
 
     // 放的人在线就写名字，不在线写编号；编号读不出来照原样写。
     static String nameOf(String owner, PlayerContext context) {
-        try {
-            return context == null ? owner : OnlinePlayers.nameById(context, UUID.fromString(owner)).orElse(owner);
-        } catch (IllegalArgumentException notUuid) {
-            return owner;
-        }
+        return OnlinePlayers.nameOrId(context, owner);
     }
 }

@@ -153,6 +153,38 @@ class ProtectionTest {
         assertFalse(protection.mayUseStorage(wild, "minecraft:chest", Set.of("家")), "这次额外保护的地标旁不用");
     }
 
+    @Test
+    void 存储不能用时说清是哪一路挡的_记在谁名下() {
+        WorldPosition wild = new WorldPosition(900, 64, 900, "minecraft:overworld");
+        WorldPosition farm = new WorldPosition(505, 64, 500, "minecraft:overworld");
+        WorldPosition door = new WorldPosition(700, 64, 700, "minecraft:overworld");
+        var regions = List.of(new RememberedRegion("河东的农场", new WorldPosition(500, 64, 500, "minecraft:overworld"), 16));
+        var protection = protection(Map.of(WALL, OTHER), regions,
+                Map.of("家", new WorldPosition(900, 64, 905, "minecraft:overworld")),
+                (position, blockType) -> position.equals(door));
+        assertEquals(new StorageUse(StorageUse.Kind.PLACED_BY_OTHER, OTHER, null),
+                protection.storageUse(WALL, "minecraft:chest", Set.of()));
+        assertEquals(new StorageUse(StorageUse.Kind.IN_REMEMBERED_REGION, null, "河东的农场"),
+                protection.storageUse(farm, "minecraft:chest", Set.of()));
+        assertEquals(new StorageUse(StorageUse.Kind.NEAR_PROTECTED_LANDMARK, null, "家"),
+                protection.storageUse(wild, "minecraft:chest", Set.of("家")));
+        assertEquals(StorageUse.Kind.LOOKS_PLAYER_MADE, protection.storageUse(door, "minecraft:barrel", Set.of()).kind());
+        assertEquals(StorageUse.USABLE, protection.storageUse(wild, "minecraft:chest", Set.of()));
+        // 归属还没问到服务端：不知道是谁的，按别人的算。
+        var unasked = new Protection(new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.empty();
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return false;
+            }
+        }, fixed(List.of()), remembered(Map.of()), GuessesPlayerMade.NOTHING, SELF);
+        assertEquals(StorageUse.Kind.OWNER_UNKNOWN, unasked.storageUse(wild, "minecraft:chest", Set.of()).kind());
+        assertEquals("不知道是谁的（按别人的算）",
+                unasked.storageUse(wild, "minecraft:chest", Set.of()).describe(id -> id));
+    }
+
     private static Protection protection(Map<WorldPosition, String> placements,
             List<RememberedRegion> regions, Map<String, WorldPosition> places,
             GuessesPlayerMade guesses) {
