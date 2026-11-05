@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game;
 
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.maiwithu.maicraft.game.picture.CameraPictures;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
 import org.maiwithu.maicraft.game.player.RestStatistics;
 import org.maiwithu.maicraft.game.player.DamageObserver;
@@ -38,6 +39,7 @@ public final class ClientHooks {
     /** 最近一次本地玩家死亡包里的死因与收到时的游戏刻。 */
     private static final AtomicReference<DeathMessage> LAST_DEATH_MESSAGE = new AtomicReference<>();
     private static final AtomicReference<RestStatistics> REST_STATISTICS = new AtomicReference<>();
+    private static final AtomicReference<CameraPictures> CAMERA_PICTURES = new AtomicReference<>();
     /** 喷气背包飞的那一段最近一次说"我管着上下"的时刻（纳秒）；没在飞为 0。 */
     private static final AtomicLong FLIGHT_CONTROLLED_AT = new AtomicLong();
 
@@ -161,6 +163,16 @@ public final class ClientHooks {
 
     public static DamageObserver damageObserver() {
         return DAMAGE_OBSERVER.get();
+    }
+
+    /** 启动时登记取画面的观察口：渲染的 Mixin 每一帧在取图点叫它。传 null 表示停止。 */
+    public static void registerCameraPictures(CameraPictures pictures) {
+        CAMERA_PICTURES.set(pictures);
+    }
+
+    /** Mixin 类跨包读取：取画面的观察口；没登记时为 null，渲染照常、什么都不拷。 */
+    public static CameraPictures cameraPictures() {
+        return CAMERA_PICTURES.get();
     }
 
     /** 启动时登记休息统计：个人统计包由 Mixin 转过来。传 null 表示停止。 */

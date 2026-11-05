@@ -15,6 +15,7 @@
     "AbstractArrowAccessor",
     "ClientLevelBlockChangeMixin",
     "GameRendererCameraMixin",
+    "GameRendererPictureMixin",
     "MouseHandlerControlMixin",
     "BlockUseAcknowledgementMixin",
     "UseKeyHoldMixin",
