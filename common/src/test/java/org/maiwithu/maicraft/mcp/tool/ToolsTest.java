@@ -353,23 +353,36 @@ class ToolsTest {
         assertTrue(data(call("events", "{}")).get("world").isJsonNull());
         assertTrue(data(call("events", "{\"topic\": \"chat\"}")).get("world").isJsonNull());
 
-        // 认出了世界：两条流的每一页都带同一个 world，编号、存档名与编号从哪来。
+        // 认出了世界：两条流的每一页都带同一个 world，编号、存档名、编号从哪来，以及服务器开没开正版验证。
         world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", "cd".repeat(32),
-                Path.of("state"));
+                Path.of("state"), false);
         for (String arguments : List.of("{}", "{\"topic\": \"chat\"}")) {
             JsonObject shown = data(call("events", arguments)).getAsJsonObject("world");
             assertEquals("ab".repeat(32), shown.get("id").getAsString());
             assertEquals("新的世界", shown.get("name").getAsString());
             assertEquals("world_id_file", shown.get("source").getAsString());
+            assertEquals("off", shown.get("online_mode").getAsString());
             // 旧版本那串按目录算的编号只用来搬 Mod 自己的旧数据，不报给宿主。
-            assertEquals(3, shown.size());
+            assertEquals(4, shown.size());
         }
+    }
+
+    @Test
+    void worldSaysWhetherTheServerVerifiesAccounts() {
+        // 正版验证开着写 on，关着写 off；服务端 MaiCraft 太旧、握手没报时写 unknown，不猜。
+        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null,
+                Path.of("state"), true);
+        assertEquals("on", data(call("events", "{}")).getAsJsonObject("world").get("online_mode").getAsString());
+        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.SERVER_ADDRESS, "服务器", null,
+                Path.of("state"), null);
+        assertEquals("unknown", data(call("events", "{}")).getAsJsonObject("world").get("online_mode").getAsString());
     }
 
     @Test
     void aWaitingEventsReadReturnsAtOnceWhenTheWorldChanges() throws Exception {
         // 宿主挂着长轮询等事件：角色退回主菜单时被叫醒，当场带着 world=null 返回，不用等满 30 秒。
-        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state"));
+        world = new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state"),
+                true);
         JsonObject first = data(call("events", "{}"));
         String arguments = "{\"stream_id\": \"" + first.get("stream_id").getAsString() + "\", \"after_cursor\": "
                 + first.get("cursor").getAsLong() + ", \"wait_ms\": 60000}";

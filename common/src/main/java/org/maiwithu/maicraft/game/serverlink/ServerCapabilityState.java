@@ -33,6 +33,8 @@ public final class ServerCapabilityState {
     String worldId;
     /** 服务端报的死亡不掉落；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
     Boolean keepInventory;
+    /** 服务端报的正版验证开没开；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
+    Boolean onlineMode;
     /** 服务端报的世界生成往地上铺的实心方块 ID；还没收到欢迎包，或服务端版本太旧、没报时为 null。 */
     List<String> generatedTerrain;
 
@@ -44,6 +46,8 @@ public final class ServerCapabilityState {
     public String worldId() { return worldId; }
     /** 服务端报的死亡不掉落（握手时报、改了再推）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
     public Boolean keepInventory() { return keepInventory; }
+    /** 服务端报的正版验证开没开（握手时报）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
+    public Boolean onlineMode() { return onlineMode; }
     /** 服务端报的世界生成铺的地形方块 ID（握手时报）；没报为 null。只在 {@link #scope()} 不为 null 时有意义。 */
     public List<String> generatedTerrain() { return generatedTerrain; }
     public Map<String, Feature> features() { return Map.copyOf(features); }
@@ -66,6 +70,7 @@ public final class ServerCapabilityState {
         scope = null;
         worldId = null;
         keepInventory = null;
+        onlineMode = null;
         generatedTerrain = null;
         features.clear();
         limits = new JsonObject();
@@ -96,6 +101,8 @@ public final class ServerCapabilityState {
         worldId = reported.matches("[0-9a-f]{64}") ? reported : null;
         // 死亡不掉落只收布尔值：旧版本服务端不报、报来别的样子都按没报，客户端照旧读不到。
         keepInventory = bool(envelope, "keepInventory");
+        // 正版验证同样只收布尔值：旧版本服务端不报就按没报，宿主看到的是"不知道"，不猜成开着或关着。
+        onlineMode = bool(envelope, "onlineMode");
         // 世界生成铺的地形方块：旧版本服务端不报就按没报，客户端只按方块标签认；不像方块 ID 的条目丢掉，别的照收。
         generatedTerrain = blockIds(envelope, "generatedTerrain");
         features.clear();

@@ -21,6 +21,7 @@ class ProtocolFlowTest {
         boolean admitted = true;
         String worldId = "ab".repeat(32);
         Boolean keepInventory = true;
+        Boolean onlineMode = true;
         List<String> generatedTerrain;
 
         @Override public String dimension() { return "minecraft:overworld"; }
@@ -28,6 +29,7 @@ class ProtocolFlowTest {
         @Override public boolean admitted() { return admitted; }
         @Override public String worldId() { return worldId; }
         @Override public Boolean keepInventory() { return keepInventory; }
+        @Override public Boolean onlineMode() { return onlineMode; }
         @Override public List<String> generatedTerrain() { return generatedTerrain; }
         @Override public boolean mayMutate() { return mayMutate; }
         @Override public List<ServerFeature> features() {
@@ -64,6 +66,19 @@ class ProtocolFlowTest {
         var unknown = new FakePeer();
         unknown.keepInventory = null;
         assertFalse(new ServerProtocolDispatcher().receive(hello(), unknown).has("keepInventory"));
+    }
+
+    @Test
+    void 欢迎包报正版验证_读不到时不带() {
+        // 开着、关着都照服务端的设置报；读不到（替身不报）时整项不带，客户端按没报算。
+        var on = new FakePeer();
+        assertTrue(new ServerProtocolDispatcher().receive(hello(), on).get("onlineMode").getAsBoolean());
+        var off = new FakePeer();
+        off.onlineMode = false;
+        assertFalse(new ServerProtocolDispatcher().receive(hello(), off).get("onlineMode").getAsBoolean());
+        var unknown = new FakePeer();
+        unknown.onlineMode = null;
+        assertFalse(new ServerProtocolDispatcher().receive(hello(), unknown).has("onlineMode"));
     }
 
     @Test

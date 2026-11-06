@@ -25,8 +25,11 @@ import org.maiwithu.maicraft.game.serverlink.ServerCapabilityState;
  * @param name      给人看的名字：单人是存档名，多人是服务器列表里的名字；不当键用，读不到时为空串
  * @param legacyKey 旧版本按存档目录或服务器地址算出的那串编号，搬旧数据时按它找；认不出时为 null
  * @param directory 本游戏实例存放 MaiCraft 进度数据的目录
+ * @param onlineMode 这个世界所在的服务器开没开正版验证，握手时服务端报的；服务端版本太旧、没报时为 null。
+ *                   关着时玩家 UUID 由名字算出，改名就成了另一个人，宿主据此决定按 UUID 认人能信到几分
  */
-public record SaveIdentity(String key, Source source, String name, String legacyKey, Path directory) {
+public record SaveIdentity(String key, Source source, String name, String legacyKey, Path directory,
+                           Boolean onlineMode) {
 
     /** 世界编号从哪来。 */
     public enum Source {
@@ -58,10 +61,14 @@ public record SaveIdentity(String key, Source source, String name, String legacy
         // 进度数据放在 config/maicraft/state 里，与外部工具放在 config 根下的数据文件互不干扰。
         Path directory = minecraft.gameDirectory.toPath().resolve("config").resolve("maicraft").resolve("state");
         String worldId = server.worldId();
-        if (worldId != null) return Optional.of(new SaveIdentity(worldId, Source.WORLD_ID_FILE, name, legacy, directory));
+        // 正版验证跟世界编号一样取自这次握手：进世界时认一次，这一趟里不再变。
+        Boolean onlineMode = server.onlineMode();
+        if (worldId != null) {
+            return Optional.of(new SaveIdentity(worldId, Source.WORLD_ID_FILE, name, legacy, directory, onlineMode));
+        }
         if (legacy == null) return Optional.empty();
         return Optional.of(new SaveIdentity(legacy, singleplayer ? Source.SAVE_FOLDER : Source.SERVER_ADDRESS,
-                name, legacy, directory));
+                name, legacy, directory, onlineMode));
     }
 
     /** 单人世界按存档目录区分；Windows 路径不区分大小写，先统一成小写再算，同一存档才算同一个世界。 */

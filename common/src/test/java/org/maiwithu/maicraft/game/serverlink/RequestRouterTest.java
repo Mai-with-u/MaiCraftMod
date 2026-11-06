@@ -203,6 +203,7 @@ class RequestRouterTest {
     /** 服务端那一侧的假对端：只为握手，死亡不掉落按字段报。 */
     private static final class ServerSide implements ServerProtocolDispatcher.Peer {
         Boolean keepInventory;
+        Boolean onlineMode;
         List<String> generatedTerrain;
 
         @Override public String dimension() { return "minecraft:overworld"; }
@@ -210,6 +211,7 @@ class RequestRouterTest {
         @Override public boolean admitted() { return true; }
         @Override public String worldId() { return null; }
         @Override public Boolean keepInventory() { return keepInventory; }
+        @Override public Boolean onlineMode() { return onlineMode; }
         @Override public List<String> generatedTerrain() { return generatedTerrain; }
         @Override public boolean mayMutate() { return true; }
         @Override public List<ServerFeature> features() { return List.of(); }
@@ -251,6 +253,32 @@ class RequestRouterTest {
         handshake(router, transport, new ServerSide(), 2);
         assertTrue(router.serverConfirmed());
         assertNull(session.capabilities.keepInventory());
+    }
+
+    @Test
+    void 服务端报的正版验证_握手往返记下_旧服务端不报时读不到() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        var session = router.session();
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        assertNull(session.capabilities.onlineMode(), "还没握好手：读不到");
+
+        // 服务器关着正版验证（离线模式）：握手往返后记下 false。
+        var server = new ServerSide();
+        server.onlineMode = false;
+        handshake(router, transport, server, 1);
+        assertTrue(router.serverConfirmed());
+        assertEquals(Boolean.FALSE, session.capabilities.onlineMode());
+
+        // 换到旧版服务端（不报这一项）：重新握手后按没报算，不沿用上一台的值。
+        router.bind(2, 2, "minecraft:overworld", 0, true, 1);
+        router.observe(1);
+        handshake(router, transport, new ServerSide(), 2);
+        assertTrue(router.serverConfirmed());
+        assertNull(session.capabilities.onlineMode());
     }
 
     @Test

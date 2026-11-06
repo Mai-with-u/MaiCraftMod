@@ -61,12 +61,24 @@ final class SparTask extends PhasedTask<SparTask.Phase> implements ThreatRespond
     /**
      * 结果细节：拿什么打的、我打中他几下，和切磋怎么收的。
      *
-     * @param spar 收手原因（`ended_by`）、他打中我几下、各剩多少血（读不到他的血为空）
+     * @param spar 收手原因（`ended_by`）、他打中我几下、各剩多少血（读不到他的血为空）、和谁打的
      */
     record SparDetails(String weapon, int hits, Spar spar) implements ResultDetails {}
 
-    /** 切磋这一场怎么收的。 */
-    record Spar(String endedBy, int hitsTaken, double myHealth, Double theirHealth) {}
+    /**
+     * 切磋这一场怎么收的。
+     *
+     * @param opponent 和谁打的；没认出点名的玩家（没开打就收场）为空，结果里不写
+     */
+    record Spar(String endedBy, int hitsTaken, double myHealth, Double theirHealth, OpponentPlayer opponent) {}
+
+    /**
+     * 切磋对手是哪位玩家：点名时给的是观察编号，宿主光看目标认不出是谁，按这里的 UUID 记这一局和谁打的。
+     *
+     * @param name 玩家名
+     * @param uuid 玩家的 UUID
+     */
+    record OpponentPlayer(String name, String uuid) {}
 
     SparTask(SparInput input, CombatSenses senses, FightMoves moves, SparView view, SparPartner partner) {
         super("切磋", Phase.CHECK, new ProgressTracker(Sparring.NO_HITS_TICKS + 200, Long.MAX_VALUE));
@@ -171,7 +183,14 @@ final class SparTask extends PhasedTask<SparTask.Phase> implements ThreatRespond
     @Override protected ResultDetails details() {
         Sparring.Ending by = ended == null ? Sparring.Ending.CANCELLED : ended;
         Double theirs = last == null || Double.isNaN(last.health()) ? null : last.health();
-        return new SparDetails(weapon, hits, new Spar(by.value, partner.hitsTaken(), myHealth, theirs));
+        return new SparDetails(weapon, hits, new Spar(by.value, partner.hitsTaken(), myHealth, theirs, opponentPlayer()));
+    }
+
+    // 认出了点名的玩家就把他的名字和 UUID 写进结果：不管是打完、被取消还是没开打（血已在停手线下），
+    // 宿主都能按 UUID 记下这一局是和谁；没认出（点名的不是玩家、人不在）时不写，不拿名字凑。
+    private OpponentPlayer opponentPlayer() {
+        if (opponent == null || opponent.uuid() == null) return null;
+        return new OpponentPlayer(opponent.name(), opponent.uuid().toString());
     }
 
     // 切磋自己接得住这名对手：别的怪真打过来时自卫照插。

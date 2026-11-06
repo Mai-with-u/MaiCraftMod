@@ -40,7 +40,7 @@
 - 收手：任何一方到停手线、再砍一刀他就倒了、他 5 秒没打中你并且退开或蹲下或收起兵器、他走开 12 格、半分钟谁都没打中谁。收手后放下盾、退到他够不着的地方看着他，以完成收场。
 - 开打时你的血已经在停手线下就不开打。切磋中他打中你的不进 `hurt`、不算拍一下，自卫也不为他插进来；收场以后他还接着打，就从零算拍一下还是连打。
 - 切磋会替换手上的目标：先记下手上在做什么，打完再下回去。
-- 结果细节：`hits` 我打中他几下，`spar.ended_by`（`they_stopped` 他停手 / `they_at_line` 他到停手线 / `me_at_line` 我到停手线 / `finishing_blow` 再一刀他就倒 / `they_left` 他走开 / `no_hits` 没人出手 / `cancelled`）、`spar.hits_taken` 他打中我几下、`spar.my_health`、`spar.their_health`（服务端不同步他的血时为空，结果里写"看不到他的血"）。
+- 结果细节：`hits` 我打中他几下，`spar.ended_by`（`they_stopped` 他停手 / `they_at_line` 他到停手线 / `me_at_line` 我到停手线 / `finishing_blow` 再一刀他就倒 / `they_left` 他走开 / `no_hits` 没人出手 / `cancelled`）、`spar.hits_taken` 他打中我几下、`spar.my_health`、`spar.their_health`（服务端不同步他的血时为空，结果里写"看不到他的血"）、`spar.opponent` 和谁打的（`name` 玩家名、`uuid` 他的 UUID；点名用观察编号时也照写，没认出点名的玩家时不带）。
 
 ## 结果怎么读
 

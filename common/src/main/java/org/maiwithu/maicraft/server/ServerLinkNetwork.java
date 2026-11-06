@@ -90,6 +90,9 @@ public final class ServerLinkNetwork {
             @Override public Boolean keepInventory() {
                 return server.getGameRules().getBoolean(GameRules.RULE_KEEPINVENTORY);
             }
+            // 正版验证照服务端此刻的设置报：专用服务器是 server.properties 的 online-mode，
+            // 单人世界与开局域网的主机是集成服务端的设置（原版开着，来串门的局域网玩家要过正版验证）。
+            @Override public Boolean onlineMode() { return server.usesAuthentication(); }
             @Override public List<String> generatedTerrain() { return ServerLinkServices.generatedTerrain(server); }
             @Override public boolean mayMutate() { return player.isAlive() && !player.isSpectator(); }
             @Override public List<ServerFeature> features() { return operations.features(player); }

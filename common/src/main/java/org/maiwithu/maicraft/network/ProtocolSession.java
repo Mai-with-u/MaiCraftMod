@@ -51,9 +51,10 @@ final class ProtocolSession {
 
     /**
      * @param keepInventory    此刻的死亡不掉落规则；读不到为 null，欢迎包里不带
+     * @param onlineMode       这台服务器开没开正版验证；读不到为 null，欢迎包里不带
      * @param generatedTerrain 世界生成往地上铺的实心方块 ID；读不到为 null，欢迎包里不带
      */
-    JsonObject welcome(long tick, Boolean keepInventory, List<String> generatedTerrain) {
+    JsonObject welcome(long tick, Boolean keepInventory, Boolean onlineMode, List<String> generatedTerrain) {
         JsonObject response = new JsonObject();
         response.addProperty("bootstrap", ProtocolJson.BOOTSTRAP);
         response.addProperty("kind", "welcome");
@@ -65,6 +66,9 @@ final class ProtocolSession {
         if (worldId != null) response.addProperty("worldId", worldId);
         // 死亡不掉落：客户端连别人的服务器时读不到这条规则，由服务端报；旧版本客户端不读这一项。
         if (keepInventory != null) response.addProperty("keepInventory", keepInventory);
+        // 正版验证：客户端只看得到连上了，看不到服务器验不验正版账号，由服务端报；关着时玩家 UUID 由名字算出、
+        // 改名就换了一个人，宿主按它决定认人信几分。旧版本客户端不读这一项。
+        if (onlineMode != null) response.addProperty("onlineMode", onlineMode);
         // 世界生成铺的地形方块：客户端读不到世界生成数据，由服务端报，客户端在方块标签之外也当天然地形认；旧版本客户端不读这一项。
         // 清单大到挤得欢迎包超出信封上限时整项不带（客户端退回只按标签认），不截半截，也不让握手因此失败。
         if (generatedTerrain != null && fitsInWelcome(generatedTerrain)) {

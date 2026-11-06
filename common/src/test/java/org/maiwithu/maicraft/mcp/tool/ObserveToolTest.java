@@ -112,7 +112,8 @@ class ObserveToolTest {
     /** 角色是谁、在哪个世界：测试摆，默认读到了全部三项。 */
     private SelfView.Identity identity = new SelfView.Identity("Mai",
             UUID.fromString("00000000-0000-0000-0000-000000000001"),
-            new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state")),
+            new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE, "新的世界", null, Path.of("state"),
+                    true),
             "cd".repeat(32));
     /** 板上还成立的提醒：测试摆。 */
     private List<Reminder> reminders = List.of();
@@ -280,6 +281,7 @@ class ObserveToolTest {
         assertEquals("ab".repeat(32), world.get("id").getAsString());
         assertEquals("新的世界", world.get("name").getAsString());
         assertEquals("world_id_file", world.get("source").getAsString());
+        assertEquals("on", world.get("online_mode").getAsString());
         // 过渡用的 world_key：这个世界的数据在旧版本里存在哪个编号名下，旧版宿主照旧按它当键。
         assertEquals("cd".repeat(32), self.get("world_key").getAsString());
 

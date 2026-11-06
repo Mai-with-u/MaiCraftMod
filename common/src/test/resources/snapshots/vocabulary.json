@@ -338,6 +338,21 @@
       "timer_id": 3,
       "note": "回 (12, 64, -30) 的熔炉取干海带 ×64"
     },
+    "follow_status_event": {
+      "cursor": 13,
+      "kind": "follow_status",
+      "message": "跟随 Steve：他回到我身边了，接着跟",
+      "player": {
+        "name": "Steve",
+        "uuid": "8667ba71-b85a-4004-af54-457a9734eed7"
+      }
+    },
+    "world": {
+      "id": "abababababababababababababababababababababababababababababababab",
+      "name": "新的世界",
+      "source": "world_id_file",
+      "online_mode": "off"
+    },
     "chat_event": {
       "cursor": 3,
       "kind": "player",

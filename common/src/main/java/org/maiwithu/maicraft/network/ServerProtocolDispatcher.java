@@ -26,6 +26,11 @@ public final class ServerProtocolDispatcher {
         String worldId();
         /** 这台服务器此刻的死亡不掉落规则，握手时报给客户端；读不到为 null，欢迎包里就不带。 */
         default Boolean keepInventory() { return null; }
+        /**
+         * 这台服务器开没开正版验证（server.properties 的 online-mode），握手时报给客户端；读不到为 null，欢迎包里就不带。
+         * 关着时玩家的 UUID 由名字算出，改名就成了另一个人，客户端据此告诉宿主认人能信到几分。
+         */
+        default Boolean onlineMode() { return null; }
         /** 这个世界的世界生成往地上铺的实心方块 ID，握手时报给客户端；读不到为 null，欢迎包里就不带。 */
         default List<String> generatedTerrain() { return null; }
         boolean mayMutate();
@@ -85,7 +90,7 @@ public final class ServerProtocolDispatcher {
                 if (session.closed || !session.dimension.equals(peer.dimension()))
                     return failure(request, "hello", "session_closed", "Use a new nonce for the current world", peer.tick());
                 session.lastTick = peer.tick();
-                return session.welcome(peer.tick(), peer.keepInventory(), peer.generatedTerrain());
+                return session.welcome(peer.tick(), peer.keepInventory(), peer.onlineMode(), peer.generatedTerrain());
             }
         }
         if (limited(peer.tick())) return failure(request, "hello", "rate_limited", "Per-tick request budget exhausted", peer.tick());
@@ -98,7 +103,7 @@ public final class ServerProtocolDispatcher {
         if (sessions.size() >= MAX_SESSIONS)
             return failure(request, "hello", "session_capacity", "Receipt retention prevents another session yet", peer.tick());
         ProtocolSession session = new ProtocolSession(request, peer);
-        JsonObject welcome = session.welcome(peer.tick(), peer.keepInventory(), peer.generatedTerrain());
+        JsonObject welcome = session.welcome(peer.tick(), peer.keepInventory(), peer.onlineMode(), peer.generatedTerrain());
         ProtocolJson.encode(welcome);
         // 新作用域会撤销已有修改权限，同时保留请求记录的查询能力。
         invalidateWorld();

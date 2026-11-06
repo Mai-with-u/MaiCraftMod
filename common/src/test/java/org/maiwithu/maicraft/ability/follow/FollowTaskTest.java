@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.event.EventFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -57,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class FollowTaskTest {
 
     private static final Target SEEN = new Target.Seen("e1");
+    private static final UUID STEVE = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
     private static final Permissions NO_TERRAIN = new Permissions(
             Permissions.BlockChanges.NONE, Permissions.Fight.HOSTILE_MOBS, false,
             Permissions.AnimalKilling.WILD, Permissions.SurvivalNeeds.ON, Set.of());
@@ -102,11 +104,15 @@ class FollowTaskTest {
         Optional<BlockPos> aside = Optional.empty();
         TickContext lockedWith;
         boolean lockFails;
+        /** 跟的是不是玩家：默认跟玩家 Steve；改成 false 就是跟一只狼，锁定时不交 UUID。 */
+        boolean followsPlayer = true;
 
         @Override public Locked lock(TickContext context, Target target) {
             lockedWith = context;
-            return lockFails ? null : new Locked(7, "minecraft:player", "Steve",
-                    new WorldPosition(10, 64, 10, "minecraft:overworld"), "西边");
+            if (lockFails) return null;
+            WorldPosition at = new WorldPosition(10, 64, 10, "minecraft:overworld");
+            return followsPlayer ? new Locked(7, "minecraft:player", "Steve", at, "西边", STEVE)
+                    : new Locked(7, "minecraft:wolf", "minecraft:wolf", at, "西边", null);
         }
 
         @Override public Sighting observe(TickContext context) {
@@ -367,12 +373,19 @@ class FollowTaskTest {
         }
     }
 
-    /** 记下发出的事件。 */
+    /** 记下发出的事件，连同挂在跟随状况上的结构化事实。 */
     private static final class Events implements TaskEventSink {
         final List<String> follow = new ArrayList<>();
+        final List<EventFacts> facts = new ArrayList<>();
 
         @Override public void publish(TaskEvent.Kind kind, String message) {
-            if (kind == TaskEvent.Kind.FOLLOW_STATUS) follow.add(message);
+            publish(kind, message, null);
+        }
+
+        @Override public void publish(TaskEvent.Kind kind, String message, EventFacts attached) {
+            if (kind != TaskEvent.Kind.FOLLOW_STATUS) return;
+            follow.add(message);
+            facts.add(attached);
         }
 
         boolean said(String words) {
@@ -535,6 +548,31 @@ class FollowTaskTest {
         view.visible = true;
         step(follow);
         assertTrue(events.said("又看见他了"));
+    }
+
+    @Test
+    void followStatusSaysWhichPlayerByUuid() {
+        // 跟玩家 Steve 跟丢了：跟随状况事件挂上 player（玩家名与 UUID），宿主不用从句子里认人。
+        view.him.gap = 4;
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 2);
+        view.visible = false;
+        step(follow);
+        assertTrue(events.said("跟丢了"));
+        assertEquals(new FollowedPlayer("Steve", STEVE.toString()), events.facts.get(events.facts.size() - 1));
+    }
+
+    @Test
+    void followStatusOfAnAnimalHasNoPlayer() {
+        // 跟的是一只狼：跟随状况照样发，但不挂 player。
+        view.followsPlayer = false;
+        view.him.gap = 4;
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 2);
+        view.visible = false;
+        step(follow);
+        assertTrue(events.said("跟丢了"));
+        assertTrue(events.facts.stream().allMatch(attached -> attached == null), "跟的不是玩家时不挂 player");
     }
 
     @Test

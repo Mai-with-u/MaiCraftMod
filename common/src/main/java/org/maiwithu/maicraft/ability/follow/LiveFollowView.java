@@ -66,7 +66,9 @@ public final class LiveFollowView implements FollowView {
         lockedType = typeOf(found);
         lockedPlayer = found instanceof Player;
         String name = found instanceof Player player ? player.getGameProfile().getName() : lockedType;
-        return new Locked(lockedEntityId, lockedType, name, positionOf(found), directionOf(self, found));
+        // 跟的是玩家才交出 UUID：跟随状况事件按它告诉宿主跟的是哪位玩家；动物、女仆这类不报。
+        return new Locked(lockedEntityId, lockedType, name, positionOf(found), directionOf(self, found),
+                lockedPlayer ? lockedUuid : null);
     }
 
     @Override

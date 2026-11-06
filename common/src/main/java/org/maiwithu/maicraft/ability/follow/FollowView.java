@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.follow;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
@@ -38,8 +39,13 @@ interface FollowView {
      */
     Optional<BlockPos> asideSpot(TickContext context, Sighting him, double headingX, double headingZ, int distance);
 
-    /** 刚锁定时的目标：游戏实体编号、类型、名字（玩家名或类型）、位置与方位。 */
-    record Locked(int entityId, String type, String name, WorldPosition position, String direction) {}
+    /**
+     * 刚锁定时的目标：游戏实体编号、类型、名字（玩家名或类型）、位置与方位。
+     *
+     * @param playerUuid 跟的是玩家时他的 UUID，跟随状况事件按它告诉宿主跟的是谁；跟的不是玩家为 null
+     */
+    record Locked(int entityId, String type, String name, WorldPosition position, String direction,
+                  UUID playerUuid) {}
 
     /** 看不见他时他在不在线。 */
     enum Presence {

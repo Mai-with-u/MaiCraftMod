@@ -23,9 +23,11 @@ import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.follow.FollowedPlayer;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.survival.hunger.OthersFoodTaken;
 import org.maiwithu.maicraft.game.ReceivedChat;
+import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.event.ChatEvent;
@@ -53,6 +55,7 @@ import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ResultJson;
 import org.maiwithu.maicraft.mcp.tool.ToolCatalog;
 import org.maiwithu.maicraft.mcp.tool.ToolReply;
+import org.maiwithu.maicraft.mcp.view.WorldIdentityView;
 
 /**
  * 接口快照：LLM 经 MCP 看得到的东西——握手说明与五个工具的参数表、生产清单里每个能力的参数表与目标对象、
@@ -196,6 +199,13 @@ class InterfaceSnapshotTest {
         shapes.add("timer_due_event", ResultJson.event(new TaskEvent(12, TaskEvent.Kind.TIMER_DUE,
                 TaskEventLog.NO_GOAL, "计时 3 到点：回 (12, 64, -30) 的熔炉取干海带 ×64（641 秒前设的；此刻白天）", null, null,
                 List.of(), new Timers.Due(3, "回 (12, 64, -30) 的熔炉取干海带 ×64"))));
+        // 跟随状况：跟的是玩家时挂上 player（玩家名与 UUID），宿主按 UUID 认出跟的是谁，不解析句子。
+        shapes.add("follow_status_event", ResultJson.event(new TaskEvent(13, TaskEvent.Kind.FOLLOW_STATUS,
+                TaskEventLog.NO_GOAL, "跟随 Steve：他回到我身边了，接着跟", null, null, List.of(),
+                new FollowedPlayer("Steve", "8667ba71-b85a-4004-af54-457a9734eed7"))));
+        // 角色在哪个世界：events 每一页与 observe(self) 都带同一个 world，online_mode 说服务器验不验正版账号。
+        shapes.add("world", WorldIdentityView.of(new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE,
+                "新的世界", null, Path.of("state"), false)));
         // 聊天流里一条玩家说的话：发言人名字、UUID，以及发言人是不是此刻在线玩家列表里的那个玩家。
         ReceivedChat said = ReceivedChat.fromPlayer("麦麦过来", UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
                 "Steve", true, false, null).orElseThrow();

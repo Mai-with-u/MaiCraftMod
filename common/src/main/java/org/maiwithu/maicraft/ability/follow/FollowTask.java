@@ -689,9 +689,13 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         yielding = false;
     }
 
+    // 跟随状况发一句话；跟的是玩家时再挂上他的名字和 UUID（事件字段 player），宿主按 UUID 认出跟的是谁，
+    // 点名时用的是观察编号、玩家改了显示名也对得上。跟的是动物、女仆这类时不挂。
     private void tell(String what) {
         String who = target == null ? "" : "跟随 " + target.name() + "：";
-        events.publish(TaskEvent.Kind.FOLLOW_STATUS, who + what);
+        FollowedPlayer player = target == null || target.playerUuid() == null ? null
+                : new FollowedPlayer(target.name(), target.playerUuid().toString());
+        events.publish(TaskEvent.Kind.FOLLOW_STATUS, who + what, player);
     }
 
     private static String spot(FollowView.Sighting him) {
