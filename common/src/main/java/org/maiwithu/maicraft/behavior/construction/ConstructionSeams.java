@@ -79,6 +79,14 @@ public final class ConstructionSeams {
     /** 许可：角色自己挑的一格能不能挖、能不能放，全仓只有许可检查点回答。 */
     public interface Guards {
         Optional<Problem> allows(PermissionCheck.WorldAction action, BlockPos pos, String blockType);
+
+        /**
+         * 这一格是别人放在角色家里的：回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；不是给空串。
+         * 清障拆掉它时写进变化的说明，主播看得出动的是谁的东西。
+         */
+        default String othersAtHomeNote(BlockPos pos) {
+            return "";
+        }
     }
 
     /** 放置预测：从现在站的位置点 clicked 的 face 放这一格，原版会放成什么；算不出为空。 */

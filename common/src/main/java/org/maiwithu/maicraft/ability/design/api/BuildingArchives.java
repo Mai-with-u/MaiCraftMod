@@ -128,6 +128,8 @@ public final class BuildingArchives {
             root.addProperty("last_check_at", archive.lastCheckAt().toString());
             root.addProperty("last_check_note", archive.lastCheckNote());
         }
+        // 读现场建的档记一笔：圈"她自己的家"时不把别人的房子算进来。她盖的不写，旧档案读回来也按她盖的算。
+        if (archive.readFromSite()) root.addProperty("read_from_site", true);
         return root.toString();
     }
 
@@ -139,6 +141,7 @@ public final class BuildingArchives {
                 BlockPos.of(root.get("anchor").getAsLong()), root.get("rotation").getAsInt(),
                 root.has("design_id") ? root.get("design_id").getAsString() : null, cells,
                 root.has("last_check_at") ? Instant.parse(root.get("last_check_at").getAsString()) : null,
-                root.has("last_check_note") ? root.get("last_check_note").getAsString() : null);
+                root.has("last_check_note") ? root.get("last_check_note").getAsString() : null,
+                root.has("read_from_site") && root.get("read_from_site").getAsBoolean());
     }
 }

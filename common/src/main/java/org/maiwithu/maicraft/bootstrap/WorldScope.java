@@ -129,6 +129,8 @@ public final class WorldScope {
     private final OwnershipMap ownership;
     /** 记住的区域每刻抄一份：寻路在后台线程上也要读。 */
     private final RegionsSnapshot regions;
+    /** 圈出角色自己的家：最近睡过的床、她按图盖过的房子；客户端刻里隔几秒抄一次。 */
+    private final OwnHomeSnapshot ownHome;
     /** 角色此刻所在的维度：寻路在后台线程上问保护时按它定位置。 */
     private volatile String dimension;
     /** 这个世界的目标运行存盘：退出游戏、换世界之后，没做完的目标从这里读回来。 */
@@ -182,6 +184,12 @@ public final class WorldScope {
     // 全仓唯一的保护判断：归属记录、记住的区域与地标、自家人之外再接两路现场读数，都读当刻的角色上下文。
     // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待；
     // 村庄按看得见村民认：收回睡过的床时村里的那张让开。读不到当刻的现场（还没进世界、人接管中）就不猜、按没看见算。
+    // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
+    private static TrustedPlayers trustedPlayers(InstanceConfig instanceConfig, Minecraft minecraft) {
+        return new TrustedPlayers(instanceConfig.trustedPlayers(), name -> OnlinePlayers.idByName(minecraft, name));
+    }
+
+    // 角色自己的家按床与她盖过的房子圈（快照），家里别人放的她亲手用、改都行；拒绝和回报里说是谁放的，编号按在线玩家换成名字。
     private Protection assembleProtection(WorldMemory memory, PlayerControlBoundary playerControl, String selfPlayerId) {
         return new Protection(ownership, regions, memory,
                 new LivePlayerMadeGuesses(position -> playerControl.activeContext()
@@ -189,7 +197,9 @@ public final class WorldScope {
                                 : context.level().getBlockState(new BlockPos(position.x(), position.y(), position.z())))
                         .orElse(null)),
                 selfPlayerId, trusted,
-                new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)));
+                new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)),
+                ownHome,
+                id -> playerControl.activeContext().map(context -> OnlinePlayers.nameOrId(context, id)).orElse(id));
     }
 
     /** @param save 握手认出的世界：现场只在认出世界之后才建，记忆按它分开存 */
@@ -230,9 +240,10 @@ public final class WorldScope {
         this.ownership = new OwnershipMap(session, minecraft.player.getUUID().toString());
         this.regions = new RegionsSnapshot(memory);
         this.regions.refresh();
-        // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
-        this.trusted = new TrustedPlayers(instanceConfig.trustedPlayers(),
-                name -> OnlinePlayers.idByName(minecraft, name));
+        this.trusted = trustedPlayers(instanceConfig, minecraft);
+        // 建筑档案库先建好：圈"她自己的家"要读她盖过的房子（进世界先抄一次）。
+        this.buildingArchives = new BuildingArchives(documents, identity.key());
+        this.ownHome = new OwnHomeSnapshot(memory, buildingArchives, System.currentTimeMillis());
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.dimension = minecraft.level.dimension().location().toString();
         installNavigationProtection();
@@ -249,7 +260,6 @@ public final class WorldScope {
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
                 compat::recipePages, instanceConfig.idleLooking());
-        this.buildingArchives = new BuildingArchives(documents, identity.key());
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
@@ -345,9 +355,10 @@ public final class WorldScope {
         if (player == null) {
             return;
         }
-        // 保护判断要的现场先刷新：维度、记住的区域、角色周围的方块归属。
+        // 保护判断要的现场先刷新：维度、记住的区域、自己的家（隔几秒抄一次）、角色周围的方块归属。
         dimension = current.level().dimension().location().toString();
         regions.refresh();
+        ownHome.refresh(System.currentTimeMillis());
         ownership.tick(dimension, player.blockPosition());
         Instant when = Instant.now();
         var self = new ClientSelfSight(() -> current).current();

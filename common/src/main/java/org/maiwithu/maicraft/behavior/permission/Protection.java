@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import org.maiwithu.maicraft.behavior.worldmemory.RemembersRegions;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -21,6 +22,11 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  *
  * <p>存储另有一问（{@link #mayUseStorage}）：箱子、AE 网络这类拿来取用、存放的东西，
  * 自家人（所有者在实例配置里列的信任玩家）放的也能用；拆、改仍按 {@link #blockProtected} 当别人的。
+ *
+ * <p>角色自己的家里（记住的"家"、最近睡过的自己那张床周围 {@link #HOME_RADIUS_BLOCKS} 格，以及她按图盖过的每一栋
+ * 外扩 {@link #OWN_BUILDING_MARGIN} 格）放开一层：别人放的方块和存储，她亲手去用、去拿、按图去改都行
+ * （{@link #protectedByUnlessHome}、{@link #storageUse}），回报里写明是谁放的。记住的区域与这次任务额外保护的地标照旧挡；
+ * 寻路顺手挖、自动挑取材点这类不是亲手点的，仍按 {@link #blockProtected} 当别人的。主播在游戏里说过"自己家可以随便改"。
  */
 public final class Protection {
 
@@ -32,6 +38,8 @@ public final class Protection {
     public static final double HOME_RADIUS_BLOCKS = 8.0;
     /** 村庄的范围：一格周围这么近看得见村民，就当它在村里（村民夜里睡在床上、白天在村里转）。玩家常识。 */
     public static final double VILLAGE_RADIUS_BLOCKS = 32.0;
+    /** 自己盖过的一栋往外扩几格也算家里：贴墙的台阶、屋檐下的箱子、门口那一格。 */
+    public static final int OWN_BUILDING_MARGIN = 2;
 
     private final ReadsBlockOwnership ownership;
     private final RemembersRegions regions;
@@ -40,6 +48,8 @@ public final class Protection {
     private final String selfPlayerId;
     private final TrustedPlayers trusted;
     private final SeesVillagers villagers;
+    private final ReadsOwnHome home;
+    private final Function<String, String> names;
 
     /**
      * @param ownership     方块归属的只读接缝（服务端记录）
@@ -66,6 +76,16 @@ public final class Protection {
      */
     public Protection(ReadsBlockOwnership ownership, RemembersRegions regions, ReadsRememberedPlaces places,
             GuessesPlayerMade guesses, String selfPlayerId, TrustedPlayers trusted, SeesVillagers villagers) {
+        this(ownership, regions, places, guesses, selfPlayerId, trusted, villagers, ReadsOwnHome.NOWHERE, id -> id);
+    }
+
+    /**
+     * @param home  圈出角色自己的家要读的床与盖过的房子；没接上时传 {@link ReadsOwnHome#NOWHERE}
+     * @param names 玩家编号换成名字（在线写名字，不在线写编号）：拒绝理由与回报里说是谁放的
+     */
+    public Protection(ReadsBlockOwnership ownership, RemembersRegions regions, ReadsRememberedPlaces places,
+            GuessesPlayerMade guesses, String selfPlayerId, TrustedPlayers trusted, SeesVillagers villagers,
+            ReadsOwnHome home, Function<String, String> names) {
         this.ownership = ownership;
         this.regions = regions;
         this.places = places;
@@ -73,6 +93,8 @@ public final class Protection {
         this.selfPlayerId = selfPlayerId;
         this.trusted = Objects.requireNonNull(trusted, "trusted");
         this.villagers = Objects.requireNonNull(villagers, "villagers");
+        this.home = Objects.requireNonNull(home, "home");
+        this.names = Objects.requireNonNull(names, "names");
     }
 
     /**
@@ -87,7 +109,66 @@ public final class Protection {
      * @param protectedLandmarks 这次任务额外保护的地标名
      */
     public boolean blockProtected(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
-        return blockProtected(position, protectedLandmarks, () -> guesses.likelyPlayerMade(position, blockType));
+        return protectedBy(position, blockType, protectedLandmarks).protects();
+    }
+
+    /** 同 {@link #blockProtected}，多给出是哪一路挡的：拒绝时照它说清是记录、区域、地标、推断还是归属没问到。 */
+    public ProtectedBy protectedBy(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        return protectedBy(position, protectedLandmarks, () -> guesses.likelyPlayerMade(position, blockType));
+    }
+
+    /**
+     * 角色亲手去用、去改这一格时挡不挡：家外和 {@link #protectedBy} 一样；在自己家里，别人放的、归属没问到的、
+     * 看着像玩家放的都放开，只有记住的区域和这次任务额外保护的地标照旧挡。
+     * 只给"点了这一格"的动作用（用东西、按图施工）；寻路顺手挖、自动挑取材点不走这里。
+     */
+    public ProtectedBy protectedByUnlessHome(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        ProtectedBy reason = protectedBy(position, blockType, protectedLandmarks);
+        return liftedAtHome(reason.route()) && homeOf(position).isPresent() ? ProtectedBy.NONE : reason;
+    }
+
+    // 家里放开的是"不知道是不是别人的、或记录说是别人的"这几路；区域与地标是调用方或角色自己点名要护着的，不放开。
+    private static boolean liftedAtHome(ProtectedBy.Route route) {
+        return route == ProtectedBy.Route.PLACED_BY_OTHER || route == ProtectedBy.Route.OWNER_UNKNOWN
+                || route == ProtectedBy.Route.LOOKS_PLAYER_MADE;
+    }
+
+    /**
+     * 这一格在不在角色自己的家里，在的话说成一小句"在你家（记住的家旁）"这类：记住的"家"、
+     * 最近睡过的那张床周围 {@link #HOME_RADIUS_BLOCKS} 格（床的归属记录写着是别人放的不算，那是借住），
+     * 或她按图盖过的一栋外扩 {@link #OWN_BUILDING_MARGIN} 格以内。都不沾给空。
+     */
+    public Optional<String> homeOf(WorldPosition position) {
+        if (insideHome(position)) return Optional.of("在你家（记住的家旁）");
+        Optional<WorldPosition> bed = home.sleptBed();
+        if (bed.isPresent() && sameDimension(bed.get(), position) && distance(bed.get(), position) <= HOME_RADIUS_BLOCKS
+                && placedByOther(bed.get()).isEmpty()) {
+            return Optional.of("在你家（你睡的床旁）");
+        }
+        for (ReadsOwnHome.Building building : home.ownBuildings()) {
+            if (building.around(position, OWN_BUILDING_MARGIN)) return Optional.of("在你盖的「" + building.name() + "」里");
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 动别人放在角色家里的一格时，回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；
+     * 不是别人放的（自己放的、没有记录的）、或不在家里给空串。
+     */
+    public String othersAtHomeNote(WorldPosition position) {
+        Optional<String> owner = placedByOther(position);
+        if (owner.isEmpty()) return "";
+        return homeOf(position).map(where -> "是 " + nameOf(owner.get()) + " 放的，" + where).orElse("");
+    }
+
+    /** 玩家编号换成名字：在线写名字，不在线写编号。 */
+    public String nameOf(String playerId) {
+        return names.apply(playerId);
+    }
+
+    /** 是哪一路挡的，说成一小句（玩家写名字）；不受保护给空串。 */
+    public String describe(ProtectedBy reason) {
+        return reason.describe(names);
     }
 
     /**
@@ -99,23 +180,31 @@ public final class Protection {
      */
     public boolean blockProtectedAsSeen(WorldPosition position, Set<String> protectedLandmarks,
             boolean seenPlayerMade) {
-        return blockProtected(position, protectedLandmarks, () -> seenPlayerMade);
+        return protectedBy(position, protectedLandmarks, () -> seenPlayerMade).protects();
     }
 
-    private boolean blockProtected(WorldPosition position, Set<String> protectedLandmarks,
+    private ProtectedBy protectedBy(WorldPosition position, Set<String> protectedLandmarks,
             BooleanSupplier likelyPlayerMade) {
         // 拿不准就按受保护处理：归属还没问到，宁可少动一格。
-        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) return true;
+        if (!ownership.known(position.dimension(), position.x(), position.y(), position.z())) {
+            return ProtectedBy.only(ProtectedBy.Route.OWNER_UNKNOWN);
+        }
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
                 ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
         // 归属记录查得到就以它为准：别人放的受保护，自己放的临时方块不算。
-        if (placedBy.isPresent()) return !placedBy.get().playerId().equals(selfPlayerId);
-        for (RememberedRegion region : regions.regions()) {
-            if (region.contains(position)) return true;
+        if (placedBy.isPresent()) {
+            String owner = placedBy.get().playerId();
+            return owner.equals(selfPlayerId) ? ProtectedBy.NONE : ProtectedBy.placedBy(owner);
         }
-        if (inProtectedLandmark(position, protectedLandmarks)) return true;
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) {
+                return ProtectedBy.inside(ProtectedBy.Route.IN_REMEMBERED_REGION, region.name());
+            }
+        }
+        Optional<String> landmark = protectedLandmarkHit(position, protectedLandmarks);
+        if (landmark.isPresent()) return ProtectedBy.inside(ProtectedBy.Route.NEAR_PROTECTED_LANDMARK, landmark.get());
         // 记录与区域都说不清，才靠猜；猜像就当是。前几路都没命中才去猜，现场读数只在这时才读。
-        return likelyPlayerMade.getAsBoolean();
+        return likelyPlayerMade.getAsBoolean() ? ProtectedBy.only(ProtectedBy.Route.LOOKS_PLAYER_MADE) : ProtectedBy.NONE;
     }
 
     /**
@@ -137,8 +226,19 @@ public final class Protection {
     /**
      * 同 {@link #mayUseStorage}，多给出不能用时是哪一路挡的、记在谁名下：跳过别人的箱子时说明里照它说清是谁的。
      * 判断顺序：额外保护的地标、归属没问到、归属记录（自己或自家人放的能用）、记住的区域、玩家放置推断。
+     * 在角色自己的家里，记录写着别人放的、归属没问到的、看着像玩家放的都能用（{@link StorageUse.Kind#AT_HOME}），
+     * 记录上有人的带上是谁放的，好在回报里写明；记住的区域与额外保护的地标照旧不用。
      */
     public StorageUse storageUse(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
+        StorageUse use = storageUseOutsideHome(position, blockType, protectedLandmarks);
+        boolean liftable = use.kind() == StorageUse.Kind.PLACED_BY_OTHER || use.kind() == StorageUse.Kind.OWNER_UNKNOWN
+                || use.kind() == StorageUse.Kind.LOOKS_PLAYER_MADE;
+        if (!liftable) return use;
+        // 家里的箱子是她过日子用的：主播在游戏里说过自己家可以随便改，别人放进来的也拿来用，回报写明是谁放的。
+        return homeOf(position).map(where -> StorageUse.atHome(use.placedBy(), where)).orElse(use);
+    }
+
+    private StorageUse storageUseOutsideHome(WorldPosition position, String blockType, Set<String> protectedLandmarks) {
         Optional<String> landmark = protectedLandmarkHit(position, protectedLandmarks);
         if (landmark.isPresent()) return StorageUse.inside(StorageUse.Kind.NEAR_PROTECTED_LANDMARK, landmark.get());
         // 归属还没问到服务端：不知道是谁的，按别人的算，宁可少翻一只箱子。
@@ -237,16 +337,21 @@ public final class Protection {
      * 和别的方块同一套规矩（2026-10-25 拍板，推断此刻只认门类结构件，对床还说不上话）。
      * 村庄里的床不在这里挡，收回来源直接让开（{@link #inVillage}）：那是村民的，不该走"点名许可"这条路。
      */
-    public boolean sleptBedProtected(WorldPosition position, Set<String> protectedLandmarks) {
+    public ProtectedBy sleptBedProtectedBy(WorldPosition position, Set<String> protectedLandmarks) {
         Optional<ReadsBlockOwnership.PlacedBy> placedBy =
                 ownership.whoPlaced(position.dimension(), position.x(), position.y(), position.z());
-        if (placedBy.isPresent()) return !placedBy.get().playerId().equals(selfPlayerId);
-        for (RememberedRegion region : regions.regions()) {
-            if (region.contains(position)) return true;
+        if (placedBy.isPresent()) {
+            String owner = placedBy.get().playerId();
+            return owner.equals(selfPlayerId) ? ProtectedBy.NONE : ProtectedBy.placedBy(owner);
         }
-        if (inProtectedLandmark(position, protectedLandmarks)) return true;
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) return ProtectedBy.inside(ProtectedBy.Route.IN_REMEMBERED_REGION, region.name());
+        }
+        Optional<String> landmark = protectedLandmarkHit(position, protectedLandmarks);
+        if (landmark.isPresent()) return ProtectedBy.inside(ProtectedBy.Route.NEAR_PROTECTED_LANDMARK, landmark.get());
         // 记录、区域、地标都说不清：照别的方块一样靠推断兜底，像玩家放的就当是别人的。
-        return guesses.likelyPlayerMade(position, null);
+        return guesses.likelyPlayerMade(position, null) ? ProtectedBy.only(ProtectedBy.Route.LOOKS_PLAYER_MADE)
+                : ProtectedBy.NONE;
     }
 
     /**
@@ -286,10 +391,6 @@ public final class Protection {
             if (Math.sqrt(dx * dx + dy * dy + dz * dz) <= LANDMARK_RADIUS) return Optional.of(name);
         }
         return Optional.empty();
-    }
-
-    private boolean inProtectedLandmark(WorldPosition position, Set<String> protectedLandmarks) {
-        return protectedLandmarkHit(position, protectedLandmarks).isPresent();
     }
 
     /**

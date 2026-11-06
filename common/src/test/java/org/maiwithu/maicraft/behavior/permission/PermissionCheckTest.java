@@ -99,6 +99,8 @@ class PermissionCheckTest {
         assertEquals(Problem.Kind.NEED_APPROVAL, refusal.kind());
         assertTrue(refusal.message().contains("(10, 64, 10)"), refusal.message());
         assertTrue(refusal.suggestion().contains("观察编号"), refusal.suggestion());
+        // 说清是哪一路挡的：这一格是服务端归属记录写着别人放的，不只给一句笼统的"玩家放的或在玩家的地盘里"。
+        assertTrue(refusal.message().contains("服务端归属记录写着是 " + OTHER + " 放的"), refusal.message());
     }
 
     @Test

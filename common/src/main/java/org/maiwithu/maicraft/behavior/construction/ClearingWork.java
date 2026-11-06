@@ -234,7 +234,8 @@ final class ClearingWork extends ConstructionWork {
             records.attempt("用工具拆下 " + cell.pos().toShortString(), "拆完方块还在，改用挖");
             return dig();
         }
-        records.change(new Change(Change.Kind.BLOCK_BROKEN, blockId(before), 1, "清障 " + cell.pos().toShortString()));
+        records.change(new Change(Change.Kind.BLOCK_BROKEN, blockId(before), 1,
+                withOwner("清障 " + cell.pos().toShortString(), cell.pos())));
         site.cleared(cell);
         if (step == Step.DIG) settleChained();
         cell = null;
@@ -248,7 +249,8 @@ final class ClearingWork extends ConstructionWork {
             if (!services.site().state(pos).isAir()) continue;
             PlannedCell planned = take(pos);
             if (planned == null) continue;
-            records.change(new Change(Change.Kind.BLOCK_BROKEN, entry.getValue(), 1, "连锁清障 " + pos.toShortString()));
+            records.change(new Change(Change.Kind.BLOCK_BROKEN, entry.getValue(), 1,
+                    withOwner("连锁清障 " + pos.toShortString(), pos)));
             site.cleared(planned);
         }
         around = Map.of();
@@ -282,5 +284,11 @@ final class ClearingWork extends ConstructionWork {
 
     private static String blockId(BlockState state) {
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+    }
+
+    // 拆掉的是别人放在角色家里的一格：说明后面带上是谁放的，主播在回报里看得出动的是谁的东西。
+    private String withOwner(String note, BlockPos pos) {
+        String owner = services.guards().othersAtHomeNote(pos);
+        return owner.isEmpty() ? note : note + "（" + owner + "）";
     }
 }

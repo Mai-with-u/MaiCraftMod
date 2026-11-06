@@ -236,8 +236,12 @@ final class UseTargets {
         }
         ResolvedTarget target = ResolvedTarget.block(cell, now, label + " " + now + " " + cell.toShortString());
         if (!named && guarded(target)) {
+            // 说清是哪一路挡的（归属记录写着谁放的、记住的区域、地标、推断、归属没问到），不只给一句笼统的。
+            UseSeams.OthersThings others = services.others();
+            String why = others == null ? "保护判断还没接上，拿不准就按别人的算"
+                    : others.whyOthers(target, input.permissions().protectedLandmarks());
             return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
-                    target.describe() + " 是别人的（玩家放的或在玩家的地盘里），这样用会改动它，不碰",
+                    target.describe() + " 不是你的（" + why + "），这样用会改动它，不碰",
                     "确实要用，就先 observe 再用观察编号点名它"));
         }
         return new Lookup.Found(target);

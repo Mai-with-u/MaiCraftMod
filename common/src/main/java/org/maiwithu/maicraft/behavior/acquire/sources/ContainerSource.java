@@ -222,8 +222,11 @@ public final class ContainerSource implements ItemSource {
         if (!use.usable() && !takableUnderAllowance(use, request)) {
             return Optional.empty();
         }
+        // 家里别人放的箱子照用：名字后面带上是谁放的，开箱取货的说明与结果里看得出拿的是谁的东西，主播知情。
+        String note = use.homeNote(ownerNames);
         KnownContainer known = new KnownContainer(
-                container.name(), container.at(), container.blockTypeId());
+                note.isEmpty() ? container.name() : container.name() + "（" + note + "）", container.at(),
+                container.blockTypeId());
         List<ItemRequest> wants = new ArrayList<>();
         if (!use.usable()) {
             // 别人的箱子：放行绑到这一只上，开箱时只拿放行的那一样、刚好够的件数，拿到了报回去；顺路的别样一件不拿。

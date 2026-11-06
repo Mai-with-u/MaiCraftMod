@@ -74,14 +74,14 @@ public final class PermissionCheck {
                     throw new IllegalArgumentException("坐标没给高度，先落实到具体哪一格再检查许可");
                 }
                 return blockAllowed(permissions, action,
-                        new WorldPosition(position.x(), position.y(), position.z(), position.dimension()), null);
+                        new WorldPosition(position.x(), position.y(), position.z(), position.dimension()), (String) null);
             }
             case Target.Landmark landmark -> {
                 requireBlockAction(action);
                 // 地标还不知道在哪（没记过）：位置落实不了，等能力先找到它、拿位置再来检查。
                 var spot = protection.landmarkPosition(landmark.name());
                 return spot.isEmpty() ? Optional.empty()
-                        : blockAllowed(permissions, action, spot.get(), null);
+                        : blockAllowed(permissions, action, spot.get(), (String) null);
             }
             case Target.Player player -> {
                 requireCreatureAction(action);
@@ -100,9 +100,8 @@ public final class PermissionCheck {
      * 许可档位上按自己放的东西算，temporary 档也放行收回。是别人放的床在收回来源里已经让开。
      */
     public Optional<Problem> sleptBedReclaimAllowed(Permissions permissions, WorldPosition position) {
-        if (protection.sleptBedProtected(position, permissions.protectedLandmarks())) {
-            return Optional.of(protectedBlockRejection(WorldAction.DIG_BLOCK, position, permissions));
-        }
+        ProtectedBy reason = protection.sleptBedProtectedBy(position, permissions.protectedLandmarks());
+        if (reason.protects()) return Optional.of(protectedBlockRejection(position, permissions, reason));
         // 档位按"收回自己放的"算：temporary 档放行，none 一格都不动。
         if (permissions.changeBlocks() == Permissions.BlockChanges.NONE) {
             return Optional.of(tierRejection(permissions, describe(position)));
@@ -117,8 +116,34 @@ public final class PermissionCheck {
     public Optional<Problem> blockAllowed(Permissions permissions, WorldAction action,
             WorldPosition position, String blockType) {
         requireBlockAction(action);
-        if (protection.blockProtected(position, blockType, permissions.protectedLandmarks())) {
-            return Optional.of(protectedBlockRejection(action, position, permissions));
+        return blockAllowed(permissions, action, position,
+                protection.protectedBy(position, blockType, permissions.protectedLandmarks()));
+    }
+
+    /**
+     * 按图施工这类"点了这一格"的动手能不能做：和 {@link #blockAllowed} 一样过保护与档位，
+     * 只是在角色自己的家里，别人放的、归属没问到的、看着像玩家放的不挡（{@link Protection#protectedByUnlessHome}）。
+     * 寻路顺手挖、自动挑取材点不用它，照旧走 {@link #blockAllowed}。
+     */
+    public Optional<Problem> blockAllowedUnlessHome(Permissions permissions, WorldAction action,
+            WorldPosition position, String blockType) {
+        requireBlockAction(action);
+        return blockAllowed(permissions, action, position,
+                protection.protectedByUnlessHome(position, blockType, permissions.protectedLandmarks()));
+    }
+
+    /**
+     * 动别人放在角色家里的一格时，回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；
+     * 不是别人放的、或不在家里给空。按图施工清障、改建时写进变化的说明，主播看得出动的是谁的东西。
+     */
+    public String othersAtHomeNote(WorldPosition position) {
+        return protection.othersAtHomeNote(position);
+    }
+
+    private Optional<Problem> blockAllowed(Permissions permissions, WorldAction action, WorldPosition position,
+            ProtectedBy reason) {
+        if (reason.protects()) {
+            return Optional.of(protectedBlockRejection(position, permissions, reason));
         }
         if (action == WorldAction.PLACE_BLOCK && permissions.changeBlocks() == Permissions.BlockChanges.NONE) {
             return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
@@ -268,18 +293,19 @@ public final class PermissionCheck {
                 "把 change_blocks 提到 natural 或 any；只是要搭临时方块再收回的话，提到 temporary 也能收");
     }
 
-    /** 受保护方块的拒绝：说清是哪路保护挡的，以及为什么许可档位开不到它。 */
-    private Problem protectedBlockRejection(WorldAction action, WorldPosition position,
-            Permissions permissions) {
+    /**
+     * 受保护方块的拒绝：说清是哪一路挡的（归属记录写着谁放的、记住的区域、额外保护的地标、推断、归属没问到），
+     * 以及为什么许可档位开不到它。
+     */
+    private Problem protectedBlockRejection(WorldPosition position, Permissions permissions, ProtectedBy reason) {
         String where = describe(position);
-        var landmark = protection.protectedLandmarkHit(position, permissions.protectedLandmarks());
-        if (landmark.isPresent()) {
+        if (reason.route() == ProtectedBy.Route.NEAR_PROTECTED_LANDMARK) {
             return Problem.of(Problem.Kind.NEED_APPROVAL,
-                    where + "在额外保护的地标『" + landmark.get() + "』旁边，不能动",
-                    "把『" + landmark.get() + "』从 protected_landmarks 里去掉，或明确点名这个目标");
+                    where + "在额外保护的地标『" + reason.place() + "』旁边，不能动",
+                    "把『" + reason.place() + "』从 protected_landmarks 里去掉，或明确点名这个目标");
         }
         return Problem.of(Problem.Kind.NEED_APPROVAL,
-                where + "是玩家放的或在玩家的地盘里（服务端记录、记住的区域或推断），任何许可档位都不动它",
+                where + "不是你的：" + protection.describe(reason) + "，任何许可档位都不动它",
                 "想动它，就用观察编号明确点名这个目标");
     }
 

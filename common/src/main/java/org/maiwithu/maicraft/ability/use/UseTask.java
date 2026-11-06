@@ -59,6 +59,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Action prepared;
     /** 落实下来的目标；只对手上的东西用时为 null。 */
     private ResolvedTarget target;
+    /** 这一下会改动别人放在角色家里的那一格时，回报里补的归属半句；不是为空串。 */
+    private String othersAtHome = "";
     /** 要走去加载出来的那一片。 */
     private WorldPosition travelTo;
     private boolean travelled;
@@ -131,6 +133,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Next<Phase> found(ResolvedTarget resolved) {
         // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面；要连着点的每一下只等几刻。
         target = resolved.facing(input.face()).quickly(input.keepTrying() > 0);
+        // 家里别人放的一格放开给她用：会改动它时记下是谁放的，收场时写进那句话，主播知情。
+        UseSeams.OthersThings others = services.others();
+        othersAtHome = others != null && others.changesWorld(input.item(), target) ? others.othersAtHomeNote(target) : "";
         if (target.isEntity()) {
             if (services.world().riding(target.entityId())) {
                 riding = target.typeId();
@@ -526,7 +531,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();
         }
-        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次"));
+        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次"
+                + (othersAtHome.isEmpty() ? "" : "；它" + othersAtHome)));
     }
 
     // 子动作的通用走向：还在做就等；做完了执行给定走向；失败了按"停下"结算。

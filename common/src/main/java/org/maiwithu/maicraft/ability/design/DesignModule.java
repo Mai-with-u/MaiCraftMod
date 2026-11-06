@@ -247,8 +247,9 @@ public final class DesignModule implements AbilityModule {
         if (archive == null && params.has("name")) {
             // 给了名字、这一栋还没档案：照读出来的这一版建一份，锚点是范围最小角、朝向 0，之后 build 指着它改。
             String unique = records.archives().unusedName(name, site.dimension(), origin);
+            // 读现场建的档记成"读来的"：那一栋可能是别人的房子，不算进她自己的家。
             BuildingArchive created = new BuildingArchive(unique, site.dimension(), origin, 0, design.id(), compiled.cells(),
-                    Instant.now(), "读现场建的档，" + read.unseen() + " 格没看到");
+                    Instant.now(), "读现场建的档，" + read.unseen() + " 格没看到", true);
             if (records.archives().save(created)) {
                 records.remember().accept(created);
                 archiveName = unique;

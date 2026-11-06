@@ -110,6 +110,8 @@ class DesignModuleTest {
         assertTrue(!details.layout().freeFloor().isEmpty(), "屋里有能放东西的空地");
         BuildingArchive created = archives.find("庇护所").orElseThrow();
         assertEquals(details.designId(), created.designId(), "档案照读出来的这一版");
+        // 读现场建的档存下又读回来仍记着是读来的：那一栋可能是别人的房子，圈她自己的家时不算进去。
+        assertTrue(created.readFromSite(), "读现场建的档记成读来的");
         assertEquals(List.of(created), remembered);
         // 指着刚建的档案再读：读档案的范围，另给整栋比对。
         JsonObject again = operation("read_site");

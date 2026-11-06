@@ -72,8 +72,8 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         Protection guard = protection.get();
         if (guard == null) return true;
         if (!target.isEntity()) {
-            WorldPosition at = WorldPosition.here(target.cell().getX(), target.cell().getY(), target.cell().getZ());
-            return guard.blockProtected(at, blockId(target), protectedLandmarks);
+            // 用东西是角色亲手点的这一格：在她自己的家里，别人放的也能用、能改（主播说过自己家可以随便改）。
+            return guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks).protects();
         }
         ClientLevel level = level();
         Entity entity = level == null ? null : level.getEntity(target.entityId());
@@ -82,6 +82,25 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         return creatures.situationOf(entity.getUUID())
                 .map(situation -> situation.player() || guard.creatureSomeoneElses(situation))
                 .orElse(true);
+    }
+
+    @Override
+    public String whyOthers(ResolvedTarget target, Set<String> protectedLandmarks) {
+        Protection guard = protection.get();
+        if (guard == null) return "保护判断还没接上，拿不准就按别人的算";
+        if (target.isEntity()) return "有主（有名字、被驯服、拴着绳、圈养着）或是玩家";
+        // 说清是哪一路挡的：归属记录写着谁放的、记住的区域、额外保护的地标、推断，还是归属没问到。
+        return guard.describe(guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks));
+    }
+
+    @Override
+    public String othersAtHomeNote(ResolvedTarget target) {
+        Protection guard = protection.get();
+        return guard == null || target.isEntity() ? "" : guard.othersAtHomeNote(cellOf(target));
+    }
+
+    private static WorldPosition cellOf(ResolvedTarget target) {
+        return WorldPosition.here(target.cell().getX(), target.cell().getY(), target.cell().getZ());
     }
 
     private static String blockId(ResolvedTarget target) {

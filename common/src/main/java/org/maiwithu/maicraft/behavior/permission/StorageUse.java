@@ -9,9 +9,9 @@ import java.util.function.Function;
  * {@link Protection#storageUse} 给的只读结论。跳过别人的存储时说明里照它说清是谁的，不在别处再判断一遍。
  *
  * @param kind     能用，或不能用的原因
- * @param placedBy 归属记录上放它的人的编号；只有 {@link Kind#PLACED_BY_OTHER} 才有，别的为 null
- * @param place    挡住它的地标或记住的区域叫什么；只有 {@link Kind#NEAR_PROTECTED_LANDMARK} 与
- *                 {@link Kind#IN_REMEMBERED_REGION} 才有，别的为 null
+ * @param placedBy 归属记录上放它的人的编号；{@link Kind#PLACED_BY_OTHER} 才有，{@link Kind#AT_HOME} 有记录时也有，别的为 null
+ * @param place    挡住它的地标或记住的区域叫什么（{@link Kind#NEAR_PROTECTED_LANDMARK} 与 {@link Kind#IN_REMEMBERED_REGION}），
+ *                 或在家里的哪一处（{@link Kind#AT_HOME}，例如"在你家（你睡的床旁）"）；别的为 null
  */
 public record StorageUse(Kind kind, String placedBy, String place) {
 
@@ -22,6 +22,8 @@ public record StorageUse(Kind kind, String placedBy, String place) {
     public enum Kind {
         /** 能用。 */
         USABLE,
+        /** 能用：在角色自己的家里，别人放的、拿不准是谁的也拿来用；回报里写明是谁放的。 */
+        AT_HOME,
         /** 在这次任务额外保护的地标旁边。 */
         NEAR_PROTECTED_LANDMARK,
         /** 归属还没问到服务端：不知道是谁的，按别人的算。 */
@@ -43,13 +45,30 @@ public record StorageUse(Kind kind, String placedBy, String place) {
         return new StorageUse(Kind.PLACED_BY_OTHER, playerId, null);
     }
 
+    /** 家里的那一只：别人放的照用，带上放它的人（没有记录为 null）和在家里的哪一处。 */
+    static StorageUse atHome(String placedBy, String where) {
+        return new StorageUse(Kind.AT_HOME, placedBy, where);
+    }
+
     /** 被地标或记住的区域挡住的那一只：挡住它的地方叫什么。 */
     static StorageUse inside(Kind kind, String place) {
         return new StorageUse(kind, null, place);
     }
 
     public boolean usable() {
-        return kind == Kind.USABLE;
+        return kind == Kind.USABLE || kind == Kind.AT_HOME;
+    }
+
+    /**
+     * 拿来用的是家里别人放的那一只时，回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；
+     * 不是（自己的、野外的）给空串。没有归属记录的说"不知道是谁放的"。
+     *
+     * @param names 玩家编号换成名字
+     */
+    public String homeNote(Function<String, String> names) {
+        if (kind != Kind.AT_HOME) return "";
+        String who = placedBy == null ? "不知道是谁放的" : "是 " + names.apply(placedBy) + " 放的";
+        return who + "，" + place;
     }
 
     /**
@@ -67,7 +86,7 @@ public record StorageUse(Kind kind, String placedBy, String place) {
      */
     public String describe(Function<String, String> names) {
         return switch (kind) {
-            case USABLE -> "";
+            case USABLE, AT_HOME -> "";
             case NEAR_PROTECTED_LANDMARK -> "在这次额外保护的地标「" + place + "」旁";
             case OWNER_UNKNOWN -> "不知道是谁的（按别人的算）";
             case PLACED_BY_OTHER -> "记在 " + names.apply(placedBy) + " 名下";

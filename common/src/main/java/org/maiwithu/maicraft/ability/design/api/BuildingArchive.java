@@ -22,9 +22,17 @@ import org.maiwithu.maicraft.behavior.construction.PlannedCell;
  * @param cells         整栋蓝图：相对锚点的计划格，朝向已经转好
  * @param lastCheckAt   最近一次整栋比对的时间；没比过为 null
  * @param lastCheckNote 最近一次整栋比对的一句结论；没比过为 null
+ * @param readFromSite  这份档案是读现场时建的（那一栋不一定是她盖的，可能是别人的房子）；
+ *                      她按图盖的为假。圈"她自己的家"只认她盖的那些
  */
 public record BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
-                              List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote) {
+                              List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote, boolean readFromSite) {
+
+    /** 她按图盖的一栋：盖完、改建时记的档案都是这一种。 */
+    public BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
+                           List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote) {
+        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, false);
+    }
 
     public BuildingArchive {
         Objects.requireNonNull(name, "name");
@@ -51,6 +59,7 @@ public record BuildingArchive(String name, String dimension, BlockPos anchor, in
 
     /** 换一份整栋蓝图（新一版图纸或并过补丁）与这次比对的结论：名字、维度、锚点、朝向不动。 */
     public BuildingArchive with(List<PlannedCell> merged, String newDesignId, Instant checkedAt, String checkNote) {
-        return new BuildingArchive(name, dimension, anchor, rotation, newDesignId, merged, checkedAt, checkNote);
+        return new BuildingArchive(name, dimension, anchor, rotation, newDesignId, merged, checkedAt, checkNote,
+                readFromSite);
     }
 }

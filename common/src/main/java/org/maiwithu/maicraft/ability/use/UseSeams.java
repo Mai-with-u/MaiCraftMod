@@ -199,8 +199,24 @@ final class UseSeams {
         /** 拿着这件东西（空手为 null）对这个目标用一下，算不算改动世界；拿不准算。 */
         boolean changesWorld(String heldItem, ResolvedTarget target);
 
-        /** 这个目标是不是别人的：方块按保护判断，生物按有主（有名字、驯服、拴绳、圈养、玩家）判断；拿不准算别人的。 */
+        /**
+         * 这个目标是不是别人的：方块按保护判断（在角色自己的家里，别人放的也算她能用的），
+         * 生物按有主（有名字、驯服、拴绳、圈养、玩家）判断；拿不准算别人的。
+         */
         boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks);
+
+        /**
+         * 为什么算别人的，说成一小句，例如"服务端归属记录写着是 玩家甲 放的"：拒绝时照它说清是哪一路挡的。
+         * 说不清的给一句笼统的。
+         */
+        default String whyOthers(ResolvedTarget target, Set<String> protectedLandmarks) {
+            return "玩家放的或在玩家的地盘里";
+        }
+
+        /** 目标是别人放在角色家里的一格：回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；不是给空串。 */
+        default String othersAtHomeNote(ResolvedTarget target) {
+            return "";
+        }
     }
 
     /** 看看点开的界面：等内容同步完、列出里面有什么、再关上；打开者负责关闭。 */
