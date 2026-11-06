@@ -2,8 +2,10 @@
 package org.maiwithu.maicraft.ability.bodylanguage;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -64,6 +66,8 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
     private final ClientMovesToMainhand hands;
     private final WalkTo walks;
     private final ClientDropPickup drops;
+    /** 上一回捡东西收场时掉落物确认的序号：只认这之后进包的，不把上一回报过的再报一遍。 */
+    private long pickUpSettledCursor = Long.MIN_VALUE;
     private final AttackKeyPress keys;
 
     public LiveNonverbalMoves(SeenRegistry seen, NonverbalExchange exchange, ClientMovesToMainhand hands, WalkTo walks,
@@ -173,7 +177,7 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
         if (target instanceof Target.Seen id) {
             seen.gameEntityOf(id.id()).ifPresent(items::add);
         } else {
-            items.addAll(exchange.tossedToMe(context.gameTick(), RECENT_TOSS_TICKS));
+            items.addAll(exchange.tossedToMe(context.gameTick(), RECENT_TOSS_TICKS).keySet());
         }
         items.removeIf(entityId -> !(me.clientLevel.getEntity(entityId) instanceof ItemEntity item)
                 || item.isRemoved() || me.distanceTo(item) > PICK_UP_BLOCKS);
@@ -181,16 +185,22 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
     }
 
     // 扔过来的东西落在脚边，原版过两秒就自己捡进背包：按服务器发来的拾取包认是哪几件、几个什么。
+    // 只认落地之后、上一回捡东西收场之后的拾取：连着叫她捡两回，第二回不把第一回报过的再报一遍。
     @Override public Optional<String> alreadyPickedUp(TickContext context, Target target) {
-        Set<Integer> wanted = new HashSet<>();
+        Map<Integer, Long> wanted = new HashMap<>();
         if (target instanceof Target.Seen id) {
-            seen.gameEntityOf(id.id()).ifPresent(wanted::add);
+            // 点名的那件不知道何时落地：只看收场序号。
+            seen.gameEntityOf(id.id()).ifPresent(entityId -> wanted.put(entityId, Long.MIN_VALUE));
         } else {
-            wanted.addAll(exchange.tossedToMe(context.gameTick(), RECENT_TOSS_TICKS));
+            wanted.putAll(exchange.tossedToMe(context.gameTick(), RECENT_TOSS_TICKS));
         }
         List<String> parts = new ArrayList<>();
-        drops.alreadyPickedUp(wanted).forEach((item, count) -> parts.add(count + " 个 " + item));
+        drops.alreadyPickedUp(wanted, pickUpSettledCursor).forEach((item, count) -> parts.add(count + " 个 " + item));
         return parts.isEmpty() ? Optional.empty() : Optional.of(String.join("、", parts));
+    }
+
+    @Override public void pickUpSettled() {
+        drops.cursor().ifPresent(cursor -> pickUpSettledCursor = cursor);
     }
 
     // 只捡这几件：一件就点名捡它；几件就把身边别的掉落物都算成"早就在地上的"，不去碰。

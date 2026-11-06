@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.perception.bodylanguage;
 
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 
@@ -18,8 +18,8 @@ public interface NonverbalExchange {
             return Optional.empty();
         }
 
-        @Override public Set<Integer> tossedToMe(long now, long withinTicks) {
-            return Set.of();
+        @Override public Map<Integer, Long> tossedToMe(long now, long withinTicks) {
+            return Map.of();
         }
 
         @Override public void answered(UUID who) {}
@@ -28,8 +28,8 @@ public interface NonverbalExchange {
     /** 最近 withinTicks 刻内最后一个冲角色做过肢体动作的玩家；没有为空。 */
     Optional<UUID> lastTowardMe(long now, long withinTicks);
 
-    /** 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西（掉落物的实体编号）。 */
-    Set<Integer> tossedToMe(long now, long withinTicks);
+    /** 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西：掉落物的实体编号 → 落地那刻。 */
+    Map<Integer, Long> tossedToMe(long now, long withinTicks);
 
     /** 角色冲他做了肢体动作：回过他了，回头看不再因为没人理他而先不理他。 */
     void answered(UUID who);
@@ -46,9 +46,9 @@ public interface NonverbalExchange {
                 return current == null ? Optional.empty() : current.lastTowardMe(now, withinTicks);
             }
 
-            @Override public Set<Integer> tossedToMe(long now, long withinTicks) {
+            @Override public Map<Integer, Long> tossedToMe(long now, long withinTicks) {
                 NonverbalWatch current = watch.get();
-                return current == null ? Set.of() : current.tossedToMe(now, withinTicks);
+                return current == null ? Map.of() : current.tossedToMe(now, withinTicks);
             }
 
             @Override public void answered(UUID who) {

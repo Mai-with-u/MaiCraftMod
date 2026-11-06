@@ -212,6 +212,8 @@ final class LiveFinder implements FindsAround {
         Set<Integer> seen = new HashSet<>();
         double reach = (double) radius * radius;
         int hidden = 0;
+        // 掉落物按物品数：一件掉落物可能是一堆 64 个，按实体数报会少报。
+        int hiddenItems = 0;
         BlockPos nearestHidden = null;
         double nearestHiddenDistance = 0;
         for (EntitySight.Observation entity : nearby) {
@@ -226,6 +228,7 @@ final class LiveFinder implements FindsAround {
             // 找不够时交代出去（真人听得见山那边的羊叫，知道往哪边走），不让结论读成"附近没有"。
             if (!entity.visible()) {
                 hidden++;
+                hiddenItems += stackCount(entity);
                 double distance = Math.sqrt(position.distSqr(center));
                 if (nearestHidden == null || distance < nearestHiddenDistance) {
                     nearestHidden = position;
@@ -249,14 +252,25 @@ final class LiveFinder implements FindsAround {
                     entity.entityId(), creatureProtected, reason, entity.traits()));
         }
         // 观察一刻读得完：这轮就是全部，如实报扫完。
-        // 找的是地上的掉落物时按"件"数，并说清走到那里原版会自己捡进背包，免得捡到了还以为它在地上。
+        // 找的是地上的掉落物时按物品数报"件"，并说走过去试着捡：走近原版会自己捡，但捡不捡得到要看现场。
         boolean drops = wanted.equals(Set.of(DROPPED_ITEM));
-        String unit = drops ? "件" : "只";
-        String hiddenLead = hidden == 0 ? null : "范围内另有 " + hidden + " " + unit + "被挡住、看不见，最近一" + unit + "在 ("
-                + nearestHidden.getX() + ", " + nearestHidden.getY() + ", " + nearestHidden.getZ() + ")，约 "
-                + Math.round(nearestHiddenDistance) + " 格，"
-                + (drops ? "走到那里会自己捡进背包" : "走过去看得见了再找");
+        if (hidden == 0) return new Round(List.copyOf(hits), true, false, null);
+        String counted = drops ? hiddenItems + " 件" : hidden + " 只";
+        String where = (drops ? "最近的在 (" : "最近一只在 (") + nearestHidden.getX() + ", " + nearestHidden.getY() + ", "
+                + nearestHidden.getZ() + ")，约 " + Math.round(nearestHiddenDistance) + " 格，";
+        String hiddenLead = "范围内另有 " + counted + "被挡住、看不见，" + where + (drops ? "走过去试着捡" : "走过去看得见了再找");
         return new Round(List.copyOf(hits), true, false, hiddenLead);
+    }
+
+    // 一件掉落物是几个：观察特征里的"数量"，读不出按 1 个。
+    private static int stackCount(EntitySight.Observation entity) {
+        String count = entity.traits() == null ? null : entity.traits().get("数量");
+        if (count == null) return 1;
+        try {
+            return Math.max(1, Integer.parseInt(count));
+        } catch (NumberFormatException unreadable) {
+            return 1;
+        }
     }
 
     // 有名字、被驯服、拴着绳、圈养着，占哪条就写哪条：照常报告，但能不能动归许可。

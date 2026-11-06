@@ -138,6 +138,13 @@ final class FakeNonverbalMoves implements NonverbalMoves {
         return alreadyPicked;
     }
 
+    /** 捡东西收场记了几回。 */
+    int pickUpSettled;
+
+    @Override public void pickUpSettled() {
+        pickUpSettled++;
+    }
+
     @Override public Action pickUp(Set<Integer> items) {
         throw new UnsupportedOperationException("替身不捡东西");
     }

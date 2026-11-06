@@ -44,6 +44,16 @@ class NonverbalPickUpTest {
         assertTrue(result.problem().message().startsWith("那件东西不在了"), result.problem().message());
     }
 
+    @Test
+    void 每回捡东西收场都记一次_做完没找到都记_好让下回不再报上回的() {
+        moves.alreadyPicked = Optional.of("3 个 minecraft:iron_ingot");
+        run(null);
+        assertEquals(1, moves.pickUpSettled, "做完收场记一次");
+        moves.alreadyPicked = Optional.empty();
+        run(null);
+        assertEquals(2, moves.pickUpSettled, "没找到收场也记一次，且只记一次");
+    }
+
     private TaskResult run(Target target) {
         NonverbalTask task = new NonverbalTask(new NonverbalInput(NonverbalOperation.PICK_UP, 1, null, 40, target),
                 moves, new PokesGiven());

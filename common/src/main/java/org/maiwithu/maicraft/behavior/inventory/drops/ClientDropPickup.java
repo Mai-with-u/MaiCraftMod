@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -133,15 +134,35 @@ public final class ClientDropPickup implements PicksUpDrops {
     /**
      * 这几件掉落物里，最近一分钟已经被角色收进背包的，按物品 ID 合计几个：走近时原版自动捡起的也算，
      * 只认服务器发给本玩家的拾取包——地上那件不见了不等于进了自己的包，别人捡走的、消失的不在这里。
+     *
+     * @param landedAt    要看的那几件：实体编号 → 落地那刻（不知道何时落地的给 {@link Long#MIN_VALUE}）
+     * @param afterCursor 只认这个序号之后的拾取：上一回捡东西收场时记的那一刻
      */
-    public Map<String, Integer> alreadyPickedUp(Set<Integer> entityIds) {
-        Map<String, Integer> byItem = new LinkedHashMap<>();
+    public Map<String, Integer> alreadyPickedUp(Map<Integer, Long> landedAt, long afterCursor) {
         LocalPlayer player = player();
-        if (player == null || entityIds.isEmpty()) return byItem;
-        for (DropConfirmations.Pickup pickup : confirmations.recentPickups(player)) {
-            if (entityIds.contains(pickup.entityId())) byItem.merge(pickup.itemId(), pickup.amount(), Integer::sum);
+        if (player == null || landedAt.isEmpty()) return new LinkedHashMap<>();
+        return pickedUpAmong(confirmations.recentPickups(player), landedAt, afterCursor);
+    }
+
+    /**
+     * 拾取包里哪些算"这几件进了包"：实体编号对得上、在它落地之后、在上一回收场之后，按物品 ID 合计几个。
+     * 同一件上一回已经报过"在背包里了"，这回就不再报一遍。
+     */
+    static Map<String, Integer> pickedUpAmong(List<DropConfirmations.Pickup> pickups, Map<Integer, Long> landedAt,
+            long afterCursor) {
+        Map<String, Integer> byItem = new LinkedHashMap<>();
+        for (DropConfirmations.Pickup pickup : pickups) {
+            Long landed = landedAt.get(pickup.entityId());
+            if (landed == null || pickup.cursor() <= afterCursor || pickup.tick() < landed) continue;
+            byItem.merge(pickup.itemId(), pickup.amount(), Integer::sum);
         }
         return byItem;
+    }
+
+    /** 此刻掉落物确认的序号：一回捡东西收场时记下，下一回只认这之后进包的；没有角色时给空。 */
+    public OptionalLong cursor() {
+        LocalPlayer player = player();
+        return player == null ? OptionalLong.empty() : OptionalLong.of(confirmations.cursor(player));
     }
 
     @Override

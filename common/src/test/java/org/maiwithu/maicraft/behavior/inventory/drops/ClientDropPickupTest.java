@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory.drops;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 
 /**
@@ -18,6 +22,38 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
  * 一句「走不过去」盖掉矛盾的说法都不允许再出现。
  */
 class ClientDropPickupTest {
+
+    private static DropConfirmations.Pickup pickup(long cursor, long tick, int entityId, int amount, String itemId) {
+        return new DropConfirmations.Pickup(cursor, tick, UUID.nameUUIDFromBytes(("e" + entityId).getBytes()), entityId,
+                amount, itemId);
+    }
+
+    @Test
+    void 进包的只认对得上那几件的拾取包_同种合在一起() {
+        // 玩家甲扔来的两件（实体 7、8）落地后自己进了包；角色自己挖的那件（实体 9）不算扔来的。
+        List<DropConfirmations.Pickup> pickups = List.of(pickup(1, 100, 7, 2, "minecraft:iron_ingot"),
+                pickup(2, 101, 8, 1, "minecraft:iron_ingot"), pickup(3, 102, 9, 5, "minecraft:cobblestone"));
+        assertEquals(Map.of("minecraft:iron_ingot", 3),
+                ClientDropPickup.pickedUpAmong(pickups, Map.of(7, 90L, 8, 95L), Long.MIN_VALUE));
+    }
+
+    @Test
+    void 落地之前的拾取不算这一件() {
+        List<DropConfirmations.Pickup> pickups = List.of(pickup(1, 80, 7, 2, "minecraft:iron_ingot"));
+        assertTrue(ClientDropPickup.pickedUpAmong(pickups, Map.of(7, 90L), Long.MIN_VALUE).isEmpty());
+    }
+
+    @Test
+    void 连着叫捡两回_第二回不把上回报过的再报一遍() {
+        List<DropConfirmations.Pickup> pickups = new ArrayList<>(List.of(pickup(4, 100, 7, 2, "minecraft:iron_ingot")));
+        Map<Integer, Long> tossed = Map.of(7, 90L, 8, 150L);
+        assertEquals(Map.of("minecraft:iron_ingot", 2), ClientDropPickup.pickedUpAmong(pickups, tossed, Long.MIN_VALUE));
+        // 上一回收场时序号是 4：第二回只认 4 之后的，实体 7 那一包不再报。
+        assertTrue(ClientDropPickup.pickedUpAmong(pickups, tossed, 4).isEmpty());
+        // 之后又扔来一件（实体 8）进了包：照报这一件。
+        pickups.add(pickup(5, 160, 8, 1, "minecraft:bread"));
+        assertEquals(Map.of("minecraft:bread", 1), ClientDropPickup.pickedUpAmong(pickups, tossed, 4));
+    }
 
     @Test
     void 捡到过就算这批做完_差的由上层按身上的清点() {

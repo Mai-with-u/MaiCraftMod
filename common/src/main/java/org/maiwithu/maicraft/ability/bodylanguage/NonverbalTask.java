@@ -51,6 +51,8 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     private int picked;
     /** 要捡的东西已经自己进了包时，进包的是几个什么；没有为 null。 */
     private String alreadyInBackpack;
+    /** 这一回捡东西的收场已经记过了：结果细节在每种收场都只出一次，这里再兜一道。 */
+    private boolean pickUpSettled;
     private int putBackTicks;
 
     /** 结果细节：实际做了什么、对着谁、没做的几下和原因。 */
@@ -247,6 +249,11 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
+        // 捡东西收场（做完、没找到、卡住、被取消都从这里过一次）：记下这一刻，下一回只认这之后才进包的。
+        if (input.operation() == NonverbalOperation.PICK_UP && !pickUpSettled) {
+            pickUpSettled = true;
+            moves.pickUpSettled();
+        }
         return new NonverbalDetails(doneWords(), partner == null ? null : partner.name(),
                 gesturing == null ? null : gesturing.skipped());
     }

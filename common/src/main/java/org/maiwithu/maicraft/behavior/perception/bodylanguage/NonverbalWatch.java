@@ -176,15 +176,25 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     }
 
     /**
-     * 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西（掉落物实体编号），最多记 {@link #TOSSED_KEEP_TICKS} 刻；
+     * 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西：掉落物实体编号 → 落地那刻，最多记 {@link #TOSSED_KEEP_TICKS} 刻；
      * 已经不在地上的（自己进了包、被别人捡走、消失了）也在内，调用方自己看还在不在。
      */
-    public Set<Integer> tossedToMe(long now, long withinTicks) {
-        Set<Integer> items = new HashSet<>();
+    public Map<Integer, Long> tossedToMe(long now, long withinTicks) {
+        return tossedWithin(tossedNear, now, withinTicks);
+    }
+
+    /** 扔到身边的那几件里，最近 withinTicks 刻内落地的：实体编号 → 落地那刻。 */
+    static Map<Integer, Long> tossedWithin(Map<Integer, Long> tossedNear, long now, long withinTicks) {
+        Map<Integer, Long> items = new HashMap<>();
         tossedNear.forEach((id, at) -> {
-            if (now - at <= withinTicks) items.add(id);
+            if (now - at <= withinTicks) items.put(id, at);
         });
         return items;
+    }
+
+    /** 扔到身边的记满 {@link #TOSSED_KEEP_TICKS} 刻（一分钟）再忘，不随那件从地上不见就忘。 */
+    static void forgetOldTosses(Map<Integer, Long> tossedNear, long now) {
+        tossedNear.values().removeIf(at -> now - at > TOSSED_KEEP_TICKS);
     }
 
     /** 换世界、断线：记的人、没发出的段、在飞的东西、拍一下的账都丢掉。 */
@@ -260,7 +270,7 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         knownItems.retainAll(present);
         // 扔到身边的记满一分钟，不随那件从地上不见就忘：落在脚边的过两秒就自己进了包，
         // 叫她捡时还要认得出"刚才扔过来的就是它"，好如实说已经在背包里了。
-        tossedNear.values().removeIf(at -> now - at > TOSSED_KEEP_TICKS);
+        forgetOldTosses(tossedNear, now);
         Iterator<Map.Entry<Integer, Toss>> it = flying.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, Toss> entry = it.next();
