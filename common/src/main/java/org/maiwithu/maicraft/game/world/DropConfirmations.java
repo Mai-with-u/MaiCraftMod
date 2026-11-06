@@ -61,6 +61,12 @@ public final class DropConfirmations {
                 : pickups.stream().filter(event -> event.cursor() > afterCursor).toList();
     }
 
+    /** 这一趟（没换身体、没换维度、没断线）最近一分钟里本玩家的拾取：问"扔过来的那件是不是已经自己进了包"时用。 */
+    public List<Pickup> recentPickups(LocalPlayer player) {
+        observeWorld(player);
+        return List.copyOf(pickups);
+    }
+
     /** 记下的序号之后本玩家从这个实体编号上收了几件；没收过为 0。 */
     public int pickedUpEntity(LocalPlayer player, int entityId, long afterCursor) {
         long count = pickups(player, afterCursor).stream()

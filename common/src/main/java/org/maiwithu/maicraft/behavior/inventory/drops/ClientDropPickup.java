@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.inventory.drops;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -127,6 +128,20 @@ public final class ClientDropPickup implements PicksUpDrops {
             }
         }
         return ids;
+    }
+
+    /**
+     * 这几件掉落物里，最近一分钟已经被角色收进背包的，按物品 ID 合计几个：走近时原版自动捡起的也算，
+     * 只认服务器发给本玩家的拾取包——地上那件不见了不等于进了自己的包，别人捡走的、消失的不在这里。
+     */
+    public Map<String, Integer> alreadyPickedUp(Set<Integer> entityIds) {
+        Map<String, Integer> byItem = new LinkedHashMap<>();
+        LocalPlayer player = player();
+        if (player == null || entityIds.isEmpty()) return byItem;
+        for (DropConfirmations.Pickup pickup : confirmations.recentPickups(player)) {
+            if (entityIds.contains(pickup.entityId())) byItem.merge(pickup.itemId(), pickup.amount(), Integer::sum);
+        }
+        return byItem;
     }
 
     @Override

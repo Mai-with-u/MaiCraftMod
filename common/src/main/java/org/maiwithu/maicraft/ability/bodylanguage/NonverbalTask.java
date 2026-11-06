@@ -5,6 +5,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.inventory.drops.ThrowsItems;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -48,6 +49,8 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     private ThrowsItems throwing;
     private Gesturing facing;
     private int picked;
+    /** 要捡的东西已经自己进了包时，进包的是几个什么；没有为 null。 */
+    private String alreadyInBackpack;
     private int putBackTicks;
 
     /** 结果细节：实际做了什么、对着谁、没做的几下和原因。 */
@@ -108,8 +111,15 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
         if (op == NonverbalOperation.PICK_UP) {
             items = moves.pickable(context, input.target());
             if (items.isEmpty()) {
-                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, input.target() == null
-                        ? "身边 6 格内没有别人刚扔过来的东西" : "那件东西不在了，或者在 6 格外", null));
+                // 落在脚边的过两秒就自己进了包：已经在背包里的如实说、按做完收场，不报"那件东西不在了"。
+                Optional<String> already = moves.alreadyPickedUp(context, input.target());
+                if (already.isPresent()) {
+                    alreadyInBackpack = already.get();
+                    return finish();
+                }
+                // 点了地上那件（观察编号）才说"那件"；点了扔东西的人、或不点名，说的是身边有没有扔过来的。
+                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, input.target() instanceof Target.Seen
+                        ? "那件东西不在了，或者在 6 格外" : "身边 6 格内没有别人刚扔过来的东西", null));
             }
             return Next.go(Phase.DO, "地上有 " + items.size() + " 件要捡");
         }
@@ -224,6 +234,9 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
         NonverbalOperation op = input.operation();
         if (op == NonverbalOperation.HOLD) return heldItem == null ? "空出了手" : "拿出了 " + heldItem;
         if (op == NonverbalOperation.TOSS) return "扔出 " + (throwing == null ? 0 : throwing.thrown()) + " 件 " + heldItem;
+        if (op == NonverbalOperation.PICK_UP && alreadyInBackpack != null) {
+            return "已经在背包里了：" + alreadyInBackpack + "（落在身边时自己捡起来了）";
+        }
         if (op == NonverbalOperation.PICK_UP) return "捡到 " + picked + " 件（地上一共 " + items.size() + " 件）";
         int count = gesturing == null ? 0 : gesturing.done();
         return switch (op) {

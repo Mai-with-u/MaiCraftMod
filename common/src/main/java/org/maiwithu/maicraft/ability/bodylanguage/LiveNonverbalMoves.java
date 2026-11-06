@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.bodylanguage;
 
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -176,6 +178,19 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
         items.removeIf(entityId -> !(me.clientLevel.getEntity(entityId) instanceof ItemEntity item)
                 || item.isRemoved() || me.distanceTo(item) > PICK_UP_BLOCKS);
         return items;
+    }
+
+    // 扔过来的东西落在脚边，原版过两秒就自己捡进背包：按服务器发来的拾取包认是哪几件、几个什么。
+    @Override public Optional<String> alreadyPickedUp(TickContext context, Target target) {
+        Set<Integer> wanted = new HashSet<>();
+        if (target instanceof Target.Seen id) {
+            seen.gameEntityOf(id.id()).ifPresent(wanted::add);
+        } else {
+            wanted.addAll(exchange.tossedToMe(context.gameTick(), RECENT_TOSS_TICKS));
+        }
+        List<String> parts = new ArrayList<>();
+        drops.alreadyPickedUp(wanted).forEach((item, count) -> parts.add(count + " 个 " + item));
+        return parts.isEmpty() ? Optional.empty() : Optional.of(String.join("、", parts));
     }
 
     // 只捡这几件：一件就点名捡它；几件就把身边别的掉落物都算成"早就在地上的"，不去碰。

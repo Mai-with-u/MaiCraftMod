@@ -131,6 +131,13 @@ final class FakeNonverbalMoves implements NonverbalMoves {
         return Set.of();
     }
 
+    /** 扔过来的东西已经自己进了包时进的是几个什么；测试定。 */
+    Optional<String> alreadyPicked = Optional.empty();
+
+    @Override public Optional<String> alreadyPickedUp(TickContext context, Target target) {
+        return alreadyPicked;
+    }
+
     @Override public Action pickUp(Set<Integer> items) {
         throw new UnsupportedOperationException("替身不捡东西");
     }

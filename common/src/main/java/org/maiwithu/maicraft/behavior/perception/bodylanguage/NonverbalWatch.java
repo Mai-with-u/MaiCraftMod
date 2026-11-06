@@ -75,6 +75,8 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
     /** 扔过来的东西落在角色多近（格）内算扔到身边；飞多久（刻）还没落地就按当时的位置算。 */
     static final double TOSS_NEAR_BLOCKS = 3;
     static final int TOSS_FLIGHT_TICKS = 40;
+    /** 扔到身边的东西记多久（刻）：一分钟，和不点名捡东西看的范围一样长。 */
+    static final long TOSSED_KEEP_TICKS = 1200;
     /** 这么久（刻）没再看见的人不再记。 */
     static final int FORGET_TICKS = 200;
     /** 被打中以后等几刻看清掉了多少血。 */
@@ -173,7 +175,10 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
         return watching == null ? Long.MIN_VALUE : watching.lastActTowardMe;
     }
 
-    /** 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西（掉落物实体编号）。 */
+    /**
+     * 最近 withinTicks 刻内别的玩家扔过来、落在角色身边的东西（掉落物实体编号），最多记 {@link #TOSSED_KEEP_TICKS} 刻；
+     * 已经不在地上的（自己进了包、被别人捡走、消失了）也在内，调用方自己看还在不在。
+     */
     public Set<Integer> tossedToMe(long now, long withinTicks) {
         Set<Integer> items = new HashSet<>();
         tossedNear.forEach((id, at) -> {
@@ -253,7 +258,9 @@ public final class NonverbalWatch implements SwingsSeen, DiggingSeen, EntityHurt
             }
         }
         knownItems.retainAll(present);
-        tossedNear.keySet().retainAll(present);
+        // 扔到身边的记满一分钟，不随那件从地上不见就忘：落在脚边的过两秒就自己进了包，
+        // 叫她捡时还要认得出"刚才扔过来的就是它"，好如实说已经在背包里了。
+        tossedNear.values().removeIf(at -> now - at > TOSSED_KEEP_TICKS);
         Iterator<Map.Entry<Integer, Toss>> it = flying.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, Toss> entry = it.next();

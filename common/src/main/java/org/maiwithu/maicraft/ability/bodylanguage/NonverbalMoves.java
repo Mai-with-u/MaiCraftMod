@@ -57,6 +57,12 @@ interface NonverbalMoves {
     /** 能捡的：给了观察编号就那一件；不给就最近 60 秒里别的玩家扔到身边的。离角色 6 格以外的不算。 */
     Set<Integer> pickable(TickContext context, Target target);
 
+    /**
+     * 要捡的那几件里已经进了背包的（扔过来落在脚边，原版过两秒自己捡起来了）：给了观察编号就看那一件，
+     * 不给就看最近 60 秒里别的玩家扔到身边的。说成"3 个 minecraft:iron_ingot"这样一串，同种的合在一起；一件都没有给空。
+     */
+    Optional<String> alreadyPickedUp(TickContext context, Target target);
+
     /** 走过去把这些东西捡起来，等它们进包。 */
     Action pickUp(Set<Integer> items);
 
