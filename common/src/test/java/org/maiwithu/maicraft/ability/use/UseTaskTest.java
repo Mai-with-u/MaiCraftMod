@@ -210,6 +210,30 @@ class UseTaskTest {
     }
 
     @Test
+    void 开关门_结果写明门现在开着还是关着_别的方块不加() {
+        Rig rig = new Rig();
+        BlockPos door = new BlockPos(3, 64, 0);
+        rig.world.blocks.put(door, "minecraft:oak_door");
+        // 点了一下门：门打开了，结果里写明现在开着。
+        rig.interactions.outcome(InteractionResult.applied("门开了"), () -> rig.world.doors.put(door, true));
+        TaskResult opened = rig.run(rig.input(position(door), null, "minecraft:oak_door", null, 1));
+        assertTrue(opened.summary().contains("；门现在开着"), opened.summary());
+        // 再点一下关上：照现场写现在关着。
+        Rig again = new Rig();
+        again.world.blocks.put(door, "minecraft:oak_door");
+        again.world.doors.put(door, true);
+        again.interactions.outcome(InteractionResult.applied("门关了"), () -> again.world.doors.put(door, false));
+        TaskResult closed = again.run(again.input(position(door), null, "minecraft:oak_door", null, 1));
+        assertTrue(closed.summary().contains("；门现在关着"), closed.summary());
+        // 拉杆不是门：不加门的状态。
+        Rig lever = new Rig();
+        lever.world.blocks.put(LEVER, "minecraft:lever");
+        lever.interactions.applied("拉杆扳动了");
+        TaskResult pulled = lever.run(lever.input(position(LEVER), null, "minecraft:lever", null, 1));
+        assertTrue(!pulled.summary().contains("门现在"), pulled.summary());
+    }
+
+    @Test
     void 潜行右键_整一下出手都按着潜行() {
         // 潜行右键自己的狼让它坐下：出手的那个动作交给按住潜行包一层，靠近时不潜行。
         Rig rig = new Rig();
@@ -809,6 +833,8 @@ class UseTaskTest {
         final Map<Integer, SeenEntity> entities = new HashMap<>();
         Integer ridingId;
         Held held;
+        /** 门、活板门、栅栏门此刻开着没有：没记的不是门。 */
+        final Map<BlockPos, Boolean> doors = new HashMap<>();
 
         @Override public String dimension() { return dimension; }
         @Override public BlockPos feet() { return BlockPos.ZERO; }
@@ -820,6 +846,7 @@ class UseTaskTest {
             return blockId(cell).map(blockOrTag::equals).orElse(false);
         }
         @Override public Optional<BlockPos> ground(int x, int z) { return Optional.empty(); }
+        @Override public Optional<Boolean> doorOpen(BlockPos cell) { return Optional.ofNullable(doors.get(cell)); }
         @Override public Fluid fluid(BlockPos cell) { return fluids.getOrDefault(cell, Fluid.NONE); }
         @Override public Optional<BlockPos> nearestSource(BlockPos near, int radius) {
             return Optional.ofNullable(sources.get(near));

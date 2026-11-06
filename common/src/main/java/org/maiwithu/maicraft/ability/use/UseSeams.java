@@ -64,6 +64,11 @@ final class UseSeams {
         /** 那一格是不是给定的方块，或在给定的标签里（# 开头）；没加载为假。 */
         boolean blockIs(BlockPos cell, String blockOrTag);
 
+        /** 那一格是门、活板门或栅栏门时此刻开着没有；不是这几样、或没加载为空。 */
+        default Optional<Boolean> doorOpen(BlockPos cell) {
+            return Optional.empty();
+        }
+
         /** x、z 那一列最上面一块挡得住身体或有流体的方块；那一列没加载为空。 */
         Optional<BlockPos> ground(int x, int z);
 

@@ -19,9 +19,13 @@ import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 
@@ -70,6 +74,12 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
             return tagId != null && state.get().is(TagKey.create(Registries.BLOCK, tagId));
         }
         return BuiltInRegistries.BLOCK.getKey(state.get().getBlock()).toString().equals(spec);
+    }
+
+    // 门、活板门、栅栏门读方块状态里的"开着"；木桶等别的带"开着"的方块不算门，不报。
+    @Override public Optional<Boolean> doorOpen(BlockPos cell) {
+        return state(cell).filter(state -> state.getBlock() instanceof DoorBlock || state.getBlock() instanceof TrapDoorBlock
+                || state.getBlock() instanceof FenceGateBlock).map(state -> state.getValue(BlockStateProperties.OPEN));
     }
 
     // 那一列最上面一块挡得住身体或有流体的方块：按客户端同步下来的高度图读，不逐格往下扫。

@@ -12,6 +12,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 - `follow_status` 事件跟的是玩家时带上 `player`（`name`、`uuid`），和 `player_body_language` 的 `player` 同一个写法；跟的是动物、女仆时不带。
 - 别人和自家人驯服的生物（狗、猫、马、女仆），`observe` 与 `find` 的 `traits` 多了 `驯服者`：是谁驯服的，在线写玩家名，不在线写 UUID。
 - `events` 每一页和 `observe(self)` 的 `world` 多了 `online_mode`：这台服务器开没开正版验证，`on` / `off` / `unknown`。`off` 时玩家 UUID 由名字算出，改名就成了另一个人，冒名也认不出来；单人世界和局域网主机一般是 `on`，服务端 MaiCraft 太旧没报时是 `unknown`。
+- `use` 开关门、活板门、栅栏门的结果写明门现在开着还是关着，点两下回到原样也看得出来。
 
 ### 改动
 

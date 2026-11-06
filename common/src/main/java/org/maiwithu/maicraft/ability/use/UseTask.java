@@ -531,8 +531,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();
         }
-        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次"
+        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + doorNow()
                 + (othersAtHome.isEmpty() ? "" : "；它" + othersAtHome)));
+    }
+
+    // 开关门、活板门、栅栏门：收场时按现场写明门现在开着还是关着，点两下回到原样也看得出来；别的方块不加。
+    private String doorNow() {
+        if (target == null || target.isEntity()) return "";
+        return services.world().doorOpen(target.cell()).map(open -> open ? "；门现在开着" : "；门现在关着").orElse("");
     }
 
     // 子动作的通用走向：还在做就等；做完了执行给定走向；失败了按"停下"结算。
