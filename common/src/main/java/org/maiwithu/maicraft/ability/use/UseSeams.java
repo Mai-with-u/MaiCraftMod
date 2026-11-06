@@ -200,10 +200,18 @@ final class UseSeams {
         boolean changesWorld(String heldItem, ResolvedTarget target);
 
         /**
-         * 这个目标是不是别人的：方块按保护判断（在角色自己的家里，别人放的也算她能用的），
-         * 生物按有主（有名字、驯服、拴绳、圈养、玩家）判断；拿不准算别人的。
+         * 这个目标是不是别人的：方块按保护判断，生物按有主（有名字、驯服、拴绳、圈养、玩家）判断；拿不准算别人的。
+         * 按类型自己找的目标问这一份，家里别人放的照旧算别人的。
          */
         boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks);
+
+        /**
+         * 同上，给调用方指着的那一格（坐标、地点）用：在角色自己的家里，别人放的方块也算她能用的；
+         * 记住的区域、额外保护的地标照旧算别人的。
+         */
+        default boolean someoneElsesPointedAt(ResolvedTarget target, Set<String> protectedLandmarks) {
+            return someoneElses(target, protectedLandmarks);
+        }
 
         /**
          * 为什么算别人的，说成一小句，例如"服务端归属记录写着是 玩家甲 放的"：拒绝时照它说清是哪一路挡的。

@@ -273,9 +273,9 @@ public final class AbilityCatalog {
 
         // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
         DesignStore designs = new DesignStore(DesignStore.fileIn(deps.stores().configDirectory()));
-        // 施工服务只拼一份：建造按图施工与机器施工走同一个施工引擎、同一套现场部件。
-        Function<Permissions, ConstructionServices> construction = constructionServices(deps, shared);
-        registerConstruction(registry, deps, designs, construction);
+        // 施工引擎与现场部件共用一套；只有建造按图施工那一份在角色自己的家里放开别人放的方块。
+        Function<Permissions, ConstructionServices> construction = constructionServices(deps, shared, false);
+        registerConstruction(registry, deps, designs, constructionServices(deps, shared, true));
 
         registerMachineAbilities(registry, deps, designs, shared, construction);
 
@@ -494,7 +494,8 @@ public final class AbilityCatalog {
      * 扳手拆机器件与放置规则也在内；建造与机器施工都用这一个。连锁挖在共用的挖掘里（清障按命中面 3×3 连锁），
      * 扳手进世界时建一次，每次施工共用，没装就是空表、照原来的挖。
      */
-    private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared) {
+    private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared,
+            boolean liftAtHome) {
         List<DismantleTool> dismantlers = deps.compat().dismantleTools(shared.playerServices());
         // 放置规则不用玩家行为：登记表里的整张表原样交给施工（换物品、对着哪格放、等哪几格）与放置预测（放下后自改）。
         List<PlacementRules> placementRules = deps.compat().placementRules();
@@ -505,7 +506,7 @@ public final class AbilityCatalog {
                     new LiveClicks(deps.hands().interactions(), deps.hands().inputs(), deps.character().context()),
                     shared.digging(), shared.innerNeeds(),
                     new LiveHolds(shared.toMainhand(), deps.character().context()),
-                    new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
+                    new PermissionGuards(() -> shared.permission(), permissions, site::dimension, liftAtHome),
                     new MemoryLedger(deps.world().memory(), site::dimension), new LiveTravels(deps.travel().walks()),
                     dismantlers, placementRules);
         };

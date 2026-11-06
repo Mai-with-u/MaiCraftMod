@@ -223,7 +223,8 @@ public final class ContainerSource implements ItemSource {
             return Optional.empty();
         }
         // 家里别人放的箱子照用：名字后面带上是谁放的，开箱取货的说明与结果里看得出拿的是谁的东西，主播知情。
-        String note = use.homeNote(ownerNames);
+        // 回报会被直播念出来：放的人不在线时写"一位不在线的玩家"，不吐编号。
+        String note = use.homeNote(protection::nameOf);
         KnownContainer known = new KnownContainer(
                 note.isEmpty() ? container.name() : container.name() + "（" + note + "）", container.at(),
                 container.blockTypeId());
@@ -279,7 +280,8 @@ public final class ContainerSource implements ItemSource {
      * 不能翻时连同是哪一路挡的、记在谁名下一起交回，说明里照它说。
      */
     private StorageUse storageUse(ContainerChooser.Candidate candidate, SourceContext context) {
-        return protection.storageUse(candidate.at(), candidate.blockTypeId(), context.permissions().protectedLandmarks());
+        // 拿东西从箱子里拿是亲手去翻的那一只：在角色自己的家里，别人放进来的也能拿（问放开的那一份）。
+        return protection.storageUseAtHome(candidate.at(), candidate.blockTypeId(), context.permissions().protectedLandmarks());
     }
 
     /** 带着放行时值不值得去翻这只别人的箱子：能拿，而且记得里面有要的东西或者没开过。 */

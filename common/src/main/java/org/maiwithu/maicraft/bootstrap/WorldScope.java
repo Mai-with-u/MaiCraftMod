@@ -199,7 +199,7 @@ public final class WorldScope {
                 selfPlayerId, trusted,
                 new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)),
                 ownHome,
-                id -> playerControl.activeContext().map(context -> OnlinePlayers.nameOrId(context, id)).orElse(id));
+                id -> OnlinePlayers.nameOrSomeoneOffline(playerControl.activeContext().orElse(null), id));
     }
 
     /** @param save 握手认出的世界：现场只在认出世界之后才建，记忆按它分开存 */

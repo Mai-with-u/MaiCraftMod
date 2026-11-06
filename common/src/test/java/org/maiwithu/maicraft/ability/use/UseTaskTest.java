@@ -611,6 +611,28 @@ class UseTaskTest {
     }
 
     @Test
+    void 坐标指着家里别人放的一格_照常用() {
+        // 自己家里别人放的地板：给了坐标就是指着这一格，在家里放开；回报里由保护判断写明是谁放的。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:oak_planks");
+        rig.others.atHome.add(LEVER);
+        rig.interactions.applied("火点着了");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:flint_and_steel", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+    }
+
+    @Test
+    void 按类型找到家里别人放的_照旧不碰() {
+        // 按类型找是角色自己挑的：家里别人放的也跳过，要点名才动。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:grass_block");
+        rig.others.atHome.add(LEVER);
+        rig.nearestBlocks.add(LEVER);
+        TaskResult result = rig.run(rig.input(new Target.Here(), "minecraft:wooden_hoe", "minecraft:grass_block", null, 1));
+        assertProblem(result, Problem.Kind.NEED_APPROVAL);
+    }
+
+    @Test
     void 锄地被短草压着_先打掉草再锄() {
         // 草方块上长着短草：先过许可、打掉那一格草，记下拆掉了什么，再回来锄成耕地。
         Rig rig = new Rig();
@@ -962,7 +984,14 @@ class UseTaskTest {
             return heldItem != null;
         }
 
+        /** 别人放在角色家里的格：按类型找时照旧算别人的，指着这一格（坐标、地点）时算她能用的。 */
+        final Set<BlockPos> atHome = new HashSet<>();
+
         @Override public boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks) {
+            return owned.contains(target.cell()) || atHome.contains(target.cell());
+        }
+
+        @Override public boolean someoneElsesPointedAt(ResolvedTarget target, Set<String> protectedLandmarks) {
             return owned.contains(target.cell());
         }
     }

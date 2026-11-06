@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
@@ -97,7 +98,7 @@ final class UseTargets {
         if (seenId.startsWith("f") && (input.block() != null || input.entity() != null)) {
             return search(found.blockPos());
         }
-        return block(found.blockPos(), "观察编号 " + seenId, true);
+        return block(found.blockPos(), "观察编号 " + seenId, Pick.NAMED);
     }
 
     // 坐标：别的维度去不了；没给 y 用那一列最上面的方块；没加载先走过去。
@@ -125,7 +126,7 @@ final class UseTargets {
         if (input.entity() != null) {
             return services.world().loaded(cell) ? search(cell) : travelTo(cell);
         }
-        return block(cell, "坐标", false);
+        return block(cell, "坐标", Pick.POINTED);
     }
 
     // 地点名：记过的地点优先，没记过认附近唯一写着它的告示牌；都落不了如实说，绝不退回到脚边去找。
@@ -150,7 +151,7 @@ final class UseTargets {
         if (input.block() != null || input.entity() != null) {
             return search(cell);
         }
-        return block(cell, "地点「" + name + "」", false);
+        return block(cell, "地点「" + name + "」", Pick.POINTED);
     }
 
     // 在一片地方按类型找最近的；没扫完不说话，扫完了还没有就是没找到，写明查了多大范围。
@@ -171,7 +172,7 @@ final class UseTargets {
         SearchesNearby.BlockResult result = services.search().nearestBlock(input.block(), center, radius,
                 this::othersBlock);
         if (result.found().isPresent()) {
-            return block(result.found().get(), input.block(), false);
+            return block(result.found().get(), input.block(), Pick.FOUND);
         }
         return result.scannedComplete() ? notFound(input.block()) : new Lookup.Scanning("正在扫附近的" + input.block());
     }
@@ -202,7 +203,7 @@ final class UseTargets {
     // 按类型找到的一格是别人的、这次的用法又会改动它：跳过，记下跳过过。
     private boolean othersBlock(BlockPos cell) {
         String now = services.world().blockId(cell).orElse("minecraft:air");
-        boolean skip = guarded(ResolvedTarget.block(cell, now, now));
+        boolean skip = guarded(ResolvedTarget.block(cell, now, now), false);
         skippedOthers |= skip;
         return skip;
     }
@@ -210,22 +211,34 @@ final class UseTargets {
     // 按类型找到的一只是别人的（有名字、驯服、拴绳、圈养）、这次的用法又会改动它：跳过，记下跳过过。
     private boolean othersCreature(int entityId) {
         boolean skip = services.world().entity(entityId)
-                .map(seen -> guarded(ResolvedTarget.entity(entityId, seen.cell(), seen.typeId())))
+                .map(seen -> guarded(ResolvedTarget.entity(entityId, seen.cell(), seen.typeId()), false))
                 .orElse(false);
         skippedOthers |= skip;
         return skip;
     }
 
     // 角色自己挑的目标能不能用：只有会改动世界的用法才看归属；认不出别人的东西时一律当别人的，宁可不做。
-    private boolean guarded(ResolvedTarget target) {
+    // 调用方指着的那一格（pointed）在角色自己的家里放开别人放的；按类型找到的照旧不放开。
+    private boolean guarded(ResolvedTarget target, boolean pointed) {
         UseSeams.OthersThings others = services.others();
         if (others == null) return true;
+        Set<String> landmarks = input.permissions().protectedLandmarks();
         return others.changesWorld(input.item(), target)
-                && others.someoneElses(target, input.permissions().protectedLandmarks());
+                && (pointed ? others.someoneElsesPointedAt(target, landmarks) : others.someoneElses(target, landmarks));
+    }
+
+    /** 一格方块是怎么落到这次 use 上的：点了观察编号、给了坐标或地点、按类型找到的。 */
+    private enum Pick {
+        /** LLM 用观察编号点名：点名就是许可，不问归属。 */
+        NAMED,
+        /** 给了坐标或地点：指着这一格，在角色自己的家里放开别人放的。 */
+        POINTED,
+        /** 按类型找到的最近一格：角色自己挑的，家里别人放的照旧不碰。 */
+        FOUND
     }
 
     // 一格方块：没加载先走过去；给了 block 就核对那一格现在是不是它；不是点名的，别人的东西用法会改动它时不碰。
-    private Lookup block(BlockPos cell, String label, boolean named) {
+    private Lookup block(BlockPos cell, String label, Pick pick) {
         if (!services.world().loaded(cell)) {
             return travelTo(cell);
         }
@@ -235,7 +248,7 @@ final class UseTargets {
                     "目标应为 " + input.block() + "，" + cell.toShortString() + " 现在是 " + now, null));
         }
         ResolvedTarget target = ResolvedTarget.block(cell, now, label + " " + now + " " + cell.toShortString());
-        if (!named && guarded(target)) {
+        if (pick != Pick.NAMED && guarded(target, pick == Pick.POINTED)) {
             // 说清是哪一路挡的（归属记录写着谁放的、记住的区域、地标、推断、归属没问到），不只给一句笼统的。
             UseSeams.OthersThings others = services.others();
             String why = others == null ? "保护判断还没接上，拿不准就按别人的算"

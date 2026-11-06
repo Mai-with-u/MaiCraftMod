@@ -30,7 +30,8 @@ public interface ReadsOwnHome {
 
         /** 这一格在不在这一栋的范围外扩 margin 格以内：贴着墙外的台阶、屋檐下的箱子也算这栋的。 */
         boolean around(WorldPosition position, int margin) {
-            boolean sameDimension = position.dimension() == null || dimension.equals(position.dimension());
+            // 两边维度都写了、而且是同一个才算：维度说不清的格子不认成家。
+            boolean sameDimension = dimension != null && dimension.equals(position.dimension());
             return sameDimension
                     && position.x() >= minX - margin && position.x() <= maxX + margin
                     && position.y() >= minY - margin && position.y() <= maxY + margin

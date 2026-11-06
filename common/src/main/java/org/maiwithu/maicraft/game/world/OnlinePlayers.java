@@ -39,6 +39,22 @@ public final class OnlinePlayers {
     }
 
     /**
+     * 回报里写一个玩家（会被直播念出来）：在线写名字，不在线、编号读不出来、没有当刻的角色上下文都写"一位不在线的玩家"，
+     * 不吐编号。动了别人放在角色家里的东西、被别人的方块挡住时说是谁放的用它。
+     */
+    public static String nameOrSomeoneOffline(PlayerContext context, String playerId) {
+        try {
+            return context == null ? SOMEONE_OFFLINE
+                    : nameById(context, UUID.fromString(playerId)).orElse(SOMEONE_OFFLINE);
+        } catch (IllegalArgumentException notUuid) {
+            return SOMEONE_OFFLINE;
+        }
+    }
+
+    /** 不在线的玩家在回报里的说法。 */
+    public static final String SOMEONE_OFFLINE = "一位不在线的玩家";
+
+    /**
      * 从看的那个玩家（角色）这边写一个玩家：玩家列表里同步了的写名字，不在线、还没同步的写编号（UUID），不猜名字。
      * 观察里写别人驯服的生物是谁驯服的时用。
      */

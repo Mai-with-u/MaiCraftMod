@@ -71,10 +71,23 @@ final class LiveOthersThings implements UseSeams.OthersThings {
     public boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks) {
         Protection guard = protection.get();
         if (guard == null) return true;
+        // 按类型自己找到的一格：家里别人放的照旧当别人的，不放开。
+        if (!target.isEntity()) return guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks).protects();
+        return creatureSomeoneElses(guard, target);
+    }
+
+    @Override
+    public boolean someoneElsesPointedAt(ResolvedTarget target, Set<String> protectedLandmarks) {
+        Protection guard = protection.get();
+        if (guard == null) return true;
         if (!target.isEntity()) {
-            // 用东西是角色亲手点的这一格：在她自己的家里，别人放的也能用、能改（主播说过自己家可以随便改）。
+            // 调用方指着的这一格：在她自己的家里，别人放的也能用、能改（主播说过自己家可以随便改）。
             return guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks).protects();
         }
+        return creatureSomeoneElses(guard, target);
+    }
+
+    private boolean creatureSomeoneElses(Protection guard, ResolvedTarget target) {
         ClientLevel level = level();
         Entity entity = level == null ? null : level.getEntity(target.entityId());
         if (entity == null) return true;
@@ -90,6 +103,7 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         if (guard == null) return "保护判断还没接上，拿不准就按别人的算";
         if (target.isEntity()) return "有主（有名字、被驯服、拴着绳、圈养着）或是玩家";
         // 说清是哪一路挡的：归属记录写着谁放的、记住的区域、额外保护的地标、推断，还是归属没问到。
+        // 只在指着的那一格被拒时问这里，所以照放开的那一份说。
         return guard.describe(guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks));
     }
 
@@ -99,8 +113,11 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         return guard == null || target.isEntity() ? "" : guard.othersAtHomeNote(cellOf(target));
     }
 
-    private static WorldPosition cellOf(ResolvedTarget target) {
-        return WorldPosition.here(target.cell().getX(), target.cell().getY(), target.cell().getZ());
+    // 目标格带上这一刻所在的维度：认家、问归属都按维度比，下界里和主世界家坐标重叠的格子不当成家。
+    private WorldPosition cellOf(ResolvedTarget target) {
+        ClientLevel level = level();
+        String dimension = level == null ? null : level.dimension().location().toString();
+        return new WorldPosition(target.cell().getX(), target.cell().getY(), target.cell().getZ(), dimension);
     }
 
     private static String blockId(ResolvedTarget target) {

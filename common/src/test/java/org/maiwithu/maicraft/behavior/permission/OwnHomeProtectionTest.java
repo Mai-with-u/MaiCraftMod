@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -15,8 +16,9 @@ import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 角色自己的家里放开一层：她睡的床旁、她按图盖的房子外扩 2 格、记住的家旁，别人放的方块和箱子她亲手用、改都行，
- * 回报写明是谁放的；寻路顺手挖、自动挑点仍按别人的算；记住的玩家地盘与额外保护的地标照旧挡；拒绝时说清是哪一路。
+ * 角色自己的家里放开一层：她睡的床旁、她亲手放下过的格子外扩、记住的家旁，别人放的方块和箱子她亲手用、改都行，
+ * 回报写明是谁放的；寻路顺手挖、自动挑箱子挑点仍按别人的算；记住的区域与额外保护的地标照旧挡（有归属记录也挡）；
+ * 家宁可认小：维度说不清、床的归属没问到、借住的床都不算家；拒绝时说清是哪一路。
  */
 class OwnHomeProtectionTest {
 
@@ -36,6 +38,8 @@ class OwnHomeProtectionTest {
     private List<ReadsOwnHome.Building> buildings = List.of();
     private List<RememberedRegion> regions = List.of();
     private Map<String, WorldPosition> places = Map.of();
+    /** 归属还没问到服务端的格子。 */
+    private final Set<WorldPosition> unknown = new HashSet<>();
 
     private Protection protection() {
         ReadsOwnHome home = new ReadsOwnHome() {
@@ -56,8 +60,15 @@ class OwnHomeProtectionTest {
                 return places;
             }
         };
-        ReadsBlockOwnership ownership = (dimension, x, y, z) -> Optional.ofNullable(
-                placements.get(new WorldPosition(x, y, z, dimension))).map(ReadsBlockOwnership.PlacedBy::new);
+        ReadsBlockOwnership ownership = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.ofNullable(placements.get(new WorldPosition(x, y, z, dimension))).map(PlacedBy::new);
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return !unknown.contains(new WorldPosition(x, y, z, dimension));
+            }
+        };
         return new Protection(ownership, () -> regions, remembered, GuessesPlayerMade.NOTHING, SELF,
                 TrustedPlayers.NOBODY, SeesVillagers.NOBODY, home, id -> OTHER.equals(id) ? "玩家甲" : id);
     }
@@ -82,20 +93,45 @@ class OwnHomeProtectionTest {
     }
 
     @Test
-    void 家里别人放的箱子能拿_带上是谁放的() {
-        StorageUse use = protection().storageUse(CHEST, "minecraft:chest", Set.of());
+    void 从箱子里拿_家里别人放的箱子能拿_带上是谁放的() {
+        StorageUse use = protection().storageUseAtHome(CHEST, "minecraft:chest", Set.of());
         assertTrue(use.usable());
         assertEquals(StorageUse.Kind.AT_HOME, use.kind());
         assertEquals("是 玩家甲 放的，在你家（你睡的床旁）", use.homeNote(id -> OTHER.equals(id) ? "玩家甲" : id));
         // 家外的箱子照旧不翻，记在谁名下。
-        assertEquals(StorageUse.Kind.PLACED_BY_OTHER, protection().storageUse(FAR, "minecraft:chest", Set.of()).kind());
+        assertEquals(StorageUse.Kind.PLACED_BY_OTHER, protection().storageUseAtHome(FAR, "minecraft:chest", Set.of()).kind());
+    }
+
+    @Test
+    void 腾背包存东西闲时开箱这些自己挑箱子的_家里也不放开() {
+        assertEquals(StorageUse.Kind.PLACED_BY_OTHER, protection().storageUse(CHEST, "minecraft:chest", Set.of()).kind());
+        assertFalse(protection().mayUseStorage(CHEST, "minecraft:chest", Set.of()));
     }
 
     @Test
     void 借住别人放的床_不算自己的家() {
         placements.put(BED, OTHER);
         assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(PLANK, null, Set.of()).route());
-        assertFalse(protection().storageUse(CHEST, "minecraft:chest", Set.of()).usable());
+        assertFalse(protection().storageUseAtHome(CHEST, "minecraft:chest", Set.of()).usable());
+    }
+
+    @Test
+    void 床那一格归属还没问到_拿不准不当家() {
+        unknown.add(BED);
+        assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(PLANK, null, Set.of()).route());
+    }
+
+    @Test
+    void 维度说不清或对不上_不当家() {
+        // 下界里和主世界的床坐标重叠的一格：不是家。
+        WorldPosition nether = new WorldPosition(PLANK.x(), PLANK.y(), PLANK.z(), "minecraft:the_nether");
+        placements.put(nether, OTHER);
+        assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(nether, null, Set.of()).route());
+        assertTrue(protection().homeOf(new WorldPosition(PLANK.x(), PLANK.y(), PLANK.z(), null)).isEmpty());
+        // 记住的家没写维度：也不认。
+        sleptBed = Optional.empty();
+        places = Map.of("家", new WorldPosition(-352, 66, 55, null));
+        assertTrue(protection().homeOf(PLANK).isEmpty());
     }
 
     @Test
@@ -119,16 +155,21 @@ class OwnHomeProtectionTest {
     }
 
     @Test
-    void 家里的玩家地盘与额外保护的地标照旧挡() {
+    void 家里的玩家地盘与额外保护的地标照旧挡_有归属记录也挡() {
+        // 木板的归属记录写着是玩家甲放的，同时又在记住的区域里：记录排在区域前面，放开前也得单独查区域。
         regions = List.of(new RememberedRegion("邻居的花园", PLANK, 3));
-        placements.remove(PLANK);
         ProtectedBy region = protection().protectedByUnlessHome(PLANK, null, Set.of());
         assertEquals(ProtectedBy.Route.IN_REMEMBERED_REGION, region.route());
         assertEquals("在记住的玩家地盘「邻居的花园」里", protection().describe(region));
+        regions = List.of(new RememberedRegion("邻居的花园", CHEST, 3));
+        assertEquals(StorageUse.Kind.IN_REMEMBERED_REGION, protection().storageUseAtHome(CHEST, "minecraft:chest", Set.of()).kind());
 
+        // 同样有归属记录、又在这次额外保护的地标旁：照旧挡，箱子也不翻。
         regions = List.of();
         places = Map.of("菜地", new WorldPosition(-352, 69, 54, DIM));
         assertEquals(ProtectedBy.Route.NEAR_PROTECTED_LANDMARK,
                 protection().protectedByUnlessHome(PLANK, null, Set.of("菜地")).route());
+        assertEquals(StorageUse.Kind.NEAR_PROTECTED_LANDMARK,
+                protection().storageUseAtHome(CHEST, "minecraft:chest", Set.of("菜地")).kind());
     }
 }

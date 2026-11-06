@@ -39,14 +39,17 @@ public record ProtectedBy(Route route, String placedBy, String place) {
         Objects.requireNonNull(route, "route");
     }
 
+    /** 归属记录写着是这个玩家放的：拒绝时说"服务端归属记录写着是 某某 放的"。 */
     static ProtectedBy placedBy(String playerId) {
         return new ProtectedBy(Route.PLACED_BY_OTHER, playerId, null);
     }
 
+    /** 落在一块记住的区域里、或一个额外保护的地标旁：拒绝时带上那块区域、那个地标叫什么。 */
     static ProtectedBy inside(Route route, String place) {
         return new ProtectedBy(route, null, place);
     }
 
+    /** 归属没问到、看着像玩家放的这类：只有是哪一路，没有人名也没有地名。 */
     static ProtectedBy only(Route route) {
         return new ProtectedBy(route, null, null);
     }
