@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 /**
  * 找实体的筛选：命中的收成、被挡住的线索、半径外的忽略、别人的带保护事实。
@@ -73,5 +74,24 @@ class LiveFinderEntityRoundTest {
         assertEquals(1, round.hits().size());
         assertTrue(round.hits().getFirst().creatureProtected());
         assertTrue(round.hits().getFirst().protectionReason().contains("有名字"));
+    }
+
+    @Test
+    void 被挡住的掉落物_结论里就说在哪_走过去会自己进包() {
+        // 棚子地板挡住了下面那件木板：observe 列得出（visible=false），find 的结论不许读成"附近没有"。
+        EntitySight.Observation plank = new EntitySight.Observation(5, LiveFinder.DROPPED_ITEM, null, null,
+                WorldPosition.here(-2, 62, 2), false, false, false, null, Map.of("物品", "minecraft:oak_planks"));
+        FindsAround.Round round = LiveFinder.entityRound(List.of(plank), Set.of(LiveFinder.DROPPED_ITEM), CENTER, 16,
+                uuid -> Optional.empty());
+        assertTrue(round.hiddenLead().contains("另有 1 件被挡住"), round.hiddenLead());
+        assertTrue(round.hiddenLead().endsWith("走到那里会自己捡进背包"), round.hiddenLead());
+        FindInput input = new FindInput(FindInput.FindKind.ENTITY, List.of(LiveFinder.DROPPED_ITEM), 5, 16);
+        TaskResult result = FindSettlement.insufficient(input, List.of(), Map.of(), round.hiddenLead());
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertTrue(result.summary().startsWith("寻找：这一片没有看得见的minecraft:item；范围内另有 1 件被挡住"),
+                result.summary());
+        assertTrue(result.summary().contains("(-2, 62, 2)"), result.summary());
+        // 线索只在结论里说一次，问题里只写查了多大范围。
+        assertTrue(!result.problem().message().contains("被挡住"), result.problem().message());
     }
 }

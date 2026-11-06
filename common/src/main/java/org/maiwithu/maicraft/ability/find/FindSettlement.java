@@ -43,12 +43,14 @@ final class FindSettlement {
     /** 同上；{@code hiddenLead} 是范围内被挡住、看不见的那些的线索（几只、最近一只的方位），没有为 null。 */
     static TaskResult insufficient(FindInput input, List<FindDetails.Found> found,
             Map<String, Integer> byType, String hiddenLead) {
-        Problem problem = Problem.of(Problem.Kind.NOT_FOUND,
-                searched(input) + (hiddenLead == null ? "" : "；" + hiddenLead),
+        Problem problem = Problem.of(Problem.Kind.NOT_FOUND, searched(input),
                 "走近一些再找，或先出行到大概会有的地方再找；更大的一片用 explore 跑一趟（路过的产地线索会记下）；"
                         + "埋在石头里的矿看不见，要拿到它直接用 obtain，会自己往下挖着找");
         if (found.isEmpty()) {
-            return TaskResult.failed("寻找：这一片没有找到" + String.join("、", input.selectors()), problem);
+            // 一个都看不见、却有被挡住的：结论里就说清"有，在哪，被挡住了"，只读结论的也不会当成附近没有。
+            String wanted = String.join("、", input.selectors());
+            return TaskResult.failed(hiddenLead == null ? "寻找：这一片没有找到" + wanted
+                    : "寻找：这一片没有看得见的" + wanted + "；" + hiddenLead, problem);
         }
         // 找到几个就是几个：LLM 常把 count 当上限（"附近所有墓碑"填 10），找到 7 个照实交出来，不判没做成。
         // 看不见的那几个的线索照样带上，想找全的自己走近再找。

@@ -186,6 +186,9 @@ final class LiveFinder implements FindsAround {
                 ? "长在树上" : "不是树上长的（房子、木屋、栅栏柱这类搭出来的原木）");
     }
 
+    /** 地上掉落物的实体类型。 */
+    static final String DROPPED_ITEM = "minecraft:item";
+
     /** 找实体：读感知的实体观察（与 observe 同一份），按类型与半径筛，多部件折叠已在读端做过。 */
     private Round scanEntities(FindInput input, BlockPos center) {
         Set<String> wanted = new HashSet<>();
@@ -246,9 +249,13 @@ final class LiveFinder implements FindsAround {
                     entity.entityId(), creatureProtected, reason, entity.traits()));
         }
         // 观察一刻读得完：这轮就是全部，如实报扫完。
-        String hiddenLead = hidden == 0 ? null : "范围内另有 " + hidden + " 只被挡住、看不见，最近一只在 ("
+        // 找的是地上的掉落物时按"件"数，并说清走到那里原版会自己捡进背包，免得捡到了还以为它在地上。
+        boolean drops = wanted.equals(Set.of(DROPPED_ITEM));
+        String unit = drops ? "件" : "只";
+        String hiddenLead = hidden == 0 ? null : "范围内另有 " + hidden + " " + unit + "被挡住、看不见，最近一" + unit + "在 ("
                 + nearestHidden.getX() + ", " + nearestHidden.getY() + ", " + nearestHidden.getZ() + ")，约 "
-                + Math.round(nearestHiddenDistance) + " 格，走过去看得见了再找";
+                + Math.round(nearestHiddenDistance) + " 格，"
+                + (drops ? "走到那里会自己捡进背包" : "走过去看得见了再找");
         return new Round(List.copyOf(hits), true, false, hiddenLead);
     }
 
