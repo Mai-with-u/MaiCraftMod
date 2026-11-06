@@ -6,6 +6,8 @@ import java.util.UUID;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.world.entity.player.Player;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
@@ -34,6 +36,16 @@ public final class OnlinePlayers {
         ClientPacketListener connection = context.connection();
         PlayerInfo info = connection == null ? null : connection.getPlayerInfo(id);
         return info == null ? Optional.empty() : Optional.of(info.getProfile().getName());
+    }
+
+    /**
+     * 从看的那个玩家（角色）这边写一个玩家：玩家列表里同步了的写名字，不在线、还没同步的写编号（UUID），不猜名字。
+     * 观察里写别人驯服的生物是谁驯服的时用。
+     */
+    public static String nameOrId(Player viewer, UUID id) {
+        ClientPacketListener connection = viewer instanceof LocalPlayer local ? local.connection : null;
+        PlayerInfo info = connection == null ? null : connection.getPlayerInfo(id);
+        return info == null ? id.toString() : info.getProfile().getName();
     }
 
     /**

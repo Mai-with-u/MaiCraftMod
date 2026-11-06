@@ -14,6 +14,7 @@ import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.boss.EnderDragonPart;
@@ -29,6 +30,7 @@ import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.LooksAt;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
+import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -124,9 +126,14 @@ public final class ClientEntitySight implements EntitySight {
             }
         }
         // 驯服了的写清是谁的：角色自己的能喂、能骑、能开界面不用点名，别人的要点名；没驯服的不写。
-        String tamedBy = ClientCreatureSituations.tamedBy(entity, viewer, trusted).word();
-        if (tamedBy != null) {
-            traits.put("驯服", tamedBy);
+        TamedBy tamedBy = ClientCreatureSituations.tamedBy(entity, viewer, trusted);
+        if (tamedBy.word() != null) {
+            traits.put("驯服", tamedBy.word());
+        }
+        // 自家人、别人驯服的再写上驯服者是谁：主播说"我家女仆""他的狗"时，她才对得上是哪一个人的。
+        if ((tamedBy == TamedBy.TRUSTED || tamedBy == TamedBy.SOMEONE_ELSE) && entity instanceof OwnableEntity ownable
+                && ownable.getOwnerUUID() != null) {
+            traits.put("驯服者", OnlinePlayers.nameOrId(viewer, ownable.getOwnerUUID()));
         }
         // 狼、猫、鹦鹉、女仆这类听令坐下的：坐着的不跟人走，让它站起来要再潜行右键一次。
         if (entity instanceof TamableAnimal tamable && tamable.isInSittingPose()) {
