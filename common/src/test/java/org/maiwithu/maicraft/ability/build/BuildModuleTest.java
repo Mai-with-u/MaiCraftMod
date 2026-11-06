@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -150,6 +151,48 @@ class BuildModuleTest {
         BuildInput second = run(fixture.module(), new Target.Position(20, 64, 20, null), cells);
         assertEquals("建筑@20,64,20", settle(second, Map.of()).archive().name(), "同名的一栋在别处，加上坐标");
         assertEquals("整栋都对上了", fixture.archives().find("建筑").orElseThrow().lastCheckNote(), "原来那一栋的档案不被覆盖");
+    }
+
+    @Test
+    void 盖完只把真放下的格记成她的_有格受保护的那次一格不添() throws Exception {
+        Fixture fixture = fixture();
+        JsonObject cells = json("{\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"},{\"offset\":[1,0,0],\"block\":\"minecraft:stone\"}]}");
+        BuildInput input = run(fixture.module(), new Target.Here(), cells);
+        BlockPos anchor = input.construction().blueprint().anchor();
+        ConstructionDetails engine = new ConstructionDetails(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), DIM),
+                anchor, anchor, Map.of(), List.of(), Map.of(), Map.of(), List.of(), null);
+        RecordsConstruction recorder = input.construction().recorder();
+        BlockPos first = new BlockPos(5, 64, 5);
+        BlockPos second = new BlockPos(6, 64, 5);
+        // 头一回只放成了第一格：图上画了两格，记成她的只有放下的那一格。
+        recorder.record(engine, world(Map.of()), Set.of(first), 0);
+        assertEquals(List.of(first), fixture.archives().find("建筑").orElseThrow().placedCells());
+        // 再来一回放下了第二格，可这次有一格被保护挡下：多半盖到了别人的东西上，这次一格都不添。
+        recorder.record(engine, world(Map.of()), Set.of(second), 1);
+        assertEquals(List.of(first), fixture.archives().find("建筑").orElseThrow().placedCells());
+        // 没被挡的一回：和以前记的合起来。
+        recorder.record(engine, world(Map.of()), Set.of(second), 0);
+        assertEquals(List.of(first, second), fixture.archives().find("建筑").orElseThrow().placedCells());
+    }
+
+    @Test
+    void 读现场建的旧档读回来算读来的_放下的格存得住_存一次换一个记号() throws Exception {
+        Fixture fixture = fixture();
+        String before = fixture.archives().revision();
+        // 旧档没有"读来的"那一笔，只有结论写着"读现场建的档"：读回来补成读来的。
+        assertTrue(fixture.archives().save(new BuildingArchive("别人的小屋", DIM, new BlockPos(10, 64, 10), 0, null,
+                List.of(stone(0)), Instant.ofEpochSecond(100), "读现场建的档，2 格没看到")));
+        assertTrue(fixture.archives().find("别人的小屋").orElseThrow().readFromSite());
+        String afterFirst = fixture.archives().revision();
+        assertTrue(!afterFirst.equals(before), "存过一次档，记号要变");
+        // 她盖的：结论是比对结果，照旧是她盖的；放下过的格原样读回。
+        BlockPos placed = new BlockPos(10, 64, 10);
+        assertTrue(fixture.archives().save(new BuildingArchive("小屋", DIM, placed, 0, null, List.of(stone(0)),
+                Instant.ofEpochSecond(200), "整栋都对上了", false, List.of(placed))));
+        BuildingArchive own = fixture.archives().find("小屋").orElseThrow();
+        assertTrue(!own.readFromSite());
+        assertEquals(List.of(placed), own.placedCells());
+        assertTrue(!fixture.archives().revision().equals(afterFirst));
     }
 
     @Test

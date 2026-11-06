@@ -169,7 +169,8 @@ public final class LiveBedFinder implements BedScanner, NightfallNeed.ReadsBedAv
         if (memory == null || current == null || current.level() == null) return;
         Block block = current.level().getBlockState(bed).getBlock();
         if (!(block instanceof BedBlock)) return;
-        memory.rememberWorkstationUsed(here(bed), BuiltInRegistries.BLOCK.getKey(block).toString(), Instant.now());
+        // 真睡下了才记"睡过"：圈"她自己的家"只认这一种，放下没睡的床不算。
+        memory.rememberBedSleptIn(here(bed), BuiltInRegistries.BLOCK.getKey(block).toString(), Instant.now());
     }
 
     @Override

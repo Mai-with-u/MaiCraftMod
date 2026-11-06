@@ -34,6 +34,9 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     /** 文档库里的范围名：世界记忆的数据都存这个范围下，与别的用途互不覆盖。 */
     public static final String SCOPE = "world-memory";
 
+    /** 床那条记忆里"真睡过"的那一项。 */
+    public static final String SLEPT_IN = "睡过";
+
     private static final String DOCUMENT_KEY = "memory";
     // 整册记忆的存盘预算：一个角色长期记得的箱子、设施、产地几千条也用不到这么多；超出时整册不写，不做截断。
     private static final int DOCUMENT_LIMIT = 8 * 1024 * 1024;
@@ -111,6 +114,14 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
      *  「收回自己放下的东西」认的也是这条账。 */
     public void rememberWorkstationUsed(WorldPosition position, String blockType, Instant when) {
         upsert(new MemoryRecord(MemoryKind.WORKSTATION, position, blockType, null, MemoryOrigin.USED, when));
+    }
+
+    /**
+     * 记一张真睡下过的床：和亲手用过的设施同一条，内容多记一项"睡过"。放下床只记亲手用过，
+     * 圈"她自己的家"只认真睡过的，免得路上随手放的一张床把那一片当成家。
+     */
+    public void rememberBedSleptIn(WorldPosition position, String blockType, Instant when) {
+        upsert(new MemoryRecord(MemoryKind.WORKSTATION, position, blockType, List.of(SLEPT_IN), MemoryOrigin.USED, when));
     }
 
     /** 记一条产地线索：在这附近见过什么，例如路过时看到这一片有煤矿。只有大概位置，到现场要再找。 */

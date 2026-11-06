@@ -15,6 +15,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
 import org.maiwithu.maicraft.ability.design.api.BuildingDesign;
 import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
 import org.maiwithu.maicraft.ability.design.api.CompiledDesign;
@@ -249,7 +250,7 @@ public final class DesignModule implements AbilityModule {
             String unique = records.archives().unusedName(name, site.dimension(), origin);
             // 读现场建的档记成"读来的"：那一栋可能是别人的房子，不算进她自己的家。
             BuildingArchive created = new BuildingArchive(unique, site.dimension(), origin, 0, design.id(), compiled.cells(),
-                    Instant.now(), "读现场建的档，" + read.unseen() + " 格没看到", true);
+                    Instant.now(), BuildingArchives.READ_FROM_SITE_NOTE + "，" + read.unseen() + " 格没看到", true);
             if (records.archives().save(created)) {
                 records.remember().accept(created);
                 archiveName = unique;

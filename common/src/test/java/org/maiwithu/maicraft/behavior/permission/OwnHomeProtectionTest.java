@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -135,16 +136,23 @@ class OwnHomeProtectionTest {
     }
 
     @Test
-    void 没睡过床_按她盖的房子外扩两格认家() {
+    void 没睡过床_按她真放下过的格外扩两格认家_图上画了没放成的不算() {
         sleptBed = Optional.empty();
-        buildings = List.of(new ReadsOwnHome.Building("火山平原小屋", DIM, -355, 65, 52, -351, 68, 56));
-        // 木板在房顶上方 2 格以内：算这栋的。
+        // 她放下过的只有屋顶那一排：(-355..-351, 68, 54)。
+        Set<BlockPos> placed = new HashSet<>();
+        for (int x = -355; x <= -351; x++) placed.add(new BlockPos(x, 68, 54));
+        buildings = List.of(new ReadsOwnHome.Building("火山平原小屋", DIM, placed));
+        // 木板在屋顶上方 2 格：挨着她放下的格，算这栋的。
         assertEquals(ProtectedBy.NONE, protection().protectedByUnlessHome(PLANK, null, Set.of()));
         assertEquals("是 玩家甲 放的，在你盖的「火山平原小屋」里", protection().othersAtHomeNote(PLANK));
-        // 离这栋东墙 4 格就不算她家了，别人放的照旧挡。
-        WorldPosition outside = new WorldPosition(-347, 65, 55, DIM);
-        placements.put(outside, OTHER);
-        assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(outside, null, Set.of()).route());
+        // 同在图纸范围里、离她放下的格 3 格的一格（地板那层）：她没放成的地方不算她家，别人放的照旧挡。
+        WorldPosition floor = new WorldPosition(-353, 65, 54, DIM);
+        placements.put(floor, OTHER);
+        assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(floor, null, Set.of()).route());
+        // 别的维度坐标重叠的一格：不算。
+        WorldPosition nether = new WorldPosition(PLANK.x(), PLANK.y(), PLANK.z(), "minecraft:the_nether");
+        placements.put(nether, OTHER);
+        assertEquals(ProtectedBy.Route.PLACED_BY_OTHER, protection().protectedByUnlessHome(nether, null, Set.of()).route());
     }
 
     @Test

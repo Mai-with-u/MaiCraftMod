@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.construction;
 
+import java.util.Set;
+
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 
 /**
@@ -20,4 +23,15 @@ public interface RecordsConstruction {
      * @return 最后交出去的结果细节
      */
     ResultDetails record(ConstructionDetails details, ReadsBlocks world);
+
+    /**
+     * 同上，多给这次施工确认真放下的格与受保护没动的格数：盖房子记"她真放下过哪几格"时用，
+     * 不在乎的使用方照旧只看细节。
+     *
+     * @param placed         这次确认放好的格（世界坐标）
+     * @param protectedCells 受保护、没动的格数
+     */
+    default ResultDetails record(ConstructionDetails details, ReadsBlocks world, Set<BlockPos> placed, int protectedCells) {
+        return record(details, world);
+    }
 }

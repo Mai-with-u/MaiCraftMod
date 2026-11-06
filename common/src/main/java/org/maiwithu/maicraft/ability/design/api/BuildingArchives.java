@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -32,6 +33,10 @@ public final class BuildingArchives {
     /** 档案名单单独一个范围：名单的键不会和哪一栋的名字撞上。 */
     static final String NAMES_SCOPE = "building-archive-names";
     private static final String NAMES_KEY = "all";
+    /** 档案改过一次就换一个记号：圈"她自己的家"的快照看它变没变，没变就不重新解码整栋蓝图。 */
+    private static final String REVISION_KEY = "revision";
+    /** 读现场建档时那一句结论的开头：认没有"读来的"一笔的旧档用。 */
+    public static final String READ_FROM_SITE_NOTE = "读现场建的档";
     /** 一篇档案的存盘预算：一栋大房子几万格也够；超出时不写。 */
     private static final int DOCUMENT_LIMIT = 8 * 1024 * 1024;
 
@@ -65,9 +70,21 @@ public final class BuildingArchives {
                 names.forEach(list::add);
                 documents.write(NAMES_SCOPE, worldKey, NAMES_KEY, list.toString(), false);
             }
+            // 每存一次换一个不会重复的记号，读快照的一侧只比相等不相等。
+            documents.write(NAMES_SCOPE, worldKey, REVISION_KEY, UUID.randomUUID().toString(), false);
             return true;
         } catch (IOException | RuntimeException failure) {
             return false;
+        }
+    }
+
+    /** 档案库这一刻的记号：存过一次档就会变；读不到给空串。只读一小篇，不解码哪一栋。 */
+    public String revision() {
+        try {
+            String revision = documents.read(NAMES_SCOPE, worldKey, REVISION_KEY, DOCUMENT_LIMIT);
+            return revision == null ? "" : revision;
+        } catch (IOException | RuntimeException broken) {
+            return "";
         }
     }
 
@@ -128,8 +145,14 @@ public final class BuildingArchives {
             root.addProperty("last_check_at", archive.lastCheckAt().toString());
             root.addProperty("last_check_note", archive.lastCheckNote());
         }
-        // 读现场建的档记一笔：圈"她自己的家"时不把别人的房子算进来。她盖的不写，旧档案读回来也按她盖的算。
+        // 读现场建的档记一笔：圈"她自己的家"时不把别人的房子算进来。
         if (archive.readFromSite()) root.addProperty("read_from_site", true);
+        // 她真放下过的格按世界坐标的长整数记：圈家只认这些格。
+        if (!archive.placedCells().isEmpty()) {
+            JsonArray placed = new JsonArray();
+            archive.placedCells().forEach(pos -> placed.add(pos.asLong()));
+            root.add("placed_cells", placed);
+        }
         return root.toString();
     }
 
@@ -137,11 +160,18 @@ public final class BuildingArchives {
         JsonObject root = JsonParser.parseString(json).getAsJsonObject();
         List<PlannedCell> cells = new ArrayList<>();
         for (JsonElement cell : root.getAsJsonArray("cells")) cells.add(PlannedCellCodec.decode(cell.getAsJsonObject()));
+        String note = root.has("last_check_note") ? root.get("last_check_note").getAsString() : null;
+        // 没有这一笔的旧档：结论写着"读现场建的档"的就是读来的，补记成读来的，免得把别人的房子当成她盖的。
+        boolean readFromSite = root.has("read_from_site") ? root.get("read_from_site").getAsBoolean()
+                : note != null && note.startsWith(READ_FROM_SITE_NOTE);
+        List<BlockPos> placed = new ArrayList<>();
+        if (root.has("placed_cells")) {
+            for (JsonElement pos : root.getAsJsonArray("placed_cells")) placed.add(BlockPos.of(pos.getAsLong()));
+        }
         return new BuildingArchive(root.get("name").getAsString(), root.get("dimension").getAsString(),
                 BlockPos.of(root.get("anchor").getAsLong()), root.get("rotation").getAsInt(),
                 root.has("design_id") ? root.get("design_id").getAsString() : null, cells,
                 root.has("last_check_at") ? Instant.parse(root.get("last_check_at").getAsString()) : null,
-                root.has("last_check_note") ? root.get("last_check_note").getAsString() : null,
-                root.has("read_from_site") && root.get("read_from_site").getAsBoolean());
+                note, readFromSite, placed);
     }
 }

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.build;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
@@ -41,9 +42,20 @@ final class BuildingRecorder implements RecordsConstruction {
     }
 
     @Override public ResultDetails record(ConstructionDetails details, ReadsBlocks world) {
+        return record(details, world, Set.of(), 0);
+    }
+
+    // 记"她真放下过哪几格"：只认这次确认放好的格，和这一栋以前记的合起来；
+    // 这次有格被保护挡下（多半是盖到了别人的东西上），这一次一格都不添，免得重试几回就把别人的房子圈成她家。
+    @Override public ResultDetails record(ConstructionDetails details, ReadsBlocks world, Set<BlockPos> placed,
+            int protectedCells) {
         Blueprint laid = planned.laid();
         BlueprintCheck.Report check = BlueprintCheck.report(laid, world);
-        BuildingArchive archive = planned.with(planned.cells(), planned.designId(), Instant.now(), conclusion(check));
+        List<BlockPos> before = records.archives().find(planned.name())
+                .filter(old -> old.dimension().equals(planned.dimension()) && old.anchor().equals(planned.anchor()))
+                .map(BuildingArchive::placedCells).orElse(List.of());
+        BuildingArchive archive = planned.with(planned.cells(), planned.designId(), Instant.now(), conclusion(check))
+                .withPlaced(before).withPlaced(protectedCells > 0 ? Set.of() : placed);
         boolean saved = records.archives().save(archive);
         if (saved) records.remember().accept(archive);
         BlockPos anchor = archive.anchor();

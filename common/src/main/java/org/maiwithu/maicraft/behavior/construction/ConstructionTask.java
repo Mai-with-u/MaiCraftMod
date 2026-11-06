@@ -246,8 +246,9 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
     // 结果细节只在收场时出一次：先交给使用方记账（盖房子记建筑档案、改建后整栋比对），之后照它给。
     @Override protected ResultDetails details() {
         if (settledDetails == null) {
+            // 连同这次真放下的格与受保护没动的格数一起交出去：盖房子只把真放下的记成她的。
             settledDetails = input.recorder().record(site.details(services.site().dimension(), temporariesLeft, input.fixturesSkipped()),
-                    services.site());
+                    services.site(), site.placed(), site.protectedCount());
         }
         return settledDetails;
     }

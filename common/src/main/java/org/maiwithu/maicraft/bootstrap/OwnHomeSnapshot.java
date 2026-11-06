@@ -5,20 +5,21 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
-import org.maiwithu.maicraft.behavior.construction.Blueprint;
 import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 圈出角色自己的家的一份快照：最近睡过的那张床（世界记忆）、她按图盖过的每一栋的范围（建筑档案，读现场建的不算）。
+ * 圈出角色自己的家的一份快照：最近真睡过的那张床（世界记忆）、她按图盖过的每一栋里真放下过的格
+ * （建筑档案，读现场建的不算）。
  *
- * <p>保护判断在后台线程上也会问，世界记忆和档案库只在客户端线程上读；档案库每读一次要把整栋蓝图解出来，
- * 所以客户端刻里每隔 {@link #REFRESH_MILLIS} 毫秒抄一次，问的时候读这份任何线程都能读的快照。
+ * <p>保护判断在后台线程上也会问，世界记忆和档案库只在客户端线程上读，所以客户端刻里每隔 {@link #REFRESH_MILLIS}
+ * 毫秒抄一次，问的时候读这份任何线程都能读的快照。档案库每读一栋要把整张蓝图解出来，只在档案库的记号变了才重读。
  */
 final class OwnHomeSnapshot implements ReadsOwnHome {
 
@@ -30,6 +31,8 @@ final class OwnHomeSnapshot implements ReadsOwnHome {
     private volatile Optional<WorldPosition> sleptBed = Optional.empty();
     private volatile List<Building> ownBuildings = List.of();
     private long refreshedAtMillis = Long.MIN_VALUE;
+    /** 上次重读各栋时档案库的记号：没变就不再解码。 */
+    private String archivesRevision;
 
     /** 进世界时建好就先抄一次：刚进来就动手的任务也认得出家。 */
     OwnHomeSnapshot(WorldMemory memory, BuildingArchives archives, long nowMillis) {
@@ -42,15 +45,17 @@ final class OwnHomeSnapshot implements ReadsOwnHome {
     void refresh(long nowMillis) {
         if (refreshedAtMillis != Long.MIN_VALUE && nowMillis - refreshedAtMillis < REFRESH_MILLIS) return;
         refreshedAtMillis = nowMillis;
-        sleptBed = SleptBeds.latest(memory);
+        // 床几秒一抄：刚睡下的床马上算进家里。
+        sleptBed = SleptBeds.latestReallySleptIn(memory);
+        // 房子只在档案存过之后重读：盖完、改建、读现场建档都会换记号。
+        String revision = archives.revision();
+        if (revision.equals(archivesRevision)) return;
+        archivesRevision = revision;
         List<Building> buildings = new ArrayList<>();
         for (BuildingArchive archive : archives.all()) {
-            // 读现场建的档可能是别人的房子：只认她按图盖的那些。
-            if (archive.readFromSite()) continue;
-            Blueprint.Bounds bounds = archive.bounds();
-            buildings.add(new Building(archive.name(), archive.dimension(),
-                    bounds.min().getX(), bounds.min().getY(), bounds.min().getZ(),
-                    bounds.max().getX(), bounds.max().getY(), bounds.max().getZ()));
+            // 读现场建的档可能是别人的房子；没记下真放下过哪几格的旧档也不认：宁可认小。
+            if (archive.readFromSite() || archive.placedCells().isEmpty()) continue;
+            buildings.add(new Building(archive.name(), archive.dimension(), Set.copyOf(archive.placedCells())));
         }
         ownBuildings = List.copyOf(buildings);
     }

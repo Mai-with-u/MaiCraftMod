@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -289,6 +290,15 @@ final class ConstructionSite {
             case null -> false;
             default -> true;
         };
+    }
+
+    /** 这次确认放好的格：盖房子记"她真放下过哪几格"用。 */
+    Set<BlockPos> placed() {
+        Set<BlockPos> placed = new LinkedHashSet<>();
+        endings.forEach((pos, ending) -> {
+            if (ending == CellEnding.PLACED) placed.add(pos);
+        });
+        return placed;
     }
 
     /** 受保护的格有几格。 */

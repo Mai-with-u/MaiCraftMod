@@ -209,7 +209,7 @@ public final class BuildModule implements AbilityModule {
             BuildingArchive planned = patch
                     ? archive.with(BlueprintPatch.merge(archive.cells(), drawn), archive.designId(), archive.lastCheckAt(), archive.lastCheckNote())
                     : new BuildingArchive(archive.name(), archive.dimension(), archive.anchor(), rotation, source.designId(), drawn,
-                            archive.lastCheckAt(), archive.lastCheckNote(), archive.readFromSite());
+                            archive.lastCheckAt(), archive.lastCheckNote(), archive.readFromSite(), archive.placedCells());
             return new StepDecision.Run(new BuildInput(
                     new ConstructionInput(construction, step.goal().permissions(), "施工", source.fixturesSkipped(),
                             new BuildingRecorder(records, planned, true), step.goal().digTool()),
