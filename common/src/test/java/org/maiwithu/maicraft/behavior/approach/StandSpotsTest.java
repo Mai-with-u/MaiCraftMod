@@ -81,6 +81,23 @@ class StandSpotsTest {
     }
 
     @Test
+    void 挑站位时每个站位的四面落差只数一次_不随排序比较次数翻倍() {
+        int[] asked = {0};
+        StubWorld counting = new StubWorld() {
+            @Override public double dropBelow(BlockPos at) {
+                asked[0]++;
+                return super.dropBelow(at);
+            }
+        };
+        StandSpots.Ranking ranking = StandSpots.find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)), REACH, counting,
+                walking, guarded);
+        int reviewed = ranking.spots().size() + ranking.rejected().size();
+        assertTrue(ranking.spots().size() > 8, "站位要够多，排序才会比较很多次：" + ranking.spots().size());
+        assertTrue(asked[0] <= reviewed + 4 * ranking.spots().size(),
+                "核对每个候选数一次，排序前每个站位四面各数一次：实际数了 " + asked[0] + " 次");
+    }
+
+    @Test
     void 脚下悬空和头顶没空间的格子被拒() {
         world.noFloor.add(new BlockPos(2, 64, 0));
         world.lowCeiling.add(new BlockPos(2, 64, 1));

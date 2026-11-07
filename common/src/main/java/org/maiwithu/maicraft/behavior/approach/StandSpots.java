@@ -11,7 +11,9 @@ import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 
@@ -137,8 +139,13 @@ public final class StandSpots {
      * 同一档里旁边一侧是深落差的（崖边、窄台）挪到后面，尽量不站在边沿上干活，别处都站不了才站。
      */
     private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet, ApproachWorldView world) {
+        // 崖边要往下数落差，每个站位排序前先看一次记下：比较时不再每比一对就重数四面。
+        Map<BlockPos, Integer> edge = new HashMap<>();
+        for (StandSpot spot : spots) {
+            edge.computeIfAbsent(spot.feet(), feet -> besideDeepDrop(feet, world) ? 1 : 0);
+        }
         spots.sort(Comparator.<StandSpot>comparingInt(spot -> climbTier(spot.feet(), currentFeet))
-                .thenComparingInt(spot -> besideDeepDrop(spot.feet(), world) ? 1 : 0));
+                .thenComparingInt(spot -> edge.get(spot.feet())));
     }
 
     /** 旁边一侧空着、往下三格以上没有落脚面就算深落差：站在那儿干活，一脚踩空就摔得掉血。 */
