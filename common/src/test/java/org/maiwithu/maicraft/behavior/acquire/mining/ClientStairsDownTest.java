@@ -29,8 +29,12 @@ import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
+import org.maiwithu.maicraft.behavior.permission.SeesVillagers;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
@@ -41,7 +45,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 往下挖楼梯：土下面是石头时一级一级挖下去，挖够就停在楼梯底；挨着水或岩浆、挖不动、
- * 不许动、下一级脚下是空洞都停下；挖到过想要的方块算做完，一格没挖到以原因失败。
+ * 不许动、下一级脚下是空洞都停下；挖到过想要的方块算做完，一格没挖到以原因失败；
+ * 人在自己家里先走出家门再挖，楼梯不挖到自家底下。
  */
 class ClientStairsDownTest {
 
@@ -272,6 +277,53 @@ class ClientStairsDownTest {
         long booked = log.changes.stream().filter(change -> change.kind() == Change.Kind.BLOCK_BROKEN)
                 .mapToLong(Change::count).sum();
         assertEquals(digs.dug.size(), booked, "挖掉过的每一格都记了账");
+    }
+
+    // 她睡过的床在 (0, 64, 0)：床旁 8 格是她自己的家。
+    private ClientStairsDown stairsAtHome() {
+        ReadsOwnHome home = new ReadsOwnHome() {
+            @Override public Optional<WorldPosition> sleptBed() {
+                return Optional.of(new WorldPosition(0, 64, 0, "minecraft:overworld"));
+            }
+
+            @Override public List<Building> ownBuildings() {
+                return List.of();
+            }
+        };
+        PermissionCheck check = new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
+                        GuessesPlayerMade.NOTHING, "self", TrustedPlayers.NOBODY, SeesVillagers.NOBODY, home, id -> id),
+                new ReadsCreatureSituation() {
+                    @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
+                        return Optional.empty();
+                    }
+                });
+        return new ClientStairsDown(world, digs, new Drops(), check);
+    }
+
+    @Test
+    void 人在自己家里_先走出家门到家外的地面再挖_楼梯一格不挖在家里() {
+        Action action = stairsAtHome().digDown(type -> type.equals("minecraft:stone"), 3, Permissions.DEFAULT);
+        assertInstanceOf(ActionStatus.Done.class, run(action));
+        BlockPos spot = world.walkedTo.getFirst();
+        assertTrue(Math.sqrt(spot.distSqr(BlockPos.ZERO.above(64))) > Protection.HOME_RADIUS_BLOCKS, "先走到家外：" + spot);
+        assertEquals(64, spot.getY(), "走到家外的地面上");
+        assertFalse(digs.dug.isEmpty(), "到了家外才挖");
+        for (BlockPos cell : digs.dug) {
+            assertTrue(Math.sqrt(cell.distSqr(BlockPos.ZERO.above(64))) > Protection.HOME_RADIUS_BLOCKS, "挖到了家里：" + cell);
+        }
+    }
+
+    @Test
+    void 家外的地挑最近的一格_四周三格外也不在家里_找不到就为空() {
+        Predicate<BlockPos> flat = cell -> cell.getY() == 64;
+        Predicate<BlockPos> home = cell -> Math.sqrt(cell.distSqr(BlockPos.ZERO.above(64))) <= 8.0;
+        BlockPos spot = StairsOutsideHome.pick(BlockPos.ZERO.above(64), home, flat).orElseThrow();
+        assertFalse(home.test(spot));
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            assertFalse(home.test(spot.relative(side, StairsOutsideHome.MARGIN)), "朝 " + side + " 走三格回到了家里");
+        }
+        assertEquals(Optional.empty(), StairsOutsideHome.pick(BlockPos.ZERO.above(64), cell -> true, flat), "四处都是家");
     }
 
     @Test

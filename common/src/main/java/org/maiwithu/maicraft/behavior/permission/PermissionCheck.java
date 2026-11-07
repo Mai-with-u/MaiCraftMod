@@ -44,6 +44,11 @@ public final class PermissionCheck {
     private final Protection protection;
     private final ReadsCreatureSituation creatures;
 
+    /** 这一格在不在她自己的家里：往下挖楼梯先走出家门，不在自家底下挖。 */
+    public boolean atOwnHome(WorldPosition position) {
+        return protection.homeOf(position).isPresent();
+    }
+
     /** 这一格是不是建筑档案里某一栋图上的格：自动挑取材点时跳过，给那一栋的名字。 */
     public Optional<String> archivedBuildingAt(WorldPosition position) {
         return protection.archivedBuildingAt(position);

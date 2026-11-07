@@ -104,6 +104,12 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
         Action stepTo(BlockPos feet);
 
+        /** 这一格能不能站上去开挖：脚和头空着、脚下是天然的实地、站上去不烫脚。 */
+        default boolean standable(TickContext context, BlockPos feet) {
+            return ground(context, feet) == Ground.OPEN && ground(context, feet.above()) == Ground.OPEN
+                    && ground(context, feet.below()) == Ground.DIGGABLE && !hurtsToStandOn(context, feet.below());
+        }
+
         /** 这一列头顶露天的地面在多高（地表的世界 y）；读不到为空。往上挖楼梯按它估还要挖几级。 */
         default OptionalInt surfaceY(TickContext context, BlockPos feet) {
             return OptionalInt.empty();
@@ -205,7 +211,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 一次往下挖楼梯（或长程挖矿、或挖到够深为止）：看清下一级 → 从上往下挖开 → 走下去 → 捡起这一级掉的东西，循环到挖够、下到够深的地方或该停。 */
     private final class Digging implements Action {
 
-        private enum Stage { LOOK, DIG, FILL, STEP_DOWN, PICK_UP, MINE }
+        private enum Stage { LOOK, WALK_OUT, DIG, FILL, STEP_DOWN, PICK_UP, MINE }
 
         private final Predicate<String> yields;
         private final int wantedCells;
@@ -257,6 +263,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         /** 挖掉的方块按种类计数：一段台阶几十格石头，结果里合成一条，不一格一条。 */
         private final Map<String, Integer> dugByType = new LinkedHashMap<>();
         private boolean booked;
+        /** 开挖前看过一次在不在自己家里（在就先走出去了）：只看一次，走出去以后不再找。 */
+        private boolean leftHome;
         /** 被叫先到安全处再停、手上那一下（走下一级、挖、垫、捡）说要先收尾：只推进它到停稳；暂停时清掉。 */
         private boolean stopping;
 
@@ -294,12 +302,15 @@ public final class ClientStairsDown implements DigsStairsDown {
                 closeStep();
                 stage = Stage.LOOK;
                 filledThisStep = false;
+                // 还没挖第一级就被叫走：回来时重新看一次在不在家里。
+                if (steps == 0) leftHome = false;
             }
             if (step != null) {
                 ActionStatus status = step.tick(context);
                 if (status instanceof ActionStatus.Running) return status;
                 closeStep();
                 return switch (stage) {
+                    case WALK_OUT -> walkedOut(status);
                     case DIG -> dug(context, status);
                     case FILL -> filled(status);
                     case STEP_DOWN -> steppedDown(status);
@@ -333,6 +344,12 @@ public final class ClientStairsDown implements DigsStairsDown {
             feet = standing.get();
             // 够深就停的挖法：站到的地方满足停点判断就收工，一格不挖也算做完（出发时就已经够深）。
             if (reached != null && reached.test(feet)) return finish(null);
+            // 为拿东西挖楼梯（找石头、长程挖矿）时人在自己家里：先走出家门到家外的天然地面上再挖，
+            // 不在自家床底、地板底下开洞。出行的下掘段按路线定在哪挖，不走开。
+            if (reached == null && steps == 0 && !leftHome) {
+                leftHome = true;
+                if (atHome(context, feet)) return walkOut(context);
+            }
             if (tunnel == null) {
                 if (steps >= MAX_STEPS) {
                     return finish(Problem.of(Problem.Kind.STUCK, "往下挖了 " + steps + " 级楼梯，先停在这里"));
@@ -419,6 +436,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         private Optional<Problem> refusal(TickContext context, Direction toward) {
             Heading way = new Heading(toward, down());
             for (BlockPos cell : stepCells(feet, toward, way.down())) {
+                if (reached == null && atHome(context, cell)) return Optional.of(underHome(cell));
                 Ground ground = site.ground(context, cell);
                 if (ground == Ground.OPEN) continue;
                 if (ground != Ground.DIGGABLE) return Optional.of(blocked(context, cell, ground));
@@ -436,6 +454,37 @@ public final class ClientStairsDown implements DigsStairsDown {
             BlockPos floor = nextFeet(feet, way).below();
             if (site.hurtsToStandOn(context, floor)) return Optional.of(hotFloor(context, floor));
             return Optional.empty();
+        }
+
+        // 挑家外最近、站得住的一格走过去；找不到、走不过去就如实停下，不在家里挖。
+        private ActionStatus walkOut(TickContext context) {
+            Optional<BlockPos> spot = StairsOutsideHome.pick(feet, cell -> atHome(context, cell),
+                    cell -> site.standable(context, cell));
+            if (spot.isEmpty()) {
+                return finish(Problem.of(Problem.Kind.NOT_FOUND, "人在自己家里，" + StairsOutsideHome.RADIUS
+                        + " 格内找不到家外能站的天然地面，不在自家底下往下挖楼梯", "先走出营地到空地上再要"));
+            }
+            stage = Stage.WALK_OUT;
+            stepTarget = spot.get();
+            step = site.stepTo(stepTarget);
+            return ActionStatus.progressed();
+        }
+
+        // 走到了家外那一格：从这里重新看第一级；走不过去如实停下。
+        private ActionStatus walkedOut(ActionStatus status) {
+            if (status instanceof ActionStatus.Failed failed) {
+                return finish(Problem.of(Problem.Kind.UNREACHABLE, "人在自己家里，要先走出家门到 " + at(stepTarget)
+                        + " 再挖楼梯，走不过去：" + failed.problem().message()));
+            }
+            return nextStep();
+        }
+
+        private boolean atHome(TickContext context, BlockPos cell) {
+            return permission.atOwnHome(position(context, cell));
+        }
+
+        private Problem underHome(BlockPos cell) {
+            return Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 在自己家里，不在自家底下挖");
         }
 
         // 下一级脚下站上去会掉血：写明是哪一格、什么方块。
