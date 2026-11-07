@@ -200,11 +200,11 @@ public class MovementPillar extends Movement {
             double diffZ = ctx.player().position().z - (dest.getZ() + 0.5);
             double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
             // 往上垫脚像真人那样跳起来放，不蹲：只有点的那格（脚下那格）自己会开界面、会被右键开关时才潜行，
-            // 免得一跳一放把箱子打开；还没站到格子正中、要挪过去时也蹲着挪，不从边上滑下去。
-            // 要潜行时，潜行真落到身上的下一刻才右键。
+            // 免得一跳一放把箱子打开。每跳一下人会偏开格子中心一点，往中心挪回去也不蹲：朝中心走不会走出这格的边，
+            // 蹲着挪会让每垫一块都蹲一下。要潜行时，潜行真落到身上的下一刻才右键。
             BlockPos clicked = src.below();
             boolean sneakToPlace = PlaceAgainst.needsSneak(ctx.world(), clicked, BlockStateInterface.get(ctx, clicked));
-            state.setInput(Input.SNEAK, sneakToPlace || dist > 0.17);
+            state.setInput(Input.SNEAK, sneakToPlace);
             double flatMotion = Math.sqrt(ctx.player().getDeltaMovement().x * ctx.player().getDeltaMovement().x + ctx.player().getDeltaMovement().z * ctx.player().getDeltaMovement().z);
             if (dist > 0.17) {//why 0.17? because it seemed like a good number, that's why
                 //[explanation added after baritone port lol] also because it needs to be less than 0.2 because of the 0.3 sneak limit
