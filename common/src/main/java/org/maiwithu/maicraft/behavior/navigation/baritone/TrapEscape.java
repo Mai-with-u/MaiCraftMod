@@ -55,6 +55,8 @@ final class TrapEscape {
     private TerrainPermit raised;
     /** 脱困中放开了别人放的普通方块（最后一级）。 */
     private boolean throughOthers;
+    /** 这次是被困在自己家里：只许拆选中的那一两格墙，经过由家里那一段自己记。 */
+    private boolean atHome;
     /** 这次脱困从哪一格开始：事件里说在哪被封住。 */
     private BlockPos trappedAt;
     private long nextCheck;
@@ -149,6 +151,37 @@ final class TrapEscape {
         };
     }
 
+    /**
+     * 被困在自己家里、选好了要水平拆开的那一两格墙：许可至少升到能挖（引擎才肯挖那几格），
+     * 不放开别人放的普通方块，也不再往上升；拆哪几格由保护要求里的"许挖格"定。none 不升。
+     */
+    boolean raiseAtHome(BlockPos feet, long tick) {
+        if (base.changes() == Permissions.BlockChanges.NONE || raised != null) return false;
+        raises++;
+        placed = 0;
+        dug = 0;
+        othersThisTime.clear();
+        reported = false;
+        trappedAt = feet == null ? null : feet.immutable();
+        TerrainPermit digs = next(base);
+        raised = digs != null ? digs : base;
+        atHome = true;
+        nextCheck = tick + CHECK_EVERY_TICKS;
+        return true;
+    }
+
+    /** 这次脱困是不是被困在自己家里那一种。 */
+    boolean atHome() {
+        return atHome;
+    }
+
+    /** 被困在自己家里那一段的经过：拆了哪格、是谁放的、补没补回；拆了别人放的就当场报一条事件。 */
+    void noteHome(String story, boolean brokeOthers) {
+        if (story.isEmpty()) return;
+        notes.add(story);
+        if (brokeOthers) events.publish(TaskEvent.Kind.OTHERS_BLOCKS_BROKEN, story);
+    }
+
     /** 脱困中该不该看一眼出没出坑：隔几刻看一次。 */
     boolean dueCheck(long tick) {
         if (raised == null || tick < nextCheck) return false;
@@ -159,6 +192,12 @@ final class TrapEscape {
     /** 出坑了：记一笔经过，挖了别人的方块就当场报一条事件；收回放开，降回任务原来的许可。 */
     void restore() {
         if (raised == null) return;
+        // 被困在家里那一种：经过等补完墙再由家里那一段记，这里只降回许可。
+        if (atHome) {
+            raised = null;
+            atHome = false;
+            return;
+        }
         notes.add(story() + "，出来后按原来的许可接着走");
         report(Boolean.TRUE);
         raised = null;
@@ -171,6 +210,11 @@ final class TrapEscape {
      */
     void finish(boolean arrived) {
         if (raised == null) return;
+        if (atHome) {
+            raised = null;
+            atHome = false;
+            return;
+        }
         notes.add(story() + (arrived ? "，走到了目的地" : ""));
         report(arrived ? Boolean.TRUE : null);
         raised = null;
@@ -233,6 +277,8 @@ final class TrapEscape {
      */
     Problem explain(Problem problem, Supplier<TrapWalls> walls, BooleanSupplier trapped, boolean carriesScaffold) {
         if (problem == null) return null;
+        // 被困在自己家里那一种由家里那一段说明，这里不再按坑里的说法补一遍。
+        if (atHome) return problem;
         if (raised == null) {
             // none 一格都不动：被困也不升，原样按走不通收场，出不去的人照样该知道还有寻死这条路。
             boolean stuckInPit = base.changes() == Permissions.BlockChanges.NONE && trapped.getAsBoolean();

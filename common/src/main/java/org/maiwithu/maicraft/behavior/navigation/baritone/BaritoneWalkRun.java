@@ -88,6 +88,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final SprintBreaks sprintBreaks = new SprintBreaks(); // 疾跑断开的诊断：视野一缩一放时分清是谁断的
     /** 卡坑自动脱困：没路又困在坑里时按"搭 → 挖"临时升许可，出坑降回。 */
     private final TrapEscape escape;
+    /** 被困在自己家里时的出路：只水平拆开一两格墙出去，出来补回。 */
+    private final HomeWayOut homeWayOut = new HomeWayOut();
     /** 人按 F8 收回角色时路线被撤了：交回后第一刻重新算路、进展计时重新起算。 */
     private boolean routeDropped;
     /** 最近一刻的角色上下文；暂停、放弃时用它停挖、交还没等到确认的右键。 */
@@ -151,8 +153,14 @@ final class BaritoneWalkRun implements WalkRun {
         return escape;
     }
 
+    // 被困在家里正拆墙出去时，家里四周的外壳也算这一趟的保护格：只许挖选中的那一两格。
     LongSet sacredCells() {
-        return target.sacred();
+        return homeWayOut.withShell(target.sacred());
+    }
+
+    /** 被困在家里选中要拆的那一两格墙；没在拆为空。 */
+    LongSet breakableCells() {
+        return homeWayOut.breakable();
     }
 
     /** 身体不许进的格子：这一趟卡住两次被列为障碍的面前格。 */
@@ -288,7 +296,8 @@ final class BaritoneWalkRun implements WalkRun {
         probe.cancel();
         probe = new TerrainProbe(engineGoal, permit);
         if (activated && owner.owns(this) && !routeDropped && !progress.stopRequested()) {
-            NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers());
+            NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers(),
+                    breakableCells());
             owner.engine().getCustomGoalProcess().updateGoalAndPath(engineGoal);
         }
         return true;
@@ -361,6 +370,8 @@ final class BaritoneWalkRun implements WalkRun {
         if (staging.tool(context, player, pathing, engine)) return; // 挖路的镐只在主背包：先挪到快捷栏再挖
         if (landingHolds(context, player, pathing, engine)) return; // 落地救援占着身体：出发前备料、落地后收回
         if (waitsForMovingObstacle(context, player, pathing, engine)) return; // 前方有正在动的东西：原地等它过去
+        // 从家里拆墙出来了：停下把墙补回去，补完按原目标接着走。
+        if (homeWayOut.holdsPlayer(context, player, clicks, hands, owner, displacement, () -> resumeAfterRefill(engine, context))) return;
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -392,9 +403,10 @@ final class BaritoneWalkRun implements WalkRun {
         // 脱困没出去的再补一句身边坑壁是什么、为什么没挖开、还剩哪条出路。
         var spare = owner.spareScaffold(player);
         progress.explainFailure(problem -> problem.kind() == Problem.Kind.INTERNAL_ERROR ? problem
-                : WalkFailureFacts.enrich(escape.explain(probe.explain(problem, !spare.isEmpty(),
+                : WalkFailureFacts.enrich(homeWayOut.explain(escape.explain(probe.explain(problem, !spare.isEmpty(),
                         owner -> TrapEscape.nameOf(owner, context)), () -> TrapWalls.around(context, feet),
-                        () -> trappedHere(feet), !spare.isEmpty()), context.level(), player, permit, spare));
+                        () -> trappedHere(feet), !spare.isEmpty()), TrapWalls.around(context, feet)
+                        .describe(permit.changes(), !spare.isEmpty())), context.level(), player, permit, spare));
         if (progress.done()) {
             finishRun(context, player, engine, pathing);
             return;
@@ -438,7 +450,8 @@ final class BaritoneWalkRun implements WalkRun {
             case OBSTACLE -> {
                 LOG.warn("[maicraft-path] 在 {} 前卡住了 {} 次，列为障碍重算绕行；{}",
                         front.toShortString(), NavigationStallMemory.ATTEMPTS, facts);
-                NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers());
+                NavigationProtection.install(sacredCells(), noEntryCells(), Integer.MIN_VALUE, escape.throughOthers(),
+                        breakableCells());
                 replanWhenSafe = true;
             }
             case EXHAUSTED -> progress.fail(Problem.of(Problem.Kind.STUCK,
@@ -488,7 +501,9 @@ final class BaritoneWalkRun implements WalkRun {
         clicks.stop(context);
         context.input().releaseAll(player);
         // 收场时还在脱困（挖出坑就走到了、没来得及看一眼）：把这次脱困的经过与挖了谁的方块结掉再交账。
+        // 从家里拆墙出来还没补完就收场的，拆了哪格、补到哪一步照实记下。
         escape.finish(progress.report().state() == WalkReport.State.ARRIVED);
+        escape.noteHome(homeWayOut.unfinishedStory(), homeWayOut.brokeOthers());
         sprintBreaks.summary().ifPresent(line -> LOG.info("[maicraft-path] {}", line)); // 这一趟疾跑断了几次、各为什么
         owner.release(this);
         finishEngine(engine, pathing);
@@ -633,7 +648,15 @@ final class BaritoneWalkRun implements WalkRun {
     // 升一级脱困：人困在封死的坑里时，只垫升到挖天然方块，能挖还出不去就放开别人放的普通方块；
     // 新开关与保护要求写进引擎、从原地重新算路。
     private boolean raiseToEscape(IBaritone engine, BlockPos feet, long tick) {
-        if (!escape.raise(feet, () -> trappedHere(feet), tick)) return false;
+        // 被困在自己家里：不按坑里那样往下、往四周乱挖，只水平拆开选好的那一两格墙出去；拆不了就如实停下。
+        if (homeWayOut.started() || NavigationProtection.atOwnHome(feet)) {
+            if (permit.changes() == Permissions.BlockChanges.NONE || !trappedHere(feet)
+                    || !homeWayOut.tryStart(lastContext, feet, target.sacred())) return false;
+            escape.raiseAtHome(feet, tick);
+            LOG.info("在自己家里被围住（{}），水平拆开 {} 出去", feet.toShortString(), homeWayOut.breakable());
+        } else if (!escape.raise(feet, () -> trappedHere(feet), tick)) {
+            return false;
+        }
         LOG.info("卡在坑里（{}），地形许可临时升到 {}{} 脱困", feet.toShortString(), escape.effective().changes(),
                 escape.throughOthers() ? "，放开别人放的普通方块" : "");
         owner.applyTerrain(this);
@@ -641,6 +664,13 @@ final class BaritoneWalkRun implements WalkRun {
         engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
         replannedFrom(tick);
         return true;
+    }
+
+    // 家里拆开的墙补完了：记下经过，按原目标从这里重新上路。
+    private void resumeAfterRefill(IBaritone engine, PlayerContext context) {
+        escape.noteHome(homeWayOut.story(), homeWayOut.brokeOthers());
+        engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
+        replannedFrom(context.clientTick());
     }
 
     // 此刻脚下这一格是不是困在封死的坑里；读不到现场按没困住算。
@@ -654,6 +684,7 @@ final class BaritoneWalkRun implements WalkRun {
     private void restoreAfterEscape(PlayerContext context, LocalPlayer player, BlockPos feet) {
         if (!escape.dueCheck(context.clientTick()) || !player.onGround() || context.level() == null) return;
         if (TrapCheck.trapped(new LiveTrapCells(context.level()), feet, WalkDropPolicy.maxDrop(player))) return;
+        homeWayOut.exited(); // 从家里拆墙出来了：等人离开拆开的格子就停下补墙
         escape.restore();
         owner.applyTerrain(this);
         replanWhenSafe = true;

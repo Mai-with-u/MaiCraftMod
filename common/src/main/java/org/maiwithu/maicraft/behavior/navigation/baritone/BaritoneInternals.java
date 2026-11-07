@@ -350,7 +350,8 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
     void applyTerrain(BaritoneWalkRun run) {
         if (active != run) return;
         configureTerrain(BaritoneAPI.getSettings(), run.permit());
-        NavigationProtection.install(run.sacredCells(), run.noEntryCells(), Integer.MIN_VALUE, run.escape().throughOthers());
+        NavigationProtection.install(run.sacredCells(), run.noEntryCells(), Integer.MIN_VALUE, run.escape().throughOthers(),
+                run.breakableCells());
     }
 
     /** 寻路引擎问：此刻在走的这一趟是不是正在落地救援（空中放东西、等确认、收回）。 */
