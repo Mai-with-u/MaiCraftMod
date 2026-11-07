@@ -15,7 +15,7 @@ import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
 
 /**
- * 被困在自己家里时拆哪一格墙：朝外水平拆脚那层或头那层，拆得越少越好，玻璃这类一拆就碎的最后才拆；
+ * 被困在自己家里时拆哪一格墙：朝外水平拆脚那层或头那层；拆了会带掉东西的最后才拆，再挑拆得少的，玻璃这类掉不回原物的最后才拆；
  * 不能拆的墙（床、家具、记住的区域里的）换一面；四面都不能拆就没有出路。地板、屋顶都在外壳里，寻路一格都不许挖。
  */
 class HomeBreachTest {
@@ -68,7 +68,7 @@ class HomeBreachTest {
     @Test
     void 关死的小屋_朝外拆开脚那层和头那层两格出去_地板屋顶都在外壳里() {
         Hut hut = new Hut();
-        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false).orElseThrow();
+        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false, cell -> false).orElseThrow();
         assertEquals(2, breach.cells().size(), breach.toString());
         BlockPos lower = breach.cells().get(0);
         assertEquals(64, lower.getY(), "先拆脚那层");
@@ -84,7 +84,7 @@ class HomeBreachTest {
     void 头那层开着窗口_只拆脚那层一格() {
         Hut hut = new Hut();
         hut.opened.add(new BlockPos(3, 65, 1));
-        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false).orElseThrow();
+        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false, cell -> false).orElseThrow();
         assertEquals(List.of(new BlockPos(3, 64, 1)), breach.cells());
         assertEquals(Direction.EAST, breach.outward());
     }
@@ -92,7 +92,8 @@ class HomeBreachTest {
     @Test
     void 东墙边摆着床和家具不能拆_换一面墙() {
         Hut hut = new Hut();
-        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> cell.getX() != 3, cell -> false).orElseThrow();
+        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> cell.getX() != 3, cell -> false, cell -> false)
+                .orElseThrow();
         assertTrue(breach.cells().stream().noneMatch(cell -> cell.getX() == 3), breach.toString());
     }
 
@@ -100,13 +101,39 @@ class HomeBreachTest {
     void 玻璃墙最后才拆_有木墙先拆木墙() {
         Hut hut = new Hut();
         // 只有西墙是木板，其余三面是玻璃。
-        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> cell.getX() != -1).orElseThrow();
+        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> cell.getX() != -1, cell -> false).orElseThrow();
         assertTrue(breach.cells().stream().allMatch(cell -> cell.getX() == -1), breach.toString());
     }
 
     @Test
+    void 墙上挂着火把告示牌_上面压着沙子的墙最后才拆_哪怕要多拆一格() {
+        Hut hut = new Hut();
+        // 西墙头那层开着窗口，只拆脚那层一格就出得去，可那一格上挂着火把；别的墙都要拆两格。
+        hut.opened.add(new BlockPos(-1, 65, 1));
+        HomeBreach breach = HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false,
+                cell -> cell.equals(new BlockPos(-1, 64, 1))).orElseThrow();
+        assertEquals(2, breach.cells().size(), "宁可多拆一格不带掉东西的：" + breach);
+        assertTrue(breach.cells().stream().noneMatch(cell -> cell.equals(new BlockPos(-1, 64, 1))), breach.toString());
+    }
+
+    @Test
+    void 每面墙都挂着东西_照样拆一面出去() {
+        HomeBreach breach = HomeBreach.find(new Hut(), FEET, 3, cell -> true, cell -> false, cell -> true).orElseThrow();
+        assertEquals(2, breach.cells().size(), breach.toString());
+    }
+
+    @Test
+    void 交出屋里那一片_拆开的格和屋外都不在里面() {
+        HomeBreach breach = HomeBreach.find(new Hut(), FEET, 3, cell -> true, cell -> false, cell -> false).orElseThrow();
+        assertTrue(breach.pocket().contains(FEET.asLong()), "脚下这一格在屋里");
+        assertTrue(breach.pocket().contains(breach.stand().asLong()), "迈出去的那一格在屋里");
+        assertFalse(breach.pocket().contains(breach.cells().get(0).asLong()), "拆开的格不在屋里");
+        assertFalse(breach.pocket().contains(breach.cells().get(0).relative(breach.outward()).asLong()), "墙外那一格不在屋里");
+    }
+
+    @Test
     void 四面都不能拆_没有出路() {
-        assertEquals(Optional.empty(), HomeBreach.find(new Hut(), FEET, 3, cell -> false, cell -> false));
+        assertEquals(Optional.empty(), HomeBreach.find(new Hut(), FEET, 3, cell -> false, cell -> false, cell -> false));
     }
 
     @Test
@@ -114,6 +141,6 @@ class HomeBreachTest {
         Hut hut = new Hut();
         hut.opened.add(new BlockPos(3, 64, 1));
         hut.opened.add(new BlockPos(3, 65, 1));
-        assertEquals(Optional.empty(), HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false));
+        assertEquals(Optional.empty(), HomeBreach.find(hut, FEET, 3, cell -> true, cell -> false, cell -> false));
     }
 }

@@ -8,8 +8,11 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
+import baritone.api.IBaritone;
 import baritone.api.utils.Rotation;
 import baritone.api.utils.RotationUtils;
+import baritone.pathing.movement.MovementHelper;
+import baritone.utils.BlockStateInterface;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
@@ -20,22 +23,54 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.decoration.HangingEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.AmethystClusterBlock;
+import net.minecraft.world.level.block.BannerBlock;
+import net.minecraft.world.level.block.BasePressurePlateBlock;
+import net.minecraft.world.level.block.BaseRailBlock;
+import net.minecraft.world.level.block.BaseTorchBlock;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BushBlock;
+import net.minecraft.world.level.block.CakeBlock;
+import net.minecraft.world.level.block.CandleBlock;
+import net.minecraft.world.level.block.CandleCakeBlock;
+import net.minecraft.world.level.block.CarpetBlock;
+import net.minecraft.world.level.block.CeilingHangingSignBlock;
+import net.minecraft.world.level.block.CocoaBlock;
+import net.minecraft.world.level.block.DiodeBlock;
 import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FaceAttachedHorizontalDirectionalBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.FlowerPotBlock;
+import net.minecraft.world.level.block.GrindstoneBlock;
 import net.minecraft.world.level.block.IronBarsBlock;
+import net.minecraft.world.level.block.LadderBlock;
+import net.minecraft.world.level.block.RedStoneWireBlock;
+import net.minecraft.world.level.block.RedstoneWallTorchBlock;
+import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.SnowLayerBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
+import net.minecraft.world.level.block.TripWireHookBlock;
+import net.minecraft.world.level.block.WallBannerBlock;
+import net.minecraft.world.level.block.WallHangingSignBlock;
+import net.minecraft.world.level.block.WallSignBlock;
+import net.minecraft.world.level.block.WallTorchBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -111,16 +146,21 @@ final class HomeWayOut {
 
     /**
      * 被困在自己家里时找墙：找到了就记下每格原来是什么、是谁放的，开始拆；找不到就记下没出路，按走不通如实收场。
-     * 已经处理过一次的不再找。
+     * 寻路不挖的格（冰、挨着水和岩浆的）选墙时也不选，和寻路同一条规矩。已经处理过一次的不再找。
      *
      * @param sacred 这一趟另外保护的格：选墙时也不碰
      */
-    boolean tryStart(PlayerContext context, BlockPos feet, LongSet sacred) {
+    boolean tryStart(PlayerContext context, IBaritone engine, BlockPos feet, LongSet sacred) {
         if (started()) return false;
         ClientLevel level = context.level();
+        BlockStateInterface engineView = new BlockStateInterface(engine.getPlayerContext());
         Optional<HomeBreach> chosen = HomeBreach.find(new LiveTrapCells(level), feet,
-                WalkDropPolicy.maxDrop(context.localPlayer()), cell -> breakableWall(level, cell, sacred),
-                cell -> fragile(level, cell));
+                WalkDropPolicy.maxDrop(context.localPlayer()),
+                cell -> level.isLoaded(cell) && breakableWall(level, cell, sacred)
+                        && !MovementHelper.avoidBreaking(engineView, cell.getX(), cell.getY(), cell.getZ(),
+                                level.getBlockState(cell)),
+                cell -> fragile(level.getBlockState(cell)),
+                cell -> knocksOff(level, cell) || framesOn(level, cell));
         if (chosen.isEmpty()) {
             stage = Stage.NO_WAY;
             return false;
@@ -288,10 +328,10 @@ final class HomeWayOut {
 
     /**
      * 这一格墙拆不拆得：有碰撞、拆得动，不是床、门、活板门、栅栏门、带方块实体的家具，上面没压着床和家具，
-     * 在家里、不是功能方块、不在记住的区域里，也不在这一趟另外保护的格里。
+     * 在家里、不是功能方块、不在记住的区域里，也不在这一趟另外保护的格里。没加载的由调用方先挡掉。
      */
-    static boolean breakableWall(ClientLevel level, BlockPos cell, LongSet sacred) {
-        if (!level.isLoaded(cell) || sacred.contains(cell.asLong())) return false;
+    static boolean breakableWall(BlockGetter level, BlockPos cell, LongSet sacred) {
+        if (sacred.contains(cell.asLong())) return false;
         BlockState state = level.getBlockState(cell);
         if (state.isAir() || state.liquid() || state.getCollisionShape(level, cell).isEmpty()) return false;
         Block block = state.getBlock();
@@ -304,11 +344,72 @@ final class HomeWayOut {
         return NavigationProtection.breakableAtHome(cell, state);
     }
 
-    /** 一拆就碎、掉不回原物的：玻璃、玻璃板、冰、树叶。只在别无选择时才拆。 */
-    static boolean fragile(ClientLevel level, BlockPos cell) {
-        BlockState state = level.getBlockState(cell);
-        return state.is(BlockTags.IMPERMEABLE) || state.is(BlockTags.ICE) || state.is(BlockTags.LEAVES)
-                || state.getBlock() instanceof IronBarsBlock;
+    /**
+     * 挖掉掉的不是自己、补不回原样的：玻璃、玻璃板碎了，石头掉圆石、草方块掉泥土、书架掉书、树叶多半什么都不掉。
+     * 身上多半没有原来那种方块，补回去就缺一块，同样多时最后才拆。
+     */
+    static boolean fragile(BlockState state) {
+        Block block = state.getBlock();
+        return state.is(BlockTags.IMPERMEABLE) || block instanceof IronBarsBlock && block != Blocks.IRON_BARS
+                || !VanillaBlockDrops.dropsItself(idOf(block));
+    }
+
+    /**
+     * 拆掉这一格会不会带掉别的东西：上面压着沙子、砂砾这类会掉下来的；四周有贴在它上面、立在它上面、
+     * 吊在它下面的东西（火把、告示牌、梯子、按钮、拉杆、旗帜、灯笼、地毯、花）。展示框和画由现场另看。
+     */
+    static boolean knocksOff(BlockGetter level, BlockPos cell) {
+        if (BlockPassability.breakReleasesFallingBlock(level, cell)) return true;
+        for (Direction side : Direction.values()) {
+            BlockState next = level.getBlockState(cell.relative(side));
+            if (!next.isAir() && hangsOn(next).orElse(null) == side.getOpposite()) return true;
+        }
+        return false;
+    }
+
+    /**
+     * 这块东西靠哪一面的方块挂着、立着：贴在墙上的（火把、告示牌、梯子、旗帜、绊线钩、贴墙的按钮拉杆、紫水晶簇）朝背后，
+     * 可可豆朝它长着的那根原木；立在上面的（火把、告示牌、旗帜、压力板、铁轨、红石、地毯、花草、花盆、雪层、蜡烛、蛋糕、门）
+     * 朝下；吊着的（灯笼、天花板上的按钮、悬挂告示牌）朝上。自己立得住的、两边都能挂的（墙上的悬挂告示牌）为空。
+     */
+    static Optional<Direction> hangsOn(BlockState state) {
+        Block block = state.getBlock();
+        if (state.hasProperty(BlockStateProperties.HANGING)) {
+            return Optional.of(state.getValue(BlockStateProperties.HANGING) ? Direction.UP : Direction.DOWN);
+        }
+        if (block instanceof FaceAttachedHorizontalDirectionalBlock && !(block instanceof GrindstoneBlock)) {
+            return Optional.of(switch (state.getValue(BlockStateProperties.ATTACH_FACE)) {
+                case FLOOR -> Direction.DOWN;
+                case CEILING -> Direction.UP;
+                case WALL -> state.getValue(BlockStateProperties.HORIZONTAL_FACING).getOpposite();
+            });
+        }
+        if (block instanceof WallTorchBlock || block instanceof RedstoneWallTorchBlock || block instanceof WallSignBlock
+                || block instanceof LadderBlock || block instanceof WallBannerBlock || block instanceof TripWireHookBlock) {
+            return Optional.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING).getOpposite());
+        }
+        if (block instanceof AmethystClusterBlock) return Optional.of(state.getValue(BlockStateProperties.FACING).getOpposite());
+        if (block instanceof CocoaBlock) return Optional.of(state.getValue(BlockStateProperties.HORIZONTAL_FACING));
+        if (block instanceof WallHangingSignBlock) return Optional.empty();
+        if (block instanceof CeilingHangingSignBlock) return Optional.of(Direction.UP);
+        if (block instanceof BaseTorchBlock || block instanceof SignBlock || block instanceof BannerBlock
+                || block instanceof BasePressurePlateBlock || block instanceof BaseRailBlock || block instanceof DiodeBlock
+                || block instanceof RedStoneWireBlock || block instanceof CarpetBlock || block instanceof BushBlock
+                || block instanceof FlowerPotBlock || block instanceof SnowLayerBlock || block instanceof CandleBlock
+                || block instanceof CakeBlock || block instanceof CandleCakeBlock || block instanceof DoorBlock) {
+            return Optional.of(Direction.DOWN);
+        }
+        return Optional.empty();
+    }
+
+    // 墙上挂着展示框、画：它们贴着的那一格被拆掉就掉下来。
+    private static boolean framesOn(ClientLevel level, BlockPos cell) {
+        AABB wall = new AABB(cell);
+        return !level.getEntitiesOfClass(HangingEntity.class, wall.inflate(1.0), hanging -> {
+            Direction facing = hanging.getDirection();
+            return hanging.getBoundingBox().move(-facing.getStepX() * 0.5, -facing.getStepY() * 0.5,
+                    -facing.getStepZ() * 0.5).deflate(1.0E-7).intersects(wall);
+        }).isEmpty();
     }
 
     /**

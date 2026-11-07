@@ -174,6 +174,25 @@ public final class VanillaBlockDrops {
     }
 
     /**
+     * 挖掉却不掉自己、取物也不拿它当来源的：书架掉三本书，拆书架拿书不如做书，不往这上面引。
+     * 只在问"挖掉还掉不掉自己"时算上。
+     */
+    private static final Set<String> NOT_ITSELF_UNOFFERED = Set.of("minecraft:bookshelf");
+
+    /**
+     * 不带精准采集挖掉这种方块，掉的是不是方块自己：石头掉圆石、草方块掉泥土、玻璃碎了、书架掉书、树叶多半什么都不掉
+     * 都不是；砾石偶尔出燧石、没出就掉自己，算是。对照里没有的按"掉自己"的通例回答。
+     * 拆了要原样补回去时据此挑：掉的不是自己，背包里多半没有那种方块，补不回。
+     */
+    public static boolean dropsItself(String blockTypeId) {
+        if (BLOCK_TO_DROP.containsKey(blockTypeId) || DROPS_NOTHING.contains(blockTypeId)
+                || NOT_ITSELF_UNOFFERED.contains(blockTypeId)) {
+            return false;
+        }
+        return chanceDropsOf(blockTypeId).stream().allMatch(ChanceDrop::elseDropsItself);
+    }
+
+    /**
      * 精准采集、时运会不会改这种方块的掉落：挖掉掉的不是自己（石头掉圆石、矿石掉矿物）、碎了什么都不掉（玻璃、冰）、
      * 有概率掉落的（树叶、砾石、草）都会改。挖方块挑工具时它们"掉落敏感"：带这两种附魔的不自动换上来。
      * 对照只认原版；认不出的模组方块当会改——拿不准就不替调用方动它的掉落。

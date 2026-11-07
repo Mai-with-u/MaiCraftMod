@@ -57,6 +57,21 @@ class VanillaBlockDropsTest {
     }
 
     @Test
+    void stoneGrassGlassBookshelfAndLeavesDoNotDropThemselves() {
+        // 拆了要原样补回去时据此挑：掉的不是自己，背包里多半没有那种方块。
+        assertFalse(VanillaBlockDrops.dropsItself("minecraft:stone"), "石头掉圆石");
+        assertFalse(VanillaBlockDrops.dropsItself("minecraft:grass_block"), "草方块掉泥土");
+        assertFalse(VanillaBlockDrops.dropsItself("minecraft:glass"), "玻璃碎了");
+        assertFalse(VanillaBlockDrops.dropsItself("minecraft:bookshelf"), "书架掉书");
+        assertFalse(VanillaBlockDrops.dropsItself("minecraft:oak_leaves"), "树叶多半什么都不掉");
+        assertTrue(VanillaBlockDrops.dropsItself("minecraft:oak_planks"));
+        assertTrue(VanillaBlockDrops.dropsItself("minecraft:cobblestone"));
+        assertTrue(VanillaBlockDrops.dropsItself("minecraft:gravel"), "没出燧石就掉砾石自己");
+        // 书架不因此成了取书的来源。
+        assertTrue(VanillaBlockDrops.blocksDropping("minecraft:book").stream().noneMatch("minecraft:bookshelf"::equals));
+    }
+
+    @Test
     void glassDropsNothingAtAll() {
         assertTrue(VanillaBlockDrops.blocksDropping("minecraft:glass").isEmpty());
         assertTrue(VanillaBlockDrops.blocksDropping("minecraft:ice").isEmpty());

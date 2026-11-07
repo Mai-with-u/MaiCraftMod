@@ -653,7 +653,7 @@ final class BaritoneWalkRun implements WalkRun {
         // 被困在自己家里：不按坑里那样往下、往四周乱挖，只水平拆开选好的那一两格墙出去；拆不了就如实停下。
         if (homeWayOut.started() || NavigationProtection.atOwnHome(feet)) {
             if (permit.changes() == Permissions.BlockChanges.NONE || !trappedHere(feet)
-                    || !homeWayOut.tryStart(lastContext, feet, target.sacred())) return false;
+                    || !homeWayOut.tryStart(lastContext, engine, feet, target.sacred())) return false;
             escape.raiseAtHome(feet, tick);
             LOG.info("在自己家里被围住（{}），水平拆开 {} 出去", feet.toShortString(), homeWayOut.breakable());
         } else if (!escape.raise(feet, () -> trappedHere(feet), tick)) {
