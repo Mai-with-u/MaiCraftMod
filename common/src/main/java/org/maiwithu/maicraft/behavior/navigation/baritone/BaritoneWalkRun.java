@@ -372,8 +372,9 @@ final class BaritoneWalkRun implements WalkRun {
         if (staging.tool(context, player, pathing, engine)) return; // 挖路的镐只在主背包：先挪到快捷栏再挖
         if (landingHolds(context, player, pathing, engine)) return; // 落地救援占着身体：出发前备料、落地后收回
         if (waitsForMovingObstacle(context, player, pathing, engine)) return; // 前方有正在动的东西：原地等它过去
-        // 从家里拆墙出来了：停下把墙补回去，补完按原目标接着走。
-        if (homeWayOut.holdsPlayer(context, player, clicks, hands, owner, displacement, () -> resumeAfterRefill(engine, context))) return;
+        // 从家里拆墙出来了：停下把墙补回去，补完按原目标接着走；被叫停就不再补，照常按停下收场。
+        if (homeWayOut.holdsPlayer(context, player, clicks, hands, owner, displacement, progress.stopRequested(),
+                () -> resumeAfterRefill(engine, context))) return;
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -475,7 +476,10 @@ final class BaritoneWalkRun implements WalkRun {
         escape.watchDigging(digging, digging == null ? null : context.level().getBlockState(digging), context);
         EngineClicks.Doing doing = clicks.tick(context, left, right, aimed);
         clicks.takePlaced().ifPresent(this::recordPlaced);
-        if (clicks.takeBroken().map(escape::noteBroken).orElse(false)) {
+        // 家里拆墙：真挖开了选中的那一格才记成拆了它（经过、补墙、拆了谁的都只算挖开的）。
+        BlockPos broken = clicks.takeBroken().orElse(null);
+        if (broken != null) homeWayOut.noteDug(broken);
+        if (broken != null && escape.noteBroken(broken)) {
             owner.applyTerrain(this);
             replanWhenSafe = true;
         }
@@ -650,7 +654,7 @@ final class BaritoneWalkRun implements WalkRun {
     // 升一级脱困：人困在封死的坑里时，只垫升到挖天然方块，能挖还出不去就放开别人放的普通方块；
     // 新开关与保护要求写进引擎、从原地重新算路。
     private boolean raiseToEscape(IBaritone engine, BlockPos feet, long tick) {
-        // 被困在自己家里：不按坑里那样往下、往四周乱挖，只水平拆开选好的那一两格墙出去；拆不了就如实停下。
+        // 被困在自己家里：不按坑里那样乱挖，只水平拆开选好的一两格墙出去（寻路不肯挖就换一面），拆不了就如实停下。
         if (homeWayOut.started() || NavigationProtection.atOwnHome(feet)) {
             if (permit.changes() == Permissions.BlockChanges.NONE || !trappedHere(feet)
                     || !homeWayOut.tryStart(lastContext, engine, feet, target.sacred())) return false;

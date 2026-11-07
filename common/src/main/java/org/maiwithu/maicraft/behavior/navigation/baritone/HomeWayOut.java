@@ -3,10 +3,11 @@ package org.maiwithu.maicraft.behavior.navigation.baritone;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
+import java.util.Set;
 
 import baritone.api.IBaritone;
 import baritone.api.utils.Rotation;
@@ -81,9 +82,11 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 被困在自己家里时的出路：门和栅栏门走路本来就会推开，走到这一步说明附近没有能开的门；
  * 这时只水平拆开选好的那一两格墙（{@link HomeBreach}）出去，出去后停下，用同一种方块补回去，再按原目标接着走。
  *
- * <p>拆的时候寻路只许挖那一两格，家里四周别的格都当保护格。补的时候人站在外面、不站在要补的格里，
- * 贴着旁边结实的一面放；身上没有那种方块、走远了够不着、放不上去，都如实记下没补回，不硬补。
- * 拆了哪格、是谁放的、补没补回写进这一趟出行的经过。
+ * <p>拆的时候寻路只许挖那一两格，家里四周别的格都当保护格；选好的墙寻路不肯挖（贴着水这类）就换下一面。
+ * 人穿过拆开的格子、脚也离开屋里那一片才停下补：拆完最后一格时人还在屋里，这时补就把自己又封回去了。
+ * 补的时候人站在外面、不站在要补的格里，贴着旁边结实的一面放，等游戏确认那一格真长出了方块才算补回；
+ * 身上没有那种方块、走远了够不着、放不上去、被叫停，都如实记下没补回，不硬补。
+ * 真挖开了哪格、是谁放的、补没补回写进这一趟出行的经过；补完收起这一段，同一趟里再被困在家里重新找墙。
  */
 final class HomeWayOut {
 
@@ -95,30 +98,45 @@ final class HomeWayOut {
     private static final float AIM_DEGREES = 2.5f;
     /** 比这还硬的墙不拆（黑曜石、远古残骸这类）：拆一格要很久，直播里看着像卡住。 */
     private static final float MAX_HARDNESS = 6.0f;
+    /** 一次被困最多换几面墙：选好的墙一格没挖开寻路就说出不去，换下一面再算。 */
+    private static final int MAX_WALLS = 3;
 
     /** 这一段出路走到哪一步。 */
     enum Stage { IDLE, NO_WAY, BREACHING, REFILL_PENDING, REFILLING, DONE }
 
-    /** 补墙这一刻怎么样：人还在拆开的格里接着走、刚停下开始补、正在补、补完了。 */
-    enum Step { WALK_ON, STARTED, BUSY, FINISHED }
+    /** 补墙这一刻怎么样：人还没穿出缺口接着走、刚停下开始补、正在补、补完了、补到一半被叫停。 */
+    enum Step { WALK_ON, STARTED, BUSY, FINISHED, STOPPED }
 
     private Stage stage = Stage.IDLE;
     private HomeBreach breach;
     /** 每格拆之前是什么方块：补回去用同一种。 */
     private final Map<BlockPos, Block> before = new LinkedHashMap<>();
-    /** 每格是谁放的（别人放的才有，写名字）。 */
+    /** 每格是谁放的（别人放的才有，写名字）：真挖开了那一格才算拆了别人的。 */
     private final Map<BlockPos, String> owners = new LinkedHashMap<>();
+    /** 引擎确认真挖开了的格：只有这些写成"拆开"、只补这些。 */
+    private final Set<BlockPos> dug = new LinkedHashSet<>();
     /** 每格补得怎么样：补回了，或者没补回的原因。 */
     private final Map<BlockPos, String> refills = new LinkedHashMap<>();
+    /** 要补的格，从下往上：真挖开了的那几格。 */
+    private final List<BlockPos> toRefill = new ArrayList<>();
+    /** 这一次被困里寻路不肯挖、换掉的墙：再找时跳过。 */
+    private final LongSet refused = new LongOpenHashSet();
+    /** 这一趟补墙时点过的格：确认晚到时那一格是补回去的墙，不是垫路的临时方块；收起一段后也留着。 */
+    private final LongSet refilled = new LongOpenHashSet();
+    /** 人的身体碰到过拆开的格子：进过缺口以后再离开，才算出来了。 */
+    private boolean enteredGap;
+    private int walls;
     private int cellIndex;
     private int cellTicks;
+    /** 正在补的这一格点过了：方块出来以后不再点，只等游戏确认。 */
+    private boolean clickedCell;
     private Action handing;
 
     Stage stage() {
         return stage;
     }
 
-    /** 这一趟已经按"被困在家里"处理过：不再按坑里那样升许可乱挖。 */
+    /** 这一次被困已经按"被困在家里"处理着：不再按坑里那样升许可乱挖。补完收起后为假。 */
     boolean started() {
         return stage != Stage.IDLE;
     }
@@ -146,65 +164,168 @@ final class HomeWayOut {
 
     /**
      * 被困在自己家里时找墙：找到了就记下每格原来是什么、是谁放的，开始拆；找不到就记下没出路，按走不通如实收场。
-     * 寻路不挖的格（冰、挨着水和岩浆的）选墙时也不选，和寻路同一条规矩。已经处理过一次的不再找。
+     * 正在拆的墙一格还没挖开、寻路就说出不去（多半是寻路自己不肯挖：贴着水、冰、悬空的沙砾），这面不拆了，换下一面再算；
+     * 已经挖开过的不换。寻路不挖的格选墙时也不选，和寻路同一条规矩。
      *
      * @param sacred 这一趟另外保护的格：选墙时也不碰
      */
     boolean tryStart(PlayerContext context, IBaritone engine, BlockPos feet, LongSet sacred) {
-        if (started()) return false;
+        boolean retry = stage == Stage.BREACHING && dug.isEmpty() && walls < MAX_WALLS;
+        if (started() && !retry) return false;
+        if (retry) breach.cells().forEach(cell -> refused.add(cell.asLong()));
         ClientLevel level = context.level();
         BlockStateInterface engineView = new BlockStateInterface(engine.getPlayerContext());
         Optional<HomeBreach> chosen = HomeBreach.find(new LiveTrapCells(level), feet,
                 WalkDropPolicy.maxDrop(context.localPlayer()),
-                cell -> level.isLoaded(cell) && breakableWall(level, cell, sacred)
+                cell -> level.isLoaded(cell) && !refused.contains(cell.asLong()) && breakableWall(level, cell, sacred)
                         && !MovementHelper.avoidBreaking(engineView, cell.getX(), cell.getY(), cell.getZ(),
                                 level.getBlockState(cell)),
                 cell -> fragile(level.getBlockState(cell)),
                 cell -> knocksOff(level, cell) || framesOn(level, cell));
         if (chosen.isEmpty()) {
-            stage = Stage.NO_WAY;
+            // 换不出别的墙就照原样留着正在拆的那面：说明里写清选的是哪格、一格没拆成。
+            if (!retry) stage = Stage.NO_WAY;
             return false;
         }
-        start(chosen.get(), level, owner -> TrapEscape.nameOf(owner, context));
+        Map<BlockPos, Block> blocks = new LinkedHashMap<>();
+        Map<BlockPos, String> placedBy = new LinkedHashMap<>();
+        for (BlockPos cell : chosen.get().cells()) {
+            blocks.put(cell, level.getBlockState(cell).getBlock());
+            NavigationProtection.placedByOther(cell).ifPresent(owner -> placedBy.put(cell, TrapEscape.nameOf(owner, context)));
+        }
+        begin(chosen.get(), blocks, placedBy);
         return true;
     }
 
     /**
-     * 选好了要拆的墙：记下每格原来是什么、是谁放的，开始拆。
-     *
-     * @param names 归属记录上的玩家编号换成名字（不在线写"一位不在线的玩家"）
+     * 选好了要拆的墙，开始拆：记下每格原来是什么方块、是谁放的（别人放的写名字）。换墙时前一面的账清掉。
      */
-    private void start(HomeBreach chosen, ClientLevel level, Function<String, String> names) {
+    void begin(HomeBreach chosen, Map<BlockPos, Block> blocks, Map<BlockPos, String> placedBy) {
         breach = chosen;
         stage = Stage.BREACHING;
-        for (BlockPos cell : chosen.cells()) {
-            before.put(cell, level.getBlockState(cell).getBlock());
-            NavigationProtection.placedByOther(cell).ifPresent(owner -> owners.put(cell, names.apply(owner)));
+        walls++;
+        before.clear();
+        before.putAll(blocks);
+        owners.clear();
+        owners.putAll(placedBy);
+        dug.clear();
+        refills.clear();
+        toRefill.clear();
+        enteredGap = false;
+    }
+
+    /** 引擎确认挖开了一格：是正在拆的墙就记下真拆开了它。没挖开的格不写进经过、也不补。 */
+    void noteDug(BlockPos cell) {
+        if ((stage == Stage.BREACHING || stage == Stage.REFILL_PENDING) && breach.cells().contains(cell)) {
+            dug.add(cell.immutable());
         }
     }
 
     /**
-     * 这一格是不是拆开后正在补、已经补过的那几格墙：补墙点下去的确认可能晚几刻才落到走路那边，
+     * 这一格是不是补墙时点过的那几格：补墙点下去的确认可能晚几刻才落到走路那边，
      * 那一格是补回去的墙，不是垫路的临时方块，不进垫块清单，免得结果里写成"没有自动收回"引着人回去拆。
      */
     boolean refilledWall(BlockPos cell) {
-        return (stage == Stage.REFILLING || stage == Stage.DONE) && breach.cells().contains(cell);
-    }
-
-    /** 出来了（站在地上、从这里只走就出得去）：等人离开拆开的格子就停下补墙。 */
-    void exited() {
-        if (stage == Stage.BREACHING) stage = Stage.REFILL_PENDING;
+        return refilled.contains(cell.asLong());
     }
 
     /**
-     * 补墙这一刻占不占身体：人离开拆开的格子就撤路线、松键、站住，一格格补；正在补的这几刻站着不算没进展；
-     * 补完调 resume 按原目标重新上路。没在补、人还在拆开的格里时不占。
+     * 卡坑判断说出得去了：拆完最后一格的那一刻人往往还站在屋里，先等人穿过缺口再补。
+     * 一格都没拆开就出得去了（有人开了门、墙被别的东西弄开），没有要补的，这一段收起。
+     */
+    void exited() {
+        if (stage != Stage.BREACHING) return;
+        if (dug.isEmpty()) {
+            reset();
+            return;
+        }
+        stage = Stage.REFILL_PENDING;
+    }
+
+    /**
+     * 补墙前每刻看一眼人走到哪了：身体碰着拆开的格子就记下进过缺口；进过以后身体离开那几格、脚也不在屋里那一片了，
+     * 才算出来了，停下补墙。拆完最后一格时人多半还站在屋里，这时补就把自己又封回去了。
+     *
+     * @param inGap 身体此刻和拆开的哪一格有重叠
+     * @param feet  脚下这一格
+     */
+    Step leaveGap(boolean inGap, BlockPos feet) {
+        if (stage != Stage.REFILL_PENDING) return Step.WALK_ON;
+        if (inGap) {
+            enteredGap = true;
+            return Step.WALK_ON;
+        }
+        if (!enteredGap || breach.pocket().contains(feet.asLong())) return Step.WALK_ON;
+        stage = Stage.REFILLING;
+        toRefill.clear();
+        breach.cells().stream().filter(dug::contains).forEach(toRefill::add);
+        toRefill.forEach(cell -> refilled.add(cell.asLong()));
+        cellIndex = 0;
+        cellTicks = 0;
+        clickedCell = false;
+        handing = null;
+        return Step.STARTED;
+    }
+
+    /** 正在补的那一格；都补完了为空，这一段记为补完。 */
+    Optional<BlockPos> refillingCell() {
+        if (stage != Stage.REFILLING) return Optional.empty();
+        if (cellIndex < toRefill.size()) return Optional.of(toRefill.get(cellIndex));
+        stage = Stage.DONE;
+        return Optional.empty();
+    }
+
+    /** 正在补的这一格有了结论（补回了、没补回的原因），换下一格。 */
+    void settleCell(String result) {
+        refills.put(toRefill.get(cellIndex), result);
+        cellIndex++;
+        cellTicks = 0;
+        clickedCell = false;
+        handing = null;
+    }
+
+    /**
+     * 补到一半被叫停：正在补的这一格和后面的都记"被叫停"，这一格点过、方块已经出来了的记"放上了，没等到游戏确认"。
+     * 这一段记为补完，不再按原目标接着走，经过由收场时记。
+     *
+     * @param shownInWorld 正在补的这一格此刻看得到原来那种方块
+     */
+    void stopRefilling(boolean shownInWorld) {
+        boolean first = true;
+        while (stage == Stage.REFILLING && cellIndex < toRefill.size()) {
+            settleCell(first && clickedCell && shownInWorld ? "放上了，没等到游戏确认（被叫停）" : "没补回：被叫停");
+            first = false;
+        }
+        stage = Stage.DONE;
+    }
+
+    /** 补完、经过记好以后收起这一段：同一趟里又被困在家里时重新找墙。补墙时点过的格子还记着。 */
+    void reset() {
+        stage = Stage.IDLE;
+        breach = null;
+        before.clear();
+        owners.clear();
+        dug.clear();
+        refills.clear();
+        toRefill.clear();
+        refused.clear();
+        walls = 0;
+        enteredGap = false;
+        cellIndex = 0;
+        cellTicks = 0;
+        clickedCell = false;
+        handing = null;
+    }
+
+    /**
+     * 补墙这一刻占不占身体：人穿出缺口、离开屋里就撤路线、松键、站住，一格格补；正在补的这几刻站着不算没进展；
+     * 补完调 resume 按原目标重新上路，再收起这一段。没在补、人还没穿出去时不占；被叫停就不再补，交回走路按停下收场。
      */
     boolean holdsPlayer(PlayerContext context, LocalPlayer player, EngineClicks clicks, ClientMovesToMainhand hands,
-            BaritoneInternals owner, NavigationProgress displacement, Runnable resume) {
+            BaritoneInternals owner, NavigationProgress displacement, boolean stopRequested, Runnable resume) {
         if (stage != Stage.REFILL_PENDING && stage != Stage.REFILLING) return false;
-        Step step = refillTick(context, player, clicks, hands);
-        if (step == Step.WALK_ON) return false;
+        Step step = refillTick(context, player, clicks, hands, stopRequested);
+        if (step == Step.WALK_ON || step == Step.STOPPED) return false;
         if (step == Step.STARTED) {
             owner.pathing().forceCancel();
             owner.engine().getInputOverrideHandler().clearAllKeys();
@@ -212,47 +333,54 @@ final class HomeWayOut {
             context.input().releaseAll(player);
         }
         displacement.restart(context.clientTick());
-        if (step == Step.FINISHED) resume.run();
+        if (step == Step.FINISHED) {
+            resume.run();
+            reset();
+        }
         return true;
     }
 
     /**
-     * 补墙推进一刻。人还站在拆开的格里时接着走，离开了就停下，从下往上一格格补：
-     * 换上那种方块、转头对准旁边结实的一面、点一下等游戏确认那一格真长出了方块。
+     * 补墙推进一刻。人还没穿出缺口时接着走，穿出来了就停下，从下往上一格格补：
+     * 换上那种方块、转头对准旁边结实的一面、点一下，等游戏确认那一格真长出了方块。被叫停就把没补的记下、不再补。
      */
-    private Step refillTick(PlayerContext context, LocalPlayer player, EngineClicks clicks, ClientMovesToMainhand hands) {
+    private Step refillTick(PlayerContext context, LocalPlayer player, EngineClicks clicks, ClientMovesToMainhand hands,
+            boolean stopRequested) {
         ClientLevel level = context.level();
         if (stage == Stage.REFILL_PENDING) {
-            if (breach.cells().stream().anyMatch(cell -> inside(player, cell))) return Step.WALK_ON;
-            stage = Stage.REFILLING;
-            cellIndex = 0;
-            cellTicks = 0;
-            return Step.STARTED;
+            // 被叫停时不开始补：补一格要好几秒，停不下来。
+            if (stopRequested) return Step.WALK_ON;
+            boolean inGap = breach.cells().stream().anyMatch(cell -> inside(player, cell));
+            return leaveGap(inGap, player.blockPosition());
         }
-        while (cellIndex < breach.cells().size()) {
-            BlockPos cell = breach.cells().get(cellIndex);
+        if (stopRequested) {
+            stopRefilling(refillingCell().map(cell -> shows(level, cell)).orElse(false));
+            return Step.STOPPED;
+        }
+        for (Optional<BlockPos> next = refillingCell(); next.isPresent(); next = refillingCell()) {
+            BlockPos cell = next.get();
             Optional<String> settled = settled(level, player, hands, cell);
             if (settled.isPresent()) {
-                nextCell(cell, settled.get());
+                settleCell(settled.get());
                 continue;
             }
             if (++cellTicks > PLACE_TIMEOUT_TICKS) {
-                nextCell(cell, "没补回：放不上去");
+                settleCell(clickedCell && shows(level, cell) ? "放上了，没等到游戏确认" : "没补回：放不上去");
                 continue;
             }
-            placeStep(context, player, clicks, hands, cell);
+            if (placeStep(context, player, clicks, hands, cell)) settleCell("已补回");
             return Step.BUSY;
         }
-        stage = Stage.DONE;
         return Step.FINISHED;
     }
 
-    // 这一格已经有结论了没有：补上了、本来就有方块、身上没有、走远了够不着、找不到贴着放的面。
+    // 这一格已经有结论了没有：别的东西占了那一格、身上没有、走远了够不着、人站在格里、找不到贴着放的面。
+    // 点过、那种方块已经出来了的还没结论：等游戏确认。
     private Optional<String> settled(ClientLevel level, LocalPlayer player, ClientMovesToMainhand hands, BlockPos cell) {
         BlockState now = level.getBlockState(cell);
         Block wanted = before.get(cell);
         if (!now.canBeReplaced()) {
-            return Optional.of(now.getBlock() == wanted && cellTicks > 0 ? "已补回" : "没补：那一格已经有方块了");
+            return clickedCell && now.getBlock() == wanted ? Optional.empty() : Optional.of("没补：那一格已经有方块了");
         }
         Item item = wanted.asItem();
         if (item == Items.AIR) return Optional.of("没补回：" + idOf(wanted) + " 没有对应的物品");
@@ -263,34 +391,36 @@ final class HomeWayOut {
         return Optional.empty();
     }
 
-    // 补一格的一刻：先把那种方块换到主手，再对准贴着的那一面，转到位了点一下。
-    private void placeStep(PlayerContext context, LocalPlayer player, EngineClicks clicks, ClientMovesToMainhand hands,
+    // 补一格的一刻：先把那种方块换到主手，再对准贴着的那一面，转到位了点一下；方块出来以后不再点，
+    // 只推进那一下的确认。游戏确认落到的正是这一格才算补回。
+    private boolean placeStep(PlayerContext context, LocalPlayer player, EngineClicks clicks, ClientMovesToMainhand hands,
             BlockPos cell) {
         String wanted = itemId(before.get(cell).asItem());
         if (handing != null) {
             ActionStatus status = handing.tick(TickContext.of(context.level().getGameTime(), context));
-            if (status instanceof ActionStatus.Running) return;
-            handing = null;
-            return;
+            if (!(status instanceof ActionStatus.Running)) handing = null;
+            return false;
         }
-        if (!itemId(player.getMainHandItem().getItem()).equals(wanted)) {
+        boolean shown = shows(context.level(), cell);
+        if (!shown && !itemId(player.getMainHandItem().getItem()).equals(wanted)) {
             handing = hands.moveToMainhand(wanted).orElse(null);
-            return;
+            return false;
         }
-        Rotation aim = support(context.level(), player, cell).orElse(null);
-        if (aim == null) return;
-        context.input().requestLook(aim.getYaw(), aim.getPitch(), context.clientTick());
-        boolean aimed = Math.abs(Mth.wrapDegrees(player.getYRot() - aim.getYaw())) <= AIM_DEGREES
-                && Math.abs(player.getXRot() - aim.getPitch()) <= AIM_DEGREES;
-        clicks.tick(context, false, true, aimed);
-        clicks.takePlaced();
+        boolean aimed = false;
+        if (!shown) {
+            Rotation aim = support(context.level(), player, cell).orElse(null);
+            if (aim == null) return false;
+            context.input().requestLook(aim.getYaw(), aim.getPitch(), context.clientTick());
+            aimed = Math.abs(Mth.wrapDegrees(player.getYRot() - aim.getYaw())) <= AIM_DEGREES
+                    && Math.abs(player.getXRot() - aim.getPitch()) <= AIM_DEGREES;
+        }
+        if (clicks.tick(context, false, !shown, aimed) != EngineClicks.Doing.NOTHING) clickedCell = true;
+        return clicks.takePlaced().filter(cell::equals).isPresent();
     }
 
-    private void nextCell(BlockPos cell, String result) {
-        refills.put(cell, result);
-        cellIndex++;
-        cellTicks = 0;
-        handing = null;
+    // 这一格此刻看得到拆之前那种方块：客户端先放上去，游戏确认之前也看得到。
+    private boolean shows(ClientLevel level, BlockPos cell) {
+        return level.getBlockState(cell).getBlock() == before.get(cell);
     }
 
     /**
@@ -321,7 +451,7 @@ final class HomeWayOut {
         return Optional.empty();
     }
 
-    // 身体和这一格有没有重叠：站在要补的格里就放不进去。
+    // 身体和这一格有没有重叠：站在要补的格里就放不进去；穿过缺口时也靠它认出人进过缺口。
     private static boolean inside(LocalPlayer player, BlockPos cell) {
         return player.getBoundingBox().deflate(0.05).intersects(new AABB(cell));
     }
@@ -413,29 +543,42 @@ final class HomeWayOut {
     }
 
     /**
-     * 这一段出路的经过，例如"在自己家里被围住，附近没有能开的门：水平拆开 (1, 64, 0) 的 minecraft:oak_planks
-     * （玩家甲 放的）出来，已补回"。还没拆过为空。
+     * 这一段出路的经过：真挖开了哪格（什么方块、谁放的）、补没补回；选好的墙一格没挖开的写"没拆成"。例如
+     * "在自己家里被围住，附近没有能开的门：水平拆开 (1, 64, 0) 的 minecraft:oak_planks（玩家甲 放的），已补回 出来"。
+     * 还没选墙为空。
      */
     String story() {
         if (breach == null) return "";
+        String lead = "在自己家里被围住，附近没有能开的门：";
+        if (dug.isEmpty()) {
+            List<String> chosen = breach.cells().stream().map(this::cellName).toList();
+            return lead + "选好要水平拆开 " + String.join("；", chosen) + " 出去，一格也没拆成";
+        }
+        boolean out = stage == Stage.REFILLING || stage == Stage.DONE;
         List<String> cells = new ArrayList<>();
         for (BlockPos cell : breach.cells()) {
+            if (!dug.contains(cell)) {
+                cells.add(cellName(cell) + " 没拆成");
+                continue;
+            }
             String owner = owners.containsKey(cell) ? "（" + owners.get(cell) + " 放的）" : "";
-            String result = refills.getOrDefault(cell, stage == Stage.BREACHING ? "" : "没来得及补");
-            cells.add("(" + cell.getX() + ", " + cell.getY() + ", " + cell.getZ() + ") 的 " + idOf(before.get(cell)) + owner
-                    + (result.isEmpty() ? "" : "，" + result));
+            cells.add(cellName(cell) + owner + "，" + refills.getOrDefault(cell, out ? "没来得及补" : "拆开了没补"));
         }
-        return "在自己家里被围住，附近没有能开的门：水平拆开 " + String.join("；", cells) + " 出来";
+        return lead + "水平拆开 " + String.join("；", cells) + (out ? " 出来" : "");
     }
 
-    /** 拆了墙、还没补完这一趟就收场了：拆了哪格、补到哪一步；没拆过、已经补完记过的给空串。 */
+    private String cellName(BlockPos cell) {
+        return "(" + cell.getX() + ", " + cell.getY() + ", " + cell.getZ() + ") 的 " + idOf(before.get(cell));
+    }
+
+    /** 这一段还没收起就收场了（拆到一半、拆了没补、补到一半被叫停）：照实交出经过；没选过墙、已经补完收起的给空串。 */
     String unfinishedStory() {
-        return breach == null || stage == Stage.DONE ? "" : story();
+        return story();
     }
 
-    /** 拆的墙里有没有别人放的：有就报一条事件。 */
+    /** 真挖开的格里有没有别人放的：有就报一条事件。选好了没挖开的不算。 */
     boolean brokeOthers() {
-        return !owners.isEmpty();
+        return dug.stream().anyMatch(owners::containsKey);
     }
 
     /**
