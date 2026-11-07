@@ -92,7 +92,9 @@ public final class LiveNightAndEdgeMoves {
 
         @Override
         public Action walkTo(double x, double y, double z) {
-            return new WalkMove(walks, new double[] {x, y, z}, TerrainPermit.WALK_ONLY, 1.0, "走向安全处");
+            // 退离边沿要站进落点那一格：容差给 1 格的话，挨着落点的脚下这格就算走到了，人一步没挪，
+            // 退步任务量出还差一格多、报退不回，几秒后又插进来，一直这样刷。
+            return new WalkMove(walks, new double[] {x, y, z}, TerrainPermit.WALK_ONLY, 0.0, "走向安全处");
         }
 
         @Override

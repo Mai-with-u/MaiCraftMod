@@ -52,7 +52,8 @@ public final class LiveEdgeView implements EdgeProximityNeed.ReadsEdge {
         if (nearestEdgeCenter == null) {
             return null;
         }
-        Vec3 toward = nearestEdgeCenter.subtract(center).normalize();
+        // 朝边沿的方向只看水平：边沿面中心比脚高半格，带上高度后"往后退两格"只退出一格，落点紧挨着脚下这格。
+        Vec3 toward = new Vec3(nearestEdgeCenter.x - center.x, 0, nearestEdgeCenter.z - center.z).normalize();
         return new EdgeProximityNeed.Facts(nearestEdge, deepestDrop, safeSpot(level, foot, toward));
     }
 
