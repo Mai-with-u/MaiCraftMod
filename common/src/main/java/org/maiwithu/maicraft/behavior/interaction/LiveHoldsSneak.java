@@ -28,19 +28,28 @@ public final class LiveHoldsSneak implements HoldsSneak {
     }
 
     @Override public Action sneaking(Action inner) {
-        return new Sneaking(Objects.requireNonNull(inner, "inner"));
+        return new Sneaking(Objects.requireNonNull(inner, "inner"), false);
+    }
+
+    @Override public Action sneakingInARow(Action inner) {
+        return new Sneaking(Objects.requireNonNull(inner, "inner"), true);
     }
 
     /** 潜行落到角色身上最多等几刻：骑着东西、被别的状态压着按不下去时不干等，照常往下做。 */
     private static final int SETTLE_TICKS = 10;
+    /** 一段连续点击里点完一下续按潜行几刻（约 0.5 秒），等下一下要不要接上。 */
+    private static final int KEEP_TICKS = 10;
 
     /** 整个动作里每刻按着潜行；暂停与结束时松开。 */
     private final class Sneaking implements Action {
         private final Action inner;
+        /** 点完先不起身：一段连续点击里的一下。 */
+        private final boolean inARow;
         private int waited;
 
-        Sneaking(Action inner) {
+        Sneaking(Action inner, boolean inARow) {
             this.inner = inner;
+            this.inARow = inARow;
         }
 
         @Override public ActionStatus tick(TickContext tick) {
@@ -53,13 +62,20 @@ public final class LiveHoldsSneak implements HoldsSneak {
         }
 
         @Override public void pause() {
-            // 被生存需求打断时先松开潜行：插进来的临时任务要正常走路、正常点东西。
+            // 被生存需求打断时先松开潜行、也不再续按：插进来的临时任务要正常走路、正常点东西。
             hold(false);
+            keepUntil(Long.MIN_VALUE);
             inner.pause();
         }
 
         @Override public void close() {
-            hold(false);
+            // 连续点击里点完这一下先不起身：0.5 秒内下一下也要蹲着点就接着蹲，不在两下之间一蹲一起。
+            PlayerContext current = context.get();
+            if (inARow && current != null) {
+                keepUntil(current.clientTick() + KEEP_TICKS);
+            } else {
+                hold(false);
+            }
             inner.close();
         }
 
@@ -74,6 +90,11 @@ public final class LiveHoldsSneak implements HoldsSneak {
         private void hold(boolean on) {
             PlayerContext current = context.get();
             if (current != null && current.localPlayer() != null) inputs.sneak(current.localPlayer(), on);
+        }
+
+        private void keepUntil(long tick) {
+            PlayerContext current = context.get();
+            if (current != null && current.input().automationOwnsControls()) current.input().keepSneakingUntil(tick);
         }
     }
 }

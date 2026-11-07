@@ -83,6 +83,17 @@ public interface PlayerInput {
 
     void clearLook();
 
+    /**
+     * 一段蹲着点的活点完一下：到 untilTick（含）为止，这几刻没人要走、要跳，就接着蹲着，下一下也要蹲着点时直接接上，
+     * 不在两下之间起身；要走、要跳、开着界面、在水里或 releaseAll 时立刻松开。给 Long.MIN_VALUE 是不再续按。
+     */
+    default void keepSneakingUntil(long untilTick) {}
+
+    /** 这一刻按着潜行只是因为上面那条续按，没有谁这一刻要蹲：不用蹲的点击要等站起来再出手。 */
+    default boolean sneakingOnlyKept() {
+        return false;
+    }
+
     /** 立即清空自动注入的移动与按键信号；停止输入本身不发送交互包。 */
     void releaseAll();
 

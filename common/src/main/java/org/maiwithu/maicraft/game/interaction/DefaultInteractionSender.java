@@ -682,6 +682,12 @@ public final class DefaultInteractionSender implements InteractionSender {
      * 提交方法随即返回 null 表示「本刻不收」。
      */
     boolean acceptSubmission(PlayerContext context) {
+        // 上一段蹲着点的活点完还续按着潜行，这一下却没人要蹲：先不再续、站起来，下一刻再出手，
+        // 免得蹲着开门变成往门上放方块、蹲着拿扳手转机器变成把机器拆下来。
+        if (context.localPlayer() != null && context.localPlayer().isShiftKeyDown() && context.input().sneakingOnlyKept()) {
+            context.input().keepSneakingUntil(Long.MIN_VALUE);
+            return false;
+        }
         return idleForNewSubmission(context) && claimSubmission(context);
     }
 

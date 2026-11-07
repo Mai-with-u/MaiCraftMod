@@ -13,4 +13,12 @@ public interface HoldsSneak {
 
     /** 包一层：推进 inner 的每一刻都按住潜行，inner 结束、被暂停或收尾时松开。 */
     Action sneaking(Action inner);
+
+    /**
+     * 一段连续点击里蹲着点的一下（施工、use 连着点会开界面的方块）：和 sneaking 一样按住，
+     * 只是点完先不起身，约 0.5 秒内下一下也要蹲着点就直接接上；要走、要跳、下一下不用蹲时再站起来。
+     */
+    default Action sneakingInARow(Action inner) {
+        return sneaking(inner);
+    }
 }

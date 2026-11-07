@@ -42,6 +42,8 @@ public final class LocalPlayerInput implements PlayerInput {
     private long lookTick = Long.MIN_VALUE;
     private long interactionLookTick = Long.MIN_VALUE;
     private Movement movement = Movement.STOPPED;
+    // 一段蹲着点的活刚点完一下时，潜行续按到哪一刻（含）；没续按为 Long.MIN_VALUE。
+    private long sneakKeptUntil = Long.MIN_VALUE;
     private Steering steering;
     private boolean navigationRelativeMovement;
     private Float targetYaw;
@@ -238,11 +240,21 @@ public final class LocalPlayerInput implements PlayerInput {
     @Override
     // 松开移动键并停止转头。挖掘、使用物品等动作由 actions 管理，不在这里结束。
     public void releaseAll() {
+        sneakKeptUntil = Long.MIN_VALUE;
         movement = Movement.STOPPED;
         steering = null;
         movementTick = Long.MIN_VALUE;
         clearLook();
         writeStoppedInput();
+    }
+
+    @Override public void keepSneakingUntil(long untilTick) {
+        sneakKeptUntil = untilTick;
+    }
+
+    @Override public boolean sneakingOnlyKept() {
+        boolean requested = movementTick == activeTick && steering == null && movement.sneaking();
+        return sneakKeptUntil >= activeTick && !requested;
     }
 
     @Override
@@ -397,6 +409,7 @@ public final class LocalPlayerInput implements PlayerInput {
     private void writeMovement(LocalPlayer player, BotInput input, Screen screen) {
         Movement command = movementTick == activeTick && permitsWorldMovement(screen)
                 ? steering == null ? movement : steering.atYaw(player.getYRot()) : Movement.STOPPED;
+        command = keptSneaking(command, player, screen);
         input.forwardImpulse = command.forward();
         input.leftImpulse = command.strafe();
         input.up = command.forward() > 0;
@@ -410,6 +423,25 @@ public final class LocalPlayerInput implements PlayerInput {
         input.sprintHeld = command.sprinting();
         // 原版松开疾跑键不会停跑；这一步不要跑（快到头、要精准起跳）时像人收住脚步一样主动停下。
         if (!command.sprinting()) player.setSprinting(false);
+    }
+
+    // 一段蹲着点的活刚点完一下：这一刻没人要走、要跳，就接着蹲着等下一下接上；
+    // 要走、要跳、开着界面、泡在水里（蹲着会往下沉）或续按到期，就松开不再续。
+    private Movement keptSneaking(Movement command, LocalPlayer player, Screen screen) {
+        if (sneakKeptUntil == Long.MIN_VALUE) return command;
+        KeptSneak kept = keptSneak(command, sneakKeptUntil, activeTick, permitsWorldMovement(screen), player.isInWater());
+        if (!kept.keep()) sneakKeptUntil = Long.MIN_VALUE;
+        return kept.command();
+    }
+
+    /** 续按潜行这一刻的结论：写出去的按键，和之后还续不续。 */
+    record KeptSneak(Movement command, boolean keep) {}
+
+    // 续按到期、这一刻要走要跳、开着界面、泡在水里：原样写出、不再续；否则站着不动时接着蹲着。
+    static KeptSneak keptSneak(Movement command, long keptUntil, long tick, boolean worldMovement, boolean inWater) {
+        boolean still = command.forward() == 0.0f && command.strafe() == 0.0f && !command.jumping();
+        if (keptUntil < tick || !still || !worldMovement || inWater) return new KeptSneak(command, false);
+        return new KeptSneak(command.sneaking() ? command : new Movement(0.0f, 0.0f, false, true, false), true);
     }
 
     /** 判断当前界面是否允许角色在已有移动指令下继续行走。 */

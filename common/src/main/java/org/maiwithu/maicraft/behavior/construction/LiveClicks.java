@@ -33,8 +33,9 @@ public final class LiveClicks implements ConstructionSeams.Clicks {
     @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak, PlacementConfirmation confirmation) {
         // 点被点方块朝那个方向的任一处表面：链条输送机的轮缘、细轴的侧面都算，和挑站位、放置预测同一条规则。
         AimAndInteract use = interactions.useBlockFace(placement.clicked(), placement.face(), confirmation);
-        // 被点的箱子、工作台会把右键截走开界面：整个动作里按着潜行，手里的方块才放得下去。
-        return new Click(sneak && this.sneak != null ? this.sneak.sneaking(use) : use, use::result);
+        // 被点的箱子、工作台会把右键截走开界面：整个动作里按着潜行，手里的方块才放得下去；
+        // 一段施工里连着几下都要蹲着点时，点完先不起身，下一下直接接上。
+        return new Click(sneak && this.sneak != null ? this.sneak.sneakingInARow(use) : use, use::result);
     }
 
     @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {

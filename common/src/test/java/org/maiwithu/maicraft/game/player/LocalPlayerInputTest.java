@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 角色输入的离线部分：移动量的取值校验、哪些界面允许继续走路、
- * 转头时的世界方向合成，以及镜头平滑的几何性质。
+ * 转头时的世界方向合成、镜头平滑的几何性质，以及连续蹲着点时续按潜行的判断。
  * 写进真实玩家输入的部分需要活着的客户端对象，只在实机验收里核对。
  */
 class LocalPlayerInputTest {
@@ -87,6 +87,27 @@ class LocalPlayerInputTest {
         LocalPlayerInput.AxisStep settled = LocalPlayerInput.smoothDamp(89.9f, 90f, 0f, 0.11f, 240f, 0.05f);
         assertEquals(90f, settled.value(), 1e-3, "余差小到不可分辨时吸附到目标");
         assertEquals(0f, settled.velocity(), 1e-3, "吸附后角速度归零");
+    }
+
+    @Test
+    void keptSneakHoldsWhileStandingStillAndLetsGoOnceSheMoves() {
+        // 一段施工里蹲着点完一下：0.5 秒内站着不动就接着蹲，下一下直接接上，不在两下之间起身。
+        PlayerInput.Movement still = PlayerInput.Movement.STOPPED;
+        LocalPlayerInput.KeptSneak waiting = LocalPlayerInput.keptSneak(still, 110, 105, true, false);
+        assertTrue(waiting.keep(), "还没到期、站着不动：接着续");
+        assertTrue(waiting.command().sneaking(), "没人要蹲也写出潜行");
+        // 要走、要跳：立刻站起来走，不蹲着拖慢走路。
+        PlayerInput.Movement walking = new PlayerInput.Movement(1f, 0f, false, false, true);
+        LocalPlayerInput.KeptSneak walks = LocalPlayerInput.keptSneak(walking, 110, 105, true, false);
+        assertFalse(walks.keep(), "要走就不再续");
+        assertFalse(walks.command().sneaking(), "走路照旧站着");
+        assertTrue(walks.command().sprinting(), "走路的按键原样写出");
+        PlayerInput.Movement jumping = new PlayerInput.Movement(0f, 0f, true, false, false);
+        assertFalse(LocalPlayerInput.keptSneak(jumping, 110, 105, true, false).keep(), "要跳就不再续");
+        // 到期、开着界面、泡在水里（蹲着会往下沉）：不再续。
+        assertFalse(LocalPlayerInput.keptSneak(still, 110, 111, true, false).command().sneaking(), "过了 0.5 秒没接上就起身");
+        assertFalse(LocalPlayerInput.keptSneak(still, 110, 105, false, false).keep(), "开着界面不续");
+        assertFalse(LocalPlayerInput.keptSneak(still, 110, 105, true, true).keep(), "在水里不续");
     }
 
     @Test

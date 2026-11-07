@@ -316,8 +316,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
                 chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
                 dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
-                // 潜行右键：整一下出手都按着潜行，动作收尾时松开。
-                Action strike = input.sneak() ? services.sneak().sneaking(ready.action()) : ready.action();
+                // 潜行右键：整一下出手都按着潜行；连着点几下时点完先不起身，下一下直接接上。
+                Action strike = input.sneak() ? services.sneak().sneakingInARow(ready.action()) : ready.action();
                 yield goWith(Phase.INTERACT, strike, input.sneak() ? "到了能动手的位置，按住潜行出手" : "到了能动手的位置，出手");
             }
         };
