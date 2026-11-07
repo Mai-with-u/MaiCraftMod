@@ -143,6 +143,14 @@ final class HomeWayOut {
         }
     }
 
+    /**
+     * 这一格是不是拆开后正在补、已经补过的那几格墙：补墙点下去的确认可能晚几刻才落到走路那边，
+     * 那一格是补回去的墙，不是垫路的临时方块，不进垫块清单，免得结果里写成"没有自动收回"引着人回去拆。
+     */
+    boolean refilledWall(BlockPos cell) {
+        return (stage == Stage.REFILLING || stage == Stage.DONE) && breach.cells().contains(cell);
+    }
+
     /** 出来了（站在地上、从这里只走就出得去）：等人离开拆开的格子就停下补墙。 */
     void exited() {
         if (stage == Stage.BREACHING) stage = Stage.REFILL_PENDING;

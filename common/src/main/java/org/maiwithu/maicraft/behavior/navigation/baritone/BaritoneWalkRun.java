@@ -179,6 +179,8 @@ final class BaritoneWalkRun implements WalkRun {
      */
     private void recordPlaced(BlockPos position) {
         if (escape.effective().changes() == Permissions.BlockChanges.NONE) return;
+        // 从家里拆墙出来后补回去的那几格是墙，不算垫路：补墙的确认晚到时会落到这里。
+        if (homeWayOut.refilledWall(position)) return;
         escape.notePlaced();
         if (!placements.contains(position)) {
             placements.add(position.immutable());
