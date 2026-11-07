@@ -5,16 +5,20 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.SlabType;
 
 import org.maiwithu.maicraft.behavior.explore.ClientExplorationWorld;
@@ -61,27 +65,49 @@ public final class ClientTravelWorldView implements TravelWorldView {
         return BlockPassability.isStandable(current.level(), feet);
     }
 
-    // 门、栅栏门那一格，楼梯、下半台阶那一格或它上面那一格，紧挨着门的门口（脚那层、头那层）：去这些地方要站准。
+    // 门、栅栏门那一格，楼梯、下半台阶那一格或它上面那一格，门口（门前门后那一格）：去这些地方要站准。
     @Override
     public boolean doorwayOrStep(BlockPos cell) {
         PlayerContext current = context.get();
-        if (current == null || current.level() == null || !current.level().isLoaded(cell)) return false;
-        if (isDoor(current.level().getBlockState(cell)) || isStep(current.level().getBlockState(cell))
-                || isStep(current.level().getBlockState(cell.below()))) {
+        if (current == null || current.level() == null) return false;
+        return doorwayOrStep(current.level(), current.level()::isLoaded, cell);
+    }
+
+    /**
+     * 这一格是不是门、台阶、门口：门、栅栏门那一格；楼梯、下半台阶那一格或站在它上面的那一格；门口是门前门后
+     * 顺着进出方向挨着门、本身走得进去的那一格（脚那层或头那层），或者门口脚下那块地。门旁边沿着墙摆的箱子、床，
+     * 堵在门前的箱子都不算门口：去那里照普通目的地停。没加载的答不是。
+     */
+    static boolean doorwayOrStep(BlockGetter level, Predicate<BlockPos> loaded, BlockPos cell) {
+        if (!loaded.test(cell)) return false;
+        if (isDoor(level.getBlockState(cell)) || isStep(level.getBlockState(cell))
+                || isStep(level.getBlockState(cell.below()))) {
             return true;
         }
         for (Direction side : Direction.Plane.HORIZONTAL) {
             BlockPos next = cell.relative(side);
-            if (current.level().isLoaded(next) && (isDoor(current.level().getBlockState(next))
-                    || isDoor(current.level().getBlockState(next.above())))) {
-                return true;
-            }
+            if (!loaded.test(next)) continue;
+            // 门前门后那一格：自己走得进去，门顺着这个方向开着进出。
+            if (open(level, cell) && passesThrough(level.getBlockState(next), side)) return true;
+            // 门口脚下那块地：上面那格走得进去，门的下半扇（或栅栏门）在高一层顺着这个方向。
+            BlockState above = level.getBlockState(next.above());
+            boolean lowerHalf = !above.hasProperty(DoorBlock.HALF) || above.getValue(DoorBlock.HALF) == DoubleBlockHalf.LOWER;
+            if (open(level, cell.above()) && lowerHalf && passesThrough(above, side)) return true;
         }
         return false;
     }
 
     private static boolean isDoor(BlockState state) {
         return state.getBlock() instanceof DoorBlock || state.getBlock() instanceof FenceGateBlock;
+    }
+
+    // 门、栅栏门是不是顺着这个方向进出：门板朝向的那条轴就是进出的方向，沿着墙的那条轴是门框旁边。
+    private static boolean passesThrough(BlockState door, Direction side) {
+        return isDoor(door) && door.getValue(HorizontalDirectionalBlock.FACING).getAxis() == side.getAxis();
+    }
+
+    private static boolean open(BlockGetter level, BlockPos cell) {
+        return level.getBlockState(cell).getCollisionShape(level, cell).isEmpty();
     }
 
     private static boolean isStep(BlockState state) {
