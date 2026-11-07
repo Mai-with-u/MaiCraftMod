@@ -282,6 +282,10 @@ public class MovementTraverse extends Movement {
             if (wasTheBridgeBlockAlwaysThere && (!MovementHelper.isLiquid(ctx, feet) || Baritone.settings().sprintInWater.value) && (!MovementHelper.avoidWalkingInto(intoBelow) || MovementHelper.isWater(intoBelow)) && !MovementHelper.avoidWalkingInto(intoAbove)) {
                 state.setInput(Input.SPRINT, true);
             }
+            // 搭桥：刚垫好的这一块也蹲着走上去，下一块接着蹲着搭，整段桥一直按住潜行，搭完再站起来。
+            if (!wasTheBridgeBlockAlwaysThere && !Baritone.settings().assumeSafeWalk.value) {
+                state.setInput(Input.SNEAK, true);
+            }
 
             BlockState destDown = BlockStateInterface.get(ctx, dest.below());
             if (feet.getY() != dest.getY() && ladder && MovementHelper.isClimbable(destDown.getBlock())) {
@@ -302,7 +306,8 @@ public class MovementTraverse extends Movement {
             }
             double dist1 = Math.max(Math.abs(ctx.player().position().x - (dest.getX() + 0.5D)), Math.abs(ctx.player().position().z - (dest.getZ() + 0.5D)));
             PlaceResult p = MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, !Baritone.settings().assumeSafeWalk.value);
-            if ((p == PlaceResult.READY_TO_PLACE || dist1 < 0.6) && !Baritone.settings().assumeSafeWalk.value) {
+            // 搭桥这一段从头到尾蹲着：走到边沿、对准、放下都按住潜行，不在每块之间起身。
+            if (!Baritone.settings().assumeSafeWalk.value) {
                 state.setInput(Input.SNEAK, true);
             }
             switch (p) {

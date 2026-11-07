@@ -29,6 +29,7 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
 import baritone.utils.BlockStateInterface;
+import org.maiwithu.maicraft.game.interaction.PlaceAgainst;
 import com.google.common.collect.ImmutableSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.*;
@@ -195,12 +196,15 @@ public class MovementPillar extends Movement {
                 return state.setStatus(MovementStatus.UNREACHABLE);
             }
 
-            state.setInput(Input.SNEAK, true);
-            // since (lower down) we only right click once player.isSneaking, and that happens the tick after we request to sneak
-
             double diffX = ctx.player().position().x - (dest.getX() + 0.5);
             double diffZ = ctx.player().position().z - (dest.getZ() + 0.5);
             double dist = Math.sqrt(diffX * diffX + diffZ * diffZ);
+            // 往上垫脚像真人那样跳起来放，不蹲：只有点的那格（脚下那格）自己会开界面、会被右键开关时才潜行，
+            // 免得一跳一放把箱子打开；还没站到格子正中、要挪过去时也蹲着挪，不从边上滑下去。
+            // 要潜行时，潜行真落到身上的下一刻才右键。
+            BlockPos clicked = src.below();
+            boolean sneakToPlace = PlaceAgainst.needsSneak(ctx.world(), clicked, BlockStateInterface.get(ctx, clicked));
+            state.setInput(Input.SNEAK, sneakToPlace || dist > 0.17);
             double flatMotion = Math.sqrt(ctx.player().getDeltaMovement().x * ctx.player().getDeltaMovement().x + ctx.player().getDeltaMovement().z * ctx.player().getDeltaMovement().z);
             if (dist > 0.17) {//why 0.17? because it seemed like a good number, that's why
                 //[explanation added after baritone port lol] also because it needs to be less than 0.2 because of the 0.3 sneak limit
@@ -228,7 +232,7 @@ public class MovementPillar extends Movement {
                     state.setInput(Input.JUMP, false); // breaking is like 5x slower when you're jumping
                     state.setInput(Input.CLICK_LEFT, true);
                     blockIsThere = false;
-                } else if (ctx.player().isCrouching() && (ctx.isLookingAt(src.below()) || ctx.isLookingAt(src)) && ctx.player().position().y > dest.getY() + 0.1) {
+                } else if ((!sneakToPlace || ctx.player().isCrouching()) && (ctx.isLookingAt(src.below()) || ctx.isLookingAt(src)) && ctx.player().position().y > dest.getY() + 0.1) {
                     state.setInput(Input.CLICK_RIGHT, true);
                 }
             }
