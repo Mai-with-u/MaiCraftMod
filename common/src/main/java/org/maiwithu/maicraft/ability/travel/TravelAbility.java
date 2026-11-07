@@ -163,8 +163,9 @@ public final class TravelAbility implements AbilityModule {
     private ParamSpecs params() {
         List<ParamSpec> specs = new ArrayList<>(List.of(
                 ParamSpec.of("radius", ParamType.NUMBER)
-                        .defaultValue(2.0).range(0, 2048)
-                        .doc("到达容差，单位格，默认 2；给 0 表示必须站进那一格").build(),
+                        .range(0, 2048)
+                        .doc("到达容差，单位格；不给时默认 2，目的地是门、台阶、门口时默认 1（站到那一格上或紧挨着）；"
+                                + "给 0 表示必须站进那一格").build(),
                 ParamSpec.of("strict_arrival", ParamType.BOOLEAN)
                         .defaultValue(false)
                         .doc("要不要严格到达：true 时目标落在水里等站不住的地方就如实失败，"
@@ -223,14 +224,13 @@ public final class TravelAbility implements AbilityModule {
         // 目的地现在就解析：坐标没给 y 走那一柱列，地标没记过就问，观察编号失效就如实结束；
         // 落在别的维度按维度路由认门，认不出的维度对在这里就以走不了结束。
         // strict_arrival 要严格到达：目标柱整列是水也不自动挪去岸格，如实失败并给建议落点。
-        var resolution = resolver.resolve(goal.target(), goal.params().number("radius"),
-                goal.params().bool("strict_arrival"));
+        var resolution = resolver.resolve(goal.target(), radius(goal), goal.params().bool("strict_arrival"));
         if (resolution instanceof DestinationResolver.Resolution.Ready ready) {
             // 同维度：指定只走路，或没指定方式而这个维度没有用得上的方式（主世界里的折跃门），就是出行任务；
             // 否则交给行程，近处走、远处比报价、隔着虚空只能过折跃门、给了 via 只用它。
             String via = choice.via();
             TerrainPermit permit = TerrainPermit.of(goal.permissions());
-            TravelDestination destination = roomy(ready.destination());
+            TravelDestination destination = roomy(snug(goal, ready.destination()));
             if (walksOnly(via)) {
                 return new StepDecision.Run(new TravelInput(destination, maxSeconds(goal), permit, goal.permissions()));
             }
@@ -292,6 +292,25 @@ public final class TravelAbility implements AbilityModule {
 
     /** 用什么方式、给它的话；参数自相矛盾时带问题。 */
     private record Choice(String via, Map<String, String> options, Problem problem) {}
+
+    /** 不给 radius 时的到达容差。 */
+    static final double DEFAULT_RADIUS = 2.0;
+    /** 目的地是门、台阶、门口时不给 radius 的到达容差：站到那一格上或紧挨着。 */
+    static final double SNUG_RADIUS = 1.0;
+
+    private static double radius(Goal goal) {
+        return goal.params().has("radius") ? goal.params().number("radius") : DEFAULT_RADIUS;
+    }
+
+    // 去门、台阶、门口又没给 radius：容差收到 1 格，站到那一格上或紧挨着，不停在两格外的门前台阶下面就算到了。
+    // 给了 radius 照给的；别的目的地照旧 2 格。
+    private TravelDestination snug(Goal goal, TravelDestination destination) {
+        if (world == null || goal.params().has("radius") || !destination.heightConfirmed()
+                || destination.radius() <= SNUG_RADIUS || !world.doorwayOrStep(destination.center())) {
+            return destination;
+        }
+        return new TravelDestination(destination.position(), true, SNUG_RADIUS, destination.arrivalNote());
+    }
 
     // 目的地附近 radius 格里一格能站的都没有（床、桌子、墙、实心方块里）：放宽到最近有能站的那一圈。
     // 不然走路找不到终点，换喷气背包在屋顶上来回绕（实机 10-13 去床边 1 格，床四周不是墙就是床本身）。

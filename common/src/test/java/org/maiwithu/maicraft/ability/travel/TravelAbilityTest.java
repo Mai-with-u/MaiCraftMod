@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.travel;
 
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
+import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
@@ -97,7 +98,7 @@ class TravelAbilityTest {
     @Test
     void specIsTravelWithToleranceAndTimeLimitParams() {
         assertEquals("maicraft:travel", ability.spec().id());
-        assertEquals(2.0, params("{}").number("radius"), "到达容差默认 2 格");
+        assertFalse(params("{}").has("radius"), "不给 radius 就按目的地定：一般 2 格，门、台阶、门口 1 格");
         assertFalse(params("{}").has("max_seconds"), "不设时限时不给 max_seconds 取值");
     }
 
@@ -159,6 +160,28 @@ class TravelAbilityTest {
         TravelInput input = assertInstanceOf(TravelInput.class, run.input());
         assertEquals(0.0, input.destination().radius(), "给 0 表示必须站进那一格");
         assertEquals(90, input.maxSeconds());
+    }
+
+    @Test
+    void doorStepOrDoorwayWithoutRadiusArrivesWithinOneBlock() {
+        // 去门前台阶 (5, 70, 5)：两格容差会停在台阶下面没进门，不给 radius 时收到 1 格；给了照给的。
+        StubWorld doorstep = new StubWorld() {
+            @Override public boolean doorwayOrStep(BlockPos cell) {
+                return cell.equals(new BlockPos(5, 70, 5));
+            }
+        };
+        TravelAbility snug = new TravelAbility(walks,
+                new DestinationResolver(doorstep, name -> Optional.empty(), id -> Optional.empty()),
+                List::of, progress -> {}, null, doorstep, List.of());
+        StepDecision.Run step = assertInstanceOf(StepDecision.Run.class,
+                snug.decide(step(goal(new Target.Position(5, 70, 5, null), "{}"))));
+        assertEquals(1.0, assertInstanceOf(TravelInput.class, step.input()).destination().radius(), "门口站准");
+        StepDecision.Run given = assertInstanceOf(StepDecision.Run.class,
+                snug.decide(step(goal(new Target.Position(5, 70, 5, null), "{\"radius\":3}"))));
+        assertEquals(3.0, assertInstanceOf(TravelInput.class, given.input()).destination().radius(), "给了照给的");
+        StepDecision.Run elsewhere = assertInstanceOf(StepDecision.Run.class,
+                snug.decide(step(goal(new Target.Position(9, 70, 9, null), "{}"))));
+        assertEquals(2.0, assertInstanceOf(TravelInput.class, elsewhere.input()).destination().radius(), "别处照旧 2 格");
     }
 
     @Test

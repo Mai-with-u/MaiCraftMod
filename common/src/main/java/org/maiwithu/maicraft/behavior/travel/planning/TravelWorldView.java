@@ -39,6 +39,14 @@ public interface TravelWorldView {
         return ColumnSample.unloaded();
     }
 
+    /**
+     * 这一格是不是门、台阶这类要站准的地方：门、栅栏门所在的那一格，楼梯、下半台阶所在的那一格或站在它上面的那一格，
+     * 紧挨着门、栅栏门的门口。去这些地方停在两格外，多半就停在门前台阶下面、没进门。读不到时答不是。
+     */
+    default boolean doorwayOrStep(BlockPos cell) {
+        return false;
+    }
+
     /** 人能不能站在这一格（脚在这格、头在上面一格、脚下踩得住）；没加载、读不到时答能，不凭空放宽目的地。 */
     default boolean standable(int x, int y, int z) {
         return true;

@@ -8,8 +8,14 @@ import java.util.OptionalInt;
 import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.SlabType;
 
 import org.maiwithu.maicraft.behavior.explore.ClientExplorationWorld;
 import org.maiwithu.maicraft.behavior.explore.ColumnSample;
@@ -53,6 +59,34 @@ public final class ClientTravelWorldView implements TravelWorldView {
         BlockPos feet = new BlockPos(x, y, z);
         if (!current.level().isLoaded(feet)) return true;
         return BlockPassability.isStandable(current.level(), feet);
+    }
+
+    // 门、栅栏门那一格，楼梯、下半台阶那一格或它上面那一格，紧挨着门的门口（脚那层、头那层）：去这些地方要站准。
+    @Override
+    public boolean doorwayOrStep(BlockPos cell) {
+        PlayerContext current = context.get();
+        if (current == null || current.level() == null || !current.level().isLoaded(cell)) return false;
+        if (isDoor(current.level().getBlockState(cell)) || isStep(current.level().getBlockState(cell))
+                || isStep(current.level().getBlockState(cell.below()))) {
+            return true;
+        }
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos next = cell.relative(side);
+            if (current.level().isLoaded(next) && (isDoor(current.level().getBlockState(next))
+                    || isDoor(current.level().getBlockState(next.above())))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDoor(BlockState state) {
+        return state.getBlock() instanceof DoorBlock || state.getBlock() instanceof FenceGateBlock;
+    }
+
+    private static boolean isStep(BlockState state) {
+        return state.getBlock() instanceof StairBlock
+                || state.getBlock() instanceof SlabBlock && state.getValue(SlabBlock.TYPE) == SlabType.BOTTOM;
     }
 
     // 目的地周围一圈逐格问"寻路为什么不踩它"，问得出原因的就是危险格；没加载的格读出来是空气，跳过。

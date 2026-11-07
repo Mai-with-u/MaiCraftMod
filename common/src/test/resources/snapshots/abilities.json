@@ -246,7 +246,7 @@
       {
         "ability": "maicraft:travel",
         "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
-        "parameters": "radius: number = 2.0, strict_arrival: boolean = false, max_distance: number = 128.0, max_seconds?: integer, via?: string",
+        "parameters": "radius?: number, strict_arrival: boolean = false, max_distance: number = 128.0, max_seconds?: integer, via?: string",
         "targets": [
           "dimension",
           "direction",
@@ -1507,8 +1507,7 @@
           "name": "radius",
           "type": "number",
           "required": false,
-          "doc": "到达容差，单位格，默认 2；给 0 表示必须站进那一格",
-          "default": 2.0,
+          "doc": "到达容差，单位格；不给时默认 2，目的地是门、台阶、门口时默认 1（站到那一格上或紧挨着）；给 0 表示必须站进那一格",
           "min": 0,
           "max": 2048
         },
