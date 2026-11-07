@@ -90,6 +90,22 @@ class LocalPlayerInputTest {
     }
 
     @Test
+    void haltStopsWalkingButKeepsSneakRequestedThisTick() {
+        // 潜行右键时外层每刻先按下潜行，瞄准再定住身位：脚步停下，潜行留着，不在瞄准的每一刻站起来。
+        PlayerInput.Movement sneakWalk = new PlayerInput.Movement(1f, 0.5f, true, true, true);
+        PlayerInput.Movement held = LocalPlayerInput.halted(sneakWalk, true);
+        assertTrue(held.sneaking(), "同一刻要的潜行留着");
+        assertEquals(0f, held.forward(), 1e-6, "前后松开");
+        assertEquals(0f, held.strafe(), 1e-6, "左右松开");
+        assertFalse(held.jumping(), "不跳");
+        assertFalse(held.sprinting(), "不跑");
+        // 这一刻没人要潜行、或者潜行是上一刻留下的：照旧全松开。
+        assertFalse(LocalPlayerInput.halted(new PlayerInput.Movement(1f, 0f, false, false, true), true).sneaking(),
+                "没要潜行就站着停下");
+        assertFalse(LocalPlayerInput.halted(sneakWalk, false).sneaking(), "上一刻的潜行不带进这一刻");
+    }
+
+    @Test
     void keptSneakHoldsWhileStandingStillAndLetsGoOnceSheMoves() {
         // 一段施工里蹲着点完一下：0.5 秒内站着不动就接着蹲，下一下直接接上，不在两下之间起身。
         PlayerInput.Movement still = PlayerInput.Movement.STOPPED;

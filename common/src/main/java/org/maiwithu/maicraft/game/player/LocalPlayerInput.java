@@ -262,7 +262,17 @@ public final class LocalPlayerInput implements PlayerInput {
         // 交互在出手前定住身位：修订号用实现内部掌握的本刻编号，调用方不需要知道。
         // 控制权不在自动化手上时没有东西可停，也不该把交互流程炸掉，安静返回。
         if (!automationOwnsControls()) return;
-        applyMovement(Movement.STOPPED, activeTick);
+        applyMovement(halted(movement, movementTick == activeTick), activeTick);
+    }
+
+    /**
+     * 定住身位后这一刻的按键：前后左右、跳、疾跑都松开；同一刻已经要了潜行（潜行右键、连着蹲着放方块）就接着蹲。
+     * 停下脚步不等于站起来——瞄准每刻都要定一次身位，连潜行一起松开的话，这一刻站起、下一刻又被按下，人一蹲一起地抽。
+     *
+     * @param requestedThisTick 这一刻有没有人提过移动要求；上一刻留下的潜行不算
+     */
+    static Movement halted(Movement current, boolean requestedThisTick) {
+        return requestedThisTick && current.sneaking() ? new Movement(0.0f, 0.0f, false, true, false) : Movement.STOPPED;
     }
 
     @Override
