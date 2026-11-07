@@ -57,17 +57,27 @@ public final class LiveEdgeView implements EdgeProximityNeed.ReadsEdge {
     }
 
     // 找退回的落点：背对崖边两格、一格，再试左右两侧；脚下踩得住、不是另一道深落差、身体放得进去才算。
+    // 就是脚下这一格、或旁边也是深落差的不算：站在一格宽的窄台上没有更稳的地方可退，就不退，
+    // 不然每隔几秒插进来"退一步"、退完还贴着边，一直报退不回安全处。
     private static double[] safeSpot(ClientLevel level, BlockPos foot, Vec3 toward) {
         Vec3 away = toward.scale(-1.0);
         Vec3 side = new Vec3(-away.z, 0, away.x);
         Vec3[] tries = {away.scale(2.0), away, side, side.scale(-1.0)};
         for (Vec3 offset : tries) {
             BlockPos cell = BlockPos.containing(foot.getX() + 0.5 + offset.x, foot.getY(), foot.getZ() + 0.5 + offset.z);
-            if (standable(level, cell)) {
+            if (!cell.equals(foot) && standable(level, cell) && !besideDeepDrop(level, cell)) {
                 return new double[] {cell.getX() + 0.5, cell.getY(), cell.getZ() + 0.5};
             }
         }
         return null;
+    }
+
+    // 这一格四面里有没有一面是深落差的边外。
+    private static boolean besideDeepDrop(ClientLevel level, BlockPos cell) {
+        for (Direction direction : new Direction[] {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST}) {
+            if (dropBelow(level, cell.relative(direction)) >= (int) EdgeProximityNeed.DEEP_DROP) return true;
+        }
+        return false;
     }
 
     // 站得住：脚下那格有碰撞、脚和头两格空着、而且不是深落差的边外。
