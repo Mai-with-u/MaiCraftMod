@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.approach;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
@@ -123,17 +124,33 @@ public final class StandSpots {
             while (firstWet < spots.size() && !world.inFluid(spots.get(firstWet).feet())) {
                 firstWet++;
             }
-            orderByReachability(spots.subList(0, firstWet), current);
-            orderByReachability(spots.subList(firstWet, spots.size()), current);
+            orderByReachability(spots.subList(0, firstWet), current, world);
+            orderByReachability(spots.subList(firstWet, spots.size()), current, world);
         } else {
-            orderByReachability(spots, current);
+            orderByReachability(spots, current, world);
         }
         return new Ranking(spots, rejected);
     }
 
-    /** 把候选按可达档排好（稳定，档内保持代价顺序）：要爬的整档挪到与角色同层或更低的之后。 */
-    private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet) {
-        spots.sort(Comparator.comparingInt(spot -> climbTier(spot.feet(), currentFeet)));
+    /**
+     * 把候选按可达档排好（稳定，档内保持代价顺序）：要爬的整档挪到与角色同层或更低的之后；
+     * 同一档里旁边一侧是深落差的（崖边、窄台）挪到后面，尽量不站在边沿上干活，别处都站不了才站。
+     */
+    private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet, ApproachWorldView world) {
+        spots.sort(Comparator.<StandSpot>comparingInt(spot -> climbTier(spot.feet(), currentFeet))
+                .thenComparingInt(spot -> besideDeepDrop(spot.feet(), world) ? 1 : 0));
+    }
+
+    /** 旁边一侧空着、往下三格以上没有落脚面就算深落差：站在那儿干活，一脚踩空就摔得掉血。 */
+    static final double DEEP_DROP = 3.0;
+
+    // 站位四面里有没有一面是深落差：那一格空着（脚和头都没有碰撞），往下三格以上才有落脚面。没加载的不算。
+    static boolean besideDeepDrop(BlockPos feet, ApproachWorldView world) {
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos next = feet.relative(side);
+            if (world.isLoaded(next) && world.headroom(next) && world.dropBelow(next) >= DEEP_DROP) return true;
+        }
+        return false;
     }
 
     /**

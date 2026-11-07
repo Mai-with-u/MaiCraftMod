@@ -69,6 +69,18 @@ class StandSpotsTest {
     }
 
     @Test
+    void 崖边站位排在后面_旁边一侧是深落差的别处都站不了才站() {
+        // 目标西边紧挨着的 (2, 64, 0) 是最便宜的站位，可它再往西一格是深落差：窄台、崖边上干活一脚踩空就摔，
+        // 同一档里排到不挨着落差的站位后面；不剔除，别处都站不了时照样能站。
+        world.deepDrops.add(new BlockPos(1, 64, 0));
+        StandSpots.Ranking ranking = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
+        BlockPos 崖边 = new BlockPos(2, 64, 0);
+        assertTrue(StandSpots.besideDeepDrop(崖边, world));
+        assertFalse(StandSpots.besideDeepDrop(ranking.spots().getFirst().feet(), world), "头一个站位不挨着落差");
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(崖边)), "崖边的站位还在，只是排在后面");
+    }
+
+    @Test
     void 脚下悬空和头顶没空间的格子被拒() {
         world.noFloor.add(new BlockPos(2, 64, 0));
         world.lowCeiling.add(new BlockPos(2, 64, 1));
