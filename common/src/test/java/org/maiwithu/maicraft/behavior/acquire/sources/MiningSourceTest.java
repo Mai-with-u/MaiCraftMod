@@ -24,6 +24,9 @@ import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
+import org.maiwithu.maicraft.behavior.permission.SeesVillagers;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -220,6 +223,49 @@ class MiningSourceTest {
                 });
         return new MiningSource(minables, digs, stairs, new FakeTools(), check, backpack, offhand, tags,
                 needs, null);
+    }
+
+    // 带一栋建筑档案的保护：x 在 0 到 4 之间、y 是 64 的格都在「小屋」图上。
+    private MiningSource sourceWithHut(ScansMinables minables) {
+        ReadsOwnHome hut = new ReadsOwnHome() {
+            @Override public Optional<WorldPosition> sleptBed() {
+                return Optional.empty();
+            }
+
+            @Override public List<Building> ownBuildings() {
+                return List.of();
+            }
+
+            @Override public Optional<String> archivedBuildingAt(WorldPosition position) {
+                return position.x() >= 0 && position.x() <= 4 && position.y() == 64 ? Optional.of("小屋") : Optional.empty();
+            }
+        };
+        PermissionCheck check = new PermissionCheck(
+                new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
+                        GuessesPlayerMade.NOTHING, "self", TrustedPlayers.NOBODY, SeesVillagers.NOBODY, hut, id -> id),
+                new ReadsCreatureSituation() {
+                    @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
+                        return Optional.empty();
+                    }
+                });
+        return new MiningSource(minables, new FakeDigs(), stairs, new FakeTools(), check, backpack, offhand, tags,
+                needs, null);
+    }
+
+    @Test
+    void 缺材料自己挑点_不拆建筑档案里房子上的格_都在房子上时说清楚() {
+        WorldPosition at = new WorldPosition(0, 64, 0, "minecraft:overworld");
+        SourceContext context = SourceContext.unscoped(at, Permissions.DEFAULT);
+        ItemRequest coal = new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "火把");
+        // 房子墙上那格煤矿不挑，房子外那格照挑。
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                sourceWithHut(new FakeMinables(List.of(coalAt(3, 0), coalAt(6, 0)), true)).quote(coal, context));
+        assertEquals(1, offer.obtainableCount());
+        // 看得见的都在房子上：不拆，说清是哪一栋、要拆就点名。
+        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
+                sourceWithHut(new FakeMinables(List.of(coalAt(3, 0)), true)).quote(coal, context));
+        assertTrue(unavailable.reason().contains("建筑档案「小屋」"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("gather"), unavailable.reason());
     }
 
     @Test

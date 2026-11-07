@@ -44,6 +44,11 @@ public final class PermissionCheck {
     private final Protection protection;
     private final ReadsCreatureSituation creatures;
 
+    /** 这一格是不是建筑档案里某一栋图上的格：自动挑取材点时跳过，给那一栋的名字。 */
+    public Optional<String> archivedBuildingAt(WorldPosition position) {
+        return protection.archivedBuildingAt(position);
+    }
+
     public PermissionCheck(Protection protection, ReadsCreatureSituation creatures) {
         this.protection = protection;
         this.creatures = creatures;

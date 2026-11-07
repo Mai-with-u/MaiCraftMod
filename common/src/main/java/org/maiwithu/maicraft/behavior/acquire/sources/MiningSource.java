@@ -152,7 +152,8 @@ public final class MiningSource implements ItemSource {
         }
         List<MinableSpot> seen = minables.minable(request.wanted(), request.dropsFrom(), context.characterAt(),
                 searchRadius(context));
-        List<MinableSpot> spots = withoutFailed(seen, context.characterAt().dimension());
+        List<MinableSpot> outside = outsideBuildings(seen, context.characterAt().dimension());
+        List<MinableSpot> spots = withoutFailed(outside, context.characterAt().dimension());
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 附近的方块还没扫完：说不准有没有，让引擎等一会儿再问，不把没扫完当成没有。
             return new SourceQuote.NotYet(describe(), "附近的方块还没扫完，这一刻说不准有没有会掉出"
@@ -167,6 +168,13 @@ public final class MiningSource implements ItemSource {
         Optional<ChanceDigging.PlaceBack> placeBack = placeBack(request, context);
         boolean canPlaceNow = placeBack.isPresent() && carried(placeBack.get().what().blockType()) > 0;
         if (spots.isEmpty() && canPlaceNow) return chanceQuote(request, context, List.of(), placeBack);
+        if (spots.isEmpty() && !seen.isEmpty() && outside.isEmpty()) {
+            // 看得见的都在建筑档案里的房子上：不拆房子当材料，要拆就点名那一格。
+            return new SourceQuote.Unavailable(describe(),
+                    "半径 " + searchRadius(context) + " 格内看得见的 " + seen.size() + " 格会掉出" + request.wanted().describe()
+                            + "的方块都在建筑档案「" + buildingOf(seen.getFirst(), context.characterAt().dimension())
+                            + "」上，不拆房子当材料；真要拆就用 gather 点名那一格，或者换个地方找");
+        }
         if (spots.isEmpty() && !seen.isEmpty()) {
             // 看得见的都是刚试过做不成的：如实说是这几处够不着、挖不下来，这一阵先不挑它们。
             return new SourceQuote.Unavailable(describe(),
@@ -380,8 +388,21 @@ public final class MiningSource implements ItemSource {
     }
 
     // 看得见的候选里去掉刚试过做不成的那几格：这一阵先挑别的格、别的树、别的矿。
+    // 建筑档案里房子上的格也去掉：缺材料时自己挑点不拆房子，点名那一格才动（gather 不走这里）。
     private List<MinableSpot> withoutFailed(List<MinableSpot> spots, String dimension) {
-        return spots.stream().filter(spot -> !failedSpots.recent(dimension, spot.pos())).toList();
+        return outsideBuildings(spots, dimension).stream().filter(spot -> !failedSpots.recent(dimension, spot.pos()))
+                .toList();
+    }
+
+    // 不在建筑档案里任何一栋图上的那些格。
+    private List<MinableSpot> outsideBuildings(List<MinableSpot> spots, String dimension) {
+        return spots.stream().filter(spot -> buildingOf(spot, dimension).isEmpty()).toList();
+    }
+
+    // 这一格在哪一栋的图上；不在为空串。
+    private String buildingOf(MinableSpot spot, String dimension) {
+        BlockPos pos = spot.pos();
+        return permission.archivedBuildingAt(new WorldPosition(pos.getX(), pos.getY(), pos.getZ(), dimension)).orElse("");
     }
 
     /**

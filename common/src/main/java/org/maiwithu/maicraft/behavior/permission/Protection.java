@@ -317,6 +317,14 @@ public final class Protection {
     }
 
     /**
+     * 这一格是不是建筑档案里某一栋图上的格：是就给那一栋的名字。缺材料自动挑取材点时跳过，不拆房子当材料；
+     * 任务点名那一格（gather 给观察编号或坐标）不问这里。维度说不清时哪个维度的房子上有这一格都算：宁可不挖。
+     */
+    public Optional<String> archivedBuildingAt(WorldPosition position) {
+        return home.archivedBuildingAt(position);
+    }
+
+    /**
      * 被困在自己家里、附近没有能开的门时，这一格墙能不能水平拆开出去：在家里、不是功能方块、不在记住的区域里。
      * 别人放的墙也能拆（拆完会补回去，回报写明是谁放的）；这次任务另外保护的格由寻路自己的保护格挡，
      * 床、门、家具与它们底下的格由寻路那一侧另外挡。

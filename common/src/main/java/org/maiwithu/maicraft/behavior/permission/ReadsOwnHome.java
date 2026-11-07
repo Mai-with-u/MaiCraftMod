@@ -51,6 +51,14 @@ public interface ReadsOwnHome {
         }
     }
 
+    /**
+     * 这一格是不是建筑档案里某一栋图上的格（她按图盖的、读现场建的都算）：是就给那一栋的名字。
+     * 自动挑取材点时跳过这些格，不拆房子当材料；没接上时一格都不是。
+     */
+    default Optional<String> archivedBuildingAt(WorldPosition position) {
+        return Optional.empty();
+    }
+
     /** 还没接上、或这个世界里还没有家时：没睡过床，也没盖过房子。 */
     ReadsOwnHome NOWHERE = new ReadsOwnHome() {
         @Override public Optional<WorldPosition> sleptBed() {
