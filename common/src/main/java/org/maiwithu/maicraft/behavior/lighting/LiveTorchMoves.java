@@ -11,7 +11,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Block;
 
 import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
-import org.maiwithu.maicraft.behavior.construction.PlacementPrediction;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -20,6 +19,7 @@ import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 import org.maiwithu.maicraft.behavior.survival.DarknessNeed;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.PlaceAgainst;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -51,7 +51,7 @@ public final class LiveTorchMoves implements DarknessNeed.TorchMoves {
         Predicate<BlockPos> opensScreen = at -> {
             PlayerContext player = now.get();
             if (player == null || player.level() == null) return true;
-            return PlacementPrediction.requiresSneak(player.level(), at, player.level().getBlockState(at));
+            return PlaceAgainst.needsSneak(player.level(), at, player.level().getBlockState(at));
         };
         // 保护这一问跟着世界走：世界现场还没建好时读不到，按受保护对待，眼前一个灯位都挑不出来。
         Predicate<BlockPos> guarded = at -> {

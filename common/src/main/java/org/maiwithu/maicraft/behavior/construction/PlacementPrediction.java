@@ -11,11 +11,8 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -148,14 +145,6 @@ public final class PlacementPrediction {
         BlockState desired = cell.state();
         if (desired.getBlock() instanceof SlabBlock && desired.getValue(BlockStateProperties.SLAB_TYPE) == SlabType.DOUBLE) return 2;
         return Math.max(1, cell.materialCount());
-    }
-
-    /** 被点的方块自己有右键行为（开界面、门、按钮、拉杆）时要潜行再点，不然手里的方块放不下去。 */
-    public static boolean requiresSneak(Level level, BlockPos clicked, BlockState state) {
-        if (state.hasBlockEntity() || state.getMenuProvider(level, clicked) != null) return true;
-        var block = state.getBlock();
-        return block instanceof DoorBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock
-                || block instanceof ButtonBlock || block instanceof LeverBlock;
     }
 
     /**

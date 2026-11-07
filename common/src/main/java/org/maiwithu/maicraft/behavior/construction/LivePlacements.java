@@ -18,6 +18,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
+import org.maiwithu.maicraft.game.interaction.PlaceAgainst;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 
@@ -105,6 +106,6 @@ public final class LivePlacements implements ConstructionSeams.PlansPlacement {
         PlayerContext current = context.get();
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
         if (current == null || current.level() == null || !current.level().isLoaded(clicked)) return false;
-        return PlacementPrediction.requiresSneak(current.level(), clicked, current.level().getBlockState(clicked));
+        return PlaceAgainst.needsSneak(current.level(), clicked, current.level().getBlockState(clicked));
     }
 }
