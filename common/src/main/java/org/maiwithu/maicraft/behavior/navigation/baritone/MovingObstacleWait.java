@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.navigation.baritone;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import baritone.api.IBaritone;
+import baritone.behavior.PathingBehavior;
+import baritone.pathing.path.PathExecutor;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.AABB;
+
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 
 /**
  * 路线前方被正在动的东西挡着（转着的风车、开过来的火车、推着的活塞）：先原地等它过去，最多 5 秒；
@@ -24,6 +32,25 @@ final class MovingObstacleWait {
     private boolean blocked;
     /** 这次等满了还挡着：交回引擎绕，同一处不再等。 */
     private boolean gaveUp;
+
+    /**
+     * 走着的这一刻要不要原地等：路线在手、人站在地上、引擎这一步能停时，看路线前方 16 格有没有被正在动的东西挡着；
+     * 要等就松开引擎的按键、原地站住。
+     */
+    boolean holdsRoute(PlayerContext context, LocalPlayer player, PathingBehavior pathing, IBaritone engine) {
+        PathExecutor current = pathing.getCurrent();
+        if (current == null || !player.onGround() || !pathing.isSafeToCancel()) return false;
+        var positions = current.getPath().positions();
+        int from = Math.max(0, Math.min(current.getPosition(), positions.size()));
+        List<BlockPos> ahead = new ArrayList<>();
+        ahead.add(player.blockPosition());
+        ahead.addAll(positions.subList(from, Math.min(positions.size(), from + AHEAD_BLOCKS + 1)));
+        var obstacles = NavigationObstacles.capture(context.level(), player);
+        if (!holds(context.clientTick(), ahead, obstacles.moving())) return false;
+        engine.getInputOverrideHandler().clearAllKeys();
+        context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        return true;
+    }
 
     /**
      * 这一刻要不要原地等。

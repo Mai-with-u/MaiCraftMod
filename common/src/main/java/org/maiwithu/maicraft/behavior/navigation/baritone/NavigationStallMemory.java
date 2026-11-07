@@ -11,8 +11,15 @@ import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 /**
  * 记住本次导航在哪些面前格反复卡住。同一格第一次卡住：途经可徒手开关的门就登记切到相反状态，没有门就原样重试；
@@ -23,6 +30,51 @@ final class NavigationStallMemory {
     static final int MAX_OBSTACLES = 8;
 
     enum Decision { RETRY, TOGGLE_PASSAGE, OBSTACLE, EXHAUSTED }
+
+    /**
+     * 执行段在面前格卡住的一次现场。
+     *
+     * @param passage 这一步途经、还没登记过的那扇徒手能开关的门（下半格）；没有为 null
+     * @param open    那扇门要切到的开关状态
+     * @param facts   卡住原因、动作、起止、面前格脚头两格的方块与卡了几刻，列为障碍时写进导航诊断
+     */
+    record Stalled(BlockPos passage, boolean open, Map<String, Object> facts) {}
+
+    /**
+     * 读一次卡住的现场：途经的门里第一扇徒手能开关、还没登记过的，切到相反状态再试；再记下卡住的样子。
+     *
+     * @param registered 这扇门已经登记过的目标开关状态；没登记为 null
+     */
+    static Stalled read(MovementStall stall, ClientLevel level, Function<BlockPos, Boolean> registered) {
+        BlockPos passage = null;
+        boolean open = false;
+        for (BlockPos cell : stall.passageCells()) {
+            if (!level.isLoaded(cell)) continue;
+            BlockState state = level.getBlockState(cell);
+            if (!handOpenable(state)) continue;
+            BlockPos key = MovementStall.passageKey(cell, state);
+            if (registered.apply(key) != null) continue;
+            passage = key;
+            open = !state.getValue(BlockStateProperties.OPEN);
+            break;
+        }
+        BlockPos front = stall.front();
+        Map<String, Object> facts = new LinkedHashMap<>();
+        facts.put("cause", stall.cause().name().toLowerCase(Locale.ROOT));
+        facts.put("movement", stall.movement());
+        facts.put("from", stall.src().toShortString());
+        facts.put("to", stall.dest().toShortString());
+        facts.put("feet_block", level.isLoaded(front) ? level.getBlockState(front).toString() : "unloaded");
+        facts.put("head_block", level.isLoaded(front.above()) ? level.getBlockState(front.above()).toString() : "unloaded");
+        facts.put("stalled_ticks", stall.ticks());
+        return new Stalled(passage, open, facts);
+    }
+
+    // 徒手能开关的：木门这类（铁门要红石）和栅栏门。
+    private static boolean handOpenable(BlockState state) {
+        return state.getBlock() instanceof DoorBlock door && door.type().canOpenByHand()
+                || state.getBlock() instanceof FenceGateBlock;
+    }
 
     private final Long2IntOpenHashMap attempts = new Long2IntOpenHashMap();
     private final LongOpenHashSet obstacles = new LongOpenHashSet();

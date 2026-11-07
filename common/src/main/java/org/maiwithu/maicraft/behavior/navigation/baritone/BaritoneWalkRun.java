@@ -9,21 +9,15 @@ import baritone.api.utils.IInputOverrideHandler;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import baritone.api.utils.input.Input;
 import baritone.behavior.PathingBehavior;
-import baritone.pathing.path.PathExecutor;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -426,29 +420,13 @@ final class BaritoneWalkRun implements WalkRun {
     // 第二次仍卡住就把面前格列为障碍、重算绕行；障碍用完就如实走不通。整个过程不额外挖也不额外放。
     private void onMovementStalled(MovementStall stall, ClientLevel level, BlockPos feet) {
         if (stall.front() == null || progress.done() || level == null) return;
-        BlockPos passage = null;
-        boolean open = false;
-        for (BlockPos cell : stall.passageCells()) {
-            if (!level.isLoaded(cell)) continue;
-            BlockState state = level.getBlockState(cell);
-            if (!handOpenable(state)) continue;
-            BlockPos key = MovementStall.passageKey(cell, state);
-            if (stalls.wantOpen(key) != null) continue;
-            passage = key;
-            open = !state.getValue(BlockStateProperties.OPEN);
-            break;
-        }
+        NavigationStallMemory.Stalled seen = NavigationStallMemory.read(stall, level, stalls::wantOpen);
         BlockPos front = stall.front();
+        BlockPos passage = seen.passage();
+        boolean open = seen.open();
+        Map<String, Object> facts = seen.facts();
         // 这一格这次卡住会被算数（不是已经列了障碍、正等重算的那格）：换个办法重来，算一次真实进展。
         boolean counted = !stalls.obstacles().contains(front.asLong());
-        Map<String, Object> facts = new LinkedHashMap<>();
-        facts.put("cause", stall.cause().name().toLowerCase(Locale.ROOT));
-        facts.put("movement", stall.movement());
-        facts.put("from", stall.src().toShortString());
-        facts.put("to", stall.dest().toShortString());
-        facts.put("feet_block", level.isLoaded(front) ? level.getBlockState(front).toString() : "unloaded");
-        facts.put("head_block", level.isLoaded(front.above()) ? level.getBlockState(front.above()).toString() : "unloaded");
-        facts.put("stalled_ticks", stall.ticks());
         NavigationStallMemory.Decision decision = stalls.observe(front, passage, open, facts);
         if (counted && decision != NavigationStallMemory.Decision.EXHAUSTED) {
             displacement.confirm(lastDrivenTick);
@@ -468,12 +446,6 @@ final class BaritoneWalkRun implements WalkRun {
                             + " 个卡住的格子 " + stalls.obstacleCells() + "，路上没挖也没垫",
                     "看看那几格挡着什么，或者把 change_blocks 放开再走"), feet);
         }
-    }
-
-    // 徒手能开关的：木门这类（铁门要红石）和栅栏门。
-    private static boolean handOpenable(BlockState state) {
-        return state.getBlock() instanceof DoorBlock door && door.type().canOpenByHand()
-                || state.getBlock() instanceof FenceGateBlock;
     }
 
     // 引擎按着左右键时真的去挖、去点：挖开一格、垫上一块都算真实进展，挖掘推进中也不算原地卡住，
@@ -576,17 +548,7 @@ final class BaritoneWalkRun implements WalkRun {
     // 等的这几刻不算没有进展；等满了还挡着就交回引擎，引擎按碰撞里的障碍自己绕。
     private boolean waitsForMovingObstacle(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
                                            IBaritone engine) {
-        PathExecutor current = pathing.getCurrent();
-        if (current == null || progress.stopRequested() || !player.onGround() || !pathing.isSafeToCancel()) return false;
-        var positions = current.getPath().positions();
-        int from = Math.max(0, Math.min(current.getPosition(), positions.size()));
-        List<BlockPos> ahead = new ArrayList<>();
-        ahead.add(player.blockPosition());
-        ahead.addAll(positions.subList(from, Math.min(positions.size(), from + MovingObstacleWait.AHEAD_BLOCKS + 1)));
-        var obstacles = NavigationObstacles.capture(context.level(), player);
-        if (!obstacleWait.holds(context.clientTick(), ahead, obstacles.moving())) return false;
-        engine.getInputOverrideHandler().clearAllKeys();
-        context.input().applyNavigationMovement(PlayerInput.Movement.STOPPED, context.clientTick());
+        if (progress.stopRequested() || !obstacleWait.holdsRoute(context, player, pathing, engine)) return false;
         displacement.restart(context.clientTick());
         return true;
     }
