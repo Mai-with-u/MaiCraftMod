@@ -283,7 +283,7 @@ public class MovementTraverse extends Movement {
                 state.setInput(Input.SPRINT, true);
             }
             // 搭桥：刚垫好的这一块也蹲着走上去，下一块接着蹲着搭，整段桥一直按住潜行，搭完再站起来。
-            if (!wasTheBridgeBlockAlwaysThere && !Baritone.settings().assumeSafeWalk.value) {
+            if (sneaksWhileBridging(wasTheBridgeBlockAlwaysThere, Baritone.settings().assumeSafeWalk.value)) {
                 state.setInput(Input.SNEAK, true);
             }
 
@@ -307,7 +307,7 @@ public class MovementTraverse extends Movement {
             double dist1 = Math.max(Math.abs(ctx.player().position().x - (dest.getX() + 0.5D)), Math.abs(ctx.player().position().z - (dest.getZ() + 0.5D)));
             PlaceResult p = MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, !Baritone.settings().assumeSafeWalk.value);
             // 搭桥这一段从头到尾蹲着：走到边沿、对准、放下都按住潜行，不在每块之间起身。
-            if (!Baritone.settings().assumeSafeWalk.value) {
+            if (sneaksWhileBridging(false, Baritone.settings().assumeSafeWalk.value)) {
                 state.setInput(Input.SNEAK, true);
             }
             switch (p) {
@@ -365,6 +365,16 @@ public class MovementTraverse extends Movement {
             MovementHelper.moveTowardsWithSlightRotation(ctx, state, dest);
             return state;
         }
+    }
+
+    /**
+     * 搭桥这一段要不要蹲着：往前垫块、走上刚垫好的那一块、接着往前搭都按住潜行，整段不在每块之间起身；
+     * 脚下这块本来就在（不是这一趟垫的）照常走。设置里假定走不掉边时不蹲。
+     *
+     * @param bridgeBlockAlwaysThere 要走上去的那一块原本就在
+     */
+    static boolean sneaksWhileBridging(boolean bridgeBlockAlwaysThere, boolean assumeSafeWalk) {
+        return !bridgeBlockAlwaysThere && !assumeSafeWalk;
     }
 
     @Override
