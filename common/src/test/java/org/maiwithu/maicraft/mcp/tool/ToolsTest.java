@@ -114,7 +114,7 @@ class ToolsTest {
         assertEquals(3, abilities.size());
         JsonObject first = abilities.get(0).getAsJsonObject();
         assertEquals("maicraft:use", first.get("ability").getAsString());
-        assertEquals("item?: string, count: integer = 1", first.get("parameters").getAsString());
+        assertEquals("item?: string, count: integer (1..64) = 1", first.get("parameters").getAsString());
         assertEquals("[\"position\",\"seen\"]", first.get("targets").toString());
     }
 

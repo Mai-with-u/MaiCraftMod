@@ -55,6 +55,15 @@ final class ToolTestAbility implements AbilityModule, EstimatesGoal {
                 Set.of(TargetKind.HERE, TargetKind.LANDMARK), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), false);
     }
 
+    /** 像做肢体动作一样：做哪个动作是选项，做几次有上下限。 */
+    static ToolTestAbility gesture() {
+        return new ToolTestAbility(spec("maicraft:gesture", "做一下肢体动作", ParamSpecs.of(
+                        ParamSpec.of("operation", ParamType.CHOICE).required()
+                                .choices("look", "crouch", "swing").doc("做哪个动作").build(),
+                        ParamSpec.of("count", ParamType.INTEGER).range(1, 64).defaultValue(1).doc("做几次").build()),
+                Set.of(), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), false);
+    }
+
     static ToolTestAbility sequence() {
         return new ToolTestAbility(spec("maicraft:sequence", "按顺序做几件事", ParamSpecs.EMPTY,
                 Set.of(), ExecutionMode.CONTROLS_PLAYER, Listing.LISTED), true);

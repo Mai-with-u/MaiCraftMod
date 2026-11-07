@@ -308,14 +308,14 @@ public final class ParamSpecs {
     }
 
     private static String expected(ParamSpec param) {
-        String range = param.min() == null && param.max() == null ? ""
-                : " " + (param.min() == null ? "" : param.min()) + ".." + (param.max() == null ? "" : param.max());
+        String constraint = param.valueConstraint();
+        String range = constraint.isEmpty() ? "" : " " + constraint;
         return switch (param.type()) {
             case INTEGER -> "整数" + range;
             case NUMBER -> "数字" + range;
             case BOOLEAN -> "布尔值";
             case TEXT -> "文字";
-            case CHOICE -> String.join(" / ", param.choices());
+            case CHOICE -> constraint;
             case ITEM_OR_TAG -> "物品 ID 或 # 开头的物品标签";
             case BLOCK_OR_TAG -> "方块 ID 或 # 开头的方块标签";
             case ENTITY_TYPE -> "实体类型 ID";

@@ -5,7 +5,7 @@
       {
         "ability": "maicraft:use",
         "summary": "对一个方块或实体用一下手上的东西（开门、按钮、拉杆、开箱看看、骑乘、剪毛、点火……）",
-        "parameters": "item?: string, potion?: string, block?: string, entity?: string, count: integer = 1, radius: integer = 32, text?: string, keep_trying: integer = 0, sneak: boolean = false, face?: string",
+        "parameters": "item?: string, potion?: string, block?: string, entity?: string, count: integer (1..64) = 1, radius: integer (1..128) = 32, text?: string, keep_trying: integer (0..10) = 0, sneak: boolean = false, face?: string (up / down / north / south / east / west)",
         "targets": [
           "here",
           "landmark",
@@ -17,21 +17,21 @@
       {
         "ability": "maicraft:eat",
         "summary": "吃身上带的食物",
-        "parameters": "item?: string, count: integer = 1",
+        "parameters": "item?: string, count: integer (1..64) = 1",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:equip",
         "summary": "穿装备或卸装备",
-        "parameters": "operation: string, slot?: string, item?: string",
+        "parameters": "operation: string (equip / unequip), slot?: string (mainhand / offhand / head / chest / legs / feet / armor), item?: string",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:drop",
         "summary": "把身上带的东西丢出去",
-        "parameters": "item: string, count: integer",
+        "parameters": "item: string, count: integer (1..999)",
         "targets": [
           "position"
         ],
@@ -40,21 +40,21 @@
       {
         "ability": "maicraft:suicide",
         "summary": "开着死亡不掉落时主动死一次，回出生点或床边",
-        "parameters": "via?: string, radius: integer = 24, max_seconds: integer = 120, keep_inventory_confirmed?: boolean",
+        "parameters": "via?: string (command / lava / fall / fire / cactus / hostile_mob / lava_bucket), radius: integer (4..64) = 24, max_seconds: integer (10..600) = 120, keep_inventory_confirmed?: boolean",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:obtain",
         "summary": "让背包里某样东西再多几件，或一次要几样；可用 via 指定途径",
-        "parameters": "item?: string, potion?: string, count?: integer, items?: array, via?: string, radius?: integer, max_distance?: integer, prefer?: array, drops_from?: array",
+        "parameters": "item?: string, potion?: string, count?: integer (1..2147483647), items?: array, via?: string (container / craft / smelt / smith / brew / mine / harvest / trade / hunt / fill / reclaim), radius?: integer (1..64), max_distance?: integer (1..2147483647), prefer?: array, drops_from?: array",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:deposit",
         "summary": "把背包里的东西存进容器",
-        "parameters": "items?: array, count?: integer, radius: integer = 32, into: string = container",
+        "parameters": "items?: array, count?: integer (1..576), radius: integer (1..128) = 32, into: string (container / network) = container",
         "targets": [
           "here",
           "landmark",
@@ -66,7 +66,7 @@
       {
         "ability": "maicraft:enchant",
         "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
-        "parameters": "item: string, tier: integer = 1, radius: integer = 32",
+        "parameters": "item: string, tier: integer (1..3) = 1, radius: integer (1..9223372036854775807) = 32",
         "targets": [
           "landmark",
           "position",
@@ -77,7 +77,7 @@
       {
         "ability": "maicraft:sleep",
         "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
-        "parameters": "operation: string = sleep",
+        "parameters": "operation: string (sleep / auto_on / auto_off / auto_status) = sleep",
         "targets": [
           "here",
           "landmark",
@@ -99,7 +99,7 @@
       {
         "ability": "maicraft:design",
         "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
-        "parameters": "operation: string, drawing?: object, design_id?: string, edits?: object, name?: string, radius?: integer, page: integer = 0, rotation: integer = 0, format: string = json",
+        "parameters": "operation: string (create / update / inspect / preview / export / read_site), drawing?: object, design_id?: string, edits?: object, name?: string, radius?: integer (0..15), page: integer (0..1000000) = 0, rotation: integer (0..270) = 0, format: string (json / nbt) = json",
         "targets": [
           "here",
           "landmark",
@@ -111,7 +111,7 @@
       {
         "ability": "maicraft:build",
         "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
-        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer = 0, name?: string",
+        "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer (0..270) = 0, name?: string",
         "targets": [
           "here",
           "landmark",
@@ -123,7 +123,7 @@
       {
         "ability": "maicraft:machine_inspect",
         "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
-        "parameters": "radius: integer = 16, item?: string, balance?: string, operation: string = inspect, name?: string",
+        "parameters": "radius: integer (1..32) = 16, item?: string, balance?: string (forces / ballast), operation: string (inspect / read_site) = inspect, name?: string",
         "targets": [
           "here",
           "landmark",
@@ -142,7 +142,7 @@
       {
         "ability": "maicraft:machine_configure",
         "summary": "改一台机器的设置：侧面、过滤、模式、样板（按已装模组的机器类型）",
-        "parameters": "settings: object, item?: string, inventory_slot?: integer",
+        "parameters": "settings: object, item?: string, inventory_slot?: integer (0..40)",
         "targets": [
           "here",
           "landmark",
@@ -154,7 +154,7 @@
       {
         "ability": "maicraft:machine_run",
         "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
-        "parameters": "item?: string, count: integer = 1, collect: boolean = true, max_seconds: integer = 300, file?: string, anchor?: object, rotation: integer = 0",
+        "parameters": "item?: string, count: integer (1..64) = 1, collect: boolean = true, max_seconds: integer (1..3600) = 300, file?: string, anchor?: object, rotation: integer (0..270) = 0",
         "targets": [
           "here",
           "landmark",
@@ -190,7 +190,7 @@
       {
         "ability": "maicraft:light",
         "summary": "给一片区域补光：量好哪里暗、自己备够火把、把灯插下去、再量一遍直到够亮；或开、关、查随行补光（走路经过暗处顺手插一支）",
-        "parameters": "operation: string = area, radius?: integer, item?: string, coverage: string = all, minimum_light?: integer",
+        "parameters": "operation: string (area / enable / disable / status) = area, radius?: integer (1..32), item?: string, coverage: string (all / most / crops) = all, minimum_light?: integer (1..15)",
         "targets": [
           "here",
           "landmark",
@@ -202,7 +202,7 @@
       {
         "ability": "maicraft:fight",
         "summary": "打指定的目标，或清掉附近一片区域的敌对生物；看着打不过也照打并写明差在哪，血见底会先撤",
-        "parameters": "entity?: string, radius: integer = 32, count?: integer, spar?: boolean, stop_at_health?: integer",
+        "parameters": "entity?: string, radius: integer (1..64) = 32, count?: integer (1..64), spar?: boolean, stop_at_health?: integer (0..19)",
         "targets": [
           "player",
           "seen"
@@ -212,7 +212,7 @@
       {
         "ability": "maicraft:follow",
         "summary": "跟着一位玩家或一个实体，保持几格距离：它走就跟、它停就停，跟着上车、过门，它在打怪时上去帮忙",
-        "parameters": "distance: integer = 3",
+        "parameters": "distance: integer (2..16) = 3",
         "targets": [
           "player",
           "seen"
@@ -222,7 +222,7 @@
       {
         "ability": "maicraft:body_language",
         "summary": "看着一个人做一个肢体动作（蹲起、挥手、点头、摇头、跳、递东西、拍一下）",
-        "parameters": "operation: string, count?: integer, item?: string, max_seconds?: integer",
+        "parameters": "operation: string (look / crouch / swing / nod / shake_head / jump / hold / toss / pick_up / poke), count?: integer (1..64), item?: string, max_seconds?: integer (1..10)",
         "targets": [
           "player",
           "seen"
@@ -232,21 +232,21 @@
       {
         "ability": "maicraft:timer",
         "summary": "不占身体的计时：过 N 秒（游戏时间）在事件里叫你一声并带回备注，角色照常干别的；不是红石或模组的计时器方块",
-        "parameters": "operation: string = set, after_seconds?: integer, note?: string, timer_id?: integer",
+        "parameters": "operation: string (set / cancel / list) = set, after_seconds?: integer (1..3600), note?: string, timer_id?: integer (1..2147483647)",
         "targets": [],
         "mode": "memory_only"
       },
       {
         "ability": "maicraft:fish",
         "summary": "在附近的水边钓鱼：自己找钓位、抛竿、咬钩就收，钓上来的照单全收",
-        "parameters": "count?: integer, max_seconds?: integer",
+        "parameters": "count?: integer (1..9223372036854775807), max_seconds?: integer (1..9223372036854775807)",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:travel",
         "summary": "走到一个地方：给坐标、地点名、看得见的东西或往某方向走多远；给维度就是去那个维度",
-        "parameters": "radius?: number, strict_arrival: boolean = false, max_distance: number = 128.0, max_seconds?: integer, via?: string",
+        "parameters": "radius?: number (0..2048), strict_arrival: boolean = false, max_distance: number (16..2048) = 128.0, max_seconds?: integer, via?: string (walk / end_gateway / boat / minecart)",
         "targets": [
           "dimension",
           "direction",
@@ -260,21 +260,21 @@
       {
         "ability": "maicraft:find",
         "summary": "在附近找某种方块、生物或结构，找到的每一样给一个观察编号，可以直接拿它下达别的指令",
-        "parameters": "block?: string, blocks?: array, entity?: array, structure?: string, count: integer = 1, radius?: integer",
+        "parameters": "block?: string, blocks?: array, entity?: array, structure?: string, count: integer (1..32) = 1, radius?: integer (4..128)",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:explore",
         "summary": "朝某个方向把外面的地形跑一遍：自由看看这一片，或去找一种群系、一块能站的平台、回露天的地面；也能钻进附近的矿洞顺着走，一路看洞壁上露出来的矿",
-        "parameters": "target: string, direction?: string, angle_degrees?: integer, min_distance?: integer, max_distance?: integer, max_seconds?: integer, interests?: array",
+        "parameters": "target: string, direction?: string (forward / backward / left / right / north / south / east / west), angle_degrees?: integer (1..360), min_distance?: integer (0..2048), max_distance?: integer (64..2048), max_seconds?: integer, interests?: array",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:chat",
         "summary": "向游戏聊天发一句话，或发一条普通玩家命令（对全体玩家可见）；公屏说一句话插一下，不替换手上的目标",
-        "parameters": "message: string, max_seconds?: integer",
+        "parameters": "message: string, max_seconds?: integer (0..90)",
         "targets": [
           "seen"
         ],
@@ -292,7 +292,7 @@
       {
         "ability": "maicraft:gomoku_play",
         "summary": "和坐在对面的女仆下五子棋：落一子并等她应手，或重开一局（车万女仆）",
-        "parameters": "move?: string, operation: string = move, max_seconds?: integer",
+        "parameters": "move?: string, operation: string (move / reset) = move, max_seconds?: integer (0..30)",
         "targets": [
           "seen"
         ],
@@ -301,14 +301,14 @@
       {
         "ability": "maicraft:reserve",
         "summary": "预留身上攒着的东西：写下这几样各留够几件，角色自己做主时不动它们，下令的目标不够才用、用了扣掉；一直有效，不占身体",
-        "parameters": "operation: string = set, items?: array",
+        "parameters": "operation: string (set / cancel) = set, items?: array",
         "targets": [],
         "mode": "memory_only"
       },
       {
         "ability": "maicraft:remember",
         "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
-        "parameters": "name: string, operation: string = remember, radius?: integer",
+        "parameters": "name: string, operation: string (remember / forget / region) = remember, radius?: integer (1..64)",
         "targets": [
           "here",
           "landmark",
@@ -327,14 +327,14 @@
       {
         "ability": "maicraft:quest",
         "summary": "对 FTB 任务书里的一个条目做一次动作：交物品、勾选、领奖",
-        "parameters": "operation: string, quest: string, requirement?: string, reward?: string, choice?: string",
+        "parameters": "operation: string (submit / confirm / claim), quest: string, requirement?: string, reward?: string, choice?: string",
         "targets": [],
         "mode": "controls_player"
       },
       {
         "ability": "maicraft:vehicle_assemble",
         "summary": "把建好的方块组装成会动的结构（物理组装器拉一次杆，在机器档案里的先补胶），或拆回方块",
-        "parameters": "operation: string = assemble",
+        "parameters": "operation: string (assemble / disassemble) = assemble",
         "targets": [
           "landmark",
           "position",
@@ -345,7 +345,7 @@
       {
         "ability": "maicraft:vehicle_drive",
         "summary": "坐上驾驶座开载具：drive 开到一个地方停稳，test 逐条按住控制件看它怎么动再松开",
-        "parameters": "vehicle?: string, operation: string = drive, inputs?: array, cruise_altitude?: integer",
+        "parameters": "vehicle?: string, operation: string (drive / test) = drive, inputs?: array, cruise_altitude?: integer (-64..320)",
         "targets": [
           "direction",
           "landmark",

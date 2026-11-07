@@ -63,6 +63,16 @@ public record ParamSpec(
         }
     }
 
+    /**
+     * 这个参数的取值约束，写成人能读的短句：选项参数列出全部可选值，数值参数写出上下限；没有约束时是空串。
+     * 能力签名与参数校验的报错共用这一份文字，两边不会各写一套而说法不一。
+     */
+    public String valueConstraint() {
+        if (type == ParamType.CHOICE) return String.join(" / ", choices);
+        if (min == null && max == null) return "";
+        return (min == null ? "" : min) + ".." + (max == null ? "" : max);
+    }
+
     // 默认值必须与解析后的取值类型一致，能力读参数时才不会因为默认值而拿到另一种类型。
     private static boolean matches(ParamType type, Object value) {
         return switch (type) {

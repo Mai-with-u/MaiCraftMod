@@ -372,7 +372,7 @@ public final class LookupTool implements McpTool {
         return ToolReply.ok(data, notes, null);
     }
 
-    /** 一行签名：能力 ID、用途、参数名与类型、接受的目标对象、执行方式。 */
+    /** 一行签名：能力 ID、用途、参数名与类型和能取的值、接受的目标对象、执行方式。 */
     private static JsonObject signature(AbilitySpec spec) {
         JsonObject json = new JsonObject();
         json.addProperty("ability", spec.id());
@@ -380,12 +380,16 @@ public final class LookupTool implements McpTool {
         List<String> params = new ArrayList<>();
         for (ParamSpec param : spec.paramSpecs().all()) {
             String type = param.type().schemaType();
+            // 取值写进签名：选项参数列出全部可选值，数值参数写出上下限。宿主只看得到这一行，
+            // 不写清楚它就只能猜，猜错的名字会被参数校验拒下。
+            String constraint = param.valueConstraint();
+            String values = constraint.isEmpty() ? "" : " (" + constraint + ")";
             if (param.required()) {
-                params.add(param.name() + ": " + type);
+                params.add(param.name() + ": " + type + values);
             } else if (param.defaultValue() != null) {
-                params.add(param.name() + ": " + type + " = " + param.defaultValue());
+                params.add(param.name() + ": " + type + values + " = " + param.defaultValue());
             } else {
-                params.add(param.name() + "?: " + type);
+                params.add(param.name() + "?: " + type + values);
             }
         }
         json.addProperty("parameters", String.join(", ", params));
