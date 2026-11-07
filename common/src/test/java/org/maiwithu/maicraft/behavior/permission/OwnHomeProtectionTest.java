@@ -156,6 +156,16 @@ class OwnHomeProtectionTest {
     }
 
     @Test
+    void 被困在家里拆墙出去_家里别人放的墙能拆_功能方块记住的区域家外的不拆() {
+        // 床旁那格木板是玩家甲放的：被困时可以水平拆开出去（出去后补回）。
+        assertTrue(protection().breakableAtHome(PLANK, false));
+        assertFalse(protection().breakableAtHome(PLANK, true), "箱子、熔炉这类功能方块不拆");
+        assertFalse(protection().breakableAtHome(FAR, false), "家外不按这条拆");
+        regions = List.of(new RememberedRegion("邻居的花园", PLANK, 3));
+        assertFalse(protection().breakableAtHome(PLANK, false), "记住的区域里的不拆");
+    }
+
+    @Test
     void 记住的家旁也算() {
         sleptBed = Optional.empty();
         places = Map.of("家", new WorldPosition(-352, 66, 55, DIM));

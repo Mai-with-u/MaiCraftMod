@@ -341,6 +341,15 @@ public final class WorldScope {
             @Override public Optional<String> placedByOther(int x, int y, int z) {
                 return protection.placedByOther(new WorldPosition(x, y, z, dimension));
             }
+
+            // 被困时先看是不是在自己家里：家里只水平拆一格墙出去再补回，不按坑里那样挖。
+            @Override public boolean atOwnHome(int x, int y, int z) {
+                return protection.homeOf(new WorldPosition(x, y, z, dimension)).isPresent();
+            }
+
+            @Override public boolean breakableAtHome(int x, int y, int z, BlockState state) {
+                return protection.breakableAtHome(new WorldPosition(x, y, z, dimension), FunctionalBlocks.functional(state));
+            }
         });
     }
 

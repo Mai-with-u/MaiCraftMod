@@ -57,6 +57,19 @@ public final class NavigationProtection {
         default Optional<String> placedByOther(int x, int y, int z) {
             return Optional.empty();
         }
+
+        /** 这一格在不在角色自己的家里（记住的家、真睡过的床旁、她真放下过的格旁）：被困在家里时不按坑里那样挖。 */
+        default boolean atOwnHome(int x, int y, int z) {
+            return false;
+        }
+
+        /**
+         * 被困在自己家里、要水平拆一格墙出去时，这一格能不能拆：在家里、不是功能方块、不在记住的区域和记住的地点旁。
+         * 别人放的墙也能拆（拆完会补回去）。床、门、家具由调用方另外挡。
+         */
+        default boolean breakableAtHome(int x, int y, int z, BlockState state) {
+            return false;
+        }
     }
 
     private NavigationProtection() {}
@@ -68,7 +81,13 @@ public final class NavigationProtection {
 
     /** 同上；throughOthers 为真表示这一趟被封死在小坑里，放开了别人放的普通方块。 */
     public static boolean install(LongSet sacred, LongSet noEntryCells, int minimumFeetY, boolean throughOthers) {
-        Snapshot next = new Snapshot(copy(sacred), copy(noEntryCells), minimumFeetY, throughOthers);
+        return install(sacred, noEntryCells, minimumFeetY, throughOthers, LongSets.emptySet());
+    }
+
+    /** 同上；breakable 是被困在自己家里时选中要拆的那一两格墙：不管是不是天然地形、是谁放的都许挖。 */
+    public static boolean install(LongSet sacred, LongSet noEntryCells, int minimumFeetY, boolean throughOthers,
+            LongSet breakable) {
+        Snapshot next = new Snapshot(copy(sacred), copy(noEntryCells), minimumFeetY, throughOthers, copy(breakable));
         boolean changed = !next.equals(CURRENT.get());
         CURRENT.set(next);
         return changed;
@@ -103,6 +122,21 @@ public final class NavigationProtection {
         return pos == null ? Optional.empty() : escapeOwner(CURRENT.get(), pos.getX(), pos.getY(), pos.getZ(), state);
     }
 
+    /** 此刻生效的保护要求下，这一格是不是被困在家里选中要拆的墙：走路时挖之前再问一次。 */
+    public static boolean breakable(BlockPos pos) {
+        return pos != null && CURRENT.get().breakable(pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /** 这一格在不在角色自己的家里。 */
+    public static boolean atOwnHome(BlockPos pos) {
+        return pos != null && WORLD.get().atOwnHome(pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /** 被困在自己家里时这一格墙能不能拆（不看这一趟的保护格，由调用方另外挡）。 */
+    public static boolean breakableAtHome(BlockPos pos, BlockState state) {
+        return pos != null && WORLD.get().breakableAtHome(pos.getX(), pos.getY(), pos.getZ(), state);
+    }
+
     /** 归属记录写着这一格是别人放的，给放它的人的编号：卡坑没出去时说挡着的是谁放的。 */
     public static Optional<String> placedByOther(BlockPos pos) {
         return pos == null ? Optional.empty() : WORLD.get().placedByOther(pos.getX(), pos.getY(), pos.getZ());
@@ -134,19 +168,31 @@ public final class NavigationProtection {
     /**
      * 一份不可变的保护要求：受保护格不得破坏或掩埋；禁入格与脚位下界约束身体可站的位置。
      * 只禁修改的格并不自动禁止身体进入，两个集合各管各的。throughOthers 为真时这一趟被封死在小坑里，
-     * 放开了别人放的普通方块（能挖但代价很高）。
+     * 放开了别人放的普通方块（能挖但代价很高）。breakableCells 是被困在自己家里时选中要拆的那一两格墙：
+     * 不管是不是天然地形、是谁放的都许挖，代价同样很高；家里别的格这时都在受保护格里。
      */
-    public record Snapshot(LongSet protectedCells, LongSet noEntryCells, int minimumFeetY, boolean throughOthers) {
+    public record Snapshot(LongSet protectedCells, LongSet noEntryCells, int minimumFeetY, boolean throughOthers,
+            LongSet breakableCells) {
         public static final Snapshot EMPTY =
-                new Snapshot(LongSets.emptySet(), LongSets.emptySet(), Integer.MIN_VALUE, false);
+                new Snapshot(LongSets.emptySet(), LongSets.emptySet(), Integer.MIN_VALUE, false, LongSets.emptySet());
 
         public Snapshot {
             protectedCells = LongSets.unmodifiable(new LongOpenHashSet(protectedCells));
             noEntryCells = LongSets.unmodifiable(new LongOpenHashSet(noEntryCells));
+            breakableCells = LongSets.unmodifiable(new LongOpenHashSet(breakableCells));
+        }
+
+        public Snapshot(LongSet protectedCells, LongSet noEntryCells, int minimumFeetY, boolean throughOthers) {
+            this(protectedCells, noEntryCells, minimumFeetY, throughOthers, LongSets.emptySet());
         }
 
         public boolean protects(int x, int y, int z) {
             return protectedCells.contains(BlockPos.asLong(x, y, z));
+        }
+
+        /** 这一格是不是被困在家里选中要拆的墙。 */
+        public boolean breakable(int x, int y, int z) {
+            return breakableCells.contains(BlockPos.asLong(x, y, z));
         }
 
         public boolean forbidsEntry(int x, int y, int z) {
@@ -155,7 +201,7 @@ public final class NavigationProtection {
 
         /** 同一份保护要求，只把放不放开别人的普通方块换掉：只读复算按"假如放开"算一次时用。 */
         public Snapshot withThroughOthers(boolean open) {
-            return new Snapshot(protectedCells, noEntryCells, minimumFeetY, open);
+            return new Snapshot(protectedCells, noEntryCells, minimumFeetY, open, breakableCells);
         }
 
         /** 是否带身体侧的约束；没有时移动搜索可以跳过整圈站位核对。 */

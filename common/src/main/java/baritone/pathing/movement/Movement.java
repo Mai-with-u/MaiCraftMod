@@ -158,7 +158,7 @@ public abstract class Movement implements IMovement, MovementHelper {
                 // 身体卡墙也不能擅自拆名单外建筑，仍由正常路线重新寻找出口；保护按此刻读到的这格方块问。
                 // 被封死在小坑里、放开了别人放的普通方块时，卡着的正是那种方块也挖。
                 BlockState stuckIn = BlockStateInterface.get(ctx, pos);
-                if (NavigationProtection.escapeOwner(pos, stuckIn).isPresent()
+                if (NavigationProtection.escapeOwner(pos, stuckIn).isPresent() || NavigationProtection.breakable(pos)
                         || !NavigationProtection.protects(pos, stuckIn)
                         && ClearanceWhitelist.allowsAt(stuckIn, pos, ctx.world(), ctx.world()::isLoaded, new HashMap<>())) {
                     MovementHelper.switchToBestToolFor(ctx, stuckIn);
@@ -214,7 +214,8 @@ public abstract class Movement implements IMovement, MovementHelper {
                 // 路线算好后有人换上名单外方块、或这格现在是像玩家放的门时，立即使这一段失效并重算绕路，不继续挥镐。
                 // 被困放开了别人放的普通方块时，挖之前再看一眼：还是那种方块才挖，换成箱子这类就作废重算。
                 BlockState inTheWay = BlockStateInterface.get(ctx, blockPos);
-                if (NavigationProtection.escapeOwner(blockPos, inTheWay).isEmpty()
+                // 被困在自己家里选中要拆的那几格墙也照挖。
+                if (NavigationProtection.escapeOwner(blockPos, inTheWay).isEmpty() && !NavigationProtection.breakable(blockPos)
                         && (NavigationProtection.protects(blockPos, inTheWay)
                         || !ClearanceWhitelist.allowsAt(inTheWay, blockPos, ctx.world(), ctx.world()::isLoaded, new HashMap<>()))) {
                     state.setStatus(MovementStatus.UNREACHABLE);

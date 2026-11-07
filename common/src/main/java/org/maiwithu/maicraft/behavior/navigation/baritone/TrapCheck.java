@@ -58,6 +58,14 @@ final class TrapCheck {
      * @param maxDrop 往下跳最多几格：和走路算路同一条线，摔完还剩一半以上的血的落差（至少三格）
      */
     static boolean trapped(Cells cells, BlockPos feet, int maxDrop) {
+        return pocket(cells, feet, maxDrop) != null;
+    }
+
+    /**
+     * 困住时铺到的那一片站得住的格子（脚位，含脚下这格）；出得去、说不清时为 null。
+     * 被困在自己家里找哪一格墙能拆开出去时，从这一片的边上找。
+     */
+    static LongSet pocket(Cells cells, BlockPos feet, int maxDrop) {
         int fx = feet.getX();
         int fy = feet.getY();
         int fz = feet.getZ();
@@ -70,18 +78,18 @@ final class TrapCheck {
             BlockPos at = queue.removeFirst();
             sawSky |= cells.sky(at.getX(), at.getY() + 1, at.getZ());
             for (BlockPos next : moves(cells, at, maxDrop)) {
-                if (next == null) return false;
+                if (next == null) return null;
                 if (Math.abs(next.getX() - fx) > RADIUS || Math.abs(next.getZ() - fz) > RADIUS
                         || Math.abs(next.getY() - fy) > HEIGHT) {
-                    return false;
+                    return null;
                 }
                 if (seen.add(next.asLong())) {
-                    if (seen.size() > MAX_VISITED) return false;
+                    if (seen.size() > MAX_VISITED) return null;
                     queue.addLast(next);
                 }
             }
         }
-        return seen.size() < SMALL_POCKET || !sawSky;
+        return seen.size() < SMALL_POCKET || !sawSky ? seen : null;
     }
 
     // 从这一格只走能到的相邻格：平走、跳上一格、往下跳 maxDrop 格以内、水里上下游。区块没加载的方向给 null（说不清，按出得去）。

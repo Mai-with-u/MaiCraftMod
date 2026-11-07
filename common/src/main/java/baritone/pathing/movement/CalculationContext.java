@@ -394,6 +394,10 @@ public class CalculationContext {
         if (allowBreak && NavigationProtection.escapeOwner(maicraftPolicy, x, y, z, current).isPresent()) {
             return NavigationProtection.ESCAPE_BREAK_MULTIPLIER;
         }
+        // 被困在自己家里、选中要水平拆开出去的那一两格墙：不管是不是天然地形、是谁放的都许挖，家里别的格都在保护格里。
+        if (allowBreak && maicraftPolicy.breakable(x, y, z)) {
+            return NavigationProtection.ESCAPE_BREAK_MULTIPLIER;
+        }
         // 名单外障碍不作为可挖路线候选，让搜索直接选择绕行；地形许可和例外名单不能越过这道限制。
         // 原木要长在天然树上、树叶要自然长的才算地形：房子的原木地板、屋顶不挖，从门走。
         if (!ClearanceWhitelist.allowsAt(current, new BlockPos(x, y, z), bsi.access,

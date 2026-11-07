@@ -316,6 +316,19 @@ public final class Protection {
         return Optional.of(placedBy.get().playerId());
     }
 
+    /**
+     * 被困在自己家里、附近没有能开的门时，这一格墙能不能水平拆开出去：在家里、不是功能方块、不在记住的区域里。
+     * 别人放的墙也能拆（拆完会补回去，回报写明是谁放的）；这次任务另外保护的格由寻路自己的保护格挡，
+     * 床、门、家具与它们底下的格由寻路那一侧另外挡。
+     */
+    public boolean breakableAtHome(WorldPosition position, boolean functional) {
+        if (functional || homeOf(position).isEmpty()) return false;
+        for (RememberedRegion region : regions.regions()) {
+            if (region.contains(position)) return false;
+        }
+        return true;
+    }
+
     /** 一只生物伤不伤得：有名字、被驯服（角色自己驯服的也算）、拴着绳、围栏里，占上一条就是有主的，不伤。 */
     public boolean creatureProtected(ReadsCreatureSituation.CreatureSituation situation) {
         return situation.bondedToSomeone();
