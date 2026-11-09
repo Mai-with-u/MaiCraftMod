@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.Locale;
+import java.util.function.Function;
 import java.util.Optional;
 
 /**
@@ -29,16 +30,22 @@ import java.util.Optional;
 public final class DetailView {
     private DetailView() {}
 
-    /** 找不到这个编号、也没有叫这个名字的地标时为空。 */
-    public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id) {
+    /**
+     * 找不到这个编号、也没有叫这个名字的地标时为空。
+     *
+     * @param lastModifier 一格最后由谁放下，说成名字；归属没问到给 null，记忆记录里就不带字段
+     */
+    public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id,
+            Function<WorldPosition, String> lastModifier) {
         String normalized = id.trim().toLowerCase(Locale.ROOT);
         if (normalized.matches("[efbs][0-9]+")) {
-            return scene.lookup(normalized).map(entry -> seen(scene, memory, entry));
+            return scene.lookup(normalized).map(entry -> seen(scene, memory, entry, lastModifier));
         }
         return memory.place(id.trim()).map(position -> landmark(scene.self(), id.trim(), position));
     }
 
-    private static JsonObject seen(Scene scene, WorldMemory memory, SeenRegistry.Entry entry) {
+    private static JsonObject seen(Scene scene, WorldMemory memory, SeenRegistry.Entry entry,
+            Function<WorldPosition, String> lastModifier) {
         JsonObject json = new JsonObject();
         json.addProperty("id", entry.id());
         json.addProperty("kind", SceneView.lower(entry.kind()));
@@ -78,7 +85,7 @@ public final class DetailView {
         // 设施：世界记忆里这个位置记过什么（开过的容器记得里面有什么）。
         JsonArray remembered = new JsonArray();
         for (MemoryRecord record : memory.recordsNear(entry.position(), 0.5)) {
-            remembered.add(WorldMemoryView.record(record, scene.self()));
+            remembered.add(WorldMemoryView.record(record, scene.self(), lastModifier));
         }
         if (!remembered.isEmpty()) {
             json.add("remembered", remembered);

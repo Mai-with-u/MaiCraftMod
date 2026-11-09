@@ -506,7 +506,7 @@ class ObserveToolTest {
                 () -> inWorld ? memory : null, table, direct, () -> reminders,
                 () -> inWorld ? new MenuView.Reads(() -> openScreen, noTrades) : null, List::of, reads::add,
                 () -> inWorld ? identity : null, () -> null,
-                new ObserveTool.Pictures(cameras, () -> LooksForPicture.NONE, () -> null))));
+                new ObserveTool.Pictures(cameras, () -> LooksForPicture.NONE, () -> null), () -> null)));
     }
 
     private static JsonObject arguments(String json) {

@@ -536,7 +536,9 @@ class UseTaskTest {
         rig.menus.look = new FakeLook(Map.of("minecraft:apple", 3));
         TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
         assertEquals(TaskResult.Status.DONE, result.status());
-        assertEquals("minecraft:apple ×3", ((UseDetails) result.details()).opened());
+        UseDetails details = (UseDetails) result.details();
+        assertEquals("minecraft:apple ×3", details.opened());
+        assertEquals(null, details.lastModifiedBy(), "归属没问到就不带字段，替身没实现 lastModifiedBy");
         assertTrue(rig.menus.look.closed);
     }
 

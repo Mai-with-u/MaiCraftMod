@@ -47,7 +47,8 @@ final class McpTools {
                         // 预留与身上各有几件：读的是客户端全程那一份，进世界时已换成这个世界存着的。
                         () -> reserved.list().stream().map(entry -> new SelfView.Reserved(entry.item(),
                                 entry.atLeast(), reserved.carriedFor(entry))).toList(), looks,
-                        inWorld(worldScope, WorldScope::identity), inWorld(worldScope, WorldScope::afterDeath), pictures),
+                        inWorld(worldScope, WorldScope::identity), inWorld(worldScope, WorldScope::afterDeath), pictures,
+                        inWorld(worldScope, WorldScope::protection)),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork, looks),

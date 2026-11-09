@@ -60,6 +60,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     /** 落实下来的目标；只对手上的东西用时为 null。 */
     private ResolvedTarget target;
     /** 这一下会改动别人放在角色家里的那一格时，回报里补的归属半句；不是为空串。 */
+    /** 动过的这格最后由谁放下：收场时写进说明，主播看得出动的是谁的东西；归属没问到为空串。 */
     private String othersAtHome = "";
     /** 要走去加载出来的那一片。 */
     private WorldPosition travelTo;
@@ -79,6 +80,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private UseSeams.MenuLook looking;
     private long appliedTimes;
     private String openedMenu;
+    /** 点开的容器最后由谁放下：结果细节里带一句；不是容器、归属没问到为 null。 */
+    private String lastModifiedBy;
     private String riding;
     private List<String> signLines = List.of();
     /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
@@ -133,9 +136,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Next<Phase> found(ResolvedTarget resolved) {
         // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面；要连着点的每一下只等几刻。
         target = resolved.facing(input.face()).quickly(input.keepTrying() > 0);
-        // 家里别人放的一格放开给她用：会改动它时记下是谁放的，收场时写进那句话，主播知情。
+        // 会改动它时记下最后由谁放下，收场时写进那句话，主播知情；归属没问到、自己放的不写。
         UseSeams.OthersThings others = services.others();
-        othersAtHome = others != null && others.changesWorld(input.item(), target) ? others.othersAtHomeNote(target) : "";
+        String modifiedBy = others == null ? null : others.lastModifiedBy(target);
+        othersAtHome = others != null && others.changesWorld(input.item(), target) && modifiedBy != null
+                ? "最后由 " + modifiedBy + " 放下" : "";
         if (target.isEntity()) {
             if (services.world().riding(target.entityId())) {
                 riding = target.typeId();
@@ -472,6 +477,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             List<String> lines = new ArrayList<>();
             contents.get().forEach((itemId, count) -> lines.add(itemId + " ×" + count));
             openedMenu = lines.isEmpty() ? "空的" : String.join("、", lines);
+            lastModifiedBy = services.others() == null ? null : services.others().lastModifiedBy(target);
             rememberContainer(List.copyOf(contents.get().keySet()));
             recordProgress("看清了点开的界面");
         } else {
@@ -572,7 +578,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new UseDetails(appliedTimes, openedMenu, signLines, riding, gameMessages);
+        return new UseDetails(appliedTimes, openedMenu, lastModifiedBy, signLines, riding, gameMessages);
     }
 
     @Override protected List<String> remaining() {

@@ -145,7 +145,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
         };
     }
 
-    // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读。
+    // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读；名字带上最后由谁放下。
     private Optional<ContainerChooser.Candidate> candidateFromWorld(ClientLevel level, BlockPos at, BlockPos from) {
         String blockTypeId = blockTypeIdOf(level.getBlockState(at));
         if (!kinds.isContainer(blockTypeId)) {
@@ -155,8 +155,11 @@ public final class ClientSpotsContainers implements SpotsContainers {
         Optional<MemoryRecord> known = memory.recordAt(MemoryKind.CONTAINER, WorldPosition.here(
                 at.getX(), at.getY(), at.getZ()));
         WorldPosition position = positionOf(level, at);
+        // 先问一句归属问到没有：没问到的记下要问，下回再来时名字就有了。
+        protection.ownershipKnown(position);
+        String placedBy = protection.placedByOther(position).map(protection::nameOf).orElse(null);
         return Optional.of(new ContainerChooser.Candidate(
-                describe(blockTypeId, at),
+                describe(blockTypeId, at) + (placedBy == null ? "" : "（最后由 " + placedBy + " 放下）"),
                 blockTypeId,
                 position,
                 known.filter(MemoryRecord::openedBefore).map(MemoryRecord::contents).orElse(null),
@@ -169,12 +172,14 @@ public final class ClientSpotsContainers implements SpotsContainers {
                 catSitting(level, at)));
     }
 
-    // 记忆里的一只容器读成候选：没加载的只给记忆里的事实，盖子与猫到场再核对。
+    // 记忆里的一只容器读成候选：没加载的只给记忆里的事实，盖子与猫到场再核对；名字带上最后由谁放下。
     private ContainerChooser.Candidate candidateFromMemory(MemoryRecord record, BlockPos from) {
         BlockPos at = new BlockPos(record.position().x(), record.position().y(), record.position().z());
         String blockTypeId = record.blockType() == null ? "minecraft:chest" : record.blockType();
+        protection.ownershipKnown(record.position());
+        String placedBy = protection.placedByOther(record.position()).map(protection::nameOf).orElse(null);
         return new ContainerChooser.Candidate(
-                describe(blockTypeId, at),
+                describe(blockTypeId, at) + (placedBy == null ? "" : "（最后由 " + placedBy + " 放下）"),
                 blockTypeId,
                 record.position(),
                 record.openedBefore() ? record.contents() : null,

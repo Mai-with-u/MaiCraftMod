@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.perception.looking.PictureLook;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
 import org.maiwithu.maicraft.game.picture.CameraPicture;
 import org.maiwithu.maicraft.game.picture.CameraPictures;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.mcp.view.PictureEncoding;
 import org.maiwithu.maicraft.mcp.view.PictureSightings;
@@ -40,6 +41,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -93,6 +95,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<SelfView.AfterDeath> afterDeath;
     /** 拍画面要用的东西。 */
     private final Pictures pictures;
+    /** 归属读端：容器的"最后由谁放下"从这来；不在世界里时给 null。 */
+    private final Supplier<Protection> protection;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -139,16 +143,22 @@ public final class ObserveTool implements McpTool {
                        Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
                        LooksAfterReading looks, Supplier<SelfView.Identity> identity,
                        Supplier<SelfView.AfterDeath> afterDeath) {
-        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, Pictures.NONE);
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, Pictures.NONE,
+                () -> null);
     }
 
-    /** @param pictures 拍画面要用的东西；不拍画面的给 {@link Pictures#NONE} */
+    /**
+     * @param pictures   拍画面要用的东西；不拍画面的给 {@link Pictures#NONE}
+     * @param protection 归属读端：容器记录的"最后由谁放下"从这来；不在世界里时给 null
+     */
     public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
                        ClientThread clientThread, Supplier<List<Reminder>> reminders,
                        Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
                        LooksAfterReading looks, Supplier<SelfView.Identity> identity,
-                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures) {
+                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
+                       Supplier<Protection> protection) {
         this.pictures = Objects.requireNonNull(pictures, "pictures");
+        this.protection = protection;
         this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
@@ -206,6 +216,17 @@ public final class ObserveTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
+    /** 一格最后由谁放下，说成名字：归属没接上、没问到、角色自己放的给 null，记录里就不带字段。 */
+    private Function<WorldPosition, String> lastModifier() {
+        if (protection == null) return null;
+        return at -> {
+            Protection guard = protection.get();
+            if (guard == null) return null;
+            guard.ownershipKnown(at);
+            return guard.placedByOther(at).map(guard::nameOf).orElse(null);
+        };
+    }
+
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
     private JsonObject view(String what, String id, boolean grid, TickContext context) {
         Scene currentScene = scene.get();
@@ -215,8 +236,8 @@ public final class ObserveTool implements McpTool {
         }
         JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
-            case "detail" -> DetailView.of(currentScene, currentMemory, id).orElse(null);
-            case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self());
+            case "detail" -> DetailView.of(currentScene, currentMemory, id, lastModifier()).orElse(null);
+            case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), lastModifier());
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid);
         };

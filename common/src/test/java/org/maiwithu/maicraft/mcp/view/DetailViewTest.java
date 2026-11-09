@@ -52,7 +52,7 @@ class DetailViewTest {
         scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:zombie", null, null,
                 WorldPosition.here(0, 65, -12), true, true, true, new EntitySight.Health(14, 20), Map.of())));
 
-        JsonObject json = DetailView.of(scene, memory, "e1").orElseThrow();
+        JsonObject json = DetailView.of(scene, memory, "e1", pos -> null).orElseThrow();
         // 顶部五项是登记里的"最后一次看见"，此刻还在场景里就再附上完整样子。
         assertEquals("e1", json.get("id").getAsString());
         assertEquals("entity", json.get("kind").getAsString());
@@ -77,7 +77,7 @@ class DetailViewTest {
         memory.containerSeen(chestAt, "minecraft:chest", NOW);
 
         String id = scene.facilities().getFirst().id();
-        JsonObject json = DetailView.of(scene, memory, id).orElseThrow();
+        JsonObject json = DetailView.of(scene, memory, id, pos -> null).orElseThrow();
         assertEquals("facility", json.get("kind").getAsString());
         JsonObject now = json.getAsJsonObject("now");
         assertEquals("minecraft:chest", now.get("block").getAsString());
@@ -93,7 +93,7 @@ class DetailViewTest {
                 WorldPosition.here(0, 64, -3), "minecraft:oak_sign", road)));
 
         String id = scene.signs().getFirst().id();
-        JsonObject json = DetailView.of(scene, memory, id).orElseThrow();
+        JsonObject json = DetailView.of(scene, memory, id, pos -> null).orElseThrow();
         // 告示牌走设施号段，登记种类就是设施。
         assertEquals("facility", json.get("kind").getAsString());
         JsonObject now = json.getAsJsonObject("now");
@@ -117,7 +117,7 @@ class DetailViewTest {
 
         String id = scene.things().getFirst().id();
         assertEquals(scene.entities().getFirst().id(), id, "同一样东西两路登记共用一个编号");
-        JsonObject now = DetailView.of(scene, memory, id).orElseThrow().getAsJsonObject("now");
+        JsonObject now = DetailView.of(scene, memory, id, pos -> null).orElseThrow().getAsJsonObject("now");
         assertEquals("minecraft:camel", now.get("type").getAsString(), "实体的样子是底");
         assertEquals("train", now.get("category").getAsString(), "模组的东西那几项并进同一条");
         assertEquals("环线", now.get("line").getAsString());
@@ -129,7 +129,7 @@ class DetailViewTest {
         scene.updateEntities(100, List.of(new EntitySight.Observation(5, "minecraft:creeper", null, null,
                 WorldPosition.here(0, 64, -3), true, true, false, null, Map.of())));
         scene.expire(400);
-        assertTrue(DetailView.of(scene, memory, "e1").isEmpty(), "失效的编号查不到，不冒充还看得见");
+        assertTrue(DetailView.of(scene, memory, "e1", pos -> null).isEmpty(), "失效的编号查不到，不冒充还看得见");
     }
 
     private static List<String> toList(JsonArray array) {

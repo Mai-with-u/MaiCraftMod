@@ -105,10 +105,12 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         return guard.describe(guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks));
     }
 
+    /** 这一格最后由谁放下，说成名字：动别人放的东西时回报里写明。归属没问到、自己放的给 null。 */
     @Override
-    public String othersAtHomeNote(ResolvedTarget target) {
+    public String lastModifiedBy(ResolvedTarget target) {
         Protection guard = protection.get();
-        return guard == null || target.isEntity() ? "" : guard.othersAtHomeNote(cellOf(target));
+        if (guard == null || target.isEntity()) return null;
+        return guard.placedByOther(cellOf(target)).map(guard::nameOf).orElse(null);
     }
 
     // 目标格带上这一刻所在的维度：认家、问归属都按维度比，下界里和主世界家坐标重叠的格子不当成家。

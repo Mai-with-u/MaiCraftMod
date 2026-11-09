@@ -32,7 +32,7 @@ class LandmarkDetailViewTest {
         // 角色站在原点，脸朝北（视角角 180）。
         scene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
                 20, 20, 300, 300, null, List.of(), List.of(), true, false));
-        JsonObject json = DetailView.of(scene, memory, "家").orElseThrow();
+        JsonObject json = DetailView.of(scene, memory, "家", pos -> null).orElseThrow();
         assertEquals("家", json.get("landmark").getAsString());
         // 目标按方块中心量：(2.5, 5.5) 离 (0.5, 0.5) 水平约 5.39 格：报后方、南、距离取整 5。
         assertEquals("后方", json.get("direction").getAsString());

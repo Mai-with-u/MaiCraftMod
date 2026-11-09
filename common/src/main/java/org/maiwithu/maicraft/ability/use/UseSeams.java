@@ -226,9 +226,12 @@ final class UseSeams {
             return "玩家放的或在玩家的地盘里";
         }
 
-        /** 目标是别人放在角色家里的一格：回报里补的半句"是 玩家甲 放的，在你家（你睡的床旁）"；不是给空串。 */
-        default String othersAtHomeNote(ResolvedTarget target) {
-            return "";
+        /**
+         * 这一格最后由谁放下，说成名字（在线写玩家名，不在线写"一位不在线的玩家"）：
+         * 打开容器看内容时结果里带一句，宿主与主播看得出动的是谁的东西。归属没问到、角色自己放的给 null。
+         */
+        default String lastModifiedBy(ResolvedTarget target) {
+            return null;
         }
     }
 
