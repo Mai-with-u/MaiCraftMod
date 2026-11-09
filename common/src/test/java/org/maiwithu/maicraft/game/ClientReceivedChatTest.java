@@ -7,11 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
@@ -35,9 +34,9 @@ class ClientReceivedChatTest {
     private static final UUID ALEX = UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7");
     private static final String POSITION = "[name:\"winefox_momo\", x:12, y:64, z:-3, dim:minecraft:overworld]";
     /** 玩家列表里谁都不在。 */
-    private static final Predicate<String> NOBODY = name -> false;
+    private static final Function<String, UUID> NOBODY = name -> null;
     /** 玩家列表里有角色 Steve 和玩家 Alex。 */
-    private static final Predicate<String> ONLINE = Set.of("Steve", "Alex")::contains;
+    private static final Function<String, UUID> ONLINE = Map.of("Steve", SELF, "Alex", ALEX)::get;
     /** 按 UUID 查玩家列表：谁都查不到。 */
     private static final Function<UUID, String> NOT_LISTED = id -> null;
     /** 按 UUID 查玩家列表：只有玩家 Alex。 */
@@ -128,7 +127,7 @@ class ClientReceivedChatTest {
 
         assertEquals(ReceivedChat.Kind.PLAYER, chat.kind());
         assertEquals("Alex", chat.sender());
-        assertNull(chat.senderId(), "没有签名就没有发言人凭据");
+        assertEquals(ALEX, chat.senderId(), "消息不带 UUID，取玩家列表里 Alex 那一项的");
         assertEquals("不是我的", chat.text());
         assertNull(chat.translationKey(), "聊天格式的翻译键不当消息的翻译键");
         assertNull(chat.shownAs());
@@ -142,7 +141,7 @@ class ClientReceivedChatTest {
                 SELF, "Steve", ONLINE).isEmpty());
         Component hovered = EntityMentionsTest.named("史蒂夫", EntityType.PLAYER, SELF);
         assertTrue(ClientReceivedChat.system(publicLine(hovered, "你好呀"), false, SELF, "Steve",
-                name -> true).isEmpty(), "显示名改过、悬停里是角色自己，也是回显");
+                name -> SELF).isEmpty(), "显示名改过、悬停里是角色自己，也是回显");
     }
 
     @Test
@@ -154,6 +153,7 @@ class ClientReceivedChatTest {
 
         assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
         assertNull(chat.sender());
+        assertNull(chat.senderId());
         assertEquals("chat.type.text", chat.translationKey());
     }
 

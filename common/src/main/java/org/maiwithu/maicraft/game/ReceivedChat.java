@@ -16,7 +16,7 @@ import java.util.UUID;
  *
  * @param kind           玩家说的话还是系统消息
  * @param sender         发言人名字；系统消息没有，名字还没同步到时也可能没有
- * @param senderId       发言人 UUID；系统消息和没有签名的消息没有
+ * @param senderId       发言人 UUID；系统消息没有；没有签名的消息只在发言人按名字对上在线玩家列表时有（取列表里那一项的）
  * @param senderOnline   玩家说的话：发言人是不是此刻在线玩家列表里的那个玩家，收到时核对过；系统消息为 false
  * @param text           原话；超过 {@value #MAX_TEXT} 字时只留前面一段
  * @param isPrivate      别人私聊角色（/msg）时为 true

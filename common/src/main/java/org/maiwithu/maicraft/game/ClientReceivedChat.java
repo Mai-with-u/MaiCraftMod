@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
@@ -90,14 +89,14 @@ public final class ClientReceivedChat {
 
     /**
      * 服务器的系统消息；动作栏提示不算聊天。死亡播报这类带着点到的实体与翻译键。
-     * 整句是公屏聊天格式、名字在当前玩家列表里的，是没有签名的服务器转来的玩家聊天，读成那个玩家说的话。
+     * 整句是公屏聊天格式、名字在当前玩家列表里的，是没有签名的服务器转来的玩家聊天，读成那个玩家说的话，
+     * 发言人 UUID 取玩家列表里这个名字的那一项。
      */
     public static Optional<ReceivedChat> system(Minecraft minecraft, Component message, boolean actionBar) {
         UUID self = minecraft.player == null ? null : minecraft.player.getUUID();
         String selfName = minecraft.player == null ? null : minecraft.player.getGameProfile().getName();
         ClientPacketListener connection = minecraft.getConnection();
-        return system(message, actionBar, self, selfName,
-                name -> connection != null && connection.getPlayerInfo(name) != null);
+        return system(message, actionBar, self, selfName, name -> listedId(connection, name));
     }
 
     /**
@@ -105,19 +104,20 @@ public final class ClientReceivedChat {
      *
      * @param self     角色自己的 UUID；不在世界里时为 null
      * @param selfName 角色的账号名；不在世界里时为 null
-     * @param online   这个名字是不是当前玩家列表里的玩家
+     * @param listedId 当前玩家列表里叫这个名字的玩家的 UUID；不在列表里时为 null
      */
     static Optional<ReceivedChat> system(Component message, boolean actionBar, UUID self, String selfName,
-                                         Predicate<String> online) {
+                                         Function<String, UUID> listedId) {
         Optional<PublicLine> said = actionBar ? Optional.empty() : publicLine(message);
-        if (said.isPresent() && online.test(said.get().name())) {
+        UUID listed = said.map(line -> listedId.apply(line.name())).orElse(null);
+        if (listed != null) {
             PublicLine line = said.get();
             // 名字是角色自己（点着的实体是角色，或和账号名一样）：自己说话的回显，和有签名时按 UUID 滤掉一样，不算收到的聊天。
             if (ReceivedChat.isUnderOwnName(null, line.name(), line.nameId(), self, selfName)) return Optional.empty();
-            // 别的玩家说的话：没有签名就没有发言人 UUID，名字照聊天格式写；名字是按玩家列表对上的，算在线玩家说的。
-            // 点到的实体与翻译键只从原话里读。
+            // 别的玩家说的话：消息本身不带发言人 UUID，名字照聊天格式写；名字是按玩家列表对上的，算在线玩家说的，
+            // 发言人 UUID 就用玩家列表里这个名字那一项的，宿主能按 UUID 认出是哪位玩家。点到的实体与翻译键只从原话里读。
             Component words = line.words();
-            return ReceivedChat.fromPlayer(words.getString(), null, line.name(), true, false, self)
+            return ReceivedChat.fromPlayer(words.getString(), listed, line.name(), true, false, self)
                     .map(chat -> chat.with(EntityMentions.in(words), translationKey(words)));
         }
         return ReceivedChat.fromServer(message.getString(), actionBar)
@@ -164,6 +164,13 @@ public final class ClientReceivedChat {
             return Optional.empty();
         }
         return arguments[at] instanceof Component said ? Optional.of(said) : Optional.empty();
+    }
+
+    // 按名字从当前连接的玩家列表里查 UUID；不在列表里（不是在线玩家，或没连着服务器）时为 null。
+    private static UUID listedId(ClientPacketListener connection, String name) {
+        if (connection == null) return null;
+        PlayerInfo info = connection.getPlayerInfo(name);
+        return info == null ? null : info.getProfile().getId();
     }
 
     // 按 UUID 从当前连接的玩家列表里查名字；查不到（还没同步、已经下线）时为 null，不编一个。
