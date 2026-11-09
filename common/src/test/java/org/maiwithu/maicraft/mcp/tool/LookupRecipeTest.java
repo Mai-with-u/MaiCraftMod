@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -31,6 +32,7 @@ import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
 /**
  * lookup 查配方与资料：配方页按类别分组、写工作站与原始定义；用途页分"当原料"和"当工作站"两部分，每条一行；
+ * id 加 query 按词过滤，只留产出或原料沾词的；一段命中太多只给总数与缩窄建议；
  * 按名字找物品 ID；参数组合写错一次报全；角色不在世界里时配方回答 not_in_world，资料退到随包常识并说明。
  */
 class LookupRecipeTest {
@@ -79,12 +81,70 @@ class LookupRecipeTest {
     }
 
     @Test
+    void 用途页按词过滤_只留产出或原料沾词的配方() {
+        JsonObject data = ok(lookup(true, new BuffetViewer()).call(args("recipe", MIXER, "烤肉", true)));
+
+        JsonObject station = data.getAsJsonObject("as_workstation");
+        assertEquals(90, station.get("recipe_count").getAsInt(), "120 道里只留沾词的 90 道");
+        JsonArray rows = station.getAsJsonArray("categories").get(0).getAsJsonObject().getAsJsonArray("recipes");
+        assertEquals(90, rows.size());
+        assertTrue(rows.get(0).getAsString().startsWith("create:buffet/roast_1："));
+        assertEquals(0, data.getAsJsonObject("as_ingredient").get("recipe_count").getAsInt());
+    }
+
+    @Test
+    void 过滤后全部落空时给一句没沾边的指路() {
+        JsonObject reply = lookup(true, new BuffetViewer()).call(args("recipe", MIXER, "回锅肉", true));
+
+        JsonObject data = ok(reply);
+        assertEquals(0, data.getAsJsonObject("as_workstation").get("recipe_count").getAsInt());
+        assertEquals(0, data.getAsJsonObject("as_workstation").getAsJsonArray("categories").size());
+        assertTrue(notes(reply).stream().anyMatch(note -> note.contains("回锅肉")), reply::toString);
+    }
+
+    @Test
+    void 配方页也按词过滤_落空时指路() {
+        JsonObject hit = lookup(true).call(args("recipe", ALLOY, "铁粒", null));
+        assertEquals(1, ok(hit).get("recipe_count").getAsInt(), "原料里有铁粒，留得下");
+
+        JsonObject miss = lookup(true).call(args("recipe", ALLOY, "不沾边的词", null));
+        assertEquals(0, ok(miss).get("recipe_count").getAsInt());
+        assertTrue(notes(miss).stream().anyMatch(note -> note.contains("不沾边的词")), miss::toString);
+    }
+
+    @Test
+    void 命中太多的一段只给总数与缩窄建议_另一段照常() {
+        JsonObject data = ok(lookup(true, new BuffetViewer()).call(args("recipe", MIXER, null, true)));
+
+        JsonObject station = data.getAsJsonObject("as_workstation");
+        assertEquals(120, station.get("recipe_count").getAsInt());
+        assertFalse(station.has("categories"), "超过上限的段不逐条倾倒");
+        assertTrue(station.get("note").getAsString().contains("120"), station::toString);
+
+        // 当原料那段只有 0 条，照常给 categories，不被大段连坐。
+        assertTrue(data.getAsJsonObject("as_ingredient").has("categories"));
+    }
+
+    @Test
+    void 配方页命中太多时只给总数与缩窄建议() {
+        JsonObject data = ok(lookup(true, new BuffetViewer()).call(args("recipe", ALLOY, null, null)));
+
+        assertEquals(120, data.get("recipe_count").getAsInt());
+        assertFalse(data.has("categories"), "超过上限的配方页不逐条倾倒");
+        assertTrue(data.get("note").getAsString().contains("120"), data::toString);
+    }
+
+    @Test
     void 参数写错一次报全_没有的物品回答unknown_id() {
         JsonObject missing = lookup(true).call(args("recipe", null, null, null));
         assertEquals(ErrorCode.INVALID_PARAMETER.wireName(), missing.getAsJsonObject("error").get("code").getAsString());
 
         JsonObject wrongTopic = lookup(true).call(args("knowledge", null, null, true));
         assertEquals(ErrorCode.INVALID_PARAMETER.wireName(), wrongTopic.getAsJsonObject("error").get("code").getAsString());
+
+        // id 和 query 一起给只有查配方放行，别的 topic 照旧拒。
+        JsonObject both = lookup(true).call(args("knowledge", "food", "钻石", null));
+        assertEquals(ErrorCode.INVALID_PARAMETER.wireName(), both.getAsJsonObject("error").get("code").getAsString());
 
         JsonObject unknown = lookup(true).call(args("recipe", "create:no_such_thing", null, null));
         assertEquals(ErrorCode.UNKNOWN_ID.wireName(), unknown.getAsJsonObject("error").get("code").getAsString());
@@ -144,6 +204,10 @@ class LookupRecipeTest {
         return reply.getAsJsonObject("data");
     }
 
+    private static List<String> notes(JsonObject reply) {
+        return reply.getAsJsonArray("notes").asList().stream().map(element -> element.getAsString()).toList();
+    }
+
     private static JsonObject args(String topic, String id, String query, Boolean uses) {
         JsonObject args = new JsonObject();
         args.addProperty("topic", topic);
@@ -154,6 +218,10 @@ class LookupRecipeTest {
     }
 
     private static LookupTool lookup(boolean inWorld) {
+        return lookup(inWorld, new MixingViewer());
+    }
+
+    private static LookupTool lookup(boolean inWorld, RecipeViewer viewer) {
         ClientThread thread = new ClientThread() {
             @Override public <T> T call(Function<TickContext, T> work) {
                 if (!inWorld) throw new NotInWorld();
@@ -166,7 +234,7 @@ class LookupRecipeTest {
             @Override public String status() { return "思索：可用，1 个场景"; }
         };
         return new LookupTool(new AbilityRegistry(new TaskFactories(), modId -> false), new KnowledgeLibrary(List.of(ponder)),
-                new RecipeLookup(List.of(new MixingViewer()), new MixingViewer()), new Items(), new Ids(), thread, List::of,
+                new RecipeLookup(List.of(viewer), viewer), new Items(), new Ids(), thread, List::of,
                 WebKnowledgeService.off());
     }
 
@@ -216,6 +284,35 @@ class LookupRecipeTest {
                     List.of(ShownIngredient.of(ShownStack.item("minecraft:andesite", "安山岩", 1)), nugget), List.of(),
                     List.of(ShownStack.item(ALLOY, "安山合金", 1),
                             new ShownStack(ShownStack.Kind.ITEM, "minecraft:gravel", "碎石", 1, 0.5)), definition);
+        }
+    }
+
+    /** 替身配方查看器：动力搅拌器当工作站时给一大桌配方（90 道烤肉、30 道甜汤），做过滤与段级降级的料。 */
+    private static final class BuffetViewer implements RecipeViewer {
+        @Override public String name() { return "emi"; }
+        @Override public boolean importsOtherViewers() { return true; }
+        @Override public Readiness readiness() { return Readiness.yes(); }
+        @Override public List<ShownRecipe> making(String itemId) { return itemId.equals(ALLOY) ? buffet() : List.of(); }
+        @Override public List<ShownRecipe> using(String itemId) { return List.of(); }
+        @Override public List<ShownRecipe> atWorkstation(String itemId) { return itemId.equals(MIXER) ? buffet() : List.of(); }
+
+        private static List<ShownRecipe> buffet() {
+            List<ShownRecipe> recipes = new ArrayList<>();
+            for (int i = 1; i <= 90; i++) {
+                recipes.add(dish("create:buffet/roast_" + i, "烤肉 " + i, "minecraft:cooked_porkchop", "烤肉"));
+            }
+            for (int i = 1; i <= 30; i++) {
+                recipes.add(dish("create:buffet/soup_" + i, "甜汤 " + i, "minecraft:sweet_berries", "甜汤"));
+            }
+            return List.copyOf(recipes);
+        }
+
+        // 一行配方：搅拌器当工作站、一样原料（名字带菜系词，过滤匹配用）、一样产出。
+        private static ShownRecipe dish(String id, String outputName, String outputId, String inputName) {
+            return new ShownRecipe(id, "create:mixing", "搅拌",
+                    List.of(ShownStack.item(MIXER, "动力搅拌器", 1)),
+                    List.of(ShownIngredient.of(ShownStack.item("minecraft:apple", inputName, 1))), List.of(),
+                    List.of(ShownStack.item(outputId, outputName, 1)), null);
         }
     }
 }

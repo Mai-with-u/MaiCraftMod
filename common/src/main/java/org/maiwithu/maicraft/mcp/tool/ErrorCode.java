@@ -24,6 +24,8 @@ public enum ErrorCode {
      * message 写明是哪一种、接着怎么办。不说明那样东西不存在。
      */
     UNAVAILABLE,
+    /** 算出来的回答比单次上限还大，这次整体不返回数据：把查询收窄（更具体的关键词或对象、分次问）再试。 */
+    TOO_LARGE,
     /** 程序出错，不是请求写错了，也不是游戏里发生了什么。 */
     INTERNAL_ERROR;
 

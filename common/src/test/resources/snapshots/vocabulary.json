@@ -194,6 +194,7 @@
     "not_in_world",
     "busy",
     "unavailable",
+    "too_large",
     "internal_error"
   ],
   "reply_shapes": {

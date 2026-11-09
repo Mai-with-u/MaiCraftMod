@@ -45,7 +45,8 @@ import java.util.function.Supplier;
  * 物品资料页与模组的资料要读游戏现场，在客户端线程上读；角色不在世界里时只查得到随包常识，并如实说明。
  *
  * <p>topic=recipe 查配方：id 是物品 ID，默认给配方页（怎么做出它），uses=true 给用途页（能拿它做什么、
- * 它当工作站能做什么）；query 按名字找物品 ID。配方要读游戏现场，角色不在世界里时回答 not_in_world。
+ * 它当工作站能做什么）；query 单独给时按名字找物品 ID，与 id 一起给时按词过滤那一页（产出或原料沾词的才留），
+ * 命中太多的一段只给总数与缩窄建议。配方要读游戏现场，角色不在世界里时回答 not_in_world。
  *
  * <p>topic=wiki 联网查 Minecraft Wiki 与 MC百科（{@link WikiTopic}）：在 MCP 请求线程上联网，不交给客户端线程；
  * 启动开关关着时照实说关着。
@@ -150,7 +151,10 @@ public final class LookupTool implements McpTool {
         String url = check.text(arguments, "url", "url", false);
         Boolean uses = check.bool(arguments, "uses", "uses");
         Integer offset = check.integer(arguments, "offset", "offset", false);
-        if (id != null && query != null) check.error("query", "id 和 query 只能给一个", "精确查用 id，搜索用 query");
+        // 查配方是唯一的例外：id 精确点名、query 按词收窄，一起给就是"它里面沾这些词的部分"。
+        if (id != null && query != null && !"recipe".equals(topic)) {
+            check.error("query", "id 和 query 只能给一个", "精确查用 id，搜索用 query");
+        }
         if (url != null && !"wiki".equals(topic)) check.error("url", "url 只在 topic=wiki 时用", null);
         if (offset != null && !"wiki".equals(topic)) check.error("offset", "offset 只在 topic=wiki 读一篇时用", null);
         if ("wiki".equals(topic)) wiki.check(check, id, query, url, offset);
@@ -270,9 +274,10 @@ public final class LookupTool implements McpTool {
     }
 
     // 查配方在客户端线程上做：配方查看器与游戏配方表都在客户端线程上读。角色不在世界里时没有配方表可读。
+    // 给了 id 就查它的页（query 有就当过滤词），只给 query 才是按名字找物品。
     private JsonObject recipeNow(String id, String query, boolean uses, RequestCheck check) {
         try {
-            return clientThread.call(context -> query != null ? recipeSearch(query, check) : recipe(id, uses, check));
+            return clientThread.call(context -> id != null ? recipe(id, uses, query, check) : recipeSearch(query, check));
         } catch (ClientThread.NotInWorld absent) {
             return ToolReply.error(ErrorCode.NOT_IN_WORLD, "角色不在世界里，读不到配方；进了世界再查");
         } catch (ClientThread.Busy busy) {
@@ -280,8 +285,8 @@ public final class LookupTool implements McpTool {
         }
     }
 
-    // 配方页或用途页：物品 ID 要在注册表里；查到的配方一条不省，跳过了哪个配方查看器、为什么写进 notes。
-    private JsonObject recipe(String rawId, boolean uses, RequestCheck check) {
+    // 配方页或用途页：物品 ID 要在注册表里；给了过滤词就只留沾词的配方，跳过了哪个配方查看器、为什么写进 notes。
+    private JsonObject recipe(String rawId, boolean uses, String query, RequestCheck check) {
         String itemId = rawId.strip().toLowerCase(Locale.ROOT);
         Optional<ReadsItemDescriptions.ItemDescription> item = items.describe(itemId);
         if (item.isEmpty()) {
@@ -289,20 +294,27 @@ public final class LookupTool implements McpTool {
             return ToolReply.error(ErrorCode.UNKNOWN_ID, registered.missing(IdKind.ITEM, rawId.strip())
                     + "；只知道名字时用 lookup(topic=recipe, query=名字) 找它的 ID");
         }
+        List<String> terms = terms(query);
         List<String> notes = new ArrayList<>(check.notes());
         JsonObject data;
         if (uses) {
             RecipeLookup.Answer asIngredient = recipes.using(itemId);
             RecipeLookup.Answer asWorkstation = recipes.atWorkstation(itemId);
-            data = RecipePages.uses(itemId, item.get().name(), asIngredient, asWorkstation);
+            data = RecipePages.uses(itemId, item.get().name(), asIngredient, asWorkstation, terms);
             addAll(notes, asIngredient.notes());
             addAll(notes, asWorkstation.notes());
+            // 过滤后两段全空：直说不沾边，换个词或者放弃。
+            if (!terms.isEmpty() && !RecipePages.hasMatch(asIngredient, terms) && !RecipePages.hasMatch(asWorkstation, terms)) {
+                notes.add("它的用途里没有沾「" + query.strip() + "」的配方；换个更具体的词，或不带 query 重查");
+            }
         } else {
             RecipeLookup.Answer making = recipes.making(itemId);
-            data = RecipePages.making(itemId, item.get().name(), making);
+            data = RecipePages.making(itemId, item.get().name(), making, terms);
             addAll(notes, making.notes());
             if (making.answered() && making.recipes().isEmpty()) {
                 notes.add("在 " + making.readFrom() + " 里没有做出它的配方；这不代表拿不到，可能要挖、打、交易或在世界里找");
+            } else if (!terms.isEmpty() && !RecipePages.hasMatch(making, terms)) {
+                notes.add("做出它的配方里没有沾「" + query.strip() + "」的；换个更具体的词，或不带 query 重查");
             }
         }
         // 查了这一样的配方：角色闲着时翻开查看器的那一页（没装查看器就对着背包盘算一会儿）。
@@ -310,10 +322,16 @@ public final class LookupTool implements McpTool {
         return ToolReply.ok(data, notes, null);
     }
 
+    // 按空白与标点切词、全部小写：找物品与过滤配方共用这一套切法；过滤时每个词都要命中，越给越窄。
+    private static List<String> terms(String query) {
+        if (query == null) return List.of();
+        return Arrays.stream(query.toLowerCase(Locale.ROOT).split("[\\s,，、;；。?？!！]+"))
+                .filter(term -> !term.isEmpty()).toList();
+    }
+
     // 按名字找物品 ID：名字或 ID 对得上全部关键词的都列出来；next 建议读第一个的配方页。
     private JsonObject recipeSearch(String query, RequestCheck check) {
-        List<String> terms = Arrays.stream(query.toLowerCase(Locale.ROOT).split("[\\s,，、;；。?？!！]+"))
-                .filter(term -> !term.isEmpty()).toList();
+        List<String> terms = terms(query);
         List<String> found = terms.isEmpty() ? List.of() : items.search(terms);
         JsonArray list = new JsonArray();
         for (String itemId : found) {

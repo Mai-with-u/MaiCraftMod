@@ -40,8 +40,9 @@ public final class ToolCatalog {
         return withSkills ? INSTRUCTIONS + SKILLS_INSTRUCTIONS : INSTRUCTIONS;
     }
 
-    // 只用于把"尚未接入"的应答序列化成一条文本；与传输层同样关闭 HTML 转义，避免名称膨胀。
-    private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
+    // 只用于把"尚未接入"的应答与调用结果序列化成一条文本；与传输层同样关闭 HTML 转义，避免名称膨胀。
+    // 分发器的回包上限也用它量长度，量出来的就是宿主实际收到的。
+    static final Gson GSON = new GsonBuilder().disableHtmlEscaping().create();
 
     private ToolCatalog() {}
 
@@ -79,9 +80,11 @@ public final class ToolCatalog {
                 properties(
                         field("topic", "string", "查什么：abilities（默认）、knowledge、wiki、recipe", "abilities"),
                         field("id", "string", "精确条目：能力 ID、资料地址，或物品 ID（topic=knowledge 读它的物品资料页，topic=recipe 查它的配方）", null),
-                        field("query", "string", "关键词搜索；与 id 二选一。topic=recipe 时按名字找物品 ID；topic=wiki 时按条目标题搜（有汉字搜中文站，否则搜英文站）", null),
+                        field("query", "string", "关键词搜索；与 id 二选一，topic=recipe 例外：与 id 同给时按词过滤那一页，只留产出或原料沾词的。"
+                                + "topic=recipe 只给 query 时按名字找物品 ID；topic=wiki 时按条目标题搜（有汉字搜中文站，否则搜英文站）", null),
                         field("url", "string", "只在 topic=wiki 时用：读一篇条目（Minecraft Wiki 的 /w/条目名，或 MC百科的 /item/、/class/、/post/ 页面），照抄搜索结果里的 url", null),
-                        field("uses", "boolean", "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它", null),
+                        field("uses", "boolean", "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它。"
+                                + "命中太多的一段只回总数，配 query 挑更具体的词", null),
                         field("offset", "integer", "只在 topic=wiki 读 url 时用：从第几段读起，照抄上一页的 next_offset 或 sections 里那一节的 offset；不给从 0 起", null)),
                 new String[0]));
         tools.add(tool(EXECUTE,

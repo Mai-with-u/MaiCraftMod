@@ -441,4 +441,27 @@ class ToolsTest {
         assertEquals("not_in_world", errorCode(call("execute", "{\"goal\": {\"ability\": \"use\"}}")));
         assertTrue(data(call("lookup", "{}")).has("abilities"));
     }
+
+    @Test
+    void oversizedRepliesComeBackAsTooLargeInsteadOfDumping() {
+        // 成功回包序列化后超过单次上限：整体退回 too_large 并指路收窄，不让一笔查询把上下文撑爆；小回包照常。
+        ToolDispatcher dispatcher = new ToolDispatcher(List.of(new SizedTool()));
+
+        JsonObject fat = dispatcher.call("sized", JsonParser.parseString("{\"chars\": 60000}").getAsJsonObject());
+        assertFalse(fat.get("ok").getAsBoolean());
+        assertEquals("too_large", errorCode(fat));
+        assertTrue(fat.getAsJsonObject("error").get("message").getAsString().contains("收窄"), fat::toString);
+
+        JsonObject slim = dispatcher.call("sized", JsonParser.parseString("{\"chars\": 10}").getAsJsonObject());
+        assertTrue(slim.get("ok").getAsBoolean(), "限内的回包原样通过");
+    }
+
+    /** 回包大小随参数变的假工具：量保险丝用。 */
+    private static final class SizedTool implements McpTool {
+        @Override public String name() { return "sized"; }
+
+        @Override public JsonObject call(JsonObject arguments) {
+            return ToolReply.ok(new JsonObject(), List.of("嗯".repeat(arguments.get("chars").getAsInt())), null);
+        }
+    }
 }

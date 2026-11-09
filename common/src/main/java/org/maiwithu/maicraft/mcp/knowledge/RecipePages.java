@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp.knowledge;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import com.google.gson.JsonArray;
@@ -19,15 +20,24 @@ import org.maiwithu.maicraft.behavior.recipe.ShownStack;
  *
  * <p>配方页一条不省，每条带原料、催化剂、产出与原始定义；用途页可能上百条，每条压成一行（配方 ID、产出、原料），
  * 不带原始定义，要看某一条的细节查它产出物的配方页。两种页都按配方类别分组，写明这一类在哪做。
+ * 给了过滤词就只留产出或原料沾词的配方；一段超过一次看得下的条数时只给总数与缩窄建议，不逐条倾倒。
  */
 public final class RecipePages {
     private RecipePages() {}
 
-    /** 配方页：能做出这件物品的全部配方。 */
-    public static JsonObject making(String itemId, String name, RecipeLookup.Answer answer) {
+    /** 一段逐条列出的上限：超过时只给总数与缩窄建议；工作站配方成千条，全量倒出来会把上下文撑爆。 */
+    static final int SECTION_LIMIT = 100;
+
+    /** 配方页：能做出这件物品的全部配方；给了过滤词就只留产出或原料沾词的。 */
+    public static JsonObject making(String itemId, String name, RecipeLookup.Answer answer, List<String> terms) {
         JsonObject page = header(itemId, name, answer);
-        page.addProperty("recipe_count", answer.recipes().size());
-        page.add("categories", categories(answer.recipes(), true));
+        List<ShownRecipe> recipes = filtered(answer, terms);
+        page.addProperty("recipe_count", recipes.size());
+        if (recipes.size() > SECTION_LIMIT) {
+            page.addProperty("note", tooMany(recipes.size(), terms, ""));
+            return page;
+        }
+        page.add("categories", categories(recipes, true));
         return page;
     }
 
@@ -36,11 +46,13 @@ public final class RecipePages {
      *
      * @param asIngredient 拿它当原料或催化剂的配方
      * @param asWorkstation 它当工作站的那几类配方
+     * @param terms 过滤词（已切好、小写）：每个词都要沾到才算命中；空列表不过滤
      */
-    public static JsonObject uses(String itemId, String name, RecipeLookup.Answer asIngredient, RecipeLookup.Answer asWorkstation) {
+    public static JsonObject uses(String itemId, String name, RecipeLookup.Answer asIngredient,
+            RecipeLookup.Answer asWorkstation, List<String> terms) {
         JsonObject page = header(itemId, name, asIngredient);
-        page.add("as_ingredient", section(asIngredient));
-        page.add("as_workstation", section(asWorkstation));
+        page.add("as_ingredient", section(asIngredient, terms));
+        page.add("as_workstation", section(asWorkstation, terms));
         return page;
     }
 
@@ -52,12 +64,53 @@ public final class RecipePages {
         return page;
     }
 
-    private static JsonObject section(RecipeLookup.Answer answer) {
+    private static JsonObject section(RecipeLookup.Answer answer, List<String> terms) {
+        List<ShownRecipe> recipes = filtered(answer, terms);
         JsonObject section = new JsonObject();
         section.addProperty("read_from", answer.readFrom());
-        section.addProperty("recipe_count", answer.recipes().size());
-        section.add("categories", categories(answer.recipes(), false));
+        section.addProperty("recipe_count", recipes.size());
+        if (recipes.size() > SECTION_LIMIT) {
+            section.addProperty("note", tooMany(recipes.size(), terms, "，或直接查某一件产出物的配方页"));
+            return section;
+        }
+        section.add("categories", categories(recipes, false));
         return section;
+    }
+
+    // 命中太多的一段只给总数与缩窄建议：全量清单本来也读不完，与其倾倒不如指个缩小问题的路。
+    private static String tooMany(int count, List<String> terms, String extra) {
+        String narrow = terms.isEmpty() ? "给 query 一个更具体的词" : "换个更具体的词";
+        return "命中 " + count + " 条，一次列不下；" + narrow + "再查" + extra;
+    }
+
+    // 按词过滤：每个词都要在这条配方的配方 ID、产出、原料或催化剂（名字、ID、标签）里出现；词为空不过滤。
+    static List<ShownRecipe> filtered(RecipeLookup.Answer answer, List<String> terms) {
+        if (terms.isEmpty()) return answer.recipes();
+        return answer.recipes().stream().filter(recipe -> matches(recipe, terms)).toList();
+    }
+
+    /** 过滤后一条都不剩时为假；调用方用它写一句没沾边的指路。词为空不算过滤。 */
+    public static boolean hasMatch(RecipeLookup.Answer answer, List<String> terms) {
+        return terms.isEmpty() || answer.recipes().stream().anyMatch(recipe -> matches(recipe, terms));
+    }
+
+    private static boolean matches(ShownRecipe recipe, List<String> terms) {
+        StringBuilder text = new StringBuilder();
+        if (recipe.recipeId() != null) text.append(recipe.recipeId()).append(' ');
+        recipe.outputs().forEach(stack -> appendWords(text, stack));
+        recipe.inputs().forEach(ingredient -> appendWords(text, ingredient));
+        recipe.catalysts().forEach(ingredient -> appendWords(text, ingredient));
+        String searchable = text.toString().toLowerCase(Locale.ROOT);
+        return terms.stream().allMatch(searchable::contains);
+    }
+
+    private static void appendWords(StringBuilder text, ShownStack stack) {
+        text.append(stack.id()).append(' ').append(stack.name()).append(' ');
+    }
+
+    private static void appendWords(StringBuilder text, ShownIngredient ingredient) {
+        if (ingredient.tag() != null) text.append(ingredient.tag()).append(' ');
+        ingredient.options().forEach(stack -> appendWords(text, stack));
     }
 
     // 按配方类别分组，组内照查看器给的顺序；每组写类别、名字、在哪做与条数。

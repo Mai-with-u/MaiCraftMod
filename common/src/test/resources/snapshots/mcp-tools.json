@@ -48,7 +48,7 @@
           },
           "query": {
             "type": "string",
-            "description": "关键词搜索；与 id 二选一。topic=recipe 时按名字找物品 ID；topic=wiki 时按条目标题搜（有汉字搜中文站，否则搜英文站）"
+            "description": "关键词搜索；与 id 二选一，topic=recipe 例外：与 id 同给时按词过滤那一页，只留产出或原料沾词的。topic=recipe 只给 query 时按名字找物品 ID；topic=wiki 时按条目标题搜（有汉字搜中文站，否则搜英文站）"
           },
           "url": {
             "type": "string",
@@ -56,7 +56,7 @@
           },
           "uses": {
             "type": "boolean",
-            "description": "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它"
+            "description": "只在 topic=recipe 时用：true 查能拿它做什么、它当工作站能做什么；不给时查怎么做出它。命中太多的一段只回总数，配 query 挑更具体的词"
           },
           "offset": {
             "type": "integer",

@@ -15,10 +15,14 @@ import java.util.Objects;
  * 按工具名把调用交给对应的工具，并把工具抛出的已知异常换成统一的错误种类。
  *
  * <p>工具调用永远得到一个统一格式的结果：程序出错也只是 {@code internal_error}，
- * 不会让 MCP 连接收到一个没有说明的失败。
+ * 不会让 MCP 连接收到一个没有说明的失败。成功的回包大到超过单次上限时整体退回
+ * {@code too_large}，不让一笔查询把 LLM 的上下文撑爆。
  */
 public final class ToolDispatcher {
     private static final Logger LOG = LoggerFactory.getLogger(ToolDispatcher.class);
+
+    /** 单条工具回包序列化后的字符上限：超过就整体退回，换成 too_large。 */
+    static final int MAX_REPLY_CHARS = 50_000;
 
     private final Map<String, McpTool> tools = new LinkedHashMap<>();
     private final RecentToolCalls recentCalls;
@@ -57,13 +61,24 @@ public final class ToolDispatcher {
         long startedAtNanos = System.nanoTime();
         ToolReply.WithImages answer = null;
         try {
-            answer = dispatch(name, tool, arguments);
+            answer = tooLargeGuard(name, dispatch(name, tool, arguments));
             return answer;
         } finally {
             // 连 Error 这类没接住的情况也要结账：不然这次调用会一直挂成"处理中"，面板就误以为宿主还在等。
             recentCalls.ended(callId, answer == null ? null : answer.reply());
             logCall(name, callId, System.nanoTime() - startedAtNanos);
         }
+    }
+
+    // 成功的回包序列化后超过上限就整体退回，换成 too_large：LLM 收到收窄建议，而不是一笔塞爆上下文的巨包。
+    // 在分发之后、结账之前量与换，调试面板和文件日志记下的就是宿主实际收到的那份。
+    private static ToolReply.WithImages tooLargeGuard(String name, ToolReply.WithImages answer) {
+        JsonObject reply = answer.reply();
+        if (!reply.get("ok").getAsBoolean()) return answer;
+        int size = ToolCatalog.GSON.toJson(reply).length();
+        if (size <= MAX_REPLY_CHARS) return answer;
+        return ToolReply.WithImages.of(ToolReply.error(ErrorCode.TOO_LARGE, "工具 " + name + " 的回答约 " + size
+                + " 字符，超过单次上限 " + MAX_REPLY_CHARS + "，这次不返回数据；把问题收窄（更具体的关键词或对象、分次问）再试"));
     }
 
     /**
