@@ -66,9 +66,17 @@ public final class AimCheck {
         return hitsBlock(hit, target) && state != null && state.canBeReplaced();
     }
 
-    /** 准星命中了指定的那只实体；另一只实体走进射线不算命中。 */
+    /**
+     * 准星命中了指定的那只实体，或命中者与它在同一条载具链上（骑在它身上的、它骑着的）：
+     * 右键实体交的是点名实体的交互请求，与准星扫过谁无关，所以乘客挡在载具身前不算遮挡——
+     * 船里坐着人时瞄着船，射线点中乘客仍按指着这条船处理，不要求换站位。
+     * 载具链之外的实体走进射线不算命中，那种才要换站位。
+     */
     public static boolean hitsEntity(HitResult hit, Entity target) {
-        return hit instanceof EntityHitResult entityHit && entityHit.getEntity() == target;
+        if (!(hit instanceof EntityHitResult entityHit)) {
+            return false;
+        }
+        return entityHit.getEntity() == target || entityHit.getEntity().isPassengerOfSameVehicle(target);
     }
 
     /** 射线命中者的简短描述，给换位重试的现场说明用。 */

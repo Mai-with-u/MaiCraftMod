@@ -456,6 +456,45 @@ class AimAndInteractTest {
         assertTrue(action.result().scene().contains("实体（编号"), "现场要说明目标是哪只实体");
     }
 
+    @Test
+    void aRayThroughTheVehiclePassengerStillCountsAsAimingAtTheVehicle() {
+        // 船里坐着人、射线被乘客挡住：右键实体交的是点名实体的交互请求，与准星扫过谁无关，
+        // 乘客不算遮挡——照常提交右键这条船，不要求换站位（空船能点、有人的船点不出是缺陷）。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity boat = fakeBoat();
+        // 离线替身没有世界、骑不上去（startRiding 要发游戏事件），只声明它坐在这条船上。
+        Entity passenger = fakeRidingBoat(boat);
+        scene.ray = new EntityHitResult(passenger, passenger.getBoundingBox().getCenter());
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.EntityTarget(boat),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "乘客挡住不算被挡，本刻提交");
+        assertEquals(1, sender.submissions.size());
+        assertEquals(PendingInteraction.Kind.INTERACT_ENTITY, sender.submissions.getFirst().kind());
+    }
+
+    @Test
+    void anUnrelatedEntityInTheRayStillBlocksTheAim() {
+        // 载具链之外的实体走进射线才是真的被挡住：换站位重试用尽后按到不了收尾，绝不出手。
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity boat = fakeBoat();
+        Entity stray = fakeBoat();
+        scene.ray = new EntityHitResult(stray, stray.getBoundingBox().getCenter());
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.EntityTarget(boat),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
+        ActionStatus status = null;
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
+            status = action.tick(context.asTickContext());
+            context.advance();
+        }
+        assertEquals("UNREACHABLE", failedKind(status));
+        assertTrue(sender.submissions.isEmpty());
+    }
+
     /** 离线替身的载具：只为拿一只活着、有包围盒的实体，不接触真实世界（ItemEntity 这类要在世界里出生）。 */
     private static Entity fakeBoat() {
         Entity boat = new Entity(EntityType.BOAT, null) {
@@ -465,5 +504,19 @@ class AimAndInteractTest {
         };
         boat.setPos(2.0, 64.0, 2.0);
         return boat;
+    }
+
+    /** 声明坐在替身载具上的乘客：只让根载具指向那条船，凑出"同一载具链"的判断。 */
+    private static Entity fakeRidingBoat(Entity boat) {
+        Entity passenger = new Entity(EntityType.BOAT, null) {
+            @Override protected void defineSynchedData(SynchedEntityData.Builder builder) {}
+            @Override protected void readAdditionalSaveData(CompoundTag tag) {}
+            @Override protected void addAdditionalSaveData(CompoundTag tag) {}
+            @Override public Entity getRootVehicle() {
+                return boat;
+            }
+        };
+        passenger.setPos(2.0, 64.0, 2.0);
+        return passenger;
     }
 }
