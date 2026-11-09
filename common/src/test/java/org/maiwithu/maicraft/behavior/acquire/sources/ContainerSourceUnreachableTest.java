@@ -19,7 +19,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.UnreachablePlaces;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -36,7 +35,7 @@ class ContainerSourceUnreachableTest {
 
     private static final WorldPosition CHEST_AT = new WorldPosition(10, 64, 5, null);
     private static final Protection NOBODY_OWNS = new Protection((dimension, x, y, z) -> Optional.empty(),
-            List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+            List::of, name -> Optional.empty(), "self");
 
     private final UnreachablePlaces places = new UnreachablePlaces();
     private final SourceContext context = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT)

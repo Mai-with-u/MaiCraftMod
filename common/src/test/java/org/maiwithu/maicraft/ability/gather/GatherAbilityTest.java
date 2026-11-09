@@ -16,7 +16,6 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -204,7 +203,7 @@ class GatherAbilityTest {
     private static PermissionCheck permission() {
         return new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 entityId -> Optional.empty());
     }
 

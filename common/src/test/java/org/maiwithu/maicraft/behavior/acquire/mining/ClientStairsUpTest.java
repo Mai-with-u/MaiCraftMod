@@ -21,10 +21,11 @@ import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -140,14 +141,15 @@ class ClientStairsUpTest {
     private final World world = new World();
     private final Digs digs = new Digs();
     private final Records records = new Records();
-    /** 受保护的格子：别人放的方块，许可检查点拒绝挖。 */
+    /** 受保护的格子：圈起来的地盘，许可检查点拒绝挖。 */
     private final Set<BlockPos> protectedCells = new HashSet<>();
 
     private Action climbing() {
         PermissionCheck check = new PermissionCheck(
-                new Protection((dimension, x, y, z) -> protectedCells.contains(new BlockPos(x, y, z))
-                        ? Optional.of(new ReadsBlockOwnership.PlacedBy("someone")) : Optional.empty(),
-                        () -> List.of(), name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                new Protection((dimension, x, y, z) -> Optional.empty(),
+                        () -> protectedCells.stream()
+                                .map(cell -> new RememberedRegion("别人的地盘", new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), null), 0)).toList(),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -193,9 +195,10 @@ class ClientStairsUpTest {
 
     private ActionStatus climb() {
         PermissionCheck check = new PermissionCheck(
-                new Protection((dimension, x, y, z) -> protectedCells.contains(new BlockPos(x, y, z))
-                        ? Optional.of(new ReadsBlockOwnership.PlacedBy("someone")) : Optional.empty(),
-                        () -> List.of(), name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                new Protection((dimension, x, y, z) -> Optional.empty(),
+                        () -> protectedCells.stream()
+                                .map(cell -> new RememberedRegion("别人的地盘", new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), null), 0)).toList(),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -250,8 +253,8 @@ class ClientStairsUpTest {
     }
 
     @Test
-    void 半路前面是别人放的方块_拐个弯接着往上挖() {
-        // 第三级前方齐头那格不许拆：往左、往右拐着接着挖，到地面照样出来。
+    void 半路前面是圈起来的格子_拐个弯接着往上挖() {
+        // 第三级前方齐头那格圈在地里不许拆：往左、往右拐着接着挖，到地面照样出来。
         protectedCells.add(new BlockPos(0, 63, -3));
 
         assertInstanceOf(ActionStatus.Done.class, climb());

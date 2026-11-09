@@ -26,7 +26,6 @@ import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
@@ -55,7 +54,7 @@ class ContainerSourceTest {
 
     /** 谁的箱子都不是：归属问过了、没人放过、也不在谁的地盘里。 */
     private static final Protection NOBODY_OWNS = new Protection((dimension, x, y, z) -> Optional.empty(),
-            List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+            List::of, name -> Optional.empty(), "self");
 
     @TempDir Path temp;
 
@@ -248,31 +247,14 @@ class ContainerSourceTest {
     }
 
     @Test
-    void 玩家的箱子记得有货也不翻() {
-        // 默认绝不碰玩家的箱子：服务端记着这只箱子是 bob 放的，里面有铁也跳过，说明里交代一句。
-        WorldMemory memory = memory();
-        memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
-        Protection bobsChest = new Protection((dimension, x, y, z) -> x == 10 && y == 64 && z == 5
-                ? Optional.of(new ReadsBlockOwnership.PlacedBy("bob")) : Optional.empty(),
-                List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
-        ContainerSource source = new ContainerSource(memorySpots(memory), tags, bobsChest,
-                (container, request, permissions) -> Optional.empty());
-
-        SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
-                source.quote(request(1), CONTEXT));
-        assertTrue(unavailable.reason().contains("别人的箱子不翻"), unavailable.reason());
-    }
-
-    @Test
-    void 自家人的箱子照常翻() {
-        // bob 是所有者在实例配置里列的自家人：他放的箱子和角色自己的一样，记得有铁就去拿。
+    void 别人放的箱子照常翻() {
+        // bob 放的箱子归属不拦：记得有铁就去拿。
         WorldMemory memory = memory();
         memory.rememberContainerOpened(CHEST_AT, "minecraft:chest", List.of("minecraft:iron_ingot"), NOW);
         String bob = new UUID(0, 42).toString();
         Protection family = new Protection((dimension, x, y, z) -> x == 10 && y == 64 && z == 5
                 ? Optional.of(new ReadsBlockOwnership.PlacedBy(bob)) : Optional.empty(),
-                List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self",
-                new TrustedPlayers(List.of(bob), name -> Optional.empty()));
+                List::of, name -> Optional.empty(), "self");
         ContainerSource source = new ContainerSource(memorySpots(memory), tags, family,
                 (container, request, permissions) -> Optional.empty());
 

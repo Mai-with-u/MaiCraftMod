@@ -390,8 +390,8 @@ public class CalculationContext {
                 && destinationFloor.getZ() == z) {
             return COST_INF;
         }
-        // 被封死在小坑里、这一趟放开了别人放的普通方块：能挖，但按很高的倍数算，路线先走空当与天然方块，只挖绕不开的那几格。
-        if (allowBreak && NavigationProtection.escapeOwner(maicraftPolicy, x, y, z, current).isPresent()) {
+        // 被封死在小坑里、这一趟放开了普通方块：能挖，但按很高的倍数算，路线先走空当与天然方块，只挖绕不开的那几格。
+        if (allowBreak && NavigationProtection.escapeBreakable(maicraftPolicy, x, y, z, current)) {
             return NavigationProtection.ESCAPE_BREAK_MULTIPLIER;
         }
         // 被困在自己家里、选中要水平拆开出去的那一两格墙：不管是不是天然地形、是谁放的都许挖，家里别的格都在保护格里。

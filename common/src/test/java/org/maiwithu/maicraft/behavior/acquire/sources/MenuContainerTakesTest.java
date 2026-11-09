@@ -39,7 +39,7 @@ import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
 
 /** 开箱取货按量拿：整堆够用整堆拿，尾数按件拿够就停；点不出去时下一刻再点，不当成背包放不下。 */
@@ -509,30 +509,30 @@ class MenuContainerTakesTest {
                 }, at -> false);
     }
 
-    /** 替身放行：已经绑到这只箱子上，面包最多拿 2 个，别的不放；拿到了记下来。 */
-    private static final class BoundAllowance implements OthersStorageAllowance {
+    /** 替身通报：已经绑到这只箱子上，面包最多拿 2 个，别的不认；拿到了记下来。 */
+    private static final class BoundReport implements StarvingFoodReport {
         final List<Taken> taken = new ArrayList<>();
 
         @Override public boolean open() { return taken.isEmpty(); }
         @Override public int atMost(String itemId) { return "minecraft:bread".equals(itemId) ? 2 : 0; }
-        @Override public OthersStorageAllowance at(StorageUse use, WorldPosition position) { return this; }
+        @Override public StarvingFoodReport at(WorldPosition position, String ownerName) { return this; }
         @Override public boolean bound() { return true; }
         @Override public void taken(List<Taken> items) { taken.addAll(items); }
     }
 
     @Test
-    void 别人的箱子按放行只拿刚好够的那一样_拿到了报回去() {
-        // 别人的箱子里有生牛肉和十个面包：要 8 件，放行只给面包 2 个；生牛肉不碰，面包拿 2 个，报回 2 个。
+    void 饿急通报只拿刚好够的那一样_拿到了报回去() {
+        // 箱子里有生牛肉和十个面包：要 8 件，通报只认面包、最多 2 个；生牛肉不碰，面包拿 2 个，报回 2 个。
         FakeBox box = new FakeBox();
         box.box.set(0, new ItemStack(Items.BEEF, 5));
         box.box.set(1, new ItemStack(Items.BREAD, 10));
-        BoundAllowance allowance = new BoundAllowance();
+        BoundReport allowance = new BoundReport();
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
                 (at, permissions) -> new OpenAtOnce(box), at -> false);
         Action take = takes.take(new KnownContainer("bob 的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:bread"), 8, "饿了，弄点吃的")
-                        .withOthersStorage(allowance)), Permissions.DEFAULT).orElseThrow();
+                        .withFoodReport(allowance)), Permissions.DEFAULT).orElseThrow();
 
         assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
         assertEquals(2, box.carried(new ItemStack(Items.BREAD)), "只拿刚好够的 2 个");
@@ -543,19 +543,19 @@ class MenuContainerTakesTest {
     }
 
     @Test
-    void 别人的箱子里没有放行的东西_一件不拿也不报() {
+    void 箱子里没有通报认的东西_一件不拿也不报() {
         FakeBox box = new FakeBox();
         box.box.set(0, new ItemStack(Items.BEEF, 5));
-        BoundAllowance allowance = new BoundAllowance();
+        BoundReport allowance = new BoundReport();
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
                 (at, permissions) -> new OpenAtOnce(box), at -> false);
         Action take = takes.take(new KnownContainer("bob 的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:beef"), 8, "饿了，弄点吃的")
-                        .withOthersStorage(allowance)), Permissions.DEFAULT).orElseThrow();
+                        .withFoodReport(allowance)), Permissions.DEFAULT).orElseThrow();
 
         runToFinish(take);
-        assertEquals(0, box.carried(new ItemStack(Items.BEEF)), "生牛肉要现做，放行不给，一件不拿");
+        assertEquals(0, box.carried(new ItemStack(Items.BEEF)), "生牛肉要现做，通报不认，一件不拿");
         assertTrue(allowance.taken.isEmpty());
     }
 

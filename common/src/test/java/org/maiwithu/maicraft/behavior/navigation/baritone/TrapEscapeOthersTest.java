@@ -26,7 +26,7 @@ import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
- * 被别人的方块封死在小坑里：放开别人放的普通方块挖出来，挖之前记下是谁放的；一趟最多 24 格；
+ * 被方块封死在小坑里：放开普通方块挖出来，挖的是别人放的就在挖之前记下是谁放的；一趟最多挖 24 格；
  * 那次脱困一收场当场报一条事件。这次任务自己保护的格、没放开时都不算。
  */
 class TrapEscapeOthersTest {
@@ -48,15 +48,19 @@ class TrapEscapeOthersTest {
         NavigationProtection.clear();
     }
 
-    // 这个世界里所有泥土都是 OWNER 放的普通方块，别的都不是。
+    // 泥土与石头都是能挖开出去的普通方块；脚下那一列（x=5）以外的都是 OWNER 放的，脚下那一列没有放置记录。
     private static void dirtPlacedByOwner() {
         NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
             @Override public boolean protects(int x, int y, int z, BlockState state) {
                 return true;
             }
 
-            @Override public Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
-                return state != null && state.is(Blocks.DIRT) ? Optional.of(OWNER) : Optional.empty();
+            @Override public boolean escapeBreakable(int x, int y, int z, BlockState state) {
+                return state != null && (state.is(Blocks.DIRT) || state.is(Blocks.STONE));
+            }
+
+            @Override public Optional<String> placedByOther(int x, int y, int z) {
+                return x != FEET.getX() ? Optional.of(OWNER) : Optional.empty();
             }
         });
     }
@@ -70,13 +74,12 @@ class TrapEscapeOthersTest {
         dirtPlacedByOwner();
         BlockState dirt = Blocks.DIRT.defaultBlockState();
         install(false, LongSets.emptySet());
-        assertEquals(Optional.empty(), NavigationProtection.escapeOwner(FEET, dirt), "没放开：别人的泥土照旧受保护");
+        assertFalse(NavigationProtection.escapeBreakable(FEET, dirt), "没放开：一格不挖");
         install(true, LongSets.emptySet());
-        assertEquals(Optional.of(OWNER), NavigationProtection.escapeOwner(FEET, dirt));
-        assertEquals(Optional.empty(), NavigationProtection.escapeOwner(FEET, Blocks.STONE.defaultBlockState()),
-                "不是别人的普通方块不放开");
+        assertTrue(NavigationProtection.escapeBreakable(FEET, dirt));
+        assertTrue(NavigationProtection.escapeBreakable(FEET, Blocks.STONE.defaultBlockState()), "普通方块谁放的都放开");
         install(true, LongSets.singleton(FEET.asLong()));
-        assertEquals(Optional.empty(), NavigationProtection.escapeOwner(FEET, dirt), "这次任务额外保护的格不碰");
+        assertFalse(NavigationProtection.escapeBreakable(FEET, dirt), "这次任务额外保护的格不碰");
     }
 
     @Test
@@ -116,11 +119,11 @@ class TrapEscapeOthersTest {
         assertTrue(escape.raise(FEET, () -> true, 0));
         install(true, LongSets.emptySet());
         boolean closed = false;
-        for (int i = 0; i < TrapEscape.MAX_OTHERS_BLOCKS; i++) {
+        for (int i = 0; i < TrapEscape.MAX_ESCAPE_DIGS; i++) {
             BlockPos cell = FEET.east(i + 1);
             escape.watchDigging(cell, Blocks.DIRT.defaultBlockState(), null);
             closed = escape.noteBroken(cell);
-            if (i < TrapEscape.MAX_OTHERS_BLOCKS - 1) assertFalse(closed);
+            if (i < TrapEscape.MAX_ESCAPE_DIGS - 1) assertFalse(closed);
         }
         assertTrue(closed, "第二十四格挖开就收回放开，调用方重新算路");
         assertFalse(escape.throughOthers());

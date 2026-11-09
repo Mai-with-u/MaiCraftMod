@@ -37,7 +37,7 @@ public interface VehicleDriver {
      * @param structureId 哪辆（结构身份）；只按遥控器、不指哪辆时为空串
      * @param near        它大概在哪（世界坐标）；不指哪辆时是角色脚下
      * @param inputs      逐条按的输入
-     * @param permissions 这次的许可：别人的载具点名即许可
+     * @param permissions 这次的许可：载具不看是谁的，圈起来的区域与额外保护的地标照旧拦
      */
     record TestRequest(String structureId, BlockPos near, List<Press> inputs, Permissions permissions) {
         public TestRequest {

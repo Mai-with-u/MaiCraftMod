@@ -20,7 +20,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -215,7 +214,7 @@ class MiningSourceTest {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西，挡路的只有许可档位。
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -242,7 +241,7 @@ class MiningSourceTest {
         };
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
-                        GuessesPlayerMade.NOTHING, "self", TrustedPlayers.NOBODY, SeesVillagers.NOBODY, hut, id -> id),
+                        "self", SeesVillagers.NOBODY, hut, id -> id),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -738,7 +737,7 @@ class MiningSourceTest {
         };
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();

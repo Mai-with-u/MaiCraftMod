@@ -14,16 +14,14 @@ import java.util.stream.Collectors;
 /**
  * 自家人：实例所有者在配置里列出的、信任的玩家（自己、一起玩的朋友）。
  *
- * <p>自家人放的箱子、AE 网络这类存储，角色可以取用、存放，和自己的一样；拆、改照旧当别人的东西。
+ * <p>名单只管生物两件事：自家人驯服的生物照旧算别人的（伤它要点名加许可再确认），
+ * 自家人打角色时自卫不停工。存储不看名单——谁放的箱子都能取用、存放。
  * 名单里每一项可以写玩家名，也可以写 UUID。写名字的要对上在线玩家才知道编号，对上一次就记住；
- * 对不上的当不是自家人——拿不准就不用，宁可少翻一只箱子。
+ * 对不上的当不是自家人——拿不准就按别人的算。
  */
 public final class TrustedPlayers {
 
-    /** 自家人名单写在哪：实例配置文件里的这一项。跳过别人的箱子时教人怎么放开，照这个写。 */
-    public static final String LISTED_IN = "实例配置 config/maicraft.json 的 trustedPlayers";
-
-    /** 一个自家人都没有：没配置时用它，谁的存储都按别人的算。 */
+    /** 一个自家人都没有：没配置时用它。 */
     public static final TrustedPlayers NOBODY = new TrustedPlayers(List.of(), name -> Optional.empty());
 
     /** 名单里直接写成 UUID 的，统一小写比。 */

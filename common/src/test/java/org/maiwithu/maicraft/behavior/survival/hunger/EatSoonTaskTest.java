@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.behavior.survival.SurvivalFakes;
@@ -174,11 +174,10 @@ class EatSoonTaskTest {
             }
 
             @Override public Action fetching(long budgetTicks, HungerNeed.Facts hunger, StarvingTake.Told told) {
-                OthersStorageAllowance.Taken bread = new OthersStorageAllowance.Taken("minecraft:bread", "面包", 1);
-                StorageUse alex = new StorageUse(StorageUse.Kind.PLACED_BY_OTHER, "alex-id", null);
+                StarvingFoodReport.Taken bread = new StarvingFoodReport.Taken("minecraft:bread", "面包", 1);
                 WorldPosition chest = new WorldPosition(12, 64, -8, "minecraft:overworld");
-                told.took(OthersFoodTaken.of(alex, chest, List.of(bread), hunger.food(), hunger.losingHealth(), id -> "Alex"),
-                        OthersFoodTaken.what(alex, chest, List.of(bread), id -> "Alex"));
+                told.took(OthersFoodTaken.of("Alex", chest, List.of(bread), hunger.food(), hunger.losingHealth()),
+                        OthersFoodTaken.what("Alex", chest, List.of(bread)));
                 return fetched.fetching(budgetTicks);
             }
         };

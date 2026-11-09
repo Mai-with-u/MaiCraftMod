@@ -22,7 +22,7 @@ public interface VehicleAssembler {
      * @param assemble    组装（true）还是拆回（false）
      * @param near        组装器（或要组装的方块）大概在哪（世界坐标）；按结构指的时候是结构所在
      * @param structureId 指的是哪个结构（拆回时用；观察编号 s# 换来的结构身份）；没指结构为 null
-     * @param permissions 这次的许可：别人的载具点名即许可，但保护照归属看
+     * @param permissions 这次的许可：载具不看是谁的，圈起来的区域与额外保护的地标照旧拦
      */
     record Request(boolean assemble, BlockPos near, String structureId, Permissions permissions) {
         public Request {

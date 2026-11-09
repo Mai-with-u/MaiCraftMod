@@ -17,11 +17,12 @@ import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
  * @param prefer  倾向用的材料（物品 ID 或 # 标签）：几种做法都行时用到它们的排前面，沿配方链往下传；没有为空
  * @param dropsFrom 掉落线索：LLM 说这样东西从哪些方块挖得到、从哪些生物打得到，采掘与狩猎把它并进原版对照；
  *                  只管这一样东西，来源备料时发的里层请求不带它；没有为 {@link DropsFrom#NONE}
- * @param othersStorage 别人的箱子放不放行：饿到危险线弄口粮时最外面那一次请求带上，能从别人的箱子拿刚好够的；
- *                      和掉落线索一样只管这一样东西，来源备料时发的里层请求不带它；平时为 {@link OthersStorageAllowance#NONE}
+ * @param foodReport 饿急弄吃的的通报：饱食度到危险线的那一次请求带上，从不是自己放的箱子里拿到现成口粮时
+ *                   通报发起的一方（只拿刚好够的件数）；和掉落线索一样只管这一样东西，
+ *                   来源备料时发的里层请求不带它；平时为 {@link StarvingFoodReport#NONE}
  */
 public record ItemRequest(WantedItem wanted, int count, String purpose, List<String> prefer, DropsFrom dropsFrom,
-        OthersStorageAllowance othersStorage) {
+        StarvingFoodReport foodReport) {
 
     public ItemRequest {
         if (wanted == null) throw new IllegalArgumentException("请求里必须有想要的东西");
@@ -29,12 +30,12 @@ public record ItemRequest(WantedItem wanted, int count, String purpose, List<Str
         if (purpose == null || purpose.isBlank()) throw new IllegalArgumentException("请求必须带用途标签");
         prefer = prefer == null ? List.of() : List.copyOf(prefer);
         dropsFrom = dropsFrom == null ? DropsFrom.NONE : dropsFrom;
-        othersStorage = othersStorage == null ? OthersStorageAllowance.NONE : othersStorage;
+        foodReport = foodReport == null ? StarvingFoodReport.NONE : foodReport;
     }
 
-    /** 不放行别人的箱子的请求：除了饿急了弄口粮，拿东西都是这一种。 */
+    /** 不带饿急通报的请求：除了饿急了弄口粮，拿东西都是这一种。 */
     public ItemRequest(WantedItem wanted, int count, String purpose, List<String> prefer, DropsFrom dropsFrom) {
-        this(wanted, count, purpose, prefer, dropsFrom, OthersStorageAllowance.NONE);
+        this(wanted, count, purpose, prefer, dropsFrom, StarvingFoodReport.NONE);
     }
 
     /** 没有掉落线索的请求：来源备料时的里层请求都是这种。 */
@@ -47,13 +48,13 @@ public record ItemRequest(WantedItem wanted, int count, String purpose, List<Str
         this(wanted, count, purpose, List.of());
     }
 
-    /** 同样要的东西，只要这么几件：还缺多少就问多少，用途、倾向、掉落线索、别人的箱子放不放行都不变。 */
+    /** 同样要的东西，只要这么几件：还缺多少就问多少，用途、倾向、掉落线索、饿急通报都不变。 */
     public ItemRequest just(int fewerCount) {
-        return new ItemRequest(wanted, fewerCount, purpose, prefer, dropsFrom, othersStorage);
+        return new ItemRequest(wanted, fewerCount, purpose, prefer, dropsFrom, foodReport);
     }
 
-    /** 同一个请求，换一份别人的箱子放行：挑中一只别人的箱子时绑上那只，挑能用的箱子时去掉放行。 */
-    public ItemRequest withOthersStorage(OthersStorageAllowance allowance) {
-        return new ItemRequest(wanted, count, purpose, prefer, dropsFrom, allowance);
+    /** 同一个请求，换一份饿急通报：挑中一只不是自己放的箱子时绑上那只，从自己放的箱子里拿时去掉通报。 */
+    public ItemRequest withFoodReport(StarvingFoodReport report) {
+        return new ItemRequest(wanted, count, purpose, prefer, dropsFrom, report);
     }
 }

@@ -71,7 +71,7 @@ final class LiveOthersThings implements UseSeams.OthersThings {
     public boolean someoneElses(ResolvedTarget target, Set<String> protectedLandmarks) {
         Protection guard = protection.get();
         if (guard == null) return true;
-        // 按类型自己找到的一格：家里别人放的照旧当别人的，不放开。
+        // 按类型自己找到的一格：只有记住的区域与额外保护的地标算别人的，归属（谁放的）不参与。
         if (!target.isEntity()) return guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks).protects();
         return creatureSomeoneElses(guard, target);
     }
@@ -81,8 +81,7 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         Protection guard = protection.get();
         if (guard == null) return true;
         if (!target.isEntity()) {
-            // 调用方指着的这一格：在她自己的家里，别人放的也能用、能改（主播说过自己家可以随便改）。
-            return guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks).protects();
+            return guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks).protects();
         }
         return creatureSomeoneElses(guard, target);
     }
@@ -102,9 +101,8 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         Protection guard = protection.get();
         if (guard == null) return "保护判断还没接上，拿不准就按别人的算";
         if (target.isEntity()) return "有主（有名字、被驯服、拴着绳、圈养着）或是玩家";
-        // 说清是哪一路挡的：归属记录写着谁放的、记住的区域、额外保护的地标、推断，还是归属没问到。
-        // 只在指着的那一格被拒时问这里，所以照放开的那一份说。
-        return guard.describe(guard.protectedByUnlessHome(cellOf(target), blockId(target), protectedLandmarks));
+        // 说清是哪一路挡的：记住的区域，还是额外保护的地标。只在指着的那一格被拒时问这里。
+        return guard.describe(guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks));
     }
 
     @Override

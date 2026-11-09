@@ -21,8 +21,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 只给 item、不给目标时不对着任何东西用。别的维度去不了；没加载的先走过去，到了再找。
  * 扫描没扫完不冒充"没有"，下一刻接着问。
  *
- * <p>会改动世界的用法（倒流体、点火、耕地、剪毛、挤奶这类）只对角色自己挑的目标看归属：
- * 按类型找时跳过别人的，坐标和地点落到别人的东西上时要 LLM 用观察编号点名；观察编号点名的就是许可。
+ * <p>会改动世界的用法（倒流体、点火、耕地、剪毛、挤奶这类）对圈起来的地盘、额外保护的地标要过保护：
+ * 按类型找时跳过它们，坐标和地点落到它们上时要 LLM 用观察编号点名；观察编号点名的就是许可。归属（谁放的）不看。
  */
 final class UseTargets {
 
@@ -217,8 +217,7 @@ final class UseTargets {
         return skip;
     }
 
-    // 角色自己挑的目标能不能用：只有会改动世界的用法才看归属；认不出别人的东西时一律当别人的，宁可不做。
-    // 调用方指着的那一格（pointed）在角色自己的家里放开别人放的；按类型找到的照旧不放开。
+    // 角色自己挑的目标能不能用：只有会改动世界的用法才看保护（圈地与额外保护的地标）；归属（谁放的）不看。
     private boolean guarded(ResolvedTarget target, boolean pointed) {
         UseSeams.OthersThings others = services.others();
         if (others == null) return true;
@@ -229,11 +228,11 @@ final class UseTargets {
 
     /** 一格方块是怎么落到这次 use 上的：点了观察编号、给了坐标或地点、按类型找到的。 */
     private enum Pick {
-        /** LLM 用观察编号点名：点名就是许可，不问归属。 */
+        /** LLM 用观察编号点名：点名就是许可，不问保护。 */
         NAMED,
-        /** 给了坐标或地点：指着这一格，在角色自己的家里放开别人放的。 */
+        /** 给了坐标或地点：指着这一格。 */
         POINTED,
-        /** 按类型找到的最近一格：角色自己挑的，家里别人放的照旧不碰。 */
+        /** 按类型找到的最近一格：角色自己挑的，过保护。 */
         FOUND
     }
 
@@ -249,12 +248,12 @@ final class UseTargets {
         }
         ResolvedTarget target = ResolvedTarget.block(cell, now, label + " " + now + " " + cell.toShortString());
         if (pick != Pick.NAMED && guarded(target, pick == Pick.POINTED)) {
-            // 说清是哪一路挡的（归属记录写着谁放的、记住的区域、地标、推断、归属没问到），不只给一句笼统的。
+            // 说清是哪一路挡的（记住的区域、额外保护的地标），不只给一句笼统的。
             UseSeams.OthersThings others = services.others();
-            String why = others == null ? "保护判断还没接上，拿不准就按别人的算"
+            String why = others == null ? "保护判断还没接上，拿不准就按受保护算"
                     : others.whyOthers(target, input.permissions().protectedLandmarks());
             return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
-                    target.describe() + " 不是你的（" + why + "），这样用会改动它，不碰",
+                    target.describe() + why + "，这样用会改动它，不碰",
                     "确实要用，就先 observe 再用观察编号点名它"));
         }
         return new Lookup.Found(target);
@@ -267,9 +266,9 @@ final class UseTargets {
 
     private Lookup notFound(String what) {
         if (skippedOthers) {
-            // 附近有，但都是别人的：要 LLM 点名才动，不是没有。
+            // 附近有，但都在圈地里或点名保护着：要 LLM 点名才动，不是没有。
             return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
-                    input.radius() + " 格内的 " + what + " 都是别人的，这样用会改动它们，不碰",
+                    input.radius() + " 格内的 " + what + " 都受保护，这样用会改动它们，不碰",
                     "确实要用，就先 observe 再用观察编号点名其中一个"));
         }
         return new Lookup.Failed(Problem.of(Problem.Kind.NOT_FOUND,

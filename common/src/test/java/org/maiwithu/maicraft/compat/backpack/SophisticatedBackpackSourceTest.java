@@ -7,7 +7,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.serverlink.ServerReads;
@@ -73,7 +72,7 @@ class SophisticatedBackpackSourceTest {
                 new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null,
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
-                        GuessesPlayerMade.NOTHING, "self"),
+                        "self"),
                 itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, backpack, DigToolRule.HELD);
         return new SophisticatedBackpackSource(compat, services, MENUS, seen, () -> NOW);
     }

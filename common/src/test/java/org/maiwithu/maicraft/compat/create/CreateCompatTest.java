@@ -40,7 +40,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatModule;
@@ -301,7 +300,7 @@ class CreateCompatTest {
     /** 不在世界里的玩家行为：角色为空，靠近与交互都碰不到；只够建出机器类型、回答"读不到"。 */
     static PlayerServices offlineServices() {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null, nobodyOwns,
                 itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, emptyBackpack(), DigToolRule.HELD);

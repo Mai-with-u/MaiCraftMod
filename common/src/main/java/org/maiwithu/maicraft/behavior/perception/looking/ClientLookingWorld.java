@@ -204,7 +204,7 @@ final class ClientLookingWorld implements LookingWorld {
         return sighted;
     }
 
-    // 开箱五条里由现场回答的四条：站在原地够得着看得见、别人的箱子不开、陷阱箱不开、身边看得见敌对生物不开。
+    // 开箱五条里由现场回答的四条：站在原地够得着看得见、额外保护的地标旁与记住的区域里的不开、陷阱箱不开、身边看得见敌对生物不开。
     private ContainerFacts containerFacts(TickContext context, LocalPlayer self, Vec3 eye, WorldPosition position,
             String blockType) {
         ClientLevel level = context.player().level();

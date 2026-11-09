@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -430,7 +429,7 @@ class LiveHuntsTest {
     void 出去找_要什么一路带着_找遍了如实说没见到() {
         FakeMoves moves = new FakeMoves();
         PermissionCheck permission = new PermissionCheck(new Protection((dimension, x, y, z) -> Optional.empty(),
-                List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"), WILD);
+                List::of, name -> Optional.empty(), "self"), WILD);
         Hunts.SearchPlan plan = new Hunts.SearchPlan(List.of("minecraft:sheep"), Optional.of("white"), true,
                 32, 16, 16, (types, center, radius) -> List.of(), WILD, permission);
         Action searching = hunts(moves).searchAndHunt(wool(), plan, Permissions.DEFAULT).orElseThrow();

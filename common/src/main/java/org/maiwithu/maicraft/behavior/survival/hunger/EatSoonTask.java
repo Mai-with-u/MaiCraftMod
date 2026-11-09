@@ -56,8 +56,8 @@ public final class EatSoonTask extends PhasedTask<EatSoonTask.Phase> {
         Action fetching(long budgetTicks);
 
         /**
-         * 同上，再按此刻的饥饿处境决定别人的箱子放不放行：饿到危险线时能从别人的箱子拿刚好够的口粮，
-         * 拿到了经 told 告诉吃饭任务。默认不放行，等于上面那个。
+         * 同上，再按此刻的饥饿处境决定带不带饿急通报：饿到危险线时从不是自己放的箱子里拿刚好吃回线以上的口粮，
+         * 拿到了经 told 告诉吃饭任务。默认不带，等于上面那个。
          */
         default Action fetching(long budgetTicks, HungerNeed.Facts hunger, StarvingTake.Told told) {
             return fetching(budgetTicks);

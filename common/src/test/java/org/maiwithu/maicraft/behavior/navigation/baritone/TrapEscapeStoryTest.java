@@ -51,14 +51,14 @@ class TrapEscapeStoryTest {
     // 坑壁：脚下与东边身体两格是模组的黑砂岩，不算天然地形、没有放置记录。
     private static TrapWalls sandstonePit() {
         return new TrapWalls(List.of(
-                new TrapWalls.Cell(FEET.below(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN, null),
-                new TrapWalls.Cell(FEET.east(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN, null),
-                new TrapWalls.Cell(FEET.east().above(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN, null)));
+                new TrapWalls.Cell(FEET.below(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN),
+                new TrapWalls.Cell(FEET.east(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN),
+                new TrapWalls.Cell(FEET.east().above(), SANDSTONE, TrapWalls.Wall.NOT_TERRAIN)));
     }
 
     @Test
     void 许可已放开但一格没动_说没动和挡着的是什么_能单独下令挖掉哪几格() {
-        // 实机：任务许可已经是 any，坑壁是模组的黑砂岩；放开别人的方块也没有一格是别人放的。
+        // 实机：任务许可已经是 any，坑壁是模组的黑砂岩。
         TrapEscape escape = new TrapEscape(TerrainPermit.ANY, TaskEventSink.NONE);
         assertTrue(escape.raise(FEET, () -> true, 0));
         Problem stuck = escape.explain(NO_ROUTE, TrapEscapeStoryTest::sandstonePit, () -> true, true);
@@ -79,28 +79,31 @@ class TrapEscapeStoryTest {
     }
 
     @Test
-    void 挡着的是别人放的方块_说是谁放的_要挖得先同意() {
+    void 受保护的方块_说受保护_要挖得先同意() {
         TrapEscape escape = new TrapEscape(TerrainPermit.NATURAL, TaskEventSink.NONE);
         assertTrue(escape.raise(FEET, () -> true, 0));
         TrapWalls walls = new TrapWalls(List.of(
-                new TrapWalls.Cell(FEET.east(), "minecraft:chest", TrapWalls.Wall.PLACED_BY_OTHER, "甲"),
-                new TrapWalls.Cell(FEET.west(), "minecraft:oak_planks", TrapWalls.Wall.PLACED_BY_OTHER, "乙"),
-                new TrapWalls.Cell(FEET.north(), "minecraft:stone", TrapWalls.Wall.PROTECTED, null)));
+                new TrapWalls.Cell(FEET.east(), "minecraft:chest", TrapWalls.Wall.PROTECTED),
+                new TrapWalls.Cell(FEET.west(), "minecraft:stone", TrapWalls.Wall.PROTECTED)));
         Problem stuck = escape.explain(NO_ROUTE, () -> walls, () -> true, true);
-        assertEquals("没有能走到目标的路线；卡在坑里，自动脱困一格没动；脚下和四周的 minecraft:chest、minecraft:oak_planks"
-                + " 是 甲、乙 放的，要挖得先同意；minecraft:stone 受保护，要挖得先同意", stuck.message());
+        assertEquals("没有能走到目标的路线；卡在坑里，自动脱困一格没动；脚下和四周的 minecraft:chest、minecraft:stone"
+                + " 受保护，要挖得先同意", stuck.message());
     }
 
     @Test
     void 真挖开了别人放的格子_按放的人数() {
-        // 世界里所有泥土都是 OWNER 放的普通方块：挖开一格泥土、一格天然石头。
+        // 脚下那一列以外是 OWNER 放的：挖开东边一格泥土（OWNER 放的）、头顶一格天然石头（没有记录）。
         NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
             @Override public boolean protects(int x, int y, int z, BlockState state) {
                 return true;
             }
 
-            @Override public Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
-                return state != null && state.is(Blocks.DIRT) ? Optional.of(OWNER) : Optional.empty();
+            @Override public boolean escapeBreakable(int x, int y, int z, BlockState state) {
+                return state != null && (state.is(Blocks.DIRT) || state.is(Blocks.STONE));
+            }
+
+            @Override public Optional<String> placedByOther(int x, int y, int z) {
+                return x != FEET.getX() ? Optional.of(OWNER) : Optional.empty();
             }
         });
         TrapEscape escape = new TrapEscape(TerrainPermit.NATURAL, TaskEventSink.NONE);
@@ -160,9 +163,9 @@ class TrapEscapeStoryTest {
     @Test
     void 几种方块不算天然地形时每个坐标跟上方块_能挖的单独说一次() {
         TrapWalls walls = new TrapWalls(List.of(
-                new TrapWalls.Cell(FEET.east(), "a:wall", TrapWalls.Wall.NOT_TERRAIN, null),
-                new TrapWalls.Cell(FEET.west(), "b:wall", TrapWalls.Wall.NOT_TERRAIN, null),
-                new TrapWalls.Cell(FEET.below(), "minecraft:stone", TrapWalls.Wall.MAY_DIG, null)));
+                new TrapWalls.Cell(FEET.east(), "a:wall", TrapWalls.Wall.NOT_TERRAIN),
+                new TrapWalls.Cell(FEET.west(), "b:wall", TrapWalls.Wall.NOT_TERRAIN),
+                new TrapWalls.Cell(FEET.below(), "minecraft:stone", TrapWalls.Wall.MAY_DIG)));
         assertEquals("脚下和四周的 a:wall、b:wall 不算天然地形，寻路不会自己挖，可以单独下令挖掉：(6, 64, 5) a:wall、(4, 64, 5) b:wall"
                 + "；minecraft:stone 这次能挖，重新算路还是没有路", walls.describe(Permissions.BlockChanges.NATURAL, true));
         assertEquals("", TrapWalls.NONE.describe(Permissions.BlockChanges.ANY, false));

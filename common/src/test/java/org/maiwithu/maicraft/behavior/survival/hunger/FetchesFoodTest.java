@@ -14,7 +14,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -87,21 +87,20 @@ class FetchesFoodTest {
     }
 
     @Test
-    void 饿急了只有叫得出名字的现成口粮带别人的箱子放行() {
-        // 放行只挂在面包、熟肉、熟鱼、蔬菜、水果几类上；"能吃的口粮"一大类里有要现做的生肉生鱼，不带，
-        // 所以别人箱子里只有生牛肉时不会去拿。
-        Map<String, OthersStorageAllowance> carried = new HashMap<>();
+    void 饿急了只有现成口粮那几类带通报() {
+        // 通报只挂在面包、熟肉、熟鱼、蔬菜、水果几类上；"能吃的口粮"一大类里有要现做的生肉生鱼，不带。
+        Map<String, StarvingFoodReport> carried = new HashMap<>();
         FakeNeeds needs = new FakeNeeds(Map.of("#maicraft:foods/edible", 12d)) {
             @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
-                carried.put(request.wanted().specifier(), request.othersStorage());
+                carried.put(request.wanted().specifier(), request.foodReport());
                 return super.nearestDistanceBlocks(request, permissions);
             }
         };
-        OthersStorageAllowance starving = StarvingTake.when(new HungerNeed.Facts(3, false, 0),
-                itemId -> Optional.empty(), id -> id, (facts, what) -> {});
+        StarvingFoodReport starving = StarvingTake.when(new HungerNeed.Facts(3, false, 0),
+                itemId -> Optional.empty(), (facts, what) -> {});
         tickRound(new FetchesFood(needs, 1200, starving), 0);
         for (String kind : FetchesFood.KINDS) assertSame(starving, carried.get("#" + kind), kind);
-        assertSame(OthersStorageAllowance.NONE, carried.get("#maicraft:foods/edible"));
+        assertSame(StarvingFoodReport.NONE, carried.get("#maicraft:foods/edible"));
     }
 
     @Test

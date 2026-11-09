@@ -14,11 +14,11 @@ import net.minecraft.world.level.block.state.BlockState;
  * 后台搜索与实际走路都从这里取同一份保护；每次安装先复制集合再整体替换，搜索侧拿到的
  * 快照因此与接单时一致，不会被下一次任务中途改写。
  *
- * <p>除了这一趟的保护要求，还有这个世界的保护判断（别人放的方块、记住的区域、归属拿不准的格子）：
- * 进世界时装进来、离开时摘掉，挖路与垫路都要过它，不挖穿别人的房子。它在后台搜索线程上也会被问，
- * 装进来的判断必须能在任何线程上读。
+ * <p>除了这一趟的保护要求，还有这个世界的保护判断（记住的区域、额外保护的地标）：
+ * 进世界时装进来、离开时摘掉，挖路与垫路都要过它。归属（谁放的）不在判断里，别人放的方块照挖，
+ * 结果里写明是谁放的。它在后台搜索线程上也会被问，装进来的判断必须能在任何线程上读。
  *
- * <p>角色被封死在小坑里、按任务许可已经挖不出去时，这一趟的保护要求会放开别人放的普通方块：
+ * <p>角色被封死在小坑里、按任务许可已经挖不出去时，这一趟的保护要求会放开普通方块（非天然的也挖）：
  * 算路时它们能挖但代价很高，走路时挖之前再问一次这一格是不是还是那种方块。出坑就收回。
  *
  * <p>这里用一处静态登记，是因为内嵌 Baritone 的搜索与移动对象都由它自己创建，
@@ -29,7 +29,7 @@ public final class NavigationProtection {
     private static final AtomicReference<Snapshot> CURRENT = new AtomicReference<>(Snapshot.EMPTY);
     private static final AtomicReference<CellRule> WORLD = new AtomicReference<>(CellRule.NONE);
 
-    /** 被困时挖一格别人放的普通方块，按挖同一格天然方块的这么多倍算：路线先走空当与天然方块，只挖绕不开的那几格。 */
+    /** 被困时挖一格非天然的普通方块，按挖同一格天然方块的这么多倍算：路线先走空当与天然方块，只挖绕不开的那几格。 */
     public static final double ESCAPE_BREAK_MULTIPLIER = 20;
 
     /**
@@ -42,15 +42,15 @@ public final class NavigationProtection {
         /** 什么都不保护：没进世界时用它。 */
         CellRule NONE = (x, y, z, state) -> false;
 
-        /** @param state 调用方读到的这一格方块；读不到传 null，推断那一路就不猜 */
+        /** @param state 调用方读到的这一格方块；读不到传 null */
         boolean protects(int x, int y, int z, BlockState state);
 
         /**
-         * 角色被封死在小坑里时，这一格能不能挖开出去：是别人放的普通方块，就给放它的人的编号；不能挖给空。
-         * 只在这一趟放开了别人的普通方块时才问；任何线程都能问。
+         * 角色被封死在小坑里时，这一格能不能挖开出去：不是功能方块、不在记住的区域与记住的地点旁就能挖，
+         * 谁放的不参与。只在这一趟放开了普通方块时才问；任何线程都能问。
          */
-        default Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
-            return Optional.empty();
+        default boolean escapeBreakable(int x, int y, int z, BlockState state) {
+            return false;
         }
 
         /** 归属记录写着这一格是别人放的：给放它的人的编号；没记录、没问到、角色自己放的给空。卡坑没出去时说是谁放的用。 */
@@ -79,7 +79,7 @@ public final class NavigationProtection {
         return install(sacred, noEntryCells, minimumFeetY, false);
     }
 
-    /** 同上；throughOthers 为真表示这一趟被封死在小坑里，放开了别人放的普通方块。 */
+    /** 同上；throughOthers 为真表示这一趟被封死在小坑里，放开了普通方块（非天然的也挖）。 */
     public static boolean install(LongSet sacred, LongSet noEntryCells, int minimumFeetY, boolean throughOthers) {
         return install(sacred, noEntryCells, minimumFeetY, throughOthers, LongSets.emptySet());
     }
@@ -103,23 +103,24 @@ public final class NavigationProtection {
         WORLD.set(rule == null ? CellRule.NONE : rule);
     }
 
-    /** 这一格受不受这个世界的保护（别人放的、记住的区域里、归属拿不准、像玩家放的门）：挖路与垫路前问它。 */
+    /** 这一格受不受这个世界的保护（记住的区域里、额外保护的地标旁）：挖路与垫路前问它。 */
     public static boolean worldProtects(int x, int y, int z, BlockState state) {
         return WORLD.get().protects(x, y, z, state);
     }
 
     /**
-     * 按一份保护要求问：这一格是不是放开给脱困的别人的普通方块，是就给放它的人的编号。
-     * 这一趟没放开、这一格是这次任务自己保护的，都给空。算路用冻结的那份，走路与挖用此刻生效的那份。
+     * 按一份保护要求问：这一格是不是放开给脱困的普通方块。
+     * 这一趟没放开、这一格是这次任务自己保护的，都算不是。算路用冻结的那份，走路与挖用此刻生效的那份。
+     * 是谁放的另问 {@link #placedByOther}，挖开后写进结果。
      */
-    public static Optional<String> escapeOwner(Snapshot policy, int x, int y, int z, BlockState state) {
-        if (!policy.throughOthers() || policy.protects(x, y, z)) return Optional.empty();
-        return WORLD.get().placedByOtherWhenTrapped(x, y, z, state);
+    public static boolean escapeBreakable(Snapshot policy, int x, int y, int z, BlockState state) {
+        if (!policy.throughOthers() || policy.protects(x, y, z)) return false;
+        return WORLD.get().escapeBreakable(x, y, z, state);
     }
 
-    /** 此刻生效的保护要求下，这一格是不是放开给脱困的别人的普通方块：走路时挖之前再问一次。 */
-    public static Optional<String> escapeOwner(BlockPos pos, BlockState state) {
-        return pos == null ? Optional.empty() : escapeOwner(CURRENT.get(), pos.getX(), pos.getY(), pos.getZ(), state);
+    /** 此刻生效的保护要求下，这一格是不是放开给脱困的普通方块：走路时挖之前再问一次。 */
+    public static boolean escapeBreakable(BlockPos pos, BlockState state) {
+        return pos != null && escapeBreakable(CURRENT.get(), pos.getX(), pos.getY(), pos.getZ(), state);
     }
 
     /** 此刻生效的保护要求下，这一格是不是被困在家里选中要拆的墙：走路时挖之前再问一次。 */
@@ -168,7 +169,7 @@ public final class NavigationProtection {
     /**
      * 一份不可变的保护要求：受保护格不得破坏或掩埋；禁入格与脚位下界约束身体可站的位置。
      * 只禁修改的格并不自动禁止身体进入，两个集合各管各的。throughOthers 为真时这一趟被封死在小坑里，
-     * 放开了别人放的普通方块（能挖但代价很高）。breakableCells 是被困在自己家里时选中要拆的那一两格墙：
+     * 放开了普通方块（能挖但代价很高）。breakableCells 是被困在自己家里时选中要拆的那一两格墙：
      * 不管是不是天然地形、是谁放的都许挖，代价同样很高；家里别的格这时都在受保护格里。
      */
     public record Snapshot(LongSet protectedCells, LongSet noEntryCells, int minimumFeetY, boolean throughOthers,
@@ -199,7 +200,7 @@ public final class NavigationProtection {
             return y < minimumFeetY || noEntryCells.contains(BlockPos.asLong(x, y, z));
         }
 
-        /** 同一份保护要求，只把放不放开别人的普通方块换掉：只读复算按"假如放开"算一次时用。 */
+        /** 同一份保护要求，只把放不放开普通方块换掉：只读复算按"假如放开"算一次时用。 */
         public Snapshot withThroughOthers(boolean open) {
             return new Snapshot(protectedCells, noEntryCells, minimumFeetY, open, breakableCells);
         }

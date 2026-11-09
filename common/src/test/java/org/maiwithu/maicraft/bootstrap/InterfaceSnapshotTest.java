@@ -192,7 +192,7 @@ class InterfaceSnapshotTest {
         // 饿急了从别人的箱子拿了吃的：消息一句话，按字段的事实挂在 others_food_taken 上，不带 goal_id。
         shapes.add("others_food_taken_event", ResultJson.event(new TaskEvent(11, TaskEvent.Kind.OTHERS_FOOD_TAKEN,
                 TaskEventLog.NO_GOAL, "饿到饱食度 3，从 Alex 家的箱子（12, 64, -8）拿了 1 个面包", null, null, List.of(),
-                new OthersFoodTaken(OthersFoodTaken.Whose.PLAYER, "Alex", null,
+                new OthersFoodTaken(OthersFoodTaken.Whose.PLAYER, "Alex",
                         new WorldPosition(12, 64, -8, "minecraft:overworld"),
                         List.of(new OthersFoodTaken.Item("minecraft:bread", 1)), 3, false))));
         // 计时到点：编号和备注直接铺在事件上（timer_id、note），宿主按字段认是哪个计时，不解析消息。

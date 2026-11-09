@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -76,7 +75,7 @@ class HarvestSourceTest {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西。
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<ReadsCreatureSituation.CreatureSituation> situationOf(
                             UUID entityId) {
@@ -149,7 +148,7 @@ class HarvestSourceTest {
     private static PermissionCheck permissionCheck() {
         return new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 entityId -> Optional.empty());
     }
 }

@@ -16,7 +16,6 @@ import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
@@ -154,7 +153,7 @@ final class OfflineCatalog {
                         progress -> { }),
                 new Guards(
                         new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
-                                GuessesPlayerMade.NOTHING, SELF_ID),
+                                SELF_ID),
                         (ReadsCreatureSituation) entityId -> Optional.empty()),
                 new Channels(new ChatChannel(nobody), () -> 0,
                         // 任务事件离线没人听，能力照常登记、参数照常校验。

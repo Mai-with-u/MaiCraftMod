@@ -4,13 +4,13 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
@@ -19,24 +19,22 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
-import org.maiwithu.maicraft.behavior.permission.StorageUse;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 跳过别人的箱子时说清是谁的：记在谁名下、不知道是谁的、被地标挡住，几只同一个原因合并计数；
- * 有记在别人名下的才教一次怎么把自家人写进实例配置。带着饿急了的放行时，能用的箱子都没有才报别人的箱子，
- * 开箱时只拿放行的那一样、不顺路拿别样，额外保护的地标旁照旧不碰。
+ * 谁放的箱子都能翻：别人放的照常报价与开箱，被额外保护的地标、记住的区域挡住的跳过并在说明里
+ * 按原因合并计数。请求带着饿急通报（饿到危险线弄口粮）时，从不是自己放的箱子里拿就绑上通报——
+ * 开箱只拿通报点名的那一样、不顺路拿别样；从自己放的箱子里拿不绑。
  */
 class ContainerSourceOthersTest {
 
@@ -44,8 +42,6 @@ class ContainerSourceOthersTest {
     private static final String CAROL = "00000000-0000-0000-0000-00000000000c";
     private static final ItemRequest STEW = new ItemRequest(WantedItem.ofItem("minecraft:mushroom_stew"), 1, "吃");
     private static final SourceContext HERE = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
-    private static final String HOW_TO_ALLOW =
-            "放的人是自家人就写进实例配置 config/maicraft.json 的 trustedPlayers，写了就能拿";
 
     /** 一排记得开过、里面有蘑菇煲的箱子，摆在 x=1..n。 */
     private static List<ContainerChooser.Candidate> chests(int count) {
@@ -70,10 +66,9 @@ class ContainerSourceOthersTest {
         };
     }
 
-    private static String reason(Protection protection, int chests, Function<String, String> names,
-            SourceContext context) {
+    private static String reason(Protection protection, int chests, SourceContext context) {
         ContainerSource source = new ContainerSource(spots(chests(chests)), new FakeTags(), protection,
-                (container, request, permissions) -> Optional.empty(), names);
+                (container, request, permissions) -> Optional.empty());
         return assertInstanceOf(SourceQuote.Unavailable.class, source.quote(STEW, context)).reason();
     }
 
@@ -82,53 +77,38 @@ class ContainerSourceOthersTest {
     }
 
     @Test
-    void 记在别人名下的说清是谁的_几只合并计数_自家人那句只说一次() {
-        // x=1..3 是 bob 放的，x=4 是 carol 放的；bob 在线写名字，carol 不在线写编号。
+    void 别人放的箱子照常报价() {
+        // x=1..3 是 bob 放的，x=4 是 carol 放的：都能翻，报最近那只有货的。
         Protection recorded = new Protection((dimension, x, y, z) -> Optional.of(
                 new ReadsBlockOwnership.PlacedBy(x <= 3 ? BOB : CAROL)), List::of, name -> Optional.empty(),
-                GuessesPlayerMade.NOTHING, "self");
-        String reason = reason(recorded, 4, id -> id.equals(BOB) ? "bob" : id, HERE);
-        assertEquals("记得的容器里没有装着minecraft:mushroom_stew的，别人的箱子不翻：3 只记在 bob 名下、1 只记在 "
-                + CAROL + " 名下；" + HOW_TO_ALLOW, reason);
-        assertEquals(1, occurrences(reason, "trustedPlayers"));
-    }
-
-    @Test
-    void 归属还没问到的说不知道是谁的_不教写自家人() {
-        Protection unasked = new Protection(new ReadsBlockOwnership() {
-            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
-                return Optional.empty();
-            }
-
-            @Override public boolean known(String dimension, int x, int y, int z) {
-                return false;
-            }
-        }, List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
-        String reason = reason(unasked, 2, Function.identity(), HERE);
-        assertEquals("记得的容器里没有装着minecraft:mushroom_stew的，别人的箱子不翻：2 只不知道是谁的（按别人的算）", reason);
-        assertFalse(reason.contains("trustedPlayers"), "写进自家人名单也拿不了的，不教");
-    }
-
-    @Test
-    void 被额外保护的地标挡住的说是哪个地标() {
-        Protection landmark = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> "家".equals(name) ? Optional.of(new WorldPosition(2, 64, 0, null)) : Optional.empty(),
-                GuessesPlayerMade.NOTHING, "self");
-        SourceContext guarded = SourceContext.unscoped(WorldPosition.here(0, 64, 0),
-                Permissions.DEFAULT.mergedWith(null, null, null, null, null, Set.of("家")));
-        assertEquals("记得的容器里没有装着minecraft:mushroom_stew的，别人的箱子不翻：1 只在这次额外保护的地标「家」旁",
-                reason(landmark, 1, Function.identity(), guarded));
-        // 同一份保护判断，不带地标的任务照常报价。
-        ContainerSource source = new ContainerSource(spots(chests(1)), new FakeTags(), landmark,
-                (container, request, permissions) -> Optional.empty(), Function.identity());
+                "self");
+        ContainerSource source = new ContainerSource(spots(chests(4)), new FakeTags(), recorded,
+                (container, request, permissions) -> Optional.empty());
         assertInstanceOf(SourceQuote.Offer.class, source.quote(STEW, HERE));
     }
 
-    /** 替身放行：开着就放行蘑菇煲 1 件；绑到哪只箱子记下来。 */
-    private static final class Starving implements OthersStorageAllowance {
+    @Test
+    void 被额外保护的地标挡住的说是哪个地标_几只合并计数() {
+        Protection landmark = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
+                name -> "家".equals(name) ? Optional.of(new WorldPosition(2, 64, 0, null)) : Optional.empty(),
+                "self");
+        SourceContext guarded = SourceContext.unscoped(WorldPosition.here(0, 64, 0),
+                Permissions.DEFAULT.mergedWith(null, null, null, null, null, Set.of("家")));
+        assertEquals("记得的容器里没有装着minecraft:mushroom_stew的，能用的都给挡住了："
+                        + "2 只在这次额外保护的地标「家」旁",
+                reason(landmark, 2, guarded));
+        assertEquals(1, occurrences(reason(landmark, 2, guarded), "「家」"), "同一个原因只说一次");
+        // 同一份保护判断，不带地标的任务照常报价。
+        ContainerSource source = new ContainerSource(spots(chests(1)), new FakeTags(), landmark,
+                (container, request, permissions) -> Optional.empty());
+        assertInstanceOf(SourceQuote.Offer.class, source.quote(STEW, HERE));
+    }
+
+    /** 替身通报：开着就认蘑菇煲 1 件；绑到哪只箱子、绑时给的放它的人记下来。 */
+    private static final class Starving implements StarvingFoodReport {
         boolean open = true;
-        StorageUse boundUse;
         WorldPosition boundAt;
+        String boundOwner;
 
         @Override public boolean open() {
             return open;
@@ -138,14 +118,14 @@ class ContainerSourceOthersTest {
             return open ? 1 : 0;
         }
 
-        @Override public OthersStorageAllowance at(StorageUse use, WorldPosition position) {
-            boundUse = use;
+        @Override public StarvingFoodReport at(WorldPosition position, String ownerName) {
             boundAt = position;
+            boundOwner = ownerName;
             return this;
         }
 
         @Override public boolean bound() {
-            return boundUse != null;
+            return boundAt != null;
         }
 
         @Override public void taken(List<Taken> items) {
@@ -155,61 +135,85 @@ class ContainerSourceOthersTest {
     // x=1 是 bob 放的，x=2 是角色自己放的（只在两只时用到），都记得里面有蘑菇煲。
     private static final Protection BOB_THEN_SELF = new Protection((dimension, x, y, z) -> Optional.of(
             new ReadsBlockOwnership.PlacedBy(x == 1 ? BOB : "self")), List::of, name -> Optional.empty(),
-            GuessesPlayerMade.NOTHING, "self");
+            "self");
 
     private static ContainerSource source(Protection protection, int chests, List<List<ItemRequest>> opened) {
         return new ContainerSource(spots(chests(chests)), new FakeTags(), protection, (container, wants, permissions) -> {
             opened.add(wants);
             return Optional.empty();
-        }, id -> id.equals(BOB) ? "bob" : id);
+        });
     }
 
     @Test
-    void 饿急了能用的箱子都没有_报别人的箱子_开箱只拿放行的那一样() {
+    void 饿急了从别人放的箱子里拿_绑上通报_不顺路拿别样() {
         Starving starving = new Starving();
-        ItemRequest hungry = STEW.withOthersStorage(starving);
+        ItemRequest hungry = STEW.withFoodReport(starving);
         List<List<ItemRequest>> opened = new ArrayList<>();
         ContainerSource source = source(BOB_THEN_SELF, 1, opened);
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(hungry, HERE));
-        assertTrue(offer.risk().contains("别人的箱子（记在 bob 名下）"), offer.risk());
 
         SourceContext alsoBread = SourceContext.alsoWanting(WorldPosition.here(0, 64, 0), Permissions.DEFAULT,
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:bread"), 3, "吃")));
         source.begin(hungry, offer, alsoBread);
         assertEquals(1, opened.size());
-        assertEquals(1, opened.getFirst().size(), "顺路的面包不在别人的箱子里拿");
-        assertTrue(opened.getFirst().getFirst().othersStorage().bound(), "放行绑到了这只箱子上");
-        assertEquals(StorageUse.Kind.PLACED_BY_OTHER, starving.boundUse.kind());
+        assertEquals(1, opened.getFirst().size(), "顺路的面包不在这一趟拿");
+        assertTrue(opened.getFirst().getFirst().foodReport().bound(), "通报绑到了这只箱子上");
         assertEquals(1, starving.boundAt.x());
+        assertEquals(BOB, starving.boundOwner, "放它的人照归属记录带上，事件里照它说");
     }
 
     @Test
-    void 自己的箱子里有就不碰别人的() {
-        // bob 的箱子更近（x=1），自己的在 x=2：照样去自己的。
-        ContainerSource source = source(BOB_THEN_SELF, 2, new ArrayList<>());
+    void 从自己放的箱子里拿_不绑通报_照常顺路拿() {
+        // 两只都是自己放的：就近去 x=1，通报不绑，照常顺手拿顺路的几样。
+        Starving starving = new Starving();
+        List<List<ItemRequest>> opened = new ArrayList<>();
+        Protection own = new Protection((dimension, x, y, z) -> Optional.of(
+                new ReadsBlockOwnership.PlacedBy("self")), List::of, name -> Optional.empty(), "self");
+        ContainerSource source = new ContainerSource(spots(chests(2)), new FakeTags(), own,
+                (container, wants, permissions) -> {
+                    opened.add(wants);
+                    return Optional.empty();
+                });
         SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
-                source.quote(STEW.withOthersStorage(new Starving()), HERE));
-        assertEquals("2,64,0", offer.hint());
+                source.quote(STEW.withFoodReport(starving), HERE));
+        assertEquals("1,64,0", offer.hint());
+
+        SourceContext alsoBread = SourceContext.alsoWanting(WorldPosition.here(0, 64, 0), Permissions.DEFAULT,
+                List.of(new ItemRequest(WantedItem.ofItem("minecraft:bread"), 3, "吃")));
+        source.begin(STEW.withFoodReport(starving), offer, alsoBread);
+        assertFalse(starving.bound(), "自己放的箱子不绑通报");
+        assertEquals(2, opened.getFirst().size(), "照常顺手拿顺路的几样");
     }
 
     @Test
-    void 不放行或放行用掉了_别人的箱子照旧不翻() {
-        ContainerSource source = source(BOB_THEN_SELF, 1, new ArrayList<>());
-        assertInstanceOf(SourceQuote.Unavailable.class, source.quote(STEW, HERE), "平时不放行");
-        Starving spent = new Starving();
-        spent.open = false;
-        assertInstanceOf(SourceQuote.Unavailable.class, source.quote(STEW.withOthersStorage(spent), HERE),
-                "这一次已经从一只别人的箱子拿过");
+    void 归属没问到的也绑通报_写不知道是谁的() {
+        Protection unasked = new Protection(new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                return Optional.empty();
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return false;
+            }
+        }, List::of, name -> Optional.empty(), "self");
+        Starving starving = new Starving();
+        List<List<ItemRequest>> opened = new ArrayList<>();
+        ContainerSource source = source(unasked, 1, opened);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class,
+                source.quote(STEW.withFoodReport(starving), HERE));
+        source.begin(STEW.withFoodReport(starving), offer, HERE);
+        assertTrue(starving.bound());
+        assertNull(starving.boundOwner, "说不清是谁的，事件里写不知道是谁的箱子");
     }
 
     @Test
-    void 额外保护的地标旁饿了也不拿() {
+    void 额外保护的地标旁拿不了() {
         Protection landmark = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
                 name -> "家".equals(name) ? Optional.of(new WorldPosition(1, 64, 0, null)) : Optional.empty(),
-                GuessesPlayerMade.NOTHING, "self");
+                "self");
         SourceContext guarded = SourceContext.unscoped(WorldPosition.here(0, 64, 0),
                 Permissions.DEFAULT.mergedWith(null, null, null, null, null, Set.of("家")));
         assertInstanceOf(SourceQuote.Unavailable.class,
-                source(landmark, 1, new ArrayList<>()).quote(STEW.withOthersStorage(new Starving()), guarded));
+                source(landmark, 1, new ArrayList<>()).quote(STEW.withFoodReport(new Starving()), guarded));
     }
 }

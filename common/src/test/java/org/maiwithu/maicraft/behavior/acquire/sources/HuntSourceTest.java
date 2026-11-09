@@ -14,7 +14,6 @@ import java.util.ArrayList;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -48,7 +47,7 @@ class HuntSourceTest {
 
     private static Protection nobodyOwns() {
         return new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
     }
 
     private static ScansCreatures.CreatureSpot sheep(int id, int x, String color, boolean sheared) {

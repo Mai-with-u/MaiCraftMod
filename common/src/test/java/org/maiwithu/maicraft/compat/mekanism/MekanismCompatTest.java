@@ -37,7 +37,6 @@ import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -317,7 +316,7 @@ class MekanismCompatTest {
 
     private static PlayerServices offline() {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
         return new PlayerServices(() -> null, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new GearChanges() {
                     @Override public Optional<Action> wear(String itemId, GearSlotName slot) { return Optional.empty(); }

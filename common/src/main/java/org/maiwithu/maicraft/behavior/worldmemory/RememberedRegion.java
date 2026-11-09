@@ -18,7 +18,7 @@ public record RememberedRegion(String name, WorldPosition center, int radiusBloc
     public RememberedRegion {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("记住区域的名字不能为空");
         if (center == null) throw new IllegalArgumentException("记住区域的中心不能为空");
-        if (radiusBlocks <= 0) throw new IllegalArgumentException("记住区域的半径必须为正：" + radiusBlocks);
+        if (radiusBlocks < 0) throw new IllegalArgumentException("记住区域的半径不能为负：" + radiusBlocks);
     }
 
     /** 一个位置算不算在这块区域里：维度相配（一方没写就当相配，宁可多算进保护）且到中心的直线距离不超过半径。 */

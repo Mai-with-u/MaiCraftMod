@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelMode;
@@ -98,7 +97,7 @@ class CreateJetpackCompatTest {
     /** 不在世界里的玩家行为：角色为空，只够建出出行方式。 */
     private static PlayerServices offlineServices() {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
         GearChanges noGear = new GearChanges() {
             @Override public Optional<Action> wear(String itemId, GearSlotName slot) { return Optional.empty(); }
             @Override public Optional<Action> takeOff(GearSlotName slot) { return Optional.empty(); }

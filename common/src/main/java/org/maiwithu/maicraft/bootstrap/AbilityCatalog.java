@@ -273,9 +273,9 @@ public final class AbilityCatalog {
 
         // 建筑设计与施工：画图不控制角色，施工经玩家行为层的施工引擎，见 registerConstruction。
         DesignStore designs = new DesignStore(DesignStore.fileIn(deps.stores().configDirectory()));
-        // 施工引擎与现场部件共用一套；只有建造按图施工那一份在角色自己的家里放开别人放的方块。
-        Function<Permissions, ConstructionServices> construction = constructionServices(deps, shared, false);
-        registerConstruction(registry, deps, designs, constructionServices(deps, shared, true));
+        // 施工引擎与现场部件共用一套：谁放的方块都能按图建、按图改。
+        Function<Permissions, ConstructionServices> construction = constructionServices(deps, shared);
+        registerConstruction(registry, deps, designs, construction);
 
         registerMachineAbilities(registry, deps, designs, shared, construction);
 
@@ -369,7 +369,7 @@ public final class AbilityCatalog {
 
     /**
      * 从记得的箱子与现场容器拿东西的来源：候选由找容器的读端给出（现场扫描与世界记忆并成一份）。
-     * 跳过别人的箱子时写记在谁名下：放的人在线写名字，不在线写编号。
+     * 谁放的箱子都能翻，只有地标旁与记住的区域里的跳过。
      */
     private static ContainerSource containerSource(Deps deps, Shared shared) {
         return new ContainerSource(
@@ -377,8 +377,7 @@ public final class AbilityCatalog {
                         deps.guards().protection(), deps.world().facilities()),
                 deps.items().itemTags(), deps.guards().protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.hands().interactions(), deps.items().itemTags(),
-                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts()),
-                owner -> OnlinePlayers.nameOrId(deps.character().context().get(), owner));
+                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts()));
     }
 
     /**
@@ -494,8 +493,7 @@ public final class AbilityCatalog {
      * 扳手拆机器件与放置规则也在内；建造与机器施工都用这一个。连锁挖在共用的挖掘里（清障按命中面 3×3 连锁），
      * 扳手进世界时建一次，每次施工共用，没装就是空表、照原来的挖。
      */
-    private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared,
-            boolean liftAtHome) {
+    private static Function<Permissions, ConstructionServices> constructionServices(Deps deps, Shared shared) {
         List<DismantleTool> dismantlers = deps.compat().dismantleTools(shared.playerServices());
         // 放置规则不用玩家行为：登记表里的整张表原样交给施工（换物品、对着哪格放、等哪几格）与放置预测（放下后自改）。
         List<PlacementRules> placementRules = deps.compat().placementRules();
@@ -506,7 +504,7 @@ public final class AbilityCatalog {
                     new LiveClicks(deps.hands().interactions(), deps.hands().inputs(), deps.character().context()),
                     shared.digging(), shared.innerNeeds(),
                     new LiveHolds(shared.toMainhand(), deps.character().context()),
-                    new PermissionGuards(() -> shared.permission(), permissions, site::dimension, liftAtHome),
+                    new PermissionGuards(() -> shared.permission(), permissions, site::dimension),
                     new MemoryLedger(deps.world().memory(), site::dimension), new LiveTravels(deps.travel().walks()),
                     dismantlers, placementRules);
         };

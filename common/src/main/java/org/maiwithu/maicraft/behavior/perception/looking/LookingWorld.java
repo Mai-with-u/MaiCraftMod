@@ -23,7 +23,7 @@ interface LookingWorld {
      * 一个容器能不能顺手打开看一眼的现场：五条里由现场回答的四条（骑乘已在闲着的判定里挡住）。
      *
      * @param reachableAndVisible 站在原地够得着、看得见
-     * @param mayUse              存储取用许可允许（别人的箱子不开）
+     * @param mayUse              存储取用许可允许（额外保护的地标旁与记住的区域里的不开）
      * @param signalSource        方块状态是信号源（陷阱箱），开了会触发机关
      * @param hostileNear         附近十六格内看得见敌对生物（猪灵也算）
      */

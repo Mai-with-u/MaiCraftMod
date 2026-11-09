@@ -11,7 +11,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -60,12 +60,12 @@ final class PriceAsks {
     record Price(Optional<Double> cost, boolean looking) {}
 
     /**
-     * 一种问法：要什么、要几件、偏好与掉落线索、别人的箱子放不放行、许可、算不算现做，以及做法不拿来当原料的那段外层。
-     * 用途只是说明，不影响报价。放行不一样，容器报的价就不一样（饿急了别人的箱子也算），不能借用不放行时记下的价；
+     * 一种问法：要什么、要几件、偏好与掉落线索、饿急通报、许可、算不算现做，以及做法不拿来当原料的那段外层。
+     * 用途只是说明，不影响报价。通报不一样，容器报的价就不一样（饿急了从别人的箱子只拿刚好够的），不能借用不带通报时记下的价；
      * 那段外层不一样，做法里剔掉的就不一样，也不能借用。
      */
     private record Question(WantedItem wanted, int count, List<String> prefer, DropsFrom dropsFrom,
-                            OthersStorageAllowance othersStorage, Permissions permissions, boolean includeMaking,
+                            StarvingFoodReport foodReport, Permissions permissions, boolean includeMaking,
                             List<WantedItem> outerWanted) {}
 
     /**
@@ -129,7 +129,7 @@ final class PriceAsks {
      */
     Price ask(ItemRequest request, Permissions permissions, boolean includeMaking) {
         Question question = new Question(request.wanted(), request.count(), request.prefer(), request.dropsFrom(),
-                request.othersStorage(), permissions, includeMaking, outerWanted.get());
+                request.foodReport(), permissions, includeMaking, outerWanted.get());
         // 估算期间、动手问价那一轮里问过同一种问法：直接用记下的，不算又问了一遍。
         if (remembered != null) {
             Price known = remembered.get(question);

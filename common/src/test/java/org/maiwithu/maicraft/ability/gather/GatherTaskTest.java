@@ -20,7 +20,6 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -231,7 +230,7 @@ class GatherTaskTest {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西。
         return new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 entityId -> Optional.empty());
     }
 
@@ -291,26 +290,26 @@ class GatherTaskTest {
     }
 
     @Test
-    void 点名的玩家放的方块照挖_按坐标给的不动() {
-        // 一格看着像玩家放的石头：按坐标给的照旧拒绝；LLM 用观察编号点名后点名即许可，照挖，不再原样拒绝让它打转。
+    void 玩家放的方块按坐标给的也照挖() {
+        // 一格玩家放的石头：归属不参与保护，按坐标给的照挖。
         PermissionCheck guarded = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(),
-                        name -> Optional.empty(), (position, blockType) -> true, "self"),
+                        name -> Optional.empty(), "self"),
                 entityId -> Optional.empty());
         FakeBackpack byPosition = new FakeBackpack();
         FakeActions positionActions = new FakeActions(byPosition, "minecraft:cobblestone", 1);
-        TaskResult refused = run(new GatherTask(blockSpot(null), positionActions, positionActions, new NoToolsNeeded(),
+        TaskResult dug = run(new GatherTask(blockSpot(null), positionActions, positionActions, new NoToolsNeeded(),
                 new FakeWorld("minecraft:stone", false), null, positionActions, guarded, byPosition, null, null, PERMS));
-        assertEquals(TaskResult.Status.FAILED, refused.status());
-        assertTrue(positionActions.log.stream().noneMatch(line -> line.startsWith("挖")), "按坐标给的不该动手挖");
+        assertEquals(TaskResult.Status.DONE, dug.status(), dug.summary());
+        assertTrue(positionActions.log.stream().anyMatch(line -> line.startsWith("挖")), "按坐标给的照挖");
 
         FakeBackpack byName = new FakeBackpack();
         FakeActions namedActions = new FakeActions(byName, "minecraft:cobblestone", 1);
         GatherSpot named = new GatherSpot(AT, false, null, null, PERMS, true, "采集 b7 处的方块");
-        TaskResult dug = run(new GatherTask(named, namedActions, namedActions, new NoToolsNeeded(),
+        TaskResult namedDug = run(new GatherTask(named, namedActions, namedActions, new NoToolsNeeded(),
                 new FakeWorld("minecraft:stone", false), null, namedActions, guarded, byName, null, null, PERMS));
-        assertEquals(TaskResult.Status.DONE, dug.status(), dug.summary());
-        assertTrue(namedActions.log.stream().anyMatch(line -> line.startsWith("挖")), "点名的应当挖");
+        assertEquals(TaskResult.Status.DONE, namedDug.status(), namedDug.summary());
+        assertTrue(namedActions.log.stream().anyMatch(line -> line.startsWith("挖")), "点名的也挖");
     }
 
     @Test

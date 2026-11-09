@@ -4,9 +4,9 @@ package org.maiwithu.maicraft.behavior.inventory.containers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
@@ -19,11 +19,12 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** 记得的容器读端：世界记忆里的容器按距离给候选，别人的箱子不进候选。 */
+/** 记得的容器读端：世界记忆里的容器按距离给候选，谁放的都给（归属不拦），被圈地挡住的不给。 */
 class RememberedContainersTest {
 
     private static final String SELF = "00000000-0000-0000-0000-000000000001";
     private static final String STRANGER = "00000000-0000-0000-0000-000000000002";
+    private static final WorldPosition NEAR = new WorldPosition(10, -60, 12, "minecraft:overworld");
 
     @TempDir
     Path temp;
@@ -54,7 +55,14 @@ class RememberedContainersTest {
 
     private Protection protectionOtherAt(int x, int y, int z) {
         return new Protection(ownershipWithOtherAt(x, y, z), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, SELF);
+                name -> Optional.empty(), SELF);
+    }
+
+    /** 圈地替身：近处那只箱子圈进了"邻居的院子"。 */
+    private Protection protectionFencedNear() {
+        RememberedRegion yard = new RememberedRegion("邻居的院子", NEAR, 4);
+        return new Protection((dimension, px, py, pz) -> Optional.empty(), () -> List.of(yard),
+                name -> Optional.empty(), SELF);
     }
 
     @Test
@@ -80,11 +88,20 @@ class RememberedContainersTest {
     }
 
     @Test
-    void 别人的箱子不进候选() {
+    void 别人放的也进候选() {
         WorldMemory memory = memoryWithContainers();
-        // (10, -60, 12) 是别人放的：虽然更近，也不往里塞东西；30 格外那只无主的照给。
+        // (10, -60, 12) 是别人放的：归属不拦，照样给候选。
         RememberedContainers containers = containers(memory, new WorldPosition(12, -60, 10, "minecraft:overworld"),
                 protectionOtherAt(10, -60, 12));
+        assertEquals(2, containers.within(64).size());
+    }
+
+    @Test
+    void 圈地里的不进候选() {
+        WorldMemory memory = memoryWithContainers();
+        // (10, -60, 12) 圈进了"邻居的院子"：不往里塞东西；30 格外那只照给。
+        RememberedContainers containers = containers(memory, new WorldPosition(12, -60, 10, "minecraft:overworld"),
+                protectionFencedNear());
         List<KnownContainer> nearby = containers.within(64);
         assertEquals(1, nearby.size());
         assertEquals(30, nearby.getFirst().at().x());

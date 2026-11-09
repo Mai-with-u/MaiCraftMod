@@ -41,7 +41,7 @@ class PermissionCheckTest {
             () -> List.of(new RememberedRegion("河东的农场",
                     new WorldPosition(500, 64, 500, "minecraft:overworld"), 16)),
             name -> Optional.empty(),
-            GuessesPlayerMade.NOTHING,
+            
             SELF);
     private final PermissionCheck check = new PermissionCheck(protection, fixedSituations());
 
@@ -93,14 +93,9 @@ class PermissionCheckTest {
     }
 
     @Test
-    void 玩家放的方块_任何档位都不动_被拒说清要点名() {
-        var refusal = check.blockAllowed(Permissions.DEFAULT,
-                PermissionCheck.WorldAction.DIG_BLOCK, WALL, null).orElseThrow();
-        assertEquals(Problem.Kind.NEED_APPROVAL, refusal.kind());
-        assertTrue(refusal.message().contains("(10, 64, 10)"), refusal.message());
-        assertTrue(refusal.suggestion().contains("观察编号"), refusal.suggestion());
-        // 说清是哪一路挡的：这一格是服务端归属记录写着别人放的，不只给一句笼统的"玩家放的或在玩家的地盘里"。
-        assertTrue(refusal.message().contains("服务端归属记录写着是 " + OTHER + " 放的"), refusal.message());
+    void 玩家放的方块_归属不拦_照挖() {
+        assertEquals(Optional.empty(), check.blockAllowed(Permissions.DEFAULT,
+                PermissionCheck.WorldAction.DIG_BLOCK, WALL, null));
     }
 
     @Test
@@ -197,8 +192,10 @@ class PermissionCheckTest {
 
     @Test
     void 被拒的许可问题_能升级成向提问_带同意与不同意两个选项() {
+        // 记住的区域里的格子挡在保护一关，拒了给提问。
+        var inside = new WorldPosition(505, 64, 500, "minecraft:overworld");
         var refusal = check.blockAllowed(Permissions.DEFAULT,
-                PermissionCheck.WorldAction.DIG_BLOCK, WALL, null).orElseThrow();
+                PermissionCheck.WorldAction.DIG_BLOCK, inside, null).orElseThrow();
         Question question = check.approvalQuestion(refusal).orElseThrow();
         assertEquals(Question.Reason.NEED_APPROVAL, question.reason());
         assertEquals(2, question.options().size());

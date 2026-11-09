@@ -39,7 +39,7 @@ import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 
 /**
  * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，把这一趟要的几样东西搬进背包
@@ -54,8 +54,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
  * 由引擎转述，不与确认拿到的混在一起。记得的箱子到现场可能已经不在：
  * 点不开、界面一直没同步，都如实失败，引擎换别的路。
  *
- * <p>请求带着绑到这只箱子上的别人的箱子放行（饿急了弄口粮）时，只拿箱里第一样放行的东西、拿到放行给的件数为止，
- * 关箱前把箱里确认少了几件报回放行；界面中途没了、说不清少了几件的不报。
+ * <p>请求带着绑到这只箱子上的饿急通报（饿急了弄口粮、这只箱子不是角色自己放的）时，只拿通报点名的那一样口粮、
+ * 拿到刚好够吃回危险线的件数为止，关箱前把箱里确认少了几件报回去；界面中途没了、说不清少了几件的不报。
  */
 public final class MenuContainerTakes implements ContainerTakes {
 
@@ -259,8 +259,8 @@ public final class MenuContainerTakes implements ContainerTakes {
             @Override
             public void rememberBeforeClose(Optional<MenuContent.Reading> lastReading) {
                 lastReading.ifPresent(MenuContainerTakes.TakeAction.this::rememberContents);
-                // 从别人的箱子按放行拿的：关箱前按箱里确认少了几件报回放行，由放行的人告诉宿主拿了谁的什么。
-                lastReading.ifPresent(reading -> wants.forEach(want -> want.reportTakenFromOthers(reading)));
+                // 从不是自己放的箱子按饿急通报拿的：关箱前按箱里确认少了几件报回去，由发起的一方发事件告诉宿主。
+                lastReading.ifPresent(reading -> wants.forEach(want -> want.reportTaken(reading)));
             }
 
             @Override
@@ -289,7 +289,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             private int allowance = Integer.MAX_VALUE;
             /** 是机器料箱时，它见过最满的时候有几件（留一半按它算）；不是为 -1。 */
             private int limitedFor = -1;
-            /** 按放行从别人的箱子拿的那一样（物品 ID）与它显示的名字；不是别人的箱子、或箱里没有放行的为 null。 */
+            /** 按饿急通报从这只箱子拿的那一样（物品 ID）与它显示的名字；没绑通报、或箱里没有通报认的为 null。 */
             private String othersItem;
             private String othersItemName;
 
@@ -316,16 +316,16 @@ public final class MenuContainerTakes implements ContainerTakes {
 
             @Override
             public Predicate<SlotSnapshot> matcher() {
-                // 别人的箱子只认挑中的那一样：一种口粮一件补多少不一样，刚好够的件数按它算。
+                // 通报只认挑中的那一样：一种口粮一件补多少不一样，刚好够的件数按它算。
                 return snapshot -> matches(snapshot, request)
                         && (othersItem == null || othersItem.equals(itemIdOf(snapshot)));
             }
 
             @Override
             public void firstReading(MenuContent.Reading reading) {
-                OthersStorageAllowance others = request.othersStorage();
-                // 别人的箱子：先挑箱里第一样放行的东西，只拿它；一样放行的都没有就一件不拿。
-                if (others.bound()) pickOthersItem(reading, others);
+                StarvingFoodReport report = request.foodReport();
+                // 绑了饿急通报的箱子（不是自己放的）：先挑箱里第一样通报认的东西，只拿它；一样认的都没有就一件不拿。
+                if (report.bound()) pickReportedItem(reading, report);
                 startTotal = matchedTotal(reading, matcher());
                 // 机器的进料箱、补料箱（下面挂着溜槽漏斗、旁边贴着往外抽的漏斗）能翻，但每样最多拿走一半，
                 // 给机器留着，不把人家搬空（用户 10-13 定）。出料箱不算，成品照样能拿完。
@@ -333,25 +333,25 @@ public final class MenuContainerTakes implements ContainerTakes {
                     limitedFor = fullestFeederCount(request.wanted().describe(), startTotal);
                     allowance = Math.max(0, startTotal - (limitedFor + 1) / 2);
                 }
-                if (others.bound()) allowance = Math.min(allowance, othersItem == null ? 0 : others.atMost(othersItem));
+                if (report.bound()) allowance = Math.min(allowance, othersItem == null ? 0 : report.atMost(othersItem));
             }
 
-            // 按容器格的先后挑第一样放行的（能拿的件数大于零）；挑中了记下它和它显示的名字。
-            private void pickOthersItem(MenuContent.Reading reading, OthersStorageAllowance others) {
+            // 按容器格的先后挑第一样通报认的（能拿的件数大于零）；挑中了记下它和它显示的名字。
+            private void pickReportedItem(MenuContent.Reading reading, StarvingFoodReport report) {
                 for (SlotSnapshot snapshot : reading.containerSnapshots()) {
-                    if (!matches(snapshot, request) || others.atMost(itemIdOf(snapshot)) <= 0) continue;
+                    if (!matches(snapshot, request) || report.atMost(itemIdOf(snapshot)) <= 0) continue;
                     othersItem = itemIdOf(snapshot);
                     othersItemName = snapshot.stack().getHoverName().getString();
                     return;
                 }
             }
 
-            // 关箱前：从别人的箱子拿了几件按箱里确认少了的算，一件都没少不报。
-            void reportTakenFromOthers(MenuContent.Reading reading) {
+            // 关箱前：从绑定的箱子拿了几件按箱里确认少了的算，一件都没少不报。
+            void reportTaken(MenuContent.Reading reading) {
                 if (othersItem == null || startTotal < 0) return;
                 int taken = startTotal - matchedTotal(reading, matcher());
                 if (taken > 0) {
-                    request.othersStorage().taken(List.of(new OthersStorageAllowance.Taken(othersItem, othersItemName, taken)));
+                    request.foodReport().taken(List.of(new StarvingFoodReport.Taken(othersItem, othersItemName, taken)));
                 }
             }
 

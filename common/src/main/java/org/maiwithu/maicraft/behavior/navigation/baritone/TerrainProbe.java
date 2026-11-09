@@ -224,8 +224,10 @@ final class TerrainProbe {
                     List<BlockPos> cells = breaks.computeIfAbsent(block, k -> new ArrayList<>());
                     if (!cells.contains(cell)) cells.add(cell.immutable());
                     if (!ClearanceWhitelist.allows(state)) outside.add(block);
-                    NavigationProtection.escapeOwner(context.maicraftPolicy, cell.getX(), cell.getY(), cell.getZ(), state)
-                            .ifPresent(owner -> others.merge(owner, 1, Integer::sum));
+                    // 这条路上放开给脱困要挖的格里，有别人放的就按人记下几格：结果里写明挖了谁的。
+                    if (NavigationProtection.escapeBreakable(context.maicraftPolicy, cell.getX(), cell.getY(), cell.getZ(), state)) {
+                        NavigationProtection.placedByOther(cell).ifPresent(owner -> others.merge(owner, 1, Integer::sum));
+                    }
                 }
                 for (BlockPos cell : movement.toPlace(context.bsi)) places.add(cell.immutable());
                 PathPlannerPool.madeProgress("terrain_probe_movement");

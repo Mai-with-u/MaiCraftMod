@@ -21,7 +21,6 @@ import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
-import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -40,11 +39,10 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
  * 就在跟前时也再给一次机会——记忆只是线索，刚装进去的货、别人顺手放的东西都要到现场开了才算数。
  * 到了跟前以现场为准，开了才算数；用哪只箱子、里面实际有多少，由开箱取物的执行接缝到现场核对并如实回报。
  *
- * <p>别人的箱子不碰：别人放的、在玩家地盘里的、这次任务额外保护的地标旁的，归属还没问清的也算，
- * 记得里面有货也不去翻——默认绝不碰玩家的箱子。自己放的、自家人（所有者信任的玩家）放的照常翻。
- * 跳过的箱子在说明里按原因合并计数，说清记在谁名下或是哪一路挡的，以及自家人怎么写进实例配置。
- * 唯一的例外是请求带着别人的箱子放行（饿到危险线弄口粮）：能用的箱子都没有这样东西时，才报最近一只
- * 有货或没开过的别人的箱子，开箱时只拿放行的那一样、刚好够的件数，额外保护的地标旁照旧不碰。
+ * <p>谁放的箱子都能翻（归属不拦），只有额外保护的地标旁与记住的区域里的不碰。
+ * 跳过的箱子在说明里按原因合并计数，说清是地标还是区域挡的。
+ * 请求带着饿急通报（饿到危险线弄口粮）时，挑中的箱子若不是角色自己放的，绑上通报交给开箱：
+ * 只拿通报点名的那一样口粮、刚好够的件数，拿到了由通报发事件让宿主知道。
  *
  * <p>一只箱子这一次拿东西里走不到跟前，记进这一次的"走不到的地方"：后面的原料不再拿去问它，
  * 只记下又问到了它，失败说明里由引擎合成一句。
@@ -58,22 +56,13 @@ public final class ContainerSource implements ItemSource {
     private final ReadsItemTags tags;
     private final Protection protection;
     private final ContainerTakes takes;
-    /** 玩家编号换成名字：跳过别人的箱子时写记在谁名下，在线写名字，不在线写编号。 */
-    private final Function<String, String> ownerNames;
 
-    /** 玩家编号原样写：离线测试与读不到玩家列表时用。 */
+    /** 生产与离线测试都用这一种：归属是谁放的这个事实由保护判断当场给。 */
     public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
-        this(spots, tags, protection, takes, Function.identity());
-    }
-
-    /** @param ownerNames 玩家编号换成名字，跳过别人的箱子时写记在谁名下 */
-    public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes,
-            Function<String, String> ownerNames) {
         this.spots = spots;
         this.tags = tags;
         this.protection = protection;
         this.takes = takes;
-        this.ownerNames = ownerNames;
     }
 
     /** 记得没有、但离这么近（格）的箱子再开一眼：几步路的事，记忆可能过时。 */
@@ -104,11 +93,8 @@ public final class ContainerSource implements ItemSource {
         ContainerChooser.Candidate maybe = null;
         boolean maybeUnsureKind = false;
         ContainerChooser.Candidate stale = null;
-        // 跳过的别人的箱子按为什么不能用、记在谁名下合并计数：几只同一个原因只说一次带只数。
-        Map<StorageUse, Integer> skippedOthers = new LinkedHashMap<>();
-        // 带着别人的箱子放行时，最近一只有货或没开过的别人的箱子：能用的箱子都没有时才报它。
-        ContainerChooser.Candidate others = null;
-        StorageUse othersUse = null;
+        // 挡住的箱子按是哪一路合并计数：几只同一个原因只说一次带只数。
+        Map<StorageUse, Integer> skipped = new LinkedHashMap<>();
         boolean skippedUnreachable = false;
         int considered = 0;
         UnreachablePlaces unreachable = context.unreachable();
@@ -118,15 +104,11 @@ public final class ContainerSource implements ItemSource {
                 skippedUnreachable = true;
                 continue;
             }
-            // 别人的箱子不翻：记得里面有货也跳过，只在说明里交代是谁的；自家人的照常翻。
+            // 额外保护的地标旁、记住的区域里的不翻：记得里面有货也跳过，只在说明里交代是哪一路挡的。
             // 这次任务额外保护的地标读端不知道，在这里按任务许可再问一遍保护判断。
             StorageUse use = storageUse(candidate, context);
             if (!use.usable()) {
-                if (others == null && othersWorthTrying(candidate, use, request)) {
-                    others = candidate;
-                    othersUse = use;
-                }
-                skippedOthers.merge(use, 1, Integer::sum);
+                skipped.merge(use, 1, Integer::sum);
                 continue;
             }
             considered++;
@@ -171,35 +153,29 @@ public final class ContainerSource implements ItemSource {
         if (!spots.scanComplete()) {
             return new SourceQuote.NotYet(describe(), "附近的容器还没扫完，扫完再答有没有");
         }
-        // 能用的箱子里都没有，又带着别人的箱子放行（饿急了弄口粮）：报最近那只别人的箱子，说清是谁的。
-        if (others != null) return othersOffer(others, othersUse, request, context);
-        return nothingHere(request, skippedOthers, skippedUnreachable && considered == 0);
+        return nothingHere(request, skipped, skippedUnreachable && considered == 0);
     }
 
     // 哪只都拿不了：能翻的都是这一次走不到跟前的，不另说一条原因，引擎在最外层合成一句说；
-    // 否则说记得的容器里没有，跳过的别人的箱子按原因合并计数接在后面。
-    private SourceQuote.Unavailable nothingHere(ItemRequest request, Map<StorageUse, Integer> skippedOthers,
+    // 否则说记得的容器里没有，挡住的箱子按原因合并计数接在后面。
+    private SourceQuote.Unavailable nothingHere(ItemRequest request, Map<StorageUse, Integer> skipped,
             boolean onlyUnreachable) {
-        if (onlyUnreachable && skippedOthers.isEmpty()) {
+        if (onlyUnreachable && skipped.isEmpty()) {
             return new SourceQuote.Unavailable(describe(), UnreachablePlaces.SKIPPED);
         }
         return new SourceQuote.Unavailable(describe(),
-                "记得的容器里没有装着" + request.wanted().describe() + "的" + skippedText(skippedOthers));
+                "记得的容器里没有装着" + request.wanted().describe() + "的" + skippedText(skipped));
     }
 
     /**
-     * 跳过的别人的箱子怎么说："，别人的箱子不翻：2 只记在 bob 名下、1 只不知道是谁的（按别人的算）"；
-     * 同一个原因、同一个人的只说一次带只数，长度只随原因与人数增长，不随箱子数增长。
-     * 有记在别人名下的，再说一次怎么把自家人写进实例配置；没跳过的给空串。
+     * 挡住的箱子怎么说："，能用的都给挡住了：2 只在这次额外保护的地标「家」旁、1 只在记住的区域「河东的农场」里"；
+     * 同一个原因的只说一次带只数，长度只随原因数增长，不随箱子数增长。没挡住的给空串。
      */
     private String skippedText(Map<StorageUse, Integer> skipped) {
         if (skipped.isEmpty()) return "";
         List<String> parts = new ArrayList<>();
-        skipped.forEach((use, count) -> parts.add(count + " 只" + use.describe(ownerNames)));
-        // 只有记在别人名下的那几只，写进自家人名单就能拿；地标、地盘、归属没问到的写了也不管用，不教。
-        boolean recorded = skipped.keySet().stream().anyMatch(use -> use.kind() == StorageUse.Kind.PLACED_BY_OTHER);
-        String howToAllow = recorded ? "；放的人是自家人就写进" + TrustedPlayers.LISTED_IN + "，写了就能拿" : "";
-        return "，别人的箱子不翻：" + String.join("、", parts) + howToAllow;
+        skipped.forEach((use, count) -> parts.add(count + " 只" + use.describe()));
+        return "，能用的都给挡住了：" + String.join("、", parts);
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -217,28 +193,33 @@ public final class ContainerSource implements ItemSource {
             return Optional.empty();
         }
         ContainerChooser.Candidate container = found.get();
-        // 报价之后才知道它是玩家的（归属刚问到）：同样不翻，交回空让引擎换路；带着放行、能拿吃的除外。
+        // 报价之后它被圈进了区域或点了额外保护的地标：不翻，交回空让引擎换路。
         StorageUse use = storageUse(container, context);
-        if (!use.usable() && !takableUnderAllowance(use, request)) {
+        if (!use.usable()) {
             return Optional.empty();
         }
-        // 家里别人放的箱子照用：名字后面带上是谁放的，开箱取货的说明与结果里看得出拿的是谁的东西，主播知情。
-        // 回报会被直播念出来：放的人不在线时写"一位不在线的玩家"，不吐编号。
-        String note = use.homeNote(protection::nameOf);
-        KnownContainer known = new KnownContainer(
-                note.isEmpty() ? container.name() : container.name() + "（" + note + "）", container.at(),
-                container.blockTypeId());
-        List<ItemRequest> wants = new ArrayList<>();
-        if (!use.usable()) {
-            // 别人的箱子：放行绑到这一只上，开箱时只拿放行的那一样、刚好够的件数，拿到了报回去；顺路的别样一件不拿。
-            wants.add(request.withOthersStorage(request.othersStorage().at(use, container.at())));
-        } else {
-            // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
-            wants.add(request);
-            for (ItemRequest extra : context.alsoWanted()) {
-                if (!extra.wanted().specifier().equals(request.wanted().specifier())) wants.add(extra);
+        // 饿急通报（饿到危险线弄口粮）：这一只不是角色自己放的，就绑上通报交给开箱——
+        // 只拿通报点名的那一样口粮、刚好够的件数，拿到了发事件让宿主知道是谁家的。
+        // 自己放的、归属还没问到的都不绑：前者是自己的东西，后者是谁的还说不清。
+        ItemRequest want = request;
+        if (want.foodReport().open()) {
+            String ownerName = protection.placedByOther(container.at()).map(protection::nameOf).orElse(null);
+            if (ownerName != null || !protection.ownershipKnown(container.at())) {
+                want = want.withFoodReport(want.foodReport().at(container.at(), ownerName));
             }
         }
+        List<ItemRequest> wants = new ArrayList<>();
+        if (want.foodReport().bound()) {
+            // 绑了通报：开箱只拿通报点名的那一样、刚好够的件数；顺路的别样一件不拿。
+            wants.add(want);
+        } else {
+            // 开都开了：把这一趟还要的另外几样一起带上，箱里有的就顺手拿了，不再为每样各开一次。
+            wants.add(want);
+            for (ItemRequest extra : context.alsoWanted()) {
+                if (!extra.wanted().specifier().equals(want.wanted().specifier())) wants.add(extra);
+            }
+        }
+        KnownContainer known = new KnownContainer(container.name(), container.at(), container.blockTypeId());
         Optional<Action> take = takes.take(known, wants, context.permissions());
         UnreachablePlaces unreachable = context.unreachable();
         if (unreachable == null) return take;
@@ -276,33 +257,12 @@ public final class ContainerSource implements ItemSource {
     }
 
     /**
-     * 这只箱子能不能翻：自己或自家人放的、野外无主的能翻；别人的、在玩家地盘里的、额外保护的、拿不准的不翻。
-     * 不能翻时连同是哪一路挡的、记在谁名下一起交回，说明里照它说。
+     * 这只箱子能不能翻：只有额外保护的地标旁、记住的区域里的不翻；谁放的都能翻（归属不拦）。
+     * 不能翻时连同是哪一路挡的一起交回，说明里照它说。
      */
     private StorageUse storageUse(ContainerChooser.Candidate candidate, SourceContext context) {
-        // 拿东西从箱子里拿是亲手去翻的那一只：在角色自己的家里，别人放进来的也能拿（问放开的那一份）。
-        return protection.storageUseAtHome(candidate.at(), candidate.blockTypeId(), context.permissions().protectedLandmarks());
-    }
-
-    /** 带着放行时值不值得去翻这只别人的箱子：能拿，而且记得里面有要的东西或者没开过。 */
-    private boolean othersWorthTrying(ContainerChooser.Candidate candidate, StorageUse use, ItemRequest request) {
-        return takableUnderAllowance(use, request)
-                && (candidate.knownContents() == null || holdsWanted(candidate, request));
-    }
-
-    /** 带着别人的箱子放行时，这只别人的箱子能不能拿：放行还开着、又不是额外保护的地标旁的。 */
-    private static boolean takableUnderAllowance(StorageUse use, ItemRequest request) {
-        return request.othersStorage().open() && use.usableWhenStarving();
-    }
-
-    // 别人的箱子的报价：记得有货报件数，没开过报不知道多少；说明里写是谁的，LLM 和日志都看得出为什么去翻它。
-    private SourceQuote.Offer othersOffer(ContainerChooser.Candidate candidate, StorageUse use, ItemRequest request,
-            SourceContext context) {
-        int count = candidate.knownContents() == null ? SourceQuote.Offer.UNKNOWN_COUNT
-                : Math.min(countWanted(candidate, request), request.count());
-        return new SourceQuote.Offer(describe(), count, new AcquisitionCost(reachableCost(candidate, context), 4),
-                depthNote(candidate, context, "能用的箱子里没有，饿急了从别人的箱子（" + use.describe(ownerNames)
-                        + "）拿刚好够吃的"), positionHint(candidate));
+        return protection.storageUse(candidate.at(), candidate.blockTypeId(),
+                context.permissions().protectedLandmarks());
     }
 
     /** 这次搜多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

@@ -15,8 +15,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  *
  * <p>两条规矩：
  * <ul>
- * <li>LLM 明确点名的目标（观察编号）视为对这个目标的许可——"拆掉这面墙"点名了那面墙，
- *     即使它是玩家放的也放行；但角色自己挑的目标必须过保护和许可档位两道关。
+ * <li>LLM 明确点名的目标（观察编号）视为对这个目标的许可——"拆掉这面墙"点名了那面墙就放行；
+ *     角色自己挑的目标还要过保护（记住的区域、额外保护的地标）与许可档位两道关。
  *     例外是有主的生物（有名字、驯服、拴绳、圈养）和玩家：伤害它们点了名也要再确认一次，见 {@link #namedCreatureAllowed}。</li>
  * <li>被拒时给 {@code NEED_APPROVAL} 问题，写清需要哪一项许可、涉及哪些格子或生物，
  *     不让 LLM 猜该开哪个开关；要不要升级成向 LLM 提问，走提问升级的判断。</li>
@@ -105,9 +105,8 @@ public final class PermissionCheck {
     }
 
     /**
-     * 收回自己睡过的床，挖那一格能不能动：床是角色亲手睡过的，这就是"自己用的"的直接证据，
-     * 归属记录没问到、没写着谁放的都不按受保护挡（别的保护来路见 {@link #blockAllowed}）；
-     * 许可档位上按自己放的东西算，temporary 档也放行收回。是别人放的床在收回来源里已经让开。
+     * 收回自己睡过的床，挖那一格能不能动：床是角色亲手睡过的，这就是"自己用的"的直接证据
+     * （别的保护来路见 {@link #blockAllowed}）；许可档位上按自己放的东西算，temporary 档也放行收回。
      */
     public Optional<Problem> sleptBedReclaimAllowed(Permissions permissions, WorldPosition position) {
         ProtectedBy reason = protection.sleptBedProtectedBy(position, permissions.protectedLandmarks());
@@ -120,26 +119,14 @@ public final class PermissionCheck {
     }
 
     /**
-     * 角色自己挑中的一格方块能不能动：先过保护（归属记录、记住的区域、额外地标、玩家放置推断），
-     * 再过许可档位。观察编号不用走这里，{@link #allows} 已把点名当许可。
+     * 角色自己挑中的一格方块能不能动：先过保护（记住的区域、额外保护的地标），再过许可档位。
+     * 归属（谁放的）不参与。观察编号不用走这里，{@link #allows} 已把点名当许可。
      */
     public Optional<Problem> blockAllowed(Permissions permissions, WorldAction action,
             WorldPosition position, String blockType) {
         requireBlockAction(action);
         return blockAllowed(permissions, action, position,
                 protection.protectedBy(position, blockType, permissions.protectedLandmarks()));
-    }
-
-    /**
-     * 按图施工这类"点了这一格"的动手能不能做：和 {@link #blockAllowed} 一样过保护与档位，
-     * 只是在角色自己的家里，别人放的、归属没问到的、看着像玩家放的不挡（{@link Protection#protectedByUnlessHome}）。
-     * 寻路顺手挖、自动挑取材点不用它，照旧走 {@link #blockAllowed}。
-     */
-    public Optional<Problem> blockAllowedUnlessHome(Permissions permissions, WorldAction action,
-            WorldPosition position, String blockType) {
-        requireBlockAction(action);
-        return blockAllowed(permissions, action, position,
-                protection.protectedByUnlessHome(position, blockType, permissions.protectedLandmarks()));
     }
 
     /**
@@ -304,8 +291,7 @@ public final class PermissionCheck {
     }
 
     /**
-     * 受保护方块的拒绝：说清是哪一路挡的（归属记录写着谁放的、记住的区域、额外保护的地标、推断、归属没问到），
-     * 以及为什么许可档位开不到它。
+     * 受保护方块的拒绝：说清是哪一路挡的（记住的区域、额外保护的地标），以及为什么许可档位开不到它。
      */
     private Problem protectedBlockRejection(WorldPosition position, Permissions permissions, ProtectedBy reason) {
         String where = describe(position);
@@ -315,8 +301,8 @@ public final class PermissionCheck {
                     "把『" + reason.place() + "』从 protected_landmarks 里去掉，或明确点名这个目标");
         }
         return Problem.of(Problem.Kind.NEED_APPROVAL,
-                where + "不是你的：" + protection.describe(reason) + "，任何许可档位都不动它",
-                "想动它，就用观察编号明确点名这个目标");
+                where + protection.describe(reason) + "，任何许可档位都不动它",
+                "那一块是圈地记忆，要动就先撤掉那块区域，或明确点名这个目标");
     }
 
     private static String describe(WorldPosition position) {

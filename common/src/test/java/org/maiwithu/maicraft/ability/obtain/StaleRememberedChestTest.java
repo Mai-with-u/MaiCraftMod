@@ -32,7 +32,6 @@ import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -140,7 +139,7 @@ class StaleRememberedChestTest {
     private ObtainTask task(WorldMemory memory, Map<WorldPosition, String> loaded, FakeBackpack backpack) {
         ContainerSource source = new ContainerSource(spots(memory, loaded), tags,
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 (container, request, permissions) -> {
                     taken.set(container);
                     return Optional.of(new Action() {

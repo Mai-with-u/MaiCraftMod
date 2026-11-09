@@ -25,7 +25,6 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.sources.TradeSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -194,7 +193,7 @@ class AcquireScopeTest {
         TradeSource trade = new TradeSource((center, radius) -> List.of(),
                 uuid -> Optional.empty(), List::of,
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
-                        GuessesPlayerMade.NOTHING, "self"),
+                        "self"),
                 (candidates, request, permissions) -> Optional.empty());
         SourceQuote quote = trade.quote(
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "测试"), CONTEXT);

@@ -20,7 +20,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -60,7 +59,7 @@ class DropsFromSourcesTest {
             new ReadsCreatureSituation.CreatureSituation(false, false, false, false, false, false));
     private static final PermissionCheck PERMISSION = new PermissionCheck(
             new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                    name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"), WILD);
+                    name -> Optional.empty(), "self"), WILD);
 
     private final FakeBackpack backpack = new FakeBackpack(36);
     private final FakeOffhand offhand = new FakeOffhand();

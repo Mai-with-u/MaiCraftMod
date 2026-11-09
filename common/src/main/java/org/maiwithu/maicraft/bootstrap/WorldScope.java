@@ -33,7 +33,6 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.ClientVillagers;
-import org.maiwithu.maicraft.behavior.permission.LivePlayerMadeGuesses;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
@@ -182,21 +181,15 @@ public final class WorldScope {
     }
 
     // 全仓唯一的保护判断：归属记录、记住的区域与地标、自家人之外再接两路现场读数，都读当刻的角色上下文。
-    // 玩家放置推断按方块本身认：门、活板门、栅栏门这类归属记录查不到的，也按玩家的东西对待；
-    // 村庄按看得见村民认：收回睡过的床时村里的那张让开。读不到当刻的现场（还没进世界、人接管中）就不猜、按没看见算。
-    // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。
+    // 村庄按看得见村民认：收回睡过的床时村里的那张让开。读不到当刻的现场（还没进世界、人接管中）就按没看见算。
+    // 自家人：所有者在实例配置里列的信任玩家；名单写名字的，按在线玩家对上编号。名单只管生物（驯服、自卫），不管存储。
     private static TrustedPlayers trustedPlayers(InstanceConfig instanceConfig, Minecraft minecraft) {
         return new TrustedPlayers(instanceConfig.trustedPlayers(), name -> OnlinePlayers.idByName(minecraft, name));
     }
 
-    // 角色自己的家按床与她盖过的房子圈（快照），家里别人放的她亲手用、改都行；拒绝和回报里说是谁放的，编号按在线玩家换成名字。
+    // 角色自己的家按床与她盖过的房子圈（快照）；回报里说是谁放的，编号按在线玩家换成名字。
     private Protection assembleProtection(WorldMemory memory, PlayerControlBoundary playerControl, String selfPlayerId) {
-        return new Protection(ownership, regions, memory,
-                new LivePlayerMadeGuesses(position -> playerControl.activeContext()
-                        .map(context -> context.level() == null ? null
-                                : context.level().getBlockState(new BlockPos(position.x(), position.y(), position.z())))
-                        .orElse(null)),
-                selfPlayerId, trusted,
+        return new Protection(ownership, regions, memory, selfPlayerId,
                 new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)),
                 ownHome,
                 id -> OnlinePlayers.nameOrSomeoneOffline(playerControl.activeContext().orElse(null), id));
@@ -320,19 +313,17 @@ public final class WorldScope {
     }
 
     /**
-     * 寻路挖路、垫路也过这一份保护判断：不挖穿别人的房子，归属拿不准的格子不动。
-     * 算路跑在后台线程上，碰不了当刻的角色上下文（玩家控制边界只许客户端线程进），所以门类推断不走
-     * 读现场的那份推断，改用寻路自己读到的这格方块来认；归属记录、区域几路照旧。
-     * 被封死在小坑里、按任务许可挖不出去时：别人放的普通方块能挖开出去，功能方块、记住的区域与地点旁边的照旧不碰。
+     * 寻路挖路、垫路也过这一份保护判断：只避开记住的区域与额外保护的地标，归属（谁放的）不拦。
+     * 算路跑在后台线程上，碰不了当刻的角色上下文，保护判断本身不读现场，后台线程照样能问。
+     * 被封死在小坑里、按任务许可挖不出去时：功能方块、记住的区域与记住的地点旁不挖，其余普通方块都能挖开出去。
      */
     private void installNavigationProtection() {
         NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
             @Override public boolean protects(int x, int y, int z, BlockState state) {
-                return protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of(),
-                        state != null && LivePlayerMadeGuesses.looksPlacedByPlayer(state));
+                return protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of());
             }
 
-            @Override public Optional<String> placedByOtherWhenTrapped(int x, int y, int z, BlockState state) {
+            @Override public boolean escapeBreakable(int x, int y, int z, BlockState state) {
                 return protection.breakableWhenTrapped(new WorldPosition(x, y, z, dimension),
                         FunctionalBlocks.functional(state));
             }

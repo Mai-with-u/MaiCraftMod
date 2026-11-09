@@ -14,7 +14,6 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
@@ -41,7 +40,7 @@ class TradeSourceTest {
             new ReadsCreatureSituation.CreatureSituation(false, false, false, false, false, false));
 
     private static final Protection NOBODY_OWNS = new Protection((dimension, x, y, z) -> Optional.empty(),
-            List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+            List::of, name -> Optional.empty(), "self");
 
     private static ScansMerchants.MerchantSpot farmer(int id, int x, boolean baby, boolean opensTrading) {
         return new ScansMerchants.MerchantSpot(id, new UUID(0, id), WorldPosition.here(x, 64, 0),

@@ -24,10 +24,10 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.behavior.permission.SeesVillagers;
@@ -198,14 +198,15 @@ class ClientStairsDownTest {
 
     private final World world = new World();
     private final Digs digs = new Digs(world);
-    /** 受保护的格子：别人放的方块，许可检查点拒绝挖。 */
+    /** 受保护的格子：圈起来的地盘，许可检查点拒绝挖。 */
     private final Set<BlockPos> protectedCells = new HashSet<>();
 
     private ClientStairsDown stairs() {
         PermissionCheck check = new PermissionCheck(
-                new Protection((dimension, x, y, z) -> protectedCells.contains(new BlockPos(x, y, z))
-                        ? Optional.of(new ReadsBlockOwnership.PlacedBy("someone")) : Optional.empty(),
-                        () -> List.of(), name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                new Protection((dimension, x, y, z) -> Optional.empty(),
+                        () -> protectedCells.stream()
+                                .map(cell -> new RememberedRegion("别人的地盘", new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), null), 0)).toList(),
+                        name -> Optional.empty(), "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -292,7 +293,7 @@ class ClientStairsDownTest {
         };
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
-                        GuessesPlayerMade.NOTHING, "self", TrustedPlayers.NOBODY, SeesVillagers.NOBODY, home, id -> id),
+                        "self", SeesVillagers.NOBODY, home, id -> id),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -436,8 +437,8 @@ class ClientStairsDownTest {
     }
 
     @Test
-    void 半路前面是别人放的方块_拐个弯接着往下挖() {
-        // 挖到一半前面是不许拆的方块：往左、往右拐着接着挖，不为这一格停下整条采掘。
+    void 半路前面是圈起来的格子_拐个弯接着往下挖() {
+        // 挖到一半前面是圈地里不许拆的方块：往左、往右拐着接着挖，不为这一格停下整条采掘。
         protectedCells.add(new BlockPos(0, 62, -2));
 
         assertInstanceOf(ActionStatus.Done.class, run(3));
@@ -465,7 +466,7 @@ class ClientStairsDownTest {
         };
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), () -> List.of(), name -> Optional.empty(),
-                        GuessesPlayerMade.NOTHING, "self"),
+                        "self"),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -509,7 +510,7 @@ class ClientStairsDownTest {
     }
 
     @Test
-    void 别人放的方块不挖_要许可() {
+    void 圈起来的格子不挖_要许可() {
         for (Direction side : Direction.Plane.HORIZONTAL) {
             protectedCells.add(new BlockPos(0, 63, 0).relative(side));
         }
@@ -560,7 +561,7 @@ class ClientStairsDownTest {
 
     @Test
     void 下一级脚下是空洞_那一格不许放_不垫() {
-        // 空洞那一格是别人的（受保护）：不往里垫，停下说清不许垫。
+        // 空洞那一格圈在地里（受保护）：不往里垫，停下说清不许垫。
         holeUnderFirstStep();
         world.fillers = List.of("minecraft:dirt");
         protectedCells.add(new BlockPos(0, 62, -1));

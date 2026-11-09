@@ -27,7 +27,6 @@ import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
@@ -373,7 +372,7 @@ final class TerminalFlowFakes {
     /** 不在世界里的玩家行为：要什么按物品 ID 精确对上（标签一概不算），其余的入口一个都用不上。 */
     static PlayerServices services(Supplier<PlayerContext> contexts) {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
         return new PlayerServices(contexts, (target, permissions) -> null, new Interactions(null),
                 itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null,
                 nobodyOwns, itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE, new BackpackView() {

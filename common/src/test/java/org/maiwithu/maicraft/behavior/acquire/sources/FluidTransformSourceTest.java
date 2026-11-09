@@ -24,7 +24,6 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -135,7 +134,7 @@ class FluidTransformSourceTest {
 
         private PlayerServices services() {
             Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                    name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                    name -> Optional.empty(), "self");
             BackpackView backpack = new BackpackView() {
                 @Override public List<BackpackStack> stacks() { return carried; }
                 @Override public int usedSlots() { return carried.size(); }

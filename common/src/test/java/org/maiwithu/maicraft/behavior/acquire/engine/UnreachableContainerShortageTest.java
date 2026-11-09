@@ -28,7 +28,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -54,7 +53,7 @@ class UnreachableContainerShortageTest {
             + "试过 49 个位置" + "（这条路走不通：水下一口气游不过去）".repeat(60);
 
     private static final Protection NOBODY_OWNS = new Protection((dimension, x, y, z) -> Optional.empty(),
-            List::of, name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+            List::of, name -> Optional.empty(), "self");
 
     @TempDir Path temp;
 

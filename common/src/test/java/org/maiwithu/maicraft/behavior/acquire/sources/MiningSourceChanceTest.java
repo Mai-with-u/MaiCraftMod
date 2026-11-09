@@ -28,7 +28,6 @@ import org.maiwithu.maicraft.behavior.acquire.mining.VanillaBlockDrops;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -60,7 +59,7 @@ class MiningSourceChanceTest {
         // 真许可检查点加全空的替身保护：本场景里没有任何受保护的东西，挡路的只有许可档位。
         PermissionCheck permission = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                        name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self"),
+                        name -> Optional.empty(), "self"),
                 entityId -> Optional.empty());
         ReadsToolRequirements noTools = new ReadsToolRequirements() {
             @Override public Optional<String> toolRequired(String blockType) {

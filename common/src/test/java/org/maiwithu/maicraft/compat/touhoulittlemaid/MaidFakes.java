@@ -23,7 +23,6 @@ import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.ReceivedChat;
@@ -252,7 +251,7 @@ final class MaidFakes {
     /** 同上，背包里带着这些东西（每样一件）。 */
     static PlayerServices services(ChatEventLog chat, List<String> carried) {
         Protection nobodyOwns = new Protection((dimension, x, y, z) -> Optional.empty(), List::of,
-                name -> Optional.empty(), GuessesPlayerMade.NOTHING, "self");
+                name -> Optional.empty(), "self");
         BackpackView empty = new BackpackView() {
             @Override public List<BackpackStack> stacks() {
                 return carried.stream().map(id -> new BackpackStack(id, 1, 1, true, false, false, false)).toList();

@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
@@ -59,8 +60,6 @@ class ReclaimSourceTest {
     private final Map<String, WorldPosition> places = new HashMap<>();
     /** 周围看得见村民的格子（村里的床）。 */
     private final Set<WorldPosition> nearVillagers = new HashSet<>();
-    /** 玩家放置推断猜成玩家放的格子。 */
-    private final Set<WorldPosition> guessedPlayerMade = new HashSet<>();
     private final List<BlockPos> collected = new ArrayList<>();
     private final FakeTags tags = new FakeTags();
     private WorldMemory memory;
@@ -85,8 +84,7 @@ class ReclaimSourceTest {
         };
         Protection protection = new Protection(ownership, () -> List.of(),
                 name -> Optional.ofNullable(places.get(name)),
-                (position, blockType) -> guessedPlayerMade.contains(position), "self", TrustedPlayers.NOBODY,
-                (position, radius) -> nearVillagers.contains(position));
+                "self", (position, radius) -> nearVillagers.contains(position), ReadsOwnHome.NOWHERE, id -> id);
         PermissionCheck check = new PermissionCheck(protection, new ReadsCreatureSituation() {
             @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                 return Optional.empty();
@@ -175,14 +173,11 @@ class ReclaimSourceTest {
     }
 
     @Test
-    void 睡过的床_推断像玩家放的_受保护要点名许可() {
-        // 推断这一路照别的方块一样问：没有归属记录、推断说像玩家放的，就按别人的东西挡下，要点名许可。
-        placedBed(FIELD_BED, "self");
+    void 睡过的床_没有记录也没记过睡的_不收() {
+        // 床那格没有归属记录、记忆里也没记自己睡过：收回来源拿不出"这是自己用的"证据，不收。
         owners.remove(FIELD_BED);
-        guessedPlayerMade.add(FIELD_BED);
-        SourceQuote.NeedsApproval approval = assertInstanceOf(SourceQuote.NeedsApproval.class,
-                quote(ANY_BED, Permissions.DEFAULT));
-        assertEquals(Problem.Kind.NEED_APPROVAL, approval.problem().kind());
+        unknownOwnership.add(FIELD_BED);
+        assertEquals(0, collected.size(), quote(ANY_BED, Permissions.DEFAULT) + "");
     }
 
     @Test

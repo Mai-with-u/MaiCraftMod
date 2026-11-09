@@ -25,14 +25,14 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 
 /**
  * 卡坑自动脱困：到不了目标、人又困在封死的坑里时，不等 LLM 放宽许可，把这一趟的地形许可临时升一级
- * 重新算路——从"只垫不挖"升到"挖天然方块"；已经能挖天然方块还是出不去（多半是被别人放的方块封死了），
- * 再升一级，这一趟放开别人放的普通方块，功能方块、记住的区域与地点旁边的照旧不碰。
+ * 重新算路——从"只垫不挖"升到"挖天然方块"；已经能挖天然方块还是出不去时再升一级，
+ * 这一趟放开普通方块（非天然的也挖），功能方块、记住的区域与地点旁边的照旧不碰。
  * change_blocks=none 不在此列：none 是调用方显式下达的"一格都不动"，被困也如实按走不通收场，
  * 只读复算会写明哪里必须动土、四周是谁的方块，由调用方决定放开许可或换目标。
  * 水路本来就在只走的路线里，只走不通等于水流这条已经试过。出了坑就降回任务原来的许可、收回放开接着走；
  * 升到头还是出不去，才按走不通收场，并把试过什么写进说明。
  *
- * <p>挖开的每一格别人的方块都记下谁放的、什么方块、在哪，一趟最多挖 {@link #MAX_OTHERS_BLOCKS} 格；
+ * <p>挖开的每一格别人的方块都记下谁放的、什么方块、在哪，一趟最多挖 {@link #MAX_ESCAPE_DIGS} 格；
  * 这次脱困一收场（出了坑或走不通）当场发一条事件，宿主不用等走路结束就知道挖了谁的。
  *
  * <p>和意外坠落救命照救一样是生存上的例外：在坑里一站几分钟等许可，是直播里最差的观感；
@@ -44,8 +44,8 @@ final class TrapEscape {
     private static final int CHECK_EVERY_TICKS = 10;
     /** 一趟最多升几次：出坑又掉回去、来回折腾时不无限升下去。 */
     static final int MAX_RAISES = 4;
-    /** 一趟最多挖开别人放的这么多格：两格高的身子，够挖一条 12 格长的通道；再多按走不通收场。 */
-    static final int MAX_OTHERS_BLOCKS = 24;
+    /** 一趟脱困最多挖开这么多格：两格高的身子，够挖一条 12 格长的通道；再多按走不通收场。 */
+    static final int MAX_ESCAPE_DIGS = 24;
 
     private final TerrainPermit base;
     private final TaskEventSink events;
@@ -53,7 +53,7 @@ final class TrapEscape {
     private final SuicideWayOut wayOut;
     /** 脱困中升到的那一档；没在脱困为 null。 */
     private TerrainPermit raised;
-    /** 脱困中放开了别人放的普通方块（最后一级）。 */
+    /** 脱困中放开了普通方块（最后一级，非天然的也挖）。 */
     private boolean throughOthers;
     /** 这次是被困在自己家里：只许拆选中的那一两格墙，经过由家里那一段自己记。 */
     private boolean atHome;
@@ -62,6 +62,8 @@ final class TrapEscape {
     private long nextCheck;
     private int placed;
     private int dug;
+    /** 这一趟脱困挖开的格（几次脱困合起来）：挖普通方块的上限按它算。 */
+    private int dugAll;
     private int raises;
     /** 这次脱困挖开的别人的方块；报过事件就不再报。 */
     private final List<OthersBlockBroken> othersThisTime = new ArrayList<>();
@@ -99,14 +101,14 @@ final class TrapEscape {
         return raised != null;
     }
 
-    /** 这一趟此刻放没放开别人放的普通方块：装保护要求时带上。 */
+    /** 这一趟此刻放没放开普通方块：装保护要求时带上。 */
     boolean throughOthers() {
         return throughOthers;
     }
 
     /**
-     * 引擎说没路时问一句：人困在坑里，就升一级——只垫升到挖天然方块；已经能挖天然方块还是没路，放开别人放的普通方块。
-     * 升不了就不去看坑：none 一格都不许动、已经升到头了、这一趟挖别人的方块到了上限。
+     * 引擎说没路时问一句：人困在坑里，就升一级——只垫升到挖天然方块；已经能挖天然方块还是没路，放开普通方块。
+     * 升不了就不去看坑：none 一格都不许动、已经升到头了、这一趟挖普通方块到了上限。
      *
      * @param feet 此刻脚下那一格：事件里说在哪被封住
      */
@@ -132,10 +134,10 @@ final class TrapEscape {
         return true;
     }
 
-    // 放不放开别人的普通方块：none 不放（一格都不动是调用方明说的）；已经放开的不再放；这一趟挖到上限的不再放。
+    // 放不放开普通方块：none 不放（一格都不动是调用方明说的）；已经放开的不再放；这一趟挖到上限的不再放。
     private boolean mayOpenOthers() {
         return base.changes() != Permissions.BlockChanges.NONE && !throughOthers
-                && othersAll.size() < MAX_OTHERS_BLOCKS;
+                && dugAll < MAX_ESCAPE_DIGS;
     }
 
     /**
@@ -153,7 +155,7 @@ final class TrapEscape {
 
     /**
      * 被困在自己家里、选好了要水平拆开的那一两格墙：许可至少升到能挖（引擎才肯挖那几格），
-     * 不放开别人放的普通方块，也不再往上升；拆哪几格由保护要求里的"许挖格"定。none 不升。
+     * 不放开普通方块，也不再往上升；拆哪几格由保护要求里的"许挖格"定。none 不升。
      */
     boolean raiseAtHome(BlockPos feet, long tick) {
         if (base.changes() == Permissions.BlockChanges.NONE || raised != null) return false;
@@ -226,31 +228,34 @@ final class TrapEscape {
     }
 
     /**
-     * 每刻挖之前看一眼正在挖的那一格：这一趟放开了别人的普通方块、这一格正是，就趁方块还在记下是谁放的、什么方块。
+     * 每刻挖之前看一眼正在挖的那一格：这一格是别人放的，就趁方块还在记下是谁放的、什么方块。
      * 放的人在线写名字，不在线写编号。
      */
     void watchDigging(BlockPos digging, BlockState state, PlayerContext context) {
-        if (!throughOthers || digging == null || state == null || state.isAir() || digging.equals(diggingAt)) return;
+        if (digging == null || state == null || state.isAir() || digging.equals(diggingAt)) return;
         diggingAt = digging.immutable();
-        diggingOthers = NavigationProtection.escapeOwner(digging, state)
+        diggingOthers = NavigationProtection.placedByOther(digging)
                 .map(owner -> new OthersBlockBroken(digging.toShortString(),
                         BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), nameOf(owner, context)))
                 .orElse(null);
     }
 
     /**
-     * 挖开了一格：脱困中记一笔挖开了几格；挖的是放开给脱困的别人的方块，就记下谁放的、什么方块、在哪。
+     * 挖开了一格：脱困中记一笔挖开了几格；挖的是别人放的方块，就记下谁放的、什么方块、在哪。
      * 返回这一下是不是挖到了一趟的上限、刚把放开收回：调用方要按新的保护要求重新算路。
      */
     boolean noteBroken(BlockPos at) {
-        if (raised != null) dug++;
+        if (raised != null) {
+            dug++;
+            dugAll++;
+        }
         OthersBlockBroken others = at != null && at.equals(diggingAt) ? diggingOthers : null;
         diggingAt = null;
         diggingOthers = null;
         if (others == null) return false;
         othersThisTime.add(others);
         othersAll.add(others);
-        if (!throughOthers || othersAll.size() < MAX_OTHERS_BLOCKS) return false;
+        if (!throughOthers || dugAll < MAX_ESCAPE_DIGS) return false;
         throughOthers = false;
         return true;
     }
@@ -285,8 +290,8 @@ final class TrapEscape {
             return stuckInPit ? withWayOut(problem.message(), problem) : problem;
         }
         report(Boolean.FALSE);
-        String capped = othersAll.size() >= MAX_OTHERS_BLOCKS
-                ? "，挖别人放的方块到了一趟 " + MAX_OTHERS_BLOCKS + " 格的上限" : "";
+        String capped = dugAll >= MAX_ESCAPE_DIGS
+                ? "，挖普通方块到了一趟 " + MAX_ESCAPE_DIGS + " 格的上限" : "";
         // 垫过、挖过还是没出去才说"还是没出去"；一格没动的直接接着说挡着的是什么，那才是 LLM 要的原因。
         String tried = story() + capped + (placed > 0 || dug > 0 ? "，还是没出去" : "");
         // 出路按任务原来的许可说：脱困临时升的那一档只管寻路，单独下令挖一格仍按任务许可检查。

@@ -11,7 +11,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.OthersStorageAllowance;
+import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.game.player.EverydayFood;
@@ -52,8 +52,8 @@ final class FetchesFood implements Action {
 
     private final ItemNeeds needs;
     private final long budgetTicks;
-    /** 别人的箱子放不放行：饿到危险线时由吃饭任务给，平时不放行。 */
-    private final OthersStorageAllowance others;
+    /** 饿急通报：饱食度到危险线时由吃饭任务给，从不是自己放的箱子里拿到口粮时发事件；平时不通报。 */
+    private final StarvingFoodReport foodReport;
     private long deadline = -1;
     private Action current;
     private String chosen;
@@ -66,13 +66,13 @@ final class FetchesFood implements Action {
     private Problem lastFailure;
 
     FetchesFood(ItemNeeds needs, long budgetTicks) {
-        this(needs, budgetTicks, OthersStorageAllowance.NONE);
+        this(needs, budgetTicks, StarvingFoodReport.NONE);
     }
 
-    FetchesFood(ItemNeeds needs, long budgetTicks, OthersStorageAllowance others) {
+    FetchesFood(ItemNeeds needs, long budgetTicks, StarvingFoodReport foodReport) {
         this.needs = Objects.requireNonNull(needs, "needs");
         this.budgetTicks = budgetTicks;
-        this.others = Objects.requireNonNull(others, "others");
+        this.foodReport = Objects.requireNonNull(foodReport, "foodReport");
     }
 
     @Override public ActionStatus tick(TickContext context) {
@@ -141,7 +141,7 @@ final class FetchesFood implements Action {
     // 一类口粮的请求：叫得出名字的现成口粮带着别人的箱子放行；"能吃的口粮"一大类里有要现做的生肉生鱼，不带。
     private ItemRequest requestFor(String kind) {
         ItemRequest request = new ItemRequest(WantedItem.ofTag(kind), COUNT, "饿了，弄点吃的");
-        return KINDS.contains(kind) ? request.withOthersStorage(others) : request;
+        return KINDS.contains(kind) ? request.withFoodReport(foodReport) : request;
     }
 
     // 几类叫得出名字的口粮和"能吃的口粮"一大类（含生肉、模组食物）同一轮估齐，挑整条路最远走多远最近的去拿：

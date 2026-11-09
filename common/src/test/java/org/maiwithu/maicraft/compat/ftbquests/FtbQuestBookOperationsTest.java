@@ -12,7 +12,6 @@ import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
-import org.maiwithu.maicraft.behavior.permission.GuessesPlayerMade;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
@@ -348,7 +347,7 @@ class FtbQuestBookOperationsTest {
     private Protection protection() {
         WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), MEMORY_KEY);
         return new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
-                GuessesPlayerMade.NOTHING, "00000000-0000-0000-0000-000000000000");
+                "00000000-0000-0000-0000-000000000000");
     }
 
     /** 换不了装备的替身：这里的测试不穿卸、不放副手。 */
