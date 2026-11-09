@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -65,13 +66,18 @@ public final class HurtEpisodes implements DamageObserver {
     }
 
     /**
-     * 一下伤害的来源：归并用的键、攻击者怎么称呼（没有为 null）、原版伤害类型。
+     * 一下伤害的来源：归并用的键、攻击者怎么称呼（没有为 null）、原版伤害类型、
+     * 认得出是谁时的攻击者事实（类型 ID、干净名字、游戏实体编号）。
      *
-     * @param key        同一个攻击者或同一种伤害的键
-     * @param attacker   攻击者的说法：玩家名、名字或种类名，看得见带观察编号；没有攻击者为 null
-     * @param damageType 原版伤害类型（msgId），例如 fall、arrow、mob
+     * @param key              同一个攻击者或同一种伤害的键
+     * @param attacker         攻击者的说法：玩家名、名字或种类名，看得见带观察编号；没有攻击者为 null
+     * @param damageType       原版伤害类型（msgId），例如 fall、arrow、mob
+     * @param attackerType     攻击者的实体类型 ID（minecraft:skeleton 这类）；没有攻击者为 null
+     * @param attackerName     攻击者的干净名字，不带观察编号后缀；没有攻击者为 null
+     * @param attackerEntityId 攻击者的游戏实体编号；没有攻击者为 null
      */
-    record Hit(String key, String attacker, String damageType) {
+    record Hit(String key, String attacker, String damageType,
+               String attackerType, String attackerName, Integer attackerEntityId) {
     }
 
     // 伤害包：认出是谁、什么伤，记一下；血掉多少等下一刻看血量。
@@ -84,14 +90,15 @@ public final class HurtEpisodes implements DamageObserver {
             return;
         }
         if (attacker == null) {
-            hit(new Hit("type:" + type, null, type), gameTick);
+            hit(new Hit("type:" + type, null, type, null, null, null), gameTick);
             return;
         }
         String name = attacker instanceof Player other ? "玩家 " + other.getGameProfile().getName()
                 : attacker.hasCustomName() ? attacker.getCustomName().getString()
                 : attacker.getType().getDescription().getString();
         String seen = seenIdOf.apply(attacker.getId()).map(id -> "（" + id + "）").orElse("");
-        hit(new Hit("entity:" + attacker.getId(), name + seen, type), gameTick);
+        hit(new Hit("entity:" + attacker.getId(), name + seen, type,
+                BuiltInRegistries.ENTITY_TYPE.getKey(attacker.getType()).toString(), name, attacker.getId()), gameTick);
     }
 
     /** 每刻看一眼血量：掉了的记到刚挨的那一下上，没有伤害包的记"只看到血掉了"；到点的段发出去。 */
@@ -109,7 +116,9 @@ public final class HurtEpisodes implements DamageObserver {
      * @param damageType 原版伤害类型（msgId）
      */
     public void beaten(String attacker, int entityId, String damageType, float lost, long tick) {
-        Hit hit = new Hit("entity:" + entityId, attacker, damageType);
+        // 交来的称呼带观察编号后缀（"玩家 Alex（e4）"）：结构化字段要的是干净名字，去掉后缀再记。
+        String clean = attacker.replaceAll("（e\\d+）$", "");
+        Hit hit = new Hit("entity:" + entityId, attacker, damageType, "minecraft:player", clean, entityId);
         Episode episode = open.computeIfAbsent(hit.key(), key -> new Episode(hit, tick));
         episode.hits++;
         episode.lost += lost;
@@ -152,7 +161,7 @@ public final class HurtEpisodes implements DamageObserver {
             float lost = lastHealth - health;
             Episode episode = lastHitKey != null && tick - lastHitTick <= ATTRIBUTE_TICKS ? open.get(lastHitKey) : null;
             if (episode == null) {
-                episode = open.computeIfAbsent(UNSEEN, key -> new Episode(new Hit(UNSEEN, null, ""), tick));
+                episode = open.computeIfAbsent(UNSEEN, key -> new Episode(new Hit(UNSEEN, null, "", null, null, null), tick));
                 episode.lastTick = tick;
             }
             episode.lost += lost;
@@ -189,6 +198,12 @@ public final class HurtEpisodes implements DamageObserver {
         // 没人打、碰着方块扎的：说出是哪种方块、记没记下绕开，LLM 不用再猜"biomesoplenty.bramble 伤"是什么。
         if (episode.hit.attacker() == null && !episode.hit.key().equals(UNSEEN)) {
             line += culpritOf.apply(episode.hit.damageType()).map(culprit -> "（" + culprit + "）").orElse("");
+        }
+        // 认得出是谁打的，句子旁边把攻击者事实铺在事件上：宿主按字段认出实体，不用解析一句话。
+        if (episode.hit.attackerType() != null) {
+            events.publish(TaskEvent.Kind.HURT, line, new AttackerFacts(episode.hit.attackerType(),
+                    episode.hit.attackerName(), episode.hit.attackerEntityId()));
+            return;
         }
         events.publish(TaskEvent.Kind.HURT, line);
     }

@@ -11,6 +11,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.kernel.event.EventFacts;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 
@@ -19,13 +20,22 @@ class HurtEpisodesTest {
 
     private final List<TaskEvent.Kind> kinds = new ArrayList<>();
     private final List<String> messages = new ArrayList<>();
-    private final TaskEventSink sink = (kind, message) -> {
-        kinds.add(kind);
-        messages.add(message);
+    private final List<EventFacts> facts = new ArrayList<>();
+    private final TaskEventSink sink = new TaskEventSink() {
+        @Override public void publish(TaskEvent.Kind kind, String message) {
+            kinds.add(kind);
+            messages.add(message);
+        }
+
+        @Override public void publish(TaskEvent.Kind kind, String message, EventFacts attached) {
+            publish(kind, message);
+            facts.add(attached);
+        }
     };
     private final HurtEpisodes hurts = new HurtEpisodes(sink, id -> Optional.empty());
 
-    private static final HurtEpisodes.Hit SKELETON = new HurtEpisodes.Hit("entity:7", "骷髅（e3）", "arrow");
+    private static final HurtEpisodes.Hit SKELETON = new HurtEpisodes.Hit("entity:7", "骷髅（e3）", "arrow",
+            "minecraft:skeleton", "骷髅", 7);
 
     @Test
     void 同一个攻击者连着挨的打归成一段_停手五秒才发() {
@@ -79,7 +89,7 @@ class HurtEpisodesTest {
         hurts.health(20f, false, 0);
         hurts.health(20f, false, 300);
         assertTrue(messages.isEmpty());
-        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall"), 310);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall", null, null, null), 310);
         hurts.health(16f, false, 310);
         hurts.health(16f, false, 410);
         assertEquals("摔了一下，掉了 4 点血，还剩 16 点", messages.getFirst());
@@ -88,7 +98,7 @@ class HurtEpisodesTest {
     @Test
     void 还剩的血写摔完当刻的_不写发出去时回了血的数() {
         hurts.health(20f, false, 0);
-        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall"), 10);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall", null, null, null), 10);
         hurts.health(12f, false, 10);
         // 吃饱了的角色等发事件的这 5 秒里一路回血，发出去时已经回满。
         hurts.health(16f, false, 60);
@@ -111,7 +121,7 @@ class HurtEpisodesTest {
     @Test
     void 没掉血的轻摔_还剩写摔那一刻的血() {
         hurts.health(15f, false, 0);
-        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall"), 10);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall", null, null, null), 10);
         hurts.health(15f, false, 10);
         hurts.health(18f, false, 110);
         assertEquals("摔了一下，掉了 0 点血，还剩 15 点", messages.getFirst());
@@ -146,5 +156,35 @@ class HurtEpisodesTest {
         hurts.health(17f, false, 120);
         assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
         assertEquals("被玩家 Alex（e4）打了一下，掉了 3 点血，还剩 17 点", messages.getFirst());
+    }
+
+    @Test
+    void 认得出是谁打的_攻击者事实铺在事件上() {
+        // 有攻击者的段：类型 ID、干净名字（不带观察编号后缀）、实体编号，宿主按字段认，不解析句子。
+        hurts.health(20f, false, 0);
+        hurts.hit(SKELETON, 10);
+        hurts.health(17f, false, 10);
+        hurts.health(17f, false, 130);
+        assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
+        assertEquals(new AttackerFacts("minecraft:skeleton", "骷髅", 7), facts.getFirst());
+
+        // 被玩家连打：类型是 minecraft:player，名字不带观察编号后缀。
+        facts.clear();
+        hurts.health(20f, false, 0);
+        hurts.byPlayer(10);
+        hurts.health(17f, false, 11);
+        hurts.beaten("玩家 Alex（e4）", 4, "player", 3f, 12);
+        hurts.health(17f, false, 130);
+        assertEquals(new AttackerFacts("minecraft:player", "玩家 Alex", 4), facts.getFirst());
+    }
+
+    @Test
+    void 没有攻击者的伤不带攻击者事实() {
+        hurts.health(20f, false, 0);
+        hurts.hit(new HurtEpisodes.Hit("type:fall", null, "fall", null, null, null), 10);
+        hurts.health(17f, false, 10);
+        hurts.health(17f, false, 130);
+        assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
+        assertTrue(facts.isEmpty(), "摔落没有攻击者，事件上不铺字段");
     }
 }
