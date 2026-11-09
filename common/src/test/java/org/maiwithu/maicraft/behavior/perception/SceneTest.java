@@ -201,6 +201,25 @@ class SceneTest {
     }
 
     @Test
+    void playersOnlineButOutOfEntityReachAreReportedAsAClue() {
+        // 玩家列表（Tab）里在线、但没有对应实体观察的玩家：总览报一条线索，观察里不冒充看得见他在哪。
+        scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:player", null, "uuid-near",
+                WorldPosition.here(2, 64, 2), true, false, false, null, Map.of(), false)));
+        scene.updateOnlinePlayers(List.of(
+                new Scene.OnlinePlayer("Alex", "uuid-near"),
+                new Scene.OnlinePlayer("Bob", "uuid-far")));
+        assertEquals(List.of(new Scene.OnlinePlayer("Bob", "uuid-far")), scene.playersOnlineNotNearby(),
+                "在附近的那位实体观察里有，不进这条线索");
+        String summary = scene.summary();
+        assertTrue(summary.contains("1 位在线的玩家不在附近（看不出他们在哪）：Bob"), summary);
+        // 在附近的那位照常逐只列，不因线索出现而被合并掉。
+        assertEquals("minecraft:player", scene.listedEntities().getFirst().type());
+        // 没有别人在线时不出现这条，总览不凭空说"没有玩家在线"。
+        scene.updateOnlinePlayers(List.of());
+        assertFalse(scene.summary().contains("在线的玩家"), scene.summary());
+    }
+
+    @Test
     void distantHarmlessEntitiesAreCountedByTypeWhileThreatsStayListed() {
         List<EntitySight.Observation> crowd = new ArrayList<>();
         for (int i = 0; i < 30; i++) {

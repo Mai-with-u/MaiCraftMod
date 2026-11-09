@@ -369,6 +369,13 @@ public final class WorldScope {
         scene.updateEnvironment(new ClientEnvironmentSight(() -> current).current());
         scene.updateEntities(gameTick, new ClientEntitySight(() -> current, trusted).nearby());
         scene.updateSounds(gameTick, new ClientSubtitleEar(() -> subtitles).recent());
+        // 玩家列表（Tab）：在线但不在实体观察里的玩家只有列表能证明——超出玩家同步半径的
+        // 玩家根本不同步实体，不把这条报出来，"附近没有玩家"就会被误读成"服务器上没有玩家"。
+        List<Scene.OnlinePlayer> online = new ArrayList<>();
+        for (OnlinePlayers.Online listed : OnlinePlayers.online(current)) {
+            online.add(new Scene.OnlinePlayer(listed.name(), listed.uuid()));
+        }
+        scene.updateOnlinePlayers(List.copyOf(online));
         // 俯视网格以角色为中心画一张：地形特征从网格里聚出来，路过成片的树顺路记产地线索。
         scene.updateGrid(OverheadGrid.render(current.level(), player.blockPosition(), OverheadGrid.DEFAULT_RADIUS),
                 gameTick, when);

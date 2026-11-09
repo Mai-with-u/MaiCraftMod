@@ -51,6 +51,13 @@ public final class SceneView {
             scene.distantCounts().forEach(distant::addProperty);
             json.add("distant_entities", distant);
         }
+        // 玩家列表里在线、但不在实体观察里的玩家：超出玩家同步半径或所在区块没加载，位置报不出来；
+        // 名字是玩家列表能给的全部，报出来角色才知道远处有人在线。
+        if (!scene.playersOnlineNotNearby().isEmpty()) {
+            JsonArray away = new JsonArray();
+            scene.playersOnlineNotNearby().forEach(player -> away.add(player.name()));
+            json.add("online_players_not_nearby", away);
+        }
         JsonArray heard = new JsonArray();
         scene.heard().forEach(sound -> heard.add(sound(sound)));
         json.add("heard", heard);

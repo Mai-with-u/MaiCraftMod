@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.perception;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -42,6 +44,8 @@ public final class Scene {
     private SceneSelf self;
     private SceneEnvironment environment;
     private OverheadGrid.View grid;
+    /** 玩家列表（Tab）里在线的玩家：与实体观察核对，不在观察里的就是"在线但不在附近"。 */
+    private List<OnlinePlayer> onlinePlayers = List.of();
     // 五路带编号的条目收在一份列表里：按编号查条目、失效撤下、列出与远处计数都走这一份。
     private List<SceneSighting> sightings = List.of();
     private List<HeardSound> heard = List.of();
@@ -72,6 +76,35 @@ public final class Scene {
     /** 更新环境观察：时间、天气、光照、生物群系。 */
     public void updateEnvironment(SceneEnvironment current) {
         environment = current;
+    }
+
+    /**
+     * 玩家列表里在线的一个人：名字与编号。
+     * 角色自己不算在线玩家（它是看的那一方，不是被看的）。
+     */
+    public record OnlinePlayer(String name, String uuid) {}
+
+    /** 更新玩家列表（Tab 列表）：每刻照抄在线的人，角色自己由调用方先去掉。 */
+    public void updateOnlinePlayers(List<OnlinePlayer> online) {
+        onlinePlayers = List.copyOf(online);
+    }
+
+    /**
+     * 在线、但此刻不在实体观察里的玩家：名字与编号原样带着。
+     * 原版只把约 512 格内（玩家的实体同步半径）的玩家同步给客户端，再远的、或所在区块还没加载的，
+     * 实体根本不在客户端手上，位置报不出来——但"他在线、不在附近"是玩家列表能给的事实，
+     * 不报出来角色就会把"附近没有玩家"误当成"服务器上没有玩家"。
+     */
+    public List<OnlinePlayer> playersOnlineNotNearby() {
+        Set<String> present = new HashSet<>();
+        for (SceneEntity entity : entities()) {
+            if (entity.uuid() != null) present.add(entity.uuid());
+        }
+        List<OnlinePlayer> away = new ArrayList<>();
+        for (OnlinePlayer player : onlinePlayers) {
+            if (!present.contains(player.uuid())) away.add(player);
+        }
+        return List.copyOf(away);
     }
 
     /**
@@ -468,6 +501,12 @@ public final class Scene {
         int distant = distantCounts().values().stream().mapToInt(Integer::intValue).sum();
         if (distant > 0) {
             parts.add(LISTED_RADIUS + " 格外另有 " + distant + " 个不相干的只按种类计数（distant_entities），要找哪一种用 find");
+        }
+        // 玩家列表给的线索：在线但不在附近的人（超出玩家同步半径、或所在区块没加载，位置报不出来）。
+        List<OnlinePlayer> away = playersOnlineNotNearby();
+        if (!away.isEmpty()) {
+            parts.add("玩家列表里还有 " + away.size() + " 位在线的玩家不在附近（看不出他们在哪）："
+                    + away.stream().map(OnlinePlayer::name).collect(Collectors.joining("、")));
         }
         if (parts.isEmpty()) {
             return "四周没什么可看的。";

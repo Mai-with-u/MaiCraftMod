@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.world;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import net.minecraft.client.Minecraft;
@@ -26,6 +28,29 @@ public final class OnlinePlayers {
         ClientPacketListener connection = minecraft.getConnection();
         PlayerInfo info = connection == null ? null : connection.getPlayerInfo(name);
         return info == null ? Optional.empty() : Optional.of(info.getProfile().getId().toString());
+    }
+
+    /** 玩家列表（Tab）里在线的一个人：名字与编号。 */
+    public record Online(String name, String uuid) {}
+
+    /**
+     * 玩家列表（Tab）里在线的每个人，角色自己不算（它是看的那一方，不是被看的）。
+     * 还没连上服务器时给空：列表还没同步，谁在线都说不准。
+     */
+    public static List<Online> online(PlayerContext context) {
+        ClientPacketListener connection = context.connection();
+        LocalPlayer self = context.localPlayer();
+        if (connection == null || self == null) {
+            return List.of();
+        }
+        List<Online> online = new ArrayList<>();
+        for (PlayerInfo info : connection.getOnlinePlayers()) {
+            if (info.getProfile().getId().equals(self.getUUID())) {
+                continue;
+            }
+            online.add(new Online(info.getProfile().getName(), info.getProfile().getId().toString()));
+        }
+        return List.copyOf(online);
     }
 
     /**

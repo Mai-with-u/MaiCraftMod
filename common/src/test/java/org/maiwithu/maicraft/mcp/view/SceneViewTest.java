@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.mcp.view;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -178,5 +179,27 @@ class SceneViewTest {
         assertEquals("00000000-0000-0000-0000-0000000000a3",
                 SceneView.entity(scene.entities().stream().filter(entity -> entity.type().equals("minecraft:wolf"))
                         .findFirst().orElseThrow()).get("uuid").getAsString());
+    }
+
+    @Test
+    void onlinePlayersNotNearbyGetTheirOwnField() {
+        // 在线但不在实体观察里的玩家：单独一个字段报名字；附近有实体的、没有别人在线的都不出现。
+        scene.updateEntities(10, List.of(new EntitySight.Observation(1, "minecraft:player", null,
+                "8667ba71-b85a-4004-af54-457a9734eed7", WorldPosition.here(3, 64, 0),
+                true, false, false, new EntitySight.Health(20, 20), Map.of())));
+        scene.updateOnlinePlayers(List.of(
+                new Scene.OnlinePlayer("Alex", "8667ba71-b85a-4004-af54-457a9734eed7"),
+                new Scene.OnlinePlayer("Bob", "00000000-0000-0000-0000-0000000000b2")));
+
+        JsonObject json = SceneView.scene(scene, false);
+        var names = new ArrayList<String>();
+        json.getAsJsonArray("online_players_not_nearby").forEach(entry -> names.add(entry.getAsString()));
+        assertEquals(List.of("Bob"), names);
+
+        // 附近的那位照常在实体列表里逐只列；所有在线玩家都在附近时这个字段不出现。
+        assertEquals(1, json.getAsJsonArray("entities").size());
+        scene.updateOnlinePlayers(List.of(
+                new Scene.OnlinePlayer("Alex", "8667ba71-b85a-4004-af54-457a9734eed7")));
+        assertFalse(SceneView.scene(scene, false).has("online_players_not_nearby"));
     }
 }
