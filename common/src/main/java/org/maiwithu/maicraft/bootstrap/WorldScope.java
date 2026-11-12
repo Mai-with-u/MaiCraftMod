@@ -90,6 +90,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.behavior.inventory.StoredReservations;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.LegacyWorldKeys;
@@ -173,6 +174,8 @@ public final class WorldScope {
     private final RespawnPoint respawnPoint = new RespawnPoint();
     /** 走投无路时提的那句寻死出路：能力从角色读端拿，寻路与吃饭经启动一侧转到当前世界这一份。 */
     private final SuicideWayOut suicideWayOut;
+    /** 当前世界的随身背包实例：与腾格子和取货来源共用同一份开包存货账本，供 observe(self) 呈现背在身上的包。 */
+    private final List<CarriedBackpack> carriedBackpacks;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -261,7 +264,7 @@ public final class WorldScope {
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions,
                 digTools, othersNotice);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
-        AbilityCatalog.create(new AbilityCatalog.Deps(
+        this.carriedBackpacks = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
                 characterReads(now, suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
@@ -505,5 +508,14 @@ public final class WorldScope {
     /** 出行进展的收件口；保留最近一刻，给宿主查询用。 */
     public TravelProgressListener travelProgress() {
         return travelProgress;
+    }
+
+    /** 此刻角色身上各栏位（含饰品栏、胸甲、副手与主背包）背着或揣着的随身背包摘要。 */
+    public List<CarriedBackpack.CarriedPack> carriedBackpacks() {
+        List<CarriedBackpack.CarriedPack> packs = new ArrayList<>();
+        for (CarriedBackpack backpack : carriedBackpacks) {
+            packs.addAll(backpack.carried());
+        }
+        return List.copyOf(packs);
     }
 }

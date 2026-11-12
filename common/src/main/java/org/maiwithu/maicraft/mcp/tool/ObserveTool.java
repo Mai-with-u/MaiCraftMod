@@ -8,6 +8,7 @@ import com.google.gson.Gson;
 import com.google.gson.FieldNamingPolicy;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.PictureLook;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
@@ -104,6 +105,8 @@ public final class ObserveTool implements McpTool {
     private final Pictures pictures;
     /** 归属读端：容器的"最后由谁放下"从这来；不在世界里时给 null。 */
     private final Supplier<Protection> protection;
+    /** 角色身上背着或揣着的随身背包（含 Curios 等饰品栏）；不在世界里或没带时为空列表。 */
+    private final Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -164,8 +167,23 @@ public final class ObserveTool implements McpTool {
                        LooksAfterReading looks, Supplier<SelfView.Identity> identity,
                        Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
                        Supplier<Protection> protection) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, pictures,
+                protection, List::of);
+    }
+
+    /**
+     * @param carriedBackpacks 角色身上各栏位（含饰品栏）的随身背包及新鲜存货摘要；没有时给空列表
+     */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity,
+                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
+                       Supplier<Protection> protection,
+                       Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks) {
         this.pictures = Objects.requireNonNull(pictures, "pictures");
         this.protection = protection;
+        this.carriedBackpacks = Objects.requireNonNull(carriedBackpacks, "carriedBackpacks");
         this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
@@ -530,6 +548,8 @@ public final class ObserveTool implements McpTool {
         view.add("reminders", REMINDER_JSON.toJsonTree(reminders.get()));
         // 预留着什么、身上各有几件：没有预留时不写这一项。
         SelfView.addReserved(view, reserved.get());
+        // 身上各栏位（含 Curios 饰品栏）背着或揣着的随身背包及新鲜存货：没带包时不写这一项。
+        SelfView.addCarriedBackpacks(view, carriedBackpacks.get());
         // 角色是谁、在哪个世界：宿主认出聊天和播报里哪个名字是角色自己，按世界分开记事。
         SelfView.addIdentity(view, identity.get());
         // 死一次会怎样：死亡不掉落开没开、会在哪重生；LLM 看着它决定要不要寻死回家。

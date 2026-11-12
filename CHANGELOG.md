@@ -8,6 +8,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- `observe(what="self")` 新增 `carried_backpacks`：角色身上背着或揣着精妙背包（含穿在 Curios 饰品栏里的）时列出栏位与物品 ID，五分钟内打开过的还附带主存储剩余空槽数与看到的存货。
 - 主背包快满需要腾格子时，自动把杂物塞进身上背着或揣着的精妙背包（支持 Curios 饰品栏、胸甲、副手与主背包多只包依次存放，跳过升级槽与记忆筛选锁定的槽位且禁止背包套娃），不再守着空背包往地上反复丢东西。
 - 角色动了别人放的容器或方块时，`events` 的 `self` 流新增 `others_things_touched` 事件，在 `others_things` 里写明动作（`took` / `stored` / `broke` / `changed`）、放它的人与 UUID、方块及坐标、确认取放的物品件数或连拆格数，方便宿主知情回报。
 - 容器是谁的与开没开过分得清：`observe(scene).facilities`、`observe(detail)`、`observe(world_memory)` 的容器条目及 `use` 点开方块容器的结果细节统一带 `whose`（`natural_loot` 战利品容器 / `self` 自己放的 / `player` 别的玩家放的 / `no_record` 没有放置记录 / `unknown` 归属还没问到）、`last_modified_by`（仅 `player` 时）与 `opened_by_self`；Lootr 战利品矿车等实体在 `observe(scene).entities[].traits` 标明`"战利品容器": "是"`，`obtain` 与 `deposit` 报到的战利品容器名附`（自然生成的战利品容器）`。

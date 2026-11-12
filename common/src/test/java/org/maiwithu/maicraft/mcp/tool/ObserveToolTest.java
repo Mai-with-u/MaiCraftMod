@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
 import org.maiwithu.maicraft.behavior.menu.OpenScreen;
@@ -731,5 +732,38 @@ class ObserveToolTest {
                 JsonParser.parseString("{\"what\":\"world_memory\",\"kind\":\"container\"}").getAsJsonObject()))
                 .getAsJsonArray("records");
         assertTrue(memContainers.size() >= 5);
+    }
+
+    @Test
+    void selfListsCarriedBackpacksInCuriosAndShowsFreshContentsOnlyWhenSeen() {
+        assertFalse(data(observe("{\"what\": \"self\"}")).has("carried_backpacks"), "没带随身背包时不写这一项");
+
+        List<CarriedBackpack.CarriedPack> packs = List.of(
+                new CarriedBackpack.CarriedPack("sophisticatedbackpacks:iron_backpack", "curios:back", true, 18,
+                        Map.of("minecraft:flint", 192, "minecraft:torch", 20)),
+                new CarriedBackpack.CarriedPack("sophisticatedbackpacks:backpack", "chest", false, 0, Map.of()));
+        ToolDispatcher withBackpacks = new ToolDispatcher(List.of(new ObserveTool(
+                () -> scene, () -> memory, table, direct, () -> reminders,
+                () -> new MenuView.Reads(() -> openScreen, noTrades), List::of, x -> { },
+                () -> identity, () -> null, ObserveTool.Pictures.NONE, () -> null, () -> packs)));
+
+        JsonArray carried = data(withBackpacks.call("observe",
+                JsonParser.parseString("{\"what\": \"self\"}").getAsJsonObject()))
+                .getAsJsonArray("carried_backpacks");
+        assertEquals(2, carried.size());
+
+        JsonObject curio = carried.get(0).getAsJsonObject();
+        assertEquals("sophisticatedbackpacks:iron_backpack", curio.get("item").getAsString());
+        assertEquals("curios:back", curio.get("where").getAsString());
+        assertTrue(curio.get("seen").getAsBoolean());
+        assertEquals(18, curio.get("free_slots").getAsInt());
+        assertEquals(2, curio.getAsJsonArray("contents").size());
+
+        JsonObject unseen = carried.get(1).getAsJsonObject();
+        assertEquals("sophisticatedbackpacks:backpack", unseen.get("item").getAsString());
+        assertEquals("chest", unseen.get("where").getAsString());
+        assertFalse(unseen.get("seen").getAsBoolean());
+        assertFalse(unseen.has("free_slots"), "没打开看过的包不编造空槽数与内容");
+        assertFalse(unseen.has("contents"));
     }
 }

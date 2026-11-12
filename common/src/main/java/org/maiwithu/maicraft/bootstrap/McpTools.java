@@ -48,7 +48,11 @@ final class McpTools {
                         () -> reserved.list().stream().map(entry -> new SelfView.Reserved(entry.item(),
                                 entry.atLeast(), reserved.carriedFor(entry))).toList(), looks,
                         inWorld(worldScope, WorldScope::identity), inWorld(worldScope, WorldScope::afterDeath), pictures,
-                        inWorld(worldScope, WorldScope::protection)),
+                        inWorld(worldScope, WorldScope::protection),
+                        () -> {
+                            WorldScope scope = worldScope.get();
+                            return scope == null ? List.of() : scope.carriedBackpacks();
+                        }),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork, looks),

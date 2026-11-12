@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.view;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -136,6 +137,34 @@ public final class SelfView {
             list.add(json);
         }
         view.add("reserved", list);
+    }
+
+    /**
+     * 把角色身上背着或揣着的随身背包写进自己这一栏：穿在 Curios 等非原版栏位时也能看到，
+     * 五分钟内打开过的附上主存储剩余通用空槽数与看到的物品计数；身上没带随身背包时不写这一项。
+     */
+    public static void addCarriedBackpacks(JsonObject view, List<CarriedBackpack.CarriedPack> packs) {
+        if (packs == null || packs.isEmpty()) return;
+        JsonArray list = new JsonArray();
+        for (CarriedBackpack.CarriedPack pack : packs) {
+            JsonObject json = new JsonObject();
+            json.addProperty("item", pack.item());
+            json.addProperty("where", pack.where());
+            json.addProperty("seen", pack.seen());
+            if (pack.seen()) {
+                json.addProperty("free_slots", pack.freeSlots());
+                JsonArray contents = new JsonArray();
+                pack.contents().forEach((item, count) -> {
+                    JsonObject stack = new JsonObject();
+                    stack.addProperty("item", item);
+                    stack.addProperty("count", count);
+                    contents.add(stack);
+                });
+                json.add("contents", contents);
+            }
+            list.add(json);
+        }
+        view.add("carried_backpacks", list);
     }
 
     /**
