@@ -5,7 +5,9 @@ import org.maiwithu.maicraft.kernel.goal.AbilityHooks;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 能力模块：一个能力的全部知识都从这里进入；内核和 MCP 入口只通过它认识能力。
@@ -57,6 +59,14 @@ public interface AbilityModule {
     /** 本能力的特殊处理；绝大多数能力用不到。 */
     default AbilityHooks hooks() {
         return AbilityHooks.NONE;
+    }
+
+    /**
+     * 插一下（{@link ExecutionMode#CUTS_IN}）遇到角色正忙腾不出手脚时，能不能不控制角色直接把这次目标办完。
+     * 默认返回 null，照常等角色空出来或按时机不对收场。
+     */
+    default TaskResult finishWithoutControl(Goal goal, TickContext context) {
+        return null;
     }
 
 }

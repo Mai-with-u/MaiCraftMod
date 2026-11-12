@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.kernel.param.ParamType;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 import java.util.List;
 import java.util.Objects;
@@ -119,6 +120,19 @@ public final class ChatAbility implements AbilityModule {
         if (goal.target() != null) return ExecutionMode.CONTROLS_PLAYER;
         String message = goal.params().has("message") ? goal.params().text("message") : "";
         return message.startsWith("/") ? ExecutionMode.CONTROLS_PLAYER : ExecutionMode.CUTS_IN;
+    }
+
+    // 角色正忙（自卫、换气、撤离、动作停不下）半秒内腾不出身子时，公屏话不占身体，直接整句发出去，不再被反射挡掉。
+    @Override
+    public TaskResult finishWithoutControl(Goal goal, TickContext context) {
+        if (modeFor(goal) != ExecutionMode.CUTS_IN) return null;
+        if (goal.params().has("max_seconds")) {
+            return TaskResult.failed("没有把话发出去",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "max_seconds 只在对生物说话（给 target）时有用",
+                            "对全体玩家说就不给 max_seconds"));
+        }
+        long tick = context == null ? -1 : context.gameTick();
+        return ChatTask.sendDirectly(goal.params().text("message"), sender, tick);
     }
 
     @Override

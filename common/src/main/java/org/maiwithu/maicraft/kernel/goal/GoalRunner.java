@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.interrupt.SurvivalNeedsOff;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.kernel.task.FinishesWithoutControl;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.KeepsTempTaskFacts;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -46,7 +47,8 @@ import java.util.function.Supplier;
  * <p>推进的记录 {@link GoalRun} 每次处境变化都存进目标运行存储；重启后从存储读回还没结束的
  * 记录，恢复为暂停，明确恢复后从当前步骤重新决定（进行中的任务不能跨重启恢复，能力会重新看现场）。
  */
-public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff, KeepsTempTaskFacts {
+public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff, KeepsTempTaskFacts,
+        FinishesWithoutControl {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunner.class);
 
     private final Goal goal;
@@ -383,6 +385,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
     @Override public boolean resumesAnywhere() {
         return goal.steps().isEmpty() && registry.find(goal.ability()).map(AbilityModule::resumesAnywhere).orElse(false)
                 || child != null && !child.finished() && child.resumesAnywhere();
+    }
+
+    @Override public TaskResult finishWithoutControl(TickContext context) {
+        return goal.steps().isEmpty() ? module().finishWithoutControl(goal, context) : null;
     }
 
     @Override public TaskResult close(CloseReason reason) {

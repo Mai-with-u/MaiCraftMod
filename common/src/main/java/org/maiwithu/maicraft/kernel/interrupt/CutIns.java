@@ -10,6 +10,7 @@ import java.util.function.Consumer;
 
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.FinishesWithoutControl;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Urgency;
@@ -32,6 +33,8 @@ final class CutIns implements SurvivalNeed {
     static final int MAX_QUEUED = 4;
     /** 排到队头以后最多等多少刻腾出身子：3 秒。 */
     static final long WAIT_TICKS = 60;
+    /** 能不控制角色直接办完的事（如公屏发话）最多等多少刻逐字打字的机会：半秒（10 刻）还忙就直接办完。 */
+    static final long DIRECT_WAIT_TICKS = 10;
 
     private final Deque<Waiting> queue = new ArrayDeque<>();
 
@@ -65,11 +68,22 @@ final class CutIns implements SurvivalNeed {
     }
 
     // 队头从第一次被问到起计时：前一个插一下还在做时不问，排着的不会被前一个耗掉等待时间。
+    // 空得出手时第 1 刻就会插进去；角色正忙（自卫、换气、撤离、手上的动作停不下）超过半秒时，
+    // 不需要控制角色也能办完的任务直接办完收场，不再白等 3 秒报时机不对。
     @Override public Urgency urgency(TickContext context, Task currentTask) {
         while (!queue.isEmpty()) {
             Waiting head = queue.peekFirst();
             if (head.since == Long.MIN_VALUE) head.since = context.gameTick();
-            if (context.gameTick() - head.since <= WAIT_TICKS) return Urgency.SOON;
+            long waited = context.gameTick() - head.since;
+            if (waited > DIRECT_WAIT_TICKS && head.task instanceof FinishesWithoutControl direct) {
+                TaskResult settled = direct.finishWithoutControl(context);
+                if (settled != null) {
+                    queue.removeFirst();
+                    head.giveUp.accept(settled);
+                    continue;
+                }
+            }
+            if (waited <= WAIT_TICKS) return Urgency.SOON;
             queue.removeFirst();
             head.giveUp.accept(tooBusy(currentTask));
         }

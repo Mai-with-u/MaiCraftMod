@@ -258,6 +258,7 @@ class ChatTaskTest {
         assertTrue(drafts.shown.size() >= 4, "话是逐字放进去的：空草稿加三个字");
         assertTrue(drafts.closes >= 1, "发完框要交回去");
         assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(((ChatTask.ChatDetails) result.details()).typed(), "逐字打完发出的标 typed=true");
     }
 
     @Test

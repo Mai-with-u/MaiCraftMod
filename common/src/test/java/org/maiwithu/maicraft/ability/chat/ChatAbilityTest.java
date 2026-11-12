@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
@@ -18,6 +19,7 @@ import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -168,5 +170,27 @@ class ChatAbilityTest {
         Task task = factories.create(new ChatInput("早上好"));
         assertInstanceOf(ChatTask.class, task);
         assertTrue(new ChatInput("早上好").describe().contains("早上好"));
+    }
+
+    @Test
+    void publicChatFinishesDirectlyWhenPlayerIsBusyWhileCommandsWaitForControl() {
+        List<String> sent = new ArrayList<>();
+        ChatAbility ability = new ChatAbility(sent::add, SILENT_ECHO, NO_BOX, false);
+        TickContext tick = new TickContext() {
+            @Override public long gameTick() { return 42L; }
+            @Override public PlayerContext player() { return null; }
+        };
+        TaskResult result = ability.finishWithoutControl(goal("我在打怪呢"), tick);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of("我在打怪呢"), sent);
+        ChatTask.ChatDetails details = assertInstanceOf(ChatTask.ChatDetails.class, result.details());
+        assertTrue(details.submitted());
+        assertFalse(details.typed(), "直接发出去的标 typed=false");
+        assertEquals(42L, details.sentAtTick());
+
+        // 游戏命令和对生物说话不能跳过角色控制。
+        assertEquals(null, ability.finishWithoutControl(goal("/home"), tick));
+        Goal toMaid = new Goal("maicraft:chat", null, new Target.Seen("e3"), messageParam("你好"), null, List.of(), null);
+        assertEquals(null, ability.finishWithoutControl(toMaid, tick));
     }
 }

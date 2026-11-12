@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.interrupt.ControlLoopTest.RecordingMain;
 import org.maiwithu.maicraft.kernel.interrupt.ControlLoopTest.RoutineOffTask;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.FinishesWithoutControl;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.Urgency;
@@ -197,6 +198,40 @@ class ControlLoopCutInTest {
         loop.leaveWorld();
         assertEquals(2, gaveUp.size());
         assertTrue(gaveUp.stream().allMatch(result -> result.status() == TaskResult.Status.CANCELLED));
+    }
+
+    @Test
+    void cutInThatCanFinishWithoutControlCompletesAfterHalfSecondEvenDuringSelfDefense() {
+        // 自卫占着身体时下达公屏话：等半秒（10 刻）还腾不出身子就直接不占身体发出去，status=DONE，自卫不断。
+        FakeTask defend = new FakeTask("自卫", Interruptibility.WORKING).finishingAfter(40);
+        ControlLoop loop = new ControlLoop(List.of(FakeNeed.of("自卫", () -> defend, Urgency.NOW)));
+        loop.setMainTask(new FakeTask("挖矿", Interruptibility.WORKING));
+        step(loop);
+        assertSame(defend, loop.currentTask());
+
+        DirectCutInTask chat = new DirectCutInTask();
+        List<TaskResult> settled = new ArrayList<>();
+        assertTrue(loop.cutIn(chat, settled::add));
+        for (int i = 0; i <= CutIns.DIRECT_WAIT_TICKS; i++) {
+            step(loop);
+            assertSame(defend, loop.currentTask(), "半秒内自卫照常推进");
+        }
+        assertTrue(settled.isEmpty(), "满 10 刻前还给逐字打字留着机会");
+
+        step(loop);
+        assertEquals(1, settled.size(), "超过半秒仍腾不出身子：当场不占身体办完");
+        assertEquals(TaskResult.Status.DONE, settled.getFirst().status());
+        assertSame(defend, loop.currentTask(), "自卫一刻都没被打断");
+    }
+
+    private static final class DirectCutInTask extends FakeTask implements FinishesWithoutControl {
+        DirectCutInTask() {
+            super("说话", Interruptibility.WORKING);
+        }
+
+        @Override public TaskResult finishWithoutControl(TickContext context) {
+            return TaskResult.done("身体正忙，没有逐字打，这句话直接发出去了");
+        }
     }
 
     private record Tick(long gameTick) implements TickContext {

@@ -232,8 +232,10 @@ public final class ControlLoop {
         return bottom.from == null && bottom.task instanceof RoutineNeedsOff off && off.routineNeedsOff();
     }
 
-    // 这个需求此刻参不参与挑选：全关时都不参与；只关起居类时，眼前危险的反应照常参与。
+    // 这个需求此刻参不参与挑选：全关时生存需求都不参与；只关起居类时，眼前危险的反应照常参与。
+    // 插一下不是生存需求（是 LLM 自己下达的目标，例如寻死途中回一句公屏话），全关生存需求时照常参与。
     private boolean excluded(SurvivalNeed need, boolean allOff, boolean routineOff) {
+        if (need == cutIns) return false;
         return allOff || routineOff && need.routine();
     }
 

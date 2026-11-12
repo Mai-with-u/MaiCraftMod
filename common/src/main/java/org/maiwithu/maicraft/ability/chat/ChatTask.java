@@ -7,6 +7,7 @@ import java.util.Objects;
 import org.maiwithu.maicraft.game.interaction.ChatDraftScreen;
 import org.maiwithu.maicraft.behavior.interaction.TypeChatDraft;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
+import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -43,6 +44,8 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     private long sentTick;
     /** 这句话交出去没有：还在打字就被替换或取消时它没发出去，结果里要说清，不让人等一句永远不会出现的话。 */
     private boolean submitted;
+    /** 这句话是不是逐字打进聊天框的：逐字打完再提交为 true；身体正忙直接整句发出或关了逐字打字为 false。 */
+    private boolean typed;
     /** 发命令前聊天栏的记号：之后新出现的话才算服务器对这条命令的回话。 */
     private long feedbackMark;
     /** 命令发出后聊天栏新出现的话（命令反馈行）；普通聊天为空。 */
@@ -69,12 +72,30 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     }
 
     /**
-     * 发话的结果细节：发了哪句话、交出去没有、交出去是在哪一刻；游戏命令另附发出后聊天栏新出现的话，
+     * 发话的结果细节：发了哪句话、交出去没有、是不是逐字打出来的、交出去是在哪一刻；游戏命令另附发出后聊天栏新出现的话，
      * 成没成由 LLM 看它判断。目标在打字中途被替换或取消时，结果照样带着这份细节：
      * {@code submitted=false} 就是这句话没发出去，替换的一方不用再等它落地。
      */
-    record ChatDetails(String message, boolean submitted, long sentAtTick,
+    record ChatDetails(String message, boolean submitted, boolean typed, long sentAtTick,
                        List<String> feedback) implements ResultDetails {}
+
+    /**
+     * 角色身体正忙（自卫、换气、撤离、手上的事停不下）超过半秒腾不出来时，公屏话不占身体、不逐字打，直接整句发出去。
+     */
+    static TaskResult sendDirectly(String message, SendsChatMessage sender, long gameTick) {
+        if (!sender.send(message)) {
+            Problem problem = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "聊天通道还没接上（角色不在世界里），这句话没有交出去", "等角色进了世界再说");
+            return TaskResult.builder(TaskResult.Status.FAILED, "说话没有完成：" + problem.headline())
+                    .problem(problem)
+                    .details(new ChatDetails(message, false, false, -1, List.of()))
+                    .build();
+        }
+        return TaskResult.builder(TaskResult.Status.DONE, "身体正忙，没有逐字打，这句话直接发出去了")
+                .attempts(List.of(new Attempt("提交聊天", message)))
+                .details(new ChatDetails(message, true, false, gameTick, List.of()))
+                .build();
+    }
 
     @Override
     protected Action enter(Phase phase) {
@@ -86,6 +107,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case TYPING -> runActionThen(context, () -> {
+                typed = true;
                 recordProgress("草稿打完了");
                 return Next.go(Phase.SEND, "整句打进聊天框了，提交");
             });
@@ -147,7 +169,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
 
     @Override
     protected ResultDetails details() {
-        return new ChatDetails(message, submitted, submitted ? sentTick : -1, feedback);
+        return new ChatDetails(message, submitted, submitted && typed, submitted ? sentTick : -1, feedback);
     }
 
     @Override
