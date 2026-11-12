@@ -207,23 +207,28 @@ public final class SustainedUse implements Action {
         }
     }
 
-    // 开始确认：手上东西变了（吃掉一口、弓开始蓄力会换状态）或正在使用中，都算这次使用已生效。
+    // 开始确认：手上东西变了（吃掉一口、弓开始蓄力会换状态）、要的瞬时效果已出现（开界面、上下坐骑）或正在使用中，都算这次使用已生效。
+    // 整个起手窗口过去三样都没出现，说明点下去既没有开始持续使用也没有瞬时效果，按没生效收场，不报成说不清的"没能确认"。
     // 现场快照缺失（测试替身读不到手持）时只按"正在使用中"核对，不冒充看到了物品变化。
-    private InteractionConfirmation startConfirmation() {
+    InteractionConfirmation startConfirmation() {
         ItemStack before = heldAtSubmission;
-        return context -> {
-            // 要的结果一按就出来了（界面开了）也算开始了：无线终端右键只开界面，手上不变、也不进入使用，
-            // 原先只认"手上变了或正在使用"，终端电量满着时回回"持续使用没有开始"（实机 10-13 装水从 AE 拿不到）。
-            if (done.observe(context) == InteractionConfirmation.Verdict.APPLIED) {
-                return InteractionConfirmation.Verdict.APPLIED;
+        return new InteractionConfirmation() {
+            @Override public Verdict observe(PlayerContext context) {
+                // 要的结果一按就出来了（界面开了）也算开始了：无线终端右键只开界面，手上不变、也不进入使用，
+                // 原先只认"手上变了或正在使用"，终端电量满着时回回"持续使用没有开始"（实机 10-13 装水从 AE 拿不到）。
+                if (done.observe(context) == Verdict.APPLIED) {
+                    return Verdict.APPLIED;
+                }
+                if (before != null && InteractionConfirmation.heldItemChanged(hand, before).observe(context)
+                        == Verdict.APPLIED) {
+                    return Verdict.APPLIED;
+                }
+                return context.usingItem() ? Verdict.APPLIED : Verdict.PENDING;
             }
-            if (before != null && InteractionConfirmation.heldItemChanged(hand, before).observe(context)
-                    == InteractionConfirmation.Verdict.APPLIED) {
-                return InteractionConfirmation.Verdict.APPLIED;
+
+            @Override public boolean expiryMeansNotApplied() {
+                return true;
             }
-            return context.usingItem()
-                    ? InteractionConfirmation.Verdict.APPLIED
-                    : InteractionConfirmation.Verdict.PENDING;
         };
     }
 

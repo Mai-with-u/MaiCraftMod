@@ -23,6 +23,12 @@ final class UseDecider {
     /** 参数组合的问题：全部一次报全，不挤牙膏。 */
     static List<String> invalidCombinations(boolean hasTarget, String item, String block, String entity,
             List<String> textLines) {
+        return invalidCombinations(hasTarget, item, block, entity, textLines, false);
+    }
+
+    /** 参数组合的问题（含显式点哪一面）：没给 target 也没给 block 却传了 face 时直接报清矛盾，不静默丢掉 face。 */
+    static List<String> invalidCombinations(boolean hasTarget, String item, String block, String entity,
+            List<String> textLines, boolean hasFace) {
         List<String> problems = new ArrayList<>();
         if (block != null && entity != null) {
             problems.add("block 与 entity 不能同时给：要点的是方块还是实体，选一个");
@@ -32,6 +38,9 @@ final class UseDecider {
         }
         if (!hasTarget && block == null && entity == null && item == null) {
             problems.add("target、block、entity、item 一个都没给：不知道要对什么用");
+        }
+        if (hasFace && !hasTarget && block == null) {
+            problems.add("给了 face 却没给 target 或 block：空气没有面可点，点脚下地面请传 target=here，点指定方块请给观察编号、坐标或 block");
         }
         // 刷子没有对着空气的使用方式（原版只对可疑的沙子、沙砾起作用）：
         // 只给 item 不给目标时不知道对着哪里刷，计划阶段一次说清。
@@ -131,9 +140,9 @@ final class UseDecider {
      *
      * @param chatMessages 出手后聊天栏收到的服务端系统消息原话，按收到先后
      */
-    /** 对着空气用东西却没生效时的建议：写清怎么把用法改成对着方块或生物用。 */
-    static final String AIR_USE_SUGGESTION = "target=here 或不给 target 都不指任何方块；"
-            + "要对着方块用就给那一格（观察编号 b# 或坐标），放在地面上就点地面那一格并给 face=up；对生物用给 e#";
+    /** 对着空气用东西却没生效时的建议：写清怎么把用法改成对着脚下地面、指定方块或生物用。 */
+    static final String AIR_USE_SUGGESTION = "不给 target 或只给 target=here（不带 face）都是对着空气用；"
+            + "放在脚下地面上请传 target=here 并配 face=up，对指定方块用给那一格（观察编号 b# 或坐标，放顶面配 face=up），对生物用给 e#";
 
     static Settlement settle(InteractionResult result, Optional<String> gameMessage, List<String> chatMessages) {
         return settle(result, gameMessage, chatMessages, false, null);

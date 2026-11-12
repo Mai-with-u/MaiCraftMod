@@ -55,17 +55,21 @@ public final class EntityUseConfirmation {
     }
 
     /**
-     * 不对着任何生物、只用手上的东西之前冻结现场：主手的东西变了，或角色身上的乘客变了（拿鞍对空处右键放下抱着的女仆），
-     * 都算生效。
+     * 不对着任何生物、只用手上的东西之前冻结现场：主手的东西变了、点开了新界面、角色上下坐骑，
+     * 或角色身上的乘客变了（拿鞍对空处右键放下抱着的女仆），都算生效。
      */
     public static InteractionConfirmation ofHeldItem(Player player, InteractionHand hand) {
         Objects.requireNonNull(player, "player");
         ItemStack heldBefore = player.getItemInHand(hand).copy();
+        int menuBefore = player.containerMenu.containerId;
+        UUID vehicleBefore = vehicleOf(player);
         List<UUID> carriedBefore = passengers(player);
         return InteractionConfirmation.anyOf(
                 InteractionConfirmation.heldItemChanged(hand, heldBefore),
-                context -> passengers(context.localPlayer()).equals(carriedBefore)
-                        ? InteractionConfirmation.Verdict.PENDING : InteractionConfirmation.Verdict.APPLIED);
+                InteractionConfirmation.menuChanged(menuBefore),
+                context -> !Objects.equals(vehicleOf(context.localPlayer()), vehicleBefore)
+                        || !passengers(context.localPlayer()).equals(carriedBefore)
+                        ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING);
     }
 
     /**
@@ -84,10 +88,10 @@ public final class EntityUseConfirmation {
 
         static Snapshot of(Player self, Entity target) {
             return new Snapshot(
-                    self.getVehicle() == null ? null : self.getVehicle().getUUID(),
+                    vehicleOf(self),
                     passengers(self),
                     passengers(target),
-                    target.getVehicle() == null ? null : target.getVehicle().getUUID(),
+                    vehicleOf(target),
                     target instanceof TamableAnimal tamable && tamable.isInSittingPose(),
                     target instanceof OwnableEntity ownable ? ownable.getOwnerUUID() : null,
                     itemsCarried(self.getInventory()));
@@ -103,6 +107,10 @@ public final class EntityUseConfirmation {
                     || !Objects.equals(targetOwner, now.targetOwner)
                     || now.carried > carried;
         }
+    }
+
+    private static UUID vehicleOf(Entity entity) {
+        return entity.getVehicle() == null ? null : entity.getVehicle().getUUID();
     }
 
     private static List<UUID> passengers(Entity entity) {

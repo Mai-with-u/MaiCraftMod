@@ -108,4 +108,19 @@ class UseDeciderTest {
         assertTrue(problem.suggestion().contains("target=here") && problem.suggestion().contains("face=up"),
                 problem.suggestion());
     }
+
+    @Test
+    void faceWithoutTargetOrBlockIsRejectedWhileHereOrBlockWithFacePasses() {
+        // 没传 target 也没传 block 却给了 face：空气没有面，计划阶段直接说清矛盾。
+        List<String> orphanFace = UseDecider.invalidCombinations(false,
+                "touhou_little_maid:smart_slab_has_maid", null, null, List.of(), true);
+        assertEquals(1, orphanFace.size());
+        assertTrue(orphanFace.getFirst().contains("face") && orphanFace.getFirst().contains("target=here"),
+                orphanFace.getFirst());
+        // target=here（hasTarget=true）配 face，或按 block 搜索配 face，都放行。
+        assertTrue(UseDecider.invalidCombinations(true,
+                "touhou_little_maid:smart_slab_has_maid", null, null, List.of(), true).isEmpty());
+        assertTrue(UseDecider.invalidCombinations(false,
+                "minecraft:bone_meal", "minecraft:grass_block", null, List.of(), true).isEmpty());
+    }
 }

@@ -64,6 +64,15 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         return state(cell).map(state -> BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
+    @Override public boolean air(BlockPos cell) {
+        return state(cell).map(BlockState::isAir).orElse(true);
+    }
+
+    // 短草、蕨、薄雪、水这类人站在里面、放方块能直接顶掉的格：找脚下地面时穿过它看下面垫着的实心格。
+    @Override public boolean replaceable(BlockPos cell) {
+        return state(cell).map(state -> state.isAir() || state.canBeReplaced()).orElse(true);
+    }
+
     // 方块 ID 按注册名比；标签按方块自己挂没挂这个标签比，模组加进标签的方块也认。
     @Override public boolean blockIs(BlockPos cell, String blockOrTag) {
         Optional<BlockState> state = state(cell);

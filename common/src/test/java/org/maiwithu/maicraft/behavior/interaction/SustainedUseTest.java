@@ -218,6 +218,10 @@ class SustainedUseTest {
     void aUseThatNeverStartsIsReportedAsRefused() {
         Rig rig = Rig.create();
         SustainedUse action = rig.action(NEVER_DONE, 0);
+        // 起手确认声明到期即没生效：对空右键魂符这类只认方块的物品时，20 刻过去既没进入使用状态也没瞬时变化，
+        // 真实提交端口按到期规则给 CONFIRMED_NOT_APPLIED，不再落进 UNCERTAIN 报成"没能确认"。
+        assertTrue(action.startConfirmation().expiryMeansNotApplied(),
+                "起手确认窗到期且没有任何生效证据时应断定为没生效");
         assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
         rig.sender.nextStatus = PendingInteraction.Status.CONFIRMED_NOT_APPLIED;
         rig.context.advance();

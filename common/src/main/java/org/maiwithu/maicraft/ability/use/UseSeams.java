@@ -61,6 +61,17 @@ final class UseSeams {
         /** 那一格方块的注册 ID；没加载为空。 */
         Optional<String> blockId(BlockPos cell);
 
+        /** 那一格是不是空气（含洞穴空气、虚空空气）；没加载按真算。 */
+        default boolean air(BlockPos cell) {
+            return blockId(cell).map(id -> id.equals("minecraft:air")
+                    || id.equals("minecraft:cave_air") || id.equals("minecraft:void_air")).orElse(true);
+        }
+
+        /** 那一格是不是空气或可被直接顶替的方块（短草、蕨、薄雪、流体）；没加载按真算。 */
+        default boolean replaceable(BlockPos cell) {
+            return air(cell);
+        }
+
         /** 那一格是不是给定的方块，或在给定的标签里（# 开头）；没加载为假。 */
         boolean blockIs(BlockPos cell, String blockOrTag);
 

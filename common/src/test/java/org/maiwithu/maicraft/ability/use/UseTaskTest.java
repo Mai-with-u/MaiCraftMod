@@ -687,6 +687,42 @@ class UseTaskTest {
     }
 
     @Test
+    void 脚边目标配朝向面_自动点脚下地面方块而非对着空气() {
+        // 站在完整方块上且脚踝长着短草（可替换）：穿过短草点脚下 (0, -1, 0) 的草地 UP 面（魂符放女仆）。
+        Rig onGrass = new Rig();
+        onGrass.world.blocks.put(BlockPos.ZERO, "minecraft:short_grass");
+        onGrass.world.replaceables.add(BlockPos.ZERO);
+        onGrass.world.blocks.put(BlockPos.ZERO.below(), "minecraft:grass_block");
+        onGrass.interactions.applied("女仆放出来了");
+        TaskResult grassResult = onGrass.run(new UseInput(new Target.Here(),
+                "touhou_little_maid:smart_slab_has_maid", null, null, 1, 32, List.of(),
+                Permissions.DEFAULT, Direction.UP));
+        assertEquals(TaskResult.Status.DONE, grassResult.status(), grassResult.summary());
+        assertEquals(BlockPos.ZERO.below(), onGrass.interactions.lastTarget.cell());
+        assertEquals(Direction.UP, onGrass.interactions.lastTarget.face());
+        assertEquals("block", ((UseDetails) grassResult.details()).usedOn());
+
+        // 站在下半砖上：feet 格本身就是非可替换地面，直接点 feet 的 UP 面。
+        Rig onSlab = new Rig();
+        onSlab.world.blocks.put(BlockPos.ZERO, "minecraft:oak_slab");
+        onSlab.interactions.applied("女仆放出来了");
+        TaskResult slabResult = onSlab.run(new UseInput(new Target.Here(),
+                "touhou_little_maid:smart_slab_has_maid", null, null, 1, 32, List.of(),
+                Permissions.DEFAULT, Direction.UP));
+        assertEquals(TaskResult.Status.DONE, slabResult.status(), slabResult.summary());
+        assertEquals(BlockPos.ZERO, onSlab.interactions.lastTarget.cell());
+        assertEquals(Direction.UP, onSlab.interactions.lastTarget.face());
+
+        // 角色正悬空（脚下两格都是空气）：如实报 NOT_POSSIBLE_HERE，不冒充对空使用。
+        Rig midAir = new Rig();
+        TaskResult airResult = midAir.run(new UseInput(new Target.Here(),
+                "touhou_little_maid:smart_slab_has_maid", null, null, 1, 32, List.of(),
+                Permissions.DEFAULT, Direction.UP));
+        assertProblem(airResult, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertEquals("block", ((UseDetails) airResult.details()).usedOn());
+    }
+
+    @Test
     void 锄地被短草压着_先打掉草再锄() {
         // 草方块上长着短草：先过许可、打掉那一格草，记下拆掉了什么，再回来锄成耕地。
         Rig rig = new Rig();
@@ -854,6 +890,7 @@ class UseTaskTest {
     private static final class FakeWorld implements UseSeams.ReadsWorld {
         String dimension = OVERWORLD;
         final Map<BlockPos, String> blocks = new HashMap<>();
+        final Set<BlockPos> replaceables = new HashSet<>();
         final Set<BlockPos> unloaded = new HashSet<>();
         final Map<BlockPos, Fluid> fluids = new HashMap<>();
         final Map<BlockPos, BlockPos> sources = new HashMap<>();
@@ -871,6 +908,9 @@ class UseTaskTest {
         @Override public boolean loaded(BlockPos cell) { return !unloaded.contains(cell); }
         @Override public Optional<String> blockId(BlockPos cell) {
             return loaded(cell) ? Optional.of(blocks.getOrDefault(cell, "minecraft:air")) : Optional.empty();
+        }
+        @Override public boolean replaceable(BlockPos cell) {
+            return air(cell) || replaceables.contains(cell);
         }
         @Override public boolean blockIs(BlockPos cell, String blockOrTag) {
             return blockId(cell).map(blockOrTag::equals).orElse(false);

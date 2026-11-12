@@ -59,8 +59,8 @@ final class UseTargets {
         // 每次重新找都重新数跳过了几个别人的：上一刻的扫描结论不带到这一刻。
         skippedOthers = false;
         return switch (input.target()) {
-            case null -> nearOrHandOnly(services.world().feet());
-            case Target.Here here -> nearOrHandOnly(services.world().feet());
+            case null -> nearOrHandOnly(services.world().feet(), false);
+            case Target.Here here -> nearOrHandOnly(services.world().feet(), true);
             case Target.Seen seen -> seen(seen.id());
             case Target.Position position -> position(position);
             case Target.Landmark landmark -> landmark(landmark.name());
@@ -69,15 +69,43 @@ final class UseTargets {
         };
     }
 
-    // 脚边：给了类型就在身边找最近的，什么类型都没给就只用手上的东西。
-    private Lookup nearOrHandOnly(BlockPos feet) {
+    // 脚边：给了类型就在身边找最近的；显式传了 target=here 又配了 face（没给 block/entity）是点脚下地面那一格；
+    // 其余什么类型都没给就只用手上的东西。
+    private Lookup nearOrHandOnly(BlockPos feet, boolean explicitHere) {
         if (input.block() == null && input.entity() == null) {
+            if (explicitHere && input.face() != null) {
+                return groundUnderFeet(feet);
+            }
             return new Lookup.HandOnly();
         }
         if (feet == null) {
             return new Lookup.Failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻角色不在世界里，找不了目标", null));
         }
         return search(feet);
+    }
+
+    // target=here 配了 face：空气没有面，按角色脚下踩着的那块地面落实——站在半砖、耕地、楼梯上时 feet 本身就是非可替换地面，
+    // 站在完整方块上（feet 是空气或短草这类可替换方块）时取 feet.below()，走普通指格流程去点那一面。
+    private Lookup groundUnderFeet(BlockPos feet) {
+        if (feet == null) {
+            return new Lookup.Failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻角色不在世界里，找不了目标", null));
+        }
+        if (!services.world().loaded(feet)) {
+            return travelTo(feet);
+        }
+        if (!services.world().replaceable(feet)) {
+            return block(feet, "脚下地面", Pick.POINTED);
+        }
+        BlockPos below = feet.below();
+        if (!services.world().loaded(below)) {
+            return travelTo(below);
+        }
+        if (!services.world().air(below)) {
+            return block(below, "脚下地面", Pick.POINTED);
+        }
+        return new Lookup.Failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                "脚下没有地面方块可点（角色正悬空），target=here 配 face 找不到落点",
+                "落回地面再试，或给具体方块的观察编号 b#、坐标"));
     }
 
     // 观察编号：实体按游戏实体编号找回当刻的那一只；地形特征是一片地方；设施就是那一格。

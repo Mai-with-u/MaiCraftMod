@@ -88,7 +88,7 @@ public final class UseModule implements AbilityModule {
                     ParamSpec.of("face", ParamType.CHOICE)
                             .choices("up", "down", "north", "south", "east", "west")
                             .doc("点方块朝哪一面（方块外形上朝这边的表面都算）；不给就点看得见的任一面。"
-                                    + "用扳手转机器时点哪一面决定绕哪根轴转").build()),
+                                    + "用扳手转机器时点哪一面决定绕哪根轴转；配 target=here 点脚下地面朝这一面的表面").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
@@ -159,7 +159,7 @@ public final class UseModule implements AbilityModule {
         String entity = params.has("entity") ? params.text("entity") : null;
         List<String> textLines = linesOf(params.has("text") ? params.text("text") : null);
         List<String> invalid = UseDecider.invalidCombinations(step.goal().target() != null,
-                item, block, entity, textLines);
+                item, block, entity, textLines, params.has("face"));
         boolean sneak = params.has("sneak") && params.bool("sneak");
         // 潜行右键告示牌会把手里的东西放上去、不打开编辑界面：写字只能直接右键。
         if (sneak && !textLines.isEmpty()) {

@@ -584,11 +584,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         return new UseDetails(appliedTimes, usedOn(), openedMenu, lastModifiedBy, signLines, riding, gameMessages);
     }
 
-    // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here）就是对着空气用。
+    // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here 且没配 face）就是对着空气用。
     private String usedOn() {
         if (target != null) return target.isEntity() ? "entity" : "block";
         if (input.entity() != null) return "entity";
-        if (input.block() != null) return "block";
+        if (input.block() != null || input.face() != null) return "block";
         if (input.target() instanceof Target.Seen seen) {
             return seen.id().startsWith("e") ? "entity" : "block";
         }
