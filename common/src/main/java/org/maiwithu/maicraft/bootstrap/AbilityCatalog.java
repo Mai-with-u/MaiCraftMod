@@ -386,7 +386,7 @@ public final class AbilityCatalog {
                 deps.items().itemTags(), deps.guards().protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.hands().interactions(), deps.items().itemTags(),
                         deps.world().memory(), deps.character().context(), deps.compat().menuLayouts(),
-                        deps.guards().othersNotice()),
+                        deps.guards().othersNotice(), deps.guards().rareLootNotice()),
                 deps.world().facilities()::isNaturalLootContainer);
     }
 
@@ -735,7 +735,7 @@ public final class AbilityCatalog {
                 deps.dropConfirmations(), deps.world().memory(), deps.guards()::protection,
                 deps.guards().creatures(), space, deps.world().facilities(),
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.compat().menuLayouts(),
-                deps.hands().digging(), deps.guards().othersNotice());
+                deps.hands().digging(), deps.guards().othersNotice(), deps.guards().rareLootNotice());
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */

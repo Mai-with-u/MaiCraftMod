@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
@@ -16,22 +17,30 @@ record Guards(
         Protection protection,
         ReadsCreatureSituation creatures,
         TrustedPlayers trusted,
-        OthersThingsNotice othersNotice) {
+        OthersThingsNotice othersNotice,
+        RareLootNotice rareLootNotice) {
 
     Guards {
         Objects.requireNonNull(protection, "protection");
         Objects.requireNonNull(creatures, "creatures");
         Objects.requireNonNull(trusted, "trusted");
         othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
+        rareLootNotice = rareLootNotice == null ? RareLootNotice.NONE : rareLootNotice;
+    }
+
+    /** 没配稀罕战利品通报器时：离线测试用空实现。 */
+    Guards(Protection protection, ReadsCreatureSituation creatures, TrustedPlayers trusted,
+            OthersThingsNotice othersNotice) {
+        this(protection, creatures, trusted, othersNotice, RareLootNotice.NONE);
     }
 
     /** 没配动别人东西的通报器时：离线测试用空实现。 */
     Guards(Protection protection, ReadsCreatureSituation creatures, TrustedPlayers trusted) {
-        this(protection, creatures, trusted, OthersThingsNotice.NONE);
+        this(protection, creatures, trusted, OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
     /** 没配自家人时：驯服的生物只分"你的"与"别人的"。 */
     Guards(Protection protection, ReadsCreatureSituation creatures) {
-        this(protection, creatures, TrustedPlayers.NOBODY, OthersThingsNotice.NONE);
+        this(protection, creatures, TrustedPlayers.NOBODY, OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 }

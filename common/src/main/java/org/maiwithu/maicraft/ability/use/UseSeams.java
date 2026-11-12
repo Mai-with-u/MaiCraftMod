@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -268,6 +269,11 @@ final class UseSeams {
         default Runnable prepareWorldChangeNotice(String heldItem, ResolvedTarget target) {
             return () -> {};
         }
+
+        /** 打开方块容器看到内容后（写进世界记忆前），若里面有稀罕贵重物品且属于战利品容器，按上回记忆去重通报。 */
+        default void reportRareLoot(ResolvedTarget target, ContainerWhose origin, WorldPosition spot,
+                List<RareLootNotice.SeenPrecious> precious) {
+        }
     }
 
     /** 看看点开的界面：等内容同步完、列出里面有什么、再关上；打开者负责关闭。 */
@@ -280,5 +286,10 @@ final class UseSeams {
     interface MenuLook extends Action {
         /** 界面里有什么：物品 ID 到件数，按界面里的先后；内容没同步完或界面认不出时为空。 */
         Optional<Map<String, Integer>> contents();
+
+        /** 容器那一侧看到的稀罕贵重物品（taken=0，只打开查看不取物）；测试替身默认为空。 */
+        default List<RareLootNotice.SeenPrecious> preciousItems() {
+            return List.of();
+        }
     }
 }

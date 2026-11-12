@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.Direction;
 
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -122,6 +123,18 @@ public final class UseModule implements AbilityModule {
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
             FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings,
             OthersThingsNotice othersNotice) {
+        return live(context, interactions, close, toMainhand, needs, scene, scans, refusals, walks, confirmations,
+                memory, protection, creatures, space, facilities, sneak, layouts, diggings, othersNotice,
+                RareLootNotice.NONE);
+    }
+
+    /** 生产同时接入动别人东西与稀罕战利品两个通报器。 */
+    public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
+            ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
+            ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
+            Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
+            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings,
+            OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -148,7 +161,7 @@ public final class UseModule implements AbilityModule {
                 new LiveUseTravel(walks),
                 new LiveMenuLooks(context, layouts),
                 memory,
-                new LiveOthersThings(context, protection, creatures, othersNotice),
+                new LiveOthersThings(context, protection, creatures, othersNotice, rareLootNotice),
                 space,
                 facilities,
                 sneak,

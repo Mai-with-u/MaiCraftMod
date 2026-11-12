@@ -508,6 +508,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 containerWhose = origin.wire();
                 lastModifiedBy = origin.lastModifiedBy();
                 containerOpenedBefore = origin.openedBySelf();
+                if (services.others() != null) {
+                    // 先在把这次开箱写进世界记忆前通报新发现的稀罕战利品，按上回记忆去重。
+                    services.others().reportRareLoot(target, origin, spot, looking.preciousItems());
+                }
             }
             rememberContainer(List.copyOf(contents.get().keySet()));
             recordProgress("看清了点开的界面");

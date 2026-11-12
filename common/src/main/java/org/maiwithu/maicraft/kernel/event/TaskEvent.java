@@ -118,7 +118,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 从别人放的容器里取放东西、拆掉或改动别人放的方块：确认发生后发一条，归属不拦动作，宿主按它知情；
          * 做了什么、谁放的、在哪、几件或几格在附带的 others_things 里。
          */
-        OTHERS_THINGS_TOUCHED
+        OTHERS_THINGS_TOUCHED,
+        /**
+         * 打开战利品容器（natural_loot 或 no_record）看到稀罕贵重物品（precious）时发出的里程碑事件：
+         * 同一只容器同一样东西按世界记忆上回看到的内容去重只报一次，开出了什么与拿走几件在附带的 rare_loot 里。
+         */
+        RARE_LOOT_FOUND
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

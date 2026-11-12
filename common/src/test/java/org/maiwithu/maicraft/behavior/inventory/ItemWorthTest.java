@@ -86,9 +86,14 @@ class ItemWorthTest {
 
     @Test
     void 垃圾压不过装备和贵重品() {
-        // 带附魔的铁镐即使堆了三组也还是贵重品；装备不会因为堆多了变垃圾。
+        // 带附魔的铁镐、不能叠的附魔书与不死图腾即使 maxStackSize=1 也归入贵重品；装备不会因为堆多了变垃圾。
         assertEquals(Worth.PRECIOUS,
-                ItemWorth.of(stack("minecraft:enchanted_book", 1, false, false, true, false), Set.of(),
+                ItemWorth.of(new BackpackStack("minecraft:enchanted_book", 1, 1, false, false, true, false), Set.of(),
                         Map.of()));
+        assertEquals(Worth.PRECIOUS,
+                ItemWorth.of(new BackpackStack("minecraft:iron_pickaxe", 1, 1, true, false, true, false), Set.of(),
+                        Map.of()));
+        assertEquals("precious", Worth.PRECIOUS.grade());
+        assertTrue(Worth.FOOD.worthLooting());
     }
 }

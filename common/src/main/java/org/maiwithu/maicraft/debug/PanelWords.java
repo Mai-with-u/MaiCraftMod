@@ -100,6 +100,7 @@ final class PanelWords {
             case OTHERS_FOOD_TAKEN -> "拿了别人的吃的";
             case PLAYER_BODY_LANGUAGE -> "别人的肢体动作";
             case OTHERS_THINGS_TOUCHED -> "动了别人的东西";
+            case RARE_LOOT_FOUND -> "开出稀罕战利品";
         };
     }
 

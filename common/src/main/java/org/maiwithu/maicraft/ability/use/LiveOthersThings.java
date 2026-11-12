@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Supplier;
@@ -23,6 +24,7 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -43,18 +45,25 @@ final class LiveOthersThings implements UseSeams.OthersThings {
     private final Supplier<Protection> protection;
     private final ReadsCreatureSituation creatures;
     private final OthersThingsNotice othersNotice;
+    private final RareLootNotice rareLootNotice;
 
     LiveOthersThings(Supplier<PlayerContext> context, Supplier<Protection> protection,
             ReadsCreatureSituation creatures) {
-        this(context, protection, creatures, OthersThingsNotice.NONE);
+        this(context, protection, creatures, OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
     LiveOthersThings(Supplier<PlayerContext> context, Supplier<Protection> protection,
             ReadsCreatureSituation creatures, OthersThingsNotice othersNotice) {
+        this(context, protection, creatures, othersNotice, RareLootNotice.NONE);
+    }
+
+    LiveOthersThings(Supplier<PlayerContext> context, Supplier<Protection> protection,
+            ReadsCreatureSituation creatures, OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
         this.context = Objects.requireNonNull(context, "context");
         this.protection = Objects.requireNonNull(protection, "protection");
         this.creatures = Objects.requireNonNull(creatures, "creatures");
         this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
+        this.rareLootNotice = rareLootNotice == null ? RareLootNotice.NONE : rareLootNotice;
     }
 
     @Override
@@ -146,6 +155,15 @@ final class LiveOthersThings implements UseSeams.OthersThings {
                 othersNotice.blockChanged(snapshot.get());
             }
         };
+    }
+
+    @Override
+    public void reportRareLoot(ResolvedTarget target, ContainerWhose origin, WorldPosition spot,
+            List<RareLootNotice.SeenPrecious> precious) {
+        if (target == null || target.isEntity() || precious.isEmpty()) return;
+        String block = blockId(target);
+        if (block == null) return;
+        rareLootNotice.report(spot, block, origin.whose(), rareLootNotice.snapshotPreviouslySeen(spot), precious);
     }
 
     // 目标格带上这一刻所在的维度：认家、问归属都按维度比，下界里和主世界家坐标重叠的格子不当成家。

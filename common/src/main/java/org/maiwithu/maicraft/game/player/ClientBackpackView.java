@@ -4,9 +4,13 @@ package org.maiwithu.maicraft.game.player;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.item.ArmorItem;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.level.block.EntityBlock;
 import net.minecraft.world.item.DiggerItem;
 import net.minecraft.world.item.ElytraItem;
@@ -41,6 +45,9 @@ public final class ClientBackpackView implements BackpackView {
     private static final int MAIN_SLOTS = 36;
     // 快捷栏：主格的前 9 格，数字键 1–9 能直接选中。
     private static final int HOTBAR_SLOTS = 9;
+    // 宝石标签（钻石、绿宝石、青金石、紫水晶碎片这类）：原版稀有度虽是 common，在玩家眼里也是稀罕贵重品。
+    private static final TagKey<Item> GEMS_TAG = TagKey.create(Registries.ITEM,
+            ResourceLocation.fromNamespaceAndPath("c", "gems"));
 
     private final LocalPlayer player;
 
@@ -103,8 +110,8 @@ public final class ClientBackpackView implements BackpackView {
                 || item instanceof ElytraItem || item instanceof ShieldItem || item instanceof ShearsItem
                 || item instanceof FlintAndSteelItem || item instanceof FishingRodItem;
         boolean food = stack.has(DataComponents.FOOD);
-        // 贵重：游戏标了 uncommon 以上稀有度，或者带附魔——丢了心疼、难补的东西。
-        boolean precious = stack.getRarity() != Rarity.COMMON || stack.isEnchanted();
+        // 贵重：游戏标了 uncommon 以上稀有度、带附魔，或是宝石（#c:gems，钻石绿宝石这类）——丢了心疼、开箱值得报喜的东西。
+        boolean precious = stack.getRarity() != Rarity.COMMON || stack.isEnchanted() || stack.is(GEMS_TAG);
         // 带方块实体的（箱子、机器、漏斗、溜槽）不算建材：是做出来的设备，腾地方不先丢它。
         boolean building = item instanceof BlockItem blockItem
                 && blockItem.getBlock().defaultBlockState().blocksMotion()

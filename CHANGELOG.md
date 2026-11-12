@@ -8,6 +8,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 打开自然战利品容器或无放置记录容器（`loot`、`use`、`obtain`）看到稀罕贵重物品（稀有度、附魔或 `#c:gems` 宝石）时，`events` 的 `self` 流新增 `rare_loot_found` 里程碑事件，按世界记忆去重并在 `rare_loot` 里写明开出了什么与拿走几件。
 - `observe(what="self")` 新增 `carried_backpacks`：角色身上背着或揣着精妙背包（含穿在 Curios 饰品栏里的）时列出栏位与物品 ID，五分钟内打开过的还附带主存储剩余空槽数与看到的存货。
 - 主背包快满需要腾格子时，自动把杂物塞进身上背着或揣着的精妙背包（支持 Curios 饰品栏、胸甲、副手与主背包多只包依次存放，跳过升级槽与记忆筛选锁定的槽位且禁止背包套娃），不再守着空背包往地上反复丢东西。
 - 角色动了别人放的容器或方块时，`events` 的 `self` 流新增 `others_things_touched` 事件，在 `others_things` 里写明动作（`took` / `stored` / `broke` / `changed`）、放它的人与 UUID、方块及坐标、确认取放的物品件数或连拆格数，方便宿主知情回报。

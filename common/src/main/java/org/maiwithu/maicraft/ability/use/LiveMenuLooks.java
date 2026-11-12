@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -8,6 +9,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
 
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
@@ -61,6 +63,7 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
         private Stage stage = Stage.WAIT_SYNC;
         private int waited;
         private Map<String, Integer> contents;
+        private List<RareLootNotice.SeenPrecious> preciousItems = List.of();
         private MenuSession session;
 
         Look(ClientMenuChannel channel, MenuContent content) {
@@ -72,6 +75,10 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
             return Optional.ofNullable(contents);
         }
 
+        @Override public List<RareLootNotice.SeenPrecious> preciousItems() {
+            return preciousItems;
+        }
+
         @Override public ActionStatus tick(TickContext tick) {
             return switch (stage) {
                 case WAIT_SYNC -> waitSync();
@@ -80,11 +87,12 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
             };
         }
 
-        // 同步完了就按物品合并列出来；等到期限还没同步完就不列，直接去关。
+        // 同步完了就按物品合并列出来，同时抄下容器侧的稀罕贵重物品；等到期限还没同步完就不列，直接去关。
         private ActionStatus waitSync() {
             Optional<MenuContent.Reading> reading = content.current();
             if (reading.isPresent()) {
                 contents = reading.get().containerContents();
+                preciousItems = RareLootNotice.collectInitial(reading.get().containerSnapshots());
                 stage = Stage.CLOSE;
                 return ActionStatus.progressed();
             }

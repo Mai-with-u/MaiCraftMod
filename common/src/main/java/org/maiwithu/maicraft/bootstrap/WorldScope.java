@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
@@ -245,6 +246,7 @@ public final class WorldScope {
         this.ownHome = new OwnHomeSnapshot(memory, buildingArchives, System.currentTimeMillis());
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, events);
+        RareLootNotice rareLootNotice = new RareLootNotice(protection, kinds::isNaturalLootContainer, memory, events);
         this.dimension = minecraft.level.dimension().location().toString();
         installNavigationProtection();
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
@@ -272,7 +274,7 @@ public final class WorldScope {
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
-                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted, othersNotice),
+                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted, othersNotice, rareLootNotice),
                 channels(minecraft, now, events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig,
