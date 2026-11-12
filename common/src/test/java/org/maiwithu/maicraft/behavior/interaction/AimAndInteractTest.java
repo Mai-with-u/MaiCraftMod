@@ -126,24 +126,61 @@ class AimAndInteractTest {
     }
 
     @Test
-    void aHitOnSomethingElseRetriesThenReportsUnreachable() {
+    void aBlockedCrosshairOnBlockUseSubmitsConstructedDirectHit() {
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
-        // 射线永远命中别的格子：中心加六个面共七个瞄准点都点不到目标。
+        // 前景草叶或邻格凸边挡住了准星射线：到站位后的普通方块右键不再换站位，直接交构造好的目标格命中发包。
         scene.ray = hitAt(new BlockPos(3, 64, 2));
-        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.APPLIED);
+        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.PENDING);
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertEquals(TARGET, sender.submissions.getFirst().hit().getBlockPos(), "直发包仍精准打在目标格上");
+    }
+
+    @Test
+    void aHeldItemRayBlockedByWorldStillRetriesThenReportsUnreachable() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        // 桶舀水倒水、水上放船走手持物品自身射线：服务端按真实视线结算，射线没对上时照旧重试后报到不了。
+        scene.ray = hitAt(new BlockPos(3, 64, 2));
+        AimAndInteract action = new AimAndInteract(new InteractionTarget.BlockTarget(TARGET),
+                AimAndInteract.Gesture.USE_HELD_ITEM, InteractionHand.MAIN_HAND,
+                c -> InteractionConfirmation.Verdict.APPLIED, ctx -> scene);
         ActionStatus status = null;
         for (int i = 0; i < 40; i++) {
             status = action.tick(context.asTickContext());
             context.advance();
             if (status instanceof ActionStatus.Failed) break;
         }
-        assertTrue(status instanceof ActionStatus.Failed, "瞄准点用尽后必须按到不了收尾");
-        assertTrue(failedMessage(status).contains("需要换站位"), "换位是站位的事，问题要指向换站位");
-        assertTrue(failedMessage(status).contains("方块 3"), "现场要写明射线命中了谁");
+        assertTrue(status instanceof ActionStatus.Failed, "物品真实射线被挡时必须按到不了收尾");
+        assertTrue(failedMessage(status).contains("需要换站位"));
+        assertTrue(failedMessage(status).contains("方块 3"));
         assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(sender.submissions.isEmpty(), "没核对过命中就绝不出手");
+        assertTrue(sender.submissions.isEmpty(), "桶类真实射线没对准绝不乱发包");
+    }
+
+    @Test
+    void aSlowCameraSubmitsAfterShortTurnCapInsteadOfFailing() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        // 镜头替身始终停在反方向（模拟低帧率或大角度转头慢）：前 6 刻保持平滑演出不出手，满 7 刻贴齐视角直接出手。
+        InteractionTestFakes.FakeScene sluggishScene = new InteractionTestFakes.FakeScene(context);
+        sluggishScene.fixedView = new Vec3(-1.0, 0.0, 0.0);
+        sluggishScene.ray = hitAt(TARGET);
+        AimAndInteract action = blockAction(sluggishScene, c -> InteractionConfirmation.Verdict.PENDING);
+        for (int i = 1; i < AimAndInteract.TURN_MAX_TICKS; i++) {
+            ActionStatus waiting = action.tick(context.asTickContext());
+            assertTrue(waiting instanceof ActionStatus.Running running && !running.progressed(),
+                    "未满短上限前继续等镜头转过去：第 " + i + " 刻");
+            assertTrue(sender.submissions.isEmpty());
+            context.advance();
+        }
+        ActionStatus submitted = action.tick(context.asTickContext());
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "满短上限当刻直接出手");
+        assertEquals(1, sender.submissions.size());
     }
 
     @Test
@@ -296,19 +333,30 @@ class AimAndInteractTest {
         return ((ActionStatus.Failed) status).problem().kind().name();
     }
     @Test
-    void aBlockWithNoVisibleFaceAsksForAnotherStandWithoutTurning() {
+    void aHiddenBlockWithinReachConstructsDirectHitWhileOutOfReachFailsImmediately() {
+        // 站位在服务端放行距离内但目标表面全被草叶遮挡：构造朝向眼睛最近面的精确命中转头提交。
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
         scene.hidden.add(TARGET);
-        AimAndInteract action = blockAction(scene, c -> InteractionConfirmation.Verdict.APPLIED);
+        AimAndInteract withinReach = blockAction(scene, c -> InteractionConfirmation.Verdict.PENDING);
+        ActionStatus submitted = runUntilSubmitted(withinReach, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertEquals(TARGET, sender.submissions.getFirst().hit().getBlockPos());
 
-        ActionStatus status = action.tick(context.asTickContext());
-
-        assertTrue(status instanceof ActionStatus.Failed, "一面都看不到就是站位问题");
+        // 真超出了服务端放行距离：不白转头，第一刻就按到不了交回换站位。
+        ScriptedInteractionSender farSender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext farContext = new InteractionTestFakes.FakeContext().withSender(farSender);
+        InteractionTestFakes.FakeScene farScene = new InteractionTestFakes.FakeScene(farContext);
+        BlockPos farBlock = new BlockPos(10, 64, 10);
+        farScene.hidden.add(farBlock);
+        AimAndInteract outOfReach = new AimAndInteract(new InteractionTarget.BlockTarget(farBlock),
+                c -> InteractionConfirmation.Verdict.APPLIED, ctx -> farScene);
+        ActionStatus status = outOfReach.tick(farContext.asTickContext());
         assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(context.input.lookRequests.isEmpty(), "看不到就不白转头");
-        assertTrue(sender.submissions.isEmpty());
+        assertTrue(farContext.input.lookRequests.isEmpty(), "超出服务端放行距离时不白转头");
+        assertTrue(farSender.submissions.isEmpty());
     }
 
     /** 挂在目标格北面的终端面板：12×12 像素、厚 2 像素，贴着这一格的北侧。 */
@@ -333,32 +381,40 @@ class AimAndInteractTest {
     }
 
     @Test
-    void hittingTheCableCoreOfTheSameBlockIsNotHittingThePart() {
-        // 同一格、但准星落在线缆芯上：不算点到面板，换瞄准点用尽后按到不了收尾，绝不出手。
+    void hittingTheCableCoreStillSubmitsDirectHitInsideThePart() {
+        // 同一格、准星被线缆芯挡住：直发包直接用落在面板框内的精确命中提交，不再因线缆挡准星换站位。
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
         scene.visibleAt.put(TARGET, PANEL.getCenter());
         scene.ray = hitAt(TARGET);
-        AimAndInteract action = partAction(scene);
-        ActionStatus status = null;
-        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
-            status = action.tick(context.asTickContext());
-            context.advance();
-        }
-        assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(sender.submissions.isEmpty());
+        ActionStatus submitted = runUntilSubmitted(partAction(scene), context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertTrue(PANEL.inflate(1.0e-3).contains(sender.submissions.getFirst().hit().getLocation()));
     }
 
     @Test
-    void aPartThatCannotBeSeenAsksForAnotherStand() {
-        // 看得见的只有线缆芯（不在面板框里）：面板看不到，不转头、不出手，问题指向换站位。
+    void anOccludedPartWithinReachConstructsPartCenterHitWhileFarPartFails() {
+        // 站位在距离内但可见射线只打到线缆芯：直发包按面板框中心构造精确命中提交。
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
-        ActionStatus status = partAction(scene).tick(context.asTickContext());
+        ActionStatus submitted = runUntilSubmitted(partAction(scene), context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertTrue(PANEL.inflate(1.0e-3).contains(sender.submissions.getFirst().hit().getLocation()));
+
+        // 超出放行距离的部件照旧不转头、报到不了。
+        BlockPos farCell = new BlockPos(10, 64, 10);
+        AABB farPanel = PANEL.move(8, 0, 8);
+        ScriptedInteractionSender farSender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext farContext = new InteractionTestFakes.FakeContext().withSender(farSender);
+        InteractionTestFakes.FakeScene farScene = new InteractionTestFakes.FakeScene(farContext);
+        ActionStatus status = new AimAndInteract(new InteractionTarget.BlockTarget(farCell, farPanel),
+                c -> InteractionConfirmation.Verdict.PENDING, ctx -> farScene).tick(farContext.asTickContext());
         assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(sender.submissions.isEmpty());
+        assertTrue(farSender.submissions.isEmpty());
     }
 
     @Test
@@ -383,21 +439,19 @@ class AimAndInteractTest {
     }
 
     @Test
-    void hittingAnotherFaceOfTheSameBlockIsNotHittingThatFace() {
-        // 同一格、但准星点中的面朝北：放下去会落到北边那一格，不算点中朝上那一面；换瞄准点用尽后按到不了收尾，绝不出手。
+    void hittingAnotherFaceWithCrosshairStillSubmitsConstructedRequestedFace() {
+        // 点名顶面而准星扫到了北面：直发包按点名的 UP 面构造精确命中提交，不会错放到北边邻格，也不白换站位。
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
         scene.ray = new BlockHitResult(Vec3.atCenterOf(TARGET), Direction.NORTH, TARGET, false);
         AimAndInteract action = new AimAndInteract(InteractionTarget.BlockTarget.facing(TARGET, Direction.UP),
                 c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
-        ActionStatus status = null;
-        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
-            status = action.tick(context.asTickContext());
-            context.advance();
-        }
-        assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(sender.submissions.isEmpty());
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertEquals(Direction.UP, sender.submissions.getFirst().hit().getDirection());
+        assertEquals(TARGET, sender.submissions.getFirst().hit().getBlockPos());
     }
 
     @Test
@@ -476,8 +530,8 @@ class AimAndInteractTest {
     }
 
     @Test
-    void anUnrelatedEntityInTheRayStillBlocksTheAim() {
-        // 载具链之外的实体走进射线才是真的被挡住：换站位重试用尽后按到不了收尾，绝不出手。
+    void anUnrelatedEntityInTheRayDoesNotBlockDirectEntitySubmissionWithinReach() {
+        // 路过的生物或草丛挡在准星线上：右键实体按目标实体编号发包，在放行距离内直接提交，不再被路过实体卡死换站位。
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
         InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
@@ -486,13 +540,21 @@ class AimAndInteractTest {
         scene.ray = new EntityHitResult(stray, stray.getBoundingBox().getCenter());
         AimAndInteract action = new AimAndInteract(new InteractionTarget.EntityTarget(boat),
                 c -> InteractionConfirmation.Verdict.PENDING, player -> scene);
-        ActionStatus status = null;
-        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Failed); i++) {
-            status = action.tick(context.asTickContext());
-            context.advance();
-        }
+        ActionStatus submitted = runUntilSubmitted(action, context);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed());
+        assertEquals(1, sender.submissions.size());
+        assertEquals(PendingInteraction.Kind.INTERACT_ENTITY, sender.submissions.getFirst().kind());
+
+        // 超出放行距离的实体照旧报到不了。
+        Entity farBoat = fakeBoat();
+        farBoat.setPos(10.0, 64.0, 10.0);
+        ScriptedInteractionSender farSender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext farContext = new InteractionTestFakes.FakeContext().withSender(farSender);
+        InteractionTestFakes.FakeScene farScene = new InteractionTestFakes.FakeScene(farContext);
+        ActionStatus status = new AimAndInteract(new InteractionTarget.EntityTarget(farBoat),
+                c -> InteractionConfirmation.Verdict.PENDING, player -> farScene).tick(farContext.asTickContext());
         assertEquals("UNREACHABLE", failedKind(status));
-        assertTrue(sender.submissions.isEmpty());
+        assertTrue(farSender.submissions.isEmpty());
     }
 
     /** 离线替身的载具：只为拿一只活着、有包围盒的实体，不接触真实世界（ItemEntity 这类要在世界里出生）。 */

@@ -7,13 +7,17 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -47,9 +51,9 @@ public final class AimAndInteract implements Action {
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     /** 连着点时每一下等确认的期限：抓传送带上跑着的东西，没点中马上点下一下。 */
     public static final int QUICK_CONFIRM_TICKS = 4;
-    /** 镜头转向目标的耐心上限；原地转不过去说明视角被什么占住，按到不了收尾。 */
-    private static final int TURN_PATIENCE_TICKS = 40;
-    /** 转到位后准星点到了别的东西时，最多重新瞄几次；真人换个角度再试一次就够了。 */
+    /** 镜头转向目标的短上限（刻）：转到位即出手，满上限贴齐角度直接出手，不再因转头慢卡在瞄准。 */
+    public static final int TURN_MAX_TICKS = 7;
+    /** 走物品真实射线的交互（桶、水上放船）准星点到了别处时，最多重新瞄几次。 */
     private static final int MAX_AIM_ATTEMPTS = 2;
 
     /** 动作内部的进度：转头与核对命中 → 等游戏确认。 */
@@ -61,8 +65,10 @@ public final class AimAndInteract implements Action {
     private final InteractionConfirmation confirmation;
     private final int confirmTicks;
     private final Function<PlayerContext, FirstPersonScene> scenes;
-    /** 这一次瞄准的点；重新瞄准时清空，按当时的位置重新找。 */
+    /** 这一次镜头转向的世界坐标点；重新瞄准时清空，按当时的位置重新找。 */
     private Vec3 aimPoint;
+    /** 直发包路径规划好的合法方块命中；准星被前景杂物挡住时直接交它发包。 */
+    private BlockHitResult plannedBlockHit;
     private int aimAttempts;
     private int aimTicks;
     private Stage stage = Stage.AIMING;
@@ -123,14 +129,15 @@ public final class AimAndInteract implements Action {
         };
     }
 
-    // 转头、核对命中、通过后当场冻结现场并提交；每刻只走一步。
+    // 转头演出、按手势核对或直发包提交；每刻只走一步。
     private ActionStatus aimAndSubmit(PlayerContext player, FirstPersonScene scene) {
         if (targetVanished(scene)) {
             return ActionStatus.failed(new Problem(Problem.Kind.TARGET_GONE,
                     target.describe() + "已经不在了，还没出手", null));
         }
+        boolean liveRay = requiresLiveRay(scene);
         if (aimPoint == null) {
-            aimPoint = planAim(scene);
+            aimPoint = liveRay ? planLiveRayAim(scene) : planDirectAim(scene);
             if (aimPoint == null) {
                 return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,
                         "从当前位置看不到" + target.describe() + "的任何一面，或者够不着，需要换站位", null));
@@ -138,34 +145,55 @@ public final class AimAndInteract implements Action {
         }
         player.input().halt(player.localPlayer());
         player.input().lookAt(player.localPlayer(), aimPoint);
-        // 发出转头不算转到位：实际视线没对准前不发射线核对，避免点到目标旁边。
+        // 保留镜头平滑转向的演出；未满短上限时等镜头转到位，满短上限就贴齐剩余角度直接进入出手，不再因转头慢判败。
         if (!AimCheck.settled(scene.viewVector(), scene.eyePosition(), aimPoint)) {
-            if (++aimTicks > TURN_PATIENCE_TICKS) {
-                return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,
-                        "镜头一直转不到" + target.describe() + "的方向", null));
+            if (++aimTicks < TURN_MAX_TICKS) {
+                return ActionStatus.running();
             }
-            return ActionStatus.running();
+            snapLookTo(player, scene.eyePosition(), aimPoint);
         }
-        HitResult hit = scene.sightRay();
-        boolean onTarget = gesture == Gesture.USE_HELD_ITEM
-                ? scene.heldItemPointsAt(((InteractionTarget.BlockTarget) target).pos(), hand)
-                : hitsTarget(scene, hit);
-        if (!onTarget) {
-            return reaimOrGiveUp(hit);
+        if (liveRay) {
+            HitResult hit = scene.sightRay();
+            boolean onTarget = gesture == Gesture.USE_HELD_ITEM
+                    ? scene.heldItemPointsAt(((InteractionTarget.BlockTarget) target).pos(), hand)
+                    : hitsTarget(scene, hit);
+            return onTarget ? submit(player, scene, hit) : reaimOrGiveUp(hit);
         }
-        return submit(player, scene, hit);
+        // 非液体方块与实体的右键走直发包：准星没被挡就用真实准星命中，被草叶、线缆或路过实体挡住就直接交规划好的精确命中。
+        HitResult live = scene.sightRay();
+        if (target instanceof InteractionTarget.BlockTarget block) {
+            BlockHitResult toSend = hitsTarget(scene, live) && live instanceof BlockHitResult blockHit
+                    ? FirstPersonInteractionTargeting.clampHitForPacket(blockHit, block.pos())
+                    : plannedBlockHit;
+            return submit(player, scene, toSend);
+        }
+        HitResult entityHit = hitsTarget(scene, live) ? live
+                : new EntityHitResult(((InteractionTarget.EntityTarget) target).entity(), aimPoint);
+        return submit(player, scene, entityHit);
     }
 
-    // 瞄准点：方块取现在看得见的那个部位，实体取身上看得见的一点（中心被草挡着就瞄上半身、顶上）；方块一面都看不到时为 null。
-    private Vec3 planAim(FirstPersonScene scene) {
+    // 桶舀水倒水、朝目标格使用手持物品（水上放船、装水瓶）与点液体格：服务端按玩家真实射线结算，必须守住真实射线核对。
+    private boolean requiresLiveRay(FirstPersonScene scene) {
+        if (gesture == Gesture.USE_HELD_ITEM) return true;
+        ItemStack held = scene.heldItem(hand);
+        if (held != null && !held.isEmpty() && FirstPersonInteractionTargeting.usesBucketRay(held.getItem())) {
+            return true;
+        }
+        if (target instanceof InteractionTarget.BlockTarget block) {
+            BlockState state = scene.blockAt(block.pos());
+            return state != null && state.getBlock() instanceof LiquidBlock;
+        }
+        return false;
+    }
+
+    // 真实射线路径的瞄准点：必须找到无遮挡可见表面，找不到说明这个站位真没法让服务端物品射线穿过。
+    private Vec3 planLiveRayAim(FirstPersonScene scene) {
         if (target instanceof InteractionTarget.BlockTarget block) {
             BlockHitResult visible = gesture == Gesture.USE_HELD_ITEM
                     ? scene.visibleItemHit(block.pos(), hand)
                     : block.face() != null ? scene.visibleFaceHit(block.pos(), block.face())
                     : block.part() != null ? scene.visiblePartHit(block.pos(), block.part())
                     : scene.visibleHit(block.pos());
-            // 点名的面看不到、而这一格里是能直接放进去的东西（雪层、草）：不挑面，
-            // 这一格里看得见的任何部位都能点——原版右键会把东西替换着放进这一格。
             if (visible == null && block.face() != null) {
                 BlockState live = scene.blockAt(block.pos());
                 if (live != null && live.canBeReplaced()) visible = scene.visibleHit(block.pos());
@@ -175,10 +203,33 @@ public final class AimAndInteract implements Action {
         return scene.visibleEntityPoint(((InteractionTarget.EntityTarget) target).entity());
     }
 
-    // 转到位后准星点到了别的：按现在的位置重新找瞄准点再试；次数用完就是站位问题。
+    // 直发包路径的瞄准点：方块优先可见表面、被挡时构造精确 BlockHitResult；实体核对在服务端放行距离内就取瞄准点。
+    private Vec3 planDirectAim(FirstPersonScene scene) {
+        if (target instanceof InteractionTarget.BlockTarget block) {
+            FirstPersonScene.DirectBlockAim direct = scene.directBlockAim(block.pos(), block.face(), block.part());
+            if (direct == null) return null;
+            plannedBlockHit = direct.packetHit();
+            return direct.lookPoint();
+        }
+        var entity = ((InteractionTarget.EntityTarget) target).entity();
+        return scene.entityWithinDirectReach(entity) ? scene.visibleEntityPoint(entity) : null;
+    }
+
+    // 满短上限后把剩余转角直接贴齐目标方向，确保紧接着同步给服务端的朝向包与瞄准方向一致（楼梯、箱子朝向不放歪）。
+    private static void snapLookTo(PlayerContext player, Vec3 eye, Vec3 point) {
+        Vec3 delta = point.subtract(eye);
+        if (delta.lengthSqr() < 1.0e-8) return;
+        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
+        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
+        player.input().requestImmediateLook(yaw, pitch, player.clientTick());
+    }
+
+    // 走真实射线路径时转到位却点到了别的：重新找瞄准点再试；次数用完就是站位问题。
     private ActionStatus reaimOrGiveUp(HitResult hit) {
         if (++aimAttempts < MAX_AIM_ATTEMPTS) {
             aimPoint = null;
+            plannedBlockHit = null;
             aimTicks = 0;
             return ActionStatus.running();
         }

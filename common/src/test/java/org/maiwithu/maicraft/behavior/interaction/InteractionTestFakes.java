@@ -95,6 +95,7 @@ final class InteractionTestFakes {
     static final class FakeScene implements FirstPersonScene {
         final FakeContext context;
         final Vec3 eye = new Vec3(0.0, 64.0, 0.0);
+        Vec3 fixedView;
         HitResult ray;
         final Map<BlockPos, BlockState> blocks = new HashMap<>();
         // 离线测试不触碰真实物品注册表，手持快照默认没有；要测持用场景时再想办法注入。
@@ -106,6 +107,7 @@ final class InteractionTestFakes {
 
         /** 视线方向 = 上一次转头请求的方向，模拟"本刻的转头还没落地"；一次都没转过就朝 -Z。 */
         @Override public Vec3 viewVector() {
+            if (fixedView != null) return fixedView;
             List<Vec3> requests = context.input.lookRequests;
             Vec3 aim = requests.size() < 2 ? new Vec3(0.0, 64.0, -1.0) : requests.get(requests.size() - 2);
             Vec3 direction = aim.subtract(eye);

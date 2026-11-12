@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -44,6 +45,8 @@ public final class BlockDigger {
     private static final int TOOL_TIMEOUT_TICKS = 20 * 5;
     /** 生存模式破坏一个方块后，到下一次开挖前等待的游戏刻数；与原版破坏间隔一致。 */
     private static final int POST_BREAK_DELAY_TICKS = 5;
+    /** 开挖前镜头转向演出的短上限（刻）：转到位即开挖，满上限贴齐视角直接开挖，不卡在等准星。 */
+    private static final int TURN_MAX_TICKS = 7;
 
     private final LocalPlayer player;
     private final InteractionSender sender;
@@ -102,6 +105,7 @@ public final class BlockDigger {
     public void requiredFace(Direction face) { requiredFace = face; }
     public void preferTopFace(boolean value) { preferTopFace = value; }
     private int blockHitDelay;    // 方块破坏后的冷却时间（reset() 后保留）。
+    private int aimTicks;         // 当前目标开挖前已转头等待的刻数。
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private ItemStack destroyingItem;
 
@@ -194,17 +198,14 @@ public final class BlockDigger {
         return DigResult.NO_SHOT;
     }
 
-    // 坐标入口先找能看到的目标面；找不到时还可能改挖眼睛与目标之间的遮挡物。
-    // 只许挖指定格的调用方应使用 digTargetStep，否则“挖目标”可能顺便拆掉别的格。
+    // 坐标入口先找能看到的目标面；被挡时若调用方允许顺手拆遮挡物则先拆遮挡，否则在服务端放行距离内直接构造命中开挖。
     public DigResult digStep(PlayerContext context, BlockPos target) {
-        Level level = player.level();
         if (blockHitDelay > 0) {                    // 先等待上一次破坏效果生效。
             blockHitDelay--;
             playerInput.halt(player);
             return DigResult.PROGRESSING;
         }
-        // 决定本刻实际挥向哪里：先尝试射线确认可见的目标表面；若目标被树叶或狭窄顶棚遮挡，则瞄准目标中心并破坏准星实际命中的遮挡物来开路。
-        // 这样角色不必永远等待理想角度；遮挡格能不能挖由调用方按许可回答，这里不替它判断。
+        // 先试无遮挡的目标可见表面；若被可顺手清除的树叶等挡住则先拆遮挡；都不满足时按直发包规则构造精确命中直接挖目标。
         BlockHitResult hit = reachableHit(target);
         BlockPos effective = target;
         if (hit == null) {
@@ -213,11 +214,13 @@ public final class BlockDigger {
                     && mayBreakOccluder.test(center.getBlockPos().immutable())) {
                 hit = center;
                 effective = center.getBlockPos();
+            } else {
+                hit = directBreakHit(target);
             }
         }
         playerInput.halt(player);
         if (hit == null) {
-            return DigResult.NO_SHOT;                // 没有清晰射线，也没有安全可清除的遮挡——当前卡住。
+            return DigResult.NO_SHOT;                // 超出服务端放行距离或目标已消失——当前无法挖掘。
         }
         if (pos == null || !pos.equals(effective)) {
             if (!start(context, effective, true)) {
@@ -228,7 +231,7 @@ public final class BlockDigger {
         return advance(context, hit, effective.equals(target));
     }
 
-    // 只尝试目标自身可见的面，绝不改挖前面的遮挡块；看不到就交回调用方换站位。
+    // 只挖目标自身，绝不改挖前面的遮挡块：先取可见面，被草叶或凸角遮挡、或停在容差带内时直接构造精确命中开挖。
     public DigResult digTargetStep(PlayerContext context, BlockPos target) {
         if (blockHitDelay > 0) {
             blockHitDelay--;
@@ -236,6 +239,9 @@ public final class BlockDigger {
             return DigResult.PROGRESSING;
         }
         BlockHitResult hit = reachableHit(target);
+        if (hit == null) {
+            hit = directBreakHit(target);
+        }
         playerInput.halt(player);
         if (hit == null) {
             return DigResult.NO_SHOT;
@@ -293,10 +299,13 @@ public final class BlockDigger {
         if (!context.canInteractThisTick()) {
             return DigResult.PROGRESSING;
         }
-        // 第一次出手先等视角靠近目标；开始以后继续推进同一份挖掘记录，不每刻重新开挖。
+        // 第一次出手先做短上限镜头转向演出：对准或满 7 刻贴齐视角后立即开挖，不再因转头慢无限干站；开始后继续推进同一份挖掘记录。
         if (pending == null) {
             if (!aimReady(hit.getLocation())) {
-                return DigResult.PROGRESSING;
+                if (++aimTicks < TURN_MAX_TICKS) {
+                    return DigResult.PROGRESSING;
+                }
+                snapLookTo(context, hit.getLocation());
             }
             if (!preparation.test(hit)) return DigResult.PROGRESSING;
             PendingInteraction started = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
@@ -583,6 +592,25 @@ public final class BlockDigger {
         pendingToolPlan = null;
         toolNoRoom = false;
         destroyingItem = null;
+        aimTicks = 0;
+    }
+
+    private void snapLookTo(PlayerContext context, Vec3 target) {
+        Vec3 delta = target.subtract(player.getEyePosition());
+        if (delta.lengthSqr() < 1.0e-8) return;
+        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
+        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
+        playerInput.requestImmediateLook(yaw, pitch, context.clientTick());
+    }
+
+    // 真实可见面被草叶或矿脉凸角挡住、或角色停在容差带内时，在服务端放行距离内按目标格与面直接构造合法挖掘命中。
+    private BlockHitResult directBreakHit(BlockPos target) {
+        double visibleReach = InteractionRange.blockReach(player);
+        double maxReach = visibleReach + sender.serverReachPadding();
+        return FirstPersonInteractionTargeting.directBlockHit(
+                player.level(), player, player.getEyePosition(), target,
+                visibleReach, maxReach, requiredFace, null, preferTopFace);
     }
 
     private boolean aimReady(Vec3 target) {

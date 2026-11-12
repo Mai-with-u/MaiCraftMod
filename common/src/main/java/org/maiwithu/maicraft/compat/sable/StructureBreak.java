@@ -34,8 +34,8 @@ final class StructureBreak implements Action {
 
     /** 挖一格最多等几刻（硬方块空手挖要很久）。 */
     static final int BREAK_TICKS = 1200;
-    /** 转头最多等几刻。 */
-    static final int AIM_TICKS = 40;
+    /** 转头演出的短上限（刻）：转到位即开挖，满上限直接按地块坐标发包开挖。 */
+    static final int AIM_TICKS = 7;
 
     private final StructureReads reads;
     private final PlayerServices services;
@@ -45,6 +45,7 @@ final class StructureBreak implements Action {
     private Action toMainhand;
     private boolean toolChosen;
     private Vec3 aimPoint;
+    private BlockHitResult plannedHit;
     private int aimed;
     private PendingInteraction pending;
     private PlayerContext last;
@@ -99,14 +100,15 @@ final class StructureBreak implements Action {
         return ActionStatus.progressed();
     }
 
-    // 看着那一格此刻在世界里看得见的那一点，转到位后准星第一下打中它才开挖；交给游戏的是地块里的格与面。
+    // 看着那一格此刻在世界里的位置，转到位或满短上限后开挖：准星打中目标就用准星命中，被船上凸边挡住就用构造的地块局部命中。
     private ActionStatus aimAndStart(PlayerContext context, FirstPersonScene scene, LocalPlayer player) {
         if (aimPoint == null) {
-            BlockHitResult visible = scene.visibleHit(target);
-            if (visible == null) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "从这里看不到、够不着船上那一格，要换站位"));
+            FirstPersonScene.DirectBlockAim direct = scene.directBlockAim(target, null, null);
+            if (direct == null) {
+                return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "从这里够不着船上那一格，要换站位"));
             }
-            aimPoint = visible.getLocation();
+            aimPoint = direct.lookPoint();
+            plannedHit = direct.packetHit();
         }
         context.input().halt(player);
         context.input().lookAt(player, aimPoint);
@@ -114,11 +116,9 @@ final class StructureBreak implements Action {
             return ActionStatus.running();
         }
         HitResult hit = scene.sightRay();
-        if (!AimCheck.hitsBlock(hit, target)) {
-            return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE,
-                    "看着船上那一格，准星却打到" + AimCheck.describeHit(hit) + "，要换站位"));
-        }
-        PendingInteraction started = context.interactionSender().startBreaking(context, (BlockHitResult) hit, BREAK_TICKS);
+        BlockHitResult toBreak = AimCheck.hitsBlock(hit, target) && hit instanceof BlockHitResult live
+                ? live : plannedHit;
+        PendingInteraction started = context.interactionSender().startBreaking(context, toBreak, BREAK_TICKS);
         // 提交入口这一刻不收：下一刻原样再开挖。
         if (started == null) return ActionStatus.running();
         pending = started;
@@ -166,6 +166,7 @@ final class StructureBreak implements Action {
         // 已经确认挖掉的留着（下一刻照挖完收场）；停掉的、没确认的作废，接着做时重新瞄准再挖。
         if (pending != null && pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) pending = null;
         aimPoint = null;
+        plannedHit = null;
         aimed = 0;
         if (last != null && last.isCurrent() && last.input() != null) last.input().halt(last.localPlayer());
     }

@@ -25,9 +25,15 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
  */
 public final class LiveFirstPersonScene implements FirstPersonScene {
     private final LocalPlayer player;
+    private final double serverReachPadding;
 
     public LiveFirstPersonScene(LocalPlayer player) {
+        this(player, InteractionRange.VANILLA_SERVER_PADDING);
+    }
+
+    public LiveFirstPersonScene(LocalPlayer player, double serverReachPadding) {
         this.player = player;
+        this.serverReachPadding = serverReachPadding;
     }
 
     @Override public Vec3 eyePosition() {
@@ -110,6 +116,32 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
             if (blocked.getType() == HitResult.Type.MISS) return point;
         }
         return center;
+    }
+
+    @Override public DirectBlockAim directBlockAim(BlockPos target, Direction face, AABB part) {
+        double visibleReach = InteractionRange.blockReach(player);
+        double maxReach = visibleReach + serverReachPadding;
+        // 若真实可见面存在，镜头转向可见点，发包点夹进方块中心安全范围；被遮挡时构造直发命中。
+        BlockHitResult visible = face != null ? visibleFaceHit(target, face)
+                : part != null ? visiblePartHit(target, part)
+                : visibleHit(target);
+        if (visible == null && face != null) {
+            BlockState live = blockAt(target);
+            if (live != null && live.canBeReplaced()) visible = visibleHit(target);
+        }
+        if (visible != null) {
+            return new DirectBlockAim(visible.getLocation(),
+                    FirstPersonInteractionTargeting.clampHitForPacket(visible, target));
+        }
+        BlockHitResult constructed = FirstPersonInteractionTargeting.directBlockHit(
+                player.level(), player, player.getEyePosition(), target,
+                visibleReach, maxReach, face, part, false);
+        return constructed == null ? null : new DirectBlockAim(constructed.getLocation(), constructed);
+    }
+
+    @Override public boolean entityWithinDirectReach(Entity entity) {
+        double maxReach = InteractionRange.entityReach(player) + serverReachPadding;
+        return entity.getBoundingBox().distanceToSqr(player.getEyePosition()) < maxReach * maxReach;
     }
 
     @Override public BlockState blockAt(BlockPos pos) {

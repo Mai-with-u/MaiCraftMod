@@ -48,6 +48,8 @@ import net.minecraft.util.Mth;
 public final class FirstPersonInteractionTargeting {
     private static final double EPSILON = 1.0e-6D;
     private static final double FACE_INSET = 1.0e-3D;
+    /** 原版服务端 handleUseItemOn 要求命中点离方块中心各轴偏移严格小于 1.0000001；留出安全余量防浮点越界。 */
+    private static final double PACKET_HIT_MAX_OFFSET = 0.999D;
 
     private FirstPersonInteractionTargeting() {}
 
@@ -489,5 +491,130 @@ public final class FirstPersonInteractionTargeting {
         return !(hit instanceof BlockHitResult blockHit)
                 || hit.getType() != HitResult.Type.BLOCK
                 || !blockHit.getBlockPos().equals(target);
+    }
+
+    /**
+     * 到站位后的方块直发包命中：先在可见范围内找真实无遮挡的表面点（画面与落点最贴近真人点击）；
+     * 被前景草叶、线缆、机器凸边遮挡，或角色停在格子边沿落进服务端距离容差带时，
+     * 按目标格形状、点名面或部件框直接构造合法的 {@link BlockHitResult}。
+     * 空气与液体格不构造直发命中（桶舀水倒水等按各自射线结算）。
+     */
+    public static BlockHitResult directBlockHit(
+            Level level, Entity observer, Vec3 eye, BlockPos target,
+            double visibleReach, double maxServerReach,
+            Direction requiredFace, AABB part, boolean preferTopFace) {
+        if (!Double.isFinite(maxServerReach) || maxServerReach <= 0.0D
+                || level == null || !level.isLoaded(target)) {
+            return null;
+        }
+        BlockState state = level.getBlockState(target);
+        if (state.isAir() || state.getBlock() instanceof LiquidBlock) {
+            return null;
+        }
+        // 先试无遮挡的真实可见面：看得见时优先取可见点，再把发包坐标夹进服务端允许的偏移框内。
+        if (Double.isFinite(visibleReach) && visibleReach > 0.0D && level.isLoaded(BlockPos.containing(eye))) {
+            BlockHitResult visible = requiredFace != null
+                    ? visibleFaceHit(level, observer, eye, target, visibleReach, requiredFace)
+                    : part != null
+                    ? visiblePartHit(level, observer, eye, target, visibleReach, part)
+                    : visibleBlockHit(level, observer, eye, target, visibleReach);
+            if (visible == null && requiredFace != null && state.canBeReplaced()) {
+                visible = visibleBlockHit(level, observer, eye, target, visibleReach);
+            }
+            if (visible != null) {
+                return clampHitForPacket(visible, target);
+            }
+        }
+        return constructDirectHit(eye, target, shapeBounds(level, target, state),
+                requiredFace, part, preferTopFace, maxServerReach);
+    }
+
+    /**
+     * 纯几何构造满足原版服务端校验的方块命中（离线单测可直接验证）：
+     * 眼睛到目标整格包围盒的距离必须严格小于 {@code maxServerReach}，命中点与方块中心各轴差值小于 1 格。
+     *
+     * @param localShapeBounds 方块选择形状在格内的局部边界（通常在 0~1 之间，超出的凸缘自动夹回安全偏移内）
+     * @param requiredFace     调用方点名要点的面；未指定时按 {@code preferTopFace} 或朝向眼睛最近的面选取
+     * @param worldPart        部件框（世界坐标）；非空时要求与方块形状重叠，命中点取重叠框中心
+     * @param preferTopFace    挖掘自上而下刨坑时优先点顶面
+     */
+    public static BlockHitResult constructDirectHit(
+            Vec3 eye, BlockPos target, AABB localShapeBounds,
+            Direction requiredFace, AABB worldPart, boolean preferTopFace, double maxServerReach) {
+        if (!Double.isFinite(maxServerReach) || maxServerReach <= 0.0D) {
+            return null;
+        }
+        // 原版 Player.canInteractWithBlock 按整格包围盒到眼睛的距离平方严格小于上限平方判定。
+        if (new AABB(target).distanceToSqr(eye) >= maxServerReach * maxServerReach) {
+            return null;
+        }
+        AABB shape = localShapeBounds == null ? new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0) : localShapeBounds;
+        if (worldPart != null) {
+            AABB localPart = worldPart.move(-target.getX(), -target.getY(), -target.getZ());
+            if (!shape.intersects(localPart)) {
+                return null;
+            }
+            AABB overlap = shape.intersect(localPart).move(target.getX(), target.getY(), target.getZ());
+            Vec3 partPoint = clampNearBlockCenter(overlap.getCenter(), target);
+            Direction face = requiredFace != null ? requiredFace : nearestFace(eye, partPoint);
+            return new BlockHitResult(partPoint, face, target.immutable(), false);
+        }
+        AABB safeShape = clampLocalShape(shape);
+        Vec3 shapeCenter = safeShape.getCenter().add(target.getX(), target.getY(), target.getZ());
+        Direction face = requiredFace != null ? requiredFace
+                : preferTopFace ? Direction.UP
+                : nearestFace(eye, shapeCenter);
+        Vec3 point = clampNearBlockCenter(faceCenterOnLocalBounds(target, safeShape, face), target);
+        return new BlockHitResult(point, face, target.immutable(), false);
+    }
+
+    /** 把已有命中的发包坐标夹进方块中心各轴 ±0.999 内，防止伸出格外的轮缘因浮点超 1.0000001 被服务端丢包。 */
+    public static BlockHitResult clampHitForPacket(BlockHitResult hit, BlockPos target) {
+        Vec3 clamped = clampNearBlockCenter(hit.getLocation(), target);
+        if (clamped.equals(hit.getLocation()) && hit.getBlockPos().equals(target)) {
+            return hit;
+        }
+        return new BlockHitResult(clamped, hit.getDirection(), target.immutable(), hit.isInside());
+    }
+
+    /** 朝向眼睛最近的那一面：眼睛在方块北侧就点北面，在正上方就点顶面，与目标中心重合时默认顶面。 */
+    public static Direction nearestFace(Vec3 eye, Vec3 center) {
+        Vec3 delta = eye.subtract(center);
+        if (delta.lengthSqr() < EPSILON) {
+            return Direction.UP;
+        }
+        return Direction.getNearest(delta.x, delta.y, delta.z);
+    }
+
+    private static AABB clampLocalShape(AABB shape) {
+        double minX = Mth.clamp(shape.minX, -0.49D, 1.0D);
+        double minY = Mth.clamp(shape.minY, -0.49D, 1.0D);
+        double minZ = Mth.clamp(shape.minZ, -0.49D, 1.0D);
+        double maxX = Math.max(minX, Mth.clamp(shape.maxX, 0.0D, 1.49D));
+        double maxY = Math.max(minY, Mth.clamp(shape.maxY, 0.0D, 1.49D));
+        double maxZ = Math.max(minZ, Mth.clamp(shape.maxZ, 0.0D, 1.49D));
+        return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    private static Vec3 faceCenterOnLocalBounds(BlockPos target, AABB localBounds, Direction face) {
+        double cx = (localBounds.minX + localBounds.maxX) * 0.5D;
+        double cy = (localBounds.minY + localBounds.maxY) * 0.5D;
+        double cz = (localBounds.minZ + localBounds.maxZ) * 0.5D;
+        return switch (face) {
+            case DOWN -> offset(target, cx, localBounds.minY, cz);
+            case UP -> offset(target, cx, localBounds.maxY, cz);
+            case NORTH -> offset(target, cx, cy, localBounds.minZ);
+            case SOUTH -> offset(target, cx, cy, localBounds.maxZ);
+            case WEST -> offset(target, localBounds.minX, cy, cz);
+            case EAST -> offset(target, localBounds.maxX, cy, cz);
+        };
+    }
+
+    private static Vec3 clampNearBlockCenter(Vec3 point, BlockPos target) {
+        Vec3 center = Vec3.atCenterOf(target);
+        return new Vec3(
+                Mth.clamp(point.x, center.x - PACKET_HIT_MAX_OFFSET, center.x + PACKET_HIT_MAX_OFFSET),
+                Mth.clamp(point.y, center.y - PACKET_HIT_MAX_OFFSET, center.y + PACKET_HIT_MAX_OFFSET),
+                Mth.clamp(point.z, center.z - PACKET_HIT_MAX_OFFSET, center.z + PACKET_HIT_MAX_OFFSET));
     }
 }

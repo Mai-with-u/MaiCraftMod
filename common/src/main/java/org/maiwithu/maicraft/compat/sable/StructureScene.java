@@ -20,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.interaction.AimCheck;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
+import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 
@@ -38,20 +39,28 @@ final class StructureScene implements FirstPersonScene {
     private final StructureReads reads;
     /** 这一刻的结构；看不到了为 null。 */
     private final SableStructures.Structure ship;
+    private final double serverReachPadding;
 
-    private StructureScene(LocalPlayer player, ClientLevel level, StructureReads reads, SableStructures.Structure ship) {
+    private StructureScene(LocalPlayer player, ClientLevel level, StructureReads reads,
+            SableStructures.Structure ship, double serverReachPadding) {
         this.player = player;
         this.level = level;
         this.reads = reads;
         this.ship = ship;
+        this.serverReachPadding = serverReachPadding;
     }
 
     /** 交互动作每刻取现场的办法：按结构身份找这一刻的结构。 */
     static Function<PlayerContext, FirstPersonScene> of(StructureReads reads, String structureId) {
         Objects.requireNonNull(reads, "reads");
         Objects.requireNonNull(structureId, "structureId");
-        return context -> new StructureScene(context.localPlayer(), context.level(), reads,
-                find(reads, context.level(), context.localPlayer(), structureId).orElse(null));
+        return context -> {
+            double padding = context.interactionSender() == null
+                    ? InteractionRange.VANILLA_SERVER_PADDING
+                    : context.interactionSender().serverReachPadding();
+            return new StructureScene(context.localPlayer(), context.level(), reads,
+                    find(reads, context.level(), context.localPlayer(), structureId).orElse(null), padding);
+        };
     }
 
     /** 角色附近这个身份的结构。 */
@@ -86,6 +95,35 @@ final class StructureScene implements FirstPersonScene {
 
     @Override public BlockHitResult visibleFaceHit(BlockPos target, Direction face) {
         return visible(target, face);
+    }
+
+    @Override public DirectBlockAim directBlockAim(BlockPos target, Direction face, AABB part) {
+        BlockState state = blockAt(target);
+        if (ship == null || state == null || state.isAir()) return null;
+        double maxReach = InteractionRange.blockReach(player) + serverReachPadding;
+        // 船上看得到表面时先用真实可见点：世界坐标给镜头转头，地块局部坐标夹好偏移后给发包。
+        if (part == null) {
+            BlockHitResult seen = visible(target, face);
+            if (seen != null) {
+                Vec3 local = ship.pose().toLocal(seen.getLocation());
+                BlockHitResult packet = FirstPersonInteractionTargeting.clampHitForPacket(
+                        new BlockHitResult(local, seen.getDirection(), target, false), target);
+                return new DirectBlockAim(seen.getLocation(), packet);
+            }
+        }
+        // 被船上别的部件挡住时：把眼睛换进地块局部坐标选最近面并构造局部命中，再换回世界核对真实距离。
+        Vec3 localEye = ship.pose().toLocal(player.getEyePosition());
+        List<AABB> boxes = state.getShape(level, target).toAabbs();
+        AABB localBounds = null;
+        for (AABB box : boxes) {
+            localBounds = localBounds == null ? box : localBounds.minmax(box);
+        }
+        BlockHitResult packet = FirstPersonInteractionTargeting.constructDirectHit(
+                localEye, target, localBounds, face, part, false, Double.MAX_VALUE);
+        if (packet == null) return null;
+        Vec3 worldLook = ship.pose().toWorld(packet.getLocation());
+        return player.getEyePosition().distanceToSqr(worldLook) < maxReach * maxReach
+                ? new DirectBlockAim(worldLook, packet) : null;
     }
 
     // 结构上不倒桶：物品按自己射线用的也按整格找看得见的部位。

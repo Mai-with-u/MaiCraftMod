@@ -12,7 +12,9 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 角色此刻的第一人称现场：眼睛在哪、看向哪、准星射到谁、目标格是什么、手上拿着什么。
@@ -20,6 +22,13 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 真实实现只做转发，让"读到的现场"这一件事只有一份。
  */
 public interface FirstPersonScene {
+
+    /**
+     * 一次直接方块点击的规划：镜头转向的世界坐标与交给原版发包的方块命中分开给出——
+     * 普通世界里两点一致（发包点夹在服务端允许的偏移内），物理结构上转头看世界点、发包交结构地块局部点。
+     */
+    record DirectBlockAim(Vec3 lookPoint, BlockHitResult packetHit) {
+    }
 
     /** 角色眼睛的世界坐标；瞄准角度与射线都从它出发。 */
     Vec3 eyePosition();
@@ -79,6 +88,34 @@ public interface FirstPersonScene {
         return entity.getBoundingBox().getCenter();
     }
 
+    /**
+     * 到站位后直接点击一格方块的瞄准与发包规划：优先取真实可见表面，被前景杂物遮挡或停在容差带内时
+     * 构造合法的精确命中；超出服务端放行距离或部件不在该格形状内时返回 null。
+     */
+    default DirectBlockAim directBlockAim(BlockPos target, Direction face, AABB part) {
+        BlockHitResult visible = face != null ? visibleFaceHit(target, face)
+                : part != null ? visiblePartHit(target, part)
+                : visibleHit(target);
+        if (visible == null && face != null) {
+            BlockState live = blockAt(target);
+            if (live != null && live.canBeReplaced()) visible = visibleHit(target);
+        }
+        if (visible != null) {
+            return new DirectBlockAim(visible.getLocation(),
+                    FirstPersonInteractionTargeting.clampHitForPacket(visible, target));
+        }
+        double maxReach = 4.5 + InteractionRange.VANILLA_SERVER_PADDING;
+        BlockHitResult constructed = FirstPersonInteractionTargeting.constructDirectHit(
+                eyePosition(), target, null, face, part, false, maxReach);
+        return constructed == null ? null : new DirectBlockAim(constructed.getLocation(), constructed);
+    }
+
+    /** 实体是否在服务端放行的交互距离之内（含握手确认的角色距离容差）。 */
+    default boolean entityWithinDirectReach(Entity entity) {
+        double maxReach = 3.0 + InteractionRange.VANILLA_SERVER_PADDING;
+        return entity.getBoundingBox().distanceToSqr(eyePosition()) < maxReach * maxReach;
+    }
+
     /** 目标格当前状态；格子未加载时返回 null，不能把没加载当成没有。 */
     BlockState blockAt(BlockPos pos);
 
@@ -90,6 +127,9 @@ public interface FirstPersonScene {
 
     /** 从当刻的角色上下文取现场；每个动作每刻取一次，不留到下一刻。 */
     static FirstPersonScene of(PlayerContext context) {
-        return new LiveFirstPersonScene(context.localPlayer());
+        double padding = context.interactionSender() == null
+                ? InteractionRange.VANILLA_SERVER_PADDING
+                : context.interactionSender().serverReachPadding();
+        return new LiveFirstPersonScene(context.localPlayer(), padding);
     }
 }
