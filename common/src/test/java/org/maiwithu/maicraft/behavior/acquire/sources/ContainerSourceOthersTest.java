@@ -216,4 +216,39 @@ class ContainerSourceOthersTest {
         assertInstanceOf(SourceQuote.Unavailable.class,
                 source(landmark, 1, new ArrayList<>()).quote(STEW.withFoodReport(new Starving()), guarded));
     }
+
+    @Test
+    void 自动取材先翻自家和战利品与无记录箱子_别人放的排最后() {
+        // x=2 是别人放的（离得最近且记得有蘑菇煲），x=15 是自家放的（较远），x=20 是没开过的自然战利品箱子。
+        List<ContainerChooser.Candidate> mixed = List.of(
+                new ContainerChooser.Candidate("chest（2, 64, 0）", "minecraft:chest",
+                        new WorldPosition(2, 64, 0, null), List.of("minecraft:mushroom_stew"), true, 2,
+                        false, true, ContainerChooser.Lid.CLEAR, false),
+                new ContainerChooser.Candidate("chest（15, 64, 0）", "minecraft:chest",
+                        new WorldPosition(15, 64, 0, null), List.of("minecraft:mushroom_stew"), true, 15,
+                        false, true, ContainerChooser.Lid.CLEAR, false));
+        Protection ownership = new Protection((dimension, x, y, z) -> {
+            if (x == 2) return Optional.of(new ReadsBlockOwnership.PlacedBy(BOB));
+            if (x == 15) return Optional.of(new ReadsBlockOwnership.PlacedBy("self"));
+            return Optional.empty();
+        }, List::of, name -> Optional.empty(), "self");
+
+        ContainerSource withOwn = new ContainerSource(spots(mixed), new FakeTags(), ownership,
+                (container, request, permissions) -> Optional.empty());
+        SourceQuote.Offer firstOffer = assertInstanceOf(SourceQuote.Offer.class, withOwn.quote(STEW, HERE));
+        assertEquals("15,64,0", firstOffer.hint(), "自家箱子虽远也排在别人放的箱子前面");
+
+        // 没有自家已知有货箱子、但有一只没开过的战利品箱子（x=20）时，也先看战利品箱子再去翻别人放的箱子（x=2）。
+        List<ContainerChooser.Candidate> lootAndOthers = List.of(
+                new ContainerChooser.Candidate("chest（2, 64, 0）", "minecraft:chest",
+                        new WorldPosition(2, 64, 0, null), List.of("minecraft:mushroom_stew"), true, 2,
+                        false, true, ContainerChooser.Lid.CLEAR, false),
+                new ContainerChooser.Candidate("lootr_chest（20, 64, 0）", "lootr:lootr_chest",
+                        new WorldPosition(20, 64, 0, null), null, true, 20,
+                        false, true, ContainerChooser.Lid.CLEAR, false));
+        ContainerSource withLoot = new ContainerSource(spots(lootAndOthers), new FakeTags(), ownership,
+                (container, request, permissions) -> Optional.empty());
+        SourceQuote.Offer lootOffer = assertInstanceOf(SourceQuote.Offer.class, withLoot.quote(STEW, HERE));
+        assertEquals("20,64,0", lootOffer.hint(), "没开过的自然战利品容器优先于别人放的箱子");
+    }
 }

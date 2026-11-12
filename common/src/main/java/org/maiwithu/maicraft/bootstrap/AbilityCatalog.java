@@ -378,7 +378,8 @@ public final class AbilityCatalog {
                 deps.items().itemTags(), deps.guards().protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.hands().interactions(), deps.items().itemTags(),
                         deps.world().memory(), deps.character().context(), deps.compat().menuLayouts(),
-                        deps.guards().othersNotice()));
+                        deps.guards().othersNotice()),
+                deps.world().facilities()::isNaturalLootContainer);
     }
 
     /**

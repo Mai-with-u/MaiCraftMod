@@ -7,10 +7,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
+import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
@@ -56,13 +58,21 @@ public final class ContainerSource implements ItemSource {
     private final ReadsItemTags tags;
     private final Protection protection;
     private final ContainerTakes takes;
+    private final Predicate<String> naturalLoot;
 
     /** 生产与离线测试都用这一种：归属是谁放的这个事实由保护判断当场给。 */
     public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
+        this(spots, tags, protection, takes, blockId -> blockId != null && blockId.startsWith("lootr:"));
+    }
+
+    /** 生产接入方块标签读端：按游戏数据认自然战利品容器，自动取材时与自家、无记录容器一起排在别人放的容器前面。 */
+    public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes,
+            Predicate<String> naturalLoot) {
         this.spots = spots;
         this.tags = tags;
         this.protection = protection;
         this.takes = takes;
+        this.naturalLoot = naturalLoot == null ? id -> false : naturalLoot;
     }
 
     /** 记得没有、但离这么近（格）的箱子再开一眼：几步路的事，记忆可能过时。 */
@@ -85,14 +95,21 @@ public final class ContainerSource implements ItemSource {
         return AcquireVia.CONTAINER;
     }
 
+    /** 一拨候选箱子里挑出来的头名：记得有货的、没开过可能有的、跟前顺手重看的。 */
+    private static final class TierPick {
+        ContainerChooser.Candidate known;
+        ContainerChooser.Candidate maybe;
+        boolean maybeUnsureKind;
+        ContainerChooser.Candidate stale;
+    }
+
     @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
         // 候选由找容器的读端给出：现场扫到的（刚摆下、记忆里还没有的箱子也在内）与记过的并成一份，近的在前。
+        // 自动取材先翻自己放的、自然战利品容器与无放置记录的，别人放的排最后，只有前面几类都没有要的东西时才去翻。
         List<ContainerChooser.Candidate> candidates =
                 spots.around(cellOf(context.characterAt()), searchRadius(context));
-        ContainerChooser.Candidate known = null;
-        ContainerChooser.Candidate maybe = null;
-        boolean maybeUnsureKind = false;
-        ContainerChooser.Candidate stale = null;
+        TierPick preferred = new TierPick();
+        TierPick others = new TierPick();
         // 挡住的箱子按是哪一路合并计数：几只同一个原因只说一次带只数。
         Map<StorageUse, Integer> skipped = new LinkedHashMap<>();
         boolean skippedUnreachable = false;
@@ -112,38 +129,29 @@ public final class ContainerSource implements ItemSource {
                 continue;
             }
             considered++;
-            if (known == null && candidate.knownContents() != null && holdsWanted(candidate, request)) {
-                known = candidate;
+            TierPick tier = placedByOtherPlayer(candidate) ? others : preferred;
+            if (tier.known == null && candidate.knownContents() != null && holdsWanted(candidate, request)) {
+                tier.known = candidate;
             }
             // 点名了药水种类、记得这只箱子里有这种药水瓶却没记下是哪种（认种类以前记的）：
             // 和没开过的一样，走过去打开看了再拿，不当成没有。
             boolean unsureKind = candidate.knownContents() != null && !holdsWanted(candidate, request)
                     && kindNotRecorded(candidate, request);
-            if (maybe == null && (candidate.knownContents() == null || unsureKind)) {
-                maybe = candidate;
-                maybeUnsureKind = unsureKind;
+            if (tier.maybe == null && (candidate.knownContents() == null || unsureKind)) {
+                tier.maybe = candidate;
+                tier.maybeUnsureKind = unsureKind;
             }
             // 开过、记得里面没有，但就在跟前：记忆可能过时（主播刚往里放了东西），真人会顺手再开一眼。
-            if (stale == null && candidate.knownContents() != null && !holdsWanted(candidate, request) && !unsureKind
-                    && candidate.walkCost() <= RECHECK_NEAR_BLOCKS) {
-                stale = candidate;
+            if (tier.stale == null && candidate.knownContents() != null && !holdsWanted(candidate, request)
+                    && !unsureKind && candidate.walkCost() <= RECHECK_NEAR_BLOCKS) {
+                tier.stale = candidate;
             }
         }
-        if (known != null) {
-            int count = countWanted(known, request);
-            if (count > 0) {
-                return new SourceQuote.Offer(describe(), Math.min(count, request.count()),
-                        new AcquisitionCost(reachableCost(known, context), 4),
-                        depthNote(known, context, "开箱时以现场为准"), positionHint(known));
-            }
-        }
-        if (maybe != null) {
-            return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
-                    new AcquisitionCost(reachableCost(maybe, context), 4),
-                    depthNote(maybe, context, maybeUnsureKind
-                            ? "记得这只箱子里有" + request.wanted().itemId() + "，没记下是哪种药水，打开看了再拿"
-                            : "这只箱子只是看见过，没开过，不确定里面有什么"), positionHint(maybe));
-        }
+        SourceQuote.Offer firstChoice = knownOrMaybeOffer(preferred, request, context);
+        if (firstChoice != null) return firstChoice;
+        SourceQuote.Offer othersChoice = knownOrMaybeOffer(others, request, context);
+        if (othersChoice != null) return othersChoice;
+        ContainerChooser.Candidate stale = preferred.stale != null ? preferred.stale : others.stale;
         if (stale != null) {
             return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
                     new AcquisitionCost(stale.walkCost() + RECHECK_NEAR_BLOCKS, 4),
@@ -154,6 +162,32 @@ public final class ContainerSource implements ItemSource {
             return new SourceQuote.NotYet(describe(), "附近的容器还没扫完，扫完再答有没有");
         }
         return nothingHere(request, skipped, skippedUnreachable && considered == 0);
+    }
+
+    // 这一拨候选里有记得装着的或没开过的，就按先确定、后未开过的顺序给出报价；都没有回 null，轮到下一拨。
+    private SourceQuote.Offer knownOrMaybeOffer(TierPick tier, ItemRequest request, SourceContext context) {
+        if (tier.known != null) {
+            int count = countWanted(tier.known, request);
+            if (count > 0) {
+                return new SourceQuote.Offer(describe(), Math.min(count, request.count()),
+                        new AcquisitionCost(reachableCost(tier.known, context), 4),
+                        depthNote(tier.known, context, "开箱时以现场为准"), positionHint(tier.known));
+            }
+        }
+        if (tier.maybe != null) {
+            return new SourceQuote.Offer(describe(), SourceQuote.Offer.UNKNOWN_COUNT,
+                    new AcquisitionCost(reachableCost(tier.maybe, context), 4),
+                    depthNote(tier.maybe, context, tier.maybeUnsureKind
+                            ? "记得这只箱子里有" + request.wanted().itemId() + "，没记下是哪种药水，打开看了再拿"
+                            : "这只箱子只是看见过，没开过，不确定里面有什么"), positionHint(tier.maybe));
+        }
+        return null;
+    }
+
+    // 自然战利品容器与自家、无记录容器都不算别人放的；只有归属明确写着其他玩家放的非战利品容器才排最后。
+    private boolean placedByOtherPlayer(ContainerChooser.Candidate candidate) {
+        return !naturalLoot.test(candidate.blockTypeId())
+                && protection.placedByAnotherPlayer(candidate.at());
     }
 
     // 哪只都拿不了：能翻的都是这一次走不到跟前的，不另说一条原因，引擎在最外层合成一句说；
@@ -219,8 +253,13 @@ public final class ContainerSource implements ItemSource {
                 if (!extra.wanted().specifier().equals(want.wanted().specifier())) wants.add(extra);
             }
         }
+        boolean wasUnopened = container.knownContents() == null;
         KnownContainer known = new KnownContainer(container.name(), container.at(), container.blockTypeId());
         Optional<Action> take = takes.take(known, wants, context.permissions());
+        if (wasUnopened) {
+            // 没开过的箱子（例如优先去翻的战利品箱）打开一看里面没有要的东西：记忆已更新，按单处未出货交回，引擎好接着试下一只箱子。
+            take = take.map(action -> new UnopenedProbe(action, container, request));
+        }
         UnreachablePlaces unreachable = context.unreachable();
         if (unreachable == null) return take;
         WorldPosition at = container.at();
@@ -228,12 +267,56 @@ public final class ContainerSource implements ItemSource {
         return take.map(action -> new NotesUnreachable(action, unreachable, at, label, request.wanted().describe()));
     }
 
+    /** 没开过的箱子开完已经写进记忆却没有要的东西时，按单点落空交回，不把其余还没试的箱子一棍子划掉。 */
+    private final class UnopenedProbe implements Action, ReportsUnconfirmed, FailedOnlyAtSpots {
+        private final Action take;
+        private final ContainerChooser.Candidate probed;
+        private final ItemRequest request;
+        private boolean emptySpot;
+
+        UnopenedProbe(Action take, ContainerChooser.Candidate probed, ItemRequest request) {
+            this.take = take;
+            this.probed = probed;
+            this.request = request;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            ActionStatus status = take.tick(context);
+            if (status instanceof ActionStatus.Done) {
+                Optional<ContainerChooser.Candidate> updated = spots.at(probed.at());
+                if (updated.isPresent() && updated.get().knownContents() != null
+                        && !holdsWanted(updated.get(), request)) {
+                    emptySpot = true;
+                    return ActionStatus.failed(Problem.of(Problem.Kind.NOT_FOUND,
+                            probed.name() + " 打开看了，里面没有" + request.wanted().describe()));
+                }
+            }
+            return status;
+        }
+
+        @Override public boolean onlyThoseSpotsFailed() { return emptySpot; }
+        @Override public List<String> unconfirmedFacts() {
+            return take instanceof ReportsUnconfirmed reporting ? reporting.unconfirmedFacts() : List.of();
+        }
+        @Override public void pause() { take.pause(); }
+        @Override public void close() { take.close(); }
+        @Override public boolean stopSafely() { return take.stopSafely(); }
+        @Override public boolean stoppedSafely() { return take.stoppedSafely(); }
+        @Override public Interruptibility interruptibility() { return take.interruptibility(); }
+        @Override public Interruptibility interruptibility(TickContext context) { return take.interruptibility(context); }
+        @Override public String describe() { return take.describe(); }
+    }
+
     /**
      * 开箱取货的动作套一层：靠近收场为到不了时，把这只箱子连同经过记进这一次的"走不到的地方"。
      * 别的照原样转给里面那一个，没能确认的交互照旧交回。
      */
     private record NotesUnreachable(Action take, UnreachablePlaces unreachable, WorldPosition at, String label,
-            String asking) implements Action, ReportsUnconfirmed {
+            String asking) implements Action, ReportsUnconfirmed, FailedOnlyAtSpots {
+
+        @Override public boolean onlyThoseSpotsFailed() {
+            return take instanceof FailedOnlyAtSpots spots && spots.onlyThoseSpotsFailed();
+        }
 
         @Override public ActionStatus tick(TickContext context) {
             ActionStatus status = take.tick(context);
