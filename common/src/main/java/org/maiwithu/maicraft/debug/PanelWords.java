@@ -99,6 +99,7 @@ final class PanelWords {
             case OTHERS_BLOCKS_BROKEN -> "挖了别人的方块";
             case OTHERS_FOOD_TAKEN -> "拿了别人的吃的";
             case PLAYER_BODY_LANGUAGE -> "别人的肢体动作";
+            case OTHERS_THINGS_TOUCHED -> "动了别人的东西";
         };
     }
 

@@ -330,6 +330,25 @@ public final class GoalRunTable {
         return runner == null || !runner.run().unfinished() ? Optional.empty() : Optional.of(runner.run());
     }
 
+    /** 此刻控制着角色动手的目标与当前步骤能力；生存需求临时任务占着身体或没有在跑的目标时为空。 */
+    public record ActiveGoal(long goalRunId, String ability) {}
+
+    /**
+     * 查此刻动手的是哪条目标、哪个能力：若生存需求的临时任务正占着身体，返回空（事件不挂目标）；
+     * 若插一下目标正在推进，返回插一下的编号与能力；否则若主目标正在推进，返回主目标编号与当前步骤能力。
+     */
+    public Optional<ActiveGoal> activeGoal() {
+        if (loop.occupyingTemporaryTask() != null) return Optional.empty();
+        if (loop.cutInRunning() instanceof GoalRunner cutting && cutting.run().unfinished()) {
+            return Optional.of(new ActiveGoal(cutting.run().id(), cutting.activeAbility()));
+        }
+        GoalRunner runner = runners.get(mainRunId);
+        if (runner != null && runner.run().state() == GoalRunState.RUNNING) {
+            return Optional.of(new ActiveGoal(runner.run().id(), runner.activeAbility()));
+        }
+        return Optional.empty();
+    }
+
     /** 按编号查目标运行；不在表里时到存盘里找（角色离开世界时停成暂停的那几条），都没有才为空。
      *  挂着的死亡恢复决策也按编号查得到。 */
     public Optional<GoalRun> find(long id) {

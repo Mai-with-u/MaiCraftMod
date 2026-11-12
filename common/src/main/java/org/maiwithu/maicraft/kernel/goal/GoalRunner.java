@@ -159,6 +159,11 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         return run;
     }
 
+    /** 此刻正在推进的那一步的能力 ID（sequence 时递归取当前步骤的能力）；不在步骤上时返回目标自己的能力。 */
+    public String activeAbility() {
+        return stepRunner != null ? stepRunner.activeAbility() : goal.ability();
+    }
+
     /**
      * LLM 要求暂停：手上的任务先松开按键停手，目标停在原处，等恢复。手上的任务此刻停下不安全（飞着、开着车）时，
      * 先叫它到安全的地方（就近落地、刹停），照常推进到它停稳再暂停——不悬在空中干等，也不松开就往下掉。

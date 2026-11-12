@@ -61,6 +61,16 @@ public final class TaskEventLog implements TaskEventSink {
                 null, ability));
     }
 
+    /**
+     * 记一条在某个目标与步骤能力推进途中发生、且带结构化事实的事件（例如动了别人放的东西、开出稀罕战利品）：
+     * 宿主同时看得到是哪个目标、哪个能力触发的，以及按字段整理的事实。
+     */
+    public TaskEvent appendForGoal(TaskEvent.Kind kind, long goalRunId, String ability, String message,
+                                   EventFacts facts) {
+        return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, null, null, List.of(),
+                facts, ability));
+    }
+
     /** 换世界或重启：清空事件、换一个新的流编号，叫醒正在等的读者让它们重新对齐。 */
     public void restart() {
         log.restart();

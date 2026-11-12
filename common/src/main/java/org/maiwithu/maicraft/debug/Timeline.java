@@ -108,8 +108,8 @@ final class Timeline {
             case SKY_CHANGED -> PanelColor.MINOR;
             // 计时到点是 LLM 给自己定的回头看一眼，和提醒一样用等待色，主播看得出它该回来处理了
             case TIMER_DUE -> PanelColor.WAITING;
-            // 被困挖开了别人的方块：拆了谁的东西主播要看一眼，用等待色提醒
-            case OTHERS_BLOCKS_BROKEN, OTHERS_FOOD_TAKEN -> PanelColor.WAITING;
+            // 被困挖开了别人的方块、动了别人放的东西：拆拿了谁的东西主播要看一眼，用等待色提醒
+            case OTHERS_BLOCKS_BROKEN, OTHERS_FOOD_TAKEN, OTHERS_THINGS_TOUCHED -> PanelColor.WAITING;
             // 别人冲角色蹲起、挥手：有人在找角色玩，用等待色让主播看一眼角色回没回他
             case PLAYER_BODY_LANGUAGE -> PanelColor.WAITING;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;

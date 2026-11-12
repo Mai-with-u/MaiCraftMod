@@ -113,7 +113,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 别的玩家冲角色做的肢体动作：蹲起、挥手、拍一下、拿出东西、点头、摇头、原地跳、扔东西、走开又回头。
          * 按人归成一段发一条，拍一下当刻发；谁、做了什么、几下、对着谁、在哪在消息里，是谁在附带的 player 里。
          */
-        PLAYER_BODY_LANGUAGE
+        PLAYER_BODY_LANGUAGE,
+        /**
+         * 从别人放的容器里取放东西、拆掉或改动别人放的方块：确认发生后发一条，归属不拦动作，宿主按它知情；
+         * 做了什么、谁放的、在哪、几件或几格在附带的 others_things 里。
+         */
+        OTHERS_THINGS_TOUCHED
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

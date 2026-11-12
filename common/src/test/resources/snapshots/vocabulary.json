@@ -182,7 +182,8 @@
     "timer_due",
     "others_blocks_broken",
     "others_food_taken",
-    "player_body_language"
+    "player_body_language",
+    "others_things_touched"
   ],
   "chat_kinds": [
     "player",

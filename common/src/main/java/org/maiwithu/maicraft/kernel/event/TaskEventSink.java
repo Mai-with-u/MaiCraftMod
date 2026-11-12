@@ -25,6 +25,22 @@ public interface TaskEventSink {
         publish(kind, message);
     }
 
+    /**
+     * 发一条由当前动作引起的带结构化事实的事件：手上有正在推进的目标且没被生存需求临时任务借走身体时，
+     * 挂在那个目标与当前步骤的能力上；临时任务动手或没有目标时，不挂目标。
+     */
+    default void publishInAction(TaskEvent.Kind kind, String message, EventFacts facts) {
+        publish(kind, message, facts);
+    }
+
+    /**
+     * 先冻结这一刻正在推进的目标与步骤能力，供稍后合并成一段的事件（例如连拆同一个人的好几格方块）
+     * 在收段时按动手当时的目标归属发出，不因目标刚结束而丢掉归属。
+     */
+    default TaskEventSink captureAction() {
+        return this;
+    }
+
     /** 没有接上出口时的空实现：事件就地丢弃。 */
     TaskEventSink NONE = (kind, message) -> {};
 }
