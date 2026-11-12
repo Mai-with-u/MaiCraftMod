@@ -223,7 +223,8 @@ public record Battlefield(Me me, List<Foe> foes, DragonArena arena) {
             boolean chasingNow = CombatSenses.threatening(threat, List.copyOf(attackers));
             // 开打后追过我、还朝我来的：攻击标记一闪一闪也照样算追兵，不让这一仗"逼近↔打完了"来回切。
             boolean chasing = chasingNow || held;
-            boolean wanted = roster.wanted(threat, attacker, chasing);
+            // 点名了实体编号的对手即便因打过我而进了敌对列表，也照样算名单上要打的。
+            boolean wanted = roster.wanted(threat, attacker, chasing) || roster.namedIds().contains(threat.entityId());
             if (!chasing && !wanted && !keep.contains(threat.entityId())) continue;
             Foe foe = new Foe(threat, chasing, attacker, wanted, roster.primary(threat));
             foes.add(foe);

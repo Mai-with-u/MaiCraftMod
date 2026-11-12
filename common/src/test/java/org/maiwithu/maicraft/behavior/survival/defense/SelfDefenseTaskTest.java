@@ -18,6 +18,7 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.Footwork;
@@ -625,9 +626,50 @@ class SelfDefenseTaskTest {
         senses.attackers.clear();
         TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 5, 10)).result();
         assertTrue(finished.summary().contains("没有还手"), finished.summary());
+        assertEquals(0, assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details()).hitsOnPlayers());
         assertTrue(task.cannotResumeInPlace(), "主任务暂停等指示");
         assertTrue(task.waitsForOrders(), "还不还手由 LLM 定：在哪做都一样的主任务也停下");
         assertTrue(events.messages.stream().anyMatch(m -> m.contains("fight 点名")), events.messages.toString());
+    }
+
+    @Test
+    void lowHealthRetreatFromAStrangerNeverStrikesHimAndStillPausesMainTaskAfterEscaping() {
+        // 残血时被陌生玩家贴脸打一下：进撤离也绝不挥刀，甩开后同样停下等指示，不自己走回打点接着干活。
+        Senses senses = new Senses();
+        senses.health = 4;
+        UUID stranger = UUID.randomUUID();
+        senses.threats.add(player(8, stranger, 2.0));
+        senses.attackers.add(new CombatSenses.Attacker(stranger, "minecraft:player", 0, "player"));
+        Moves moves = new Moves();
+        Events events = new Events();
+        SelfDefenseNeed need = new SelfDefenseNeed(senses, moves, events);
+        SelfDefenseTask task = (SelfDefenseTask) need.createTask(new Tick(0));
+        task.start(new Tick(0));
+        run(task, 0, 5);
+        assertEquals(0, moves.strikes, "残血撤离也不对没点名的玩家挥刀");
+        // 拉开距离、玩家不再追：安静期满后按被玩家打收场，主任务暂停等指示。
+        moves.at[0] = -25;
+        senses.threats.clear();
+        senses.attackers.clear();
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, run(task, 5, 100)).result();
+        var details = assertInstanceOf(SelfDefenseTask.DefenseDetails.class, finished.details());
+        assertEquals(0, details.hitsOnPlayers());
+        assertTrue(finished.summary().contains("没有还手"), finished.summary());
+        assertTrue(task.cannotResumeInPlace(), "撤离甩开后同样暂停主任务");
+        assertTrue(task.waitsForOrders(), "等指示决定还不还手");
+    }
+
+    @Test
+    void defenseTallyCountsPlayerHitsTruthfully() {
+        Senses senses = new Senses();
+        UUID stranger = UUID.randomUUID();
+        senses.threats.add(player(8, stranger, 2.0));
+        Moves moves = new Moves();
+        DefenseTally tally = new DefenseTally();
+        tally.note(new Tick(0), new Battle.Moment(
+                Battle.State.RETREATING, "测试", true, true, false, 8, "撤", false),
+                senses, moves);
+        assertEquals(1, tally.hitsOnPlayers());
     }
 
     @Test

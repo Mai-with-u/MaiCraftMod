@@ -10,11 +10,13 @@ import java.util.Map;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
 
 import org.maiwithu.maicraft.behavior.combat.ArrowsSpent;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -34,6 +36,8 @@ final class DefenseTally {
     private String weapon = BARE_HANDS;
     private int hits;
     private int shots;
+    /** 这一场确认挥中或射中玩家实体的下数：自卫不应打中玩家，非零用来如实交代而不谎报没有还手。 */
+    private int hitsOnPlayers;
     /** 箭少了几支：按背包里箭的只数算，和射了几箭各记各的。 */
     private final ArrowsSpent arrows = new ArrowsSpent();
 
@@ -41,10 +45,13 @@ final class DefenseTally {
     void note(TickContext context, Battle.Moment moment, CombatSenses senses, BattleMoves moves) {
         if (moment.struck() || moment.fired()) {
             weapon = moves.mainHand(context);
-            if (moment.targetId() >= 0 && !engaged.containsKey(moment.targetId())) {
-                Entity target = senses.entityById(context, moment.targetId());
-                engaged.put(moment.targetId(), target == null ? "实体 " + moment.targetId()
-                        : EntityType.getKey(target.getType()).toString());
+            if (moment.targetId() >= 0) {
+                String targetType = engaged.computeIfAbsent(
+                        moment.targetId(), id -> resolveTargetType(context, senses, id));
+                if ("minecraft:player".equals(targetType)
+                        || senses.entityById(context, moment.targetId()) instanceof Player) {
+                    hitsOnPlayers++;
+                }
             }
         }
         if (moment.struck()) hits++;
@@ -82,6 +89,20 @@ final class DefenseTally {
 
     int shots() {
         return shots;
+    }
+
+    int hitsOnPlayers() {
+        return hitsOnPlayers;
+    }
+
+    // 先从客户端实体读种类；替身世界里没有实体对象时再从视野威胁表兜底认出是不是玩家或哪种怪。
+    private static String resolveTargetType(TickContext context, CombatSenses senses, int targetId) {
+        Entity target = senses.entityById(context, targetId);
+        if (target != null) return EntityType.getKey(target.getType()).toString();
+        for (CombatSenses.Threat threat : senses.threats(context, ThreatAssessment.FLEE_CLEAR_DISTANCE)) {
+            if (threat.entityId() == targetId) return threat.type();
+        }
+        return "实体 " + targetId;
     }
 
     /** 打完后的那几刻（捡东西、走回打点）接着记箭数：最后一箭的扣减服务器要隔一两刻才同步到背包。 */

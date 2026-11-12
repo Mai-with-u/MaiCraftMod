@@ -181,6 +181,46 @@ public final class Retreat {
     }
 
     /**
+     * 撤离途中贴上身的没点引信的苦力怕：进了起爆半径（它的危险半径，即点火距离 3 格）就算贴身。
+     * 点着引信的不算——那由躲爆炸的打法先接走。
+     */
+    static Battlefield.Foe creeperAtHeel(Battlefield field) {
+        Battlefield.Foe nearest = null;
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (foe.threat().kind() != ThreatAssessment.Kind.EXPLOSIVE || foe.fusing()) continue;
+            if (foe.distance() > foe.threat().dangerRadius()) continue;
+            if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
+        }
+        return nearest;
+    }
+
+    /**
+     * 撤离途中追上来的对手能不能还手：名单上明确要打的（含点名对战或切磋的玩家）照打，
+     * 没点名的玩家一律不还手，避免残血撤离或宿主离线时反射一刀砍向路过碰了角色一下的玩家。
+     */
+    static boolean mayStrikeBack(Battlefield.Foe foe) {
+        return foe.wanted() || foe.threat().kind() != ThreatAssessment.Kind.PLAYER;
+    }
+
+    /**
+     * 撤离途中真追上角色（看得见且够得着角色）的那只追兵：有能还手的怪贴身时先挑最近的那只怪应对，
+     * 没有能还手的怪、只有没点名的玩家贴身时再返回那名玩家，供引擎举盾退开而不挥刀。
+     */
+    static Battlefield.Foe catchingUp(Battlefield field) {
+        Battlefield.Foe strikeable = null;
+        Battlefield.Foe player = null;
+        for (Battlefield.Foe foe : field.chasers()) {
+            if (!foe.threat().visible() || !foe.threat().canHitMe()) continue;
+            if (mayStrikeBack(foe)) {
+                if (strikeable == null || foe.distance() < strikeable.distance()) strikeable = foe;
+            } else if (player == null || foe.distance() < player.distance()) {
+                player = foe;
+            }
+        }
+        return strikeable != null ? strikeable : player;
+    }
+
+    /**
      * 挑一个落点，往家（没记过家就往打点）那一侧跑：同样背离追兵重心、在左右九十度的八个方向里，挑能站、离家最近的那个；
      * 上一条走不通就按离家远近换下一个。实机 10-15 夜里低血撤离五次，每次只按追兵反方向跑，越跑离家越远，最远到西边 130 格外。
      * 不知道家和打点在哪（toward 为 null）时按八个方向挨个试，不给「离家最近」的偏好。

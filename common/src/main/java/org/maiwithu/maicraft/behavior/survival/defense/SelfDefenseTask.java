@@ -169,10 +169,9 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             events.publish(TaskEvent.Kind.NEED_UNHANDLED, "想撤也走不动：撤离路线连着走不通，退无可退，就地迎战");
         }
         return switch (moment.state()) {
-            // 甩开了追兵：跟打完一样先观察一阵（追得几乎一样快的怪会在边界上一进一出），再走回打点；
-            // 走不回才按走不回的路径交代。原先甩开就当场按"人已不在原地"收场，守着原地的主任务
-            // 被无条件停住等 LLM——人其实就在打点旁边，玩家会走回去接着干。
-            case ESCAPED -> watchFirst();
+            // 甩开了追兵：没有陌生玩家参与时先观察一阵再走回打点；被陌生玩家打过的（含残血或空手撤离甩开），
+            // 跟停手一样当场停下来等 LLM 决定还不还手，不自己走回打点接着干活。
+            case ESCAPED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
             case FINISHED -> strangers.isEmpty() ? watchFirst() : stoppedByStranger(context);
             default -> Next.stay();
         };
@@ -183,7 +182,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         return go(Phase.WATCH, "威胁暂时消失，观察一阵");
     }
 
-    // 被没点名的玩家打了：退开举盾、没有还手，他停手后不走回打点、不接着干活——停下来等 LLM 决定还不还手。
+    // 被没点名的玩家打了：他停手或角色撤开后不走回打点、不接着干活——停下来等 LLM 决定还不还手；
+    // 有没有对玩家出过手按实际打中玩家下数如实写，只在 0 下时写"没有还手"。
     private Next<Phase> stoppedByStranger(TickContext context) {
         displaced = true;
         awaitsOrders = true;
@@ -193,10 +193,12 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
                     ? player.getName().getString() : "实体 " + id);
         }
         String who = String.join("、", names);
-        displacedWhy = "被玩家 " + who + " 打了，没有还手，" + whereNow(context);
-        events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，没有还手；"
+        int playerHits = tally.hitsOnPlayers();
+        String reaction = playerHits == 0 ? "没有还手" : "还了手 " + playerHits + " 下";
+        displacedWhy = "被玩家 " + who + " 打了，" + reaction + "，" + whereNow(context);
+        events.publish(TaskEvent.Kind.NEED_UNHANDLED, "被玩家 " + who + " 打了：退到够不着的地方举着盾，" + reaction + "；"
                 + "主任务已暂停，等你决定（要还手就用 fight 点名他，想当切磋就 fight(target=他, spar=true)，不理就让主任务继续）");
-        return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，没有还手，停下等指示")
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE, "被玩家 " + who + " 打了，" + reaction + "，停下等指示")
                 .details(details(distanceFromAnchor(context), heartsLost(context))).build());
     }
 
@@ -436,15 +438,15 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
 
     private DefenseDetails details(double drift, double heartsLost) {
         return new DefenseDetails(drift, heartsLost, tally.defeated(), tally.weapon(), tally.hits(), tally.shots(),
-                tally.arrowsSpent(), tally.arrowsPickedUp());
+                tally.arrowsSpent(), tally.arrowsPickedUp(), tally.hitsOnPlayers());
     }
 
     /**
      * 自卫的结果细节：位移、红心差，打掉了谁（"种类 ×只数"）、拿什么打、确认挥中几下、射了几箭、
-     * 箭净少了几支（按背包数，捡回的已抵掉；读不到背包为 null）、捡回几支。
+     * 箭净少了几支（按背包数，捡回的已抵掉；读不到背包为 null）、捡回几支、打中玩家几下（自卫里应为 0）。
      */
     record DefenseDetails(double driftBlocks, double heartsLost, List<String> defeated, String weapon, int hits,
-                          int shots, Integer arrowsSpent, int arrowsPickedUp) implements ResultDetails {
+                          int shots, Integer arrowsSpent, int arrowsPickedUp, int hitsOnPlayers) implements ResultDetails {
         DefenseDetails {
             defeated = List.copyOf(defeated);
         }

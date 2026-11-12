@@ -305,7 +305,7 @@ public final class Battle {
         Battlefield.Me me = field.me();
         // 苦力怕贴身：撤离途中它进了起爆半径（3 格），不再走寻路绕行式撤离——引信一点这几十格绕路就是原地挨炸。
         // 改为当刻疾跑沿远离它的方向直线拉开，禁用绕行与停顿（八个方向都被挡才站住）；点着引信的由躲爆炸先接走，到不了这里。
-        Battlefield.Foe bomb = creeperAtHeel(field);
+        Battlefield.Foe bomb = Retreat.creeperAtHeel(field);
         if (bomb != null) {
             limbs.dropWalk();
             limbs.dropStrike();
@@ -317,12 +317,12 @@ public final class Battle {
             return new Moment(State.RETREATING, "苦力怕贴身，疾跑直线拉开", !step.standing(), false, false,
                     bomb.id(), retreat.why(), cornered);
         }
-        Battlefield.Foe pursuer = nearestChaser(field);
-        // 真被追上（它已经够得着我）才停下退着还手；只是跟在后面几格就接着疾跑——人跑起来比僵尸快，
-        // 停下来还手反倒被围上。实机 10-14 四只尸壳跟在三格外，角色每隔一下就停下还手，十几秒被追死。
-        if (pursuer != null && pursuer.threat().visible() && pursuer.threat().canHitMe()) {
+        Battlefield.Foe pursuer = Retreat.catchingUp(field);
+        // 真被追上（够得着我）才停下应对；没点名的玩家贴上来只举盾退开不挥刀，能还手的追兵才退着还手。
+        if (pursuer != null) {
             limbs.dropWalk();
-            boolean inReach = pursuer.threat().withinReach(me.reach());
+            boolean mayStrike = Retreat.mayStrikeBack(pursuer);
+            boolean inReach = mayStrike && pursuer.threat().withinReach(me.reach());
             boolean struck = false;
             if (inReach && !swapping) struck = limbs.swing(context, pursuer.id(), me.x(), me.z(), moves::strike).struck();
             if (!inReach) limbs.dropStrike();
@@ -330,7 +330,8 @@ public final class Battle {
             Footwork.Step step = Footwork.choose(me.x(), me.z(),
                     new Footwork.Stance(null, sideHazards(field, -1, 1.0), false), moves.ground(context));
             moves.step(context, pursuer.id(), step);
-            return new Moment(State.RETREATING, "撤离途中被追上，退着还手", struck || !step.standing(), struck,
+            String what = mayStrike ? "撤离途中被追上，退着还手" : "撤离途中被玩家追上，举盾退开，不还手";
+            return new Moment(State.RETREATING, what, struck || !step.standing(), struck,
                     false, pursuer.id(), retreat.why(), cornered);
         }
         limbs.dropStrike();
@@ -679,20 +680,6 @@ public final class Battle {
     private static Battlefield.Foe nearestChaser(Battlefield field) {
         Battlefield.Foe nearest = null;
         for (Battlefield.Foe foe : field.chasers()) {
-            if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
-        }
-        return nearest;
-    }
-
-    /**
-     * 撤离途中贴上身的没点引信的苦力怕：进了起爆半径（它的危险半径，即点火距离 3 格）就算贴身。
-     * 点着引信的不算——那由躲爆炸的打法先接走。
-     */
-    private static Battlefield.Foe creeperAtHeel(Battlefield field) {
-        Battlefield.Foe nearest = null;
-        for (Battlefield.Foe foe : field.chasers()) {
-            if (foe.threat().kind() != ThreatAssessment.Kind.EXPLOSIVE || foe.fusing()) continue;
-            if (foe.distance() > foe.threat().dangerRadius()) continue;
             if (nearest == null || foe.distance() < nearest.distance()) nearest = foe;
         }
         return nearest;

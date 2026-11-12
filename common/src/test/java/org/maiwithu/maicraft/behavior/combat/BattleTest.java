@@ -780,7 +780,7 @@ class BattleTest {
 
     @Test
     void againstAZombieTheCadenceLeavesFootworkAsBefore() {
-        // 打僵尸：2.6 格处既在冷却带也在出手带里（我够得着它、它够不着我的那条缝），离下一刀几刻都站着不动。
+        // 打僵尸：2.6 格处既在冷却带也在出手带里（我够得着它、它够得着我的外沿外那条缝），离下一刀几刻都站着不动。
         for (int ticks : new int[] {10, 1, 0}) {
             Senses senses = new Senses();
             senses.threats.add(zombie(1, 2.6));
@@ -789,5 +789,53 @@ class BattleTest {
             battle(senses, moves).tick(new Tick(0));
             assertTrue(moves.lastStep().standing(), "还差 " + ticks + " 刻：站在缝里，实际 " + moves.lastStep());
         }
+    }
+
+    @Test
+    void retreatingNeverSwingsAtAnUnnamedPlayerButStillFightsANamedOne() {
+        // 残血撤离途中没点名的玩家贴到 2 格内碰了角色一下：举盾往外退，绝不挥刀。
+        CombatSenses.Threat unnamed = player(2.0);
+        Senses senses = new Senses();
+        senses.health = 4;
+        senses.threats.add(unnamed);
+        senses.attackers.add(new CombatSenses.Attacker(unnamed.uuid(), "minecraft:player", 0, "player"));
+        Moves moves = new Moves();
+        Battle defensive = new Battle(senses, moves,
+                (threat, attacker, chasing) -> chasing && threat.kind() != ThreatAssessment.Kind.PLAYER,
+                ThreatAssessment.VIGILANCE_RADIUS);
+        Battle.Moment backOff = defensive.tick(new Tick(0));
+        assertEquals(Battle.State.RETREATING, backOff.state());
+        assertEquals(0, moves.strikes, "没点名的玩家贴上来也不还手");
+        assertFalse(backOff.struck());
+        assertTrue(backOff.doing().contains("不还手"), backOff.doing());
+        assertEquals(Boolean.FALSE, moves.guardStrike, "退开时举着盾");
+        assertTrue(moves.lastStep().dx() < 0, "往外退开，实际 " + moves.lastStep());
+
+        // 任务明确点名要打这位玩家时，残血撤离被追上照常退着还手。
+        Moves namedMoves = new Moves();
+        Battle duel = new Battle(senses, namedMoves, NAMED_ID_NINE, ThreatAssessment.VIGILANCE_RADIUS);
+        Battle.Moment foughtBack = duel.tick(new Tick(0));
+        assertEquals(Battle.State.RETREATING, foughtBack.state());
+        assertEquals(1, namedMoves.strikes, "点名对战的玩家照常退着还手");
+        assertTrue(foughtBack.struck());
+    }
+
+    @Test
+    void retreatingStrikesACatchingZombieEvenWhenAnUnnamedPlayerIsCloser() {
+        // 没点名的玩家在 1.1 格、僵尸在 1.3 格同时贴身：挥向僵尸而不砍玩家。
+        CombatSenses.Threat unnamed = player(1.1);
+        Senses senses = new Senses();
+        senses.health = 4;
+        senses.threats.add(unnamed);
+        senses.threats.add(zombie(2, 1.3));
+        senses.attackers.add(new CombatSenses.Attacker(unnamed.uuid(), "minecraft:player", 0, "player"));
+        Moves moves = new Moves();
+        Battle defensive = new Battle(senses, moves,
+                (threat, attacker, chasing) -> chasing && threat.kind() != ThreatAssessment.Kind.PLAYER,
+                ThreatAssessment.VIGILANCE_RADIUS);
+        Battle.Moment moment = defensive.tick(new Tick(0));
+        assertEquals(Battle.State.RETREATING, moment.state());
+        assertEquals(1, moves.strikes, "照打贴身的僵尸");
+        assertEquals(2, moment.targetId(), "挥刀目标是僵尸，不是更近的没点名玩家");
     }
 }
