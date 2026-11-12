@@ -429,6 +429,52 @@ class ObserveToolTest {
 
         assertEquals("矿洞口", view.getAsJsonArray("places").get(0).getAsJsonObject().get("name").getAsString());
         assertEquals("container", view.getAsJsonArray("records").get(0).getAsJsonObject().get("kind").getAsString());
+        assertTrue(view.get("records_total").getAsInt() >= 1);
+        assertEquals(view.get("records_total").getAsInt(), view.get("records_listed").getAsInt());
+    }
+
+    @Test
+    void placesViewIsCompactAndWorldMemoryCapsInsteadOfFailingWithTooLarge() {
+        Instant now = Instant.ofEpochMilli(2000);
+        memory.remember("家", new WorldPosition(0, 64, 12, "minecraft:overworld"));
+        memory.rememberBuilding(new WorldPosition(40, 64, 0, "minecraft:overworld"), "麦麦一号", now);
+        memory.rememberMachine(new WorldPosition(0, 64, 88, "minecraft:overworld"), "刷铁机", now);
+        memory.rememberRegion("河东的农场", new WorldPosition(16, 64, 16, "minecraft:overworld"), 8);
+        List<String> bulkyItems = List.of(
+                "minecraft:cobblestone", "minecraft:cobbled_deepslate", "minecraft:iron_ingot",
+                "minecraft:coal", "minecraft:oak_planks", "minecraft:spruce_log", "minecraft:bread");
+        for (int i = 0; i < 450; i++) {
+            memory.rememberContainerOpened(new WorldPosition(10 + i, 64, 10, "minecraft:overworld"),
+                    "minecraft:chest", bulkyItems, now);
+            memory.rememberSite(new WorldPosition(20 + i * 16, 64, 20, "minecraft:overworld"),
+                    bulkyItems, now);
+        }
+
+        // 紧凑视图只列按名字记的地点、档案与地盘，自动记录只给分类总数。
+        JsonObject compact = data(observe("{\"what\": \"places\"}"));
+        JsonArray named = compact.getAsJsonArray("places");
+        assertEquals("家", named.get(0).getAsJsonObject().get("name").getAsString());
+        assertEquals("place", named.get(0).getAsJsonObject().get("kind").getAsString());
+        assertEquals("麦麦一号", named.get(1).getAsJsonObject().get("name").getAsString());
+        assertEquals("building", named.get(1).getAsJsonObject().get("kind").getAsString());
+        assertEquals("刷铁机", named.get(2).getAsJsonObject().get("name").getAsString());
+        assertEquals("machine", named.get(2).getAsJsonObject().get("kind").getAsString());
+        assertEquals(1, compact.getAsJsonArray("regions").size());
+        assertTrue(compact.getAsJsonObject("record_counts").get("container").getAsInt() >= 450);
+
+        // 整份世界记忆不再因为记录过多触发 too_large：按近到远列到装得下为止，剩余按种类报数。
+        JsonObject fullReply = observe("{\"what\": \"world_memory\"}");
+        assertTrue(fullReply.get("ok").getAsBoolean(), fullReply::toString);
+        JsonObject full = fullReply.getAsJsonObject("data");
+        assertTrue(full.get("records_listed").getAsInt() < full.get("records_total").getAsInt());
+        assertTrue(full.has("records_not_listed"));
+        assertTrue(fullReply.getAsJsonArray("notes").toString().contains("places"));
+
+        // 支持按 radius 与 kind 收窄。
+        JsonObject filtered = data(observe("{\"what\": \"world_memory\", \"radius\": 25, \"kind\": \"container\"}"));
+        assertTrue(filtered.get("records_total").getAsInt() > 0 && filtered.get("records_total").getAsInt() < 30);
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"radius\": 16}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"places\", \"kind\": \"site\"}")));
     }
 
     @Test

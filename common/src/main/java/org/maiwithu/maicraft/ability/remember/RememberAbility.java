@@ -44,6 +44,8 @@ public final class RememberAbility implements AbilityModule {
     static final int DEFAULT_REGION_RADIUS = 8;
     /** 圈地盘最大的半径：再大就是半张地图，角色哪儿都动不了。 */
     static final int MAX_REGION_RADIUS = 64;
+    /** 按范围清掉失效记忆最大的半径：重生成一片区块时一次能清干净。 */
+    static final int MAX_FORGET_AREA_RADIUS = 512;
 
     private final WorldMemory memory;
     private final ReadsCharacterPosition characterPosition;
@@ -60,17 +62,19 @@ public final class RememberAbility implements AbilityModule {
     public AbilitySpec spec() {
         return new AbilitySpec(
                 "maicraft:remember",
-                "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
+                "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
                 AbilityDoc.forAbility("remember"),
                 ParamSpecs.of(
-                        ParamSpec.of("name", ParamType.TEXT).required()
-                                .doc("地点或地盘的名字；首尾空白去掉后原样比较，不改大小写").build(),
+                        ParamSpec.of("name", ParamType.TEXT)
+                                .doc("remember、forget、region 必填：地点或地盘的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给").build(),
                         ParamSpec.of("operation", ParamType.CHOICE).defaultValue("remember")
-                                .choices("remember", "forget", "region")
+                                .choices("remember", "forget", "region", "forget_area")
                                 .doc("remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，"
-                                        + "region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用）").build(),
-                        ParamSpec.of("radius", ParamType.INTEGER).range(1, MAX_REGION_RADIUS)
-                                .doc("只用于 region：地盘半径，单位格，默认 " + DEFAULT_REGION_RADIUS).build()),
+                                        + "region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用），"
+                                        + "forget_area 把目标周围 radius 格内的命名地点与容器、工作站、产地记忆清掉").build(),
+                        ParamSpec.of("radius", ParamType.INTEGER).range(1, MAX_FORGET_AREA_RADIUS)
+                                .doc("用于 region（地盘半径，默认 " + DEFAULT_REGION_RADIUS + "，最大 " + MAX_REGION_RADIUS
+                                        + "）或 forget_area（清理半径，必填，1 到 " + MAX_FORGET_AREA_RADIUS + "）").build()),
                 Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
                 ExecutionMode.MEMORY_ONLY,
                 Set.of(),
@@ -81,14 +85,27 @@ public final class RememberAbility implements AbilityModule {
     @Override
     public StepDecision decide(StepContext step) {
         ParamValues params = step.goal().params();
-        // 名字按规格先去首尾空白再原样比较；参数规格已保证非空。
-        String name = params.text("name").trim();
         String operation = params.has("operation") ? params.text("operation") : "remember";
+        if ("forget_area".equals(operation)) {
+            return forgetArea(step.goal().target(), params);
+        }
+        String name = params.has("name") ? params.text("name").trim() : "";
+        if (name.isEmpty()) {
+            return new StepDecision.Finish(TaskResult.failed("缺少地点或地盘的名字",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "operation=" + operation + " 必须给 name",
+                            "写上地点或地盘的名字；要按范围清一片失效记忆用 operation=forget_area")));
+        }
         // 给了半径却没说圈地盘：多半是想圈地盘忘了写，只记一个点会让 LLM 以为那片已经受保护，主播的基地照样被挖。
         if (params.has("radius") && !"region".equals(operation)) {
-            return new StepDecision.Finish(TaskResult.failed("radius 只用于圈地盘",
-                    Problem.of(Problem.Kind.INVALID_PARAMETER, "给了 radius，但 operation 不是 region",
+            return new StepDecision.Finish(TaskResult.failed("radius 只用于圈地盘或按范围清记忆",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "给了 radius，但 operation 不是 region 或 forget_area",
                             "要圈一片玩家地盘写 operation=region；只记一个地点就去掉 radius")));
+        }
+        if ("region".equals(operation) && params.has("radius") && params.integer("radius") > MAX_REGION_RADIUS) {
+            return new StepDecision.Finish(TaskResult.failed("圈地盘的半径太大",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER,
+                            "region 的 radius 最多 " + MAX_REGION_RADIUS + " 格，收到 " + params.integer("radius"),
+                            "圈地盘用 1.." + MAX_REGION_RADIUS + "；大范围只用于 forget_area")));
         }
         return switch (operation) {
             case "forget" -> forget(name);
@@ -96,6 +113,24 @@ public final class RememberAbility implements AbilityModule {
                     ? (int) params.integer("radius") : DEFAULT_REGION_RADIUS);
             default -> remember(name, step.goal().target());
         };
+    }
+
+    /** 按范围清掉失效记忆：不用给 name，必须给 radius，中心省略就是角色脚下。 */
+    private StepDecision forgetArea(Target target, ParamValues params) {
+        if (params.has("name")) {
+            return new StepDecision.Finish(TaskResult.failed("forget_area 不用给 name",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER,
+                            "forget_area 会清掉范围内全部记住的地点、容器、工作站与产地记忆，不按单个名字筛",
+                            "只忘一个名字改用 operation=forget；确认清整片就去掉 name")));
+        }
+        if (!params.has("radius")) {
+            return new StepDecision.Finish(TaskResult.failed("forget_area 必须给 radius",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "缺少清理半径 radius",
+                            "给出 1.." + MAX_FORGET_AREA_RADIUS + " 格的 radius")));
+        }
+        Located located = locate(target);
+        if (located.failure() != null) return located.failure();
+        return new StepDecision.Run(RememberPlaceInput.forgetArea(located.position(), (int) params.integer("radius")));
     }
 
     /** 忘掉：同名的地点与地盘记过哪样忘哪样；两样都没记过就失败并附上记得的全部名字。 */
@@ -142,7 +177,7 @@ public final class RememberAbility implements AbilityModule {
         if (previous != null && previous.center().equals(center) && previous.radiusBlocks() == radius) {
             return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.DONE,
                             "地盘「" + name + "」本来就这样记着")
-                    .details(new RememberPlaceTask.RememberDetails(name, "region", center, radius, null, null, null))
+                    .details(new RememberPlaceTask.RememberDetails(name, "region", center, radius, null, null, null, null))
                     .build());
         }
         return new StepDecision.Run(RememberPlaceInput.region(name, center, radius, previous));

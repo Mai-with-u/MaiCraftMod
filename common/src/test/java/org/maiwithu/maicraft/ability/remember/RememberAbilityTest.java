@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -28,6 +29,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -113,10 +115,12 @@ class RememberAbilityTest {
     }
 
     @Test
-    void specIsMemoryOnlyAndNeedsAName() {
+    void specIsMemoryOnlyAndRequiresNameForPlaceOperations() {
         assertEquals("maicraft:remember", ability.spec().id());
         assertEquals(ExecutionMode.MEMORY_ONLY, ability.spec().mode());
-        assertFalse(ability.spec().paramSpecs().parse(new JsonObject()).ok(), "缺 name 应报错");
+        StepDecision.Finish missingName = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{}"))));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, missingName.result().problem().kind());
     }
 
     @Test
@@ -286,9 +290,13 @@ class RememberAbilityTest {
     @Test
     void radiusOutOfRangeIsRejectedByTheParameterCheck() {
         assertFalse(ability.spec().paramSpecs().parse(JsonParser.parseString(
-                "{\"name\":\"大地盘\",\"operation\":\"region\",\"radius\":65}").getAsJsonObject()).ok());
+                "{\"operation\":\"forget_area\",\"radius\":513}").getAsJsonObject()).ok());
         assertFalse(ability.spec().paramSpecs().parse(JsonParser.parseString(
                 "{\"name\":\"小地盘\",\"operation\":\"region\",\"radius\":0}").getAsJsonObject()).ok());
+        // 圈地盘超过 64 格在决定阶段拒绝，512 只开放给 forget_area。
+        StepDecision.Finish regionTooBig = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"name\":\"大地盘\",\"operation\":\"region\",\"radius\":65}"))));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, regionTooBig.result().problem().kind());
     }
 
     @Test
@@ -364,5 +372,53 @@ class RememberAbilityTest {
         assertEquals(Problem.Kind.NOT_FOUND, finish.result().problem().kind());
         assertTrue(finish.result().problem().message().contains("农场"),
                 "失败要说清圈过哪些地盘：" + finish.result().problem().message());
+    }
+
+    @Test
+    void forgetAreaClearsPlacesAndAutoRecordsWhileKeepingRegionsArchivesAndTemporaryBlocks() {
+        Instant now = Instant.ofEpochMilli(1000);
+        WorldPosition near = new WorldPosition(15, 64, -10, "minecraft:overworld");
+        WorldPosition far = new WorldPosition(300, 64, 300, "minecraft:overworld");
+        WorldPosition nether = new WorldPosition(12, 64, -8, "minecraft:the_nether");
+        memory.remember("老树场", near);
+        memory.remember("远处矿洞", far);
+        memory.remember("下界门", nether);
+        memory.rememberRegion("营地地盘", near, 10);
+        memory.rememberContainerSeen(near, "minecraft:chest", now);
+        memory.workstationSeen(near, "minecraft:crafting_table", now);
+        memory.rememberSite(near, List.of("minecraft:oak_log"), now);
+        memory.rememberBuilding(near, "小木屋", now);
+        memory.rememberMachine(near, "刷铁机", now);
+        memory.rememberTemporaryBlock(near, "minecraft:dirt", "施工", now);
+
+        // 缺 radius 或误传 name 都按参数错拒绝。
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget_area\"}")))).result().problem().kind());
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget_area\",\"name\":\"老树场\",\"radius\":32}"))))
+                .result().problem().kind());
+
+        StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget_area\",\"radius\":32}"))));
+        TaskResult result = runToFinish(run);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        RememberPlaceTask.RememberDetails details =
+                assertInstanceOf(RememberPlaceTask.RememberDetails.class, result.details());
+        assertEquals(1, details.forgotten().places().size());
+        assertEquals("老树场", details.forgotten().places().getFirst().name());
+        assertEquals(near, details.forgotten().places().getFirst().position());
+        assertEquals(1, details.forgotten().container());
+        assertEquals(1, details.forgotten().workstation());
+        assertEquals(1, details.forgotten().site());
+
+        // 范围内命名地点与自动记录已清；远处、异维度、地盘、建筑机器档案、临时方块都在。
+        assertTrue(memory.places().get("老树场") == null);
+        assertTrue(memory.place("远处矿洞").isPresent());
+        assertTrue(memory.place("下界门").isPresent());
+        assertTrue(memory.region("营地地盘").isPresent());
+        assertTrue(memory.place("小木屋").isPresent());
+        assertTrue(memory.place("刷铁机").isPresent());
+        assertEquals(1, memory.temporaryBlocks().size());
+        assertTrue(memory.recordAt(MemoryKind.CONTAINER, near).isEmpty());
     }
 }

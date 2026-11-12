@@ -184,6 +184,33 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         modifyAndSave(book -> book.withoutRegion(name));
     }
 
+    /** 按范围清掉的一个命名地点：保留原名和原坐标，误清时可照着记回。 */
+    public record ForgottenPlace(String name, WorldPosition position) {}
+
+    /** 按范围清理记忆的结果：清掉的命名地点列表，以及容器、工作站、产地线索各清了多少条。 */
+    public record AreaForgotten(List<ForgottenPlace> places, int container, int workstation, int site) {
+        public AreaForgotten {
+            places = List.copyOf(places);
+        }
+
+        public int totalRemoved() {
+            return places.size() + container + workstation + site;
+        }
+    }
+
+    /**
+     * 按范围清掉同一维度半径内的失效记忆（服主重生成地形后用）：清命名地点、容器、工作站、产地线索；
+     * 圈的地盘、建筑档案、机器档案和还没收回的临时方块不动。
+     */
+    public AreaForgotten forgetArea(WorldPosition center, int radiusBlocks) {
+        MemoryBook.AreaRemoval removal = readBook().withoutArea(
+                pos -> sameDimension(pos, center) && distance(pos, center) <= radiusBlocks);
+        if (removal.changed()) {
+            modifyAndSave(ignored -> removal.book());
+        }
+        return removal.forgotten();
+    }
+
     /** 忘掉一个按名字记的地点；名字没记过就不动，返回有没有真的忘掉。 */
     public boolean forgetPlace(String name) {
         // 先查再删：名字没记过时不进文档库的事务，也如实回答没忘掉什么。

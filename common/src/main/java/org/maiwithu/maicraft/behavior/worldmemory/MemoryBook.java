@@ -2,9 +2,11 @@
 package org.maiwithu.maicraft.behavior.worldmemory;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -91,4 +93,45 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
         next.remove(name);
         return new MemoryBook(records, next, regions);
     }
+
+    /**
+     * 按范围清掉一片失效记忆：清掉落在范围内的命名地点与容器、工作站、产地线索；
+     * 圈的地盘、建筑档案、机器档案与还没收回的临时方块原样保留。
+     */
+    AreaRemoval withoutArea(Predicate<WorldPosition> inArea) {
+        var keptPlaces = new HashMap<String, WorldPosition>();
+        List<WorldMemory.ForgottenPlace> removedPlaces = new ArrayList<>();
+        for (Map.Entry<String, WorldPosition> entry : places.entrySet()) {
+            if (inArea.test(entry.getValue())) {
+                removedPlaces.add(new WorldMemory.ForgottenPlace(entry.getKey(), entry.getValue()));
+            } else {
+                keptPlaces.put(entry.getKey(), entry.getValue());
+            }
+        }
+        removedPlaces.sort(Comparator.comparing(WorldMemory.ForgottenPlace::name));
+        List<MemoryRecord> keptRecords = new ArrayList<>(records.size());
+        int containers = 0;
+        int workstations = 0;
+        int sites = 0;
+        for (MemoryRecord record : records) {
+            boolean removable = (record.kind() == MemoryKind.CONTAINER
+                    || record.kind() == MemoryKind.WORKSTATION
+                    || record.kind() == MemoryKind.SITE)
+                    && inArea.test(record.position());
+            if (!removable) {
+                keptRecords.add(record);
+            } else if (record.kind() == MemoryKind.CONTAINER) {
+                containers++;
+            } else if (record.kind() == MemoryKind.WORKSTATION) {
+                workstations++;
+            } else {
+                sites++;
+            }
+        }
+        boolean changed = !removedPlaces.isEmpty() || keptRecords.size() != records.size();
+        MemoryBook next = changed ? new MemoryBook(keptRecords, keptPlaces, regions) : this;
+        return new AreaRemoval(next, new WorldMemory.AreaForgotten(removedPlaces, containers, workstations, sites), changed);
+    }
+
+    record AreaRemoval(MemoryBook book, WorldMemory.AreaForgotten forgotten, boolean changed) {}
 }

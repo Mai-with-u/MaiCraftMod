@@ -9,7 +9,7 @@
         "properties": {
           "what": {
             "type": "string",
-            "description": "看什么：self、scene（默认）、detail、world_memory、menu、picture",
+            "description": "看什么：self、scene（默认）、detail、places（只列记住的地点与档案名）、world_memory、menu、picture",
             "default": "scene"
           },
           "id": {
@@ -19,6 +19,14 @@
           "grid": {
             "type": "boolean",
             "description": "只在 what=scene 时用：true 时附带近处的俯视网格"
+          },
+          "radius": {
+            "type": "integer",
+            "description": "只在 what=world_memory 时用：只列离角色这么近（格）的记录"
+          },
+          "kind": {
+            "type": "string",
+            "description": "只在 what=world_memory 时用：只列这一类记录（container / workstation / site / machine / building / temporary_block）"
           },
           "with_menu": {
             "type": "boolean",

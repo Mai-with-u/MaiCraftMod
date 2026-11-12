@@ -64,10 +64,12 @@ public final class ToolCatalog {
                         + "数量、血量、背包、聊天、告示牌的字以 self、scene、detail、events 为准。"
                         + "给 id 时角色闲着就先转头看过去再拍，手上有活时不转头。",
                 properties(
-                        field("what", "string", "看什么：self、scene（默认）、detail、world_memory、menu、picture", "scene"),
+                        field("what", "string", "看什么：self、scene（默认）、detail、places（只列记住的地点与档案名）、world_memory、menu、picture", "scene"),
                         field("id", "string", "只在 what=detail 或 picture 时用：观察编号（e12、f3、b5、s2）或地标名；"
                                 + "picture 还收建筑档案名（转过去看那一栋）", null),
                         field("grid", "boolean", "只在 what=scene 时用：true 时附带近处的俯视网格", null),
+                        field("radius", "integer", "只在 what=world_memory 时用：只列离角色这么近（格）的记录", null),
+                        field("kind", "string", "只在 what=world_memory 时用：只列这一类记录（container / workstation / site / machine / building / temporary_block）", null),
                         field("with_menu", "boolean", "只在 what=picture 时用：true 时连同此刻开着的界面一起拍（整幅屏幕画面）；"
                                 + "界面认不出、结构化读不出来时用", null),
                         field("unlabeled", "boolean", "只在 what=picture 时用：true 时图上不标观察编号（看外观时用）；"

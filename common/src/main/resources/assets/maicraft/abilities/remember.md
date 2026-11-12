@@ -6,9 +6,9 @@
 
 | 名字 | 必填 | 说明 |
 | --- | :---: | --- |
-| `name` | ✅ | 地点或地盘的名字；首尾空白去掉后原样比较，不改大小写 |
-| `operation` | | `remember` 记住地点（默认，同名覆盖）/ `region` 以目标为中心圈一块玩家地盘 / `forget` 忘掉同名的地点与地盘 |
-| `radius` | | 只用于 `region`：地盘半径，单位格，默认 8，1–64。没写 `operation=region` 却给了它会报参数错 |
+| `name` | | `remember`、`region`、`forget` 必填：地点或地盘的名字，首尾空白去掉后原样比较，不改大小写；`forget_area` 不用给 |
+| `operation` | | `remember` 记住地点（默认，同名覆盖）/ `region` 以目标为中心圈一块玩家地盘 / `forget` 忘掉同名的地点与地盘 / `forget_area` 清掉目标周围一片失效记忆 |
+| `radius` | | 用于 `region`（地盘半径，默认 8，1–64）或 `forget_area`（清理半径，必填，1–512） |
 
 ## 目标对象（用于记住地点和圈地盘，省略就是 `here`）
 
@@ -34,3 +34,4 @@
 - 同名覆盖：结果细节 `previous_position`（圈地盘还有 `previous_radius`）写出原来记成什么；没变就直接完成，说"本来就这样记着"。
 - 忘掉：同名的地点与地盘一并忘，结果写出忘掉的是哪几样；两样都没记过就失败（`NOT_FOUND`），问题里附上记得的全部地点名与地盘名，不会把写错的名字当成已经忘掉。
 - 结果细节：`name`、`operation`；记住地点时有 `position`，圈地盘时 `position` 是中心、`radius` 是半径；改记时有 `previous_position`（与 `previous_radius`）；忘掉时 `previous_position` 是忘掉的地点，`forgotten_region` 是忘掉的地盘。
+- 按范围清理（`operation=forget_area`）：服主重新生成地形或整片搬迁后，清掉中心 `radius` 格内（同一维度）按名字记的地点、自动记下的容器、工作站、产地线索；圈的地盘、建筑与机器档案、还没收回的临时方块不动。结果细节 `forgotten` 逐个列出被清掉的命名地点（名字和原坐标，误清可照着记回）及各类记忆清掉的条数。

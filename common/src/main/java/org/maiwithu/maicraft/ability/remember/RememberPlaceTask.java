@@ -28,6 +28,7 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
 
     private final RememberPlaceInput input;
     private final WorldMemory memory;
+    private WorldMemory.AreaForgotten areaForgotten;
 
     public RememberPlaceTask(RememberPlaceInput input, WorldMemory memory) {
         // 一刻内完成的小事，卡住判定只作兜底，不会真的等到。
@@ -46,16 +47,17 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
     /**
      * 结果细节：名字、做了哪种操作。记地点时 position 是那个位置，圈地盘时 position 是中心、radius 是半径；
      * 改记时有 previous_position（圈地盘还有 previous_radius）；忘掉时 previous_position 是忘掉的地点，
-     * forgotten_region 是忘掉的地盘。
+     * forgotten_region 是忘掉的地盘；按范围清记忆时有 position、radius 与 forgotten。
      */
     record RememberDetails(String name, String operation, WorldPosition position, Integer radius,
-            WorldPosition previousPosition, Integer previousRadius, RegionShape forgottenRegion)
+            WorldPosition previousPosition, Integer previousRadius, RegionShape forgottenRegion,
+            WorldMemory.AreaForgotten forgotten)
             implements ResultDetails {
 
         /** 记地点（或忘掉只记过地点的名字）时的细节：没有半径和地盘。 */
         static RememberDetails ofPlace(String name, String operation, WorldPosition position,
                 WorldPosition previousPosition) {
-            return new RememberDetails(name, operation, position, null, previousPosition, null, null);
+            return new RememberDetails(name, operation, position, null, previousPosition, null, null, null);
         }
     }
 
@@ -67,9 +69,26 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (input.operation()) {
             case FORGET -> forget();
+            case FORGET_AREA -> forgetArea();
             case REGION -> region();
             case REMEMBER -> remember();
         };
+    }
+
+    // 按范围清理失效记忆：清掉范围内命名地点、容器、工作站与产地线索，地盘、建筑机器档案与临时方块不动。
+    private Next<Phase> forgetArea() {
+        areaForgotten = memory.forgetArea(input.position(), input.radius());
+        String summary;
+        if (areaForgotten.totalRemoved() == 0) {
+            summary = describe(input.position()) + " 周围 " + input.radius() + " 格内没有要清理的地点或记忆";
+        } else {
+            summary = "已清理 " + describe(input.position()) + " 周围 " + input.radius() + " 格内的失效记忆：地点 "
+                    + areaForgotten.places().size() + " 处、容器 " + areaForgotten.container()
+                    + " 条、工作站 " + areaForgotten.workstation() + " 条、产地线索 " + areaForgotten.site() + " 条";
+        }
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
+                .details(details())
+                .build());
     }
 
     // 忘掉：同名的地点与地盘记过哪样忘哪样，结果写清忘掉的是哪几样。
@@ -115,10 +134,13 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
             case REGION -> {
                 RememberedRegion before = input.previousRegion();
                 yield new RememberDetails(input.name(), "region", input.position(), input.radius(),
-                        before == null ? null : before.center(), before == null ? null : before.radiusBlocks(), null);
+                        before == null ? null : before.center(), before == null ? null : before.radiusBlocks(),
+                        null, null);
             }
             case FORGET -> new RememberDetails(input.name(), "forget", null, null, input.previous(), null,
-                    RegionShape.of(input.previousRegion()));
+                    RegionShape.of(input.previousRegion()), null);
+            case FORGET_AREA -> new RememberDetails(null, "forget_area", input.position(), input.radius(),
+                    null, null, null, areaForgotten);
         };
     }
 

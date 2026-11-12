@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.mcp.view.PictureView;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.ClientFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
@@ -33,6 +34,7 @@ import org.maiwithu.maicraft.mcp.view.SceneView;
 import org.maiwithu.maicraft.mcp.view.SelfView;
 import org.maiwithu.maicraft.mcp.view.WorldMemoryView;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -53,7 +55,10 @@ import java.util.function.Supplier;
  * 场景与记忆按世界创建，角色不在世界里时回答不在世界里。
  */
 public final class ObserveTool implements McpTool {
-    private static final List<String> VIEWS = List.of("self", "scene", "detail", "world_memory", "menu", "picture");
+    private static final List<String> VIEWS = List.of(
+            "self", "scene", "detail", "places", "world_memory", "menu", "picture");
+    private static final List<String> MEMORY_KINDS = List.of(
+            "container", "workstation", "site", "machine", "building", "temporary_block");
     /** 拍画面时等转头最多多久（毫秒）：闲时看那一回最多转两秒，多给半秒余量。 */
     static final long TURN_WAIT_MILLIS = 2500;
     /** 等下一帧画到取图点最多多久（毫秒）：游戏这一秒都没画出一帧，多半是窗口最小化了。 */
@@ -182,13 +187,16 @@ public final class ObserveTool implements McpTool {
     // picture 另带一张图；别的视图只有 JSON。
     @Override public ToolReply.WithImages answer(JsonObject arguments) {
         RequestCheck check = new RequestCheck();
-        check.rejectUnknownFields(arguments, "", List.of("what", "id", "grid", "with_menu", "unlabeled"));
+        check.rejectUnknownFields(arguments, "",
+                List.of("what", "id", "grid", "with_menu", "unlabeled", "radius", "kind"));
         String chosen = check.choice(arguments, "what", "what", VIEWS);
         String what = chosen == null ? "scene" : chosen;
         String id = check.text(arguments, "id", "id", false);
         Boolean grid = check.bool(arguments, "grid", "grid");
         Boolean withMenu = check.bool(arguments, "with_menu", "with_menu");
         Boolean unlabeled = check.bool(arguments, "unlabeled", "unlabeled");
+        Integer radius = check.integer(arguments, "radius", "radius", false);
+        String kind = check.choice(arguments, "kind", "kind", MEMORY_KINDS);
         if (what.equals("detail") && id == null && !arguments.has("id")) {
             check.error("id", "what=detail 时要给 id", "观察编号（e12、f3、b5、s2）或地标名");
         }
@@ -197,6 +205,11 @@ public final class ObserveTool implements McpTool {
         if (!what.equals("scene") && grid != null) check.error("grid", "grid 只在 what=scene 时用", null);
         if (!what.equals("picture") && withMenu != null) check.error("with_menu", "with_menu 只在 what=picture 时用", null);
         if (!what.equals("picture") && unlabeled != null) check.error("unlabeled", "unlabeled 只在 what=picture 时用", null);
+        if (!what.equals("world_memory") && radius != null) check.error("radius", "radius 只在 what=world_memory 时用", null);
+        if (what.equals("world_memory") && radius != null && radius < 1) {
+            check.error("radius", "radius 至少为 1", "正整数（格）");
+        }
+        if (!what.equals("world_memory") && kind != null) check.error("kind", "kind 只在 what=world_memory 时用", null);
         if (!check.ok()) {
             return ToolReply.WithImages.of(ToolReply.error(ErrorCode.INVALID_PARAMETER,
                     "参数有 " + check.errors().size() + " 处问题", check.errors(), null));
@@ -204,15 +217,20 @@ public final class ObserveTool implements McpTool {
         if (what.equals("picture")) {
             return picture(id, Boolean.TRUE.equals(withMenu), Boolean.TRUE.equals(unlabeled), check.notes());
         }
-        return ToolReply.WithImages.of(view(what, id, grid, check));
+        MemoryKind kindFilter = kind == null ? null : MemoryKind.valueOf(kind.toUpperCase(Locale.ROOT));
+        return ToolReply.WithImages.of(view(what, id, grid, radius, kindFilter, check));
     }
 
-    private JsonObject view(String what, String id, Boolean grid, RequestCheck check) {
-        JsonObject data = clientThread.call(context -> view(what, id, Boolean.TRUE.equals(grid), context));
+    private JsonObject view(String what, String id, Boolean grid, Integer radius, MemoryKind kindFilter,
+            RequestCheck check) {
+        List<String> viewNotes = new ArrayList<>();
+        JsonObject data = clientThread.call(
+                context -> view(what, id, Boolean.TRUE.equals(grid), radius, kindFilter, viewNotes, context));
         if (data == null) {
             return ToolReply.error(ErrorCode.UNKNOWN_ID, "没有观察编号或地标叫 " + id
                     + "；观察编号只在短时间内有效，重新 observe(scene) 拿新的编号");
         }
+        viewNotes.forEach(check::note);
         return ToolReply.ok(data, check.notes(), null);
     }
 
@@ -228,16 +246,22 @@ public final class ObserveTool implements McpTool {
     }
 
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
-    private JsonObject view(String what, String id, boolean grid, TickContext context) {
+    private JsonObject view(String what, String id, boolean grid, Integer radius, MemoryKind kindFilter,
+            List<String> notes, TickContext context) {
         Scene currentScene = scene.get();
         WorldMemory currentMemory = memory.get();
         if (currentScene == null || currentMemory == null) {
             throw new ClientThread.NotInWorld();
         }
+        PlayerContext player = context.player();
+        String dimension = player == null || player.level() == null
+                ? null : player.level().dimension().location().toString();
         JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
             case "detail" -> DetailView.of(currentScene, currentMemory, id, lastModifier()).orElse(null);
-            case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), lastModifier());
+            case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension);
+            case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
+                    radius, kindFilter, lastModifier(), notes::add);
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid);
         };

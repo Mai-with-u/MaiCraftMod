@@ -307,8 +307,8 @@
       },
       {
         "ability": "maicraft:remember",
-        "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
-        "parameters": "name: string, operation: string (remember / forget / region) = remember, radius?: integer (1..64)",
+        "summary": "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
+        "parameters": "name?: string, operation: string (remember / forget / region / forget_area) = remember, radius?: integer (1..512)",
         "targets": [
           "here",
           "landmark",
@@ -1798,33 +1798,34 @@
     },
     {
       "ability": "maicraft:remember",
-      "summary": "记住或忘掉一个按名字叫的地点，或把一片地方圈成玩家地盘",
+      "summary": "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
       "parameters": [
         {
           "name": "name",
           "type": "string",
-          "required": true,
-          "doc": "地点或地盘的名字；首尾空白去掉后原样比较，不改大小写"
+          "required": false,
+          "doc": "remember、forget、region 必填：地点或地盘的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给"
         },
         {
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用）",
+          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用），forget_area 把目标周围 radius 格内的命名地点与容器、工作站、产地记忆清掉",
           "default": "remember",
           "choices": [
             "remember",
             "forget",
-            "region"
+            "region",
+            "forget_area"
           ]
         },
         {
           "name": "radius",
           "type": "integer",
           "required": false,
-          "doc": "只用于 region：地盘半径，单位格，默认 8",
+          "doc": "用于 region（地盘半径，默认 8，最大 64）或 forget_area（清理半径，必填，1 到 512）",
           "min": 1,
-          "max": 64
+          "max": 512
         }
       ],
       "targets": [
