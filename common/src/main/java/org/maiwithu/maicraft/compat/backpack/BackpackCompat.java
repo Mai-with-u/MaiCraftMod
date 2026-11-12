@@ -8,8 +8,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.ItemStack;
@@ -49,7 +47,7 @@ public final class BackpackCompat extends CompatModule {
     @Override public void contribute(CompatRegistry registry) {
         // 随身背包来源：身上的仓库，开包取出算拿到，并入 carried 这条途径。
         registry.itemSource(this, services ->
-                new SophisticatedBackpackSource(this, services, menus, stockFor(services), clock));
+                new SophisticatedBackpackSource(this, services, stockFor(services), clock));
     }
 
     /** 同一份玩家行为（同一趟进世界）共用同一本开包存货记录，换世界新建玩家行为时换新账本。 */
@@ -108,18 +106,6 @@ public final class BackpackCompat extends CompatModule {
             return true;
         }
         return !carriedSlots((Player) null).isEmpty();
-    }
-
-    /** 原版背包里装着随身背包的那几格。 */
-    public List<Integer> carriedSlots(Inventory inventory) {
-        List<Integer> slots = new ArrayList<>();
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && isBackpackItem(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString())) {
-                slots.add(slot);
-            }
-        }
-        return List.copyOf(slots);
     }
 
     /** 点开的界面是不是角色顶层精妙背包的界面。 */

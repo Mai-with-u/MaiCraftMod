@@ -54,9 +54,4 @@ public interface BackpackMenus {
     default void openCarried() {
         open(BackpackSlot.Location.FIRST_CARRIED);
     }
-
-    /** 按原版主背包格号打开那一只随身背包。 */
-    default void open(int mainSlot) {
-        open(BackpackSlot.Location.mainSlot(mainSlot));
-    }
 }

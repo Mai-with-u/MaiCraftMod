@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.backpack;
 
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -162,5 +163,43 @@ class SophisticatedBackpackSourceTest {
         assertTrue(source.begin(TORCHES,
                 new SourceQuote.Offer("随身背包", 5, new AcquisitionCost(0, 4), ""),
                 CONTEXT).isEmpty());
+    }
+
+    @Test
+    void 背在饰品栏而不在主背包里时照样认得出并按栏位报价() {
+        BackpackSlot curioPack = new BackpackSlot("curios", "back", 0, "sophisticatedbackpacks:iron_backpack");
+        BackpackMenus curioMenus = new BackpackMenus() {
+            @Override public boolean isBackpackMenu(AbstractContainerMenu menu) { return false; }
+            @Override public Optional<List<Integer>> mainStorageSlotIds(AbstractContainerMenu menu) {
+                return Optional.empty();
+            }
+            @Override public List<Integer> playerSlotIds(AbstractContainerMenu menu) { return List.of(); }
+            @Override public List<BackpackSlot> carriedBackpacks(Player player) {
+                return List.of(curioPack);
+            }
+            @Override public void open(BackpackSlot.Location location) { }
+        };
+        BackpackCompat compat = new BackpackCompat(itemId -> itemId.startsWith("sophisticatedbackpacks:"),
+                curioMenus, () -> NOW);
+        BackpackView mainWithoutBackpack = carrying("minecraft:cobblestone");
+        PlayerServices services = new PlayerServices(() -> null, (target, permissions) -> null,
+                new Interactions(null),
+                itemId -> Optional.empty(), new NoGear(), inner -> inner, (request, permissions) -> null,
+                new Protection((dimension, x, y, z) -> Optional.empty(), List::of, name -> Optional.empty(),
+                        "self"),
+                itemId -> Set.of(), MenuLayouts.VANILLA, new BlockScanService(), ServerReads.NONE,
+                mainWithoutBackpack, DigToolRule.HELD);
+        SeenBackpackStock seen = new SeenBackpackStock();
+        SophisticatedBackpackSource source = new SophisticatedBackpackSource(compat, services, seen, () -> NOW);
+
+        // 刚背在饰品栏还没打开过：不报"身上没有随身背包"，报可能装有。
+        SourceQuote.Offer unseenOffer = assertInstanceOf(SourceQuote.Offer.class, source.quote(TORCHES, CONTEXT));
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, unseenOffer.obtainableCount());
+        assertTrue(source.begin(TORCHES, unseenOffer, CONTEXT).isPresent());
+
+        // 开包记下饰品栏这只包里有 15 根火把：五分钟内直接报明确数量。
+        seen.saw(curioPack.location(), Map.of("minecraft:torch", 15), 12, NOW.minusSeconds(20));
+        SourceQuote.Offer freshOffer = assertInstanceOf(SourceQuote.Offer.class, source.quote(TORCHES, CONTEXT));
+        assertEquals(10, freshOffer.obtainableCount());
     }
 }
