@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.ability.deposit.DepositModule;
+import org.maiwithu.maicraft.ability.loot.LootModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
@@ -266,6 +267,8 @@ public final class AbilityCatalog {
 
         // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
         registry.register(depositModule(deps, shared));
+        // 搜刮战利品容器：按价值分级拿走稀罕物、装备、材料与食物，触发开出稀罕战利品的里程碑。
+        registry.register(lootModule(deps, shared));
 
         // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
         // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
@@ -748,6 +751,15 @@ public final class AbilityCatalog {
                 deps.world().facilities(), () -> shared.networks().stream().findFirst(), deps.kept(),
                 deps.compat().menuLayouts(), shared.bringClose(), deps.hands().interactions(), shared.toMainhand(),
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()));
+    }
+
+    /** 搜刮战利品容器能力的一份：找容器、归属保护、容器界面搬运与稀罕战利品通报共用同一套现场部件。 */
+    private static LootModule lootModule(Deps deps, Shared shared) {
+        return LootModule.live(deps.character().context(), deps.world()::scene, deps.world().memory(),
+                deps.world().blockScans(), deps.guards().protection(), deps.world().facilities(), shared.collects(),
+                deps.compat().menuLayouts(), shared.bringClose(), deps.hands().interactions(), shared.toMainhand(),
+                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.kept(),
+                deps.guards().rareLootNotice());
     }
 
     /**
