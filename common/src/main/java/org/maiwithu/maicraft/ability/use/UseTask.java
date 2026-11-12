@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.behavior.interaction.WriteSign;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -396,7 +397,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         List<String> chatMessages = services.refusal() == null ? List.of()
                 : services.refusal().systemMessagesSince(chatMark);
-        return switch (UseDecider.settle(result, newGameMessage(), chatMessages)) {
+        String held = input.item() != null ? input.item()
+                : services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse("手上的东西");
+        return switch (UseDecider.settle(result, newGameMessage(), chatMessages, target == null, held)) {
             case UseDecider.Settlement.Applied applied -> {
                 // 生效了照常算生效；这段时间聊天栏里服务端说的话原样附上，要不要当回事由 LLM 判断。
                 gameMessages.addAll(chatMessages);
@@ -578,7 +581,18 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new UseDetails(appliedTimes, openedMenu, lastModifiedBy, signLines, riding, gameMessages);
+        return new UseDetails(appliedTimes, usedOn(), openedMenu, lastModifiedBy, signLines, riding, gameMessages);
+    }
+
+    // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here）就是对着空气用。
+    private String usedOn() {
+        if (target != null) return target.isEntity() ? "entity" : "block";
+        if (input.entity() != null) return "entity";
+        if (input.block() != null) return "block";
+        if (input.target() instanceof Target.Seen seen) {
+            return seen.id().startsWith("e") ? "entity" : "block";
+        }
+        return input.target() == null || input.target() instanceof Target.Here ? "air" : "block";
     }
 
     @Override protected List<String> remaining() {

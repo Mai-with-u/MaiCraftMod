@@ -131,7 +131,20 @@ final class UseDecider {
      *
      * @param chatMessages 出手后聊天栏收到的服务端系统消息原话，按收到先后
      */
+    /** 对着空气用东西却没生效时的建议：写清怎么把用法改成对着方块或生物用。 */
+    static final String AIR_USE_SUGGESTION = "target=here 或不给 target 都不指任何方块；"
+            + "要对着方块用就给那一格（观察编号 b# 或坐标），放在地面上就点地面那一格并给 face=up；对生物用给 e#";
+
     static Settlement settle(InteractionResult result, Optional<String> gameMessage, List<String> chatMessages) {
+        return settle(result, gameMessage, chatMessages, false, null);
+    }
+
+    /**
+     * 把交互结论结算成走向：对着空气用却没生效时，说明这次是对着空气用的，并写清要对着方块还是生物怎么传参，
+     * 不让调用方把用法不对误当成这件东西不能用。
+     */
+    static Settlement settle(InteractionResult result, Optional<String> gameMessage, List<String> chatMessages,
+            boolean onAir, String heldItem) {
         Optional<Problem> chatRefusal = chatMessages.isEmpty() ? Optional.empty()
                 : Optional.of(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                         "游戏没有接这一下，聊天栏里说：" + String.join("；", chatMessages), null));
@@ -141,12 +154,19 @@ final class UseDecider {
             // 确认等满了却在聊天栏收到了服务端的话：多半是被拒绝了，附原话交回，不再报说不清。
             case UNCONFIRMED -> chatRefusal.<Settlement>map(Settlement.NotApplied::new)
                     .orElseGet(() -> new Settlement.Unconfirmed(result.scene()));
-            // 游戏说了为什么就附原话（动作栏优先，其次聊天栏）；什么都没说、目标也没变，就是这样用没有效果。
+            // 游戏说了为什么就附原话（动作栏优先，其次聊天栏）；对着空气用却没反应时说明是对着空气用的并给出对准方块或生物的用法。
             case NOT_APPLIED -> new Settlement.NotApplied(gameMessage
                     .map(message -> Problem.of(Problem.Kind.REFUSED_BY_GAME, "游戏拒绝了：" + message, null))
                     .or(() -> chatRefusal)
-                    .orElseGet(() -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                            "这样用没有效果：" + result.scene(), null)));
+                    .orElseGet(() -> {
+                        if (onAir) {
+                            String what = heldItem == null || heldItem.isBlank() ? "手上的东西" : heldItem;
+                            return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                                    "对着空气用了 " + what + " 没有效果：" + result.scene(), AIR_USE_SUGGESTION);
+                        }
+                        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                                "这样用没有效果：" + result.scene(), null);
+                    }));
         };
     }
 

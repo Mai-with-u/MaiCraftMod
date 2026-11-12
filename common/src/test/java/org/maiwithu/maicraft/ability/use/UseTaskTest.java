@@ -657,6 +657,36 @@ class UseTaskTest {
     }
 
     @Test
+    void 对着空气用没生效_结果细节标air并说明要对着什么用() {
+        Rig rig = new Rig();
+        rig.interactions.outcome(InteractionResult.notApplied("手上物品没少、现场没变"), () -> { });
+        TaskResult result = rig.run(rig.input(new Target.Here(), "minecraft:bone_meal", null, null, 1));
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertProblem(result, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertTrue(result.problem().message().startsWith("对着空气用了 minecraft:bone_meal 没有效果"),
+                result.problem().message());
+        assertTrue(result.problem().suggestion().contains("face=up"), result.problem().suggestion());
+        UseDetails details = (UseDetails) result.details();
+        assertEquals("air", details.usedOn());
+    }
+
+    @Test
+    void 对着方块或实体用_结果细节标block与entity() {
+        Rig blockRig = new Rig();
+        blockRig.world.blocks.put(LEVER, "minecraft:lever");
+        blockRig.interactions.applied("拉杆扳动了");
+        TaskResult onBlock = blockRig.run(blockRig.input(position(LEVER), null, null, null, 1));
+        assertEquals("block", ((UseDetails) onBlock.details()).usedOn());
+
+        Rig entityRig = new Rig();
+        entityRig.seen.put("e4", new ResolvesSeen.Resolved(WorldPosition.here(2, 64, 2), "minecraft:sheep", 11));
+        entityRig.world.entities.put(11, new UseSeams.ReadsWorld.SeenEntity("minecraft:sheep", new BlockPos(2, 64, 2), true));
+        entityRig.interactions.applied("剪下了羊毛");
+        TaskResult onEntity = entityRig.run(entityRig.input(new Target.Seen("e4"), "minecraft:shears", null, null, 1));
+        assertEquals("entity", ((UseDetails) onEntity.details()).usedOn());
+    }
+
+    @Test
     void 锄地被短草压着_先打掉草再锄() {
         // 草方块上长着短草：先过许可、打掉那一格草，记下拆掉了什么，再回来锄成耕地。
         Rig rig = new Rig();

@@ -96,4 +96,16 @@ class UseDeciderTest {
                 .isEmpty());
         assertTrue(UseDecider.rejectedItem("minecraft:brush").isEmpty());
     }
+
+    @Test
+    void usingItemOnAirWithoutEffectExplainsTargetUsage() {
+        UseDecider.Settlement settled = UseDecider.settle(
+                InteractionResult.notApplied("数量和世界都没变"), Optional.empty(), List.of(),
+                true, "minecraft:bone_meal");
+        Problem problem = ((UseDecider.Settlement.NotApplied) settled).problem();
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, problem.kind());
+        assertTrue(problem.message().startsWith("对着空气用了 minecraft:bone_meal 没有效果"), problem.message());
+        assertTrue(problem.suggestion().contains("target=here") && problem.suggestion().contains("face=up"),
+                problem.suggestion());
+    }
 }
