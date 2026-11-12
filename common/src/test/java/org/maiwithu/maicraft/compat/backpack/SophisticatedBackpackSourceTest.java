@@ -51,8 +51,7 @@ class SophisticatedBackpackSourceTest {
         @Override public boolean isBackpackMenu(AbstractContainerMenu menu) { return false; }
         @Override public Optional<List<Integer>> mainStorageSlotIds(AbstractContainerMenu menu) { return Optional.empty(); }
         @Override public List<Integer> playerSlotIds(AbstractContainerMenu menu) { return List.of(); }
-        @Override public void openCarried() { }
-        @Override public void open(int inventorySlot) { }
+        @Override public void open(BackpackSlot.Location location) { }
     };
 
     private static BackpackView carrying(String... itemIds) {

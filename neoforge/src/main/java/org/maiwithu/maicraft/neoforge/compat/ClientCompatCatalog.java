@@ -72,8 +72,8 @@ public final class ClientCompatCatalog {
         // Sable 与 Simulated 两个入口共用一本逐格读的记事本：在船上施工改了方块作废一次，两边都照新结构读。
         StructureScans scans = new StructureScans();
         return List.of(
-                // 精妙背包：实测过 3.25.69（精妙核心 1.4.72）；装了 3.26 及以上不登记，实测通过后再放宽。
-                new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.26"),
+                // 精妙背包：按 3.25.69（精妙核心 1.4.72）编译，字节码签名与 3.26.17 逐项核对一致；装了 3.27 及以上不登记。
+                new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.27"),
                         () -> new BackpackCompat(new SophisticatedBackpackItems(),
                                 new SophisticatedBackpackMenus(), Instant::now)),
                 // 应用能源2：实测过 19.2.17；装了 19.3 及以上不登记，实测通过后再放宽。
