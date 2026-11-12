@@ -179,7 +179,8 @@ public final class Approach implements Action {
     }
 
     private ActionStatus checkHere() {
-        Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded);
+        // 原地还没动步：按严进核对（看得见、原触及距离内）才一步不走，隔着墙或站在外圈先挑看得见的站位走过去。
+        Optional<String> failure = StandSpots.checkStandingHere(target, reach, world, guarded);
         if (failure.isEmpty()) return ActionStatus.done();
         start = world.currentFeet();
         // 这次目标里刚从这附近试过、合起来再算也到不了：直接收场，不再重算一轮。
@@ -371,8 +372,8 @@ public final class Approach implements Action {
         // 补救常常是挖开自己脚下那一块（坑边看不见坑底时挖掉坑沿）或挖进地里的站位，挖完人还在往下掉：
         // 落地前核对必然是"还没落地"，等它站稳再核对，不把掉落的几刻当成补救没用。
         if (!world.onGround() && ++landingTicks <= LANDING_WAIT_TICKS) return ActionStatus.running();
-        // 补救做完再核对一次；还不行就没有更多办法了，把经过如实交代出去，不再回头换站位。
-        Optional<String> failure = StandSpots.checkArrival(target, reach, world, guarded);
+        // 补救做完再核对一次：补救去挖遮挡就要把视线真挖通，还不行就没有更多办法了，如实交代出去。
+        Optional<String> failure = StandSpots.checkAfterRescue(target, reach, world, guarded);
         if (failure.isEmpty()) return ActionStatus.done();
         recordTried("补救后的位置", failure.get());
         return giveUp(null, true);

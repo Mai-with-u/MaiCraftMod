@@ -270,7 +270,8 @@ public final class WaterFillSource implements ItemSource {
         // 按阶段建下一个动作：玻璃瓶已在主手就跳过换手；装一瓶的确认是身上的水瓶比点之前多了一瓶。
         private Action next(PlayerContext player) {
             return switch (stage) {
-                case APPROACH -> services.approach().toward(ApproachTarget.ofBlockFace(water, Direction.UP), permissions);
+                case APPROACH -> services.approach().toward(
+                        ApproachTarget.ofBlockFace(water, Direction.UP).requiringSightOnArrival(), permissions);
                 case HAND -> {
                     if (player != null && player.localPlayer() != null
                             && player.localPlayer().getMainHandItem().is(Items.GLASS_BOTTLE)) {
@@ -356,9 +357,9 @@ public final class WaterFillSource implements ItemSource {
         // 按阶段建下一个动作：空桶已在主手就跳过换手；舀的确认是主手变成水桶。
         private Action next(PlayerContext player) {
             return switch (stage) {
-                // 走到能从上面看见水面的地方：按整格找站位时，寻路一直给不出路线（实机 572,79,125 舀水两次都卡在这）；
-                // 和 use 拿空桶点水面同一个靠近办法，朝上那一面。
-                case APPROACH -> services.approach().toward(ApproachTarget.ofBlockFace(water, Direction.UP), permissions);
+                // 走到能从上面看见水面的地方：装水桶与装水瓶都在服务端按真实射线找水面，到达后仍核对视线与原距离。
+                case APPROACH -> services.approach().toward(
+                        ApproachTarget.ofBlockFace(water, Direction.UP).requiringSightOnArrival(), permissions);
                 case HAND -> {
                     if (player != null && player.localPlayer() != null
                             && player.localPlayer().getMainHandItem().is(Items.BUCKET)) {

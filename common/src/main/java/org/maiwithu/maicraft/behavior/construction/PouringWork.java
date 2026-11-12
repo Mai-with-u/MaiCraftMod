@@ -125,7 +125,8 @@ final class PouringWork extends ConstructionWork {
 
     private ActionStatus approach() {
         step = Step.APPROACH;
-        ApproachTarget at = ApproachTarget.ofBlock(target());
+        // 桶按服务端真实射线作用：到达站位后仍要守住原触及距离与视线。
+        ApproachTarget at = ApproachTarget.ofBlock(target()).requiringSightOnArrival();
         // 要倒的是岩浆：先挑它流不到的站位，站错了岩浆一流开就淹到脚下。收走源液体和倒水照常靠近。
         avoidingLava = cell != null && stray == null && cell.state().getFluidState().is(Fluids.LAVA);
         begin(avoidingLava ? services.close().toward(at, permissions, outsideLavaFlow(cell.pos()))
@@ -188,7 +189,7 @@ final class PouringWork extends ConstructionWork {
             avoidingLava = false;
             records.attempt("站到岩浆流不到的地方倒 " + target().toShortString(),
                     failure.problem().message() + "；照常挑站位倒");
-            begin(services.close().toward(ApproachTarget.ofBlock(target()), permissions),
+            begin(services.close().toward(ApproachTarget.ofBlock(target()).requiringSightOnArrival(), permissions),
                     "走到 " + target().toShortString() + " 跟前");
             return ActionStatus.progressed();
         }

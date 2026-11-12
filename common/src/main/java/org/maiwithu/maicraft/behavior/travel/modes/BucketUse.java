@@ -86,7 +86,9 @@ final class BucketUse implements Action {
     // 按阶段备下一个小动作：桶已在主手就直接出手；身上没有这种桶按缺东西失败。
     private ActionStatus prepare() {
         switch (stage) {
-            case APPROACH -> current = construction.close().toward(ApproachTarget.ofBlock(target), permissions);
+            // 桶在服务端按真实眼睛射线结算，到达站位后仍要核对原触及距离与视线。
+            case APPROACH -> current = construction.close().toward(
+                    ApproachTarget.ofBlock(target).requiringSightOnArrival(), permissions);
             case HOLD -> {
                 switch (construction.hand().hold(bucketItem)) {
                     case ConstructionSeams.HoldPlan.Ready ready -> {

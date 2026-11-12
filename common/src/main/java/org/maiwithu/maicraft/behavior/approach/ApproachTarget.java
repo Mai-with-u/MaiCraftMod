@@ -24,13 +24,21 @@ import net.minecraft.world.phys.Vec3;
  *                       脚格进水但头还在水面外的湿位都可用，排序时排到干站位之后：脚下实心的浅水位
  *                       照常站，贴着水面的漂浮位不必有实地；到了之后的核对也放行踩着水漂着的到达。
  *                       头也进了水的深水位照旧拒。其余目标不声明，泡水照旧一票拒
+ * @param requiresSightOnArrival 到达站位后仍必须核对无遮挡视线与原触及距离：桶舀水倒水、水面上放船、装水瓶、
+ *                               刷子与抛投物品在服务端按眼睛射线或抛物线结算，不能隔着前景遮挡直发包
  */
 public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face,
-        boolean removesBlock, boolean wetFeetAllowed) {
+        boolean removesBlock, boolean wetFeetAllowed, boolean requiresSightOnArrival) {
+
+    /** 兼容不显式声明到达视线约束的构造：只有抛投目标默认要求到达后视线畅通。 */
+    public ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, Double frontYaw, Direction face,
+            boolean removesBlock, boolean wetFeetAllowed) {
+        this(kind, block, bounds, frontYaw, face, removesBlock, wetFeetAllowed, kind == InteractionKind.TOSS);
+    }
 
     /** 对一个方块做事，例如箱子、工作台；床不用这个，见 {@link #ofBed}。 */
     public static ApproachTarget ofBlock(BlockPos at) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, false, false);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, false, false, false);
     }
 
     /**
@@ -38,7 +46,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * 下面是实地或摔不坏时原地挖不算错，下面是岩浆或看不见底的洞就换旁边一格。
      */
     public static ApproachTarget ofBlockToDig(BlockPos at) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, true, false);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), null, null, true, false, false);
     }
 
     /**
@@ -51,7 +59,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         if (!new AABB(at).intersects(part)) {
             throw new IllegalArgumentException("部件框不在 " + at.toShortString() + " 这一格里");
         }
-        return new ApproachTarget(InteractionKind.BLOCK, at, part, null, null, false, false);
+        return new ApproachTarget(InteractionKind.BLOCK, at, part, null, null, false, false, false);
     }
 
     /**
@@ -61,7 +69,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      */
     public static ApproachTarget ofBlockFace(BlockPos at, Direction face) {
         return new ApproachTarget(InteractionKind.BLOCK, at, PlacementSpots.faceBox(at, face), null, face, false,
-                false);
+                false, false);
     }
 
     /**
@@ -69,12 +77,12 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * 背面那一侧的按"背面"拒掉。正面的水平朝向角按原版告示牌自己的旋转角给出。
      */
     public static ApproachTarget onFrontSideOf(BlockPos at, double frontYaw) {
-        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw, null, false, false);
+        return new ApproachTarget(InteractionKind.BLOCK, at, new AABB(at), frontYaw, null, false, false, false);
     }
 
     /** 对一张床做事：给床头或床尾任意一半的格子，距离与视线都按床底面判。 */
     public static ApproachTarget ofBed(BlockPos half) {
-        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null, null, false, false);
+        return new ApproachTarget(InteractionKind.BED, half, new AABB(half), null, null, false, false, false);
     }
 
     /**
@@ -89,7 +97,12 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         }
         AABB landing = new AABB(cell.getX(), cell.getY() + catchHeight, cell.getZ(),
                 cell.getX() + 1, cell.getY() + Math.max(1.0, catchHeight + 0.05), cell.getZ() + 1);
-        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null, false, false);
+        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null, false, false, true);
+    }
+
+    /** 标记这次方块目标在到达站位后仍要守住真实视线与原触及距离（桶舀水倒水、装水瓶、水上放船）。 */
+    public ApproachTarget requiringSightOnArrival() {
+        return new ApproachTarget(kind, block, bounds, frontYaw, face, removesBlock, wetFeetAllowed, true);
     }
 
     /** 对一个实体做事；包围盒由调用方在取目标的同一刻读出来。 */
@@ -108,7 +121,7 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
 
     private static ApproachTarget vehicleTarget(AABB box, boolean wetFeetAllowed) {
         BlockPos center = BlockPos.containing(box.getCenter());
-        return new ApproachTarget(InteractionKind.ENTITY, center, box, null, null, false, wetFeetAllowed);
+        return new ApproachTarget(InteractionKind.ENTITY, center, box, null, null, false, wetFeetAllowed, false);
     }
 
     public ApproachTarget {

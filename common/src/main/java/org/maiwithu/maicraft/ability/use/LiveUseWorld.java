@@ -30,6 +30,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -172,14 +173,25 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         }
         if (!writesSign) {
             // 指定了点哪一面：站位按方块外形上朝这一面的表面看不看得见挑。
-            return Optional.of(target.face() != null ? ApproachTarget.ofBlockFace(target.cell(), target.face())
-                    : ApproachTarget.ofBlock(target.cell()));
+            ApproachTarget base = target.face() != null
+                    ? ApproachTarget.ofBlockFace(target.cell(), target.face())
+                    : ApproachTarget.ofBlock(target.cell());
+            // 桶舀倒、水上放船、装水瓶与刷子在服务端按真实射线或持续按住准星结算，到达站位后仍核对视线与原距离。
+            return Optional.of(requiresSightForHeld() ? base.requiringSightOnArrival() : base);
         }
         ClientLevel level = level();
         if (level == null || !level.isLoaded(target.cell())) return Optional.empty();
         BlockState state = level.getBlockState(target.cell());
         if (!(state.getBlock() instanceof SignBlock sign)) return Optional.empty();
         return Optional.of(ApproachTarget.onFrontSideOf(target.cell(), sign.getYRotationDegrees(state)));
+    }
+
+    private boolean requiresSightForHeld() {
+        ItemUseAim.Gesture gesture = ItemUseAim.gestureOf(heldItem().map(Held::itemId).orElse(null));
+        return gesture == ItemUseAim.Gesture.SCOOP
+                || gesture == ItemUseAim.Gesture.POUR
+                || gesture == ItemUseAim.Gesture.OWN_USE
+                || gesture == ItemUseAim.Gesture.BRUSH;
     }
 
     private Optional<BlockState> state(BlockPos cell) {

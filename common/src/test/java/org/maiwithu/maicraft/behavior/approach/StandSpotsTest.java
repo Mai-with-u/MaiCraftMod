@@ -233,16 +233,19 @@ class StandSpotsTest {
     }
 
     @Test
-    void 到了之后四下核对() {
+    void 到了之后按服务端口径与手势核对() {
         ApproachTarget target = ApproachTarget.ofBlock(new BlockPos(3, 64, 0));
         assertEquals(Optional.empty(), StandSpots.checkArrival(target, REACH, world, guarded));
         // 离目标太远：够不着。
         world.feet = new BlockPos(20, 64, 0);
         assertEquals(Optional.of("够不着"), StandSpots.checkArrival(target, REACH, world, guarded));
-        // 站对了位置但被挡住：看不见。
+        // 普通方块已经在挑站位阶段筛过视线：到达后被草叶、线缆细碎遮挡时不再判败换站位，交给直发包出手。
         world.feet = new BlockPos(2, 64, 0);
         world.hidden = (eye, t) -> true;
-        assertEquals(Optional.of("看不见"), StandSpots.checkArrival(target, REACH, world, guarded));
+        assertEquals(Optional.empty(), StandSpots.checkArrival(target, REACH, world, guarded));
+        // 桶舀倒水、装水瓶、水上放船这类在服务端按真实眼睛射线结算的目标：到达后被挡照旧报看不见。
+        ApproachTarget bucketTarget = target.requiringSightOnArrival();
+        assertEquals(Optional.of("看不见"), StandSpots.checkArrival(bucketTarget, REACH, world, guarded));
         // 还在跳跃中：没落地。
         world.hidden = (eye, t) -> false;
         world.grounded = false;
@@ -386,28 +389,53 @@ class StandSpotsTest {
     }
 
     @Test
-    void 恰好压着方块交互距离的格子要_再远一格就拒() {
-        // 眼到方块边线 4.5 格整：距离判是"超过才拒"，压线算够得着；这一边界错成"大于等于才过"就全盘收紧。
+    void 挑方块站位预留停步余量_无内缩站位时零余量兜底_到达复查对齐服务端余量() {
         ApproachTarget 目标块 = ApproachTarget.ofBlock(new BlockPos(5, 65, 0));
+        // 平地上近处有大把站位：(0, 64, 0) 离方块边线正好 4.5 格，停在格子西沿就会超属性距离，预留 0.4 格内缩时不选它。
         StandSpots.Ranking ranking = StandSpots.find(目标块, REACH, world, walking, guarded);
-        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(0, 64, 0))),
-                "恰好 4.5 格的候选要入选");
+        assertEquals("够不着", failureAt(ranking, new BlockPos(0, 64, 0)));
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(1, 64, 0))),
+                "内缩 0.4 格以内的站位照常入选");
+
+        // 近处所有内缩站位都被封住（只剩 (0, 64, 0) 与更西侧能站）：退回零余量兜底，恰好 4.5 格的候选放行，再远仍拒。
+        StubWorld 窄岸 = new StubWorld() {
+            @Override public boolean solidFloor(BlockPos feet) {
+                return feet.getX() <= 0 && feet.getY() == 64 && feet.getZ() == 0;
+            }
+        };
+        StandSpots.Ranking fallback = StandSpots.find(目标块, REACH, 窄岸, walking, guarded);
+        assertEquals(List.of(new StandSpot(new BlockPos(0, 64, 0), 0.0)), fallback.spots());
+
+        // 到达复查对齐服务端放行口径：旧服务端（+1.0 格，严格小于 5.5）放行 4.5 格、拒 5.5 格；
+        // 新服务端（+2.0 格，严格小于 6.5）放行停偏到 5.5 格的位置，满 6.5 格仍拒；要求真实视线的目标不加服务端余量。
+        ReachRules 新服规则 = new ReachRules(4.5, 3.0, 3, 1.62, 2.0);
         world.feet = new BlockPos(0, 64, 0);
         assertEquals(Optional.empty(), StandSpots.checkArrival(目标块, REACH, world, guarded));
-        // 再远一格：5.5 格，够不着。
         world.feet = new BlockPos(-1, 64, 0);
         assertEquals(Optional.of("够不着"), StandSpots.checkArrival(目标块, REACH, world, guarded));
+        assertEquals(Optional.empty(), StandSpots.checkArrival(目标块, 新服规则, world, guarded));
+        assertEquals(Optional.of("够不着"),
+                StandSpots.checkArrival(目标块.requiringSightOnArrival(), 新服规则, world, guarded));
+        world.feet = new BlockPos(-2, 64, 0);
+        assertEquals(Optional.of("够不着"), StandSpots.checkArrival(目标块, 新服规则, world, guarded));
     }
 
     @Test
-    void 实体恰好压着实体交互距离的格子要_再远一丝就拒() {
-        // 包围盒左缘离眼睛 3.0 格整：压线算够得着；往远处挪一丝（3.0001）就该拒。
+    void 实体站位预留停步余量且零余量兜底守住精确边界() {
         ApproachTarget 压线 = ApproachTarget.ofEntity(new AABB(3.5, 64, 0, 4.5, 66, 1));
-        StandSpots.Ranking ranking = StandSpots.find(压线, REACH, world, walking, guarded);
-        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(0, 64, 0))),
-                "恰好 3.0 格的实体候选要入选");
+        // 近处有站位时，离实体包围盒正好 3.0 格的 (0, 64, 0) 因 0.4 格停步余量不选。
+        assertEquals("够不着", failureAt(StandSpots.find(压线, REACH, world, walking, guarded),
+                new BlockPos(0, 64, 0)));
+
+        // 近处都被封死、只剩 (0, 64, 0) 可站时：零余量兜底放行恰好 3.0 格，挪远一丝（3.0001）照旧拒。
+        StubWorld 孤台 = new StubWorld() {
+            @Override public boolean solidFloor(BlockPos feet) {
+                return feet.equals(new BlockPos(0, 64, 0));
+            }
+        };
+        assertEquals(1, StandSpots.find(压线, REACH, 孤台, walking, guarded).spots().size());
         ApproachTarget 过线 = ApproachTarget.ofEntity(new AABB(3.5001, 64, 0, 4.5001, 66, 1));
-        assertEquals("够不着", failureAt(StandSpots.find(过线, REACH, world, walking, guarded),
+        assertEquals("够不着", failureAt(StandSpots.find(过线, REACH, 孤台, walking, guarded),
                 new BlockPos(0, 64, 0)));
     }
 

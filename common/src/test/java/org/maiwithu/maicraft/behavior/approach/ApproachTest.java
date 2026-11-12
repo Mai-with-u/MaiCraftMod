@@ -132,24 +132,38 @@ class ApproachTest {
     }
 
     @Test
-    void 到了核对不过换下一个候选() {
-        // 找候选时半边都看得见；真走过去之后挡板立起来了，目标西侧的候选全部作废，走到东侧才完成。
+    void 普通目标走到站位后被细碎遮挡直接完成_桶等要求视线的目标照旧换站位() {
+        // 普通方块走到挑好的站位后就算前景多了草叶遮挡，也不再原地换站位打转，直接交给直发包出手。
         world.grounded = false;
-        AtomicInteger walked = new AtomicInteger();
-        StubMoves moves = new StubMoves(world, ActionStatus.done(), ActionStatus.done(), ActionStatus.done());
-        moves.onArrive = walked::incrementAndGet;
-        world.hidden = (eye, target) -> walked.get() > 0 && eye.x() < 1.5;
-        Approach approach = approach(moves, null, Permissions.DEFAULT);
-        ActionStatus status = ActionStatus.running();
-        for (int tick = 1; tick <= 30 && !(status instanceof ActionStatus.Done); tick++) {
-            status = approach.tick(new StubTick(tick));
+        AtomicInteger walkedPlain = new AtomicInteger();
+        StubMoves plainMoves = new StubMoves(world, ActionStatus.done());
+        plainMoves.onArrive = walkedPlain::incrementAndGet;
+        world.hidden = (eye, target) -> walkedPlain.get() > 0 && eye.x() < 1.5;
+        Approach plain = approach(plainMoves, null, Permissions.DEFAULT);
+        ActionStatus plainStatus = ActionStatus.running();
+        for (int tick = 1; tick <= 10 && !(plainStatus instanceof ActionStatus.Done); tick++) {
+            plainStatus = plain.tick(new StubTick(tick));
         }
-        assertEquals(ActionStatus.done(), status);
-        assertTrue(moves.begun.size() > 1);
-        // 换站位时收掉上一趟，把身体交还给下一趟。
-        assertEquals(moves.begun.size() - 1, moves.closes);
-        assertTrue(approach.tried().size() > 1);
-        assertTrue(approach.tried().stream().allMatch(attempt -> attempt.result().contains("看不见")));
+        assertEquals(ActionStatus.done(), plainStatus);
+        assertEquals(1, plainMoves.begun.size(), "普通方块到站位后不再因前景遮挡换站位");
+
+        // 桶舀倒水这类要求真实视线的目标：走过去之后挡板立起来看不见了，照旧收掉上一趟换到看得见的东侧站位。
+        world.feet = new BlockPos(0, 64, 0);
+        world.grounded = false;
+        AtomicInteger walkedBucket = new AtomicInteger();
+        StubMoves bucketMoves = new StubMoves(world, ActionStatus.done(), ActionStatus.done(), ActionStatus.done());
+        bucketMoves.onArrive = walkedBucket::incrementAndGet;
+        world.hidden = (eye, target) -> walkedBucket.get() > 0 && eye.x() < 1.5;
+        Approach bucket = approach(ApproachTarget.ofBlock(目标).requiringSightOnArrival(),
+                bucketMoves, null, Permissions.DEFAULT, null);
+        ActionStatus bucketStatus = ActionStatus.running();
+        for (int tick = 1; tick <= 30 && !(bucketStatus instanceof ActionStatus.Done); tick++) {
+            bucketStatus = bucket.tick(new StubTick(tick));
+        }
+        assertEquals(ActionStatus.done(), bucketStatus);
+        assertTrue(bucketMoves.begun.size() > 1);
+        assertEquals(bucketMoves.begun.size() - 1, bucketMoves.closes);
+        assertTrue(bucket.tried().stream().allMatch(attempt -> attempt.result().contains("看不见")));
     }
 
     @Test

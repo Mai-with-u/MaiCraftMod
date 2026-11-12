@@ -60,6 +60,13 @@ public final class StandSpots {
      */
     private static final double BED_CELL_SLACK = 0.5;
 
+    /**
+     * 挑方块与实体的候选站位时预留的停步内缩余量（格）：走到站位只保证身体进到那一格里，
+     * 脚步常停在进格子那一侧的边沿，离目标能比格子中心远出小半格；先内缩 0.4 格挑站位，
+     * 只有周围一个带余量的站位都没有时才退回零余量兜底。类别：玩家常识（停步位置偏差）。
+     */
+    static final double STOP_SLACK = 0.4;
+
     /** 原版 Q 丢出的东西从眼睛下方这么多格出手。类别：游戏事实。 */
     private static final double TOSS_RELEASE_DROP = 0.3;
 
@@ -103,8 +110,11 @@ public final class StandSpots {
         // 就是格子坐标从西到东、从低到高、从北到南的次序，收齐后照这个次序排回去再逐格核对。
         candidates.sort(Comparator.<BlockPos>comparingInt(BlockPos::getX).thenComparingInt(BlockPos::getY)
                 .thenComparingInt(BlockPos::getZ));
-        for (BlockPos feet : candidates) {
-            review(feet, target, reach, world, walking, guarded, current, spots, rejected);
+        // 先预留 0.4 格停步余量筛一遍，避开停在格子外沿就压线的边缘格；周围一个内缩站位都没有时，再退回零余量兜底。
+        reviewAll(candidates, target, reach, STOP_SLACK, world, walking, guarded, current, spots, rejected);
+        if (spots.isEmpty()) {
+            rejected.clear();
+            reviewAll(candidates, target, reach, 0.0, world, walking, guarded, current, spots, rejected);
         }
         spots.sort(null);
         // 声明允许湿脚的目标（骑上载具）：干站位排前面，浅水站位按代价排在所有干位之后——
@@ -169,8 +179,9 @@ public final class StandSpots {
     }
 
     /**
-     * 到了之后的核对：角色站在给定的位置上，够得着吗、看得见吗、落地了吗。
-     * 通过返回 empty；不过时返回最先不过的那一项，用玩家能懂的话说。
+     * 到了站位之后的核对：角色站在挑好的站位上，按服务端实际放行口径核对够不够得着、落没落地。
+     * 普通方块与实体交互在挑站位时已经筛过视线，到达后交给直发包提交，不再因细碎前景遮挡判败换站位；
+     * 桶舀水倒水、水面上放船、装水瓶、刷子与抛投目标在服务端按真实射线或抛物线结算，照旧核对原触及距离与视线。
      */
     public static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
                                                 ApproachWorldView world, ProtectedCells guarded) {
@@ -178,12 +189,40 @@ public final class StandSpots {
     }
 
     /**
-     * 到了之后的核对；{@code mayStandOnTarget} 为真时允许站在要挖的那格上（就地挖的兜底用，
+     * 到了站位之后的核对；{@code mayStandOnTarget} 为真时允许站在要挖的那格上（就地挖的兜底用，
      * 那时下面是实地或摔不坏才放行）。其余判定与公开重载一致。
      */
     static Optional<String> checkArrival(ApproachTarget target, ReachRules reach,
-                                                 ApproachWorldView world, ProtectedCells guarded,
-                                                 boolean mayStandOnTarget) {
+                                         ApproachWorldView world, ProtectedCells guarded,
+                                         boolean mayStandOnTarget) {
+        boolean strictSight = target.requiresSightOnArrival();
+        double padding = strictSight ? 0.0 : reach.serverPadding();
+        return verifyStanding(target, reach, world, guarded, mayStandOnTarget, padding, strictSight);
+    }
+
+    /**
+     * 还没动步时的原地核对：角色站在出发点没挑过站位，按无额外余量的属性距离和畅通视线严进——
+     * 原地本来就看得见、够得着才一步不走，隔着墙或离得远就去挑看得见的站位，免得隔墙伸手穿帮。
+     */
+    static Optional<String> checkStandingHere(ApproachTarget target, ReachRules reach,
+                                              ApproachWorldView world, ProtectedCells guarded) {
+        return verifyStanding(target, reach, world, guarded, false, 0.0, true);
+    }
+
+    /**
+     * 站位补救挖完遮挡后的核对：补救本来就是去挖通挡在视线上的方块，视线得真通了才算救成，
+     * 免得没挖穿墙就在墙外硬点；距离按到达口径放行。
+     */
+    static Optional<String> checkAfterRescue(ApproachTarget target, ReachRules reach,
+                                             ApproachWorldView world, ProtectedCells guarded) {
+        double padding = target.requiresSightOnArrival() ? 0.0 : reach.serverPadding();
+        return verifyStanding(target, reach, world, guarded, false, padding, true);
+    }
+
+    private static Optional<String> verifyStanding(ApproachTarget target, ReachRules reach,
+                                                   ApproachWorldView world, ProtectedCells guarded,
+                                                   boolean mayStandOnTarget, double serverPadding,
+                                                   boolean requireSight) {
         BlockPos feet = world.currentFeet();
         // 骑载具踩着水凑到船边算到了：人在贴水面的湿位漂着、头还在水面外时不要求落地，
         // 落地这一项只有站在干地上的目标才核对（与挑站位共用的同一条判据，见 floatingForVehicle）。
@@ -197,10 +236,11 @@ public final class StandSpots {
         // 写告示牌这类只站正面的目标，人已经站在背面时先报背面：在这里点下去编辑的是背面那一面。
         String behind = sideFailure(feet, target);
         if (behind != null) return Optional.of(behind);
-        // 已经站在这里：床距按人此刻的精确位置量，不留余量，和原版点床时的判定一模一样。
-        String reachFailure = reachFailure(target, reach, world.currentPosition(), 0.0, world.currentEye());
+        // 已经站在这里：床距按人此刻的精确位置量，不留余量；方块与实体按本次核对允许的服务端余量判。
+        String reachFailure = reachFailure(target, reach, world.currentPosition(), 0.0, serverPadding,
+                serverPadding > 0.0, world.currentEye());
         if (reachFailure != null) return Optional.of(reachFailure);
-        if (!world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
+        if (requireSight && !world.visibleFrom(world.currentEye(), target)) return Optional.of("看不见");
         // 要挖的那格正好踩在脚下：先看一眼下面，岩浆或看不见底的洞不在这里动手，换旁边一格。
         if (target.removesBlock() && !mayStandOnTarget) {
             String under = standingOnTargetFailure(feet, target, world);
@@ -228,8 +268,17 @@ public final class StandSpots {
         return null;
     }
 
+    private static void reviewAll(List<BlockPos> candidates, ApproachTarget target, ReachRules reach,
+                                  double stopSlack, ApproachWorldView world, WalkCost walking,
+                                  ProtectedCells guarded, BlockPos current,
+                                  List<StandSpot> spots, List<RejectedSpot> rejected) {
+        for (BlockPos feet : candidates) {
+            review(feet, target, reach, stopSlack, world, walking, guarded, current, spots, rejected);
+        }
+    }
+
     /** 一个候选位置过一遍四项检查；过得去就带着代价进候选表，过不去就带着失败项进被拒表。 */
-    private static void review(BlockPos feet, ApproachTarget target, ReachRules reach,
+    private static void review(BlockPos feet, ApproachTarget target, ReachRules reach, double stopSlack,
                                ApproachWorldView world, WalkCost walking, ProtectedCells guarded,
                                BlockPos current, List<StandSpot> spots, List<RejectedSpot> rejected) {
         String steady = steadyFailure(feet, target, world, guarded);
@@ -250,8 +299,9 @@ public final class StandSpots {
             return;
         }
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
-        // 还没走过去：按格子中心估，床距留出"停在格子哪一边都够得着"的余量。
-        String tooFar = reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, eye);
+        // 还没走过去：按格子中心估，方块与实体扣掉停步内缩余量，床距留出"停在格子哪一边都够得着"的余量。
+        String tooFar = reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, -stopSlack,
+                false, eye);
         if (tooFar != null) {
             rejected.add(new RejectedSpot(feet, tooFar));
             return;
@@ -321,20 +371,29 @@ public final class StandSpots {
     /**
      * 够得着检查：按交互种类取距离规则，返回失败项，够得着返回 null。
      *
-     * @param standing 脚底的位置：已经站着就是精确位置，候选站位取格子底面中心
-     * @param bedSlack 床距横向要留的余量：候选站位留出停在格子边上的半格，已经站着不留
+     * @param standing   脚底的位置：已经站着就是精确位置，候选站位取格子底面中心
+     * @param bedSlack   床距横向要留的余量：候选站位留出停在格子边上的半格，已经站着不留
+     * @param rangeDelta 方块与实体距离的增减量：候选站位传负的停步内缩，到达复查传正的服务端放行余量
+     * @param strictLess 是否按原版服务端 {@code distanceToSqr < maxRange^2} 的严格小于判边界
      */
     private static String reachFailure(ApproachTarget target, ReachRules reach, Vec3 standing, double bedSlack,
-                                       Vec3 eye) {
+                                       double rangeDelta, boolean strictLess, Vec3 eye) {
         return switch (target.kind()) {
-            // 方块与实体：从眼睛到目标边缘的直线距离不超属性值，和角色自己伸手判定同源。
-            case BLOCK -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.blockRange() ? "够不着" : null;
-            case ENTITY -> eye.distanceTo(nearestPoint(target.bounds(), eye)) > reach.entityRange() ? "够不着" : null;
+            // 方块与实体：从眼睛到目标边缘的直线距离与当次上限比；带服务端余量时对齐原版严格小于判定。
+            case BLOCK -> outOfReach(target.bounds(), eye, Math.max(0.0, reach.blockRange() + rangeDelta), strictLess)
+                    ? "够不着" : null;
+            case ENTITY -> outOfReach(target.bounds(), eye, Math.max(0.0, reach.entityRange() + rangeDelta), strictLess)
+                    ? "够不着" : null;
             // 床：服务端按床底面中心分轴卡距离，横向不超过床距离档，高度差不超过两格。
             case BED -> bedOutOfRange(standing, target.block(), reach.bedDistance() - bedSlack) ? "够不着" : null;
             // 往一格里扔：不看交互距离，看出手点比接住东西的地方高多少、离那一格多近。
             case TOSS -> tossFailure(target, eye);
         };
+    }
+
+    private static boolean outOfReach(AABB bounds, Vec3 eye, double limit, boolean strictLess) {
+        double distance = eye.distanceTo(nearestPoint(bounds, eye));
+        return strictLess ? distance >= limit : distance > limit;
     }
 
     /** 往一格里扔东西的站位：出手点比接住东西的高度高一截又不太高，人站在那一格正旁边、不在它正上方。 */
@@ -354,7 +413,7 @@ public final class StandSpots {
      */
     static String reachFailureAt(BlockPos feet, ApproachTarget target, ReachRules reach) {
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
-        return reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, eye);
+        return reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, 0.0, false, eye);
     }
 
     /** 包围盒上离给定点最近的点：把点的三个坐标各自夹进盒子的范围。 */
