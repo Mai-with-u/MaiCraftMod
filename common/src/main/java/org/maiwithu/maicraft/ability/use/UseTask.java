@@ -18,6 +18,9 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.behavior.interaction.WriteSign;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -81,8 +84,12 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private UseSeams.MenuLook looking;
     private long appliedTimes;
     private String openedMenu;
+    /** 点开的方块容器是谁的（natural_loot / self / player / no_record / unknown）；没点开方块容器为 null。 */
+    private String containerWhose;
     /** 点开的容器最后由谁放下：结果细节里带一句；不是容器、归属没问到为 null。 */
     private String lastModifiedBy;
+    /** 这一次点开方块容器之前，世界记忆里有没有角色亲手打开过它的记录；没点开方块容器为 null。 */
+    private Boolean containerOpenedBefore;
     private String riding;
     private List<String> signLines = List.of();
     /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
@@ -480,7 +487,22 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             List<String> lines = new ArrayList<>();
             contents.get().forEach((itemId, count) -> lines.add(itemId + " ×" + count));
             openedMenu = lines.isEmpty() ? "空的" : String.join("、", lines);
-            lastModifiedBy = services.others() == null ? null : services.others().lastModifiedBy(target);
+            if (target != null && !target.isEntity()) {
+                // 先在把这次开箱写进世界记忆之前记下"此前有没有开过"，回答协议要求的"这一次点开之前开没开过"。
+                WorldPosition spot = new WorldPosition(target.cell().getX(), target.cell().getY(), target.cell().getZ(),
+                        services.world().dimension());
+                boolean openedBefore = services.memory() != null
+                        && services.memory().recordAt(MemoryKind.CONTAINER, spot).map(MemoryRecord::openedBefore).orElse(false);
+                boolean naturalLoot = services.facilities() != null
+                        && services.facilities().isNaturalLootContainer(target.typeId());
+                ContainerWhose origin = services.others() == null
+                        ? new ContainerWhose(naturalLoot ? ContainerWhose.Kind.NATURAL_LOOT : ContainerWhose.Kind.UNKNOWN,
+                                null, openedBefore)
+                        : services.others().containerWhose(target, naturalLoot, openedBefore);
+                containerWhose = origin.wire();
+                lastModifiedBy = origin.lastModifiedBy();
+                containerOpenedBefore = origin.openedBySelf();
+            }
             rememberContainer(List.copyOf(contents.get().keySet()));
             recordProgress("看清了点开的界面");
         } else {
@@ -581,7 +603,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new UseDetails(appliedTimes, usedOn(), openedMenu, lastModifiedBy, signLines, riding, gameMessages);
+        return new UseDetails(appliedTimes, usedOn(), openedMenu, containerWhose, lastModifiedBy,
+                containerOpenedBefore, signLines, riding, gameMessages);
     }
 
     // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here 且没配 face）就是对着空气用。

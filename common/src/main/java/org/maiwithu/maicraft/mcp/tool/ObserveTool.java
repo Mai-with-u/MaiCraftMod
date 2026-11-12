@@ -43,7 +43,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -234,17 +233,6 @@ public final class ObserveTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
-    /** 一格最后由谁放下，说成名字：归属没接上、没问到、角色自己放的给 null，记录里就不带字段。 */
-    private Function<WorldPosition, String> lastModifier() {
-        if (protection == null) return null;
-        return at -> {
-            Protection guard = protection.get();
-            if (guard == null) return null;
-            guard.ownershipKnown(at);
-            return guard.placedByOther(at).map(guard::nameOf).orElse(null);
-        };
-    }
-
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
     private JsonObject view(String what, String id, boolean grid, Integer radius, MemoryKind kindFilter,
             List<String> notes, TickContext context) {
@@ -256,14 +244,18 @@ public final class ObserveTool implements McpTool {
         PlayerContext player = context.player();
         String dimension = player == null || player.level() == null
                 ? null : player.level().dimension().location().toString();
+        Protection guard = protection == null ? null : protection.get();
+        WorldMemoryView.ContainerOrigin recordOrigin =
+                WorldMemoryView.originFrom(currentScene.facilityKinds(), guard, dimension);
         JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
-            case "detail" -> DetailView.of(currentScene, currentMemory, id, lastModifier()).orElse(null);
+            case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard).orElse(null);
             case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
-                    radius, kindFilter, lastModifier(), notes::add);
+                    radius, kindFilter, recordOrigin, notes::add);
             case "menu" -> menu();
-            default -> SceneView.scene(currentScene, grid);
+            default -> SceneView.scene(currentScene, grid,
+                    DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin));
         };
         // 看了自己、周围或某样东西：角色闲着时顺着看过去（开背包、转头、开手边的箱子）。
         // 记忆、界面在世界里没有对应的东西可看，不演；读到的内容照旧当场返回，不等角色看完。

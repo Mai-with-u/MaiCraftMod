@@ -60,10 +60,12 @@ import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.sources.ReclaimSource;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 
 import java.nio.file.Path;
 import java.util.UUID;
@@ -538,8 +540,40 @@ class UseTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status());
         UseDetails details = (UseDetails) result.details();
         assertEquals("minecraft:apple ×3", details.opened());
+        assertEquals("unknown", details.whose());
+        assertEquals(false, details.openedBySelf());
         assertEquals(null, details.lastModifiedBy(), "归属没问到就不带字段，替身没实现 lastModifiedBy");
         assertTrue(rig.menus.look.closed);
+    }
+
+    @Test
+    void 点开战利品与玩家容器_如实报五态来源和点开前是否开过() {
+        Rig rig = new Rig();
+        rig.memory = new WorldMemory(new DocumentStore(temp.resolve("state-loot")), "world-1");
+        rig.facilities = new FacilityKinds(
+                FakeBlockTags.vanilla().tag("lootr:containers", "lootr:lootr_chest"));
+        rig.world.blocks.put(LEVER, "lootr:lootr_chest");
+
+        // 第一次点开战利品箱：此前没开过（opened_by_self=false），写进世界记忆后第二次再开就是 true。
+        rig.interactions.applied("战利品箱开了");
+        rig.menus.look = new FakeLook(Map.of("minecraft:emerald", 5));
+        UseDetails firstOpen = (UseDetails) rig.run(rig.input(position(LEVER), null, null, null, 1)).details();
+        assertEquals("natural_loot", firstOpen.whose());
+        assertEquals(false, firstOpen.openedBySelf());
+        assertNull(firstOpen.lastModifiedBy());
+
+        rig.interactions.applied("战利品箱又开了");
+        rig.menus.look = new FakeLook(Map.of("minecraft:emerald", 5));
+        UseDetails secondOpen = (UseDetails) rig.run(rig.input(position(LEVER), null, null, null, 1)).details();
+        assertEquals("natural_loot", secondOpen.whose());
+        assertEquals(true, secondOpen.openedBySelf());
+
+        // 容器名后缀：战利品容器与玩家放的容器各自给出准确说明。
+        assertEquals("（自然生成的战利品容器）",
+                new ContainerWhose(ContainerWhose.Kind.NATURAL_LOOT, null, false).labelSuffix());
+        assertEquals("（最后由 玩家甲 放下）",
+                new ContainerWhose(ContainerWhose.Kind.PLAYER, "玩家甲", false).labelSuffix());
+        assertEquals("", new ContainerWhose(ContainerWhose.Kind.SELF, null, true).labelSuffix());
     }
 
     @Test

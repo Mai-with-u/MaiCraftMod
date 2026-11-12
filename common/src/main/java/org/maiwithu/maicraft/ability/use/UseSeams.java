@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -243,6 +244,21 @@ final class UseSeams {
          */
         default String lastModifiedBy(ResolvedTarget target) {
             return null;
+        }
+
+        /**
+         * 点开一只方块容器时，断定它是谁的以及这一次点开之前开没开过。
+         * 默认按 {@link #lastModifiedBy} 与战利品标签兜底，方便离线测试替身不另写归属表也能工作。
+         */
+        default ContainerWhose containerWhose(ResolvedTarget target, boolean naturalLoot, boolean openedBefore) {
+            if (naturalLoot) {
+                return new ContainerWhose(ContainerWhose.Kind.NATURAL_LOOT, null, openedBefore);
+            }
+            String modifier = lastModifiedBy(target);
+            if (modifier != null) {
+                return new ContainerWhose(ContainerWhose.Kind.PLAYER, modifier, openedBefore);
+            }
+            return new ContainerWhose(ContainerWhose.Kind.UNKNOWN, null, openedBefore);
         }
     }
 

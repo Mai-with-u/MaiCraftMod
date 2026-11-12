@@ -10,8 +10,12 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.OwnableEntity;
@@ -42,6 +46,10 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 而不是把它当成已经走掉。活体生物带血量快照，掉落物也算实体——地上的东西是观察的一部分。
  */
 public final class ClientEntitySight implements EntitySight {
+
+    /** 实体形式的战利品容器（Lootr 的箱子矿车等）：挂着该标签的实体在 traits 里标明是战利品容器。 */
+    private static final TagKey<EntityType<?>> LOOTR_ENTITY_CONTAINERS =
+            TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("lootr", "containers"));
 
     private final Supplier<PlayerContext> context;
     private final TrustedPlayers trusted;
@@ -122,6 +130,9 @@ public final class ClientEntitySight implements EntitySight {
         Map<String, String> traits = new LinkedHashMap<>();
         if (entity.isOnFire()) {
             traits.put("着火", "是");
+        }
+        if (entity.getType().is(LOOTR_ENTITY_CONTAINERS)) {
+            traits.put("战利品容器", "是");
         }
         // 中立生物：没惹它不打人，惹毛了才算敌对（僵尸猪灵打一只整群上）。
         if (Hostility.neutral(entity) && entity instanceof Mob mob) {

@@ -5,7 +5,10 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
@@ -38,6 +41,42 @@ public final class WorldMemoryView {
 
     private WorldMemoryView() {}
 
+    /** 按位置、方块类型与是否开过断定容器是谁的。 */
+    @FunctionalInterface
+    public interface ContainerOrigin {
+        ContainerWhose of(WorldPosition position, String blockType, boolean openedBySelf);
+    }
+
+    /** 生产与完整观察测试共用：按战利品方块标签、区块归属表与世界记忆断定容器来源，缺维度的坐标补上当前维度。 */
+    public static ContainerOrigin originFrom(FacilityKinds kinds, Protection protection, String dimension) {
+        return (position, blockType, openedBySelf) -> {
+            WorldPosition located = position != null && position.dimension() == null && dimension != null
+                    ? new WorldPosition(position.x(), position.y(), position.z(), dimension) : position;
+            boolean naturalLoot = kinds != null && blockType != null && kinds.isNaturalLootContainer(blockType);
+            return ContainerWhose.of(located, naturalLoot, protection, openedBySelf);
+        };
+    }
+
+    static ContainerOrigin fromLegacyModifier(Function<WorldPosition, String> lastModifier) {
+        if (lastModifier == null) {
+            return (position, blockType, openedBySelf) ->
+                    new ContainerWhose(ContainerWhose.Kind.UNKNOWN, null, openedBySelf);
+        }
+        return (position, blockType, openedBySelf) -> {
+            String modifier = lastModifier.apply(position);
+            return modifier != null
+                    ? new ContainerWhose(ContainerWhose.Kind.PLAYER, modifier, openedBySelf)
+                    : new ContainerWhose(ContainerWhose.Kind.NO_RECORD, null, openedBySelf);
+        };
+    }
+
+    static void writeContainerOrigin(JsonObject json, ContainerWhose origin) {
+        if (origin == null) return;
+        json.addProperty("whose", origin.wire());
+        if (origin.lastModifiedBy() != null) json.addProperty("last_modified_by", origin.lastModifiedBy());
+        json.addProperty("opened_by_self", origin.openedBySelf());
+    }
+
     /** 紧凑的命名地点视图（observe(what=places)）：速览读记住的地点用它，不再拉整份容器与产地记录。 */
     public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension) {
         JsonObject json = new JsonObject();
@@ -62,7 +101,14 @@ public final class WorldMemoryView {
 
     /** 兼容无过滤调用：不限半径与种类、不单独收说明。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, Function<WorldPosition, String> lastModifier) {
-        return of(memory, self, null, null, null, lastModifier, ignored -> {});
+        return of(memory, self, null, null, null, fromLegacyModifier(lastModifier), ignored -> {});
+    }
+
+    /** 兼容传最后放置者函数的调用。 */
+    public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
+            Integer radius, MemoryKind kindFilter,
+            Function<WorldPosition, String> lastModifier, Consumer<String> notes) {
+        return of(memory, self, dimension, radius, kindFilter, fromLegacyModifier(lastModifier), notes);
     }
 
     /**
@@ -70,7 +116,7 @@ public final class WorldMemoryView {
      */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
-            Function<WorldPosition, String> lastModifier, Consumer<String> notes) {
+            ContainerOrigin containerOrigin, Consumer<String> notes) {
         JsonObject json = new JsonObject();
         json.add("places", places(memory.places(), self, dimension));
         json.add("regions", regions(memory.regions()));
@@ -95,7 +141,7 @@ public final class WorldMemoryView {
         JsonArray list = new JsonArray();
         Map<String, Integer> notListed = new LinkedHashMap<>();
         for (MemoryRecord entry : filtered) {
-            JsonObject rendered = record(entry, self, dimension, lastModifier);
+            JsonObject rendered = record(entry, self, dimension, containerOrigin);
             int itemChars = COMPACT.toJson(rendered).length() + 2;
             if (notListed.isEmpty() && usedChars + itemChars <= MAX_VIEW_CHARS) {
                 list.add(rendered);
@@ -190,11 +236,11 @@ public final class WorldMemoryView {
     }
 
     static JsonObject record(MemoryRecord record, SceneSelf self, Function<WorldPosition, String> lastModifier) {
-        return record(record, self, null, lastModifier);
+        return record(record, self, null, fromLegacyModifier(lastModifier));
     }
 
     static JsonObject record(MemoryRecord record, SceneSelf self, String dimension,
-            Function<WorldPosition, String> lastModifier) {
+            ContainerOrigin containerOrigin) {
         JsonObject item = new JsonObject();
         item.addProperty("kind", SceneView.lower(record.kind()));
         if (record.blockType() != null) item.addProperty("block", record.blockType());
@@ -202,10 +248,10 @@ public final class WorldMemoryView {
         if (self != null && sameDimension(record.position(), dimension)) {
             item.addProperty("distance", SceneView.distance(self, record.position()));
         }
-        // 容器带最后由谁放下：只对容器记录给，问不到就不出字段。
-        String modifier = record.kind() == MemoryKind.CONTAINER && lastModifier != null
-                ? lastModifier.apply(record.position()) : null;
-        if (modifier != null) item.addProperty("last_modified_by", modifier);
+        // 容器记录统一带 whose、last_modified_by（仅 player 时）与 opened_by_self。
+        if (record.kind() == MemoryKind.CONTAINER && containerOrigin != null) {
+            writeContainerOrigin(item, containerOrigin.of(record.position(), record.blockType(), record.openedBefore()));
+        }
         if (record.contents() != null) {
             JsonArray contents = new JsonArray();
             record.contents().forEach(contents::add);

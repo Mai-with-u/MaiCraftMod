@@ -18,8 +18,12 @@ import org.maiwithu.maicraft.game.world.ReadsBlockTags;
  */
 public final class FacilityKinds {
 
-    /** 容器的标签：通用的箱子与木桶标签两个加载器都有；潜影盒只有原版标签（通用的两边都没有）。 */
-    static final List<String> CONTAINER_TAGS = List.of("c:chests", "c:barrels", "minecraft:shulker_boxes");
+    /** 自然生成的战利品容器标签：装了 Lootr 的服务器上战利品箱、木桶、潜影盒都挂着它，每人独立一份。 */
+    public static final String LOOTR_CONTAINER_TAG = "lootr:containers";
+
+    /** 容器的标签：通用的箱子与木桶标签、原版潜影盒标签，以及 Lootr 的战利品容器标签。 */
+    static final List<String> CONTAINER_TAGS = List.of(
+            "c:chests", "c:barrels", "minecraft:shulker_boxes", LOOTR_CONTAINER_TAG);
 
     /** 末影箱的标签与原版 ID：挂着它的即使也挂着箱子标签，也不算容器。 */
     static final String ENDER_CHEST_TAG = "c:chests/ender";
@@ -54,6 +58,15 @@ public final class FacilityKinds {
             return false;
         }
         return CONTAINER_TAGS.stream().anyMatch(blockTags::contains);
+    }
+
+    /** 是自然生成的战利品容器：挂着 lootr:containers 标签且不是末影箱，开了拿了都不算动别人的东西。 */
+    public boolean isNaturalLootContainer(String blockType) {
+        if (blockType == null || blockType.equals(ENDER_CHEST)) {
+            return false;
+        }
+        Set<String> blockTags = tags.tagsOf(blockType);
+        return !blockTags.contains(ENDER_CHEST_TAG) && blockTags.contains(LOOTR_CONTAINER_TAG);
     }
 
     /** 是工作设施：原版 ID 表里的，或挂着铁砧、工作台、熔炉标签的。 */

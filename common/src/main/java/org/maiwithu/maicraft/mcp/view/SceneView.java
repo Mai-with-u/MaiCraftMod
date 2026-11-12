@@ -14,9 +14,11 @@ import org.maiwithu.maicraft.behavior.perception.SceneEnvironment;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.Locale;
+import java.util.function.BiFunction;
 
 /**
  * observe(scene) 的样子：周围有什么、在哪个方位、多远，每样东西带观察编号，LLM 可以直接指着它下指令。
@@ -30,6 +32,11 @@ public final class SceneView {
     private SceneView() {}
 
     public static JsonObject scene(Scene scene, boolean withGrid) {
+        return scene(scene, withGrid, null);
+    }
+
+    public static JsonObject scene(Scene scene, boolean withGrid,
+            BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin) {
         JsonObject json = new JsonObject();
         SceneEnvironment environment = scene.environment();
         if (environment != null) {
@@ -65,7 +72,7 @@ public final class SceneView {
         scene.features().forEach(feature -> features.add(feature(feature)));
         json.add("features", features);
         JsonArray facilities = new JsonArray();
-        scene.facilities().forEach(facility -> facilities.add(facility(facility)));
+        scene.facilities().forEach(facility -> facilities.add(facility(facility, facilityOrigin)));
         json.add("facilities", facilities);
         // 看得见的告示牌：主播在基地立的路牌、留言，正面的字连成一句带在 text 里。
         if (!scene.signs().isEmpty()) {
@@ -144,6 +151,11 @@ public final class SceneView {
     }
 
     static JsonObject facility(FacilitySighting facility) {
+        return facility(facility, null);
+    }
+
+    static JsonObject facility(FacilitySighting facility,
+            BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin) {
         JsonObject json = new JsonObject();
         json.addProperty("id", facility.id());
         json.addProperty("block", facility.blockType());
@@ -151,6 +163,10 @@ public final class SceneView {
         json.addProperty("compass", facility.compass());
         json.addProperty("distance", facility.distance());
         json.add("position", position(facility.position()));
+        if (facilityOrigin != null) {
+            WorldMemoryView.writeContainerOrigin(json,
+                    facilityOrigin.apply(facility.position(), facility.blockType()));
+        }
         return json;
     }
 

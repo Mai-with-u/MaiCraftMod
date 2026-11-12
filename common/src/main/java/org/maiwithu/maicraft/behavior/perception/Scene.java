@@ -63,6 +63,11 @@ public final class Scene {
         this.kinds = kinds;
     }
 
+    /** 设施分类：观察视图按它认某处设施是不是容器、是不是自然战利品容器。 */
+    public FacilityKinds facilityKinds() {
+        return kinds;
+    }
+
     /** 更新角色自己的观察：方位说法的基准，先有它，别的观察才整理得出方位。 */
     public void updateSelf(SelfSight.Facts facts) {
         String facingWord = DirectionWords.compassOf(

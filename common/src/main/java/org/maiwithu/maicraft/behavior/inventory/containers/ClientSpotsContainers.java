@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
@@ -145,7 +146,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
         };
     }
 
-    // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读；名字带上最后由谁放下。
+    // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读；名字带上容器来源说明（最后由谁放下或自然战利品容器）。
     private Optional<ContainerChooser.Candidate> candidateFromWorld(ClientLevel level, BlockPos at, BlockPos from) {
         String blockTypeId = blockTypeIdOf(level.getBlockState(at));
         if (!kinds.isContainer(blockTypeId)) {
@@ -155,31 +156,31 @@ public final class ClientSpotsContainers implements SpotsContainers {
         Optional<MemoryRecord> known = memory.recordAt(MemoryKind.CONTAINER, WorldPosition.here(
                 at.getX(), at.getY(), at.getZ()));
         WorldPosition position = positionOf(level, at);
-        // 先问一句归属问到没有：没问到的记下要问，下回再来时名字就有了。
-        protection.ownershipKnown(position);
-        String placedBy = protection.placedByOther(position).map(protection::nameOf).orElse(null);
+        boolean openedBefore = known.map(MemoryRecord::openedBefore).orElse(false);
+        ContainerWhose origin = ContainerWhose.of(position, kinds.isNaturalLootContainer(blockTypeId),
+                protection, openedBefore);
         return Optional.of(new ContainerChooser.Candidate(
-                describe(blockTypeId, at) + (placedBy == null ? "" : "（最后由 " + placedBy + " 放下）"),
+                describe(blockTypeId, at) + origin.labelSuffix(),
                 blockTypeId,
                 position,
-                known.filter(MemoryRecord::openedBefore).map(MemoryRecord::contents).orElse(null),
+                openedBefore ? known.get().contents() : null,
                 true,
                 Math.sqrt(at.distSqr(from)),
-                // 存东西只往能用的容器里放：自己或自家人放的、野外无主的；别人的算受保护。
+                // 存东西与取材只跳过圈起来的地盘与额外保护地标里的容器；归属不拦。
                 !protection.mayUseStorage(position, blockTypeId, Set.of()),
                 true,
                 lidOf(level, at),
                 catSitting(level, at)));
     }
 
-    // 记忆里的一只容器读成候选：没加载的只给记忆里的事实，盖子与猫到场再核对；名字带上最后由谁放下。
+    // 记忆里的一只容器读成候选：没加载的只给记忆里的事实，盖子与猫到场再核对；名字带上容器来源说明。
     private ContainerChooser.Candidate candidateFromMemory(MemoryRecord record, BlockPos from) {
         BlockPos at = new BlockPos(record.position().x(), record.position().y(), record.position().z());
         String blockTypeId = record.blockType() == null ? "minecraft:chest" : record.blockType();
-        protection.ownershipKnown(record.position());
-        String placedBy = protection.placedByOther(record.position()).map(protection::nameOf).orElse(null);
+        ContainerWhose origin = ContainerWhose.of(record.position(), kinds.isNaturalLootContainer(blockTypeId),
+                protection, record.openedBefore());
         return new ContainerChooser.Candidate(
-                describe(blockTypeId, at) + (placedBy == null ? "" : "（最后由 " + placedBy + " 放下）"),
+                describe(blockTypeId, at) + origin.labelSuffix(),
                 blockTypeId,
                 record.position(),
                 record.openedBefore() ? record.contents() : null,

@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.mcp.view;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
@@ -13,11 +14,15 @@ import org.maiwithu.maicraft.behavior.perception.SceneSighting;
 import org.maiwithu.maicraft.behavior.perception.SceneThing;
 import org.maiwithu.maicraft.behavior.perception.SeenRegistry;
 import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.Locale;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.Optional;
 
@@ -30,28 +35,50 @@ import java.util.Optional;
 public final class DetailView {
     private DetailView() {}
 
-    /**
-     * 找不到这个编号、也没有叫这个名字的地标时为空。
-     *
-     * @param lastModifier 一格最后由谁放下，说成名字；归属没问到给 null，记忆记录里就不带字段
-     */
+    /** 兼容只传最后放置者函数的旧调用。 */
     public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id,
             Function<WorldPosition, String> lastModifier) {
+        return of(scene, memory, id, null, WorldMemoryView.fromLegacyModifier(lastModifier));
+    }
+
+    /** 生产观察入口：按当前维度与保护读端给容器详情及记忆记录补齐容器来源五态。 */
+    public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id,
+            String dimension, Protection protection) {
+        return of(scene, memory, id, dimension,
+                WorldMemoryView.originFrom(scene.facilityKinds(), protection, dimension));
+    }
+
+    /** 场景设施的容器来源读口：只对容器方块给出容器来源，工作台、熔炉、床给 null。 */
+    public static BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin(
+            FacilityKinds kinds, WorldMemory memory, WorldMemoryView.ContainerOrigin recordOrigin) {
+        return (position, blockType) -> {
+            if (kinds == null || blockType == null || !kinds.isContainer(blockType)) return null;
+            boolean opened = memory != null
+                    && memory.recordAt(MemoryKind.CONTAINER, position).map(MemoryRecord::openedBefore).orElse(false);
+            return recordOrigin.of(position, blockType, opened);
+        };
+    }
+
+    private static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id, String dimension,
+            WorldMemoryView.ContainerOrigin recordOrigin) {
         String normalized = id.trim().toLowerCase(Locale.ROOT);
         if (normalized.matches("[efbs][0-9]+")) {
-            return scene.lookup(normalized).map(entry -> seen(scene, memory, entry, lastModifier));
+            return scene.lookup(normalized).map(entry -> seen(scene, memory, entry, dimension, recordOrigin));
         }
         return memory.place(id.trim()).map(position -> landmark(scene.self(), id.trim(), position));
     }
 
     private static JsonObject seen(Scene scene, WorldMemory memory, SeenRegistry.Entry entry,
-            Function<WorldPosition, String> lastModifier) {
+            String dimension, WorldMemoryView.ContainerOrigin recordOrigin) {
         JsonObject json = new JsonObject();
         json.addProperty("id", entry.id());
         json.addProperty("kind", SceneView.lower(entry.kind()));
         json.addProperty("last_direction", entry.direction());
         json.add("last_position", SceneView.position(entry.position()));
         json.addProperty("last_seen_tick", entry.lastSeenTick());
+        BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin =
+                facilityOrigin(scene.facilityKinds(), memory, recordOrigin);
+        ContainerWhose topOrigin = null;
         // 此刻还在场景里：附上场景给的完整样子；模组的东西（电梯、车站、列车、物理结构）
         // 在场景那几项之上再并上全部详情（楼层表、座位……），与实体同号时并成一条。
         JsonObject now = null;
@@ -60,10 +87,13 @@ public final class DetailView {
             if (sighting instanceof SceneThing found) {
                 thing = found;
             } else {
+                if (sighting instanceof FacilitySighting facility) {
+                    topOrigin = facilityOrigin.apply(facility.position(), facility.blockType());
+                }
                 now = switch (sighting) {
                     case SceneEntity entity -> SceneView.entity(entity);
                     case TerrainFeature feature -> SceneView.feature(feature);
-                    case FacilitySighting facility -> SceneView.facility(facility);
+                    case FacilitySighting facility -> SceneView.facility(facility, facilityOrigin);
                     case SceneSign sign -> sign(sign);
                     // 模组的东西单独收着：它的详情要并进同号实体的样子里，见下面。
                     case SceneThing ignored -> null;
@@ -81,11 +111,18 @@ public final class DetailView {
             json.add("now", now);
         } else {
             json.addProperty("in_scene", false);
+            if (entry.kind() == SeenRegistry.Kind.FACILITY) {
+                topOrigin = memory.recordAt(MemoryKind.CONTAINER, entry.position())
+                        .map(rec -> recordOrigin.of(entry.position(), rec.blockType(), rec.openedBefore()))
+                        .orElse(null);
+            }
         }
+        // 看的是容器时，detail 顶层直接带容器来源三字段，宿主不用再进 now 或 remembered 翻。
+        WorldMemoryView.writeContainerOrigin(json, topOrigin);
         // 设施：世界记忆里这个位置记过什么（开过的容器记得里面有什么）。
         JsonArray remembered = new JsonArray();
         for (MemoryRecord record : memory.recordsNear(entry.position(), 0.5)) {
-            remembered.add(WorldMemoryView.record(record, scene.self(), lastModifier));
+            remembered.add(WorldMemoryView.record(record, scene.self(), dimension, recordOrigin));
         }
         if (!remembered.isEmpty()) {
             json.add("remembered", remembered);

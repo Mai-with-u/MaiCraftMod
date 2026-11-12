@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -111,6 +112,14 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         Protection guard = protection.get();
         if (guard == null || target.isEntity()) return null;
         return guard.placedByOther(cellOf(target)).map(guard::nameOf).orElse(null);
+    }
+
+    @Override
+    public ContainerWhose containerWhose(ResolvedTarget target, boolean naturalLoot, boolean openedBefore) {
+        if (target == null || target.isEntity()) {
+            return new ContainerWhose(ContainerWhose.Kind.UNKNOWN, null, openedBefore);
+        }
+        return ContainerWhose.of(cellOf(target), naturalLoot, protection.get(), openedBefore);
     }
 
     // 目标格带上这一刻所在的维度：认家、问归属都按维度比，下界里和主世界家坐标重叠的格子不当成家。

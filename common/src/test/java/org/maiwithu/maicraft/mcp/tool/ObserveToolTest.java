@@ -50,6 +50,9 @@ import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.kernel.task.Urgency;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
+import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfView;
 
@@ -610,5 +613,102 @@ class ObserveToolTest {
         assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"self\", \"grid\": true}")));
         inWorld = false;
         assertEquals("not_in_world", errorCode(observe("{}")));
+    }
+
+    @Test
+    void containersReportWhoseLastModifiedByAndOpenedBySelfAcrossSceneDetailAndMemory() {
+        FacilityKinds kinds = new FacilityKinds(
+                FakeBlockTags.vanilla().tag("lootr:containers", "lootr:lootr_chest"));
+        Scene richScene = new Scene(memory, kinds);
+        richScene.updateSelf(new SelfSight.Facts(0.5, 64, 0.5, 180f,
+                20, 18, 300, 300, "minecraft:stone_pickaxe", List.of(), List.of(), true, false));
+        WorldPosition lootAt = WorldPosition.here(2, 64, 0);
+        WorldPosition selfAt = WorldPosition.here(4, 64, 0);
+        WorldPosition otherAt = WorldPosition.here(6, 64, 0);
+        WorldPosition noRecordAt = WorldPosition.here(8, 64, 0);
+        WorldPosition unknownAt = WorldPosition.here(10, 64, 0);
+        WorldPosition tableAt = WorldPosition.here(12, 64, 0);
+        // 自己放的那只箱子已经亲手打开过一次；其余都是刚在场景里看见、还没开过的。
+        memory.rememberContainerOpened(selfAt, "minecraft:chest", List.of("minecraft:iron_ingot"),
+                Instant.ofEpochMilli(2000));
+        richScene.updateFacilities(20, Instant.ofEpochMilli(3000), List.of(
+                new NearbyBlocksSight.BlockSighting(lootAt, "lootr:lootr_chest"),
+                new NearbyBlocksSight.BlockSighting(selfAt, "minecraft:chest"),
+                new NearbyBlocksSight.BlockSighting(otherAt, "minecraft:chest"),
+                new NearbyBlocksSight.BlockSighting(noRecordAt, "minecraft:barrel"),
+                new NearbyBlocksSight.BlockSighting(unknownAt, "minecraft:shulker_box"),
+                new NearbyBlocksSight.BlockSighting(tableAt, "minecraft:crafting_table")));
+
+        ReadsBlockOwnership ownership = new ReadsBlockOwnership() {
+            @Override public Optional<PlacedBy> whoPlaced(String dimension, int x, int y, int z) {
+                if (x == 4 && y == 64 && z == 0) return Optional.of(new PlacedBy("self-uuid"));
+                if (x == 6 && y == 64 && z == 0) return Optional.of(new PlacedBy("other-uuid"));
+                return Optional.empty();
+            }
+
+            @Override public boolean known(String dimension, int x, int y, int z) {
+                return !(x == 10 && y == 64 && z == 0);
+            }
+        };
+        Protection guard = new Protection(ownership, memory::regions, memory::place, "self-uuid",
+                (pos, r) -> false, ReadsOwnHome.NOWHERE,
+                id -> "other-uuid".equals(id) ? "玩家甲" : id);
+        ToolDispatcher withProtection = new ToolDispatcher(List.of(new ObserveTool(
+                () -> richScene, () -> memory, table, direct, () -> reminders,
+                () -> new MenuView.Reads(() -> openScreen, noTrades), List::of, reads::add,
+                () -> identity, () -> null, ObserveTool.Pictures.NONE, () -> guard)));
+
+        JsonArray facilities = data(withProtection.call("observe", JsonParser.parseString("{}").getAsJsonObject()))
+                .getAsJsonArray("facilities");
+        assertEquals(6, facilities.size());
+        JsonObject fLoot = facilities.get(0).getAsJsonObject();
+        assertEquals("natural_loot", fLoot.get("whose").getAsString());
+        assertFalse(fLoot.has("last_modified_by"));
+        assertFalse(fLoot.get("opened_by_self").getAsBoolean());
+
+        JsonObject fSelf = facilities.get(1).getAsJsonObject();
+        assertEquals("self", fSelf.get("whose").getAsString());
+        assertFalse(fSelf.has("last_modified_by"));
+        assertTrue(fSelf.get("opened_by_self").getAsBoolean());
+
+        JsonObject fOther = facilities.get(2).getAsJsonObject();
+        assertEquals("player", fOther.get("whose").getAsString());
+        assertEquals("玩家甲", fOther.get("last_modified_by").getAsString());
+        assertFalse(fOther.get("opened_by_self").getAsBoolean());
+
+        JsonObject fNoRecord = facilities.get(3).getAsJsonObject();
+        assertEquals("no_record", fNoRecord.get("whose").getAsString());
+        assertFalse(fNoRecord.get("opened_by_self").getAsBoolean());
+
+        JsonObject fUnknown = facilities.get(4).getAsJsonObject();
+        assertEquals("unknown", fUnknown.get("whose").getAsString());
+        assertFalse(fUnknown.get("opened_by_self").getAsBoolean());
+
+        JsonObject fTable = facilities.get(5).getAsJsonObject();
+        assertFalse(fTable.has("whose"), "工作台不是容器，不带容器来源字段");
+        assertFalse(fTable.has("opened_by_self"));
+
+        // observe(detail) 看玩家甲的箱子：顶层与 remembered 都带容器来源三字段。
+        String otherId = fOther.get("id").getAsString();
+        JsonObject detail = data(withProtection.call("observe",
+                JsonParser.parseString("{\"what\":\"detail\",\"id\":\"" + otherId + "\"}").getAsJsonObject()));
+        assertEquals("player", detail.get("whose").getAsString());
+        assertEquals("玩家甲", detail.get("last_modified_by").getAsString());
+        assertFalse(detail.get("opened_by_self").getAsBoolean());
+        JsonObject remOther = detail.getAsJsonArray("remembered").get(0).getAsJsonObject();
+        assertEquals("player", remOther.get("whose").getAsString());
+        assertEquals("玩家甲", remOther.get("last_modified_by").getAsString());
+
+        // observe(detail) 看工作台：顶层不带 whose。
+        String tableId = fTable.get("id").getAsString();
+        JsonObject tableDetail = data(withProtection.call("observe",
+                JsonParser.parseString("{\"what\":\"detail\",\"id\":\"" + tableId + "\"}").getAsJsonObject()));
+        assertFalse(tableDetail.has("whose"));
+
+        // observe(world_memory, kind=container)：五只容器各自带着对应的 whose 与 opened_by_self。
+        JsonArray memContainers = data(withProtection.call("observe",
+                JsonParser.parseString("{\"what\":\"world_memory\",\"kind\":\"container\"}").getAsJsonObject()))
+                .getAsJsonArray("records");
+        assertTrue(memContainers.size() >= 5);
     }
 }
