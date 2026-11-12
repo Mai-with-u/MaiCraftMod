@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.mcp.tool;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.GsonBuilder;
 import com.google.gson.Gson;
@@ -35,9 +36,11 @@ import org.maiwithu.maicraft.mcp.view.SelfView;
 import org.maiwithu.maicraft.mcp.view.WorldMemoryView;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -187,7 +190,7 @@ public final class ObserveTool implements McpTool {
     @Override public ToolReply.WithImages answer(JsonObject arguments) {
         RequestCheck check = new RequestCheck();
         check.rejectUnknownFields(arguments, "",
-                List.of("what", "id", "grid", "with_menu", "unlabeled", "radius", "kind"));
+                List.of("what", "id", "grid", "with_menu", "unlabeled", "radius", "kind", "sections"));
         String chosen = check.choice(arguments, "what", "what", VIEWS);
         String what = chosen == null ? "scene" : chosen;
         String id = check.text(arguments, "id", "id", false);
@@ -196,6 +199,7 @@ public final class ObserveTool implements McpTool {
         Boolean unlabeled = check.bool(arguments, "unlabeled", "unlabeled");
         Integer radius = check.integer(arguments, "radius", "radius", false);
         String kind = check.choice(arguments, "kind", "kind", MEMORY_KINDS);
+        Set<String> sections = sections(arguments, what, check);
         if (what.equals("detail") && id == null && !arguments.has("id")) {
             check.error("id", "what=detail 时要给 id", "观察编号（e12、f3、b5、s2）或地标名");
         }
@@ -217,14 +221,41 @@ public final class ObserveTool implements McpTool {
             return picture(id, Boolean.TRUE.equals(withMenu), Boolean.TRUE.equals(unlabeled), check.notes());
         }
         MemoryKind kindFilter = kind == null ? null : MemoryKind.valueOf(kind.toUpperCase(Locale.ROOT));
-        return ToolReply.WithImages.of(view(what, id, grid, radius, kindFilter, check));
+        return ToolReply.WithImages.of(view(what, id, grid, radius, kindFilter, sections, check));
+    }
+
+    /**
+     * world_memory 的分节取用：要哪几节（places / regions / records），不给或给了空数组都按三节全要看。
+     * 只配 world_memory 用；点的节名必须是这三节之一。
+     */
+    private static Set<String> sections(JsonObject arguments, String what, RequestCheck check) {
+        if (!arguments.has("sections")) return null;
+        if (!what.equals("world_memory")) {
+            check.error("sections", "sections 只在 what=world_memory 时用", null);
+            return null;
+        }
+        JsonArray asked = arguments.getAsJsonArray("sections");
+        if (asked == null || asked.isEmpty()) {
+            check.error("sections", "sections 要是节名的数组：places、regions、records；不给就是三节都要", null);
+            return null;
+        }
+        Set<String> parsed = new LinkedHashSet<>();
+        for (int index = 0; index < asked.size(); index++) {
+            String section = asked.get(index).isJsonPrimitive() ? asked.get(index).getAsString() : null;
+            if (section == null || !SECTIONS.contains(section)) {
+                check.error("sections", "sections 里第 " + index + " 项不是节名：places、regions、records 之一", null);
+                return null;
+            }
+            parsed.add(section);
+        }
+        return parsed;
     }
 
     private JsonObject view(String what, String id, Boolean grid, Integer radius, MemoryKind kindFilter,
-            RequestCheck check) {
+            Set<String> sections, RequestCheck check) {
         List<String> viewNotes = new ArrayList<>();
         JsonObject data = clientThread.call(
-                context -> view(what, id, Boolean.TRUE.equals(grid), radius, kindFilter, viewNotes, context));
+                context -> view(what, id, Boolean.TRUE.equals(grid), radius, kindFilter, sections, viewNotes, context));
         if (data == null) {
             return ToolReply.error(ErrorCode.UNKNOWN_ID, "没有观察编号或地标叫 " + id
                     + "；观察编号只在短时间内有效，重新 observe(scene) 拿新的编号");
@@ -233,9 +264,12 @@ public final class ObserveTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
+    /** world_memory 的三节名字：sections 参数只认这几个。 */
+    private static final Set<String> SECTIONS = Set.of("places", "regions", "records");
+
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
     private JsonObject view(String what, String id, boolean grid, Integer radius, MemoryKind kindFilter,
-            List<String> notes, TickContext context) {
+            Set<String> sections, List<String> notes, TickContext context) {
         Scene currentScene = scene.get();
         WorldMemory currentMemory = memory.get();
         if (currentScene == null || currentMemory == null) {
@@ -252,7 +286,7 @@ public final class ObserveTool implements McpTool {
             case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard).orElse(null);
             case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
-                    radius, kindFilter, recordOrigin, notes::add);
+                    radius, kindFilter, recordOrigin, notes::add, sections);
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid,
                     DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin));

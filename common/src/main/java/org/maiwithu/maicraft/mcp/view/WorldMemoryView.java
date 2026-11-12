@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -27,8 +28,9 @@ import java.util.function.Function;
  * 世界记忆与命名地点的观察视图：
  * <ul>
  *   <li>{@code observe(what=places)}：紧凑列出按名字记的地点、建筑档案、机器档案和地盘，以及自动记录的分类总数；</li>
- *   <li>{@code observe(what=world_memory)}：支持按 {@code radius}、{@code kind} 过滤，未过滤时按由近到远装到回包上限以内，
- *       不触发整包 {@code too_large} 失败，超出的部分在 {@code records_not_listed} 里按种类如实报数。</li>
+ *   <li>{@code observe(what=world_memory)}：支持按 {@code radius}、{@code kind} 过滤，只出点名的节（places / regions / records）；
+ *       未过滤且三节都要时按由近到远装到回包上限以内，不触发整包 {@code too_large} 失败，
+ *       超出的部分在 {@code records_not_listed} 里按种类如实报数。</li>
  * </ul>
  */
 public final class WorldMemoryView {
@@ -99,42 +101,48 @@ public final class WorldMemoryView {
         return json;
     }
 
-    /** 兼容无过滤调用：不限半径与种类、不单独收说明。 */
+    /** 兼容无过滤调用：不限半径与种类、三节都出、不单独收说明。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, Function<WorldPosition, String> lastModifier) {
-        return of(memory, self, null, null, null, fromLegacyModifier(lastModifier), ignored -> {});
+        return of(memory, self, null, null, null, fromLegacyModifier(lastModifier), ignored -> {}, null);
     }
 
-    /** 兼容传最后放置者函数的调用。 */
+    /** 兼容传最后放置者函数的调用：三节都出。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
             Function<WorldPosition, String> lastModifier, Consumer<String> notes) {
-        return of(memory, self, dimension, radius, kindFilter, fromLegacyModifier(lastModifier), notes);
+        return of(memory, self, dimension, radius, kindFilter, fromLegacyModifier(lastModifier), notes, null);
     }
 
     /**
-     * 世界记忆视图：可按半径与种类过滤；记录太多时近的先列到单次回包装得下为止，其余按种类报数。
+     * 世界记忆视图：可按半径与种类过滤；records 会随游玩一直变长，只要个别节（places）的调用方按 sections 点名取那一节，
+     * 不让整包顶到单回包上限；不点名就三节都出。记录太多时近的先列到单次回包装得下为止，其余按种类报数。
+     *
+     * @param self         角色此刻的位置，用来按远近排序；还没看清自己时为 null，按记录先后排
+     * @param sections     只出哪几节（places / regions / records）；null 出全部三节
      */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
-            ContainerOrigin containerOrigin, Consumer<String> notes) {
+            ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections) {
         JsonObject json = new JsonObject();
-        json.add("places", places(memory.places(), self, dimension));
-        json.add("regions", regions(memory.regions()));
+        if (serves(sections, "places")) json.add("places", places(memory.places(), self, dimension));
+        if (serves(sections, "regions")) json.add("regions", regions(memory.regions()));
 
         List<MemoryRecord> filtered = new ArrayList<>();
-        for (MemoryRecord record : memory.allRecords()) {
-            if (kindFilter != null && record.kind() != kindFilter) continue;
-            if (radius != null) {
-                if (!sameDimension(record.position(), dimension)) continue;
-                if (self != null && SceneView.distance(self, record.position()) > radius) continue;
+        if (serves(sections, "records")) {
+            for (MemoryRecord record : memory.allRecords()) {
+                if (kindFilter != null && record.kind() != kindFilter) continue;
+                if (radius != null) {
+                    if (!sameDimension(record.position(), dimension)) continue;
+                    if (self != null && SceneView.distance(self, record.position()) > radius) continue;
+                }
+                filtered.add(record);
             }
-            filtered.add(record);
-        }
-        if (self != null) {
-            filtered.sort(Comparator
-                    .<MemoryRecord>comparingInt(record -> sameDimension(record.position(), dimension) ? 0 : 1)
-                    .thenComparingInt(record -> sameDimension(record.position(), dimension)
-                            ? SceneView.distance(self, record.position()) : 0));
+            if (self != null) {
+                filtered.sort(Comparator
+                        .<MemoryRecord>comparingInt(record -> sameDimension(record.position(), dimension) ? 0 : 1)
+                        .thenComparingInt(record -> sameDimension(record.position(), dimension)
+                                ? SceneView.distance(self, record.position()) : 0));
+            }
         }
 
         int usedChars = COMPACT.toJson(json).length() + 256;
@@ -150,17 +158,24 @@ public final class WorldMemoryView {
                 notListed.merge(SceneView.lower(entry.kind()), 1, Integer::sum);
             }
         }
-        json.add("records", list);
-        json.addProperty("records_total", filtered.size());
-        json.addProperty("records_listed", list.size());
-        if (!notListed.isEmpty()) {
-            JsonObject omitted = new JsonObject();
-            notListed.forEach(omitted::addProperty);
-            json.add("records_not_listed", omitted);
-            notes.accept("世界记忆共有 " + filtered.size() + " 条记录，按由近到远列出了最近的 " + list.size()
-                    + " 条；只读记住的地点请用 observe(what=\"places\")，要看其余记录可传 radius 或 kind 收窄");
+        if (serves(sections, "records")) {
+            json.add("records", list);
+            json.addProperty("records_total", filtered.size());
+            json.addProperty("records_listed", list.size());
+            if (!notListed.isEmpty()) {
+                JsonObject omitted = new JsonObject();
+                notListed.forEach(omitted::addProperty);
+                json.add("records_not_listed", omitted);
+                notes.accept("世界记忆共有 " + filtered.size() + " 条记录，按由近到远列出了最近的 " + list.size()
+                        + " 条；只读记住的地点请用 observe(what=\"places\")，要看其余记录可传 radius 或 kind 收窄");
+            }
         }
         return json;
+    }
+
+    /** 这一节这回出不出：没点名任何节（null）就三节都出。 */
+    private static boolean serves(Set<String> sections, String section) {
+        return sections == null || sections.contains(section);
     }
 
     private record NamedEntry(String name, String kind, WorldPosition position) {}

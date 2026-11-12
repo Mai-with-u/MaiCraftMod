@@ -73,7 +73,8 @@ public final class ToolCatalog {
                         field("with_menu", "boolean", "只在 what=picture 时用：true 时连同此刻开着的界面一起拍（整幅屏幕画面）；"
                                 + "界面认不出、结构化读不出来时用", null),
                         field("unlabeled", "boolean", "只在 what=picture 时用：true 时图上不标观察编号（看外观时用）；"
-                                + "编号和它们在图上的位置照样列在 in_picture", null)),
+                                + "编号和它们在图上的位置照样列在 in_picture", null),
+                        named("sections", sectionsSchema())),
                 new String[0]));
         tools.add(tool(LOOKUP, "查资料，只读，不动角色：能力列表与能力说明；资料（随包的机制常识、物品资料页、思索、任务书）；配方；"
                         + "联网查 Minecraft Wiki 与 MC百科（topic=wiki：query 按标题搜，url 读一篇，长文按段分页，next 照抄翻页）。"
@@ -207,5 +208,24 @@ public final class ToolCatalog {
         field.addProperty("description", description);
         if (defaultValue != null) field.addProperty("default", defaultValue);
         return field;
+    }
+
+    // sections 参数的结构：节名的数组，只认 world_memory 的三节。
+    private static JsonObject sectionsSchema() {
+        JsonArray sectionNames = new JsonArray();
+        sectionNames.add("places");
+        sectionNames.add("regions");
+        sectionNames.add("records");
+        JsonObject item = new JsonObject();
+        item.addProperty("type", "string");
+        item.add("enum", sectionNames);
+        JsonObject sections = new JsonObject();
+        sections.addProperty("name", "sections");
+        sections.addProperty("type", "array");
+        sections.addProperty("description",
+                "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / records 容器与见过的资源）；"
+                        + "不给就三节都给");
+        sections.add("items", item);
+        return sections;
     }
 }

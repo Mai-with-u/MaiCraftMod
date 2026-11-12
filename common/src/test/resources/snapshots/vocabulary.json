@@ -51,6 +51,7 @@
     "requirement": "任务里一条要求的编号（任务书资料的条目页里给的）",
     "reward": "一个任务自己的根奖励编号；奖池里的子奖励不是能单独领的奖励",
     "rotation": "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270",
+    "sections": "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、records（容器与见过的资源）的列表；不给就三节都给",
     "settings": "要改成的设置（JSON 对象）：键是目标认的设置项（机器的、载具操纵表的、女仆的），值写字符串",
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
     "sneak": "按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；不给就不潜行",

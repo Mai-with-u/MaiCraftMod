@@ -481,6 +481,27 @@ class ObserveToolTest {
     }
 
     @Test
+    void worldMemoryServesOnlyTheSectionsAskedFor() {
+        // 记住的地点清单会随游玩无界变长，宿主刷新"记住的地点"只要 places 一节：按节取，不用整包顶到回包上限。
+        memory.remember("家", WorldPosition.here(0, 64, 30));
+
+        JsonObject placesOnly = data(observe("{\"what\": \"world_memory\", \"sections\": [\"places\"]}"));
+        assertEquals(1, placesOnly.keySet().size(), placesOnly::toString);
+        assertEquals("家", placesOnly.getAsJsonArray("places").get(0).getAsJsonObject().get("name").getAsString());
+
+        JsonObject allThree = data(observe(
+                "{\"what\": \"world_memory\", \"sections\": [\"places\", \"regions\", \"records\"]}"));
+        assertEquals(data(observe("{\"what\": \"world_memory\"}")), allThree, "三节都点名等于缺省不点名");
+    }
+
+    @Test
+    void sectionsOnlyGoesWithWorldMemoryAndNamesRealSections() {
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"sections\": [\"places\"]}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"self\", \"sections\": []}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"world_memory\", \"sections\": [\"记忆\"]}")));
+    }
+
+    @Test
     void rememberedPlacesShowUpInObserveAndGoAwayWhenForgotten() {
         // 记地点当场完成：execute 直接带回结果，不成为主任务。
         JsonObject remembered = data(execute("{\"ability\": \"remember\", \"parameters\": {\"name\": \"家\"}}"));

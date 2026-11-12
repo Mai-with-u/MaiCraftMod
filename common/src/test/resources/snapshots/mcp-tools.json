@@ -35,6 +35,18 @@
           "unlabeled": {
             "type": "boolean",
             "description": "只在 what=picture 时用：true 时图上不标观察编号（看外观时用）；编号和它们在图上的位置照样列在 in_picture"
+          },
+          "sections": {
+            "type": "array",
+            "description": "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / records 容器与见过的资源）；不给就三节都给",
+            "items": {
+              "type": "string",
+              "enum": [
+                "places",
+                "regions",
+                "records"
+              ]
+            }
           }
         }
       }
