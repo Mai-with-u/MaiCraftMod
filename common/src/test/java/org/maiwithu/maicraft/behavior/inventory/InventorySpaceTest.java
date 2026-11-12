@@ -380,4 +380,62 @@ class InventorySpaceTest {
         assertEquals(Problem.Kind.INVENTORY_FULL, failed.problem().kind());
         assertTrue(failed.problem().message().contains("腾不出 2 格"), failed.problem().message());
     }
+
+    @Test
+    void 主背包里同时装着精妙背包与燧石杂物时跳过背包自身_把燧石塞进随身背包() {
+        BackpackStack packItem = new BackpackStack("sophisticatedbackpacks:backpack", 1, 1, false, false, false, false);
+        BackpackStack flint = new BackpackStack("minecraft:flint", 64, 64, false, false, false, false);
+        FakeBackpack backpack = new FakeBackpack(2, packItem, flint);
+        CarriedBackpack nonNestingCarried = new CarriedBackpack() {
+            @Override public int freeSlots() { return 27; }
+
+            @Override public Optional<Action> store(BackpackStack stack, TaskRecords records) {
+                if (stack.itemId().startsWith("sophisticatedbackpacks:")) {
+                    return Optional.empty();
+                }
+                return Optional.of(oneTick(() -> {
+                    backpack.removeOne(stack.itemId());
+                    records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(), "放进了随身背包"));
+                    return ActionStatus.done();
+                }));
+            }
+        };
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(),
+                Optional.of(nonNestingCarried), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(List.of("sophisticatedbackpacks:backpack"),
+                backpack.stacks().stream().map(BackpackStack::itemId).toList());
+        assertEquals(1, records.changes.size());
+        assertEquals("minecraft:flint", records.changes.getFirst().what());
+    }
+
+    @Test
+    void 随身背包过滤拒收某样杂物但仍有空槽时_不废掉整只包_别的杂物照样存进去() {
+        FakeBackpack backpack = new FakeBackpack(2, junk("minecraft:cobblestone", 64), junk("minecraft:dirt", 64));
+        List<String> stored = new ArrayList<>();
+        CarriedBackpack filteredCarried = new CarriedBackpack() {
+            @Override public int freeSlots() { return 10; }
+
+            @Override public Optional<Action> store(BackpackStack stack, TaskRecords records) {
+                return Optional.of(oneTick(() -> {
+                    if (stack.itemId().equals("minecraft:cobblestone")) {
+                        return ActionStatus.failed(
+                                Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "过滤升级拒收圆石", null));
+                    }
+                    stored.add(stack.itemId());
+                    backpack.removeOne(stack.itemId());
+                    records.change(new Change(Change.Kind.ITEM_STORED, stack.itemId(), stack.count(), "放进了随身背包"));
+                    return ActionStatus.done();
+                }));
+            }
+        };
+        InventorySpace space = new InventorySpace(ItemsToKeep.NOTHING, backpack, Optional.empty(),
+                Optional.of(filteredCarried), Optional.empty(), Optional.empty());
+        CollectedRecords records = new CollectedRecords();
+
+        assertInstanceOf(ActionStatus.Done.class, run(makeRoom(space, 1, Set.of(), records)));
+        assertEquals(List.of("minecraft:dirt"), stored);
+    }
 }

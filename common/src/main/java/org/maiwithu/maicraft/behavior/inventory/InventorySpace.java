@@ -119,6 +119,8 @@ public final class InventorySpace {
         private final TaskRecords records;
         /** 不往外挪的东西：任务要留着的，加上这次挪不动的（存哪都存不进的）。 */
         private final Set<String> unmovable;
+        /** 放不进随身背包的物品（随身背包本身禁套娃，或包内过滤升级拒收）：跳过随身背包，不影响其他杂物进包或它自己存箱子。 */
+        private final Set<String> unacceptedByCarried = new HashSet<>();
         /** 这次存不进去的容器：点不开、放不下的，不再往里塞。 */
         private final Set<WorldPosition> failedContainers = new HashSet<>();
         private boolean mergeBroken;
@@ -199,7 +201,8 @@ public final class InventorySpace {
                     carriedBroken ? 0 : carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0),
                     containers,
                     !networkBroken && network.get().map(storage -> storage.reachable(nearMe())).orElse(false),
-                    keptCounts(stacks));
+                    keptCounts(stacks),
+                    Set.copyOf(unacceptedByCarried));
         }
 
         // 背包里每种东西要留几件：预留的、正要用的；留够这么多的那几堆腾背包不挪，多出来的照常按价值排。
@@ -272,7 +275,17 @@ public final class InventorySpace {
         private void giveUpOn(SpaceMove move, Problem problem) {
             switch (move) {
                 case SpaceMove.MergeStacks merge -> mergeBroken = true;
-                case SpaceMove.ToCarriedBackpack carried -> carriedBroken = true;
+                case SpaceMove.ToCarriedBackpack(var stack) -> {
+                    // 仅当前这一种物品放不进随身背包（背包自身禁套娃，或被包内过滤拒收）且随身背包仍有空槽时，
+                    // 只跳过这种物品，不废掉整只包；包打不开或已无空槽时才整只标坏不再试。
+                    boolean itemOnly = (problem == null || problem.kind() == Problem.Kind.NOT_POSSIBLE_HERE)
+                            && carriedBackpack.map(CarriedBackpack::freeSlots).orElse(0) > 0;
+                    if (itemOnly) {
+                        unacceptedByCarried.add(stack.itemId());
+                    } else {
+                        carriedBroken = true;
+                    }
+                }
                 case SpaceMove.ToNetwork stored -> networkBroken = true;
                 case SpaceMove.ToKnownContainer(var container, var stack) -> failedContainers.add(container.at());
             }

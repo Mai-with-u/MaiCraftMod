@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.ability.vehicle.spi.TrainScheduler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleAssembler;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleDriver;
 import org.maiwithu.maicraft.ability.vehicle.spi.VehicleReader;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
@@ -81,6 +82,7 @@ public final class CompatRegistry {
     private final Slot<DismantleTool> dismantleTools = slot("拆卸工具", CompatDismantleTool::new);
     private final Slot<ItemSettings> itemSettings = slot("物品设置", CompatItemSettings::new);
     private final Slot<TravelMode> travelModes = slot("出行方式", CompatTravelMode::new);
+    private final Slot<CarriedBackpack> carriedBackpacks = slot("随身背包", CompatCarriedBackpack::new);
     private final Slot<NetworkStorage> networkStorages = slot("网络存储", CompatNetworkStorage::new);
     private final Slot<MenuLayoutProof> menuLayouts = slot("界面布局证明", CompatMenuLayoutProof::new);
     private final Slot<KnowledgeSource> knowledgeSources = slot("知识来源", CompatKnowledgeSource::new);
@@ -184,6 +186,11 @@ public final class CompatRegistry {
      */
     public void itemSource(CompatModule module, Function<PlayerServices, ItemSource> build) {
         itemSources.add(module, build);
+    }
+
+    /** 联动入口交随身背包的建法：腾地方时先把杂物放进随身背包，包一层后交给背包空间与自身观察。 */
+    public void carriedBackpack(CompatModule module, Function<PlayerServices, CarriedBackpack> build) {
+        carriedBackpacks.add(module, build);
     }
 
     /** 联动入口交网络存储的建法：腾地方时把东西存进网络（AE2 的无线终端），包一层后交给背包空间。 */
@@ -420,6 +427,11 @@ public final class CompatRegistry {
     /** 进世界时建联动模组的物品设置；规矩同物品来源。 */
     public List<ItemSettings> itemSettings(PlayerServices services) {
         return itemSettings.build(services);
+    }
+
+    /** 进世界时建联动模组的随身背包；规矩同物品来源。 */
+    public List<CarriedBackpack> carriedBackpacks(PlayerServices services) {
+        return carriedBackpacks.build(services);
     }
 
     /** 进世界时建联动模组的网络存储（身上的无线终端存东西）；规矩同物品来源。 */

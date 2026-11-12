@@ -50,7 +50,21 @@ final class SpacePlanner {
             int carriedBackpackFreeSlots,
             List<KnownContainer> nearbyContainers,
             boolean networkStorage,
-            Map<String, Integer> keptCounts) {
+            Map<String, Integer> keptCounts,
+            Set<String> unacceptedByCarriedBackpack) {
+
+        Scene {
+            unacceptedByCarriedBackpack = unacceptedByCarriedBackpack == null
+                    ? Set.of() : Set.copyOf(unacceptedByCarriedBackpack);
+        }
+
+        /** 没有被随身背包单独拒收的物品。 */
+        Scene(List<BackpackStack> stacks, int freeSlots, int slotsNeeded, Set<String> reservedItemIds,
+                boolean stackMergerAvailable, int carriedBackpackFreeSlots, List<KnownContainer> nearbyContainers,
+                boolean networkStorage, Map<String, Integer> keptCounts) {
+            this(stacks, freeSlots, slotsNeeded, reservedItemIds, stackMergerAvailable, carriedBackpackFreeSlots,
+                    nearbyContainers, networkStorage, keptCounts, Set.of());
+        }
 
         /** 没有要留够件数的东西。 */
         Scene(List<BackpackStack> stacks, int freeSlots, int slotsNeeded, Set<String> reservedItemIds,
@@ -99,7 +113,7 @@ final class SpacePlanner {
             // 没有地方可存就跳过：这一堆留在背包里，要不要丢由调用方处置，Mod 不往地上扔。
             if (scene.networkStorage()) {
                 toNetwork.add(stack);
-            } else if (carriedRoom > 0) {
+            } else if (carriedRoom > 0 && !scene.unacceptedByCarriedBackpack().contains(stack.itemId())) {
                 moves.add(new SpaceMove.ToCarriedBackpack(stack));
                 carriedRoom--;
             } else if (containerIndex < scene.nearbyContainers().size()) {
