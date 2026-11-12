@@ -82,7 +82,7 @@ public final class ClientEntitySight implements EntitySight {
             found.add(new Observation(
                     entity.getId(),
                     BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
-                    entity.hasCustomName() ? entity.getCustomName().getString() : null,
+                    entityName(entity),
                     entity.getStringUUID(),
                     WorldPosition.here((int) Math.floor(entity.getX()),
                             (int) Math.floor(entity.getY()), (int) Math.floor(entity.getZ())),
@@ -95,6 +95,18 @@ public final class ClientEntitySight implements EntitySight {
                     ClientCreatureSituations.tamedBy(entity, player, trusted) != TamedBy.NOBODY));
         }
         return found;
+    }
+
+    /**
+     * 实体的观察名字：别的玩家始终带游戏名（与玩家列表、聊天里的名字一致），认人不再只靠 UUID；
+     * 其他实体只带名字牌、重命名这类自定义名。
+     */
+    static String entityName(Entity entity) {
+        if (entity instanceof Player other) {
+            String profileName = other.getGameProfile() == null ? null : other.getGameProfile().getName();
+            return profileName != null && !profileName.isBlank() ? profileName : other.getName().getString();
+        }
+        return entity.hasCustomName() ? entity.getCustomName().getString() : null;
     }
 
     // 只有怪物会"把攻击目标放在角色身上"；其他实体挨得再近也不算盯着我。

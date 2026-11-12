@@ -282,4 +282,22 @@ class SceneTest {
                 .orElseThrow().id(), "同一个结构沿用编号");
         assertEquals("ship-0", scene.seen().structureOf(ship).orElseThrow());
     }
+
+    @Test
+    void nearbyPlayersCarryTheirGameNames() {
+        // 附近的玩家实体观察直接带游戏名；若观察里暂时为空、在线玩家列表按 UUID 对得上时也会补上。
+        scene.updateEntities(10, List.of(
+                new EntitySight.Observation(1, "minecraft:player", "玩家甲", "uuid-1",
+                        WorldPosition.here(3, 64, 0), true, false, false, null, Map.of(), false),
+                new EntitySight.Observation(2, "minecraft:player", null, "uuid-2",
+                        WorldPosition.here(0, 64, -4), true, false, false, null, Map.of(), false)));
+        scene.updateOnlinePlayers(List.of(
+                new Scene.OnlinePlayer("玩家甲", "uuid-1"),
+                new Scene.OnlinePlayer("观众乙", "uuid-2")));
+        List<SceneEntity> listed = scene.listedEntities();
+        assertEquals("玩家甲", listed.get(0).name());
+        assertEquals("uuid-1", listed.get(0).uuid());
+        assertEquals("观众乙", listed.get(1).name());
+        assertEquals("uuid-2", listed.get(1).uuid());
+    }
 }

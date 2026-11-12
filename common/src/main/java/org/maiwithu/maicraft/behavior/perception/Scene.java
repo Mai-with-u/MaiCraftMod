@@ -84,9 +84,28 @@ public final class Scene {
      */
     public record OnlinePlayer(String name, String uuid) {}
 
-    /** 更新玩家列表（Tab 列表）：每刻照抄在线的人，角色自己由调用方先去掉。 */
+    /** 更新玩家列表（Tab 列表）：每刻照抄在线的人，角色自己由调用方先去掉；已有没带名字的玩家实体顺手按 UUID 补上名字。 */
     public void updateOnlinePlayers(List<OnlinePlayer> online) {
         onlinePlayers = List.copyOf(online);
+        if (sightings.isEmpty()) return;
+        List<SceneEntity> updated = new ArrayList<>();
+        boolean changed = false;
+        for (SceneSighting sighting : sightings) {
+            if (sighting instanceof SceneEntity entity) {
+                String resolved = entity.name() == null && PLAYER.equals(entity.type())
+                        ? onlineNameByUuid(entity.uuid()) : entity.name();
+                if (resolved != null && entity.name() == null) {
+                    changed = true;
+                    updated.add(new SceneEntity(entity.id(), entity.type(), resolved, entity.uuid(),
+                            entity.direction(), entity.compass(), entity.distance(), entity.dy(),
+                            entity.visible(), entity.hostile(), entity.targetingMe(),
+                            entity.health(), entity.traits()));
+                } else {
+                    updated.add(entity);
+                }
+            }
+        }
+        if (changed) replace(SceneEntity.class, updated);
     }
 
     /**
@@ -126,12 +145,22 @@ public final class Scene {
             String id = ids.entity(sighting.entityId(),
                     WorldPosition.here(sighting.position().x(), sighting.position().y(), sighting.position().z()),
                     direction, nowTick);
-            next.add(new SceneEntity(id, sighting.type(), sighting.name(), individualUuid(sighting),
+            String name = sighting.name() != null ? sighting.name()
+                    : (PLAYER.equals(sighting.type()) ? onlineNameByUuid(sighting.uuid()) : null);
+            next.add(new SceneEntity(id, sighting.type(), name, individualUuid(sighting),
                     direction, bearing.compass(), bearing.distance(), dy,
                     sighting.visible(), sighting.hostile(), sighting.targetingMe(),
                     sighting.health(), sighting.traits()));
         }
         replace(SceneEntity.class, next);
+    }
+
+    private String onlineNameByUuid(String uuid) {
+        if (uuid == null) return null;
+        for (OnlinePlayer player : onlinePlayers) {
+            if (uuid.equals(player.uuid())) return player.name();
+        }
+        return null;
     }
 
     /**
