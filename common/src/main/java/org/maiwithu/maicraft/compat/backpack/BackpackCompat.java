@@ -45,9 +45,11 @@ public final class BackpackCompat extends CompatModule {
     }
 
     @Override public void contribute(CompatRegistry registry) {
-        // 随身背包来源：身上的仓库，开包取出算拿到，并入 carried 这条途径。
+        // 随身背包来源与腾地方存放共用同一份开包存货账本：取货或存货开过包，另一边马上知道里面有什么、还剩几格空位。
         registry.itemSource(this, services ->
                 new SophisticatedBackpackSource(this, services, stockFor(services), clock));
+        registry.carriedBackpack(this, services ->
+                new SophisticatedCarriedBackpack(this, services, stockFor(services), clock));
     }
 
     /** 同一份玩家行为（同一趟进世界）共用同一本开包存货记录，换世界新建玩家行为时换新账本。 */

@@ -120,6 +120,7 @@ import org.maiwithu.maicraft.behavior.inventory.hands.ClientStackMerger;
 import org.maiwithu.maicraft.behavior.inventory.drops.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.inventory.containers.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.RememberedContainers;
@@ -230,7 +231,12 @@ public final class AbilityCatalog {
      * 退世界后现场整体丢弃，进下一个世界时按清单重新登记，不把上一个世界的模块带过来。
      */
     public static AbilityRegistry create(Deps deps, AbilityRegistry into) {
-        AbilityRegistry registry = into;
+        registerInWorld(deps, into);
+        return into;
+    }
+
+    /** 进世界登记全部能力并返回同一套随身背包实例，让自身观察与腾格子读同一本开包账。 */
+    static List<CarriedBackpack> registerInWorld(Deps deps, AbilityRegistry registry) {
         registry.clearRegistered();
         Shared shared = sharedOf(deps);
 
@@ -283,7 +289,7 @@ public final class AbilityCatalog {
         registry.register(lightModule(deps, construction));
 
         registerStandalone(registry, deps, shared, construction);
-        return registry;
+        return shared.carriedBackpacks();
     }
 
     /**
@@ -294,7 +300,7 @@ public final class AbilityCatalog {
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
             DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space,
-            List<NetworkStorage> networks) {
+            List<NetworkStorage> networks, List<CarriedBackpack> carriedBackpacks) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -347,16 +353,17 @@ public final class AbilityCatalog {
         // 腾背包不替玩家往地上扔东西，丢弃只有丢弃能力（drop）走。装备与拿东西在背包要满时先按它腾。
         // 随身背包的接缝留给随身背包的联动模组。身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
         List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
-        // 腾背包时要留的东西（预留的、正要用的）留够件数不挪。
+        List<CarriedBackpack> carriedBackpacks = deps.compat().carriedBackpacks(playerServices);
+        // 腾背包时要留的东西（预留的、正要用的）留够件数不挪；随身背包接联动登记的第一只实现。
         InventorySpace space = new InventorySpace(deps.kept(), deps.character().backpack(),
                 Optional.of(new ClientStackMerger(deps.character().context())),
-                Optional.empty(),
+                carriedBackpacks.stream().findFirst(),
                 Optional.of(new RememberedContainers(deps.world().memory(), deps.character().position(),
                         deps.guards().protection())),
                 Optional.of(storing),
                 () -> networks.stream().findFirst());
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices, dropping, storing, space, networks);
+                permission, playerServices, dropping, storing, space, networks, carriedBackpacks);
     }
 
     /** 往下挖楼梯的现场部件：拿到物品在看不见石头时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
