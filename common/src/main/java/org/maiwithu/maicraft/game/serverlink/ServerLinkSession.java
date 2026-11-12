@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.chat.Component;
+import org.maiwithu.maicraft.network.CharacterReachTolerance;
 import org.maiwithu.maicraft.network.ProtocolJson;
 
 /**
@@ -27,6 +28,14 @@ public final class ServerLinkSession {
         this.router = new RequestRouter(transport::available,
                 envelope -> { transport.send(envelope); return true; },
                 () -> requireClientThread(Minecraft.getInstance()), this::enqueue, (request, send) -> true);
+        // 角色距离容差随每次入服握手自动协商：新服务端在欢迎包里开启，旧服务端未报时自动退回原版余量。
+        this.router.register(new ClientOperation(
+                CharacterReachTolerance.OPERATION, CharacterReachTolerance.VERSION, false));
+    }
+
+    /** 本次连接握手确认的服务端交互距离余量（格）：新服务端返回 2.0 格，未握手或旧服务端返回原版 1.0 格。 */
+    public double serverReachPadding() {
+        return router.serverReachPadding();
     }
 
     /** 客户端要登记的操作清单必须在入服前完成；启动时在这里登记。 */

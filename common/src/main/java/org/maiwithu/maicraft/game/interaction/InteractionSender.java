@@ -8,6 +8,7 @@ import net.minecraft.world.phys.BlockHitResult;
 
 import org.maiwithu.maicraft.game.player.BoundaryLifecycle;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 提交真实玩家操作并逐刻确认：提交一次动作与确认它做成了是两个阶段。
@@ -184,4 +185,9 @@ public interface InteractionSender extends BoundaryLifecycle {
 
     /** 逐刻结算：先核对上下文仍是本刻、动作仍是本角色的，再运行只读确认条件。 */
     PendingInteraction poll(PlayerContext context, PendingInteraction pending);
+
+    /** 当前服务端实际放行的交互距离余量（格）：默认按原版 1.0 格余量回答，生产提交入口按握手结果返回。 */
+    default double serverReachPadding() {
+        return InteractionRange.VANILLA_SERVER_PADDING;
+    }
 }

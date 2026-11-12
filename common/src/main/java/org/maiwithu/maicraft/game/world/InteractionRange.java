@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.game.world;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
+import org.maiwithu.maicraft.network.CharacterReachTolerance;
 
 /**
  * 交互距离：角色够得着多远，全仓只有这一处实现。
@@ -13,6 +14,12 @@ import net.minecraft.world.entity.player.Player;
  * 并在 {@link ServerBedDistance} 的默认实现里写明原因。
  */
 public final class InteractionRange {
+
+    /** 原版服务端处理方块右键、破坏与实体交互时自带的距离余量（格）。类别：游戏事实。 */
+    public static final double VANILLA_SERVER_PADDING = CharacterReachTolerance.VANILLA_PADDING;
+
+    /** 协商了角色距离容差的新服务端给角色账号放行的总距离余量（格）。类别：游戏事实。 */
+    public static final double CHARACTER_SERVER_PADDING = CharacterReachTolerance.CHARACTER_PADDING;
 
     /** 床的交互距离由服务端告诉客户端；这个接口就是读取它的出口。 */
     public interface ServerBedDistance {

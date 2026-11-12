@@ -15,25 +15,35 @@ import net.minecraft.server.MinecraftServer;
  */
 public final class ServerLinkServices {
     /**
-     * 一台服务器的服务：方块归属记录、交互确认通道、这个存档的世界编号（写不进编号文件时为 null），
-     * 以及世界生成往地上铺的实心方块（读不出来时为 null）。
+     * 一台服务器的服务：方块归属记录、交互确认通道、这个存档的世界编号（写不进编号文件时为 null）、
+     * 世界生成往地上铺的实心方块（读不出来时为 null），以及角色账号名单（未挂入时为 null）。
      */
     private record Services(BlockOwnershipRecord ownership, ServerConfirmations confirmations, String worldId,
-                            List<String> generatedTerrain) {}
+                            List<String> generatedTerrain, CharacterAccounts accounts) {}
 
     private static final Map<MinecraftServer, Services> ATTACHED =
             Collections.synchronizedMap(new IdentityHashMap<>());
 
     private ServerLinkServices() {}
 
-    /** 尚未登记时用给定的工厂创建并登记；同一服务器重复调用不重建。 */
+    /** 尚未登记时用给定的工厂创建并登记（不挂角色账号名单的测试重载）；同一服务器重复调用不重建。 */
     public static void attachIfAbsent(MinecraftServer server,
                                       Supplier<BlockOwnershipRecord> ownership,
                                       Supplier<ServerConfirmations> confirmations,
                                       Supplier<String> worldId,
                                       Supplier<List<String>> generatedTerrain) {
+        attachIfAbsent(server, ownership, confirmations, worldId, generatedTerrain, () -> null);
+    }
+
+    /** 尚未登记时用给定的工厂创建并登记；同一服务器重复调用不重建。 */
+    public static void attachIfAbsent(MinecraftServer server,
+                                      Supplier<BlockOwnershipRecord> ownership,
+                                      Supplier<ServerConfirmations> confirmations,
+                                      Supplier<String> worldId,
+                                      Supplier<List<String>> generatedTerrain,
+                                      Supplier<CharacterAccounts> accounts) {
         ATTACHED.computeIfAbsent(server, ignored -> new Services(ownership.get(), confirmations.get(), worldId.get(),
-                generatedTerrain.get()));
+                generatedTerrain.get(), accounts.get()));
     }
 
     public static void detach(MinecraftServer server) {
@@ -62,5 +72,11 @@ public final class ServerLinkServices {
     public static List<String> generatedTerrain(MinecraftServer server) {
         var services = ATTACHED.get(server);
         return services == null ? null : services.generatedTerrain();
+    }
+
+    /** 该服务器的角色账号名单：距离容差钩子按它核对是不是准入的角色；尚未登记时返回 null。 */
+    public static CharacterAccounts characterAccounts(MinecraftServer server) {
+        var services = ATTACHED.get(server);
+        return services == null ? null : services.accounts();
     }
 }

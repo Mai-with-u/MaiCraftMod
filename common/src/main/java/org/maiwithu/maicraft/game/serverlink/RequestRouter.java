@@ -11,6 +11,7 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import org.maiwithu.maicraft.network.CharacterReachTolerance;
 import static org.maiwithu.maicraft.game.serverlink.ClientRequest.*;
 
 /**
@@ -49,6 +50,11 @@ public final class RequestRouter {
 
     /** 会话对象供同包的离线测试读取握手随机数与状态；包外不可见。 */
     ServerSessionConnection session() { return session; }
+
+    /** 本次连接握手协商出的服务端交互距离余量（格）：新服务端确认了角色距离容差为 2.0，否则为原版 1.0。 */
+    public double serverReachPadding() {
+        return CharacterReachTolerance.serverPadding(serverSupported(CharacterReachTolerance.OPERATION));
+    }
 
     public void register(ClientOperation operation) {
         // 注册发生在 mod 构造期（不在客户端线程），只写并发前的清单，不碰游戏对象；

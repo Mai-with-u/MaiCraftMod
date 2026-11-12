@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import net.minecraft.network.protocol.game.ServerboundMovePlayerPacket;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.phys.BlockHitResult;
 
@@ -42,6 +43,11 @@ final class MiningActions {
                 hit.getDirection());
         owner.install(pending);
         try {
+            var player = context.localPlayer();
+            if (player != null && player.connection != null) {
+                player.connection.send(new ServerboundMovePlayerPacket.Rot(
+                        player.getYRot(), player.getXRot(), player.onGround()));
+            }
             DefaultInteractionSender.gameMode(context).startDestroyBlock(hit.getBlockPos(), hit.getDirection());
             context.localPlayer().swing(InteractionHand.MAIN_HAND);
         } catch (RuntimeException failure) {

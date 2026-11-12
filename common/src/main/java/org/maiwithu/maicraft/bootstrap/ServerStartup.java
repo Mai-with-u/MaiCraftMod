@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
+import org.maiwithu.maicraft.network.CharacterReachTolerance;
 import org.maiwithu.maicraft.network.MaiCraftPayload;
 import org.maiwithu.maicraft.server.CharacterAccountCommand;
 import org.maiwithu.maicraft.server.CharacterAccounts;
@@ -68,17 +69,21 @@ final class ServerStartup {
         ServerLinkNetwork network = new ServerLinkNetwork(operations, accounts::admits);
         // 客户端可查询的只读操作：角色附近一个区块里哪些格是谁放的，格多时分页答。归属记录按服务器实例在第一个刻结束时从存档读回并登记。
         operations.register(OwnershipQuery.OPERATION, OwnershipQuery.VERSION, false, new OwnershipQuery());
+        // 向准入的角色客户端声明本服务端带有角色距离容差钩子，供客户端到达复查与直发包对齐放行口径。
+        operations.register(CharacterReachTolerance.OPERATION, CharacterReachTolerance.VERSION, false,
+                (player, body) -> new JsonObject());
         // 服务端一侧的联动清单逐行检查并写日志：通过的联动入口把客户端读不到的模组读数登记成只读操作，握手时协商。
         ServerCompatLoading.load(compatCatalog, loader, new ServerCompatRegistry(operations));
         // 方块归属存盘：主线程只拍快照，压缩写盘在后台，存盘时不卡服。
         OwnershipSaver ownershipSaver = new OwnershipSaver();
         // 这台服务器的服务只建一份：从存档读回归属记录、登记确认通道，再读出（第一次就生成）这个存档的世界编号，
-        // 最后读一遍世界生成数据，记下往地上铺的实心方块，握手时报给客户端当天然地形认。
+        // 最后读一遍世界生成数据，记下往地上铺的实心方块，握手时报给客户端当天然地形认；角色账号名单一并挂入供距离钩子读取。
         Consumer<MinecraftServer> attach = server -> ServerLinkServices.attachIfAbsent(server,
                 () -> OwnershipFile.of(server).load(),
                 () -> new ServerConfirmations(push, network::hasSession),
                 () -> WorldIdFile.of(server).loadOrCreate(),
-                () -> generatedTerrain(server));
+                () -> generatedTerrain(server),
+                () -> accounts);
         return new ServerLifecycle() {
             @Override public void tickEnd(MinecraftServer server) {
                 // 首刻建好本服务器的服务；之后每五分钟把归属记录的改动存一次盘，停服时再存一次。

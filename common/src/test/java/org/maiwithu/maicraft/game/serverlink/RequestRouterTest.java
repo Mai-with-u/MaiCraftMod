@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.serverlink;
 
+import org.maiwithu.maicraft.network.CharacterReachTolerance;
 import org.maiwithu.maicraft.network.ProtocolJson;
 import org.maiwithu.maicraft.network.ServerFeature;
 import org.maiwithu.maicraft.network.ServerProtocolDispatcher;
@@ -205,6 +206,7 @@ class RequestRouterTest {
         Boolean keepInventory;
         Boolean onlineMode;
         List<String> generatedTerrain;
+        List<ServerFeature> offeredFeatures = List.of();
 
         @Override public String dimension() { return "minecraft:overworld"; }
         @Override public long tick() { return 100; }
@@ -214,7 +216,7 @@ class RequestRouterTest {
         @Override public Boolean onlineMode() { return onlineMode; }
         @Override public List<String> generatedTerrain() { return generatedTerrain; }
         @Override public boolean mayMutate() { return true; }
-        @Override public List<ServerFeature> features() { return List.of(); }
+        @Override public List<ServerFeature> features() { return offeredFeatures; }
         @Override public JsonObject execute(String operationId, JsonObject body) { return new JsonObject(); }
     }
 
@@ -404,5 +406,37 @@ class RequestRouterTest {
         assertTrue(transport.sent.size() >= sentBefore);
         assertTrue(transport.sent.subList(sentBefore, transport.sent.size()).stream()
                 .noneMatch(envelope -> envelope.get("kind").getAsString().equals("hello")), "已经握好手的不重来");
+    }
+
+    @Test
+    void 角色距离容差随握手往返开启_旧服务端或移出名单时退回原版余量() {
+        var transport = new CapturingTransport();
+        transport.available = true;
+        var router = new RequestRouter(transport::available, envelope -> { transport.send(envelope); return true; },
+                () -> { }, Runnable::run, (ClientRequest request, Runnable send) -> true);
+        router.register(new ClientOperation(
+                CharacterReachTolerance.OPERATION, CharacterReachTolerance.VERSION, false));
+        router.bind(1, 1, "minecraft:overworld", 0, true, 0);
+        router.observe(0);
+        assertEquals(1.0, router.serverReachPadding(), "还没握手前按原版 1.0 格余量算");
+
+        // 新服务端声明支持 character.reach：握手完成后客户端切换到 2.0 格余量。
+        var upgraded = new ServerSide();
+        upgraded.offeredFeatures = List.of(new ServerFeature(
+                CharacterReachTolerance.OPERATION, CharacterReachTolerance.VERSION, false, true, new JsonObject()));
+        handshake(router, transport, upgraded, 1);
+        assertTrue(router.serverConfirmed());
+        assertEquals(2.0, router.serverReachPadding(), "握手确认后启用角色距离容差 2.0 格");
+
+        // 服主把账号移出名单：准入撤销后当场退回原版 1.0 格余量。
+        router.receive(admission(false), 1);
+        assertEquals(1.0, router.serverReachPadding(), "移出名单后退回原版 1.0 格余量");
+
+        // 换连未声明该能力的旧服务端：重新握手后自动退回原版 1.0 格余量。
+        router.bind(2, 2, "minecraft:overworld", 0, true, 2);
+        router.observe(2);
+        handshake(router, transport, new ServerSide(), 2);
+        assertTrue(router.serverConfirmed());
+        assertEquals(1.0, router.serverReachPadding(), "旧服务端未报能力时退回原版 1.0 格余量");
     }
 }

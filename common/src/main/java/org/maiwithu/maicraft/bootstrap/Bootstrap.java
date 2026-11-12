@@ -312,7 +312,8 @@ public final class Bootstrap {
             RenderedScreens renderedScreens = new RenderedScreens();
             ClientHooks.registerRenderedScreens(renderedScreens);
             menuActions = new DefaultMenuActions(playerControl.input(), renderedScreens);
-            interactionSender = new DefaultInteractionSender(menuActions);
+            interactionSender = new DefaultInteractionSender(menuActions,
+                    () -> session == null ? 1.0 : session.serverReachPadding());
             menuActions.attachSender(interactionSender);
             playerControl.attachInteractionEntries(interactionSender, menuActions);
             // 按住使用键的投影：持续使用的提交方接入前没有任务占用，投影读到的始终是真实键值。

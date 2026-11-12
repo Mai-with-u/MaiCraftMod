@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.game.interaction;
 
 import java.util.Objects;
 import java.util.function.BiFunction;
+import java.util.function.DoubleSupplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -27,6 +28,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.MenuVisibility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,6 +37,7 @@ public final class DefaultInteractionSender implements InteractionSender {
     private static final Logger LOG = LoggerFactory.getLogger(DefaultInteractionSender.class);
 
     private final MenuActions menuActions;
+    private final DoubleSupplier serverReachPadding;
 
     /** 当前正在等确认的动作；副手放置单独记录，与主动作并行等待。 */
     private PendingInteraction active;
@@ -50,7 +53,17 @@ public final class DefaultInteractionSender implements InteractionSender {
     private final MiningActions mining = new MiningActions(this);
 
     public DefaultInteractionSender(MenuActions menuActions) {
+        this(menuActions, () -> InteractionRange.VANILLA_SERVER_PADDING);
+    }
+
+    public DefaultInteractionSender(MenuActions menuActions, DoubleSupplier serverReachPadding) {
         this.menuActions = menuActions;
+        this.serverReachPadding = Objects.requireNonNull(serverReachPadding, "serverReachPadding");
+    }
+
+    @Override
+    public double serverReachPadding() {
+        return serverReachPadding.getAsDouble();
     }
 
     String diagnosticState() {
@@ -441,8 +454,12 @@ public final class DefaultInteractionSender implements InteractionSender {
                 PendingInteraction.Kind.INTERACT_ENTITY, context, confirmation, timeoutTicks);
         try {
             // 照原版准星右键的顺序：先带着点中的位置右键它（盔甲架穿脱装备只认这一下），
-            // 它不接再按普通右键实体（骑船、剪毛、挤奶、交易）。点中的位置从此刻的视线算，瞄哪里就点哪里。
+            // 它不接再按普通右键实体（骑船、剪毛、挤奶、交易）。出手前同步朝向包，确保服务端看到的朝向一致。
             LocalPlayer player = context.localPlayer();
+            if (player.connection != null) {
+                player.connection.send(new ServerboundMovePlayerPacket.Rot(
+                        player.getYRot(), player.getXRot(), player.onGround()));
+            }
             Vec3 clicked = FirstPersonInteractionTargeting.entityClickPoint(player.getEyePosition(),
                     player.getViewVector(1.0f), target.getBoundingBox().inflate(target.getPickRadius()));
             var result = gameMode(context).interactAt(player, target, new EntityHitResult(target, clicked), hand);
