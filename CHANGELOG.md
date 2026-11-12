@@ -8,6 +8,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 角色动了别人放的容器或方块时，`events` 的 `self` 流新增 `others_things_touched` 事件，在 `others_things` 里写明动作（`took` / `stored` / `broke` / `changed`）、放它的人与 UUID、方块及坐标、确认取放的物品件数或连拆格数，方便宿主知情回报。
 - 容器是谁的与开没开过分得清：`observe(scene).facilities`、`observe(detail)`、`observe(world_memory)` 的容器条目及 `use` 点开方块容器的结果细节统一带 `whose`（`natural_loot` 战利品容器 / `self` 自己放的 / `player` 别的玩家放的 / `no_record` 没有放置记录 / `unknown` 归属还没问到）、`last_modified_by`（仅 `player` 时）与 `opened_by_self`；Lootr 战利品矿车等实体在 `observe(scene).entities[].traits` 标明`"战利品容器": "是"`，`obtain` 与 `deposit` 报到的战利品容器名附`（自然生成的战利品容器）`。
 - `observe(what="places")`：只列按名字记的地点、建筑档案与机器档案名、圈过的地盘和自动记录分类条数，读记住的地点不用再拉整份世界记忆。
 - `observe(what="world_memory")` 新增 `radius` 与 `kind` 过滤，记录太多时按由近到远列到装得下为止并给出未列出的分类计数 `records_not_listed`，不再因回包过大整包失败。

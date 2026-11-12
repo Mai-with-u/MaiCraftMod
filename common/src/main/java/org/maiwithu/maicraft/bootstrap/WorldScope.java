@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
@@ -122,6 +123,8 @@ public final class WorldScope {
     private final PainfulBlocks pains;
     /** 这个世界的保护判断：能力挑方块、生存需求里要挖开的都问它，归属查询的在途请求只留一份。 */
     private final Protection protection;
+    /** 动了别人放的容器与方块时发事件告诉宿主：连拆同一个人的方块在这里攒段收口。 */
+    private final OthersThingsNotice othersNotice;
     /** 自家人：存储能不能用、被打要不要停工都按这一份。 */
     private final TrustedPlayers trusted;
     /** 方块归属按区块问服务端记下；角色走到哪先把周围问好。 */
@@ -238,6 +241,7 @@ public final class WorldScope {
         this.buildingArchives = new BuildingArchives(documents, identity.key());
         this.ownHome = new OwnHomeSnapshot(memory, buildingArchives, System.currentTimeMillis());
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
+        this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, events);
         this.dimension = minecraft.level.dimension().location().toString();
         installNavigationProtection();
         // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
@@ -253,36 +257,40 @@ public final class WorldScope {
         // 闲时看：读后看与闲看都从这个世界的场景来；开箱走原生交互与认得出的界面，配方页每次问登记表此刻有谁能翻。
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
                 compat::recipePages, instanceConfig.idleLooking());
-        // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份。
-        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
+        // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份；动了别人放的方块一并入账。
+        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions,
+                digTools, othersNotice);
         // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
-        // 依赖按领域用途分组传进去：当刻角色读端、物品事实、世界与观察、动手、走到与出行、
-        // 许可与保护、对外通道、存放位置，外加几样只属于一件事的接缝与实例配置。
         AbilityCatalog.create(new AbilityCatalog.Deps(
-                new CharacterReads(now,
-                        PlayerViews.backpack(now),
-                        LiveCarryReads.offhand(now),
-                        PlayerViews.hunger(now),
-                        PlayerViews.foods(now),
-                        PlayerViews.equipment(now),
-                        PlayerViews.effects(now),
-                        PlayerViews.gearFit(now),
-                        LiveCarryReads.characterPosition(now), suicideWayOut),
+                characterReads(now, suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
                 new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
-                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted),
-                new Channels(new ChatChannel(now),
-                        // 客户端刻号跟着所在世界走；没进世界读不到，按 0 兜底（只在读端内部量时长用）。
-                        () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
-                        events, timers, session, chatEvents),
+                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted, othersNotice),
+                channels(minecraft, now, events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig,
                 sparPartner),
                 abilities);
+    }
+
+    // 当刻角色全身读端按同一份角色供给者组装：背包、副手、饱食、口粮、装备、状态效果、合身度、坐标与寻死出路。
+    private static CharacterReads characterReads(Supplier<PlayerContext> now, SuicideWayOut suicideWayOut) {
+        return new CharacterReads(now, PlayerViews.backpack(now), LiveCarryReads.offhand(now),
+                PlayerViews.hunger(now), PlayerViews.foods(now), PlayerViews.equipment(now),
+                PlayerViews.effects(now), PlayerViews.gearFit(now),
+                LiveCarryReads.characterPosition(now), suicideWayOut);
+    }
+
+    // 对外通道：公屏聊天、世界刻号（没进世界按 0 兜底）、事件流、计时器、服务端会话与聊天事件流。
+    private static Channels channels(Minecraft minecraft, Supplier<PlayerContext> now, TaskEventSink events,
+            Timers timers, ServerLinkSession session, ChatEventLog chatEvents) {
+        return new Channels(new ChatChannel(now),
+                () -> minecraft.level == null ? 0 : minecraft.level.getGameTime(),
+                events, timers, session, chatEvents);
     }
 
     /**
@@ -397,13 +405,20 @@ public final class WorldScope {
         // 目标在推进时，LLM 排好的后几步点的还是开头看到的编号：到期时先看东西还在不在，还在就留着；
         // 没有目标在推进时到期就失效。
         scene.expire(gameTick, goalUnderway ? entry -> scene.seen().stillThere(current.level(), entry) : null);
+        othersNotice.flushDue(gameTick);
     }
 
-    /** 离开这个世界：寻路不再按这个世界的保护判断挖路、不再问它的障碍来源，记下的归属作废。 */
+    /** 离开这个世界：先冲刷还没发完的连拆账，再卸下寻路保护与障碍来源，记下的归属作废。 */
     public void leave() {
+        othersNotice.flushNow();
         NavigationProtection.installWorldRule(NavigationProtection.CellRule.NONE);
         NavigationObstacles.install(List.of());
         ownership.forgetAll();
+    }
+
+    /** 动了别人放的东西的通报器：每刻看连拆收段，目标收尾或暂停前也先冲刷它。 */
+    public OthersThingsNotice othersNotice() {
+        return othersNotice;
     }
 
     /** 世界记忆：宿主查询与能力共用的那份。 */

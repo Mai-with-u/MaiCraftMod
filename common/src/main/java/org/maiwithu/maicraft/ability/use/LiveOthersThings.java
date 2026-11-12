@@ -24,6 +24,7 @@ import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -41,12 +42,19 @@ final class LiveOthersThings implements UseSeams.OthersThings {
     private final Supplier<PlayerContext> context;
     private final Supplier<Protection> protection;
     private final ReadsCreatureSituation creatures;
+    private final OthersThingsNotice othersNotice;
 
     LiveOthersThings(Supplier<PlayerContext> context, Supplier<Protection> protection,
             ReadsCreatureSituation creatures) {
+        this(context, protection, creatures, OthersThingsNotice.NONE);
+    }
+
+    LiveOthersThings(Supplier<PlayerContext> context, Supplier<Protection> protection,
+            ReadsCreatureSituation creatures, OthersThingsNotice othersNotice) {
         this.context = Objects.requireNonNull(context, "context");
         this.protection = Objects.requireNonNull(protection, "protection");
         this.creatures = Objects.requireNonNull(creatures, "creatures");
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
     }
 
     @Override
@@ -120,6 +128,24 @@ final class LiveOthersThings implements UseSeams.OthersThings {
             return new ContainerWhose(ContainerWhose.Kind.UNKNOWN, null, openedBefore);
         }
         return ContainerWhose.of(cellOf(target), naturalLoot, protection.get(), openedBefore);
+    }
+
+    @Override
+    public Runnable prepareWorldChangeNotice(String heldItem, ResolvedTarget target) {
+        if (target == null || target.isEntity() || !changesWorld(heldItem, target)) {
+            return () -> {};
+        }
+        String block = blockId(target);
+        if (block == null) return () -> {};
+        var snapshot = othersNotice.snapshotBlock(cellOf(target), block);
+        if (snapshot.isEmpty()) return () -> {};
+        boolean[] fired = {false};
+        return () -> {
+            if (!fired[0]) {
+                fired[0] = true;
+                othersNotice.blockChanged(snapshot.get());
+            }
+        };
     }
 
     // 目标格带上这一刻所在的维度：认家、问归属都按维度比，下界里和主世界家坐标重叠的格子不当成家。

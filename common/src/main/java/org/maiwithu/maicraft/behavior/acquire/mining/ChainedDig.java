@@ -1,20 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.phys.BlockHitResult;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.ChainKeyHold;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.BlockGone;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -54,6 +60,9 @@ final class ChainedDig implements TellsToolUse {
     private final List<BreakAccelerator> accelerators;
     private final BlockBreaking digging;
     private final Cells cells;
+    private final OthersThingsNotice othersNotice;
+    /** 开挖前趁整批副格还在世界里抄下的归属快照：等副格消失结算时把确认挖掉的格入账。 */
+    private final Map<BlockPos, OthersThingsNotice.BlockOwner> batchOwners = new LinkedHashMap<>();
     private Stage stage = Stage.DIG;
     /** 这一轮开出来的连锁键；不连锁（没装、答了只挖这一格）时为空。 */
     private ChainKeyHold hold;
@@ -74,12 +83,19 @@ final class ChainedDig implements TellsToolUse {
 
     ChainedDig(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak,
             List<BreakAccelerator> accelerators, BlockBreaking digging, Cells cells) {
+        this(trigger, face, shape, mayBreak, accelerators, digging, cells, OthersThingsNotice.NONE);
+    }
+
+    ChainedDig(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak,
+            List<BreakAccelerator> accelerators, BlockBreaking digging, Cells cells,
+            OthersThingsNotice othersNotice) {
         this.trigger = trigger.immutable();
         this.shape = Objects.requireNonNull(shape, "shape");
         this.mayBreak = Objects.requireNonNull(mayBreak, "mayBreak");
         this.accelerators = List.copyOf(accelerators);
         this.digging = Objects.requireNonNull(digging, "digging");
         this.cells = Objects.requireNonNull(cells, "cells");
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
         this.faceRequired = face != null;
         digging.aimAt(this.trigger);
         digging.fromFace(face);
@@ -154,6 +170,7 @@ final class ChainedDig implements TellsToolUse {
     private ActionStatus settle(TickContext context) {
         boolean allGone = batch.stream().allMatch(cell -> cells.gone(context, cell));
         if (!allGone && context.gameTick() < settleUntil) return ActionStatus.running();
+        reportBrokenBatch(context);
         stage = Stage.RELEASE;
         return released();
     }
@@ -193,6 +210,7 @@ final class ChainedDig implements TellsToolUse {
         }
         if (readiness instanceof ChainKeyHold.Readiness.Chain chain) {
             batch = chain.batch();
+            snapshotBatchOwners();
             // 连没连锁、为什么没连，结果里看不出来：记一行，实机对得上屏幕上 FTB 面板跳没跳。
             LOG.info("[连锁挖] {}：按住连锁键，一批 {} 格", trigger.toShortString(), batch.size());
             return true;
@@ -221,8 +239,33 @@ final class ChainedDig implements TellsToolUse {
         hold = null;
         holdOpened = false;
         batch = List.of();
+        batchOwners.clear();
         droppingChain = false;
         if (stage == Stage.SETTLE || stage == Stage.RELEASE) stage = Stage.DIG;
+    }
+
+    // 趁第一下挥下去之前整批方块还在世界里，把其中别人放的副格先抄下归属快照。
+    private void snapshotBatchOwners() {
+        batchOwners.clear();
+        if (current == null || current.level() == null) return;
+        String dimension = current.level().dimension().location().toString();
+        for (BlockPos cell : batch) {
+            if (BlockGone.gone(current.level(), cell)) continue;
+            String blockId = BuiltInRegistries.BLOCK.getKey(current.level().getBlockState(cell).getBlock()).toString();
+            WorldPosition at = new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), dimension);
+            othersNotice.snapshotBlock(at, blockId).ifPresent(owner -> batchOwners.put(cell.immutable(), owner));
+        }
+    }
+
+    // 副格等同步收口时，只把真已经从世界里消失的那几格报进连拆账（触发格与副格由通报器按坐标去重）。
+    private void reportBrokenBatch(TickContext context) {
+        if (batchOwners.isEmpty()) return;
+        batchOwners.forEach((cell, owner) -> {
+            if (cells.gone(context, cell)) {
+                othersNotice.blockBroken(owner, context.gameTick());
+            }
+        });
+        batchOwners.clear();
     }
 
     @Override public Interruptibility interruptibility() {

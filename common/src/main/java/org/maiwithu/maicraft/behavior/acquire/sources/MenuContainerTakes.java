@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire.sources;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -26,6 +27,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuTakeRound;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ContainerFeeds;
@@ -69,6 +71,8 @@ public final class MenuContainerTakes implements ContainerTakes {
     private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
     /** 这只容器是不是在给机器供料（进料箱、补料箱）：是的话每样最多拿走一半，给机器留着。 */
     private final Predicate<BlockPos> feedsMachine;
+    /** 动了别人放的容器时发事件告诉宿主；饿急了拿口粮的那一条仍走饿急通报，不重复发。 */
+    private final OthersThingsNotice othersNotice;
     /** 机器料箱里每种东西见过最满的时候有几件（按维度、位置、要的东西记）：留一半按它算，不按这一回剩的算。 */
     private final Map<String, Integer> fullestFeeders = new HashMap<>();
 
@@ -77,7 +81,17 @@ public final class MenuContainerTakes implements ContainerTakes {
      */
     public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
             WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts) {
-        this(tags, memory, contexts, clientOpenings(close, interactions, contexts, layouts));
+        this(close, interactions, tags, memory, contexts, layouts, OthersThingsNotice.NONE);
+    }
+
+    /** 生产接入动别人东西的通报器：确认从别人放的容器里拿走了东西时合发一条事件。 */
+    public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
+            WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts,
+            OthersThingsNotice othersNotice) {
+        this(tags, memory, contexts, clientOpenings(close, interactions, contexts, layouts), at -> {
+            PlayerContext player = contexts.get();
+            return player != null && player.level() != null && ContainerFeeds.feedsAutomation(player.level(), at);
+        }, othersNotice);
     }
 
     /** 打开箱子的动作由调用方给：生产走靠近与右键点开，测试换成替身箱子。 */
@@ -86,17 +100,25 @@ public final class MenuContainerTakes implements ContainerTakes {
         this(tags, memory, contexts, openings, at -> {
             PlayerContext player = contexts.get();
             return player != null && player.level() != null && ContainerFeeds.feedsAutomation(player.level(), at);
-        });
+        }, OthersThingsNotice.NONE);
     }
 
     /** 供料判断也由调用方给：测试换成替身。 */
     MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine) {
+        this(tags, memory, contexts, openings, feedsMachine, OthersThingsNotice.NONE);
+    }
+
+    /** 全参入口：测试可同时替掉打开动作、供料判断与动别人东西通报器。 */
+    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+            BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine,
+            OthersThingsNotice othersNotice) {
         this.tags = Objects.requireNonNull(tags, "tags");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.contexts = Objects.requireNonNull(contexts, "contexts");
         this.openings = Objects.requireNonNull(openings, "openings");
         this.feedsMachine = Objects.requireNonNull(feedsMachine, "feedsMachine");
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
     }
 
     // 生产的打开方式：走到够得着的地方、右键点开、认领并等同步；走过去能动多少地形按这次任务的许可来。
@@ -134,6 +156,11 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int waited;
         /** 机器料箱只剩一半、一样没拿时的说明：关上界面后以它收场；别的情况为 null。 */
         private Problem held;
+        /** 开箱第一份读数里匹配本次请求的各物品件数与显示名，以及最新确认过的容器读数：收尾时据此合算一次开箱拿走了什么。 */
+        private Map<String, Integer> initialMatchedCounts;
+        private final Map<String, String> matchedNames = new HashMap<>();
+        private MenuContent.Reading latestReading;
+        private boolean othersReported;
 
         TakeAction(KnownContainer container, List<ItemRequest> requests, Permissions permissions) {
             this.container = container;
@@ -223,11 +250,14 @@ public final class MenuContainerTakes implements ContainerTakes {
             if (menu != null) menu.abandon();
         }
 
-        // 收尾：打开动作一并收尾；一轮还没收场的，先撒手（点出去的那几下交回没能确认）再请游戏关上界面。
+        // 收尾：打开动作一并收尾；一轮还没收场的，先撒手（点出去的那几下交回没能确认）、结算已确认拿走的部分，再请游戏关上界面。
         @Override
         public void close() {
             opening.close();
-            if (round != null) round.close(true);
+            if (round != null) {
+                round.close(true);
+                reportOthersTook();
+            }
         }
 
         @Override
@@ -258,9 +288,12 @@ public final class MenuContainerTakes implements ContainerTakes {
 
             @Override
             public void rememberBeforeClose(Optional<MenuContent.Reading> lastReading) {
+                lastReading.ifPresent(reading -> latestReading = reading);
                 lastReading.ifPresent(MenuContainerTakes.TakeAction.this::rememberContents);
                 // 从不是自己放的箱子按饿急通报拿的：关箱前按箱里确认少了几件报回去，由发起的一方发事件告诉宿主。
                 lastReading.ifPresent(reading -> wants.forEach(want -> want.reportTaken(reading)));
+                // 普通取货动了别人放的容器时，一次开箱合发一条 others_things_touched；饿急通报走原有事件不重发。
+                reportOthersTook();
             }
 
             @Override
@@ -323,6 +356,8 @@ public final class MenuContainerTakes implements ContainerTakes {
 
             @Override
             public void firstReading(MenuContent.Reading reading) {
+                recordInitialMatched(reading);
+                latestReading = reading;
                 StarvingFoodReport report = request.foodReport();
                 // 绑了饿急通报的箱子（不是自己放的）：先挑箱里第一样通报认的东西，只拿它；一样认的都没有就一件不拿。
                 if (report.bound()) pickReportedItem(reading, report);
@@ -357,6 +392,7 @@ public final class MenuContainerTakes implements ContainerTakes {
 
             @Override
             public int stillNeeded(MenuContent.Reading reading) {
+                latestReading = reading;
                 return Math.min(request.count(), allowance) - (startTotal - matchedTotal(reading, matcher()));
             }
 
@@ -374,6 +410,54 @@ public final class MenuContainerTakes implements ContainerTakes {
             public boolean settleAfterDiverge() {
                 return false;
             }
+        }
+
+        // 第一份读数来时记下容器里匹配本次请求的各物品初始总数与可读名字，后面按它与关箱读数的差核实拿走了几件。
+        private void recordInitialMatched(MenuContent.Reading reading) {
+            if (initialMatchedCounts != null) return;
+            initialMatchedCounts = new LinkedHashMap<>();
+            for (SlotSnapshot snapshot : reading.containerSnapshots()) {
+                if (snapshot.isEmpty() || !matchesAnyWant(snapshot)) continue;
+                String itemId = itemIdOf(snapshot);
+                initialMatchedCounts.merge(itemId, snapshot.count(), Integer::sum);
+                matchedNames.putIfAbsent(itemId, snapshot.stack().getHoverName().getString());
+            }
+        }
+
+        private boolean matchesAnyWant(SlotSnapshot snapshot) {
+            for (ContainerWant want : wants) {
+                if (matches(snapshot, want.request())) return true;
+            }
+            return false;
+        }
+
+        // 一次开箱只报一条：核算出容器侧确认少掉的各物品件数，交给通报器对别人放的容器发事件；饿急通报走原有事件不重发。
+        private void reportOthersTook() {
+            if (othersReported || initialMatchedCounts == null || latestReading == null) return;
+            othersReported = true;
+            for (ContainerWant want : wants) {
+                if (want.request().foodReport().bound()) return;
+            }
+            Map<String, Integer> remaining = new HashMap<>();
+            for (SlotSnapshot snapshot : latestReading.containerSnapshots()) {
+                if (snapshot.isEmpty()) continue;
+                remaining.merge(itemIdOf(snapshot), snapshot.count(), Integer::sum);
+            }
+            List<OthersThingsNotice.MovedItem> taken = new ArrayList<>();
+            initialMatchedCounts.forEach((itemId, before) -> {
+                int delta = before - remaining.getOrDefault(itemId, 0);
+                if (delta > 0) {
+                    taken.add(new OthersThingsNotice.MovedItem(itemId, matchedNames.get(itemId), delta));
+                }
+            });
+            if (taken.isEmpty()) return;
+            PlayerContext current = contexts.get();
+            ClientLevel level = current == null ? null : current.level();
+            WorldPosition position = level == null ? container.at()
+                    : new WorldPosition(at.getX(), at.getY(), at.getZ(), level.dimension().location().toString());
+            String blockType = level == null ? container.blockTypeId()
+                    : BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
+            othersNotice.containerTook(position, blockType, taken);
         }
     }
 }

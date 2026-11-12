@@ -260,6 +260,14 @@ final class UseSeams {
             }
             return new ContainerWhose(ContainerWhose.Kind.UNKNOWN, null, openedBefore);
         }
+
+        /**
+         * 出手前目标方块还在原位时，若这一下属于会改动方块的用法，就先抄下它是不是其他玩家放的；
+         * 交互确认生效时调用返回的回调发出一条 others_things_touched（action=changed）事件。
+         */
+        default Runnable prepareWorldChangeNotice(String heldItem, ResolvedTarget target) {
+            return () -> {};
+        }
     }
 
     /** 看看点开的界面：等内容同步完、列出里面有什么、再关上；打开者负责关闭。 */

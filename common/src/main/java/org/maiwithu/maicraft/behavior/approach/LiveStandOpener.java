@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.BlockDigger;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -63,9 +64,16 @@ final class LiveStandOpener implements StandOpener {
 
     /** 挖遮挡之前拿哪件工具：和挖格同一份挑工具。 */
     private final DigToolRule tools;
+    private final OthersThingsNotice othersNotice;
 
     LiveStandOpener(Supplier<PlayerContext> context, PermissionCheck permission, Permissions permissions,
                     ReachRules reach, WalkTo walks, TerrainPermit permit, ProtectedCells guarded, DigToolRule tools) {
+        this(context, permission, permissions, reach, walks, permit, guarded, tools, OthersThingsNotice.NONE);
+    }
+
+    LiveStandOpener(Supplier<PlayerContext> context, PermissionCheck permission, Permissions permissions,
+                    ReachRules reach, WalkTo walks, TerrainPermit permit, ProtectedCells guarded, DigToolRule tools,
+                    OthersThingsNotice othersNotice) {
         this.tools = Objects.requireNonNull(tools, "tools");
         this.context = Objects.requireNonNull(context, "context");
         this.permission = Objects.requireNonNull(permission, "permission");
@@ -74,6 +82,7 @@ final class LiveStandOpener implements StandOpener {
         this.walks = Objects.requireNonNull(walks, "walks");
         this.permit = Objects.requireNonNull(permit, "permit");
         this.guarded = Objects.requireNonNull(guarded, "guarded");
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
     }
 
     @Override
@@ -177,6 +186,8 @@ final class LiveStandOpener implements StandOpener {
         private int noShotTicks;
         private BlockDigger digger;
         private PlayerContext last;
+        private BlockPos watchedCell;
+        private OthersThingsNotice.BlockOwner watchedOwner;
 
         ClearSight(BlockPos feet, List<BlockPos> cells, String what) {
             this.feet = feet;
@@ -202,17 +213,33 @@ final class LiveStandOpener implements StandOpener {
                 digger = new BlockDigger(player.localPlayer(), player.interactionSender(), player.menuActions(),
                         player.input(), tools);
             }
-            return switch (digger.digTargetStep(player, cells.get(index))) {
+            BlockPos targetCell = cells.get(index);
+            snapshotOwner(player, targetCell);
+            return switch (digger.digTargetStep(player, targetCell)) {
                 case BROKE_TARGET, BROKE_OCCLUDER -> {
                     noShotTicks = 0;
+                    if (watchedOwner != null) {
+                        othersNotice.blockBroken(watchedOwner, tick.gameTick());
+                        watchedOwner = null;
+                    }
+                    watchedCell = null;
                     yield ActionStatus.progressed();
                 }
                 case NO_SHOT, NO_ROOM, MISSING_TOOL -> ++noShotTicks > NO_SHOT_LIMIT_TICKS
                         ? ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
-                        "站到 " + feet.toShortString() + " 后打不着要挖开的 " + cells.get(index).toShortString()))
+                        "站到 " + feet.toShortString() + " 后打不着要挖开的 " + targetCell.toShortString()))
                         : ActionStatus.running();
                 case PROGRESSING -> ActionStatus.running();
             };
+        }
+
+        private void snapshotOwner(PlayerContext player, BlockPos cell) {
+            if (player == null || player.level() == null || cell.equals(watchedCell) || cleared(player, cell)) return;
+            watchedCell = cell;
+            String blockId = BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(cell).getBlock()).toString();
+            WorldPosition at = new WorldPosition(cell.getX(), cell.getY(), cell.getZ(),
+                    player.level().dimension().location().toString());
+            watchedOwner = othersNotice.snapshotBlock(at, blockId).orElse(null);
         }
 
         private boolean cleared(PlayerContext player, BlockPos cell) {

@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.Direction;
 
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -110,6 +111,17 @@ public final class UseModule implements AbilityModule {
             ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
             FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings) {
+        return live(context, interactions, close, toMainhand, needs, scene, scans, refusals, walks, confirmations,
+                memory, protection, creatures, space, facilities, sneak, layouts, diggings, OthersThingsNotice.NONE);
+    }
+
+    /** 生产接入动别人东西的通报器：改动别人放的方块确认生效后发一条事件告诉宿主。 */
+    public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
+            ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
+            ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
+            Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
+            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings,
+            OthersThingsNotice othersNotice) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
                 new LiveUseInteractions(interactions, context),
@@ -136,7 +148,7 @@ public final class UseModule implements AbilityModule {
                 new LiveUseTravel(walks),
                 new LiveMenuLooks(context, layouts),
                 memory,
-                new LiveOthersThings(context, protection, creatures),
+                new LiveOthersThings(context, protection, creatures, othersNotice),
                 space,
                 facilities,
                 sneak,

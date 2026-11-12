@@ -607,7 +607,7 @@ public final class Bootstrap {
                         abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
                         compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
                         dropConfirmations,
-                        taskEvents, lightLevels, lightingWorld, followLighting, timers, chatEvents,
+                        ActionScopedEventSink.of(taskEvents, () -> goals), lightLevels, lightingWorld, followLighting, timers, chatEvents,
                         new UnreachableFromHere(this::mainGoalRun), NonverbalExchange.live(() -> nonverbal, lookBack),
                         sparPartner);
                 worldScope[0] = scope;
@@ -619,7 +619,7 @@ public final class Bootstrap {
                 // 全部恢复为暂停，等 LLM 决定接不接着做。读回时的暂停事件进的是新的这条流。
                 taskEvents.restart();
                 publishingGoalRuns = new EventPublishingGoalRunStore(
-                        new SettlesReservations(new NotesGoalGains(scope.goalRuns(), itemsInUse), reserved),
+                        new SettlesReservations(new NotesGoalGains(ActionScopedEventSink.flushing(scope, scope.goalRuns()), itemsInUse), reserved),
                         taskEvents, selfBriefs, readySteps);
                 goals.enterWorld(scope.memory(), publishingGoalRuns);
                 // 认出了世界：挂着读聊天的也当场返回，带上这个世界（任务事件流上面换了新流，已经叫醒）。

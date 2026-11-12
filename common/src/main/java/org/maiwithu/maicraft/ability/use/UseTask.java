@@ -66,6 +66,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     /** 这一下会改动别人放在角色家里的那一格时，回报里补的归属半句；不是为空串。 */
     /** 动过的这格最后由谁放下：收场时写进说明，主播看得出动的是谁的东西；归属没问到为空串。 */
     private String othersAtHome = "";
+    /** 出手前趁原方块还在冻结好的改动通报：确认生效时触发一次，连点同一格不重复报。 */
+    private Runnable worldChangeNotice = () -> {};
     /** 要走去加载出来的那一片。 */
     private WorldPosition travelTo;
     private boolean travelled;
@@ -149,6 +151,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         String modifiedBy = others == null ? null : others.lastModifiedBy(target);
         othersAtHome = others != null && others.changesWorld(input.item(), target) && modifiedBy != null
                 ? "最后由 " + modifiedBy + " 放下" : "";
+        worldChangeNotice = others == null ? () -> {} : others.prepareWorldChangeNotice(input.item(), target);
         if (target.isEntity()) {
             if (services.world().riding(target.entityId())) {
                 riding = target.typeId();
@@ -415,6 +418,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 // 写字时点开编辑界面只是第一步，字写上去才算这一次做成。
                 if (!input.writesText()) {
                     appliedTimes++;
+                    worldChangeNotice.run();
                     UseChanges.recordApplied(this::recordChange, services.world(), target, interaction, result);
                     rememberPlacedFacility();
                 }
@@ -423,6 +427,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             case UseDecider.Settlement.Unexpected unexpected -> {
                 gameMessages.addAll(chatMessages);
                 appliedTimes++;
+                worldChangeNotice.run();
                 recordChange(new Change(target != null && target.isEntity() ? Change.Kind.ENTITY_AFFECTED
                         : Change.Kind.BLOCK_CHANGED, describeWhat(), 1, "交互生效了，现场出乎预料：" + unexpected.scene()));
                 yield Next.done(TaskResult.done("确认生效了 " + appliedTimes + " 次；最后这一下现场出乎预料："
@@ -469,6 +474,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Next<Phase> signWritten() {
         WriteSign.Written written = writing.written().orElseThrow();
         appliedTimes++;
+        worldChangeNotice.run();
         signLines = written.lines();
         recordChange(new Change(Change.Kind.BLOCK_CHANGED, describeWhat(), 1,
                 "告示牌写上了字：" + String.join(" / ", signLines)));

@@ -11,6 +11,7 @@ import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockGone;
@@ -33,15 +34,23 @@ public final class LiveBlockDigging implements DigsBlocks {
 
     private final Supplier<BlockBreaking> diggings;
     private final List<BreakAccelerator> accelerators;
+    private final OthersThingsNotice othersNotice;
 
     public LiveBlockDigging(Supplier<BlockBreaking> diggings) {
-        this(diggings, List.of());
+        this(diggings, List.of(), OthersThingsNotice.NONE);
     }
 
     /** @param accelerators 联动的挖掘加速（连锁挖）；没装时为空表，连锁挖一格就是普通地挖 */
     public LiveBlockDigging(Supplier<BlockBreaking> diggings, List<BreakAccelerator> accelerators) {
+        this(diggings, accelerators, OthersThingsNotice.NONE);
+    }
+
+    /** 生产接入动别人东西的通报器：连锁挖掉的别人副格在收口时一并记进连拆账。 */
+    public LiveBlockDigging(Supplier<BlockBreaking> diggings, List<BreakAccelerator> accelerators,
+            OthersThingsNotice othersNotice) {
         this.diggings = diggings;
         this.accelerators = List.copyOf(accelerators);
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
     }
 
     @Override
@@ -73,7 +82,7 @@ public final class LiveBlockDigging implements DigsBlocks {
         digging.wantsDrop(prep.wantsDrop());
         digging.digTool(prep.digTool());
         return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, digging,
-                (context, cell) -> gone(context.player(), cell)));
+                (context, cell) -> gone(context.player(), cell), othersNotice));
     }
 
     @Override
@@ -91,7 +100,7 @@ public final class LiveBlockDigging implements DigsBlocks {
         // 没有连锁挖的模组：普通地挖这一格，不挑面（只挖一格时哪面看得见挖哪面）。
         if (accelerators.isEmpty()) return dig(trigger);
         return Optional.of(new ChainedDig(trigger, face, shape, mayBreak, accelerators, diggings.get(),
-                (context, cell) -> gone(context.player(), cell)));
+                (context, cell) -> gone(context.player(), cell), othersNotice));
     }
 
     @Override

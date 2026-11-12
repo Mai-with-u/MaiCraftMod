@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
@@ -33,6 +34,7 @@ public final class LiveApproaches implements BringsPlayerClose {
     private final PermissionCheck permission;
     private final DigToolRule tools;
     private final UnreachableFromHere unreachable;
+    private final OthersThingsNotice othersNotice;
 
     /**
      * @param tools       站位补救挖遮挡时拿哪件工具
@@ -40,12 +42,20 @@ public final class LiveApproaches implements BringsPlayerClose {
      */
     public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
                           PermissionCheck permission, DigToolRule tools, UnreachableFromHere unreachable) {
+        this(context, world, walks, permission, tools, unreachable, OthersThingsNotice.NONE);
+    }
+
+    /** 生产接入动别人东西的通报器：站位补救顺手拆掉别人放的遮挡格时一并记进连拆账。 */
+    public LiveApproaches(Supplier<PlayerContext> context, ApproachWorldView world, WalkTo walks,
+                          PermissionCheck permission, DigToolRule tools, UnreachableFromHere unreachable,
+                          OthersThingsNotice othersNotice) {
         this.tools = Objects.requireNonNull(tools, "tools");
         this.unreachable = Objects.requireNonNull(unreachable, "unreachable");
         this.context = Objects.requireNonNull(context, "context");
         this.world = Objects.requireNonNull(world, "world");
         this.walks = Objects.requireNonNull(walks, "walks");
         this.permission = Objects.requireNonNull(permission, "permission");
+        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
     }
 
     @Override
@@ -70,7 +80,8 @@ public final class LiveApproaches implements BringsPlayerClose {
         // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
         ReachRules reach = reachNow();
         TerrainPermit permit = TerrainPermit.of(permissions);
-        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools);
+        StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools,
+                othersNotice);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
                 avoid, walks, permit, opener, permissions, records, unreachable);
     }

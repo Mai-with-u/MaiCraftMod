@@ -304,7 +304,7 @@ public final class AbilityCatalog {
         PermissionCheck permission = new PermissionCheck(deps.guards().protection(), deps.guards().creatures());
         LiveApproaches bringsClose = new LiveApproaches(deps.character().context(),
                 new LiveApproachWorld(deps.character().context()), deps.travel().walks(), permission,
-                deps.hands().digTools(), deps.travel().unreachable());
+                deps.hands().digTools(), deps.travel().unreachable(), deps.guards().othersNotice());
         // 换手读端提前建好：用东西的备手、进食的换手、装备的穿卸共用同一套界面搬运。
         ClientMovesToMainhand toMainhand = new ClientMovesToMainhand(deps.character().context());
         // 拿到物品引擎的内需入口先建好：用东西缺了要用的东西去拿一件、来源备料缺原料缺工具，都回到同一个引擎，
@@ -327,8 +327,8 @@ public final class AbilityCatalog {
         // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
         // 现做工具包在外面：挖楼梯、清障、采掘带着这一趟的规模挖时，身上没有对路的工具、划算又有料就先做一把。
         DigsBlocks digging = new ToolFirstDigging(new LiveBlockDigging(deps.hands().digging(),
-                deps.compat().breakAccelerators(playerServices)), deps.hands().digTools(), innerNeeds, deps.kept(),
-                deps.items().itemTags());
+                deps.compat().breakAccelerators(playerServices), deps.guards().othersNotice()), deps.hands().digTools(),
+                innerNeeds, deps.kept(), deps.items().itemTags());
         ClientDropPickup drops = new ClientDropPickup(deps.character().context(), deps.travel().walks(),
                 deps.dropConfirmations());
         ClientCollectsBlocks collects = new ClientCollectsBlocks(bringsClose, digging, drops);
@@ -342,7 +342,7 @@ public final class AbilityCatalog {
         StoresInContainer.Parts storing = new StoresInContainer.Parts(
                 (at, permissions) -> new ClientMenuOpening(at, permissions, deps.compat().menuLayouts(),
                         bringsClose, deps.hands().interactions(), deps.character().context()),
-                deps.world().memory());
+                deps.world().memory(), deps.guards().othersNotice());
         // 腾地方：合并散堆、存进容器、存网络三条路都接上了，存进容器用的是存东西能力同一份现场部件；
         // 腾背包不替玩家往地上扔东西，丢弃只有丢弃能力（drop）走。装备与拿东西在背包要满时先按它腾。
         // 随身背包的接缝留给随身背包的联动模组。身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
@@ -377,7 +377,8 @@ public final class AbilityCatalog {
                         deps.guards().protection(), deps.world().facilities()),
                 deps.items().itemTags(), deps.guards().protection(),
                 new MenuContainerTakes(shared.bringClose(), deps.hands().interactions(), deps.items().itemTags(),
-                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts()));
+                        deps.world().memory(), deps.character().context(), deps.compat().menuLayouts(),
+                        deps.guards().othersNotice()));
     }
 
     /**
@@ -725,7 +726,7 @@ public final class AbilityCatalog {
                 deps.dropConfirmations(), deps.world().memory(), deps.guards()::protection,
                 deps.guards().creatures(), space, deps.world().facilities(),
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.compat().menuLayouts(),
-                deps.hands().digging());
+                deps.hands().digging(), deps.guards().othersNotice());
     }
 
     /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */

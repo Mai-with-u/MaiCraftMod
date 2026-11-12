@@ -2,6 +2,8 @@
 package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -12,6 +14,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -43,13 +46,19 @@ public final class StoresInContainer implements Action {
     /**
      * 存放要用的现场部件：存东西能力与腾地方共用一份。
      *
-     * @param opens  打开一只容器
-     * @param memory 世界记忆：存完把容器里有什么记下来，取东西时按它找箱子；没接上为 null
+     * @param opens        打开一只容器
+     * @param memory       世界记忆：存完把容器里有什么记下来，取东西时按它找箱子；没接上为 null
+     * @param othersNotice 往别人放的容器存进东西后发事件告诉宿主；没接上用空实现
      */
-    public record Parts(OpensContainer opens, WorldMemory memory) {
+    public record Parts(OpensContainer opens, WorldMemory memory, OthersThingsNotice othersNotice) {
+
+        public Parts(OpensContainer opens, WorldMemory memory) {
+            this(opens, memory, OthersThingsNotice.NONE);
+        }
 
         public Parts {
             Objects.requireNonNull(opens, "opens");
+            othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
         }
     }
 
@@ -84,6 +93,9 @@ public final class StoresInContainer implements Action {
     private final Ledger ledger;
     private final Permissions permissions;
     private final Parts parts;
+    /** 这一趟往这只容器里两侧确认存进去的各物品总件数：收尾时只发一条事件。 */
+    private final Map<String, Integer> confirmedStored = new LinkedHashMap<>();
+    private boolean othersReported;
 
     private Stage stage = Stage.OPEN;
     private MenuOpening opening;
@@ -139,7 +151,7 @@ public final class StoresInContainer implements Action {
         return switch (opening.tick(context)) {
             case ActionStatus.Running running -> running;
             case ActionStatus.Done done -> {
-                transfer = new ContainerTransfer(opening.opened().orElseThrow(), order, ledger, carryOver);
+                transfer = new ContainerTransfer(opening.opened().orElseThrow(), order, countingLedger(), carryOver);
                 carryOver = null;
                 stage = Stage.TRANSFER;
                 yield ActionStatus.progressed();
@@ -201,7 +213,33 @@ public final class StoresInContainer implements Action {
 
     private ActionStatus finish(ActionStatus ending) {
         stage = Stage.FINISHED;
+        reportOthersStored();
         return ending;
+    }
+
+    // 包装外部记账口：每笔容器两侧确认存入的件数同步记一份，收尾时按这只容器一次合发事件。
+    private Ledger countingLedger() {
+        return new Ledger() {
+            @Override public int left(String itemId) { return ledger.left(itemId); }
+            @Override public void passedThrough(String itemId, int amount, String fact) {
+                ledger.passedThrough(itemId, amount, fact);
+            }
+            @Override public void stored(String itemId, int amount) {
+                ledger.stored(itemId, amount);
+                if (amount > 0) confirmedStored.merge(itemId, amount, Integer::sum);
+            }
+            @Override public void unconfirmed(String fact) { ledger.unconfirmed(fact); }
+            @Override public void attempt(String tried, String whatHappened) { ledger.attempt(tried, whatHappened); }
+        };
+    }
+
+    private void reportOthersStored() {
+        if (othersReported || confirmedStored.isEmpty()) return;
+        othersReported = true;
+        List<OthersThingsNotice.MovedItem> items = new ArrayList<>(confirmedStored.size());
+        confirmedStored.forEach((itemId, count) ->
+                items.add(new OthersThingsNotice.MovedItem(itemId, null, count)));
+        parts.othersNotice().containerStored(container.at(), container.blockTypeId(), items);
     }
 
     // 上一趟没结算的那一笔补不上了：照实记进没能确认。
@@ -245,6 +283,7 @@ public final class StoresInContainer implements Action {
             case FINISHED -> { }
         }
         stage = Stage.FINISHED;
+        reportOthersStored();
     }
 
     @Override
