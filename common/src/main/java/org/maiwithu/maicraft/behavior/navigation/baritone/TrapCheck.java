@@ -23,6 +23,10 @@ final class TrapCheck {
     static final int HEIGHT = 12;
     /** 封死的一片站得住的格子不到这么多，就算小坑，见不见得到天都算困住。 */
     static final int SMALL_POCKET = 24;
+    /** 嵌在地面以下 2～4 格深的露天凹坑（苦力怕连环坑、挖出的浅坑）最多认到这么大；再大按地形盆地处理。 */
+    static final int SUNKEN_PIT_LIMIT = 96;
+    private static final int MIN_PIT_DEPTH = 2;
+    private static final int MAX_PIT_DEPTH = 4;
     /** 铺到这么多格还没铺完，说明是一大片，按出得去处理。 */
     private static final int MAX_VISITED = 6000;
 
@@ -89,7 +93,55 @@ final class TrapCheck {
                 }
             }
         }
-        return seen.size() < SMALL_POCKET || !sawSky ? seen : null;
+        if (seen.size() < SMALL_POCKET || !sawSky) return seen;
+        // 露天但面积偏大的苦力怕连环坑或浅采石坑：四周大部分边界都嵌在比坑底高 2～4 格的地面以下时照算被困，区别于平地围墙院子。
+        return seen.size() < SUNKEN_PIT_LIMIT && sunkenInGround(cells, seen) ? seen : null;
+    }
+
+    // 区分嵌在地面以下 2～4 格深的凹坑与平地上的围墙院子：坑边往外看不仅紧邻处高 2～4 格，再往外延伸两格仍是高处实地。
+    private static boolean sunkenInGround(Cells cells, LongSet seen) {
+        LongSet columns = new LongOpenHashSet(seen.size());
+        for (long packed : seen) {
+            columns.add(columnKey(BlockPos.getX(packed), BlockPos.getZ(packed)));
+        }
+        int edges = 0;
+        int sunkenEdges = 0;
+        for (long packed : seen) {
+            int x = BlockPos.getX(packed);
+            int y = BlockPos.getY(packed);
+            int z = BlockPos.getZ(packed);
+            for (int[] side : SIDES) {
+                if (columns.contains(columnKey(x + side[0], z + side[1]))) continue;
+                edges++;
+                if (raisedGroundBeyond(cells, x, y, z, side[0], side[1])) sunkenEdges++;
+            }
+        }
+        return edges > 0 && sunkenEdges * 4 >= edges * 3;
+    }
+
+    // 沿外侧方向看：紧邻坑壁在 2～4 格高处站得住，且再往外两步没有降回坑内同层（排除立在平地上的矮墙）。
+    private static boolean raisedGroundBeyond(Cells cells, int x, int y, int z, int dx, int dz) {
+        boolean rimStandable = false;
+        for (int depth = MIN_PIT_DEPTH; depth <= MAX_PIT_DEPTH; depth++) {
+            if (stand(cells, x + dx, y + depth, z + dz)) {
+                rimStandable = true;
+                break;
+            }
+        }
+        if (!rimStandable) return false;
+        for (int step = 2; step <= 3; step++) {
+            int gx = x + dx * step;
+            int gz = z + dz * step;
+            if (!cells.loaded(gx, gz) || cells.open(gx, y + 1, gz)) return false;
+            for (int lowY = y - 1; lowY <= y + 1; lowY++) {
+                if (stand(cells, gx, lowY, gz)) return false;
+            }
+        }
+        return true;
+    }
+
+    private static long columnKey(int x, int z) {
+        return (((long) x) << 32) | (z & 0xFFFFFFFFL);
     }
 
     // 从这一格只走能到的相邻格：平走、跳上一格、往下跳 maxDrop 格以内、水里上下游。区块没加载的方向给 null（说不清，按出得去）。

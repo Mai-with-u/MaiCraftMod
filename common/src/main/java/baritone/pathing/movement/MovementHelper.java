@@ -892,6 +892,10 @@ public interface MovementHelper extends ActionCosts, Helper {
             BlockPos against1 = placeAt.relative(HORIZONTALS_BUT_ALSO_DOWN_____SO_EVERY_DIRECTION_EXCEPT_UP[i]);
             if (MovementHelper.canPlaceAgainst(ctx, against1)) {
                 if (!((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(false, placeAt.getX(), placeAt.getY(), placeAt.getZ())) { // get ready to place a throwaway block
+                    // 新路线刚算出同一刻立即执行第一步时，垫料可能还在主背包等外层下一刻挪到快捷栏：站在地面时先等挪料，不提前标走不通。
+                    if (ctx.player().onGround() && BaritoneInternals.scaffoldWaitsInBackpack(ctx.player())) {
+                        return PlaceResult.NO_OPTION;
+                    }
                     Helper.HELPER.logDebug("bb pls get me some blocks. dirt, netherrack, cobble");
                     state.setStatus(MovementStatus.UNREACHABLE);
                     return PlaceResult.NO_OPTION;

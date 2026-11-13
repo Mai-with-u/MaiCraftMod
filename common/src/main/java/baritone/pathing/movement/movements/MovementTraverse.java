@@ -306,6 +306,11 @@ public class MovementTraverse extends Movement {
             }
             double dist1 = Math.max(Math.abs(ctx.player().position().x - (dest.getX() + 0.5D)), Math.abs(ctx.player().position().z - (dest.getZ() + 0.5D)));
             PlaceResult p = MovementHelper.attemptToPlaceABlock(state, baritone, dest.below(), false, !Baritone.settings().assumeSafeWalk.value);
+            // 站在边沿准备搭桥而垫料还在主背包等下一刻挪进快捷栏时，先原地停住，不往悬空那一格迈步。
+            if (p == PlaceResult.NO_OPTION && !feet.equals(dest) && ctx.player().onGround()
+                    && BaritoneInternals.scaffoldWaitsInBackpack(ctx.player())) {
+                return state;
+            }
             // 搭桥这一段从头到尾蹲着：走到边沿、对准、放下都按住潜行，不在每块之间起身。
             if (sneaksWhileBridging(false, Baritone.settings().assumeSafeWalk.value)) {
                 state.setInput(Input.SNEAK, true);

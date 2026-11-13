@@ -117,6 +117,40 @@ class TrapCheckTest {
     }
 
     @Test
+    void wideTwoToFourDeepCraterSunkenInGroundIsATrap() {
+        // 苦力怕连炸或乱挖掏出的 6×6 露天凹坑（36 格，超过 24 格小坑线），比周围平地低 2～4 格：四周都是高处实地而非围墙，算困住。
+        for (int depth : new int[] {2, 3, 4}) {
+            Ground ground = new Ground();
+            for (int x = 0; x < 6; x++) {
+                for (int z = 0; z < 6; z++) {
+                    for (int y = 64 - depth; y <= 63; y++) {
+                        ground.dugOut.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+            assertTrue(TrapCheck.trapped(ground, new BlockPos(2, 64 - depth, 2)),
+                    depth + " 格深的 6×6 露天凹坑没有台阶出口应算困住");
+        }
+    }
+
+    @Test
+    void thickWalledCourtyardStillNotMistakenForSunkenPit() {
+        // 平地上的两格厚围墙围出 6×6 露天空地：越过两格厚墙外侧仍是同层平地，不算地下凹坑。
+        Ground ground = new Ground();
+        for (int i = -2; i <= 7; i++) {
+            for (int y = 64; y <= 65; y++) {
+                for (int t = 0; t <= 1; t++) {
+                    ground.solid.add(new BlockPos(i, y, -1 - t));
+                    ground.solid.add(new BlockPos(i, y, 6 + t));
+                    ground.solid.add(new BlockPos(-1 - t, y, i));
+                    ground.solid.add(new BlockPos(6 + t, y, i));
+                }
+            }
+        }
+        assertFalse(TrapCheck.trapped(ground, new BlockPos(2, 64, 2)));
+    }
+
+    @Test
     void escapeClimbsBuildThenDigThenOthersAndStepsBackDown() {
         // 给过动土余地（只垫不挖）的困局才升：先升到挖天然方块，还出不去再放开别人放的普通方块。
         TrapEscape escape = new TrapEscape(TerrainPermit.TEMPORARY);

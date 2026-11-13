@@ -29,6 +29,7 @@ import baritone.pathing.movement.Movement;
 import baritone.pathing.movement.MovementHelper;
 import baritone.pathing.movement.MovementState;
 import baritone.utils.BlockStateInterface;
+import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.game.interaction.PlaceAgainst;
 import com.google.common.collect.ImmutableSet;
 import net.minecraft.core.BlockPos;
@@ -193,6 +194,10 @@ public class MovementPillar extends Movement {
         } else {
             // Get ready to place a throwaway block
             if (!((Baritone) baritone).getInventoryBehavior().selectThrowawayForLocation(true, src.x, src.y, src.z)) {
+                // 新路线刚接管或刚切到垫柱步时，主背包里的垫料要等外层下一刻打开背包挪进快捷栏：站在地面原地等一刻，不当场判走不通把坑壁出口记成障碍。
+                if (ctx.player().onGround() && BaritoneInternals.scaffoldWaitsInBackpack(ctx.player())) {
+                    return state;
+                }
                 return state.setStatus(MovementStatus.UNREACHABLE);
             }
 
