@@ -48,9 +48,9 @@ class MiningFailedSpotsTest {
 
     private static final SourceContext CONTEXT = SourceContext.unscoped(WorldPosition.here(16, 65, 22), Permissions.DEFAULT);
     private static final WantedItem LOG = WantedItem.ofItem("minecraft:spruce_log");
-    /** 坡上那棵树顶上够不着的原木，和另一棵够得着的树。 */
+    /** 坡上那棵树顶上够不着的原木，和另一棵更远、够得着的树（近的先挑，够不着的那格划掉后才会轮到它）。 */
     private static final BlockPos HIGH_LOG = new BlockPos(13, 70, 24);
-    private static final BlockPos OTHER_TREE = new BlockPos(20, 65, 20);
+    private static final BlockPos OTHER_TREE = new BlockPos(24, 65, 28);
 
     private final FakeBackpack backpack = new FakeBackpack(36);
     private final FakeOffhand offhand = new FakeOffhand();
