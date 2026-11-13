@@ -137,7 +137,7 @@ public final class UseModule implements AbilityModule {
             OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
         return new UseModule(new UseServices(
                 new LiveUseWorld(context),
-                new LiveUseInteractions(interactions, context),
+                new LiveUseInteractions(interactions, sneak, context),
                 close,
                 new LiveHandPreparation(toMainhand, context),
                 needs,

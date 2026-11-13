@@ -164,6 +164,15 @@ public final class ItemUseAim {
         return gesture == Gesture.SCOOP && nature == CellNature.FLUID_FLOWING;
     }
 
+    /**
+     * 主手用这件东西右键方块时，副手拿着盾牌要不要自动按住潜行再点：
+     * 原版只有斧头（去皮、刮铜、去蜡）在主手非潜行且副手拿盾时把右键让给举盾，锹、锄与普通物品都不受副手盾影响；
+     * 只在持斧且副手持盾时按住潜行，不把普通开箱、开门、按按钮改成潜行。
+     */
+    public static boolean sneaksPastOffhandShield(Gesture gesture, boolean shieldInOffhand) {
+        return gesture == Gesture.STRIP_TOOL && shieldInOffhand;
+    }
+
     /** 对一个确定的源格舀：射线只认源格，点到流动的格子不算数。 */
     public static Aim scoop(BlockPos source) {
         return new Aim(source, source, Confirmation.HAND_BECOMES_FULL_BUCKET, "舀流体源格 " + source.toShortString());

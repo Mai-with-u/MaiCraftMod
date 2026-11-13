@@ -203,6 +203,19 @@ class ItemUseAimTest {
     }
 
     @Test
+    void onlyStripToolWithShieldInOffhandSneaksAutomatically() {
+        // 原版只有主手持斧且副手持盾时非潜行右键会被当成举盾；锹、锄、涂蜡及普通空手开箱开门都不潜行。
+        assertTrue(ItemUseAim.sneaksPastOffhandShield(ItemUseAim.Gesture.STRIP_TOOL, true));
+        assertFalse(ItemUseAim.sneaksPastOffhandShield(ItemUseAim.Gesture.STRIP_TOOL, false));
+        for (ItemUseAim.Gesture gesture : ItemUseAim.Gesture.values()) {
+            if (gesture == ItemUseAim.Gesture.STRIP_TOOL) continue;
+            assertFalse(ItemUseAim.sneaksPastOffhandShield(gesture, true),
+                    gesture + " 在副手拿盾时不应自动改成潜行右键");
+            assertFalse(ItemUseAim.sneaksPastOffhandShield(gesture, false));
+        }
+    }
+
+    @Test
     void unsupportedHoldGivesNoAim() {
         assertTrue(ItemUseAim.aim(ItemUseAim.Gesture.UNSUPPORTED, target,
                 ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false)).isEmpty());

@@ -15,6 +15,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.CandleBlock;
@@ -29,8 +30,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.GestureConfirmations;
+import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.SneakingUse;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
 import org.maiwithu.maicraft.game.interaction.EntityUseConfirmation;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -52,10 +55,16 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
     private static final int BRUSH_HOLD_LIMIT_TICKS = 600;
 
     private final Interactions interactions;
+    private final HoldsSneak sneak;
     private final Supplier<PlayerContext> context;
 
     LiveUseInteractions(Interactions interactions, Supplier<PlayerContext> context) {
+        this(interactions, null, context);
+    }
+
+    LiveUseInteractions(Interactions interactions, HoldsSneak sneak, Supplier<PlayerContext> context) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
+        this.sneak = sneak;
         this.context = Objects.requireNonNull(context, "context");
     }
 
@@ -141,6 +150,14 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
         // 指定了点哪一面、点的就是目标那一格：只点朝这一面的表面（扳手点哪一面决定绕哪根轴转）。
         boolean faced = target.face() != null && aim.clickCell().equals(cell);
+        if (!bucket && !ownUse && ItemUseAim.sneaksPastOffhandShield(
+                gesture, player.getOffhandItem().is(Items.SHIELD))) {
+            // 主手持斧且副手持盾时，原版非潜行右键会被当成举盾直接跳过：改发潜行右键让原版执行去皮、刮铜或除蜡。
+            SneakingUse use = faced ? interactions.useBlockFaceSneaking(cell, target.face(), sneak, confirmation)
+                    : target.quick() ? interactions.useBlockQuicklySneaking(aim.clickCell(), sneak, confirmation)
+                    : interactions.useBlockSneaking(aim.clickCell(), sneak, confirmation);
+            return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
+        }
         AimAndInteract use = bucket || ownUse
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
                 : faced ? interactions.useBlockFace(cell, target.face(), confirmation)

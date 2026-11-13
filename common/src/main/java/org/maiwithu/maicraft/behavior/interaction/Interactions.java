@@ -70,6 +70,26 @@ public final class Interactions {
     }
 
     /**
+     * 按住潜行右键一格方块（主手持斧且副手持盾去皮、刮铜、去蜡时绕开原版举盾优先）：
+     * 先等潜行生效再瞄准提交，连续多块时半秒内保持蹲姿，收尾自动松开潜行。
+     */
+    public SneakingUse useBlockSneaking(BlockPos target, HoldsSneak sneak, InteractionConfirmation confirmation) {
+        return new SneakingUse(useBlock(target, confirmation), sneak);
+    }
+
+    /** 按住潜行快速右键一格方块，等潜行生效后按短确认窗核对。 */
+    public SneakingUse useBlockQuicklySneaking(BlockPos target, HoldsSneak sneak,
+                                               InteractionConfirmation confirmation) {
+        return new SneakingUse(useBlockQuickly(target, confirmation), sneak);
+    }
+
+    /** 按住潜行点方块外形上朝 face 的那一面，等潜行生效后按指定面瞄准提交。 */
+    public SneakingUse useBlockFaceSneaking(BlockPos target, Direction face, HoldsSneak sneak,
+                                            InteractionConfirmation confirmation) {
+        return new SneakingUse(useBlockFace(target, face, confirmation), sneak);
+    }
+
+    /**
      * 朝一格使用手里的物品：物品按自己的射线规则作用到那一格（水桶把水倒进去），生效与否按给定的确认条件核对。
      *
      * @param affected 物品要作用到的那一格，例如水该落进的那一格
