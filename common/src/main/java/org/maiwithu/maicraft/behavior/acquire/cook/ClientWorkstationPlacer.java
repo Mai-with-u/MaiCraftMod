@@ -13,7 +13,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
+import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
@@ -245,7 +249,7 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
                         if (tried.contains(cell) || !placeableAt(current, cell)) {
                             continue;
                         }
-                        double score = spotScore(dx, dy, dz, look.x, look.z);
+                        double score = spotScore(dx, dy, dz, look.x, look.z) + passagePenalty(current, cell);
                         if (score < bestScore) {
                             best = cell;
                             bestScore = score;
@@ -308,6 +312,33 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         double flat = Math.hypot(dx, dz);
         double facing = flat < 1.0E-6 ? 0 : (dx * lookX + dz * lookZ) / flat;
         return flat + (dy == 0 ? 0 : 1.5) + (facing < 0 ? 1.0 : 0) - facing * 0.25;
+    }
+
+    // 紧挨门口或夹在两面墙之间的单格窄通道往后排：有空地就先挑空地放，不在基地走廊或门框口留挡路木桩。
+    private static double passagePenalty(PlayerContext current, BlockPos cell) {
+        var level = current.level();
+        double penalty = 0;
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            Block neighbor = level.getBlockState(cell.relative(side)).getBlock();
+            if (neighbor instanceof DoorBlock || neighbor instanceof FenceGateBlock
+                    || neighbor instanceof TrapDoorBlock) {
+                penalty += 6.0;
+                break;
+            }
+        }
+        boolean westBlocked = blocksPassage(level, cell.west());
+        boolean eastBlocked = blocksPassage(level, cell.east());
+        boolean northBlocked = blocksPassage(level, cell.north());
+        boolean southBlocked = blocksPassage(level, cell.south());
+        if ((westBlocked && eastBlocked && !northBlocked && !southBlocked)
+                || (northBlocked && southBlocked && !westBlocked && !eastBlocked)) {
+            penalty += 4.0;
+        }
+        return penalty;
+    }
+
+    private static boolean blocksPassage(Level level, BlockPos cell) {
+        return !level.getBlockState(cell).getCollisionShape(level, cell).isEmpty();
     }
 
     // 支撑格六个邻格里此刻是这种方块的格子。
