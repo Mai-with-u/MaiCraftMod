@@ -13,8 +13,11 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
@@ -386,6 +389,70 @@ class ObtainTaskTest {
                 finished.summary());
         assertTrue(finished.summary().contains("3 个" + WantedItem.ofItem("minecraft:coal").describe()),
                 finished.summary());
+    }
+
+    @Test
+    void 采掘留下深坑时结果细节带pits_没留坑时不出现pits字段() {
+        FakeBackpack backpack = new FakeBackpack();
+        DugPits dugPits = new DugPits();
+        // 先记一条先前任务留下的旧记录：本次任务只报自己游标之后新挖出的坑。
+        dugPits.record(new DugPits.Pit(new WorldPosition(10, 63, 10, "minecraft:overworld"),
+                2, true, "上一场的坑"));
+
+        ScriptedAcquisition noPit = new ScriptedAcquisition();
+        noPit.backpack = backpack;
+        noPit.deliverPerTick = 2;
+        noPit.deliveredVia = "mine";
+        ObtainTask cleanTask = new ObtainTask(input(2, ItemAcquisition.Scope.ALL), noPit, backpack, null,
+                itemId -> Set.of(), new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), dugPits);
+        cleanTask.start(tick(0));
+        TaskResult cleanDone = runTask(cleanTask);
+        JsonObject cleanJson = ResultJson.result(cleanDone);
+        assertFalse(cleanJson.getAsJsonObject("details").has("pits"),
+                "没挖出两格以上深坑时不输出 pits 字段：" + cleanJson);
+
+        StartsAcquisition withPit = new StartsAcquisition() {
+            @Override public Action need(ItemRequest request, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return needSeveral(List.of(request), permissions, scope, onDelivered, records);
+            }
+
+            @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add("minecraft:cobblestone", 3);
+                        onDelivered.accept("mine");
+                        dugPits.record(new DugPits.Pit(
+                                new WorldPosition(-361, 63, 39, "minecraft:overworld"),
+                                3, true, "收工前用圆石把台阶入口封平了"));
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "挖台阶取石并回填";
+                    }
+                };
+            }
+        };
+        ObtainItems cobbleInput = new ObtainItems(
+                List.of(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 3, "取材")),
+                ItemAcquisition.Scope.ALL, Permissions.DEFAULT, "取材", "再拿 3 个圆石", null);
+        ObtainTask pitTask = new ObtainTask(cobbleInput, withPit, backpack, null, itemId -> Set.of(),
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), dugPits);
+        pitTask.start(tick(0));
+        TaskResult pitDone = runTask(pitTask);
+        JsonObject details = ResultJson.result(pitDone).getAsJsonObject("details");
+        JsonArray pits = details.getAsJsonArray("pits");
+        assertEquals(1, pits.size());
+        JsonObject entry = pits.get(0).getAsJsonObject();
+        assertEquals(-361, entry.getAsJsonObject("at").get("x").getAsInt());
+        assertEquals(63, entry.getAsJsonObject("at").get("y").getAsInt());
+        assertEquals(39, entry.getAsJsonObject("at").get("z").getAsInt());
+        assertEquals("minecraft:overworld", entry.getAsJsonObject("at").get("dimension").getAsString());
+        assertEquals(3, entry.get("depth").getAsInt());
+        assertTrue(entry.get("filled").getAsBoolean());
+        assertEquals("收工前用圆石把台阶入口封平了", entry.get("note").getAsString());
     }
 
     private TaskResult runTask(ObtainTask task) {

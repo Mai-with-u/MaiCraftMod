@@ -8,7 +8,13 @@ import java.util.Set;
 
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.timer.Timers;
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientCollectsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
+import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
+import org.maiwithu.maicraft.behavior.acquire.mining.LiveStairsSite;
+import org.maiwithu.maicraft.behavior.acquire.mining.PitBackfill;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCreatureScans;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCreatureSight;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCropReplanting;
@@ -72,40 +78,34 @@ final class AcquisitionWiring {
      */
     static AbilityModule obtainModule(AbilityCatalog.Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects, DigsStairsDown stairs, InventorySpace space, ContainerSource containerSource,
+            ClientCollectsBlocks collects, DigsBlocks digging, InventorySpace space, ContainerSource containerSource,
             ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
-        // 装炉就走留下的那几台：这个世界一份，挂计时走 LLM 用的同一张计时表。
         FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(timersOf(deps.channels().timers()));
-        // 在工作站上动手：熔炉添燃料时按同一份燃料表挑身上烧得最久的。
+        DugPits dugPits = new DugPits();
         MenuRecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
                 recipeReads, deps.world().memory(), deps.character().context(), leftCooking);
         ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context(), deps.world().generatedTerrain());
-        // 就地摆台与做完收回同一个接缝：收回走和收回野外那张床同一套"走过去、挖下来、捡起来"。
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects);
         RecipeSource craftSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
-        // 烧炼来源认熔炉、高炉、烟熏炉三种：高炉、烟熏炉只用记得的现成的，没有照旧用熔炉。
         RecipeSource smeltSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
-        // 锻造台一条路：钻石装备加下界合金锭升级成下界合金的；要升级的那件只穿在身上时脱下 → 升级 → 穿回原来那一格。
         RecipeSource smithSource = new RecipeSource(Set.of(WorkstationRecipe.Kind.SMITHING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission,
                 new TakesOffWornGear(deps.character().equipment(), playerServices.gear(), deps.character().backpack(),
                         deps.items().itemTags()));
-        // 酿造台一条路：照客户端那份酿造表一步一步酿药水，等的时候顺手备后面几炉的料；就地摆的酿造台放下就留着。
         BrewingSource brewSource = new BrewingSource(new ClientBrewingReads(deps.character().context()),
                 deps.world().memory(), recipeRuns, placer, innerNeeds, deps.character().backpack(),
                 deps.character().offhand(), deps.items().itemTags());
-        // 砾石挖出来没出燧石，放在脚边再挖：和就地摆台子同一套挑格、换手、点一下，只是不记进世界记忆。
-        MiningSource miningSource = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
-                permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
+        MiningSource miningSource = miningSource(deps, toMainhand, permission, innerNeeds, collects, digging,
+                drops, yieldScans, placer, dugPits);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.hands().interactions(), deps.character().context()));
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
@@ -147,7 +147,23 @@ final class AcquisitionWiring {
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
         return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
-                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking);
+                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking, dugPits);
+    }
+
+    /** 创建采掘来源：挂上营地地面避让、往下挖台阶入口与平地竖坑收工回填及坑位记账。 */
+    private static MiningSource miningSource(AbilityCatalog.Deps deps, ClientMovesToMainhand toMainhand,
+            PermissionCheck permission, DeferredInnerNeeds innerNeeds, ClientCollectsBlocks collects,
+            DigsBlocks digging, ClientDropPickup drops, ClientYieldScans yieldScans,
+            ClientWorkstationPlacer placer, DugPits dugPits) {
+        Campground campground = Campground.of(permission, deps.world().memory());
+        LiveStairsSite stairsSite = new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(),
+                toMainhand, deps.kept(), deps.world().generatedTerrain());
+        DigsStairsDown stairs = PitBackfill.wrapStairs(
+                new ClientStairsDown(stairsSite, digging, drops, permission, campground), stairsSite, dugPits);
+        MiningSource source = new MiningSource(yieldScans, collects, stairs, deps.items().toolRequirements(),
+                permission, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer);
+        source.guardCampgroundAndPits(campground, stairsSite, dugPits);
+        return source;
     }
 
     /**

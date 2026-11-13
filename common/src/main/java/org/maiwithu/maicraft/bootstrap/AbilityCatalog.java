@@ -78,6 +78,7 @@ import org.maiwithu.maicraft.ability.timer.TimerAbility;
 import org.maiwithu.maicraft.ability.travel.TravelAbility;
 import org.maiwithu.maicraft.ability.use.UseModule;
 import org.maiwithu.maicraft.behavior.acquire.field.ClientCropReplanting;
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsUp;
@@ -370,12 +371,13 @@ public final class AbilityCatalog {
                 permission, playerServices, dropping, storing, space, networks, carriedBackpacks);
     }
 
-    /** 往下挖楼梯的现场部件：拿到物品在看不见石头时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
+    /** 往下挖楼梯的现场部件：出行往上/往下挖台阶时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
     private static ClientStairsDown stairsDown(Deps deps, Shared shared) {
         return new ClientStairsDown(
                 new LiveStairsSite(deps.travel().walks(), deps.hands().interactions(), shared.toMainhand(), deps.kept(),
                         deps.world().generatedTerrain()),
-                shared.digging(), shared.drops(), shared.permission());
+                shared.digging(), shared.drops(), shared.permission(),
+                Campground.of(shared.permission(), deps.world().memory()));
     }
 
     /**
@@ -675,12 +677,10 @@ public final class AbilityCatalog {
                 deps.config().chatTypewriter(), commandTree::adminOnly, listeners);
     }
 
-    /** 拿到物品能力的一份：往下挖楼梯的现场部件在这里拼，身外的来源清单与引擎见 AcquisitionWiring。 */
+    /** 拿到物品能力的一份：身外的来源清单、营地避让与采掘坑口回填账本见 AcquisitionWiring。 */
     private static AbilityModule obtainModule(Deps deps, Shared shared, ContainerSource containerSource) {
-        // 看不见石头时往下挖楼梯：挖一格、捡这一级掉的东西与采掘共用一套，走下一级只走不改地形，脚下空着垫一块。
-        ClientStairsDown stairs = stairsDown(deps, shared);
         return AcquisitionWiring.obtainModule(deps, shared.playerServices(), shared.bringClose(),
-                shared.toMainhand(), shared.permission(), shared.innerNeeds(), shared.collects(), stairs,
+                shared.toMainhand(), shared.permission(), shared.innerNeeds(), shared.collects(), shared.digging(),
                 shared.space(), containerSource, shared.drops(), shared.dropping().stepsAside());
     }
 

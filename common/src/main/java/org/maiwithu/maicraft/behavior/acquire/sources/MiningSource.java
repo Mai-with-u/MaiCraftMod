@@ -1,11 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.sources;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.Deque;
-import java.util.HashSet;
 import java.util.List;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -40,6 +37,11 @@ import org.maiwithu.maicraft.behavior.acquire.mining.ScansMinables;
 import org.maiwithu.maicraft.behavior.acquire.mining.PermittedSpots;
 import org.maiwithu.maicraft.behavior.acquire.mining.OreHeights;
 import org.maiwithu.maicraft.behavior.acquire.mining.MinableSpot;
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
+import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsDown;
+import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
+import org.maiwithu.maicraft.behavior.acquire.mining.PitBackfill;
+import org.maiwithu.maicraft.behavior.acquire.mining.SurfaceMiningPolicy;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.DropOdds;
@@ -103,6 +105,11 @@ public final class MiningSource implements ItemSource {
     private final ReadsItemTags tags;
     /** 砾石放在脚边再挖；为 null 时不放，只挖天然的。 */
     private final PlacesBlockBeside placer;
+    /** 营地范围判断：床、箱子、工作台旁边的平地不就地往下挖；没接上时 everywhere 都允许。 */
+    private Campground campground = Campground.NOWHERE;
+    /** 地面竖坑核查与收工回填读端；没接上时只采掘不查坑。 */
+    private ClientStairsDown.Site surfaceSite;
+    private DugPits dugPits;
 
     /** @param placer 把身上的砾石放在脚边再挖；为 null 时不放 */
     public MiningSource(ScansMinables minables, CollectsBlocks collects, DigsStairsDown stairs,
@@ -135,6 +142,13 @@ public final class MiningSource implements ItemSource {
         this.chain = Objects.requireNonNull(chain, "chain");
     }
 
+    /** 接上营地范围与地面竖坑回填账本：不在营地平地往下挖，平地掏出深坑时收工顺手回填并记入结果。 */
+    public void guardCampgroundAndPits(Campground campground, ClientStairsDown.Site surfaceSite, DugPits dugPits) {
+        this.campground = Objects.requireNonNull(campground, "campground");
+        this.surfaceSite = surfaceSite;
+        this.dugPits = dugPits;
+    }
+
     @Override public String describe() {
         return "采掘";
     }
@@ -150,10 +164,13 @@ public final class MiningSource implements ItemSource {
                     "没有方块直接掉出" + request.wanted().describe()
                             + "——它是做出来的就去合成或烧炼；是挖哪种模组方块得来的，用 drops_from 写上那种方块");
         }
+        String dimension = context.characterAt().dimension();
         List<MinableSpot> seen = minables.minable(request.wanted(), request.dropsFrom(), context.characterAt(),
                 searchRadius(context));
-        List<MinableSpot> outside = outsideBuildings(seen, context.characterAt().dimension());
-        List<MinableSpot> spots = withoutFailed(outside, context.characterAt().dimension());
+        List<MinableSpot> outside = outsideBuildings(seen, dimension);
+        List<MinableSpot> unfailed = withoutFailed(outside, dimension);
+        List<MinableSpot> spots = SurfaceMiningPolicy.prioritizeExposed(
+                SurfaceMiningPolicy.outsideCampFlatGround(unfailed, dimension, campground), context.characterAt());
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 附近的方块还没扫完：说不准有没有，让引擎等一会儿再问，不把没扫完当成没有。
             return new SourceQuote.NotYet(describe(), "附近的方块还没扫完，这一刻说不准有没有会掉出"
@@ -168,36 +185,7 @@ public final class MiningSource implements ItemSource {
         Optional<ChanceDigging.PlaceBack> placeBack = placeBack(request, context);
         boolean canPlaceNow = placeBack.isPresent() && carried(placeBack.get().what().blockType()) > 0;
         if (spots.isEmpty() && canPlaceNow) return chanceQuote(request, context, List.of(), placeBack);
-        if (spots.isEmpty() && !seen.isEmpty() && outside.isEmpty()) {
-            // 看得见的都在建筑档案里的房子上：不拆房子当材料，要拆就点名那一格。
-            return new SourceQuote.Unavailable(describe(),
-                    "半径 " + searchRadius(context) + " 格内看得见的 " + seen.size() + " 格会掉出" + request.wanted().describe()
-                            + "的方块都在建筑档案「" + buildingOf(seen.getFirst(), context.characterAt().dimension())
-                            + "」上，不拆房子当材料；真要拆就用 gather 点名那一格，或者换个地方找");
-        }
-        if (spots.isEmpty() && !seen.isEmpty()) {
-            // 看得见的都是刚试过做不成的：如实说是这几处够不着、挖不下来，这一阵先不挑它们。
-            return new SourceQuote.Unavailable(describe(),
-                    "半径 " + searchRadius(context) + " 格内看得见的 " + seen.size() + " 格会掉出" + request.wanted().describe()
-                            + "的方块刚试过都走不到跟前或挖不下来，" + FailedSpots.REMEMBER_MILLIS / 60_000
-                            + " 分钟内先不挑它们；换个站位、垫脚或挖开路再试");
-        }
-        if (spots.isEmpty()) {
-            // 要的矿只在别的维度生成（在主世界要远古残骸）：说清它在哪个维度哪几层、先过去再要，不让 LLM 在这边白挖。
-            Optional<OreHeights.Band> elsewhere = bandElsewhere(request, context);
-            if (elsewhere.isPresent()) {
-                OreHeights.Band band = elsewhere.get();
-                return new SourceQuote.Unavailable(describe(),
-                        "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
-                                + "的方块；" + band.name() + "只在 " + band.dimension() + " 生成（" + band.describe()
-                                + "），角色现在在 " + context.characterAt().dimension() + "，先用 travel 去 "
-                                + band.dimension() + " 再要");
-            }
-            return new SourceQuote.Unavailable(describe(),
-                    "半径 " + searchRadius(context) + " 格内看得见的地方没有会掉出" + request.wanted().describe()
-                            + "的方块（只算地图上自然长的：机器零件、房子、平台这些搭出来的不拆）；埋在石头里的看不见，"
-                            + "要先下矿洞、挖开或换个地方看看");
-        }
+        if (spots.isEmpty()) return emptySpotsUnavailable(request, context, seen, outside, unfailed);
         PermittedSpots.Screen<MinableSpot> screened = PermittedSpots.screen(spots, MinableSpot::pos,
                 MinableSpot::blockType, context.permissions(), permission);
         // 一挖就掉的先挖；只有概率掉落的（砾石、草、树叶）按碰运气挖报价。天然的不许挖但身上的砾石能放下再挖也算。
@@ -216,11 +204,45 @@ public final class MiningSource implements ItemSource {
                 riskNote(certain.getFirst().blockType()));
     }
 
+    // 筛完没有可挖候选时，按被营地地面、建筑档案、近期失败或跨维度生成挡住的先后给出准确原因。
+    private SourceQuote.Unavailable emptySpotsUnavailable(ItemRequest request, SourceContext context,
+            List<MinableSpot> seen, List<MinableSpot> outside, List<MinableSpot> unfailed) {
+        int radius = searchRadius(context);
+        String what = request.wanted().describe();
+        if (!unfailed.isEmpty()) {
+            return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的 " + unfailed.size()
+                    + " 格会掉出" + what + "的地面都在床、箱子或工作台旁边的营地范围内，不在营地地面就地往下挖坑；走出营地或放大搜索半径再取");
+        }
+        if (!seen.isEmpty() && outside.isEmpty()) {
+            return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的 " + seen.size() + " 格会掉出" + what
+                    + "的方块都在建筑档案「" + buildingOf(seen.getFirst(), context.characterAt().dimension())
+                    + "」上，不拆房子当材料；真要拆就用 gather 点名那一格，或者换个地方找");
+        }
+        if (!seen.isEmpty()) {
+            return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的 " + seen.size() + " 格会掉出" + what
+                    + "的方块刚试过都走不到跟前或挖不下来，" + FailedSpots.REMEMBER_MILLIS / 60_000
+                    + " 分钟内先不挑它们；换个站位、垫脚或挖开路再试");
+        }
+        Optional<OreHeights.Band> elsewhere = bandElsewhere(request, context);
+        if (elsewhere.isPresent()) {
+            OreHeights.Band band = elsewhere.get();
+            return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的地方没有会掉出" + what
+                    + "的方块；" + band.name() + "只在 " + band.dimension() + " 生成（" + band.describe()
+                    + "），角色现在在 " + context.characterAt().dimension() + "，先用 travel 去 " + band.dimension() + " 再要");
+        }
+        return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的地方没有会掉出" + what
+                + "的方块（只算地图上自然长的：机器零件、房子、平台这些搭出来的不拆）；埋在石头里的看不见，要先下矿洞、挖开或换个地方看看");
+    }
+
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准；刚试过做不成的格这一阵不挑。
         String dimension = context.characterAt().dimension();
-        List<MinableSpot> spots = withoutFailed(minables.minable(request.wanted(), request.dropsFrom(),
-                context.characterAt(), searchRadius(context)), dimension);
+        List<MinableSpot> spots = SurfaceMiningPolicy.prioritizeExposed(
+                SurfaceMiningPolicy.outsideCampFlatGround(
+                        withoutFailed(minables.minable(request.wanted(), request.dropsFrom(),
+                                context.characterAt(), searchRadius(context)), dimension),
+                        dimension, campground),
+                context.characterAt());
         if (spots.isEmpty() && !minables.scanComplete()) {
             // 还没扫完就不动手：交回空，引擎重新问价时会等它扫完。
             return Optional.empty();
@@ -274,14 +296,18 @@ public final class MiningSource implements ItemSource {
         // 整根树干一下挖掉（可能比要的多，像玩家用连锁那样），掉落物集中在挖的那一格，挖完一起捡。
         // 走不到跟前、挖不下来的那一格记一阵，并记在这一串动作上：整串只坏在这几格时，引擎换别处接着拿。
         SpotWork[] work = new SpotWork[1];
-        Optional<Action> collect = collectBatch(collects, batch.stream().map(MinableSpot::pos).toList(), permissions,
+        List<BlockPos> batchCells = batch.stream().map(MinableSpot::pos).toList();
+        Optional<Action> collect = collectBatch(collects, batchCells, permissions,
                 chainable(request, context.characterAt(), searchRadius(context), permissions),
                 cell -> work[0].note(dimension, cell), context.digTool(), context.records());
         if (collect.isEmpty()) {
             // 收的入口接不上，一步都还没动：整串放弃，由引擎换别的路。
             return Optional.empty();
         }
-        steps.add(collect.get());
+        Action collectStep = SurfaceMiningPolicy.isLog(blockType)
+                ? collect.get()
+                : PitBackfill.wrapSurfaceBatch(collect.get(), batchCells, surfaceSite, dugPits);
+        steps.add(collectStep);
         work[0] = new SpotWork(new StepwiseActions("挖出" + request.wanted().describe(), steps.toArray(Action[]::new)));
         return Optional.of(work[0]);
     }
@@ -683,36 +709,9 @@ public final class MiningSource implements ItemSource {
                 "采掘" + request.wanted().describe() + "要用的工具"), permissions, null));
     }
 
-    /**
-     * 从最近的一格起连出一批：相邻（含斜）的同种方块；原木只沿上下连（不把横梁、邻树算进来）；最多要几件挖几格。
-     * 候选已经按由近及远排好。
-     */
+    /** 从排在最前的一格起连出一批：原木沿竖向连，其余优先连同层或更高处的相邻格，不够再往下一层挖。 */
     static List<MinableSpot> batchOf(List<MinableSpot> spots, int count) {
-        List<MinableSpot> batch = new ArrayList<>();
-        if (spots.isEmpty() || count <= 0) return batch;
-        MinableSpot seed = spots.getFirst();
-        boolean upright = isLog(seed.blockType());
-        Deque<MinableSpot> pending = new ArrayDeque<>(List.of(seed));
-        Set<BlockPos> taken = new HashSet<>(Set.of(seed.pos()));
-        while (!pending.isEmpty() && batch.size() < count) {
-            MinableSpot current = pending.removeFirst();
-            batch.add(current);
-            for (MinableSpot other : spots) {
-                if (taken.contains(other.pos()) || !other.blockType().equals(seed.blockType())) continue;
-                int dx = Math.abs(other.pos().getX() - current.pos().getX());
-                int dy = Math.abs(other.pos().getY() - current.pos().getY());
-                int dz = Math.abs(other.pos().getZ() - current.pos().getZ());
-                boolean adjacent = upright ? dx == 0 && dz == 0 && dy == 1 : dx <= 1 && dy <= 1 && dz <= 1;
-                if (adjacent && taken.add(other.pos())) pending.addLast(other);
-            }
-        }
-        return batch;
-    }
-
-    // 原木、菌柄这类：一棵树的树干竖着连，批次只沿竖向。
-    private static boolean isLog(String blockType) {
-        return blockType.endsWith("_log") || blockType.endsWith("_stem")
-                || blockType.endsWith("_wood") || blockType.endsWith("_hyphae");
+        return SurfaceMiningPolicy.batchOf(spots, count);
     }
 
     /** 这次挖多大范围：任务给了半径就在这个范围里找（给了就不越界），没给用来源自己的默认。 */

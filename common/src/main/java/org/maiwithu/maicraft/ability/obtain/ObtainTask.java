@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
@@ -58,19 +59,28 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     private final Set<String> obtainedVia = new LinkedHashSet<>();
     /** 装炉就走留下的那几台：开场记下回数，收场时挑出这一场留下的。 */
     private final FurnacesLeftCooking leftCooking;
-    /** 开场时一共装炉就走过几回：收场时比它多出来的就是这一场留下的。 */
     private int leftMark;
+    /** 采掘在地面挖出的坑位账本：开场记下游标，收场时挑出这一场留下的坑。 */
+    private final DugPits dugPits;
+    private int pitsMark;
 
-    /** 不接装炉就走的记录：从来没留下过一炉。 */
+    /** 不接装炉就走与坑位账本的记录。 */
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
-        this(input, acquisition, backpack, offhand, tags, new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
+        this(input, acquisition, backpack, offhand, tags,
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits());
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking) {
+        this(input, acquisition, backpack, offhand, tags, leftCooking, new DugPits());
+    }
+
+    ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
+            OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits) {
         super("拿东西", Phase.COUNT, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.leftCooking = leftCooking;
+        this.dugPits = dugPits;
         this.input = input;
         this.acquisition = acquisition;
         this.backpack = backpack;
@@ -97,6 +107,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     // 先逐样记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
         leftMark = leftCooking.timesLeft();
+        pitsMark = dugPits.mark();
         int total = 0;
         int wanted = 0;
         for (ItemRequest request : input.requests()) {
@@ -179,7 +190,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
                         got + "；" + where + "，约 " + minutes + " 分钟后回来取")
                 .problem(problem)
                 .remaining(List.copyOf(missing))
-                .details(new ObtainedVia(List.copyOf(obtainedVia), left.stream().map(ObtainedVia.LeftFurnace::of).toList()))
+                .details(buildDetails(left))
                 .build());
     }
 
@@ -205,7 +216,14 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return new ObtainedVia(List.copyOf(obtainedVia));
+        return buildDetails(null);
+    }
+
+    private ObtainedVia buildDetails(List<LeftCooking> left) {
+        List<ObtainedVia.LeftFurnace> furnaces = left == null ? null
+                : left.stream().map(ObtainedVia.LeftFurnace::of).toList();
+        List<ObtainedVia.Pit> pits = dugPits.since(pitsMark).stream().map(ObtainedVia.Pit::of).toList();
+        return new ObtainedVia(List.copyOf(obtainedVia), furnaces, pits);
     }
 
     // 要的是一类（标签）时说清拿到的是哪几样：要"能吃的"拿回来面包还是生牛肉，下一步怎么吃、要不要烤不一样。
