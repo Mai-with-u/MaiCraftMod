@@ -49,9 +49,10 @@ public record AcquireVia(String name, String description) {
         return TRADE.name().equals(name);
     }
 
-    /** 这条途径是不是要现做的（合成、烧炼、锻造台升级）：挑可以互换的原料时，现成的来路与现做分开比。 */
+    /** 这条途径是不是要现做的（合成、烧炼、锻造台升级、手工涂抹）：挑可以互换的原料时，现成的来路与现做分开比。 */
     public static boolean makes(String name) {
-        return CRAFT.name().equals(name) || SMELT.name().equals(name) || SMITH.name().equals(name);
+        return CRAFT.name().equals(name) || SMELT.name().equals(name) || SMITH.name().equals(name)
+                || "item_application".equals(name);
     }
 
     public AcquireVia {
