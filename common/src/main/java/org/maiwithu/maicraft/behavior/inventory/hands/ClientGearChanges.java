@@ -3,11 +3,12 @@ package org.maiwithu.maicraft.behavior.inventory.hands;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.InteractionHand;
 
@@ -62,10 +63,19 @@ public final class ClientGearChanges implements GearChanges {
 
     private final Supplier<PlayerContext> contexts;
     private final ClientMovesToMainhand movesToMainhand;
+    private final Function<PlayerContext, Inventory> inventories;
 
     public ClientGearChanges(Supplier<PlayerContext> contexts, ClientMovesToMainhand movesToMainhand) {
+        this(contexts, movesToMainhand,
+                player -> player == null || player.localPlayer() == null ? null : player.localPlayer().getInventory());
+    }
+
+    // 背包来源可由同包单测注入真实 Inventory，避免离线测试依赖客户端玩家实例。
+    ClientGearChanges(Supplier<PlayerContext> contexts, ClientMovesToMainhand movesToMainhand,
+            Function<PlayerContext, Inventory> inventories) {
         this.contexts = Objects.requireNonNull(contexts);
         this.movesToMainhand = Objects.requireNonNull(movesToMainhand);
+        this.inventories = Objects.requireNonNull(inventories);
     }
 
     @Override
@@ -82,10 +92,11 @@ public final class ClientGearChanges implements GearChanges {
     @Override
     public Optional<Action> wearFrom(int inventorySlot, GearSlotName slot) {
         PlayerContext context = contexts.get();
-        if (context == null || context.localPlayer() == null || inventorySlot < 0 || inventorySlot > 35) {
+        Inventory inventory = inventories.apply(context);
+        if (inventory == null || inventorySlot < 0 || inventorySlot > 35) {
             return Optional.empty();
         }
-        var stack = context.localPlayer().getInventory().getItem(inventorySlot);
+        var stack = inventory.getItem(inventorySlot);
         if (stack.isEmpty()) return Optional.empty();
         // 穿的是这一格上的那一件：同种的有好几件（附魔、耐久不同）时不按种类随手拿。
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
@@ -101,7 +112,8 @@ public final class ClientGearChanges implements GearChanges {
         if (context == null) return Optional.empty();
         // 主手取下就是空出手来：快捷栏有空格就切过去（像真人滚一下滚轮），没有就把手上这堆搬进背包。
         if (slot == GearSlotName.MAINHAND) {
-            int empty = firstEmptyHotbarSlot(context.localPlayer());
+            Inventory inventory = inventories.apply(context);
+            int empty = inventory == null ? -1 : firstEmptyHotbarSlot(inventory);
             if (empty >= 0) return Optional.of(new HotbarSelection(empty));
         }
         return Optional.of(new TakeOffAction(slot));
@@ -114,7 +126,9 @@ public final class ClientGearChanges implements GearChanges {
         /** 指定从背包哪一格拿那一件；不指定（按种类找第一件）为 -1。 */
         private final int sourceSlot;
         private Action stage;
+        private PendingMenuAction menuPending;
         private PendingInteraction usePending;
+        private long busySince = Long.MIN_VALUE;
         private Problem failure;
 
         WearAction(String itemId, GearSlotName slot) {
@@ -165,26 +179,41 @@ public final class ClientGearChanges implements GearChanges {
             };
         }
 
-        // 副手交换：只认主背包与快捷栏里的东西；交换要求世界画面空闲，占着就下一刻再试。
+        // 副手交换：首次提交时从指定格或背包里找到目标物品发一次原生副手交换，后续刻只轮询这笔确认，
+        // 避免客户端预测先把原格腾空后下一刻误报缺物或撞上前一笔未结清的操作。
         private ActionStatus offhandSwap(PlayerContext player) {
-            LocalPlayer body = player.localPlayer();
-            // 指定了哪一格就换那一格的那件；没指定按种类找第一件。
-            int source = sourceSlot >= 0 ? sourceSlot : findFirstInventorySlot(body, itemId);
-            if (source < 0) {
-                failure = Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId + "，穿不上副手", null);
-                return ActionStatus.failed(failure);
+            MenuActions actions = player.menuActions();
+            if (menuPending == null) {
+                Inventory inventory = inventories.apply(player);
+                if (inventory == null) return ActionStatus.running();
+                // 指定了哪一格就换那一格的那件；没指定按种类找第一件。
+                int source = sourceSlot >= 0 ? sourceSlot : findFirstInventorySlot(inventory, itemId);
+                if (source < 0) {
+                    failure = Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId + "，穿不上副手", null);
+                    return ActionStatus.failed(failure);
+                }
+                try {
+                    menuPending = actions.swapInventoryToOffhand(player, source, STEP_TIMEOUT_TICKS);
+                    busySince = Long.MIN_VALUE;
+                } catch (IllegalStateException busy) {
+                    // 画面被占或角色正在用东西：下一刻再试，卡满一步期限仍发不出去就如实报错。
+                    return waitWhileBusy(player);
+                }
+                if (!menuPending.terminal()) return ActionStatus.running();
+            } else if (!menuPending.terminal()) {
+                menuPending = actions.poll(player, menuPending);
+                if (!menuPending.terminal()) return ActionStatus.running();
             }
-            try {
-                PendingMenuAction pending = player.menuActions()
-                        .swapInventoryToOffhand(player, source, STEP_TIMEOUT_TICKS);
-                if (!pending.terminal()) return ActionStatus.running();
-                return pending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
-                        ? ActionStatus.done()
-                        : fail("副手交换没能确认：" + pending.detail());
-            } catch (IllegalStateException busy) {
-                // 画面被占或角色正在用东西：下一刻再试，不硬抢。
-                return ActionStatus.running();
-            }
+            return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
+                    ? ActionStatus.done()
+                    : fail("副手交换没能确认：" + menuPending.detail());
+        }
+
+        private ActionStatus waitWhileBusy(PlayerContext player) {
+            if (busySince == Long.MIN_VALUE) busySince = player.clientTick();
+            return player.clientTick() - busySince > STEP_TIMEOUT_TICKS
+                    ? fail("画面一直被占，副手交换提交不出去")
+                    : ActionStatus.running();
         }
 
         // 对自己使用主手的护甲：生效的标志是护甲格换上了这件（或主手换持了别的）。
@@ -229,6 +258,7 @@ public final class ClientGearChanges implements GearChanges {
         private final GearSlotName slot;
         private PendingMenuAction menuPending;
         private PendingMenuAction closePending;
+        private long busySince = Long.MIN_VALUE;
         private Problem failure;
 
         TakeOffAction(GearSlotName slot) {
@@ -242,24 +272,39 @@ public final class ClientGearChanges implements GearChanges {
             return slot == GearSlotName.OFFHAND ? offhandTakeOff(player) : menuTakeOff(player);
         }
 
-        // 副手取下：找一个空的背包格与副手交换，东西就进了背包。
+        // 副手取下：首次提交时找一个空的背包格与副手交换，后续刻只轮询这笔交换确认，不再重复发交换；
+        // 确认落袋返回完成，超时或被回滚则如实报错。
         private ActionStatus offhandTakeOff(PlayerContext player) {
-            LocalPlayer body = player.localPlayer();
-            int empty = firstEmptyInventorySlot(body);
-            if (empty < 0) {
-                failure = Problem.of(Problem.Kind.INVENTORY_FULL, "背包没有空格，副手的东西取不下来", null);
-                return ActionStatus.failed(failure);
+            MenuActions actions = player.menuActions();
+            if (menuPending == null) {
+                Inventory inventory = inventories.apply(player);
+                if (inventory == null) return ActionStatus.running();
+                int empty = firstEmptyInventorySlot(inventory);
+                if (empty < 0) {
+                    failure = Problem.of(Problem.Kind.INVENTORY_FULL, "背包没有空格，副手的东西取不下来", null);
+                    return ActionStatus.failed(failure);
+                }
+                try {
+                    menuPending = actions.swapInventoryToOffhand(player, empty, STEP_TIMEOUT_TICKS);
+                    busySince = Long.MIN_VALUE;
+                } catch (IllegalStateException busy) {
+                    return waitWhileBusy(player);
+                }
+                if (!menuPending.terminal()) return ActionStatus.running();
+            } else if (!menuPending.terminal()) {
+                menuPending = actions.poll(player, menuPending);
+                if (!menuPending.terminal()) return ActionStatus.running();
             }
-            try {
-                PendingMenuAction pending = player.menuActions()
-                        .swapInventoryToOffhand(player, empty, STEP_TIMEOUT_TICKS);
-                if (!pending.terminal()) return ActionStatus.running();
-                return pending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
-                        ? ActionStatus.done()
-                        : fail("副手交换没能确认：" + pending.detail());
-            } catch (IllegalStateException busy) {
-                return ActionStatus.running();
-            }
+            return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
+                    ? ActionStatus.done()
+                    : fail("副手交换没能确认：" + menuPending.detail());
+        }
+
+        private ActionStatus waitWhileBusy(PlayerContext player) {
+            if (busySince == Long.MIN_VALUE) busySince = player.clientTick();
+            return player.clientTick() - busySince > STEP_TIMEOUT_TICKS
+                    ? fail("画面一直被占，副手交换提交不出去")
+                    : ActionStatus.running();
         }
 
         // 护甲与主手取下：打开背包界面，对那一格做一次整堆搬出，栏位空了才算取下；
@@ -322,9 +367,8 @@ public final class ClientGearChanges implements GearChanges {
     }
 
     /** 在主背包与快捷栏里找指定物品的格；找不到给 -1。 */
-    private static int findFirstInventorySlot(LocalPlayer body, String itemId) {
+    private static int findFirstInventorySlot(Inventory inventory, String itemId) {
         var wanted = ResourceLocation.tryParse(itemId);
-        var inventory = body.getInventory();
         for (int slot = 0; slot <= 35; slot++) {
             var stack = inventory.getItem(slot);
             if (!stack.isEmpty() && BuiltInRegistries.ITEM
@@ -334,20 +378,18 @@ public final class ClientGearChanges implements GearChanges {
     }
 
     /** 找第一个空的快捷栏格（0..8）；没有给 -1。 */
-    private static int firstEmptyHotbarSlot(LocalPlayer body) {
-        var inventory = body.getInventory();
+    private static int firstEmptyHotbarSlot(Inventory inventory) {
         for (int slot = 0; slot <= 8; slot++) {
             if (inventory.getItem(slot).isEmpty()) return slot;
         }
         return -1;
     }
 
-    /** 找第一个空的主背包格（9..35）；没有给 -1。 */
-    private static int firstEmptyInventorySlot(LocalPlayer body) {
-        var inventory = body.getInventory();
+    /** 优先找空的主背包格（9..35），主背包全满再看空的快捷栏格（0..8）；都没有给 -1。 */
+    private static int firstEmptyInventorySlot(Inventory inventory) {
         for (int slot = 9; slot <= 35; slot++) {
             if (inventory.getItem(slot).isEmpty()) return slot;
         }
-        return -1;
+        return firstEmptyHotbarSlot(inventory);
     }
 }
