@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat;
 
+import org.maiwithu.maicraft.behavior.acquire.spi.BlockApplications;
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
@@ -93,6 +94,7 @@ public final class CompatRegistry {
     private final Slot<RangedWeapon> rangedWeapons = slot("远程武器", CompatRangedWeapon::new);
     private final Slot<ObstacleSource> obstacleSources = slot("障碍来源", CompatObstacleSource::new);
     private final Slot<FluidTransforms> fluidTransforms = slot("流体转化配方表", CompatFluidTransforms::new);
+    private final Slot<BlockApplications> blockApplications = slot("手工涂抹配方表", CompatBlockApplications::new);
     private final Slot<FallBrake> fallBrakes = slot("刹住一掉的办法", CompatFallBrake::new);
     private final Slot<LandingMaterials> landingMaterials = slot("落地补料来源", CompatLandingMaterials::new);
     private final Slot<StowBeforeWalking> stowsBeforeWalking = slot("走路前收起来的东西", CompatStowBeforeWalking::new);
@@ -374,6 +376,11 @@ public final class CompatRegistry {
         fluidTransforms.add(module, transforms);
     }
 
+    /** 联动入口交一份"放下基底方块、拿材料右键改造"的配方表（机械动力的手工涂抹）：包一层后交给拿东西；模组停用后一条都不给。 */
+    public void blockApplications(CompatModule module, BlockApplications applications) {
+        blockApplications.add(module, applications);
+    }
+
     /**
      * 这局真正登记上、此刻还开着的联动模组 ID，按字母排：没装的、版本不对没登记的、用着用着接口对不上停用了的都不在里面。
      * lookup 列能力时把它放在顶上，宿主据此决定哪些靠模组的技能进目录。
@@ -562,6 +569,11 @@ public final class CompatRegistry {
     /** 联动模组的"扔进流体里会变"的配方表：拿东西为每一份建一条途径。 */
     public List<FluidTransforms> fluidTransforms() {
         return fluidTransforms.ready();
+    }
+
+    /** 联动模组的"放下基底方块、拿材料右键改造"配方表：拿东西为每一份建一条途径。 */
+    public List<BlockApplications> blockApplications() {
+        return blockApplications.ready();
     }
 
     /** 联动模组的远程武器，按联动清单的顺序。 */

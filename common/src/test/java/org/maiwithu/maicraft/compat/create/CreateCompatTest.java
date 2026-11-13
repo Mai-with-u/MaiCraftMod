@@ -165,6 +165,13 @@ class CreateCompatTest {
         assertTrue(CreateMachines.blocksOf(List.of("create:no_such_block", "not a key")).isEmpty());
     }
 
+    @Test
+    void 装了对的版本就交出手工涂抹配方途径() {
+        CompatRegistry registry = CompatRegistry.load(List.of(supported()), loaderWith("6.0.11"));
+        assertEquals(1, registry.blockApplications().size());
+        assertEquals("item_application", registry.blockApplications().getFirst().via().name());
+    }
+
     private static SupportedMod<CompatModule> supported() {
         return new SupportedMod<>(CreateCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
                 CreateCompatTest::compat);

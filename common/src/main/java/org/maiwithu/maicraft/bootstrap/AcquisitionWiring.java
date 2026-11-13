@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHunts;
 import org.maiwithu.maicraft.behavior.acquire.cook.ClientBrewingReads;
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.sources.BlockApplicationSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.BrewingSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveTransformSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveWorkTools;
@@ -51,6 +52,7 @@ import org.maiwithu.maicraft.behavior.acquire.cook.TransformSites;
 import org.maiwithu.maicraft.behavior.acquire.sources.WaterFillSource;
 import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.BlockApplications;
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.approach.LiveApproaches;
@@ -126,11 +128,8 @@ final class AcquisitionWiring {
                 deps.items().itemTags()));
         // 联动来源进世界时带着这一份玩家行为建：缺东西去拿也回到同一个引擎（内需入口），许可原样传下去。
         sources.addAll(deps.compat().itemSources(playerServices));
-        // 联动交来的"扔进水里会变"的配方表（AE2 的转化）：每一份一条途径，扔料、退开、等、捡用和捡掉落物同一套。
-        TransformSites sites = new LiveTransformSites(playerServices);
-        for (FluidTransforms transforms : deps.compat().fluidTransforms()) {
-            sources.add(new FluidTransformSource(transforms, sites, playerServices, drops, stepsAside));
-        }
+        List<BlockApplicationSource> applicationSources = addCompatTransforms(
+                sources, deps, playerServices, drops, stepsAside, innerNeeds, permission, blockTransforms);
         // 清点身上几件时连穿着的护甲一起数：锻造台上升级好穿回身上的那件照样算拿到了。
         BackpackWithArmor carried = new BackpackWithArmor(deps.character().backpack(), deps.character().equipment());
         // 来源装好一炉就走时，这一场拿东西当场收场：引擎、烧炼来源、obtain 看的是同一份留着烧的记录。
@@ -142,6 +141,7 @@ final class AcquisitionWiring {
         // 备料不把外层正要的当原料用掉（不把做好的合金压成块），外层只看到最近一次备工具为止（为斧头可用身上的原木）。
         craftSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         strippingSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
+        applicationSources.forEach(source -> source.watchChain(acquisition::inProgress, acquisition::outerWanted));
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
         miningSource.prepareWorkTools(new LiveWorkTools(deps.character().context()), acquisition::inProgress);
         smeltSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
@@ -231,6 +231,27 @@ final class AcquisitionWiring {
         return new StrippingSource(deps.character().backpack(), deps.character().offhand(),
                 deps.items().itemTags(), innerNeeds, permission, blockTransforms,
                 StrippingSource.liveAxeUses(deps.character().context()));
+    }
+
+    /** 登记联动模组交来的流体转化（AE2）与手工涂抹（机械动力）配方来源，并返回手工涂抹来源以便挂接防环。 */
+    private static List<BlockApplicationSource> addCompatTransforms(List<ItemSource> sources,
+            AbilityCatalog.Deps deps, PlayerServices playerServices, ClientDropPickup drops,
+            Optional<StepsAside> stepsAside, DeferredInnerNeeds innerNeeds, PermissionCheck permission,
+            InWorldBlockTransform.Seams blockTransforms) {
+        TransformSites sites = new LiveTransformSites(playerServices);
+        for (FluidTransforms transforms : deps.compat().fluidTransforms()) {
+            sources.add(new FluidTransformSource(transforms, sites, playerServices, drops, stepsAside));
+        }
+        List<BlockApplicationSource> built = new ArrayList<>();
+        for (BlockApplications applications : deps.compat().blockApplications()) {
+            built.add(new BlockApplicationSource(applications, () -> {
+                var current = deps.character().context().get();
+                return current == null ? null : current.level();
+            }, deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds,
+                    permission, blockTransforms));
+        }
+        sources.addAll(built);
+        return built;
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */

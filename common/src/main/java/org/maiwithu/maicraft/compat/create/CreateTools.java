@@ -33,6 +33,11 @@ public interface CreateTools {
     /** 砂纸打磨的全部配方：拿什么磨、磨出什么、一次几件。 */
     List<Polishing> polishing(ClientLevel level);
 
+    /** 手工涂抹（create:item_application）的全部配方：放下哪种基底方块、拿什么右键涂抹、变成什么。 */
+    default List<ItemApplication> itemApplications(ClientLevel level) {
+        return List.of();
+    }
+
     /** 用强力胶粘 from 到 to 这一片：Create 选区两下点完确认时发的那一包，服务器核对后扣一点胶、生成一块胶。 */
     void glue(BlockPos from, BlockPos to);
 
@@ -108,6 +113,27 @@ public interface CreateTools {
     record Polishing(List<String> inputs, String result, int resultCount) {
         public Polishing {
             inputs = List.copyOf(inputs);
+            Objects.requireNonNull(result, "result");
+        }
+    }
+
+    /**
+     * 一条手工涂抹（create:item_application）配方：把基底方块放在世界里，拿手持物右键涂抹成新方块（或掉出物品）。
+     *
+     * @param id                配方注册 ID
+     * @param baseItems         可放成基底方块的物品 ID 列表
+     * @param heldItems         拿在手里右键涂抹的物品 ID 列表
+     * @param keepHeldItem      涂抹时是否保留手持物不消耗
+     * @param result            主产物物品 ID
+     * @param resultCount       涂抹一次出几件主产物
+     * @param placesResultBlock 主产物是不是原地替换成的方块
+     */
+    record ItemApplication(String id, List<String> baseItems, List<String> heldItems, boolean keepHeldItem,
+                           String result, int resultCount, boolean placesResultBlock) {
+        public ItemApplication {
+            Objects.requireNonNull(id, "id");
+            baseItems = List.copyOf(baseItems);
+            heldItems = List.copyOf(heldItems);
             Objects.requireNonNull(result, "result");
         }
     }

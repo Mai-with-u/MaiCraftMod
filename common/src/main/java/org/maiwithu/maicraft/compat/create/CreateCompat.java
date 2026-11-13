@@ -72,9 +72,10 @@ public final class CreateCompat extends CompatModule {
 
     @Override public void contribute(CompatRegistry registry) {
         CreateMachines.contribute(this, registry);
-        // 扳手拆机器方块、砂纸打磨当拿东西的一条途径：都要走过去、换手、点，进世界时带着玩家行为建。
+        // 扳手拆机器方块、砂纸打磨与手工涂抹当拿东西的途径：都要走过去、换手、点，进世界时带着玩家行为建。
         registry.dismantleTool(this, services -> new CreateWrench(this, services));
         registry.itemSource(this, services -> new SandpaperSource(this, services));
+        registry.blockApplications(this, new CreateBlockApplications(this));
         // 附近的工具箱：不用走过去，照轮盘那样把一格挂到快捷栏上。
         registry.itemSource(this, services -> new ToolboxSource(this, services));
         // 土豆加农炮当远程武器：只交事实，挑、换手、瞄、出手由战斗做。
@@ -317,6 +318,11 @@ public final class CreateCompat extends CompatModule {
     /** 砂纸打磨的配方；见 {@link CreateTools#polishing}。 */
     public List<CreateTools.Polishing> polishing(ClientLevel level) {
         return call("读砂纸打磨的配方", () -> tools.polishing(level));
+    }
+
+    /** 手工涂抹的配方；见 {@link CreateTools#itemApplications}。 */
+    public List<CreateTools.ItemApplication> itemApplications(ClientLevel level) {
+        return call("读手工涂抹的配方", () -> tools.itemApplications(level));
     }
 
     /** 用强力胶粘一片；见 {@link CreateTools#glue}。 */

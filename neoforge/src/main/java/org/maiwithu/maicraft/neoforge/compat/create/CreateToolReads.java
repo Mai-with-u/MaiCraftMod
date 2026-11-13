@@ -19,6 +19,8 @@ import net.neoforged.neoforge.items.ItemStackHandler;
 import com.simibubi.create.AllDataComponents;
 import com.simibubi.create.AllRecipeTypes;
 import com.simibubi.create.api.equipment.potatoCannon.PotatoCannonProjectileType;
+import com.simibubi.create.content.kinetics.deployer.ItemApplicationRecipe;
+import com.simibubi.create.content.processing.recipe.ProcessingOutput;
 import com.simibubi.create.content.equipment.toolbox.ToolboxBlockEntity;
 import com.simibubi.create.content.equipment.toolbox.ToolboxEquipPacket;
 import com.simibubi.create.content.equipment.toolbox.ToolboxHandler;
@@ -34,6 +36,7 @@ import com.simibubi.create.content.equipment.wrench.IWrenchable;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.Recipe;
@@ -76,6 +79,38 @@ public final class CreateToolReads implements CreateTools {
             if (inputs.isEmpty() || result.isEmpty()) continue;
             recipes.add(new Polishing(List.copyOf(inputs), BuiltInRegistries.ITEM.getKey(result.getItem()).toString(),
                     result.getCount()));
+        }
+        return recipes;
+    }
+
+    // 手工涂抹配方：从客户端配方管理器读 create:item_application，第 0 格筛能放成方块的基底物品，第 1 格取手持涂抹物；
+    // 主产物是方块时原地替换成 1 格该方块，不是方块时原格变空气并掉出主产物。
+    @Override public List<ItemApplication> itemApplications(ClientLevel level) {
+        List<ItemApplication> recipes = new ArrayList<>();
+        for (RecipeHolder<? extends Recipe<?>> holder
+                : level.getRecipeManager().getAllRecipesFor(AllRecipeTypes.ITEM_APPLICATION.getType())) {
+            if (!(holder.value() instanceof ItemApplicationRecipe application)) continue;
+            if (application.getRollableResults().isEmpty()) continue;
+            Set<String> bases = new LinkedHashSet<>();
+            for (ItemStack option : application.getProcessedItem().getItems()) {
+                if (!option.isEmpty() && option.getItem() instanceof BlockItem) {
+                    bases.add(BuiltInRegistries.ITEM.getKey(option.getItem()).toString());
+                }
+            }
+            Set<String> held = new LinkedHashSet<>();
+            for (ItemStack option : application.getRequiredHeldItem().getItems()) {
+                if (!option.isEmpty()) {
+                    held.add(BuiltInRegistries.ITEM.getKey(option.getItem()).toString());
+                }
+            }
+            ProcessingOutput main = application.getRollableResults().getFirst();
+            ItemStack result = main.getStack();
+            if (bases.isEmpty() || held.isEmpty() || result.isEmpty()) continue;
+            boolean placesBlock = result.getItem() instanceof BlockItem;
+            int count = placesBlock ? 1 : Math.max(1, result.getCount());
+            recipes.add(new ItemApplication(holder.id().toString(), List.copyOf(bases), List.copyOf(held),
+                    application.shouldKeepHeldItem(), BuiltInRegistries.ITEM.getKey(result.getItem()).toString(),
+                    count, placesBlock));
         }
         return recipes;
     }
