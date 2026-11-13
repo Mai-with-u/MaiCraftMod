@@ -33,8 +33,13 @@ import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import com.google.gson.JsonParser;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.StepContext;
+import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.Attempt;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -303,6 +308,93 @@ class MachineConnectTaskTest {
                 "等了 " + ticks + " 刻");
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(result.summary().contains("正在向服务端要"), result.summary());
+    }
+
+    @Test
+    void 来源直接传动力网编号_识别并挑该网里最近的可接线构件铺通_找不到时说清原因() {
+        Rig rig = new Rig(tempDir);
+        DocumentStore documents = new DocumentStore(tempDir.resolve("module-state.sqlite"));
+        MachineConnectModule module = new MachineConnectModule(rig.services,
+                new MachineArchives(documents, "world1"), new WorldMemory(documents, "world1"),
+                permissions -> null);
+
+        // 模块解析：kinetic:-96207267254206 直接认成网络编号，不再误当地标报"没记住"。
+        ParamValues validParams = module.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"network\":\"kinetic\",\"source\":\"kinetic:-96207267254206\",\"radius\":16}").getAsJsonObject()).params();
+        Goal validGoal = Goal.of("maicraft:machine_connect", positionOf(TARGET), validParams);
+        StepDecision decision = module.decide(stepOf(validGoal, rig.tick()));
+        assertTrue(decision instanceof StepDecision.Run);
+        MachineConnectInput parsed = (MachineConnectInput) ((StepDecision.Run) decision).input();
+        assertEquals(Optional.of("kinetic:-96207267254206"), parsed.sourceNetworkId());
+        assertTrue(parsed.source().isEmpty());
+
+        // 缺了冒号后标识的写法当场按参数错误拒绝。
+        ParamValues incompleteParams = module.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"network\":\"kinetic\",\"source\":\"kinetic:\"}").getAsJsonObject()).params();
+        StepDecision incomplete = module.decide(stepOf(Goal.of("maicraft:machine_connect", positionOf(TARGET),
+                incompleteParams), rig.tick()));
+        assertTrue(incomplete instanceof StepDecision.Finish);
+        assertEquals(Problem.Kind.INVALID_PARAMETER, ((StepDecision.Finish) incomplete).result().problem().kind());
+
+        // 现场有另一张网的更近构件 (5,64,6)、目标网里无外露轴面的更近构件 (4,64,6)，以及目标网里有轴面的可接线构件 (2,64,6)：
+        // 只选 kinetic:-96207267254206 这张网，并挑出有可接线端口的 (2,64,6) 铺线。
+        BlockPos otherNetNear = new BlockPos(5, 64, 6);
+        BlockPos sealedMember = new BlockPos(4, 64, 6);
+        BlockPos attachableMember = new BlockPos(2, 64, 6);
+        rig.world.blocks.put(otherNetNear, Blocks.FURNACE.defaultBlockState());
+        rig.world.blocks.put(sealedMember, Blocks.FURNACE.defaultBlockState());
+        rig.world.blocks.put(attachableMember, Blocks.FURNACE.defaultBlockState());
+        for (int x = 2; x <= 6; x++) {
+            BlockPos along = new BlockPos(x, 64, 6);
+            if (!along.equals(attachableMember) && !along.equals(TARGET)
+                    && !along.equals(otherNetNear) && !along.equals(sealedMember)) {
+                rig.world.blocks.put(along, Blocks.AIR.defaultBlockState());
+            }
+        }
+        // 给一条北侧绕开 (4,64,6) 与 (5,64,6) 的空路，验证能从 (2,64,6) 接到 (6,64,6)。
+        for (int x = 2; x <= 6; x++) {
+            rig.world.blocks.put(new BlockPos(x, 64, 5), Blocks.AIR.defaultBlockState());
+        }
+        rig.reader.put(otherNetNear, "kinetic:999");
+        rig.reader.put(sealedMember, "kinetic:-96207267254206");
+        rig.reader.put(attachableMember, "kinetic:-96207267254206");
+        rig.reader.put(TARGET, "kinetic:111");
+        rig.reader.lines = new ShaftLines();
+        rig.type.portsAt = at -> at.equals(sealedMember) ? List.of()
+                : List.of(new ExchangePoint(at, Direction.NORTH, ExchangePoint.Medium.ROTATION, ExchangePoint.Flow.BOTH, ""),
+                        new ExchangePoint(at, Direction.SOUTH, ExchangePoint.Medium.ROTATION, ExchangePoint.Flow.BOTH, ""),
+                        new ExchangePoint(at, Direction.EAST, ExchangePoint.Medium.ROTATION, ExchangePoint.Flow.BOTH, ""),
+                        new ExchangePoint(at, Direction.WEST, ExchangePoint.Medium.ROTATION, ExchangePoint.Flow.BOTH, ""));
+        rig.machineRuns();
+        rig.area.offer(new ReadsMachineArea.Round(List.of(
+                new ReadsMachineArea.Cell(otherNetNear, Blocks.FURNACE.defaultBlockState(), false),
+                new ReadsMachineArea.Cell(sealedMember, Blocks.FURNACE.defaultBlockState(), false),
+                new ReadsMachineArea.Cell(attachableMember, Blocks.FURNACE.defaultBlockState(), false)), 0, true, false));
+        rig.lineBuilding = line -> new LaidAtOnce(() -> rig.reader.put(TARGET, "kinetic:-96207267254206"));
+
+        TaskResult connected = rig.run(parsed);
+        assertEquals(TaskResult.Status.DONE, connected.status(), connected.summary());
+        MachineConnectDetails details = (MachineConnectDetails) connected.details();
+        assertEquals(new WorldPosition(attachableMember.getX(), attachableMember.getY(), attachableMember.getZ(),
+                "minecraft:overworld"), details.sourceCell(), "跳过别张网和封死没接口的构件，挑中最近的可接线构件");
+        assertTrue(details.joined());
+
+        // 现场没有这张动力网时，按 NOT_FOUND 明确说明找不到该网络编号的成员。
+        Rig missingRig = new Rig(tempDir);
+        missingRig.area.offer(new ReadsMachineArea.Round(List.of(), 0, true, false));
+        TaskResult missing = missingRig.run(new MachineConnectInput("kinetic", positionOf(TARGET), Optional.empty(),
+                Optional.of("kinetic:-96207267254206"), 16, null, Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, missing.status());
+        assertEquals(Problem.Kind.NOT_FOUND, missing.problem().kind());
+        assertTrue(missing.problem().message().contains("kinetic:-96207267254206"), missing.problem().message());
+    }
+
+    private static StepContext stepOf(Goal goal, TickContext tick) {
+        return new StepContext() {
+            @Override public Goal goal() { return goal; }
+            @Override public int stepIndex() { return 0; }
+            @Override public TickContext tick() { return tick; }
+        };
     }
 
     /** 一刻铺完的那段施工：铺完时跑一下给的效果（让网络读数跟着变）。 */

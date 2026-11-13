@@ -48,7 +48,7 @@ final class MachineConnectModule implements AbilityModule {
                     ParamSpec.of("network", ParamType.TEXT).required()
                             .doc("接哪种网：取值由已登记的网络读取器自报，例如 kinetic（应力）、me、energy").build(),
                     ParamSpec.of("source", ParamType.TEXT)
-                            .doc("接到哪：写法与 target 相同（观察编号、[x,y,z] 坐标、名字）；不给就在 radius 内找").build(),
+                            .doc("接到哪：观察编号、[x,y,z] 坐标、名字，或 machine_inspect 返回的网络编号（如 kinetic:...）；不给就在 radius 内找").build(),
                     ParamSpec.of("radius", ParamType.INTEGER).defaultValue(32)
                             .doc("没给 source 时找来源的范围，单位格").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
@@ -84,21 +84,68 @@ final class MachineConnectModule implements AbilityModule {
                                             .map(reader -> reader.kind().id()).reduce((a, b) -> a + " / " + b).orElse(""))));
         }
         Optional<Target> source = Optional.empty();
+        Optional<String> sourceNetworkId = Optional.empty();
         if (params.has("source")) {
-            source = parseSource(params.text("source"));
-            if (source.isEmpty()) {
-                return new StepDecision.Finish(TaskResult.failed("source 写法不对",
-                        Problem.of(Problem.Kind.INVALID_PARAMETER,
-                                "source 要是观察编号（b3）、坐标 [x,y,z] 或一个名字",
-                                "和 target 同一种写法；不给就在 radius 内找")));
+            String rawSource = params.text("source").trim();
+            Optional<ParsedNetworkId> asNetwork = parseNetworkId(rawSource);
+            if (asNetwork.isPresent()) {
+                ParsedNetworkId net = asNetwork.get();
+                if (net.id().isEmpty()) {
+                    return new StepDecision.Finish(TaskResult.failed("source 网络编号不完整",
+                            Problem.of(Problem.Kind.INVALID_PARAMETER,
+                                    "source 网络编号缺少冒号或 @ 后面的标识：" + rawSource,
+                                    "照抄 machine_inspect 里 networks[].id 的完整值，或给一格机器的坐标、观察编号")));
+                }
+                if (!net.kind().equals(kind)) {
+                    return new StepDecision.Finish(TaskResult.failed("source 网络种类与 network 不一致",
+                            Problem.of(Problem.Kind.INVALID_PARAMETER,
+                                    "source 给的是 " + net.kind() + " 网络编号（" + rawSource + "），和要接的 network="
+                                            + kind + " 不是同一种网",
+                                    "把 network 改成 " + net.kind() + "，或换成一张 " + kind + " 网络的编号或机器坐标")));
+                }
+                sourceNetworkId = Optional.of(net.full());
+            } else {
+                source = parseSource(rawSource);
+                if (source.isEmpty()) {
+                    return new StepDecision.Finish(TaskResult.failed("source 写法不对",
+                            Problem.of(Problem.Kind.INVALID_PARAMETER,
+                                    "source 要是观察编号（b3）、坐标 [x,y,z]、名字，或网络编号（如 kinetic:...）",
+                                    "和 target 同一种写法，也可直接传 machine_inspect 的 networks[].id；不给就在 radius 内找")));
+                }
             }
         }
         MachineArchive archive = step.goal().target() instanceof Target.Landmark landmark
                 ? archives.find(landmark.name()).orElse(null)
                 : null;
         int radius = params.has("radius") ? (int) params.integer("radius") : 32;
-        return new StepDecision.Run(new MachineConnectInput(kind, step.goal().target(), source, radius,
-                archive, step.goal().permissions()));
+        return new StepDecision.Run(new MachineConnectInput(kind, step.goal().target(), source, sourceNetworkId,
+                radius, archive, step.goal().permissions()));
+    }
+
+    private record ParsedNetworkId(String kind, String id, String full) {
+    }
+
+    /**
+     * 识别 machine_inspect 返回的网络编号（如 kinetic:-96207267254206、me@0,64,0）：
+     * 前缀是已登记的网络种类且带 : 或 @ 分隔，同时不是已存的机器档案名或记过的地点名时，按网络编号解析。
+     */
+    private Optional<ParsedNetworkId> parseNetworkId(String trimmed) {
+        if (trimmed.isEmpty() || archives.find(trimmed).isPresent() || services.places().place(trimmed).isPresent()) {
+            return Optional.empty();
+        }
+        int colon = trimmed.indexOf(':');
+        int at = trimmed.indexOf('@');
+        int sep = colon > 0 && (at < 0 || colon < at) ? colon : at;
+        if (sep <= 0) {
+            return Optional.empty();
+        }
+        String prefix = trimmed.substring(0, sep);
+        boolean knownKind = services.networkReaders().stream()
+                .anyMatch(reader -> reader.kind().id().equals(prefix));
+        if (!knownKind) {
+            return Optional.empty();
+        }
+        return Optional.of(new ParsedNetworkId(prefix, trimmed.substring(sep + 1).trim(), trimmed));
     }
 
     /** source 的三种写法：观察编号、坐标、名字；都不是给空。 */

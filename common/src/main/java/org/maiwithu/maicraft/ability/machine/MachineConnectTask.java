@@ -151,6 +151,15 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
             sourceCell = ((MachineTargets.Resolution.Found) source).cell();
             return Next.go(Phase.VERDICT, "两端都认好了，核对网络");
         }
+        if (input.sourceNetworkId().isPresent()) {
+            String wantedNet = input.sourceNetworkId().get();
+            if (reader.membership(targetCell).filter(wantedNet::equals).isPresent()) {
+                // 目标本身已经挂在点名的那张网上了：不用再扫周围，直接去核对运行状态与整网读数。
+                sourceCell = targetCell;
+                return Next.go(Phase.VERDICT, "目标已经在网络 " + wantedNet + " 上，核对状态");
+            }
+            return Next.go(Phase.FIND_SOURCE, "在 " + input.radius() + " 格内找网络 " + wantedNet + " 的可接线成员");
+        }
         return Next.go(Phase.FIND_SOURCE, "没给来源，在 " + input.radius() + " 格内找挂着这种网的格子");
     }
 
@@ -194,6 +203,9 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         }
         for (ReadsMachineArea.Cell cell : round.cells()) {
             reader.membership(cell.pos()).ifPresent(networkId -> {
+                if (input.sourceNetworkId().isPresent() && !input.sourceNetworkId().get().equals(networkId)) {
+                    return;
+                }
                 candidates.put(cell.pos(), networkId);
                 if (isRunning(cell.pos(), cell.state())) preferredRunning = true;
             });
@@ -204,6 +216,12 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         }
         BlockPos chosen = chooseSource();
         if (chosen == null) {
+            if (input.sourceNetworkId().isPresent()) {
+                String wantedNet = input.sourceNetworkId().get();
+                return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
+                        input.radius() + " 格内找不到网络「" + wantedNet + "」的任何成员（可能超出 radius 范围，或这张网已经拆改换了编号）",
+                        "把 radius 调大、重新 machine_inspect 看现在的网络编号，或直接给在网构件的坐标"));
+            }
             return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
                     input.radius() + " 格内没有挂着 " + kind.id() + " 网的格子",
                     "把 radius 调大，或用 source 指一台在网的机器"));
@@ -212,11 +230,18 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         return Next.go(Phase.VERDICT, "找到了在网的一格，核对网络");
     }
 
-    /** 挑来源：在转的优先，再按离目标远近；登记的网络读取器读不出运行状态时按远近。 */
+    /**
+     * 挑来源起点：优先有可接线端口（外露轴面或跨越端）的构件，避免挑到四面封死没法引出动力的成员；
+     * 其中在转的优先，再按离目标最近挑。全都看不出接线口时退回全部候选里按同样规则挑。
+     */
     private BlockPos chooseSource() {
+        Optional<LineMaterials> materials = reader.lineMaterials();
+        List<BlockPos> connectable = materials.isEmpty() ? List.of()
+                : candidates.keySet().stream().filter(pos -> canAttachFrom(pos, materials.get())).toList();
+        Iterable<BlockPos> pool = connectable.isEmpty() ? candidates.keySet() : connectable;
         List<BlockPos> running = new ArrayList<>();
         List<BlockPos> others = new ArrayList<>();
-        for (BlockPos pos : candidates.keySet()) {
+        for (BlockPos pos : pool) {
             (isRunning(pos, services.world().stateAt(pos).orElse(null)) ? running : others).add(pos);
         }
         if (running.isEmpty()) {
@@ -225,6 +250,12 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         BlockPos best = nearest(running);
         preferredRunning = true;
         return best != null ? best : nearest(others);
+    }
+
+    // 这一格能不能引出线路：有对接介质的端口面（或能当链条输送机这类跨越段的一头）才算可接线构件。
+    private boolean canAttachFrom(BlockPos cell, LineMaterials materials) {
+        return !routes.attaches(List.of(cell), materials, ExchangePoint.Flow.OUTPUT).isEmpty()
+                || !routes.spanEnds(List.of(cell), materials).isEmpty();
     }
 
     private BlockPos nearest(List<BlockPos> cells) {

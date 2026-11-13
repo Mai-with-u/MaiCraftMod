@@ -1252,7 +1252,7 @@
           "name": "source",
           "type": "string",
           "required": false,
-          "doc": "接到哪：写法与 target 相同（观察编号、[x,y,z] 坐标、名字）；不给就在 radius 内找"
+          "doc": "接到哪：观察编号、[x,y,z] 坐标、名字，或 machine_inspect 返回的网络编号（如 kinetic:...）；不给就在 radius 内找"
         },
         {
           "name": "radius",
