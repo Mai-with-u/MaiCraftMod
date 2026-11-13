@@ -9,6 +9,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 ### 新增
 
 - `machine_inspect` 的 `devices[]` 新增 `settings`（多格设备各格设置不同时为 `setting_groups`），直接列出工作盆与朝上动力锯的配方产物过滤槽（`filter`，无过滤时为 `empty`）、漏斗过滤与件数、转速控制器数值等已激活设置项，设过滤或清空过滤照旧走 `machine_configure`。
+- `obtain` 支持斧头去皮（归入 `via=craft`）：要去皮原木、去皮木头、去皮菌柄菌核或去皮竹块时，自动备齐斧头与原木，在身边避开窄道与门口的空位一块块放下削皮再挖回进包，半途失败也会把刚放下的原木收回。
 - 新增 `maicraft:loot` 搜刮战利品容器能力：不指定目标时在 `radius`（默认 24、最大 64）内优先挑最近没开过的自然战利品容器（其次无记录容器），按价值分级把预留急需、稀罕贵重、装备、有用材料与食物搬进背包并把建材零碎垃圾留在箱里，结果细节写明 `container`、`opened`、`taken`、`left`、`rare_finds` 与 `backpack_full`；点名自家或玩家容器只打开查看不拿东西。
 - 打开自然战利品容器或无放置记录容器（`loot`、`use`、`obtain`）看到稀罕贵重物品（稀有度、附魔或 `#c:gems` 宝石）时，`events` 的 `self` 流新增 `rare_loot_found` 里程碑事件，按世界记忆去重并在 `rare_loot` 里写明开出了什么与拿走几件。
 - `observe(what="self")` 新增 `carried_backpacks`：角色身上背着或揣着精妙背包（含穿在 Curios 饰品栏里的）时列出栏位与物品 ID，五分钟内打开过的还附带主存储剩余空槽数与看到的存货。

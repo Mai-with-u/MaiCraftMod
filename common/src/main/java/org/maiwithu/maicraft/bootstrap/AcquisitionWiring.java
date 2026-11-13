@@ -27,6 +27,8 @@ import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.sources.FluidTransformSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HuntSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.InWorldBlockTransform;
+import org.maiwithu.maicraft.behavior.acquire.sources.StrippingSource;
 import org.maiwithu.maicraft.behavior.acquire.engine.BackpackWithArmor;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
@@ -92,6 +94,9 @@ final class AcquisitionWiring {
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
+        InWorldBlockTransform.Seams blockTransforms = blockTransformSeams(deps, playerServices, placer, collects, drops);
+        StrippingSource strippingSource = strippingSource(deps, innerNeeds, permission, blockTransforms);
+        // 烧炼来源认熔炉、高炉、烟熏炉三种：高炉、烟熏炉只用记得的现成的，没有照旧用熔炉。
         RecipeSource smeltSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
@@ -110,7 +115,7 @@ final class AcquisitionWiring {
                 new ClientCropReplanting(toMainhand, deps.hands().interactions(), deps.character().context()));
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                containerSource, craftSource, smeltSource, smithSource, brewSource, miningSource, harvestSource,
+                containerSource, craftSource, strippingSource, smeltSource, smithSource, brewSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
                 new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags())));
         sources.addAll(tradeAndHunt(deps, bringsClose, drops, innerNeeds, permission));
@@ -136,6 +141,7 @@ final class AcquisitionWiring {
         smeltSource.watchLeftCooking(leftCooking);
         // 备料不把外层正要的当原料用掉（不把做好的合金压成块），外层只看到最近一次备工具为止（为斧头可用身上的原木）。
         craftSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
+        strippingSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         // 成批砍树挖石头前先备一把石制工具；正在为做这把工具挖料时不再先要它。
         miningSource.prepareWorkTools(new LiveWorkTools(deps.character().context()), acquisition::inProgress);
         smeltSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
@@ -207,6 +213,24 @@ final class AcquisitionWiring {
                 timers.cancel(timerId);
             }
         };
+    }
+
+    /** 原地摆块、持物右键改造并当场挖回的通用现场接缝，供斧头去皮与手工涂抹来源共用。 */
+    private static InWorldBlockTransform.Seams blockTransformSeams(AbilityCatalog.Deps deps,
+            PlayerServices playerServices, ClientWorkstationPlacer placer, ClientCollectsBlocks collects,
+            ClientDropPickup drops) {
+        return new InWorldBlockTransform.Seams(
+                placer, placer, InWorldBlockTransform.liveApplier(deps.character().context(),
+                        playerServices.toMainhand(), deps.hands().interactions(), playerServices.sneak(),
+                        deps.items().itemTags()), collects, drops);
+    }
+
+    /** 原版斧头去皮来源：在身边放下一格未去皮木料，拿斧头削皮再当场挖回，归入合成途径。 */
+    private static StrippingSource strippingSource(AbilityCatalog.Deps deps, DeferredInnerNeeds innerNeeds,
+            PermissionCheck permission, InWorldBlockTransform.Seams blockTransforms) {
+        return new StrippingSource(deps.character().backpack(), deps.character().offhand(),
+                deps.items().itemTags(), innerNeeds, permission, blockTransforms,
+                StrippingSource.liveAxeUses(deps.character().context()));
     }
 
     /** 来源自报的途径，按来源顺序去重；合成与烧炼各是一条，同一条途径有几个来源也只列一次。 */
