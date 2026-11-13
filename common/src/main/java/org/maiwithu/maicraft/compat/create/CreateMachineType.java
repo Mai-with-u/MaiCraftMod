@@ -212,6 +212,13 @@ final class CreateMachineType implements MachineType {
         return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, count, permissions);
     }
 
+    // 锯齿没朝上、加工处漏放了置物台或工作盆这类现场摆法原因交给机器运行说明白，不误报成机器不收这种料。
+    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+        ClientLevel level = level();
+        if (level == null || !level.isLoaded(at)) return Optional.empty();
+        return stations.whyCannotFeed(kind.work(), level, level.getBlockState(at), at);
+    }
+
     // 锯与粉碎轮做好的东西掉在地上：给出落在哪一块，machine_run 数那一块地上新多出来的、走过去捡。
     @Override public Optional<AABB> dropArea(BlockPos at) {
         ClientLevel level = level();

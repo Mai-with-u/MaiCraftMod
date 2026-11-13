@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
@@ -153,8 +154,9 @@ final class MachineTestDoubles {
         final String name;
         final MachineRole role;
         private final Predicate<BlockState> covers;
-        /** 设置项与现值：键 → 值。 */
+        /** 设置项与现值：键 → 值；按格不一时用 settingsAt。 */
         final Map<String, String> settingValues = new LinkedHashMap<>();
+        Function<BlockPos, Map<String, String>> settingsAt;
         /** 改设置时执行的动作：测试用它把读回的值真的改掉或让它打转。 */
         final Map<String, Runnable> onChange = new HashMap<>();
         /** 改设置时交出的动作；没给按 onChange 一刻做完。用来演"正对着机器切换、等游戏确认"。 */
@@ -206,6 +208,8 @@ final class MachineTestDoubles {
         final List<Long> ingredientAmounts = new ArrayList<>();
         /** 投料的先后：每次 feed 记下投的是什么。 */
         final List<String> fedItems = new ArrayList<>();
+        /** 现场摆法接不了投料时的原因说明；默认为空，按机器本身不收这种料处理。 */
+        Function<String, Optional<String>> cannotFeedWhy = itemId -> Optional.empty();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -293,8 +297,9 @@ final class MachineTestDoubles {
         }
 
         @Override public List<MachineSetting> settings(BlockPos at) {
+            Map<String, String> source = settingsAt != null ? settingsAt.apply(at) : settingValues;
             List<MachineSetting> out = new ArrayList<>();
-            settingValues.forEach((key, value) -> out.add(
+            source.forEach((key, value) -> out.add(
                     new MachineSetting(key, value, List.of(), key + " 的说明")));
             return out;
         }
@@ -329,6 +334,10 @@ final class MachineTestDoubles {
         @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
             fedItems.add(itemId);
             return Optional.ofNullable(feedActions.poll());
+        }
+
+        @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+            return cannotFeedWhy.apply(itemId);
         }
 
         @Override public boolean outputVisible(BlockPos at) {
@@ -446,6 +455,8 @@ final class MachineTestDoubles {
         boolean inWorld = true;
         /** 地上躺着的掉落物：物品 → 件数，不分在哪一块。 */
         final Map<String, Integer> onGround = new HashMap<>();
+        /** 角色随身已有的物品：specifier（物品 ID 或 #标签）→ 件数。 */
+        final Map<String, Integer> carried = new HashMap<>();
 
         @Override public Optional<Spot> playerSpot() {
             return inWorld ? Optional.of(new Spot(playerAt, dimension)) : Optional.empty();
@@ -457,6 +468,10 @@ final class MachineTestDoubles {
 
         @Override public int itemsOnGround(AABB area, String itemId) {
             return onGround.getOrDefault(itemId, 0);
+        }
+
+        @Override public int carriedCount(WantedItem wanted) {
+            return carried.getOrDefault(wanted.specifier(), 0);
         }
     }
 

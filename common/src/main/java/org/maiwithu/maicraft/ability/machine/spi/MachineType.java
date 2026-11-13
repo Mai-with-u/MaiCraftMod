@@ -161,6 +161,15 @@ public interface MachineType {
      */
     Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions);
 
+    /**
+     * 这台机器此刻为什么接不了投料（{@link #feed} 给了空是因为当前朝向不接散料、加工处还没摆置物台或工作盆、
+     * 双轮之间没有朝下送料口这类现场摆法原因）：给出一句中文原因，machine_run 按这里做不了如实报，
+     * 不误报成机器不收这种物品；机器本身就不收料时给空。
+     */
+    default Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+        return Optional.empty();
+    }
+
     /** 这台机器出口现在有什么：置物台台面、出口箱、传送带末端；只列看得见的。 */
     List<MachineState.Shown> output(BlockPos at);
 

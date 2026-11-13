@@ -242,4 +242,45 @@ class CreateReadingsTest {
         assertEquals(Direction.SOUTH, CreateReadings.beltHeading(Direction.NORTH, 256).orElseThrow());
         assertTrue(CreateReadings.beltHeading(Direction.EAST, 0).isEmpty(), "不转不送");
     }
+
+    @Test
+    void 动力锯只有锯齿朝上才报顶面散料口_水平放置如实报朝向砍树切方块口() {
+        BlockPos at = new BlockPos(4, 64, 4);
+        var up = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.UP);
+        var south = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.SOUTH);
+
+        List<ExchangePoint> upSpots = ProcessingSpots.of(CreateMachineCatalog.Work.SAW, up, at, Set.of(), false);
+        assertEquals(1, upSpots.size());
+        assertEquals(Direction.UP, upSpots.getFirst().side());
+        assertEquals(ExchangePoint.Flow.BOTH, upSpots.getFirst().flow());
+
+        List<ExchangePoint> southSpots = ProcessingSpots.of(CreateMachineCatalog.Work.SAW, south, at, Set.of(), false);
+        assertEquals(1, southSpots.size());
+        assertEquals(Direction.SOUTH, southSpots.getFirst().side());
+        assertEquals(ExchangePoint.Flow.INPUT, southSpots.getFirst().flow());
+        assertTrue(southSpots.getFirst().note().contains("不收顶面散料"), southSpots.getFirst().note());
+    }
+
+    @Test
+    void 水平动力锯与缺台位的压机给出摆法原因_工作盆取物点击框避开顶面空腔与侧面过滤框() {
+        BlockPos at = new BlockPos(2, 70, 2);
+        var stone = Blocks.STONE.defaultBlockState();
+        var southSaw = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.SOUTH);
+        var upSaw = Blocks.DISPENSER.defaultBlockState().setValue(BlockStateProperties.FACING, Direction.UP);
+
+        Optional<String> sawWhy = StationHandling.whyCannotFeed(CreateMachineCatalog.Work.SAW, southSaw, at,
+                cell -> false, cell -> false, cell -> false, cell -> stone);
+        assertTrue(sawWhy.isPresent() && sawWhy.get().contains("facing=up"), sawWhy.toString());
+        assertTrue(StationHandling.whyCannotFeed(CreateMachineCatalog.Work.SAW, upSaw, at,
+                cell -> false, cell -> false, cell -> false, cell -> stone).isEmpty());
+
+        Optional<String> pressWhy = StationHandling.whyCannotFeed(CreateMachineCatalog.Work.PRESS, stone, at,
+                cell -> false, cell -> false, cell -> false, cell -> stone);
+        assertTrue(pressWhy.isPresent() && pressWhy.get().contains("正下方第二格"), pressWhy.toString());
+
+        // 工作盆外壁下半截框：底面 >= 2/16（高于底板），顶面 < 8/16（严格低于侧面 [0.50, 1.00] 的配方产物过滤框）。
+        var lowerWall = StationHandling.basinLowerWall(at);
+        assertTrue(lowerWall.minY >= at.getY() + 2 / 16.0 - 1e-9);
+        assertTrue(lowerWall.maxY < at.getY() + 0.50 - 0.05, "膨胀瞄准内缩量后仍严格低于过滤框下沿 0.50：" + lowerWall);
+    }
 }

@@ -172,6 +172,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     "不给 item 只看它的读数，或换一台烧燃料的发电机"));
         }
         if (input.item() != null && fuel.kind() == FuelUse.Kind.FUEL) {
+            Optional<String> blocked = type.whyCannotFeed(cell, input.item());
+            if (blocked.isPresent()) {
+                return Next.fail(cannotFeedProblem(blocked.get()));
+            }
             fuelRun = true;
             notes.add(describeMachine() + "烧的燃料：" + fuel.note());
             toGather.add(new MachineRunDetails.Fed(input.item(), input.count()));
@@ -201,6 +205,13 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         }
         batches = batchesNeeded(recipe);
         queueIngredients(recipe);
+        // 现场机器朝向不对（如水平放置的动力锯）或加工处还没摆置物台、工作盆时，备料前直接如实说明，不白跑一趟拿料。
+        if (!toGather.isEmpty()) {
+            Optional<String> blocked = type.whyCannotFeed(cell, toGather.peek().item());
+            if (blocked.isPresent()) {
+                return Next.fail(cannotFeedProblem(blocked.get()));
+            }
+        }
         recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
         if (menuExit) {
             peeking = services.interactions().lookIntoMenu(cell, input.item(), false, input.permissions())
@@ -263,7 +274,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         toGather.addAll(mainItems);
     }
 
-    // 备料：一样一样去拿，缺了按缺东西收场；拿到了挪进投料队。
+    // 备料：先扣掉角色随身已有的匹配原料（并刨去前面已排进投料队的同名份额），够数直接进投料队，差一点只去补差额。
     private Next<Phase> gather(TickContext context) {
         if (action() != null) {
             return switch (runAction(context)) {
@@ -278,16 +289,29 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                         failed.problem().suggestion()));
             };
         }
-        MachineRunDetails.Fed next = toGather.peek();
-        if (next == null) {
-            return Next.go(Phase.FEED, "料备齐了");
+        while (!toGather.isEmpty()) {
+            MachineRunDetails.Fed next = toGather.peek();
+            WantedItem wanted = new WantedItem(next.item());
+            int reserved = toFeed.stream().filter(queued -> queued.item().equals(next.item()))
+                    .mapToInt(MachineRunDetails.Fed::count).sum();
+            int available = Math.max(0, services.world().carriedCount(wanted) - reserved);
+            int missing = next.count() - available;
+            if (missing <= 0) {
+                toFeed.add(toGather.poll());
+                recordProgress("身上已有 " + next.item() + " ×" + available + "，够投 " + next.count() + " 件");
+                continue;
+            }
+            prepared = services.needs().actionFor(new ItemRequest(wanted, missing,
+                    "投进机器的料"), input.permissions(), records());
+            return Next.go(Phase.GATHER, available > 0
+                    ? "身上已有 " + next.item() + " ×" + available + "，再去补 " + missing + " 件"
+                    : "去拿 " + next.item() + " ×" + missing);
         }
-        prepared = services.needs().actionFor(new ItemRequest(new WantedItem(next.item()), next.count(),
-                "投进机器的料"), input.permissions(), records());
-        return Next.go(Phase.GATHER, "去拿 " + next.item() + " ×" + next.count());
+        return Next.go(Phase.FEED, "料备齐了");
     }
 
-    // 投料：交给机器类型的投法（手持右键顶面、放进输入槽），投好一样记一样。
+    // 投料：交给机器类型的投法（手持右键顶面、放进输入槽），投好一样记一样；
+    // 若现场朝向不对或缺配套台位导致给不出投法，按现场摆法原因报 NOT_POSSIBLE_HERE，不误报成机器不收这种物品。
     private Next<Phase> feed(TickContext context) {
         if (action() != null) {
             return switch (runAction(context)) {
@@ -310,8 +334,14 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     feeding = action instanceof FeedReport report ? report : null;
                     return Next.go(Phase.FEED, "把 " + next.item() + " 投进" + describeMachine());
                 })
-                .orElseGet(() -> stop(Problem.of(Problem.Kind.UNSUPPORTED,
-                        describeMachine() + "不收 " + next.item() + " 这种料")));
+                .orElseGet(() -> stop(type.whyCannotFeed(cell, next.item())
+                        .map(this::cannotFeedProblem)
+                        .orElseGet(() -> Problem.of(Problem.Kind.UNSUPPORTED,
+                                describeMachine() + "不收 " + next.item() + " 这种料"))));
+    }
+
+    private Problem cannotFeedProblem(String why) {
+        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, describeMachine() + "现在没法投料：" + why);
     }
 
     // 一样料投完记账：投法交得出实情（扔进去的）按进去的件数记，没进去的在哪写进说明；

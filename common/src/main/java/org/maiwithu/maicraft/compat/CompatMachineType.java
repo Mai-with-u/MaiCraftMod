@@ -144,6 +144,11 @@ public final class CompatMachineType implements MachineType {
         return act(() -> type.feed(at, itemId, count, permissions));
     }
 
+    // 停用或接口对不上时不编现场摆法原因，交回空。
+    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+        return ask(() -> type.whyCannotFeed(at, itemId), Optional.empty());
+    }
+
     @Override public List<MachineState.Shown> output(BlockPos at) {
         return ask(() -> type.output(at), List.of());
     }

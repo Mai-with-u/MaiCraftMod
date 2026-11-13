@@ -11,6 +11,10 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
+import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -52,5 +56,15 @@ final class LiveMachineWorld implements MachineWorldView {
         return current.level().getEntitiesOfClass(ItemEntity.class, area,
                         drop -> drop.isAlive() && BuiltInRegistries.ITEM.getKey(drop.getItem().getItem()).toString().equals(itemId))
                 .stream().mapToInt(drop -> drop.getItem().getCount()).sum();
+    }
+
+    // 清点身上（主背包加副手）匹配原料的件数：复用全仓统一的清点规则，物品 ID、标签与药水瓶种类按同一把尺子数。
+    @Override public int carriedCount(WantedItem wanted) {
+        PlayerContext current = context.get();
+        if (current == null || current.localPlayer() == null) {
+            return 0;
+        }
+        return CarriedItems.matching(new ClientBackpackView(current.localPlayer()),
+                LiveCarryReads.offhand(context), wanted, LiveCarryReads.itemTags());
     }
 }

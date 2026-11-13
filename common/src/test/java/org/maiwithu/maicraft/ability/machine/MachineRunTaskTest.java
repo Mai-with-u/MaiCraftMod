@@ -446,6 +446,57 @@ class MachineRunTaskTest {
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
     }
 
+    @Test
+    void 机器当前朝向或摆法接不了投料_备料前直接报清摆法原因_不误报不收这种料() {
+        Rig rig = new Rig();
+        rig.viewer.putMaking(PLATE, List.of(pressingRecipe()));
+        rig.type.cannotFeedWhy = itemId -> Optional.of("锯齿当前朝 south（只砍切正前方的树木与方块），要投喂散料加工需把锯齿朝上（facing=up）");
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.problem().message().contains("facing=up"), result.problem().message());
+        assertEquals(0, rig.needs.requests.size(), "朝向不对接不了散料，不白跑一趟去备料");
+    }
+
+    @Test
+    void 机器本身确实不收料_仍按不支持说明不收这种料() {
+        Rig rig = new Rig();
+        rig.viewer.putMaking(PLATE, List.of(pressingRecipe()));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
+        assertTrue(result.problem().message().contains("不收 " + INGOT + " 这种料"), result.problem().message());
+    }
+
+    @Test
+    void 随身已有足够原料时不重复备料_差一部分时只请求差额件数() {
+        // 身上已有 435 件原料、做两批只要 2 件：一次备料都不发，直接投 2 件。
+        Rig enough = new Rig();
+        enough.machineRunsAtFullSpeed();
+        enough.world.carried.put(INGOT, 435);
+        TaskResult enoughResult = enough.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, enoughResult.status(), enoughResult.summary());
+        assertEquals(0, enough.needs.requests.size(), "随身够数直接进投料队");
+        assertEquals(2, ((MachineRunDetails) enoughResult.details()).fed().getFirst().count());
+
+        // 身上已有 5 件原料、做 9 批要 9 件：只向取物请求差额 4 件，投料仍投满 9 件。
+        Rig partialCarry = new Rig();
+        partialCarry.viewer.putMaking(PLATE, List.of(pressingRecipe()));
+        partialCarry.type.feedActions.add(new MachineTestDoubles.Scripted(1,
+                () -> partialCarry.type.output.put(PLATE, 9)));
+        partialCarry.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        partialCarry.world.carried.put(INGOT, 5);
+        TaskResult partialResult = partialCarry.run(new MachineRunInput(positionOf(CELL), PLATE, 9, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, partialResult.status(), partialResult.summary());
+        assertEquals(1, partialCarry.needs.requests.size());
+        assertEquals(4, partialCarry.needs.requests.getFirst().count(), "只补差额 4 件");
+        assertEquals(9, ((MachineRunDetails) partialResult.details()).fed().getFirst().count(), "投料按配方全量 9 件投");
+    }
+
     /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */
     private static final class ReportedFeed implements Action, FeedReport {
         private final int delivered;

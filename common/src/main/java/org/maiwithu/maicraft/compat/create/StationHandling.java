@@ -49,6 +49,12 @@ final class StationHandling {
     private static final double FACE_INSET = 0.15;
     /** 顶面点击框的厚度（格）。 */
     private static final double FACE_DEPTH = 0.02;
+    /**
+     * 工作盆外壁下半截的高度范围（格）：高于 2/16 底板，低于水平侧面 8/16~16/16 的配方产物过滤框（半径 0.25、中心在 12/16），
+     * 四周都能直接点到盆壁且不碰过滤框、不落进顶面中心空腔。类别：游戏事实（BASIN_BLOCK_SHAPE 与 BasinValueBox）。
+     */
+    private static final double BASIN_WALL_LOW = 2 / 16.0;
+    private static final double BASIN_WALL_HIGH = 7 / 16.0;
 
     private final CreateCompat compat;
     private final PlayerServices services;
@@ -118,6 +124,64 @@ final class StationHandling {
         if (depot.isPresent()) return Optional.of(putOnDepot(level, depot.get(), itemId, count, permissions));
         return tossSpot(work, level, state, at).map(spot -> new TossFeed(services, itemId, count, spot.cell(),
                 spot.catchHeight(), permissions));
+    }
+
+    /** 这台机器现场接不了投料的原因：锯齿没朝上、加工处缺置物台或工作盆、粉碎轮没摆出双轮夹口。 */
+    Optional<String> whyCannotFeed(CreateMachineCatalog.Work work, ClientLevel level, BlockState state, BlockPos at) {
+        return whyCannotFeed(work, state, at,
+                cell -> compat.depotItems(level, cell).isPresent(),
+                cell -> compat.basinItems(level, cell).isPresent(),
+                cell -> level.isLoaded(cell) && level.getBlockState(cell).isCollisionShapeFullBlock(level, cell),
+                level::getBlockState);
+    }
+
+    /**
+     * 纯函数判定现场摆法为什么接不了散料或台面投喂：区分"朝向或配套台位不对"与"机器本身不收料"，
+     * 避免水平放着砍树的动力锯或底下漏放工作盆的搅拌器被误报成"不收这种物品"。
+     */
+    static Optional<String> whyCannotFeed(CreateMachineCatalog.Work work, BlockState state, BlockPos at,
+            Predicate<BlockPos> depotAt, Predicate<BlockPos> basinAt, Predicate<BlockPos> fanBlocks,
+            Function<BlockPos, BlockState> blockAt) {
+        return switch (work) {
+            case SAW -> {
+                Optional<Direction> face = facing(state);
+                if (face.isPresent() && face.get() != Direction.UP) {
+                    Direction dir = face.get();
+                    yield Optional.of(dir.getAxis().isHorizontal()
+                            ? "锯齿当前朝 " + dir.getName() + "（只砍切正前方的树木与方块），要投喂散料加工需把锯齿朝上（facing=up）"
+                            : "锯齿当前朝 down，固定放置时不接散料投喂，要投喂散料加工需把锯齿朝上（facing=up）");
+                }
+                yield Optional.empty();
+            }
+            case PRESS -> {
+                BlockPos below = at.below(2);
+                yield !depotAt.test(below) && !basinAt.test(below)
+                        ? Optional.of("正下方第二格（" + below.toShortString() + "）既没有置物台也没有工作盆，没地方放料")
+                        : Optional.empty();
+            }
+            case MIXER -> {
+                BlockPos below = at.below(2);
+                yield !basinAt.test(below)
+                        ? Optional.of("正下方第二格（" + below.toShortString() + "）没有工作盆，没地方放料")
+                        : Optional.empty();
+            }
+            case DEPLOYER -> ProcessingSpots.workCell(work, state, at).filter(depotAt).isEmpty()
+                    ? Optional.of("朝向前方第二格没有置物台，没地方放要加工的料")
+                    : Optional.empty();
+            case SPOUT -> {
+                BlockPos below = at.below(2);
+                yield !depotAt.test(below)
+                        ? Optional.of("正下方第二格（" + below.toShortString() + "）没有置物台，没地方放要注液的东西")
+                        : Optional.empty();
+            }
+            case FAN -> ProcessingSpots.fanDepot(state, at, depotAt, fanBlocks).isEmpty()
+                    ? Optional.of("风向六格内没有未被实心方块挡住的置物台，没地方稳住要加工的料")
+                    : Optional.empty();
+            case GRINDER -> idOf(state).equals(CRUSHING_WHEEL) && crushingGap(at, blockAt).isEmpty()
+                    ? Optional.of("旁边没有朝下送料的双轮夹口（需要两只粉碎轮隔一格相对往里转）")
+                    : Optional.empty();
+            default -> Optional.empty();
+        };
     }
 
     /** 扔料的落点：收料的那一格，东西落到离它底面多高就被接住。 */
@@ -204,7 +268,8 @@ final class StationHandling {
                     () -> compat.millstoneOutput(level, at).orElse(List.of()), permissions));
         }
         Optional<BlockPos> basin = basinFor(work, state, at).filter(cell -> compat.basinItems(level, cell).isPresent());
-        return basin.map(cell -> emptyHandTake(level, cell, "从工作盆取出东西",
+        // 工作盆顶面中心是空腔、侧面上半截挂着配方产物过滤框：空手取物专门瞄准外壁下半截，既不落空也不被过滤框拦走。
+        return basin.map(cell -> emptyHandTakeAt(cell, basinLowerWall(cell), "从工作盆取出东西",
                 () -> compat.basinItems(level, cell).orElse(List.of()), permissions));
     }
 
@@ -412,7 +477,13 @@ final class StationHandling {
     // 空手取：先腾空手（手里拿着东西右键就成了放），走过去对准顶面右键；那一格的东西少了才算取到。
     private Action emptyHandTake(ClientLevel level, BlockPos cell, String what,
             Supplier<List<ItemStack>> contents, Permissions permissions) {
-        return new HandThenClick(services, what, cell, topFace(level, cell), permissions,
+        return emptyHandTakeAt(cell, topFace(level, cell), what, contents, permissions);
+    }
+
+    // 空手对准指定部件框右键取回物品：那一格同步过来的存货件数减少才算取成。
+    private Action emptyHandTakeAt(BlockPos cell, AABB targetBox, String what,
+            Supplier<List<ItemStack>> contents, Permissions permissions) {
+        return new HandThenClick(services, what, cell, targetBox, permissions,
                 () -> mainhandEmpty() ? Optional.empty() : services.toMainhand().emptyMainhand(),
                 () -> {
                     int before = total(contents.get());
@@ -423,13 +494,22 @@ final class StationHandling {
 
     /**
      * 一格方块顶面的点击框（世界坐标）：贴着方块形状最高处，四边往里收一点。
-     * 置物台、工作盆都比一整格矮，点在整格顶上会打空。
+     * 置物台、分液池都比一整格矮，点在整格顶上会打空。
      */
     static AABB topFace(ClientLevel level, BlockPos at) {
         VoxelShape shape = level.getBlockState(at).getShape(level, at);
         double top = shape.isEmpty() ? 1.0 : shape.max(Direction.Axis.Y);
         return new AABB(at.getX() + FACE_INSET, at.getY() + top - FACE_DEPTH, at.getZ() + FACE_INSET,
                 at.getX() + 1 - FACE_INSET, at.getY() + top, at.getZ() + 1 - FACE_INSET);
+    }
+
+    /**
+     * 工作盆空手取物的点击框（世界坐标）：取四壁下半截（Y 在 2/16 到 7/16 之间），
+     * 避开顶面中心 12/16 宽的空洞和水平侧面上半截（Y 在 8/16 到 16/16）的配方产物过滤框，也不必按潜行。
+     */
+    static AABB basinLowerWall(BlockPos at) {
+        return new AABB(at.getX(), at.getY() + BASIN_WALL_LOW, at.getZ(),
+                at.getX() + 1.0, at.getY() + BASIN_WALL_HIGH, at.getZ() + 1.0);
     }
 
     private boolean holding(String itemId) {

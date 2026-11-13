@@ -78,14 +78,13 @@ final class ProcessingSpots {
             case FAN -> workCell(work, state, at).ifPresent(cell -> points.add(new ExchangePoint(cell, null,
                     ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
                     "风朝这一面吹（反着转时往回吸）：前方放水是洗、放岩浆或火是烧、放灵魂火是缠魂，风里或风前置物台上的东西被加工")));
-            case SAW -> points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM,
-                    ExchangePoint.Flow.BOTH, "锯齿朝上时锯顶面上的东西：从顶上扔进去或用传送带送进来，产物从另一头出来"));
+            case SAW -> points.add(sawSpot(state, at));
             case GRINDER -> points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM,
                     ExchangePoint.Flow.INPUT, "从顶上扔东西进去磨碎"));
             case DEPOT -> points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM,
                     ExchangePoint.Flow.BOTH, "台面：手持东西右键顶面放一整叠（先收回台上原有的），空手右键顶面收回"));
             case BASIN -> points.add(new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM,
-                    ExchangePoint.Flow.BOTH, "盆口：东西扔进盆里，流体用桶倒进去；空手右键取出盆里的东西"));
+                    ExchangePoint.Flow.BOTH, "盆口：固体原料从上方扔进盆里或用漏斗对准工作盆这一格本身送入（手持固体右键不会塞进盆里），流体用桶倒进去；空手右键盆壁下半截或盆口边沿取出盆里的东西"));
             case SPOUT -> {
                 points.add(new ExchangePoint(at.below(2), null, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
                         "加工处：正下方第二格放置物台或传送带，上面的东西被注上流体；中间那一格空着"));
@@ -110,7 +109,28 @@ final class ProcessingSpots {
         return points;
     }
 
-    // 机械手、鼓风机的朝向在方块状态的 facing 上；读不到就不知道加工处在哪。
+    // 动力锯按锯齿朝向分两种完全不同的活法：只有锯齿朝上才收顶面散料或传送带送来的物品；
+    // 水平朝向时只砍伐或切开正前方紧贴的那一格树木、作物与方块，固定朝下时不接散料。
+    private static ExchangePoint sawSpot(BlockState state, BlockPos at) {
+        Optional<Direction> face = facing(state);
+        if (face.isEmpty()) {
+            return new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
+                    "锯齿朝上时从顶上扔散料或用传送带送进来加工；水平朝向时只砍切正前方紧贴的树木与方块");
+        }
+        Direction dir = face.get();
+        if (dir == Direction.UP) {
+            return new ExchangePoint(at, Direction.UP, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
+                    "锯齿朝上：从顶上扔进去或用传送带送进来加工，产物从另一头弹出");
+        }
+        if (dir.getAxis().isHorizontal()) {
+            return new ExchangePoint(at, dir, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.INPUT,
+                    "锯齿朝 " + dir.getName() + "：只砍切正前方紧贴的树木、作物与方块，不收顶面散料投喂（做锯切配方要锯齿朝上）");
+        }
+        return new ExchangePoint(at, Direction.DOWN, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.INPUT,
+                "锯齿朝下：固定放置时不收散料投喂（做锯切配方要锯齿朝上，砍树要水平朝向）");
+    }
+
+    // 机械手、鼓风机、动力锯的朝向在方块状态的 facing 上；读不到就不知道加工处在哪。
     private static Optional<Direction> facing(BlockState state) {
         return state.hasProperty(BlockStateProperties.FACING)
                 ? Optional.of(state.getValue(BlockStateProperties.FACING)) : Optional.empty();
