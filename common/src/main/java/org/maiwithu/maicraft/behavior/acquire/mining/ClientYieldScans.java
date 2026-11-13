@@ -16,6 +16,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -124,25 +125,39 @@ public final class ClientYieldScans implements ScansMinables, ScansMatureCrops {
             if (current.level().getBlockState(hit).hasBlockEntity()) continue;
             String blockTypeId = blockTypeIdOf(current, hit);
             BlockState state = current.level().getBlockState(hit);
+            boolean sideExposed = hasOpenSide(current.level(), hit);
             int fortune = fortunes.computeIfAbsent(state.getBlock(), block -> fortuneFor(current, state));
             // 线索点名的方块按 LLM 说的算会掉要的东西：挖了掉的是什么，挖完以进包的为准；
             // 对照里知道它是概率掉落的（点名砾石要燧石）按对照的机会，不知道的说不准、按每块一件估。
             if (told.contains(state.getBlock())) {
                 spots.add(new MinableSpot(hit, blockTypeId, wanted.specifier(),
-                        toldOdds(blockTypeId, productIds, fortune)));
+                        toldOdds(blockTypeId, productIds, fortune), sideExposed));
                 continue;
             }
             String dropped = VanillaBlockDrops.droppedBy(blockTypeId);
             // 同名通例带出的方块未必真的掉想要的东西：掉落对不上这次要的就不报。
             if (productIds.contains(dropped)) {
-                spots.add(new MinableSpot(hit, blockTypeId, dropped));
+                spots.add(new MinableSpot(hit, blockTypeId, dropped, sideExposed));
                 continue;
             }
             // 概率掉落：挖一块不一定出，带上这一块的机会，取物按期望放大挖的块数。
             chanceFor(blockTypeId, productIds).ifPresent(chance ->
-                    spots.add(new MinableSpot(hit, blockTypeId, chance.itemId(), chance.odds(fortune))));
+                    spots.add(new MinableSpot(hit, blockTypeId, chance.itemId(), chance.odds(fortune), sideExposed)));
         }
         return spots;
+    }
+
+    // 四个水平邻格里至少有一格在已加载区块中开放且不含流体，说明这是山坡侧面、小土包、坑壁或洞壁上的露头方块。
+    private static boolean hasOpenSide(ClientLevel level, BlockPos hit) {
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            BlockPos neighbor = hit.relative(side);
+            if (!level.isLoaded(neighbor)) continue;
+            BlockState around = level.getBlockState(neighbor);
+            if (around.getFluidState().isEmpty() && around.getCollisionShape(level, neighbor).isEmpty()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // 线索点名的方块掉要的东西的机会：对照里是必掉的按必掉，是概率掉落的按它的机会，都没有就说不准。

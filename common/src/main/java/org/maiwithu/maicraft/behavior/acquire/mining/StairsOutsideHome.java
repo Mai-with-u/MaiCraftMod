@@ -14,8 +14,8 @@ import net.minecraft.core.Direction;
  */
 final class StairsOutsideHome {
 
-    /** 最远在几格内找：再远就不算"走出家门"，如实说找不到。 */
-    static final int RADIUS = 24;
+    /** 最远在几格内找：足够走出家或十格营地范围并留出三格余量，再远就不算身边营地外了，如实说找不到。 */
+    static final int RADIUS = 28;
     /** 家外这一格朝四面再走几格也不在家里。 */
     static final int MARGIN = 3;
     /** 上下最多差几格：家外的地面和屋里的地面高低差不多。 */

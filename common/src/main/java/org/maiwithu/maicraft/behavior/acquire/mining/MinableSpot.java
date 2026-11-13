@@ -7,12 +7,13 @@ import net.minecraft.core.BlockPos;
  * 一格可以挖的方块：在哪、是什么、挖了掉什么、掉的机会多大。挖了掉什么以游戏真实的掉落规则为准，
  * 结论由扫描接缝的实现读出来，这里只带结论。
  *
- * @param pos        方块的格子
- * @param blockType  方块的注册 ID，例如 minecraft:coal_ore
+ * @param pos         方块的格子
+ * @param blockType   方块的注册 ID，例如 minecraft:coal_ore
  * @param droppedItem 挖掉后掉落的物品 ID，例如 minecraft:coal
- * @param odds       挖一格掉它的机会：矿石必掉，砾石出燧石这类是概率掉落
+ * @param odds        挖一格掉它的机会：矿石必掉，砾石出燧石这类是概率掉落
+ * @param sideExposed 四个水平邻格里至少有一面是开放空气（坡面、土包、坑壁、矿壁）；只有顶面露出的平地方块为 false
  */
-public record MinableSpot(BlockPos pos, String blockType, String droppedItem, DropOdds odds) {
+public record MinableSpot(BlockPos pos, String blockType, String droppedItem, DropOdds odds, boolean sideExposed) {
 
     public MinableSpot {
         if (pos == null) throw new IllegalArgumentException("可挖的方块必须有格子");
@@ -21,9 +22,19 @@ public record MinableSpot(BlockPos pos, String blockType, String droppedItem, Dr
         if (odds == null) throw new IllegalArgumentException("可挖的方块必须写掉的机会");
     }
 
+    /** 没标侧面露头时按平地顶面看。 */
+    public MinableSpot(BlockPos pos, String blockType, String droppedItem, DropOdds odds) {
+        this(pos, blockType, droppedItem, odds, false);
+    }
+
     /** 一挖就掉的方块：矿石、石头、原木这类。 */
     public MinableSpot(BlockPos pos, String blockType, String droppedItem) {
-        this(pos, blockType, droppedItem, DropOdds.CERTAIN);
+        this(pos, blockType, droppedItem, DropOdds.CERTAIN, false);
+    }
+
+    /** 一挖就掉、并标明是不是侧面露头的坡面或坑壁方块。 */
+    public MinableSpot(BlockPos pos, String blockType, String droppedItem, boolean sideExposed) {
+        this(pos, blockType, droppedItem, DropOdds.CERTAIN, sideExposed);
     }
 
     /** 挖一块不一定出：概率掉落，或线索点名、掉没掉说不准的方块。 */

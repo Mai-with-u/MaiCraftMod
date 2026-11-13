@@ -5,7 +5,6 @@ import java.util.OptionalInt;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -137,12 +136,19 @@ public final class ClientStairsDown implements DigsStairsDown {
     private final DigsBlocks digs;
     private final PicksUpDrops drops;
     private final PermissionCheck permission;
+    private final Campground campground;
 
     public ClientStairsDown(Site site, DigsBlocks digs, PicksUpDrops drops, PermissionCheck permission) {
+        this(site, digs, drops, permission, Campground.NOWHERE);
+    }
+
+    public ClientStairsDown(Site site, DigsBlocks digs, PicksUpDrops drops, PermissionCheck permission,
+            Campground campground) {
         this.site = Objects.requireNonNull(site, "site");
         this.digs = Objects.requireNonNull(digs, "digs");
         this.drops = Objects.requireNonNull(drops, "drops");
         this.permission = Objects.requireNonNull(permission, "permission");
+        this.campground = Objects.requireNonNull(campground, "campground");
     }
 
     @Override
@@ -160,49 +166,6 @@ public final class ClientStairsDown implements DigsStairsDown {
     public Optional<Action> tunnelToward(Tunnel tunnel, Permissions permissions) {
         return Optional.of(new Digging(tunnel.yields(), tunnel.wantedCells(), permissions, tunnel));
     }
-
-    /** 挖一级要清的三格，从上往下挖：前方齐头那格、前方齐脚那格、前方脚下那格。 */
-    static List<BlockPos> stepCells(BlockPos feet, Direction heading) {
-        return stepCells(feet, heading, true);
-    }
-
-    /** 往下的一级要清三格（齐头、齐脚、脚下）；横着的一步只清两格（齐头、齐脚）。都从上往下挖。 */
-    static List<BlockPos> stepCells(BlockPos feet, Direction heading, boolean down) {
-        BlockPos ahead = feet.relative(heading);
-        return down ? List.of(ahead.above(), ahead, ahead.below()) : List.of(ahead.above(), ahead);
-    }
-
-    /** 挖通这一级后站到哪：前方脚下那格。 */
-    static BlockPos nextFeet(BlockPos feet, Heading way) {
-        BlockPos ahead = feet.relative(way.heading());
-        return way.down() ? ahead.below() : ahead;
-    }
-
-    /** 挖开这一级会露出来的四周：三格的水平邻格、最上面那格的头顶、下一级的脚下；自己站的这一列是来路，不算。 */
-    static List<BlockPos> surroundings(BlockPos feet, Direction heading) {
-        return surroundings(feet, new Heading(heading, true));
-    }
-
-    /** 同上，横着的一步按两格算。 */
-    static List<BlockPos> surroundings(BlockPos feet, Heading way) {
-        List<BlockPos> cells = stepCells(feet, way.heading(), way.down());
-        Set<BlockPos> around = new LinkedHashSet<>();
-        for (BlockPos cell : cells) {
-            for (Direction side : Direction.Plane.HORIZONTAL) {
-                around.add(cell.relative(side));
-            }
-        }
-        around.add(cells.getFirst().above());
-        around.add(nextFeet(feet, way).below());
-        cells.forEach(around::remove);
-        around.remove(feet.below());
-        around.remove(feet);
-        around.remove(feet.above());
-        return List.copyOf(around);
-    }
-
-    /** 往哪边挖、这一步是往下还是横着。 */
-    record Heading(Direction heading, boolean down) {}
 
     private static String at(BlockPos cell) {
         return "(" + cell.getX() + ", " + cell.getY() + ", " + cell.getZ() + ")";
@@ -434,8 +397,8 @@ public final class ClientStairsDown implements DigsStairsDown {
 
         // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、许不许动，四周看有没有水或岩浆。
         private Optional<Problem> refusal(TickContext context, Direction toward) {
-            Heading way = new Heading(toward, down());
-            for (BlockPos cell : stepCells(feet, toward, way.down())) {
+            StairStepShape.Heading way = new StairStepShape.Heading(toward, down());
+            for (BlockPos cell : StairStepShape.stepCells(feet, toward, way.down())) {
                 if (reached == null && atHome(context, cell)) return Optional.of(underHome(cell));
                 Ground ground = site.ground(context, cell);
                 if (ground == Ground.OPEN) continue;
@@ -444,14 +407,14 @@ public final class ClientStairsDown implements DigsStairsDown {
                         position(context, cell), site.blockType(context, cell));
                 if (refused.isPresent()) return refused;
             }
-            for (BlockPos cell : surroundings(feet, way)) {
+            for (BlockPos cell : StairStepShape.surroundings(feet, way)) {
                 if (site.ground(context, cell) == Ground.FLUID) {
                     return Optional.of(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面挨着 " + at(cell) + " 的 "
                             + site.blockType(context, cell) + "，挖开会灌进来，停在这里"));
                 }
             }
             // 下一级脚下是岩浆块：挖开了也站不上去（烫脚，走路不肯站），这个方向当挖不了，往左右拐。
-            BlockPos floor = nextFeet(feet, way).below();
+            BlockPos floor = StairStepShape.nextFeet(feet, way).below();
             if (site.hurtsToStandOn(context, floor)) return Optional.of(hotFloor(context, floor));
             return Optional.empty();
         }
@@ -479,8 +442,10 @@ public final class ClientStairsDown implements DigsStairsDown {
             return nextStep();
         }
 
+        // 自家或床、箱子、工作台附近的营地范围：开挖前先走出这片地面再挖，楼梯也不挖进营地底下。
         private boolean atHome(TickContext context, BlockPos cell) {
-            return permission.atOwnHome(position(context, cell));
+            WorldPosition where = position(context, cell);
+            return permission.atOwnHome(where) || campground.covers(where);
         }
 
         private Problem underHome(BlockPos cell) {
@@ -498,8 +463,8 @@ public final class ClientStairsDown implements DigsStairsDown {
         // 往下三格都空（洞）就在下一级脚下垫一块再走下去，垫不了才停；落下去是液体、落脚的是岩浆块，
         // 和挨着岩浆一样换个方向挖，几个方向都不行才停。
         private ActionStatus digNext(TickContext context) {
-            Heading way = new Heading(heading, down());
-            List<BlockPos> cells = stepCells(feet, heading, way.down());
+            StairStepShape.Heading way = new StairStepShape.Heading(heading, down());
+            List<BlockPos> cells = StairStepShape.stepCells(feet, heading, way.down());
             for (int row = 0; row < cells.size(); row++) {
                 BlockPos cell = cells.get(row);
                 Ground ground = site.ground(context, cell);
@@ -524,7 +489,7 @@ public final class ClientStairsDown implements DigsStairsDown {
                 digsThisStep++;
                 return ActionStatus.progressed();
             }
-            BlockPos landing = nextFeet(feet, way);
+            BlockPos landing = StairStepShape.nextFeet(feet, way);
             Ground floor = site.ground(context, landing.below());
             for (int extra = 0; floor == Ground.OPEN && extra < EXTRA_DROP; extra++) {
                 landing = landing.below();
@@ -533,9 +498,9 @@ public final class ClientStairsDown implements DigsStairsDown {
             if (floor == Ground.OPEN || floor == Ground.FLUID) {
                 // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再垫一块或拐开。
                 if (tunnel != null && tunnel.inSight().test(feet)) return mineInSight();
-                if (floor == Ground.OPEN) return fillUnder(context, nextFeet(feet, way).below());
+                if (floor == Ground.OPEN) return fillUnder(context, StairStepShape.nextFeet(feet, way).below());
                 // 下界挖穿进洞，洞底多半是岩浆海：这个方向不走，往左右拐着接着挖。
-                return turnOrFinish(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(nextFeet(feet, way))
+                return turnOrFinish(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(StairStepShape.nextFeet(feet, way))
                         + " 脚下落下去是 " + site.blockType(context, landing.below()) + "，不往这边走"));
             }
             if (site.hurtsToStandOn(context, landing.below())) return turnOrFinish(hotFloor(context, landing.below()));
@@ -545,7 +510,7 @@ public final class ClientStairsDown implements DigsStairsDown {
             stepRun = 1;
             // 横着挖、这一步一格没挖（前面本来就空着，洞里、地上）：连着空着、踩得住、不挨水和岩浆的几格一次走过去，
             // 不每格停下来重新寻一次路；走到头再看一眼有没有矿，前面要挖了再一格一格来。
-            if (steppingLevel && digsThisStep == 0 && landing.equals(nextFeet(feet, way))) {
+            if (steppingLevel && digsThisStep == 0 && landing.equals(StairStepShape.nextFeet(feet, way))) {
                 while (stepRun < OPEN_RUN && levelSteps + stepRun < LEVEL_STEPS) {
                     BlockPos further = stepTarget.relative(heading);
                     if (!openStretch(context, further)) break;
@@ -612,7 +577,7 @@ public final class ClientStairsDown implements DigsStairsDown {
         // 长程挖矿挖一行：往下对准迎面（最下一行对准顶面，迎面贴着脚下那格打不着）用斜着往下的连锁，
         // 横着对准迎面用直着往前的连锁；线上从这一格起连着的每一格都挖得、许可准挖、四周不挨水和岩浆才算这一行的，
         // 模组给的那一条超出这些就不连锁、只挖这一格。
-        private Optional<Action> chainDig(TickContext context, BlockPos trigger, int row, Heading way) {
+        private Optional<Action> chainDig(TickContext context, BlockPos trigger, int row, StairStepShape.Heading way) {
             Direction face = way.down() && row == 2 ? Direction.UP : heading.getOpposite();
             Map<BlockPos, String> line = lineAhead(context, trigger, way.down());
             chainTrigger = trigger;
