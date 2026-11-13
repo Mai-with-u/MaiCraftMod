@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -167,6 +168,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 Optional<Problem> unwritable = unwritableSign(target.cell());
                 if (unwritable.isPresent()) return stop(unwritable.get());
             }
+            // 工作盆对普通固体物品右键既塞不进料，点中侧面还会误写产物过滤框：备手拿料前就说明白，不白跑一趟。
+            if (UseDecider.BASIN_BLOCK.equals(target.typeId()) && input.item() != null
+                    && !services.world().interactsWithBasin(input.item())) {
+                return stop(UseDecider.basinSolidUseProblem(input.item()));
+            }
         }
         recordProgress("确定了目标：" + target.describe());
         return prepareHand();
@@ -269,6 +275,22 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         recordProgress(input.item() == null ? "空手准备好了" : "把 " + input.item() + " 拿到了手上");
         if (target == null) {
             return interactNow();
+        }
+        if (!target.isEntity() && UseDecider.BASIN_BLOCK.equals(target.typeId()) && !input.writesText()) {
+            String held = services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse(input.item());
+            if (held != null && !services.world().interactsWithBasin(held)) {
+                return stop(UseDecider.basinSolidUseProblem(held));
+            }
+            // 空手取工作盆内的物品且未点名面时，自动对准盆口顶面 2/16 宽实体边沿（顶面被整格封死时退回底面）：
+            // 工作盆四个水平侧面的上半截挂着配方产物过滤框，空手点中只会被 Create 当成清空过滤拦掉；
+            // 上下面不激活过滤框，且不用按潜行（避免副手拿盾时原版潜行右键跳过方块交互）。
+            if (held == null && target.face() == null) {
+                if (services.world().topRimOpen(target.cell())) {
+                    target = target.facing(Direction.UP);
+                } else if (services.world().bottomOpen(target.cell())) {
+                    target = target.facing(Direction.DOWN);
+                }
+            }
         }
         if (!target.isEntity() && scoopsNow() && services.world().fluid(target.cell()) == UseSeams.ReadsWorld.Fluid.FLOWING) {
             Optional<BlockPos> source = services.world().nearestSource(target.cell(), SOURCE_SEARCH_RADIUS);

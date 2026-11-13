@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.create;
 
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -11,6 +12,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -102,14 +104,38 @@ final class ValueChanges {
                 new StepsInOrder.Step("空着手潜行右键", () -> services.sneak().sneaking(toggle)))));
     }
 
-    // 设过滤格：空着手点是清空，手持东西点是设成它；身上没有那样东西就按缺东西失败，不拿着别的去点。
+    // 设过滤格：空着手点是清空，手持东西点是设成它；多面都有同一个过滤框（工作盆四面都有）时优先挑没被相邻实心块挡住且离角色最近的那面。
     private Action setFilter(BlockPos at, CreateValues.FilterBox filter, String value, Permissions permissions) {
         if (filter.spots().isEmpty()) {
             return failing(Problem.Kind.NOT_POSSIBLE_HERE, "「" + filter.label() + "」现在没有画出来能点的地方");
         }
-        return clickWithHeld(at, filter.spots().getFirst(), "把「" + filter.label() + "」设成 " + value, value, permissions,
+        CreateValues.Spot chosen = pickSpot(at, filter.spots());
+        return clickWithHeld(at, chosen, "把「" + filter.label() + "」设成 " + value, value, permissions,
                 now -> sameFilter(compat.valueBoxes(now, at), filter)
                         .filter(box -> CreateValueSettings.filterValue(box.filter()).equals(value)).isPresent());
+    }
+
+    private CreateValues.Spot pickSpot(BlockPos at, List<CreateValues.Spot> spots) {
+        PlayerContext current = services.context().get();
+        if (current == null || current.localPlayer() == null || current.level() == null) {
+            return spots.getFirst();
+        }
+        ClientLevel level = current.level();
+        return pickSpot(spots, current.localPlayer().getEyePosition(), side -> {
+            BlockPos neighbor = at.relative(side);
+            return level.isLoaded(neighbor) && level.getBlockState(neighbor).isCollisionShapeFullBlock(level, neighbor);
+        });
+    }
+
+    /**
+     * 从多处可点击的同一过滤框位置里挑最顺手的一处：没被紧邻实心方块封死的排前面，再按离眼睛最近挑。
+     * 工作盆四个水平面挂的是同一个配方产物过滤框，北面贴墙或接着漏斗时自动改点露出来的其余侧面。
+     */
+    static CreateValues.Spot pickSpot(List<CreateValues.Spot> spots, Vec3 eye, Predicate<Direction> blockedFace) {
+        return spots.stream()
+                .min(Comparator.comparing((CreateValues.Spot spot) -> blockedFace.test(spot.face()))
+                        .thenComparingDouble(spot -> eye == null ? 0.0 : spot.center().distanceToSqr(eye)))
+                .orElseGet(spots::getFirst);
     }
 
     // 手持那样东西（empty 是空着手）点方块上的一处小框：框取 Create 判点中半径的六成，点在框里一定算点中；

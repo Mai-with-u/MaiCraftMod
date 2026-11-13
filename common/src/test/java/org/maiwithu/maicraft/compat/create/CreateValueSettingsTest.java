@@ -87,4 +87,22 @@ class CreateValueSettingsTest {
         assertNotNull(CreateValueSettings.encodeAmount(box, "8").problem());
         assertNotNull(CreateValueSettings.encodeAmount(box, "=65").problem());
     }
+
+    @Test
+    void 工作盆四面过滤框挑没被挡住且离角色最近的那一面() {
+        List<CreateValues.Spot> spots = List.of(
+                new CreateValues.Spot(Direction.NORTH, new Vec3(0.5, 0.75, 0.0), 0.25),
+                new CreateValues.Spot(Direction.SOUTH, new Vec3(0.5, 0.75, 1.0), 0.25),
+                new CreateValues.Spot(Direction.EAST, new Vec3(1.0, 0.75, 0.5), 0.25),
+                new CreateValues.Spot(Direction.WEST, new Vec3(0.0, 0.75, 0.5), 0.25));
+        // 角色站在南边且北面贴着实心墙或漏斗：不再死点第一个 NORTH，自动挑敞开且最近的 SOUTH 面。
+        CreateValues.Spot southChosen = ValueChanges.pickSpot(spots, new Vec3(0.5, 1.62, 2.2),
+                side -> side == Direction.NORTH);
+        assertEquals(Direction.SOUTH, southChosen.face());
+
+        // 角色站在北边但北面被实心块封死：跳过被挡的 NORTH，挑次近的敞开侧面 EAST。
+        CreateValues.Spot unblocked = ValueChanges.pickSpot(spots, new Vec3(0.8, 1.62, -1.0),
+                side -> side == Direction.NORTH);
+        assertEquals(Direction.EAST, unblocked.face());
+    }
 }

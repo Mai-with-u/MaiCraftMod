@@ -179,9 +179,16 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                                 + "风里没有置物台时 machine_run 不投料\n";
                         default -> "\n";
                     });
-            case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔），产物留在盆里，")
+            case MIXER -> text.append("- machine_run：料扔进正下方第二格的工作盆里（站到盆边扔，固体原料不能手持右键塞进工作盆），产物留在盆里，")
                     .append("空手右键工作盆取出\n");
-            case BASIN -> text.append("- machine_run：站到盆边把料扔进去，落在盆沿上也收；空手右键取出盆里的东西\n");
+            case BASIN -> text.append("- 投料与取物：固体原料**不能**手持右键塞进工作盆（手持固体右键水平侧面中心命中的是配方**产物**过滤框，")
+                    .append("会把那样东西设成产物过滤器锁死别的配方！），只能站到盆边从上方丢入（drop 或 machine_run），")
+                    .append("或用原版漏斗、安山/黄铜漏斗、溜槽对准**工作盆所在的那一格坐标本身**送入")
+                    .append("（水平侧面漏斗必须与工作盆同 Y 高度指向工作盆那一格，绝不能高一格指向工作盆上方的空气格）；")
+                    .append("流体用桶右键倒进去或接流体管；空手右键用于掏出盆内物品。\n")
+                    .append("- 配方产物过滤：工作盆侧面的过滤框过滤的是配方**产物**（例如 9 个铁粒压铁锭时，过滤框若误挂了铁粒就会卡住不压），")
+                    .append("machine_inspect 的设备 settings 里会显示当前 `filter`（无过滤为 `empty`），")
+                    .append("设过滤或清空过滤用 machine_configure 的 `filter`（写产物物品 ID 或 `empty`）\n");
             case MOTION -> text.append("- 要一起动的方块用强力胶粘：machine_build 的安装段 `{kind: create:super_glue, offsets: [一角, 对角]}`，")
                     .append("两角之间的方块要连着、相距不到 25 格，身上要有强力胶；装置的轴转起来（或通电）时把粘着的一片推拉、转动、吊起\n");
             case SCHEMATIC -> text.append("- 蓝图桌：machine_run 给 file（schematics 目录下的 .nbt，和 build 的 file 同一个目录），")
@@ -201,7 +208,10 @@ final class CreateMachineKnowledge implements KnowledgeSource {
                     .append("machine_build 的 installations 写 `{kind: create:crafter_link, offsets: [台 A, 台 B]}` 把相邻两台的入口连成一组")
                     .append("（拿扳手点背面靠另一台的那条边）；machine_configure 每台的 crafter.slot 写这一格的料，")
                     .append("crafter.pointing 写箭头；凑齐、转起来就一起做\n");
-            case SAW -> text.append("- machine_run：锯齿朝上时站到旁边把料扔到锯面上；锯没转时料停在上面，转起来再锯\n");
+            case SAW -> text.append("- 朝向与用法：锯齿朝上（`facing=up`）时才加工散料——站到旁边把料扔到锯面上或用传送带送入，产物从锯条指向的那一头弹出；")
+                    .append("水平朝向（`facing` 为东、南、西、北）时只砍切正前方紧贴的树木、作物与方块，**不收**顶面散料投喂。\n")
+                    .append("- 配方过滤：锯齿朝上时顶面有配方产物过滤槽（一木多切时指定切成哪种产物），")
+                    .append("machine_inspect 的设备 settings 里显示 `filter`，用 machine_configure 的 `filter` 设产物物品 ID 或 `empty` 清空\n");
             case GRINDER -> text.append("- machine_run：石磨站到旁边把料扔到顶上；粉碎轮扔进两只轮子中间那一格，")
                     .append("那一格要朝下送料（两只轮子对着往里转）\n");
             case DEPOT -> text.append("- machine_run：手持料右键顶面放上去，手上先只留要投的件数（一次最多一叠）；")

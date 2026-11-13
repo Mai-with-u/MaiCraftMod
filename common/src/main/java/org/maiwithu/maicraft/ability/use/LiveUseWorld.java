@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -18,7 +19,9 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.SignBlock;
@@ -32,6 +35,7 @@ import net.minecraft.world.level.material.FluidState;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.StackKey;
 
 /**
  * 用东西的世界读数：每次都按这一刻的客户端现场回答，角色不在世界里或那一格没加载时如实给空。
@@ -90,6 +94,38 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     @Override public Optional<Boolean> doorOpen(BlockPos cell) {
         return state(cell).filter(state -> state.getBlock() instanceof DoorBlock || state.getBlock() instanceof TrapDoorBlock
                 || state.getBlock() instanceof FenceGateBlock).map(state -> state.getValue(BlockStateProperties.OPEN));
+    }
+
+    // 工作盆顶面四周边沿有 2/16 宽：只要正上方那一格底面不是整格实心封死的（空气、溜槽、漏斗都留着边沿），就能点到顶面。
+    @Override public boolean topRimOpen(BlockPos cell) {
+        ClientLevel level = level();
+        BlockPos above = cell.above();
+        if (level == null || !level.isLoaded(above)) return true;
+        BlockState aboveState = level.getBlockState(above);
+        return aboveState.isAir() || !Block.isFaceFull(aboveState.getShape(level, above), Direction.DOWN);
+    }
+
+    @Override public boolean bottomOpen(BlockPos cell) {
+        ClientLevel level = level();
+        BlockPos below = cell.below();
+        if (level == null || !level.isLoaded(below)) return true;
+        BlockState belowState = level.getBlockState(below);
+        return belowState.isAir() || !Block.isFaceFull(belowState.getShape(level, below), Direction.UP);
+    }
+
+    // 对工作盆直接右键有效的物品：除名字认得的桶瓶、海绵、扳手外，还认扳手与桶标签，以及用完留空容器的装液物品。
+    @Override public boolean interactsWithBasin(String itemOrTag) {
+        if (UseDecider.interactsWithBasinById(itemOrTag)) return true;
+        if (itemOrTag == null || itemOrTag.startsWith("#")) return false;
+        ResourceLocation id = ResourceLocation.tryParse(StackKey.parse(itemOrTag.toLowerCase(Locale.ROOT)).itemId());
+        if (id == null) return false;
+        Optional<Item> found = BuiltInRegistries.ITEM.getOptional(id);
+        if (found.isEmpty()) return false;
+        Item item = found.get();
+        ItemStack probe = new ItemStack(item);
+        return item.hasCraftingRemainingItem()
+                || probe.is(TagKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath("c", "tools/wrench")))
+                || probe.is(TagKey.create(Registries.ITEM, ResourceLocation.fromNamespaceAndPath("c", "buckets")));
     }
 
     // 那一列最上面一块挡得住身体或有流体的方块：按客户端同步下来的高度图读，不逐格往下扫。

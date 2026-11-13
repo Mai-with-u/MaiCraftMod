@@ -112,28 +112,47 @@ record MachineDetails(List<NetworkView> networks, List<DeviceView> devices, List
     /**
      * 一个设备：线缆与传动件以外的机器方块，同一块里同种相邻的格合成一个；或者线缆格某一面装着的一个部件。
      *
-     * @param id      这一眼里的编号（d1、d2……）
-     * @param type    机器类型编号；部件写部件的物品 ID
-     * @param role    在机器里干什么（机器角色的小写名）；部件写 part
-     * @param at      只有一格时在哪；部件为 null（看 host 与 side）
-     * @param cells   不止一格时共几格
-     * @param box     不止一格时的包围盒
-     * @param host    部件装在哪一格；不是部件为 null
-     * @param side    部件装在那一格的哪一面；不是部件为 null
-     * @param on      挂在哪些网上（网络编号，含没有读取器的连接件段）；不在网上为 null
-     * @param archive 有格落在所看档案里时写档案名；没有为 null
-     * @param state   各格读数一样时的读数
-     * @param states  各格读数不一样时按读数分组，每组列出是哪几格；读数一样时为 null
-     * @param ports   网表示不了的进出口（侧面配置、台面怎么放东西、还没接上网的设备该从哪一面接）；没有为 null
+     * @param id            这一眼里的编号（d1、d2……）
+     * @param type          机器类型编号；部件写部件的物品 ID
+     * @param role          在机器里干什么（机器角色的小写名）；部件写 part
+     * @param at            只有一格时在哪；部件为 null（看 host 与 side）
+     * @param cells         不止一格时共几格
+     * @param box           不止一格时的包围盒
+     * @param host          部件装在哪一格；不是部件为 null
+     * @param side          部件装在那一格的哪一面；不是部件为 null
+     * @param on            挂在哪些网上（网络编号，含没有读取器的连接件段）；不在网上为 null
+     * @param archive       有格落在所看档案里时写档案名；没有为 null
+     * @param state         各格读数一样时的读数
+     * @param states        各格读数不一样时按读数分组，每组列出是哪几格；读数一样时为 null
+     * @param ports         网表示不了的进出口（侧面配置、台面怎么放东西、还没接上网的设备该从哪一面接）；没有为 null
+     * @param settings      各格设置一样时的激活设置项（键 → 现值，如过滤格 filter 为物品 ID 或 empty）；没有设置项时为 null
+     * @param settingGroups 多格设备各格设置不一样时按设置分组列出；单格或各格设置一样时为 null
      */
     record DeviceView(String id, String type, String role, BlockPos at, Integer cells, Box box, BlockPos host,
                       Direction side, List<String> on, String archive, StateView state, List<StateGroup> states,
-                      List<ExchangePoint> ports) {
+                      List<ExchangePoint> ports, Map<String, String> settings, List<SettingGroup> settingGroups) {
+
+        DeviceView(String id, String type, String role, BlockPos at, Integer cells, Box box, BlockPos host,
+                Direction side, List<String> on, String archive, StateView state, List<StateGroup> states,
+                List<ExchangePoint> ports) {
+            this(id, type, role, at, cells, box, host, side, on, archive, state, states, ports, null, null);
+        }
 
         DeviceView {
             on = on == null || on.isEmpty() ? null : List.copyOf(on);
             states = states == null || states.isEmpty() ? null : List.copyOf(states);
             ports = ports == null || ports.isEmpty() ? null : List.copyOf(ports);
+            settings = settings == null || settings.isEmpty() ? null : Map.copyOf(settings);
+            settingGroups = settingGroups == null || settingGroups.isEmpty() ? null : List.copyOf(settingGroups);
+        }
+    }
+
+    /** 多格设备里设置一样的一组格（如连成一片的机械合成器各格放了什么料）。 */
+    record SettingGroup(List<BlockPos> cells, Map<String, String> settings) {
+
+        SettingGroup {
+            cells = List.copyOf(cells);
+            settings = Map.copyOf(settings);
         }
     }
 

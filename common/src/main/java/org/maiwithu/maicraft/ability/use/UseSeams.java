@@ -82,6 +82,21 @@ final class UseSeams {
             return Optional.empty();
         }
 
+        /** 那一格正上方的方块有没有把整格底面封死：没封死（空气、溜槽、漏斗）时能点到工作盆顶面盆口边沿。 */
+        default boolean topRimOpen(BlockPos cell) {
+            return air(cell.above());
+        }
+
+        /** 那一格正下方的方块有没有把整格顶面封死：上方被整格封死时看底面露不露得出来。 */
+        default boolean bottomOpen(BlockPos cell) {
+            return air(cell.below());
+        }
+
+        /** 手持这件物品（或标签）对工作盆右键是不是倒装流体、海绵吸水或扳手旋转这类有效交互；普通固体为假。 */
+        default boolean interactsWithBasin(String itemOrTag) {
+            return UseDecider.interactsWithBasinById(itemOrTag);
+        }
+
         /** x、z 那一列最上面一块挡得住身体或有流体的方块；那一列没加载为空。 */
         Optional<BlockPos> ground(int x, int z);
 

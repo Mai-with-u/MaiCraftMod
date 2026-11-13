@@ -55,6 +55,54 @@ final class UseDecider {
             "minecraft:bow", "minecraft:crossbow", "minecraft:trident",
             "minecraft:shield", "minecraft:spyglass", "minecraft:fishing_rod");
 
+    /** 机械动力工作盆的方块 ID。 */
+    static final String BASIN_BLOCK = "create:basin";
+
+    /** 对机械动力工作盆直接右键有原生交互（倒装流体、吸水、旋转拆装、抄写配置、选点）的固定物品名单。类别：F 游戏事实（BasinBlock.useItemOn 与 ValueSettingsInputHandler）。 */
+    private static final Set<String> BASIN_DIRECT_USE_ITEMS = Set.of(
+            "minecraft:sponge",
+            "create:wrench",
+            "create:clipboard",
+            "create:mechanical_arm",
+            "minecraft:glass_bottle",
+            "minecraft:potion",
+            "minecraft:splash_potion",
+            "minecraft:lingering_potion",
+            "minecraft:honey_bottle",
+            "minecraft:experience_bottle",
+            "minecraft:dragon_breath",
+            "minecraft:bowl",
+            "create:builders_tea",
+            "create:potion");
+
+    /**
+     * 按物品或标签名判断这件东西对工作盆右键是不是合法的流体装倒、海绵吸水或扳手操作。
+     * 工作盆对普通固体物品（铁粒、矿石、海带、过滤器等）右键不会投料，非潜行点到水平侧面中心还会误写配方产物过滤框。
+     */
+    static boolean interactsWithBasinById(String itemOrTag) {
+        if (itemOrTag == null || itemOrTag.isBlank()) return true;
+        String spec = lower(itemOrTag.trim());
+        int bracket = spec.indexOf('[');
+        if (bracket > 0) spec = spec.substring(0, bracket);
+        if (spec.startsWith("#")) {
+            return spec.contains("wrench") || spec.contains("bucket") || spec.contains("bottle");
+        }
+        if (BASIN_DIRECT_USE_ITEMS.contains(spec)) return true;
+        String path = spec.contains(":") ? spec.substring(spec.indexOf(':') + 1) : spec;
+        return path.equals("bucket") || path.endsWith("_bucket")
+                || path.endsWith("_wrench") || path.equals("wrench")
+                || path.endsWith("_bottle")
+                || path.contains("fluid_tank") || path.contains("canister")
+                || path.contains("jerrycan") || path.contains("canteen") || path.contains("reservoir");
+    }
+
+    /** 手持普通固体对工作盆调用 use 时的游戏事实说明：防止调用方以为能塞料，或误触侧面产物过滤框锁死配方。 */
+    static Problem basinSolidUseProblem(String heldItem) {
+        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                "固体物品 " + heldItem + " 不能手持右键塞进工作盆（右键水平侧面中心反而会把它挂上配方产物过滤框，锁死别的配方）",
+                "投固体原料请站到盆边用 drop 扔进盆口、用 machine_run，或用漏斗对准工作盆所在的那一格本身输入；真要改工作盆的配方产物过滤请用 machine_configure 设 filter");
+    }
+
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */
     record Rejection(String message, String suggestion) {}
 

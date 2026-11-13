@@ -225,6 +225,41 @@ class MachineAreaReportTest {
         assertTrue(result.devicesIn(Set.of(ORIGIN.west())).isEmpty());
     }
 
+    @Test
+    void 设备暴露激活的过滤与数值设置_多格设置不同时按设置分组列格() {
+        Scene scene = new Scene();
+        MachineTestDoubles.FakeMachineType basin = scene.type("create:basin", MachineRole.STORAGE, Blocks.CAULDRON);
+        basin.settingValues.put("filter", "minecraft:iron_nugget");
+        MachineTestDoubles.FakeMachineType crafter =
+                scene.type("create:mechanical_crafter", MachineRole.PROCESSING, Blocks.CRAFTING_TABLE);
+        crafter.settingsAt = at -> Map.of("crafter.slot", at.getX() == 0 ? "minecraft:iron_ingot" : "empty");
+        MachineTestDoubles.FakeMachineType plain = scene.type("create:depot", MachineRole.STORAGE, Blocks.BARREL);
+        scene.put(ORIGIN, Blocks.CAULDRON);
+        scene.put(ORIGIN.above(), Blocks.CRAFTING_TABLE);
+        scene.put(ORIGIN.above().east(), Blocks.CRAFTING_TABLE);
+        scene.put(ORIGIN.west(2), Blocks.BARREL);
+
+        MachineAreaReport.Result result = scene.report();
+
+        DeviceView plainView = result.devices().stream()
+                .filter(device -> device.type().equals(plain.id)).findFirst().orElseThrow();
+        assertNull(plainView.settings(), "没有设置项的设备不带空 settings");
+        assertNull(plainView.settingGroups());
+
+        DeviceView basinView = result.devices().stream()
+                .filter(device -> device.type().equals("create:basin")).findFirst().orElseThrow();
+        assertEquals(Map.of("filter", "minecraft:iron_nugget"), basinView.settings(),
+                "工作盆侧面挂着的产物过滤器直接在 machine_inspect 设备里看见");
+        assertNull(basinView.settingGroups());
+
+        DeviceView crafterView = result.devices().stream()
+                .filter(device -> device.type().equals("create:mechanical_crafter")).findFirst().orElseThrow();
+        assertNull(crafterView.settings(), "多格设备各格设置不同时不混成一份");
+        assertEquals(2, crafterView.settingGroups().size());
+        assertEquals(Map.of("crafter.slot", "minecraft:iron_ingot"), crafterView.settingGroups().get(0).settings());
+        assertEquals(Map.of("crafter.slot", "empty"), crafterView.settingGroups().get(1).settings());
+    }
+
     /** 一片离线现场：几种机器类型、认领的格、每格挂的网、读取器与世界里别的格。 */
     private static final class Scene {
         final List<MachineTestDoubles.FakeMachineType> types = new ArrayList<>();

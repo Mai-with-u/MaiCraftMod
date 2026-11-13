@@ -797,6 +797,45 @@ class UseTaskTest {
         assertEquals(1, rig.clears.cleared.size());
     }
 
+    @Test
+    void 空手对工作盆取物_自动瞄准顶面盆口边沿避开侧面过滤框且不按潜行() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "create:basin");
+        rig.interactions.applied("取出了盆里的铁锭");
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(Direction.UP, rig.interactions.lastTarget.face(),
+                "未指定面时自动走顶面盆沿，不激活水平侧面的配方产物过滤框");
+        assertTrue(rig.sneaked.isEmpty(), "空手取盆内物品不靠潜行，免得副手拿盾跳过方块交互");
+
+        // 正上方被整格方块封死时，退回同样不激活过滤框的底面。
+        Rig capped = new Rig();
+        capped.world.blocks.put(LEVER, "create:basin");
+        capped.world.blocks.put(LEVER.above(), "minecraft:stone");
+        capped.interactions.applied("从盆底取出了东西");
+        TaskResult cappedResult = capped.run(capped.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, cappedResult.status(), cappedResult.summary());
+        assertEquals(Direction.DOWN, capped.interactions.lastTarget.face());
+    }
+
+    @Test
+    void 手持固体对工作盆调用use直接拦截说明_桶与扳手照常放行() {
+        Rig solid = new Rig();
+        solid.world.blocks.put(LEVER, "create:basin");
+        TaskResult refused = solid.run(solid.input(position(LEVER), "minecraft:iron_nugget", null, null, 1));
+        assertProblem(refused, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertTrue(refused.problem().message().contains("不能手持右键塞进工作盆"), refused.problem().message());
+        assertTrue(refused.problem().suggestion().contains("machine_configure"), refused.problem().suggestion());
+        assertEquals(0, solid.interactions.builds, "不点下去，避免把固体误挂上工作盆产物过滤框");
+        assertEquals(0, solid.needs.requests.size(), "连去拿固体原料的一趟也省下");
+
+        Rig bucket = new Rig();
+        bucket.world.blocks.put(LEVER, "create:basin");
+        bucket.interactions.applied("把水倒进了工作盆");
+        TaskResult poured = bucket.run(bucket.input(position(LEVER), "minecraft:water_bucket", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, poured.status(), poured.summary());
+    }
+
     private static Target position(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }

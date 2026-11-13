@@ -123,4 +123,23 @@ class UseDeciderTest {
         assertTrue(UseDecider.invalidCombinations(false,
                 "minecraft:bone_meal", "minecraft:grass_block", null, List.of(), true).isEmpty());
     }
+
+    @Test
+    void basinAcceptsFluidContainersSpongeAndWrenchWhileExplainingSolidItemPitfall() {
+        assertTrue(UseDecider.interactsWithBasinById(null));
+        assertTrue(UseDecider.interactsWithBasinById("minecraft:water_bucket"));
+        assertTrue(UseDecider.interactsWithBasinById("minecraft:bucket"));
+        assertTrue(UseDecider.interactsWithBasinById("minecraft:sponge"));
+        assertTrue(UseDecider.interactsWithBasinById("create:wrench"));
+        assertTrue(UseDecider.interactsWithBasinById("minecraft:potion"));
+        assertTrue(!UseDecider.interactsWithBasinById("minecraft:iron_nugget"));
+        assertTrue(!UseDecider.interactsWithBasinById("minecraft:kelp"));
+        assertTrue(!UseDecider.interactsWithBasinById("create:filter"));
+
+        Problem solidProblem = UseDecider.basinSolidUseProblem("minecraft:iron_nugget");
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, solidProblem.kind());
+        assertTrue(solidProblem.message().contains("产物过滤"), solidProblem.message());
+        assertTrue(solidProblem.suggestion().contains("drop")
+                && solidProblem.suggestion().contains("machine_configure"), solidProblem.suggestion());
+    }
 }

@@ -29,10 +29,12 @@ import org.maiwithu.maicraft.ability.machine.MachineDetails.ConnectorState;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.Connectors;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.DeviceView;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.NetworkView;
+import org.maiwithu.maicraft.ability.machine.MachineDetails.SettingGroup;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.StateGroup;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.StateView;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
@@ -196,7 +198,7 @@ final class MachineAreaReport {
         return devices;
     }
 
-    // 一个设备的样子：挂在哪些网上、读数（一样的写一份，不一样的按读数分组列格）、网表示不了的进出口。
+    // 一个设备的样子：挂在哪些网上、读数（一样的写一份，不一样的按读数分组列格）、网表示不了的进出口、已激活的设置项。
     private DeviceView view(Device device, Site site) {
         List<String> on = new ArrayList<>(networksOf(device, site));
         if (device.part != null) {
@@ -205,14 +207,21 @@ final class MachineAreaReport {
                     StateView.of(device.part.state(), device.part.state().readings()), null, null);
         }
         Map<StateView, List<BlockPos>> byState = new LinkedHashMap<>();
-        for (BlockPos cell : device.cells) byState.computeIfAbsent(site.state(cell), key -> new ArrayList<>()).add(cell);
+        Map<Map<String, String>, List<BlockPos>> bySettings = new LinkedHashMap<>();
+        for (BlockPos cell : device.cells) {
+            byState.computeIfAbsent(site.state(cell), key -> new ArrayList<>()).add(cell);
+            bySettings.computeIfAbsent(site.settings(cell), key -> new ArrayList<>()).add(cell);
+        }
         StateView state = byState.size() == 1 ? byState.keySet().iterator().next() : null;
         List<StateGroup> states = byState.size() == 1 ? null : byState.entrySet().stream()
                 .map(entry -> new StateGroup(entry.getValue(), entry.getKey())).toList();
+        Map<String, String> settings = bySettings.size() == 1 ? bySettings.keySet().iterator().next() : null;
+        List<SettingGroup> settingGroups = bySettings.size() == 1 ? null : bySettings.entrySet().stream()
+                .map(entry -> new SettingGroup(entry.getValue(), entry.getKey())).toList();
         int count = device.cells.size();
         return new DeviceView(device.id, device.type.id(), device.type.role().name().toLowerCase(Locale.ROOT),
                 single(device.cells), count == 1 ? null : count, box(device.cells), null, null, on,
-                site.archiveOf(device.cells), state, states, ports(device, site));
+                site.archiveOf(device.cells), state, states, ports(device, site), settings, settingGroups);
     }
 
     // 设备挂在哪些网上：各格（部件看它所在的线缆格）的网络编号，再加上贴着它的连接件段。
@@ -373,6 +382,7 @@ final class MachineAreaReport {
         final Map<BlockPos, String> segmentAt = new LinkedHashMap<>();
         private final Map<BlockPos, StateView> states = new LinkedHashMap<>();
         private final Map<BlockPos, List<ExchangePoint>> points = new LinkedHashMap<>();
+        private final Map<BlockPos, Map<String, String>> settings = new LinkedHashMap<>();
 
         Site(Map<BlockPos, MachineType> types, Map<BlockPos, BlockState> claimed,
                 Map<BlockPos, Map<String, String>> memberships, Set<BlockPos> archiveCells, String archiveName) {
@@ -424,6 +434,17 @@ final class MachineAreaReport {
         /** 这一格的进出口（机器类型给的原样）。 */
         List<ExchangePoint> pointsAt(BlockPos cell) {
             return points.computeIfAbsent(cell, key -> types.get(key).exchangePoints(claimed.get(key), key));
+        }
+
+        /** 这一格已激活的设置项与现值（过滤格挂了什么或 empty、数值与选项）；没有设置项给空表。 */
+        Map<String, String> settings(BlockPos cell) {
+            return settings.computeIfAbsent(cell, key -> {
+                Map<String, String> current = new LinkedHashMap<>();
+                for (MachineSetting setting : types.get(key).settings(key)) {
+                    current.put(setting.key(), setting.value() == null ? "" : setting.value());
+                }
+                return Map.copyOf(current);
+            });
         }
 
         /** 有格落在所看档案里时给档案名。 */

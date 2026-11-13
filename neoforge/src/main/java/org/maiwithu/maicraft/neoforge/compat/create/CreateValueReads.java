@@ -10,7 +10,6 @@ import com.simibubi.create.content.redstone.diodes.BrassDiodeScrollValueBehaviou
 import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
 import com.simibubi.create.foundation.blockEntity.behaviour.BlockEntityBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueBoxTransform;
-import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBehaviour;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsBoard;
 import com.simibubi.create.foundation.blockEntity.behaviour.ValueSettingsPacket;
 import com.simibubi.create.foundation.blockEntity.behaviour.filtering.FilteringBehaviour;
@@ -46,13 +45,17 @@ public final class CreateValueReads implements CreateValues {
         List<ValueBox> values = new ArrayList<>();
         for (BlockEntityBehaviour behaviour : smart.getAllBehaviours()) {
             if (behaviour instanceof SidedFilteringBehaviour sided) {
-                // 每一面一格的过滤格：哪一面有就读哪一面，点的时候点那一面。
+                // 每一面一格的过滤格：哪一面真画了框才读哪一面，点的时候点那一面。
                 for (Direction side : Direction.values()) {
                     FilteringBehaviour face = sided.get(side);
-                    if (face != null) filters.add(filter(sided, face, side, level, at, state, player, List.of(side)));
+                    if (face == null || !face.isActive()) continue;
+                    FilterBox box = filter(sided, face, side, level, at, state, List.of(side));
+                    if (!box.spots().isEmpty()) filters.add(box);
                 }
             } else if (behaviour instanceof FilteringBehaviour filtering && filtering.isActive()) {
-                filters.add(filter(filtering, filtering, null, level, at, state, player, List.of(Direction.values())));
+                // 水平放置的动力锯虽然挂着 FilteringBehaviour，但槽位偏移返回 null、现场没有激活的过滤框，不虚报设置项。
+                FilterBox box = filter(filtering, filtering, null, level, at, state, List.of(Direction.values()));
+                if (!box.spots().isEmpty()) filters.add(box);
             } else if (behaviour instanceof ScrollValueBehaviour scroll && scroll.isActive()) {
                 values.add(value(scroll, at, player));
             }
@@ -64,9 +67,10 @@ public final class CreateValueReads implements CreateValues {
         CatnipServices.NETWORK.sendToServer(new ValueSettingsPacket(at, row, value, null, null, side, false, netId));
     }
 
-    // 一个过滤格：放着什么、限多少，再挨个面试 Create 画框的位置，框画在那一面上才算能点。
+    // 一个过滤格：放着什么、限多少，再挨个面试 Create 画框的位置，框画在那一面上才算能点；
+    // 不分侧面的单槽（如朝上动力锯顶面过滤槽）按槽位相对方块中心的方位定它落在哪一面。
     private static FilterBox filter(FilteringBehaviour owner, FilteringBehaviour face, Direction side, ClientLevel level,
-            BlockPos at, BlockState state, LocalPlayer player, List<Direction> faces) {
+            BlockPos at, BlockState state, List<Direction> faces) {
         List<Spot> spots = new ArrayList<>();
         ValueBoxTransform slot = owner.getSlotPositioning();
         for (Direction candidate : faces) {
@@ -74,10 +78,12 @@ public final class CreateValueReads implements CreateValues {
             Vec3 local = slot.getLocalOffset(level, at, state);
             if (local == null || !slot.testHit(level, at, state, local)) continue;
             double radius = slot.getScale() / (slot instanceof ValueBoxTransform.Dual ? 3.5 : 2.0);
-            spots.add(new Spot(candidate, Vec3.atLowerCornerOf(at).add(local), radius));
+            Direction hitFace = slot instanceof ValueBoxTransform.Sided ? candidate
+                    : Direction.getNearest(local.x - 0.5, local.y - 0.5, local.z - 0.5);
+            spots.add(new Spot(hitFace, Vec3.atLowerCornerOf(at).add(local), radius));
             if (!(slot instanceof ValueBoxTransform.Sided)) break;
         }
-        String label = label(owner, at, player);
+        String label = filterLabel(face);
         return new FilterBox(owner.netId(), side, label, face.getFilter().copy(), face.isCountVisible(), face.upTo,
                 face.getAmount(), face.getMaxStackSize(), spots);
     }
@@ -99,9 +105,10 @@ public final class CreateValueReads implements CreateValues {
         return new ValueBox(scroll.netId(), kind, label, scroll.getValue(), board.maxValue(), List.of());
     }
 
-    private static String label(ValueSettingsBehaviour behaviour, BlockPos at, LocalPlayer player) {
+    // 过滤格自己的标题（如"配方过滤器"、"流体过滤器"、"过滤器"）：createBoard().title() 恒返回提取数量，不能拿来当过滤格名。
+    private static String filterLabel(FilteringBehaviour behaviour) {
         try {
-            return behaviour.createBoard(player, centerHit(at)).title().getString();
+            return behaviour.getLabel().getString();
         } catch (RuntimeException unavailable) {
             return "过滤格";
         }
