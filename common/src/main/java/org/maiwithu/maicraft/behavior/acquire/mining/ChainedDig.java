@@ -13,15 +13,14 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.phys.BlockHitResult;
 
+import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.ChainKeyHold;
-import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockGone;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -31,8 +30,11 @@ import org.slf4j.LoggerFactory;
 /**
  * 连锁挖一格：按住连锁键挖触发格，模组把整批一起挖掉；不连锁时就是普通地挖这一格。
  * 第一下之前问连锁键准备好没有 → 挖触发格（连锁时一直按着）→ 那一下确认后再等副格的方块更新到齐（最多一秒）
- * → 松键、等模组按松开处理 → 做完。挖到一半键丢了（形状被换、工具换了）：停手、松键，改成只挖这一格。
- * 被打断时同样先松键，回来重新开一次连锁。哪些副格真挖掉了由调用方逐格复查。
+ * → 松键、等模组按松开处理 → 做完。
+ *
+ * <p>连锁键打开后 40 刻（两秒）内还没挥出第一下，或者挖到一半键丢了（形状被换、工具换了）：
+ * 停手松开连锁键、取消挑面、在日志里写明当时停在哪一步，改成普通地单挖这一格，不按着连锁键原地干等。
+ * 被打断时同样先松键，回来重新开一次连锁。哪些副格真挖掉了由结算时逐格复查并记入统计账本。
  */
 final class ChainedDig implements TellsToolUse {
 
@@ -40,8 +42,8 @@ final class ChainedDig implements TellsToolUse {
 
     /** 挥不下去每隔这么多刻记一行。 */
     private static final int STALL_LOG_TICKS = 100;
-    /** 挥不下去已经多少刻。 */
-    private int ticksStalled;
+    /** 连锁键打开后最多等几刻必须挥出第一下：40 刻（两秒）内没挥下去就松键放弃这一批退回单挖。 */
+    static final int CHAIN_SWING_TIMEOUT_TICKS = 40;
     /** 副格的方块更新最多等几刻：模组在同一刻挖完整批，更新随后几个包陆续到。 */
     static final int SETTLE_TICKS = 20;
     /** 要求的那一面这么多刻都打不中就不再挑面：站位偏了照样挖下去，形状不对由那一批的检查兜住。 */
@@ -61,6 +63,7 @@ final class ChainedDig implements TellsToolUse {
     private final BlockBreaking digging;
     private final Cells cells;
     private final OthersThingsNotice othersNotice;
+    private final ChainMiningLedger ledger;
     /** 开挖前趁整批副格还在世界里抄下的归属快照：等副格消失结算时把确认挖掉的格入账。 */
     private final Map<BlockPos, OthersThingsNotice.BlockOwner> batchOwners = new LinkedHashMap<>();
     private Stage stage = Stage.DIG;
@@ -69,26 +72,36 @@ final class ChainedDig implements TellsToolUse {
     private boolean holdOpened;
     /** 准备好时那一批会一起挖的格；只挖这一格时为空。 */
     private List<BlockPos> batch = List.of();
-    /** 挖的中途键丢了：先松开，松好再接着挖这一格。 */
+    /** 挖的中途键丢了或等满 40 刻还没挥出：先松开，松好再接着单挖这一格。 */
     private boolean droppingChain;
     private PlayerContext current;
     private long settleUntil;
+    private int ticksStalled;
     private int ticksWithoutSwing;
+    private int chainWaitTicks;
     private boolean faceRequired;
     private ActionStatus.Failed failure;
     /** 上一次记下的"在等什么"：换了才再记一行。 */
     private String lastWait = "";
-    /** 这次为什么没连锁：给描述用。 */
+    /** 这次为什么没连锁：给描述与拒绝记忆、统计账本用。 */
     private String singleReason = "";
+    /** 是否已向统计账本记过这一轮挖掘结果。 */
+    private boolean ledgerRecorded;
 
     ChainedDig(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak,
             List<BreakAccelerator> accelerators, BlockBreaking digging, Cells cells) {
-        this(trigger, face, shape, mayBreak, accelerators, digging, cells, OthersThingsNotice.NONE);
+        this(trigger, face, shape, mayBreak, accelerators, digging, cells, OthersThingsNotice.NONE, null);
     }
 
     ChainedDig(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak,
             List<BreakAccelerator> accelerators, BlockBreaking digging, Cells cells,
             OthersThingsNotice othersNotice) {
+        this(trigger, face, shape, mayBreak, accelerators, digging, cells, othersNotice, null);
+    }
+
+    ChainedDig(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak,
+            List<BreakAccelerator> accelerators, BlockBreaking digging, Cells cells,
+            OthersThingsNotice othersNotice, ChainMiningLedger ledger) {
         this.trigger = trigger.immutable();
         this.shape = Objects.requireNonNull(shape, "shape");
         this.mayBreak = Objects.requireNonNull(mayBreak, "mayBreak");
@@ -96,6 +109,7 @@ final class ChainedDig implements TellsToolUse {
         this.digging = Objects.requireNonNull(digging, "digging");
         this.cells = Objects.requireNonNull(cells, "cells");
         this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
+        this.ledger = ledger;
         this.faceRequired = face != null;
         digging.aimAt(this.trigger);
         digging.fromFace(face);
@@ -112,12 +126,13 @@ final class ChainedDig implements TellsToolUse {
         };
     }
 
-    // 挖触发格：先开连锁键；挥下去以后每刻续按，键丢了就停手松键改成只挖这一格。
+    // 挖触发格：先开连锁键；挥下去以后每刻续按，键丢了或 40 刻内没挥出第一下就松键改成只挖这一格。
     private ActionStatus dig(TickContext context) {
         if (!holdOpened) open();
         if (!batch.isEmpty() && digging.swingPending() && !hold.keep(current)) {
             digging.pause();
             batch = List.of();
+            batchOwners.clear();
             droppingChain = true;
             singleReason = "挖到一半连锁键松掉了";
         }
@@ -139,7 +154,34 @@ final class ChainedDig implements TellsToolUse {
                 || status instanceof ActionStatus.Running running && running.progressed()) {
             return dug(context);
         }
-        // 挥不下去好几秒：记一行挖掘器此刻在做什么，实机对得上卡在哪。
+        if (hold != null && !digging.swingPending() && ++chainWaitTicks >= CHAIN_SWING_TIMEOUT_TICKS) {
+            giveUpChainBeforeSwing();
+        }
+        logStallIfNeeded(context);
+        // 要求的面一直打不中（站位斜了、上一行还没挖开）：不再挑面，哪面看得见挖哪面。
+        if (faceRequired && !digging.swingPending() && ++ticksWithoutSwing > FACE_GIVE_UP_TICKS) {
+            faceRequired = false;
+            digging.fromFace(null);
+        }
+        return ActionStatus.running();
+    }
+
+    // 连锁键打开后满 40 刻还没挥出第一下：写清当时停在哪一步，松开连锁键、取消挑面，当场退回单挖。
+    private void giveUpChainBeforeSwing() {
+        String stepWhere = lastWait.isEmpty() ? "挖掘器在" + digging.describe() : lastWait;
+        LOG.info("[连锁挖] {}：等满 {} 刻还没挥下去（停在：{}），松开连锁键退回单挖",
+                trigger.toShortString(), chainWaitTicks, stepWhere);
+        singleReason = "按下连锁键后超时未挥出（" + stepWhere + "）";
+        batch = List.of();
+        batchOwners.clear();
+        droppingChain = true;
+        if (faceRequired) {
+            faceRequired = false;
+            digging.fromFace(null);
+        }
+    }
+
+    private void logStallIfNeeded(TickContext context) {
         if (!digging.swingPending() && ++ticksStalled % STALL_LOG_TICKS == 0) {
             var self = context.player() == null ? null : context.player().localPlayer();
             LOG.info("[连锁挖] {}：{} 刻还没挥下去，挖掘器在{}；人在 {}，眼睛离这格中心 {} 格", trigger.toShortString(),
@@ -147,12 +189,6 @@ final class ChainedDig implements TellsToolUse {
                     self == null ? "?" : String.format("%.1f", Math.sqrt(self.getEyePosition().distanceToSqr(
                             trigger.getX() + 0.5, trigger.getY() + 0.5, trigger.getZ() + 0.5))));
         }
-        // 要求的面一直打不中（站位斜了、上一行还没挖开）：不再挑面，哪面看得见挖哪面。
-        if (faceRequired && !digging.swingPending() && ++ticksWithoutSwing > FACE_GIVE_UP_TICKS) {
-            faceRequired = false;
-            digging.fromFace(null);
-        }
-        return ActionStatus.running();
     }
 
     // 触发格挖掉了：连锁的要再等副格更新到齐才松键；只挖这一格的直接收尾。
@@ -166,10 +202,12 @@ final class ChainedDig implements TellsToolUse {
         return ActionStatus.progressed();
     }
 
-    // 等副格：整批都没了或者等满一秒就松键；模组按耐久、饥饿半路停下的那几格留给调用方复查。
+    // 等副格：整批都没了或者等满一秒就松键；按现场真消失的格数记进统计账本。
     private ActionStatus settle(TickContext context) {
-        boolean allGone = batch.stream().allMatch(cell -> cells.gone(context, cell));
+        long brokenCount = batch.stream().filter(cell -> cells.gone(context, cell)).count();
+        boolean allGone = brokenCount == batch.size();
         if (!allGone && context.gameTick() < settleUntil) return ActionStatus.running();
+        recordChainedLedger((int) Math.max(1L, brokenCount));
         reportBrokenBatch(context);
         stage = Stage.RELEASE;
         return released();
@@ -180,12 +218,26 @@ final class ChainedDig implements TellsToolUse {
         if (hold != null && !hold.release(current)) return ActionStatus.running();
         hold = null;
         stage = Stage.DONE;
+        if (failure == null && batch.isEmpty()) recordSingleLedger();
         return failure != null ? failure : ActionStatus.done();
+    }
+
+    private void recordChainedLedger(int brokenBlocks) {
+        if (ledger == null || ledgerRecorded) return;
+        ledgerRecorded = true;
+        ledger.recordChained(brokenBlocks, "周围没有相连的同种方块");
+    }
+
+    private void recordSingleLedger() {
+        if (ledger == null || ledgerRecorded) return;
+        ledgerRecorded = true;
+        ledger.recordSingle(singleReason);
     }
 
     // 开这一轮的连锁键：按顺序问联动的挖掘加速，第一个开得出的就用它；都开不出就普通地挖。
     private void open() {
         holdOpened = true;
+        chainWaitTicks = 0;
         for (BreakAccelerator accelerator : accelerators) {
             Optional<ChainKeyHold> opened = accelerator.hold(shape, mayBreak);
             if (opened.isPresent()) {
@@ -201,7 +253,6 @@ final class ChainedDig implements TellsToolUse {
         if (hold == null || droppingChain) return true;
         ChainKeyHold.Readiness readiness = hold.ready(current, hit);
         if (readiness instanceof ChainKeyHold.Readiness.Wait wait) {
-            // 在等什么记一行（换了才记）：实机连锁卡住一分钟不挥第一下时，看得出卡在哪一步。
             if (!wait.why().equals(lastWait)) {
                 lastWait = wait.why();
                 LOG.info("[连锁挖] {}：等着，{}", trigger.toShortString(), wait.why());
@@ -211,7 +262,6 @@ final class ChainedDig implements TellsToolUse {
         if (readiness instanceof ChainKeyHold.Readiness.Chain chain) {
             batch = chain.batch();
             snapshotBatchOwners();
-            // 连没连锁、为什么没连，结果里看不出来：记一行，实机对得上屏幕上 FTB 面板跳没跳。
             LOG.info("[连锁挖] {}：按住连锁键，一批 {} 格", trigger.toShortString(), batch.size());
             return true;
         }
@@ -238,6 +288,7 @@ final class ChainedDig implements TellsToolUse {
         if (hold != null) hold.release(current);
         hold = null;
         holdOpened = false;
+        chainWaitTicks = 0;
         batch = List.of();
         batchOwners.clear();
         droppingChain = false;
@@ -272,9 +323,12 @@ final class ChainedDig implements TellsToolUse {
         return digging.interruptibility();
     }
 
-    // 连锁挖下来的格子用了什么工具：问挖掘器，它一格一格记着。
     @Override public List<DigToolUse> toolUses() {
         return digging.toolUses();
+    }
+
+    @Override public String notChainedReason() {
+        return batch.isEmpty() && !singleReason.isEmpty() ? singleReason : null;
     }
 
     @Override public String describe() {

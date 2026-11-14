@@ -57,6 +57,11 @@ public interface DigsBlocks {
         return dig(target);
     }
 
+    /** 已知这一格因换格不变的原因跳过连锁按键直接单挖时调用，把跳过原因记入统计账本；默认同带规模的 dig。 */
+    default Optional<Action> digSkippingChain(BlockPos target, ToolPrep prep, String skippedReason) {
+        return dig(target, prep);
+    }
+
     /**
      * 连锁挖一格：对准触发格挖，装了连锁挖的模组时按住连锁键，按形状把一批一起挖掉——
      * 模组给出的那一批每一格 mayBreak 都同意才连锁，不然只挖触发格。face 不为空时先从这一面挖

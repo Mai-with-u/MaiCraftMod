@@ -85,6 +85,12 @@ public final class ToolFirstDigging implements DigsBlocks {
         return Optional.of(new ToolFirst(target.immutable(), prep, () -> digs.dig(target, prep)));
     }
 
+    @Override public Optional<Action> digSkippingChain(BlockPos target, ToolPrep prep, String skippedReason) {
+        // 已知换格不变的拒绝原因跳过连锁按键时，现做工具算账照常跑，内层直接走带原因的单挖。
+        return Optional.of(new ToolFirst(target.immutable(), prep,
+                () -> digs.digSkippingChain(target, prep, skippedReason)));
+    }
+
     @Override public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
             Predicate<BlockPos> mayBreak) {
         return digs.digChained(trigger, face, shape, mayBreak);
@@ -128,6 +134,10 @@ public final class ToolFirstDigging implements DigsBlocks {
         // 挖下来的格子用了什么工具：问此刻真正在挖的那一步；还在现做工具时还没挖过，给空表。
         @Override public List<DigToolUse> toolUses() {
             return dig instanceof TellsToolUse tells ? tells.toolUses() : List.of();
+        }
+
+        @Override public String notChainedReason() {
+            return dig instanceof TellsToolUse tells ? tells.notChainedReason() : null;
         }
 
         @Override public ActionStatus tick(TickContext context) {

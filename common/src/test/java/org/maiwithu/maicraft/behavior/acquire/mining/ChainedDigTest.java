@@ -205,4 +205,49 @@ class ChainedDigTest {
         assertInstanceOf(ActionStatus.Done.class, statuses.getLast());
         assertEquals(2, hold.releases, "回来重新按、做完再松");
     }
+
+    @Test
+    void 等满四十刻还没挥出第一下_自动松开连锁键退回单挖并记入统计账本() {
+        Digging digging = new Digging();
+        Hold hold = new Hold();
+        // 模拟服务端一直没发回可用选区：连锁键每刻都答还在等。
+        hold.answers.add(new ChainKeyHold.Readiness.Wait("等 FTB 发回选区"));
+        ChainMiningLedger ledger = new ChainMiningLedger();
+        int mark = ledger.mark();
+        ChainedDig action = new ChainedDig(TRIGGER, Direction.SOUTH, BreakAccelerator.ChainShape.STRAIGHT_LINE,
+                pos -> true, List.of(new Accelerator(hold)), digging, (context, cell) -> gone.contains(cell),
+                null, ledger);
+
+        List<ActionStatus> statuses = run(action, 80);
+        assertInstanceOf(ActionStatus.Done.class, statuses.getLast(), "四十刻超时后退回单挖完成，不一直卡住");
+        assertEquals(1, hold.releases, "放弃连锁时先把连锁键松开");
+        assertEquals(null, digging.face, "放弃连锁后一并取消挑面");
+        assertTrue(gone.contains(TRIGGER), "触发格已按单挖挖开");
+        assertTrue(action.notChainedReason().contains("按下连锁键后超时未挥出"), action.notChainedReason());
+
+        ChainMiningLedger.Summary summary = ledger.completeSince(mark).orElseThrow();
+        assertEquals(0, summary.chainedBatches());
+        assertEquals(1, summary.singleBlocks());
+        assertEquals("按下连锁键后超时未挥出", summary.notChainedReason());
+    }
+
+    @Test
+    void 成批连锁挖完按实测消失格数记入统计账本() {
+        Digging digging = new Digging();
+        Hold hold = new Hold();
+        hold.answers.add(new ChainKeyHold.Readiness.Chain(List.of(TRIGGER, TRIGGER.east(), TRIGGER.east(2))));
+        digging.alsoBreaks = List.of(TRIGGER.east(), TRIGGER.east(2));
+        ChainMiningLedger ledger = new ChainMiningLedger();
+        int mark = ledger.mark();
+        ChainedDig action = new ChainedDig(TRIGGER, Direction.SOUTH, BreakAccelerator.ChainShape.CONNECTED,
+                pos -> true, List.of(new Accelerator(hold)), digging, (context, cell) -> gone.contains(cell),
+                null, ledger);
+
+        List<ActionStatus> statuses = run(action, 100);
+        assertInstanceOf(ActionStatus.Done.class, statuses.getLast());
+        ChainMiningLedger.Summary summary = ledger.completeSince(mark).orElseThrow();
+        assertEquals(1, summary.chainedBatches());
+        assertEquals(3, summary.chainedBlocks());
+        assertEquals(0, summary.singleBlocks());
+    }
 }

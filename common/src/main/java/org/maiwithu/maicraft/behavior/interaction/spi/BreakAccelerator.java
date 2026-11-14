@@ -23,6 +23,11 @@ public interface BreakAccelerator {
      */
     Optional<ChainKeyHold> hold(ChainShape shape, Predicate<BlockPos> mayBreak);
 
+    /** 当前世界里连锁破坏是否真正就绪可用（客户端已登记且服务端接收连锁包）。 */
+    default boolean available() {
+        return true;
+    }
+
     /** 一起挖的形状：挖什么用哪种，按命中的那一面算。 */
     enum ChainShape {
         /** 命中面上以触发格为中心的 3×3：清障挖一片。 */

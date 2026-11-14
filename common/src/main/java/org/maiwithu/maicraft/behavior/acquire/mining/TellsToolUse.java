@@ -16,4 +16,9 @@ public interface TellsToolUse extends Action {
 
     /** 这个动作到目前为止挖下来的格子用了哪些工具，按先后。 */
     List<DigToolUse> toolUses();
+
+    /** 尝试过连锁但退回单挖的原因；真正连上了或本来就是普通单挖时为 null。 */
+    default String notChainedReason() {
+        return null;
+    }
 }

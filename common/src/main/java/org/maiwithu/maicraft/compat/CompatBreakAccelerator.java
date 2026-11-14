@@ -28,6 +28,11 @@ public final class CompatBreakAccelerator implements BreakAccelerator {
         this.accelerator = Objects.requireNonNull(accelerator, "accelerator");
     }
 
+    @Override public boolean available() {
+        // 联动还开着且当前服务端真正接收连锁包才算可用：observe(self) 的 mod_features 照此报实情。
+        return ask(module, accelerator::available, false);
+    }
+
     @Override public Optional<ChainKeyHold> hold(ChainShape shape, Predicate<BlockPos> mayBreak) {
         return ask(module, () -> accelerator.hold(shape, mayBreak), Optional.<ChainKeyHold>empty())
                 .map(hold -> new Guarded(module, hold));

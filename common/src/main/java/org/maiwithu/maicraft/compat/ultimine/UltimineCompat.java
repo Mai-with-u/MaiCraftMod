@@ -39,6 +39,10 @@ public final class UltimineCompat extends CompatModule {
 
     /** 开连锁键：服务器没装 FTB 时开不出，挖掘逐格。 */
     private record Accelerator(UltimineControls controls, ChainSite site) implements BreakAccelerator {
+        @Override public boolean available() {
+            return controls.serverListens();
+        }
+
         @Override public Optional<ChainKeyHold> hold(ChainShape shape, Predicate<BlockPos> mayBreak) {
             if (!controls.serverListens()) return Optional.empty();
             return Optional.of(new UltimineKeyHold(controls, site, shape, mayBreak));

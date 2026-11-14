@@ -19,13 +19,13 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * → 选区每一格都挖得、调用方都同意才连锁 → 停半秒让观众看清轮廓 → 挖的时候一直按着 → 挖完松开。
  *
  * <p>哪一步不行就松开键、等 FTB 按松开处理了再答只挖这一格：界面藏着（F1）、服务器没装、主播自己按着、
- * FTB 不让（冷却、饿着）、选区里有一格不该挖、工具耐久撑不完这一批、六秒等不到选区。
+ * FTB 不让（冷却、饿着）、选区里有一格不该挖、工具耐久撑不完这一批、两秒等不到选区。
  * 施工的 3×3 在按键之前先看一眼命中面，注定连不成就不按键，免得面板闪一下。
  */
 final class UltimineKeyHold implements ChainKeyHold {
 
-    /** 从对准到能挖最多等几刻：按键、切形状、等选区都算在里面。 */
-    static final int GIVE_UP_TICKS = 120;
+    /** 从对准到能挖最多等几刻：40 刻（两秒）内切完形状并等不到可用选区就放弃这一批退回单挖，不在原地干等。 */
+    static final int GIVE_UP_TICKS = 40;
     /** 选区到了以后至少画几刻再挖：观众要看得到连锁的白色轮廓。 */
     static final int VISIBLE_TICKS = 10;
     /** 发了切形状包后等几刻还没切过去，就再发一次。 */
@@ -94,7 +94,7 @@ final class UltimineKeyHold implements ChainKeyHold {
             return now - openedAt > GIVE_UP_TICKS ? single(now, "主播一直按着连锁键")
                     : new Readiness.Wait("主播按着连锁键，等他松开");
         }
-        if (now - openedAt > GIVE_UP_TICKS) return single(now, "等了六秒没等到 FTB 按" + ChainShapes.shownName(shape) + "发回的选区");
+        if (now - openedAt > GIVE_UP_TICKS) return single(now, "等了两秒没等到 FTB 按" + ChainShapes.shownName(shape) + "发回的选区");
         if (!pressed) return press(context, now);
         controls.holdKey(true);
         return switchedAndPreviewed(context, now);
