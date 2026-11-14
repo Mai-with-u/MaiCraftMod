@@ -45,18 +45,23 @@ public final class BoatLandings {
                 Comparator.comparingDouble(spot -> spot.distSqr(destination)), LIMIT);
     }
 
-    /** 这一格紧挨着能划的水面：四邻的柱子里有一柱顶上是活水（没冻住），水面低在脚下一两格也算挨着。 */
+    /**
+     * 这一格紧挨着能划的水面：优先看四正交邻格，再看四对角邻格（锯齿海岸线或斜角礁石船体照样贴得拢）；
+     * 水面在脚下同一层或低一到三格（岸坎高出水面一两格）都算挨着。
+     */
     static boolean touchesWater(Function<BlockPos, Optional<BlockState>> read, BlockPos feet) {
-        for (BlockPos side : List.of(feet.north(), feet.south(), feet.west(), feet.east())) {
-            Optional<BlockState> state = read.apply(side);
-            if (state.isEmpty() || WaterCrossing.kindOf(state.get()) != WaterCrossing.Kind.WATER) continue;
-            return true;
-        }
-        // 脚边没有齐平的水：往脚下方看两格，岸坡比水面高一步时也下得去。
-        for (int down = 1; down <= 2; down++) {
-            BlockPos lower = feet.below(down);
-            for (BlockPos side : List.of(lower.north(), lower.south(), lower.west(), lower.east())) {
+        for (int down = 0; down <= 3; down++) {
+            BlockPos level = down == 0 ? feet : feet.below(down);
+            for (BlockPos side : List.of(level.north(), level.south(), level.west(), level.east())) {
                 Optional<BlockState> state = read.apply(side);
+                if (state.isPresent() && WaterCrossing.kindOf(state.get()) == WaterCrossing.Kind.WATER) return true;
+            }
+        }
+        for (int down = 0; down <= 2; down++) {
+            BlockPos level = down == 0 ? feet : feet.below(down);
+            for (BlockPos diag : List.of(level.north().west(), level.north().east(),
+                    level.south().west(), level.south().east())) {
+                Optional<BlockState> state = read.apply(diag);
                 if (state.isPresent() && WaterCrossing.kindOf(state.get()) == WaterCrossing.Kind.WATER) return true;
             }
         }

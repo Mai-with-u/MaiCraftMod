@@ -6,8 +6,10 @@ import java.util.OptionalInt;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.EmptyBlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.travel.planning.TravelPlanner;
@@ -99,14 +101,24 @@ public final class WaterCrossing {
         return walking + paddling + overhead;
     }
 
-    /** 一柱的地表：从上往下找第一个不是空气的方块；全是空气（或整柱没加载）给空。 */
+    /**
+     * 一柱的地表：从上往下找第一个真正构成水面、冰面或结实地表的方块，跳过草、花、甘蔗、藤蔓与伸到水边的树叶；
+     * 全是空气（或整柱没加载）给空。
+     */
     static Optional<Top> surface(Function<BlockPos, Optional<BlockState>> read, int x, int z, int yHigh, int yLow) {
         for (int y = yHigh; y >= yLow; y--) {
             Optional<BlockState> state = read.apply(new BlockPos(x, y, z));
-            if (state.isEmpty() || state.get().isAir()) continue;
+            if (state.isEmpty() || ignoresForSurface(state.get())) continue;
             return Optional.of(new Top(new BlockPos(x, y, z), state.get()));
         }
         return Optional.empty();
+    }
+
+    // 空气、岸边伸出的树冠树叶、以及没有碰撞体积的草花甘蔗藤蔓不算地表，继续往下找真正的地面或水面。
+    private static boolean ignoresForSurface(BlockState state) {
+        if (state.isAir() || state.getBlock() instanceof LeavesBlock) return true;
+        if (kindOf(state) != Kind.LAND) return false;
+        return state.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
     }
 
     /** 这一柱的地表是什么：水、冻住的水，还是实地；整柱没有实遮挡（没加载或悬空）算实地，不凭空判成水。 */
@@ -133,11 +145,58 @@ public final class WaterCrossing {
     /** 地表类别。 */
     enum Kind { WATER, FROZEN, LAND }
 
-    /** 这一柱站得住的脚位：地表之上那一格；地表是水或没找到给空。 */
+    /**
+     * 这一柱站得住的干地脚位：从上往下找下面一格是已加载结实干地、脚与头两格没有液体和实心阻挡的位置；
+     * 岸边有伸出来的树冠或悬崖檐时也能落到树下真正的水边地面，整柱未加载或顶上是水给空。
+     */
     static OptionalInt standFeet(Function<BlockPos, Optional<BlockState>> read, int x, int z, int yHint) {
         Optional<Top> top = surface(read, x, z, yHint + Y_WINDOW_ABOVE, yHint - Y_WINDOW_BELOW);
         if (top.isEmpty() || kindOf(top.get().state()) != Kind.LAND) return OptionalInt.empty();
-        return OptionalInt.of(top.get().pos().getY() + 1);
+        for (int y = top.get().pos().getY(); y >= yHint - Y_WINDOW_BELOW; y--) {
+            Optional<BlockState> ground = read.apply(new BlockPos(x, y, z));
+            if (ground.isEmpty()) continue;
+            BlockState below = ground.get();
+            if (kindOf(below) == Kind.WATER || kindOf(below) == Kind.FROZEN) return OptionalInt.empty();
+            if (ignoresForSurface(below)) continue;
+            BlockPos feet = new BlockPos(x, y + 1, z);
+            if (headroomClear(read, feet) && headroomClear(read, feet.above())) {
+                return OptionalInt.of(y + 1);
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    private static boolean headroomClear(Function<BlockPos, Optional<BlockState>> read, BlockPos cell) {
+        Optional<BlockState> state = read.apply(cell);
+        if (state.isEmpty()) return true;
+        BlockState s = state.get();
+        if (!s.getFluidState().isEmpty()) return false;
+        return s.isAir() || s.getCollisionShape(EmptyBlockGetter.INSTANCE, BlockPos.ZERO).isEmpty();
+    }
+
+    /**
+     * 对岸还在未加载区块之外（或船在大海中央四周已加载范围全是水）时，沿目的地方向在已加载活水前缘挑一格水面航点：
+     * 船先划到那里把前方新区块加载出来，下一轮再接着找对岸下船。
+     */
+    static Optional<BlockPos> loadedWaterWaypoint(Function<BlockPos, Optional<BlockState>> read,
+            BlockPos from, BlockPos toward, int maxDistance) {
+        double dx = toward.getX() - from.getX();
+        double dz = toward.getZ() - from.getZ();
+        double len = Math.hypot(dx, dz);
+        if (len < 1.0) return Optional.empty();
+        double ux = dx / len;
+        double uz = dz / len;
+        int limit = (int) Math.min(maxDistance, Math.floor(len));
+        BlockPos furthestWater = null;
+        for (int dist = MIN_WATER_WIDTH; dist <= limit; dist += 2) {
+            int x = (int) Math.round(from.getX() + ux * dist);
+            int z = (int) Math.round(from.getZ() + uz * dist);
+            Optional<Top> top = surface(read, x, z, from.getY() + 4, from.getY() - 6);
+            if (top.isEmpty()) break;
+            if (kindOf(top.get().state()) != Kind.WATER || top.get().state().getBlock() == Blocks.LILY_PAD) break;
+            furthestWater = top.get().pos();
+        }
+        return Optional.ofNullable(furthestWater);
     }
 
     /** 线上按比例取一点所在的柱。 */

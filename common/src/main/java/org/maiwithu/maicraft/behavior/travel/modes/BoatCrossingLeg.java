@@ -375,6 +375,10 @@ final class BoatCrossingLeg implements TravelLeg {
         double distance = Math.sqrt(boatPos.distanceToSqr(target.x, boatPos.y, target.z));
         if (distance <= ARRIVAL_DISTANCE) {
             releaseKeys(live);
+            if (plan.stayAfloat()) {
+                // 本段只是划到已加载水面的前缘航点：人留在船上直接交还行程，下一轮接着往前找对岸。
+                return ActionStatus.done();
+            }
             step = Step.DISMOUNT;
             return ActionStatus.progressed();
         }

@@ -50,9 +50,9 @@ public final class BoatCrossing implements TravelMode {
 
     private final DimensionTravelServices services;
 
-    /** 报价时定下的这一段打算：报价与开跑之间世界可能又变，开跑时照打算先核对现场。 */
+    /** 报价时定下的这一段打算：报价与开跑之间世界可能又变，开跑时照打算先核对现场；stayAfloat 为真表示本段只划到视野前缘水面航点，到了留在船上接着划下一段。 */
     record Plan(BlockPos launchFeet, BlockPos launchWater, BlockPos existingBoat, List<BlockPos> landings,
-                String boatItem, BlockPos destination) {}
+                String boatItem, BlockPos destination, boolean stayAfloat) {}
 
     /** @param services 跨维度出行的现场部件：读格、走到、换主手、当刻角色上下文（这里只用它读格与读现场） */
     public BoatCrossing(DimensionTravelServices services) {
@@ -136,44 +136,65 @@ public final class BoatCrossing implements TravelMode {
             return;
         }
         List<BlockPos> landings = BoatLandings.around(read, span.farShore(), request.to());
+        boolean stayAfloat = false;
         if (landings.isEmpty()) {
-            sink.decline(Problem.Kind.UNREACHABLE, "对岸（" + span.farShore().toShortString()
-                    + " 附近）没有紧挨水面的靠岸点，划过去上不了岸");
-            return;
+            // 对岸还在未加载区块外时，先朝目的地划到已加载水面的前缘，把前面的海面与岸块加载出来再接着划。
+            Optional<BlockPos> waypoint = WaterCrossing.loadedWaterWaypoint(
+                    read, spots.getFirst().water(), request.to(), 96);
+            if (waypoint.isPresent()) {
+                landings = List.of(waypoint.get());
+                stayAfloat = true;
+            } else {
+                sink.decline(Problem.Kind.UNREACHABLE, "对岸（" + span.farShore().toShortString()
+                        + " 附近）没有紧挨水面的靠岸点，划过去上不了岸");
+                return;
+            }
         }
-        BlockPos launchWater = spots.getFirst().water();
+        emitCrossingOffer(request, span, spots.getFirst(), landings.getFirst(), stayAfloat, carried, freeBoat, sink);
+    }
+
+    private static void emitCrossingOffer(TravelRequest request, WaterCrossing.Span span, BoatLaunchSpots.Spot spot,
+            BlockPos landing, boolean stayAfloat, Optional<String> carried, Optional<BlockPos> freeBoat,
+            OfferSink sink) {
         long ticks = WaterCrossing.estimateTicks(request.from(), span, request.to());
         String needs = carried.isPresent() ? "身上的一条船（" + carried.get() + "）"
                 : "岸边 " + freeBoat.get().toShortString() + " 停着的没人坐的船";
-        String changes = carried.isPresent()
-                ? "放下一条船（身上少一条船）；船划完留在岸边不收"
-                : "用岸边那条船，划完留在对岸";
-        String hint = "放船站位 " + spots.getFirst().feet().toShortString() + "，靠岸点 "
-                + landings.getFirst().toShortString() + (carried.isEmpty()
-                        ? "，用岸边那条船" : "，用身上的船");
-        TravelOffer offer = new TravelOffer(VIA, spots.getFirst().feet(), landings.getFirst(), ticks,
-                List.of(needs), List.of(changes), hint);
-        sink.offer(offer);
+        String changes = stayAfloat
+                ? "放下一条船朝目的地划过眼前这片水面，到了继续留在船上往前看"
+                : (carried.isPresent()
+                        ? "放下一条船（身上少一条船）；船划完留在岸边不收"
+                        : "用岸边那条船，划完留在对岸");
+        String hint = "放船站位 " + spot.feet().toShortString()
+                + (stayAfloat ? "，水面航点 " : "，靠岸点 ") + landing.toShortString()
+                + (carried.isEmpty() ? "，用岸边那条船" : "，用身上的船");
+        sink.offer(new TravelOffer(VIA, spot.feet(), landing, ticks, List.of(needs), List.of(changes), hint));
     }
 
-    // 人在船里：跳过隔水勘测，直接给"开到最近的岸、下船"的一份报价；交还行程后从岸上接着走。
+    // 人在船里：跳过隔水勘测，有已加载的岸就开过去下船；在大海中央四周还没看到岸但给了目的地时，先朝目的地划过当前已加载海面。
     private void offerRidingToShore(TravelRequest request,
             Function<BlockPos, Optional<BlockState>> read, OfferSink sink) {
         BlockPos here = request.from();
         Optional<BlockPos> shore = nearestShore(read, here, request.to() == null ? here : request.to());
         if (shore.isEmpty()) {
+            if (request.to() != null) {
+                Optional<BlockPos> waypoint = WaterCrossing.loadedWaterWaypoint(
+                        read, here, request.to(), SHORE_SEARCH_DISTANCE);
+                if (waypoint.isPresent()) {
+                    BlockPos target = waypoint.get();
+                    long ticks = Math.round(Math.sqrt(here.distSqr(target)) / 8.0 * 20) + 20;
+                    sink.offer(new TravelOffer(VIA, here, target, ticks, List.of(),
+                            List.of("朝目的地把船往前划一段水面，加载前方海面与海岸"),
+                            "先划到水面 " + target.toShortString() + " 接着看前方的岸"));
+                    return;
+                }
+            }
             sink.decline(Problem.Kind.UNREACHABLE, "坐在船里，可 " + SHORE_SEARCH_DISTANCE
                     + " 格内没看到能上岸的实地（或那一片没加载）");
             return;
         }
         BlockPos shoreAt = shore.get();
         List<BlockPos> landings = BoatLandings.around(read, shoreAt, request.to() == null ? shoreAt : request.to());
-        if (landings.isEmpty()) {
-            sink.decline(Problem.Kind.UNREACHABLE, "岸边 " + shoreAt.toShortString()
-                    + " 附近没有紧挨水面的靠岸点，开过去也下不了船");
-            return;
-        }
-        BlockPos landing = landings.getFirst();
+        BlockPos landing = landings.isEmpty() ? shoreAt : landings.getFirst();
         long ticks = Math.round(Math.sqrt(here.distSqr(landing)) / 8.0 * 20) + OVERHEAD_TICKS / 2;
         TravelOffer offer = new TravelOffer(VIA, here, landing, ticks, List.of(),
                 List.of("把船开到岸边停下，人下船；船留在岸边"),
@@ -186,14 +207,15 @@ public final class BoatCrossing implements TravelMode {
         return new BoatCrossingLeg(planNow(request, offer), request.permissions(), services);
     }
 
-    /** 开跑这一刻的打算：人在船里就照报价的靠岸点开过去下船，否则重新挑备船办法、站位与靠岸点。 */
+    /** 开跑这一刻的打算：人在船里就照报价的靠岸点或水面航点开过去，否则重新挑备船办法、站位与靠岸点。 */
     private Plan planNow(TravelRequest request, TravelOffer offer) {
         Function<BlockPos, Optional<BlockState>> read = services.world()::stateAt;
         BlockPos aim = request.to() == null ? offer.to() : request.to();
         List<BlockPos> landings = BoatLandings.around(read, offer.to(), aim);
-        if (landings.isEmpty()) landings = List.of(offer.to());
+        boolean stayAfloat = landings.isEmpty();
+        if (stayAfloat) landings = List.of(offer.to());
         if (ridingVanillaBoat()) {
-            return new Plan(null, null, null, landings, null, request.to());
+            return new Plan(null, null, null, landings, null, request.to(), stayAfloat);
         }
         // 备船办法照当下重新认：岸边记得的、停着的船优先，身上有船物品其次；站位重新挑，挑不出按报价的起点凑。
         Optional<BlockPos> freeBoat = rememberedFreeBoat().or(() -> nearestFreeBoat(services.context().get(),
@@ -210,7 +232,7 @@ public final class BoatCrossing implements TravelMode {
         }
         return new Plan(spot.map(BoatLaunchSpots.Spot::feet).orElse(offer.from()),
                 spot.map(BoatLaunchSpots.Spot::water).orElse(offer.from()),
-                freeBoat.orElse(null), landings, carried.orElse(null), request.to());
+                freeBoat.orElse(null), landings, carried.orElse(null), request.to(), stayAfloat);
     }
 
     /** 停着的船旁能站的脚位：四邻加对角八柱，各柱用干地事实挑能站的脚位；全是水就给空，由调用方决定照不照常去试。 */
@@ -228,7 +250,10 @@ public final class BoatCrossing implements TravelMode {
         return stances;
     }
 
-    /** 出发点最近的一柱实地：从船的位置一圈圈往外找，找带着往目的地那边偏。 */
+    /**
+     * 出发点最近的一处真正能靠岸的已加载陆地：从船的位置一圈圈往外找，同圈里离目的地近的优先。
+     * 只认已加载且紧挨水面的可站干地脚位，未加载区块边缘绝不误当成岸。
+     */
     static Optional<BlockPos> nearestShore(Function<BlockPos, Optional<BlockState>> read,
             BlockPos at, BlockPos toward) {
         for (int r = 0; r <= SHORE_SEARCH_DISTANCE; r++) {
@@ -236,9 +261,13 @@ public final class BoatCrossing implements TravelMode {
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != r) continue;
-                    BlockPos cell = new BlockPos(at.getX() + dx, at.getY(), at.getZ() + dz);
-                    if (WaterCrossing.surfaceKind(read, cell) != WaterCrossing.Kind.LAND) continue;
-                    if (best == null || cell.distSqr(toward) < best.distSqr(toward)) best = cell;
+                    int x = at.getX() + dx;
+                    int z = at.getZ() + dz;
+                    var feetY = WaterCrossing.standFeet(read, x, z, at.getY());
+                    if (feetY.isEmpty()) continue;
+                    BlockPos feet = new BlockPos(x, feetY.getAsInt(), z);
+                    if (!BoatLandings.touchesWater(read, feet)) continue;
+                    if (best == null || feet.distSqr(toward) < best.distSqr(toward)) best = feet;
                 }
             }
             if (best != null) return Optional.of(best);
@@ -292,6 +321,6 @@ public final class BoatCrossing implements TravelMode {
         return path.endsWith("_boat") || path.endsWith("_raft");
     }
 
-    /** 找最近的岸最多看多远（格）：坐在船里四周该看得见岸，再远就是在大海中央。 */
-    static final int SHORE_SEARCH_DISTANCE = 48;
+    /** 找最近的岸最多看多远（格）：覆盖常规视距边缘，再远由水面航点分段往前划。 */
+    static final int SHORE_SEARCH_DISTANCE = 64;
 }

@@ -92,7 +92,8 @@ final class AcquisitionWiring {
                 recipeReads, deps.world().memory(), deps.character().context(), leftCooking);
         ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context(), deps.world().generatedTerrain());
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
-                deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects);
+                deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects,
+                deps.travel().walks());
         RecipeSource craftSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,

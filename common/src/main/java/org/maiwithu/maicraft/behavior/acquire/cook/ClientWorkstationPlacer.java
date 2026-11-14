@@ -19,11 +19,18 @@ import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
+import org.maiwithu.maicraft.behavior.navigation.TerrainPermit;
+import org.maiwithu.maicraft.behavior.navigation.WalkReport;
+import org.maiwithu.maicraft.behavior.navigation.WalkRun;
+import org.maiwithu.maicraft.behavior.navigation.WalkTo;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
+import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -56,6 +63,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
 
     /** 找放格的范围：身边两格以内，再远放下也不好走过去用。 */
     private static final int REACH_BLOCKS = 2;
+    /** 泡在水里身边没有干地时，往四周多远以内找能上岸摆工作台的干地（格）。 */
+    static final int SHORE_BENCH_RADIUS = 24;
+    /** 浅水里直接贴水底摆工作台时，支撑格离眼睛最远不超过多少格。 */
+    private static final double SHALLOW_SUPPORT_REACH = 4.2;
     /** 一格放不下最多换几格再试。 */
     private static final int SPOT_TRIES = 3;
 
@@ -65,14 +76,22 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
     private final Supplier<PlayerContext> context;
     /** 收回台子：走到跟前、挖下来、捡起掉落物。 */
     private final CollectsBlocks collects;
+    /** 泡在水里时先游到附近岸边干地再摆台；没接上时只看当场身边与浅水底。 */
+    private final WalkTo walks;
 
     public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
             WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects) {
+        this(interactions, toMainhand, memory, context, collects, null);
+    }
+
+    public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
+            WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects, WalkTo walks) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.context = Objects.requireNonNull(context, "context");
         this.collects = Objects.requireNonNull(collects, "collects");
+        this.walks = walks;
     }
 
     @Override
@@ -135,6 +154,8 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         /** 放的是设施：放下后记进世界记忆。放回再挖的砾石不记。 */
         private final boolean remember;
         private Action moving;
+        private WalkRun walkingToShore;
+        private boolean triedShore;
         private AimAndInteract placing;
         private Problem failure;
         /** 挑好的放格：准备阶段定下；点的是它下面那格支撑方块。 */
@@ -166,9 +187,29 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             return confirmPlaced(current, tick);
         }
 
-        // 先挑好放格、把设施方块换到主手，都齐了才对支撑面出手。
+        // 先挑好放格（泡在水里时优先游去附近岸边，没岸再试浅水底）、把设施方块换到主手，都齐了才对支撑面出手。
         private ActionStatus prepare(PlayerContext current, TickContext tick) {
+            if (walkingToShore != null) {
+                return stepWalkToShore(tick);
+            }
             BlockPos spot = findSpot(current);
+            if (spot == null && inWater(current)) {
+                if (!triedShore && walks != null) {
+                    BlockPos shore = findShoreStance(current);
+                    triedShore = true;
+                    if (shore != null) {
+                        walkingToShore = walks.start(GoalCompiler.standOn(shore), TerrainPermit.WALK_ONLY);
+                        return ActionStatus.progressed();
+                    }
+                }
+                spot = findShallowWaterSpot(current);
+                if (spot == null) {
+                    failure = Problem.of(Problem.Kind.UNREACHABLE,
+                            "正泡在深水里，脚下够不着水底、周围 " + SHORE_BENCH_RADIUS + " 格也没有岸边干地能放" + displayName(),
+                            "先用 travel 游到最近的岸边或浅滩，再合成");
+                    return ActionStatus.failed(failure);
+                }
+            }
             if (spot == null) {
                 failure = Problem.of(Problem.Kind.UNREACHABLE,
                         "身边没有能放" + displayName() + "的空位（要空格与结实的地面），不硬放", null);
@@ -201,11 +242,26 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             Block block = blockOf(blockType).orElseThrow();
             BlockPos support = spot.below();
             alreadyThere = holding(current, support, block);
-            // 放格里长着草、花这类一碰就换掉的：像人一样直接点那丛草，东西就顶替它放下。点下面的地面会被草挡住，
-            // 实机 10-14 河边草地上放工作台，回回"看不到方块的任何一面"，鱼竿一直做不出来。
-            BlockPos clickAt = current.level().getBlockState(spot).isAir() ? support : spot;
+            // 放格里长着草、花这类一碰就换掉的：像人一样直接点那丛草，东西就顶替它放下；
+            // 放格是空气或水时，方块射线穿得过液体，必须点下面的结实支撑格顶面才能把工作台放稳。
+            BlockState spotState = current.level().getBlockState(spot);
+            BlockPos clickAt = spotState.isAir() || !spotState.getFluidState().isEmpty() ? support : spot;
             placing = interactions.useBlock(clickAt, placedAround(support, block, alreadyThere));
             return ActionStatus.progressed();
+        }
+
+        private ActionStatus stepWalkToShore(TickContext tick) {
+            ActionStatus status = walkingToShore.tick(tick);
+            if (status instanceof ActionStatus.Running) {
+                return status;
+            }
+            WalkReport report = walkingToShore.report();
+            walkingToShore.close();
+            walkingToShore = null;
+            if (status instanceof ActionStatus.Done || report.state() == WalkReport.State.ARRIVED) {
+                return ActionStatus.progressed();
+            }
+            return ActionStatus.running();
         }
 
         // 放置结果与记忆一起收尾：真放下了才记，按实际落下的那一格记；没放下不冒充记得一台新设施。
@@ -279,16 +335,94 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             return over.isAir() || over.canBeReplaced() && over.getCollisionShape(current.level(), above).isEmpty();
         }
 
-        // 被生存需求打断：换手、放置先停住，恢复后接着推进。
+        // 泡在水里且周围 24 格内有干地岸边时，挑最近一格站上去就能在旁边摆下工作台的岸格。
+        private BlockPos findShoreStance(PlayerContext current) {
+            var self = current.localPlayer();
+            BlockPos base = self.blockPosition();
+            BlockPos best = null;
+            double bestDistSq = Double.MAX_VALUE;
+            for (int dx = -SHORE_BENCH_RADIUS; dx <= SHORE_BENCH_RADIUS; dx++) {
+                for (int dz = -SHORE_BENCH_RADIUS; dz <= SHORE_BENCH_RADIUS; dz++) {
+                    double distSq = (double) dx * dx + (double) dz * dz;
+                    if (distSq >= bestDistSq) continue;
+                    for (int dy = -4; dy <= 4; dy++) {
+                        BlockPos stance = base.offset(dx, dy, dz);
+                        if (!current.level().isLoaded(stance)
+                                || !BlockPassability.isDryStandable(current.level(), stance)) {
+                            continue;
+                        }
+                        if (hasAdjacentDrySpot(current, stance)) {
+                            best = stance;
+                            bestDistSq = distSq;
+                            break;
+                        }
+                    }
+                }
+            }
+            return best;
+        }
+
+        private boolean hasAdjacentDrySpot(PlayerContext current, BlockPos stance) {
+            for (Direction dir : Direction.Plane.HORIZONTAL) {
+                BlockPos cell = stance.relative(dir);
+                if (current.level().isLoaded(cell) && placeableAt(current, cell)) return true;
+            }
+            return false;
+        }
+
+        // 附近没有干地岸边、但脚下水深只有一到三格够得着结实水底时，挑水底之上那一格直接放下工作台顶替水格。
+        private BlockPos findShallowWaterSpot(PlayerContext current) {
+            var self = current.localPlayer();
+            BlockPos base = self.blockPosition();
+            var eye = self.getEyePosition();
+            BlockPos best = null;
+            double bestDistSq = Double.MAX_VALUE;
+            for (int dx = -REACH_BLOCKS; dx <= REACH_BLOCKS; dx++) {
+                for (int dy = -3; dy <= 0; dy++) {
+                    for (int dz = -REACH_BLOCKS; dz <= REACH_BLOCKS; dz++) {
+                        BlockPos cell = base.offset(dx, dy, dz);
+                        if (tried.contains(cell) || !placeableSubmergedAt(current, cell, eye)) continue;
+                        double distSq = cell.distToCenterSqr(eye);
+                        if (distSq < bestDistSq) {
+                            best = cell;
+                            bestDistSq = distSq;
+                        }
+                    }
+                }
+            }
+            return this.spot = best;
+        }
+
+        private boolean placeableSubmergedAt(PlayerContext current, BlockPos cell, Vec3 eye) {
+            if (!current.level().isLoaded(cell)) return false;
+            BlockState state = current.level().getBlockState(cell);
+            if (!BlockPassability.isWater(state) || !state.canBeReplaced()) return false;
+            BlockState placed = blockOf(blockType).orElseThrow().defaultBlockState();
+            if (!current.level().isUnobstructed(placed, cell, CollisionContext.empty())) return false;
+            BlockPos below = cell.below();
+            if (below.distToCenterSqr(eye) > SHALLOW_SUPPORT_REACH * SHALLOW_SUPPORT_REACH) return false;
+            if (!current.level().getBlockState(below).isFaceSturdy(current.level(), below, Direction.UP)) return false;
+            BlockPos above = cell.above();
+            BlockState over = current.level().getBlockState(above);
+            return over.isAir() || BlockPassability.isWater(over)
+                    || over.canBeReplaced() && over.getCollisionShape(current.level(), above).isEmpty();
+        }
+
+        // 被生存需求打断：游上岸、换手、放置先停住，恢复后接着推进。
         @Override
         public void pause() {
+            if (walkingToShore != null) walkingToShore.stop();
             if (moving != null) moving.pause();
             if (placing != null) placing.pause();
         }
 
-        // 收尾：没做完的换手与放置一并收尾。
+        // 收尾：没做完的游上岸、换手与放置一并收尾。
         @Override
         public void close() {
+            if (walkingToShore != null) {
+                walkingToShore.close();
+                walkingToShore = null;
+            }
             if (moving != null) moving.close();
             if (placing != null) placing.close();
         }
@@ -374,6 +508,11 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
                 return true;
             }
         };
+    }
+
+    private static boolean inWater(PlayerContext current) {
+        var self = current.localPlayer();
+        return self.isInWaterOrBubble() || BlockPassability.isWater(current.level(), self.blockPosition());
     }
 
     private static Optional<Block> blockOf(String blockTypeId) {

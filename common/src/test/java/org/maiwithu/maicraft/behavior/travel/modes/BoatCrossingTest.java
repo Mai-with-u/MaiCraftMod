@@ -404,4 +404,50 @@ class BoatCrossingTest {
         assertTrue(BoatLaunchSpots.aimedWell(new Vec3(aim.x - 0.1, aim.y, 20.55), aim), "差在容差内就出手");
         assertTrue(BoatLaunchSpots.aimedWell(aim, aim));
     }
+
+    @Test
+    void 找最近岸边跳过未加载区块_命中真实靠岸点() {
+        // 复现第 63 场：船在 (-200, 62, 161)，东侧 x >= -160 是未加载区块（read 返回 empty），
+        // 西侧 x = -225 是已加载的真海岸；不能把东侧未加载边界 -160 误认成岸。
+        for (int x = -224; x <= -161; x++) {
+            for (int z = 120; z <= 180; z++) {
+                put(x, 62, z, Blocks.WATER.defaultBlockState());
+            }
+        }
+        put(-225, 62, 161, Blocks.GRASS_BLOCK.defaultBlockState());
+        Optional<BlockPos> shore = BoatCrossing.nearestShore(world(),
+                new BlockPos(-200, 62, 161), new BlockPos(-150, 65, 120));
+        assertTrue(shore.isPresent());
+        assertEquals(new BlockPos(-225, 63, 161), shore.get(), "跳过未加载区块，命中西侧真实海岸脚位");
+    }
+
+    @Test
+    void 岸边长着高草甘蔗与树冠或岸坎高两格也能挑出靠岸点() {
+        // 湖水在 x=10..20, y=62；对岸在 x=21，地面比水面高两格（y=64），上面还长着高草（y=65..66）和树叶（y=69）。
+        for (int x = 10; x <= 20; x++) {
+            put(x, 62, 0, Blocks.WATER.defaultBlockState());
+        }
+        put(21, 64, 0, Blocks.GRASS_BLOCK.defaultBlockState());
+        put(21, 65, 0, Blocks.TALL_GRASS.defaultBlockState());
+        put(21, 66, 0, Blocks.TALL_GRASS.defaultBlockState());
+        put(21, 69, 0, Blocks.OAK_LEAVES.defaultBlockState());
+        // 再放一处只斜角紧挨水面的礁石岸块 (21, 62, 1)。
+        put(21, 62, 1, Blocks.STONE.defaultBlockState());
+
+        List<BlockPos> landings = BoatLandings.around(world(), new BlockPos(21, 64, 0), new BlockPos(30, 65, 0));
+        assertTrue(landings.contains(new BlockPos(21, 65, 0)), "穿过树叶和高草认出 y=65 的岸坎脚位：" + landings);
+        assertTrue(landings.contains(new BlockPos(21, 63, 1)), "斜角邻水的岸块也能作为靠岸点：" + landings);
+    }
+
+    @Test
+    void 大海中央四周未见陆地时挑出已加载前缘水面航点() {
+        for (int x = 0; x <= 40; x++) {
+            put(x, 62, 0, Blocks.WATER.defaultBlockState());
+        }
+        // x > 40 未加载：从 (0, 62, 0) 朝 (200, 64, 0) 划，应挑出已加载海面远端的活水航点。
+        Optional<BlockPos> waypoint = WaterCrossing.loadedWaterWaypoint(world(),
+                new BlockPos(0, 62, 0), new BlockPos(200, 64, 0), 64);
+        assertTrue(waypoint.isPresent());
+        assertEquals(new BlockPos(40, 62, 0), waypoint.get());
+    }
 }
