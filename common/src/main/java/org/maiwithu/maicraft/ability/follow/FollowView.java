@@ -40,6 +40,19 @@ interface FollowView {
     Optional<BlockPos> asideSpot(TickContext context, Sighting him, double headingX, double headingZ, int distance);
 
     /**
+     * 此刻跟向目标会不会踏进危险水域（水里有溺尸等敌对生物，或近三分钟刚在这片水里死过人）。
+     * 安全或不在水域附近时为空。
+     */
+    default Optional<DangerousWater.Hazard> waterHazard(TickContext context, Sighting him) {
+        return Optional.empty();
+    }
+
+    /** 自己已经泡在危险水里时，往四周挑一格干燥可站的岸边脚位先退上去。 */
+    default Optional<BlockPos> shoreWaitSpot(TickContext context, Sighting him, DangerousWater.Hazard hazard) {
+        return Optional.empty();
+    }
+
+    /**
      * 刚锁定时的目标：游戏实体编号、类型、名字（玩家名或类型）、位置与方位。
      *
      * @param playerUuid 跟的是玩家时他的 UUID，跟随状况事件按它告诉宿主跟的是谁；跟的不是玩家为 null

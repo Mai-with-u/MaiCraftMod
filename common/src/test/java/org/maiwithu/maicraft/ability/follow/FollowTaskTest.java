@@ -102,6 +102,8 @@ class FollowTaskTest {
         boolean visible = true;
         Presence presence = Presence.ONLINE;
         Optional<BlockPos> aside = Optional.empty();
+        Optional<DangerousWater.Hazard> waterHazard = Optional.empty();
+        Optional<BlockPos> shoreSpot = Optional.empty();
         TickContext lockedWith;
         boolean lockFails;
         /** 跟的是不是玩家：默认跟玩家 Steve；改成 false 就是跟一只狼，锁定时不交 UUID。 */
@@ -126,6 +128,15 @@ class FollowTaskTest {
         @Override public Optional<BlockPos> asideSpot(TickContext context, Sighting him, double headingX,
                                                       double headingZ, int distance) {
             return aside;
+        }
+
+        @Override public Optional<DangerousWater.Hazard> waterHazard(TickContext context, Sighting him) {
+            return waterHazard;
+        }
+
+        @Override public Optional<BlockPos> shoreWaitSpot(TickContext context, Sighting him,
+                                                          DangerousWater.Hazard hazard) {
+            return shoreSpot;
         }
     }
 
@@ -759,5 +770,47 @@ class FollowTaskTest {
         assertNotNull(walk);
         follow.close(CloseReason.CANCELLED);
         assertTrue(walk.closed, "取消时把手上的路结清");
+    }
+
+    @Test
+    void waitsOnShoreInsteadOfDivingIntoDrownedWaterAndResumesOnceSafe() {
+        // 目标走进有溺尸的水里并在水里挨打：角色不下水追、也不下水帮打；若自己泡在水边先退上岸，等他上岸再接着跟。
+        view.him.gap = 10;
+        view.him.inFight = true;
+        view.waterHazard = Optional.of(new DangerousWater.Hazard(
+                new Vec3(10, 62, 10), "水里有敌对生物 minecraft:drowned", true));
+        view.shoreSpot = Optional.of(new BlockPos(18, 64, 10));
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 3);
+
+        assertEquals(0, moves.helps, "水里有溺尸时不下水帮打送命");
+        assertTrue(events.said("下水太危险"), "发事件说明在岸边等");
+        assertEquals(1, walks.runs.size(), "自己泡在水里时先发起退上岸的一趟路");
+
+        // 退到了岸上，他还在危险水里：站在岸边看着他等。
+        walks.last().state = WalkReport.State.ARRIVED;
+        view.waterHazard = Optional.of(new DangerousWater.Hazard(
+                new Vec3(10, 62, 10), "水里有敌对生物 minecraft:drowned", false));
+        run(follow, 3);
+        assertFalse(moves.looks.isEmpty(), "在岸边看着他等");
+
+        // 他上岸了、危险解除：自动恢复跟随往他那边走。
+        view.him.inFight = false;
+        view.waterHazard = Optional.empty();
+        run(follow, 3);
+        assertTrue(events.said("离开危险水域了，接着跟"));
+        assertEquals(2, walks.runs.size(), "安全后重新起步跟上");
+    }
+
+    @Test
+    void dangerousWaterFailsWithDangerAfterBlockedLimit() {
+        view.him.gap = 10;
+        view.waterHazard = Optional.of(new DangerousWater.Hazard(
+                new Vec3(10, 62, 10), "刚在这片水里遇害过", false));
+        FollowTask follow = task(3, Permissions.DEFAULT);
+        run(follow, 2);
+        clock += FollowTask.BLOCKED_LIMIT_TICKS;
+        TaskResult finished = assertInstanceOf(TickResult.Finished.class, step(follow)).result();
+        assertEquals(Problem.Kind.DANGER, finished.problem().kind());
     }
 }

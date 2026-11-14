@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -88,5 +89,49 @@ class FollowJudgmentsTest {
         assertEquals("minecraft:overworld", PortalTrail.destination("minecraft:the_nether", "minecraft:nether_portal"));
         assertEquals("minecraft:the_end", PortalTrail.destination("minecraft:overworld", "minecraft:end_portal"));
         assertNull(PortalTrail.destination("minecraft:the_end", "minecraft:end_portal"), "出口门送人回各自的重生点，跟不过去");
+    }
+
+    @Test
+    void dangerousWaterBlocksDrownedPoolAndRemembersRecentCasualty() {
+        DangerousWater water = new DangerousWater();
+        Vec3 shore = new Vec3(-70, 63, -380);
+        Vec3 pool = new Vec3(-82, 61, -392);
+        // 目标泡在有溺尸的水里：判定为危险水域，留在岸上不跟下水。
+        Optional<DangerousWater.Hazard> liveDrowned = water.evaluate("minecraft:overworld", 100,
+                shore, false, pool, true,
+                List.of(new DangerousWater.WaterThreat("minecraft:drowned", new Vec3(-85, 61, -390))));
+        assertTrue(liveDrowned.isPresent());
+        assertTrue(liveDrowned.get().reason().contains("minecraft:drowned"));
+        assertFalse(liveDrowned.get().meInWater());
+
+        // 两人都在陆地上、水怪在远侧不挡连线：照常陆路跟，不误拦。
+        assertTrue(water.evaluate("minecraft:overworld", 100,
+                shore, false, new Vec3(-65, 63, -375), false,
+                List.of(new DangerousWater.WaterThreat("minecraft:drowned", new Vec3(-95, 61, -405)))).isEmpty());
+
+        // 刚在这片水里死过一次：重生后 44 秒（880 刻）回来，哪怕还没刷出溺尸视野，目标又下同一片水也不再跟着跳进去。
+        water.recordCasualty("minecraft:overworld", pool, 200);
+        Optional<DangerousWater.Hazard> remembered = water.evaluate("minecraft:overworld", 200 + 880,
+                shore, false, new Vec3(-87, 62, -387), true, List.of());
+        assertTrue(remembered.isPresent());
+        assertTrue(remembered.get().reason().contains("刚在这片水里遇害过"));
+
+        // 过了 3 分钟警戒期后自动解除。
+        assertTrue(water.evaluate("minecraft:overworld", 200 + DangerousWater.CASUALTY_MEMORY_TICKS + 1,
+                shore, false, new Vec3(-87, 62, -387), true, List.of()).isEmpty());
+    }
+
+    @Test
+    void shoreSpotPicksDryLandAwayFromHazard() {
+        DangerousWater.Hazard hazard = new DangerousWater.Hazard(
+                new Vec3(-82, 61, -392), "水里有敌对生物 minecraft:drowned", true);
+        Vec3 meInPool = new Vec3(-78.5, 62, -388.5);
+        Vec3 himInPool = new Vec3(-84.5, 61, -392.5);
+        // x >= -75 是干燥河岸，其余是水：应挑出离自己最近且离开危险中心的干地岸格。
+        Optional<BlockPos> spot = DangerousWater.chooseShoreSpot(meInPool, himInPool, hazard,
+                cell -> cell.getY() == 63 && cell.getX() >= -75);
+        assertTrue(spot.isPresent());
+        assertEquals(63, spot.get().getY());
+        assertTrue(spot.get().getX() >= -75);
     }
 }

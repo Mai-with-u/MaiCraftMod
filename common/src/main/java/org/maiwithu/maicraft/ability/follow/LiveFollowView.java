@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.follow;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,6 +20,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
@@ -37,10 +42,16 @@ public final class LiveFollowView implements FollowView {
     static final double FIGHT_RADIUS = 6.0;
 
     private final SeenRegistry seen;
+    private final DangerousWater dangerousWater = new DangerousWater();
     private int lockedEntityId = -1;
     private UUID lockedUuid;
     private String lockedType;
     private boolean lockedPlayer;
+    /** 上一刻的角色身体与当时是不是泡在水里：重生换身体后回头核对旧身体是不是死在水里。 */
+    private LocalPlayer lastSelf;
+    private Vec3 lastSelfPos;
+    private String lastSelfDimension;
+    private boolean lastSelfInWater;
 
     public LiveFollowView(SeenRegistry seen) {
         this.seen = seen;
@@ -73,6 +84,7 @@ public final class LiveFollowView implements FollowView {
 
     @Override
     public Sighting observe(TickContext context) {
+        noteSelfWaterDeath(context);
         Entity him = find(context);
         if (him == null) {
             return null;
@@ -92,6 +104,9 @@ public final class LiveFollowView implements FollowView {
         Entity vehicle = him.getVehicle();
         boolean sleeping = him instanceof LivingEntity living && living.isSleeping();
         boolean dead = him instanceof LivingEntity living && living.isDeadOrDying();
+        if (dead && inWater(level, him)) {
+            dangerousWater.recordCasualty(dimensionOf(him), him.position(), context.gameTick());
+        }
         return new Sighting(positionOf(him), ground, him.position(), him.getEyePosition(), him.getYRot(),
                 directionOf(self, him), self.distanceTo(him), me.distanceTo(Vec3.atBottomCenterOf(ground)), me,
                 sleeping, dead, portalAt(level, him),
@@ -112,6 +127,74 @@ public final class LiveFollowView implements FollowView {
         ClientLevel level = level(context);
         return AsideSpot.choose(him.me(), him.feet(), headingX, headingZ, distance,
                 cell -> level.isLoaded(cell) && BlockPassability.isDryStandable(level, cell));
+    }
+
+    @Override
+    public Optional<DangerousWater.Hazard> waterHazard(TickContext context, Sighting him) {
+        if (him == null) return Optional.empty();
+        LocalPlayer self = context.player().localPlayer();
+        ClientLevel level = level(context);
+        boolean meInWater = inWater(level, self);
+        boolean himInWater = inWaterAt(level, him.feet());
+        List<DangerousWater.WaterThreat> threats = collectWaterThreats(level, self, him.feet());
+        return dangerousWater.evaluate(dimensionOf(self), context.gameTick(), self.position(), meInWater,
+                him.feet(), himInWater, threats);
+    }
+
+    @Override
+    public Optional<BlockPos> shoreWaitSpot(TickContext context, Sighting him, DangerousWater.Hazard hazard) {
+        ClientLevel level = level(context);
+        LocalPlayer self = context.player().localPlayer();
+        return DangerousWater.chooseShoreSpot(self.position(), him == null ? null : him.feet(), hazard,
+                cell -> level.isLoaded(cell) && BlockPassability.isDryStandable(level, cell));
+    }
+
+    // 记录角色在水里遇害：包括死的那一刻恰好读到，以及死亡期间停摆、重生换了新身体后回头发现上一个身体死在水里。
+    private void noteSelfWaterDeath(TickContext context) {
+        LocalPlayer self = context.player().localPlayer();
+        ClientLevel level = level(context);
+        if (lastSelf != null && lastSelf != self && lastSelf.isDeadOrDying() && lastSelfInWater) {
+            dangerousWater.recordCasualty(lastSelfDimension, lastSelfPos, context.gameTick());
+        }
+        boolean nowInWater = inWater(level, self);
+        if (self.isDeadOrDying() && nowInWater) {
+            dangerousWater.recordCasualty(dimensionOf(self), self.position(), context.gameTick());
+        }
+        lastSelf = self;
+        lastSelfPos = self.position();
+        lastSelfDimension = dimensionOf(self);
+        lastSelfInWater = nowInWater;
+    }
+
+    // 收集角色与被跟对象周围泡在水里的敌对生物，按实体编号去重。
+    private static List<DangerousWater.WaterThreat> collectWaterThreats(ClientLevel level, LocalPlayer self,
+                                                                        Vec3 himFeet) {
+        Map<Integer, DangerousWater.WaterThreat> byId = new LinkedHashMap<>();
+        for (Mob mob : level.getEntitiesOfClass(Mob.class,
+                self.getBoundingBox().inflate(DangerousWater.SCAN_RADIUS),
+                candidate -> candidate instanceof Enemy && candidate.isAlive() && inWater(level, candidate))) {
+            byId.put(mob.getId(), new DangerousWater.WaterThreat(typeOf(mob), mob.position()));
+        }
+        BlockPos himCell = BlockPos.containing(himFeet);
+        for (Mob mob : level.getEntitiesOfClass(Mob.class,
+                new AABB(himCell).inflate(DangerousWater.SCAN_RADIUS),
+                candidate -> candidate instanceof Enemy && candidate.isAlive() && inWater(level, candidate))) {
+            byId.putIfAbsent(mob.getId(), new DangerousWater.WaterThreat(typeOf(mob), mob.position()));
+        }
+        return new ArrayList<>(byId.values());
+    }
+
+    private static boolean inWater(ClientLevel level, Entity entity) {
+        return entity.isInWaterOrBubble() || inWaterAt(level, entity.position());
+    }
+
+    private static boolean inWaterAt(ClientLevel level, Vec3 pos) {
+        BlockPos cell = BlockPos.containing(pos);
+        return level.isLoaded(cell) && BlockPassability.isWater(level, cell);
+    }
+
+    private static String dimensionOf(Entity entity) {
+        return entity.level().dimension().location().toString();
     }
 
     // 先按记下的编号找，UUID 对得上才算；对不上或编号没了，按 UUID 在当前世界里重新找（重生、换维度回来编号会变）。

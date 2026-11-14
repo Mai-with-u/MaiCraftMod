@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.follow;
 
-import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -19,7 +17,6 @@ import org.maiwithu.maicraft.kernel.child.ChildTaskAction;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.interrupt.KeepsCompany;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -53,6 +50,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         KEEP,
         /** 跟不过去：停下看着他等，他挪开再试。 */
         BLOCKED,
+        /** 前面是危险水域：先退上岸或在岸边看着他等，不下水送死。 */
+        WATER_WAIT,
         /** 跟丢了：去最后看见他的地方找，或原地等他回来。 */
         SEARCH,
         /** 跟着过传送门。 */
@@ -81,36 +80,12 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     static final long SEARCH_LIMIT_TICKS = 20L * 30;
     /** 让过一次路，这么久内不再让（刻）：免得两个人在门口来回躲。 */
     static final long YIELD_COOLDOWN_TICKS = 40;
-    /** 一辆车没坐上，这么久内不再去坐它（刻）。 */
-    static final long BOARD_RETRY_TICKS = 20L * 10;
     /** 帮打撤出来以后，这么久内不再上去（刻）。 */
     static final long HELP_COOLDOWN_TICKS = 20L * 5;
     /** 帮打一下都没打着就结束（怪够不着）以后，这么久内不再上去（刻）。 */
     static final long HELP_IDLE_COOLDOWN_TICKS = 20L * 30;
-    /** 同一辆车没坐上几次就不再去坐它。 */
-    static final int BOARD_TRIES = 2;
     /** 兜底：这么久既没跟上、也没在走近，算卡住（刻，3 分钟）；跟不过去与找人各有更短的时限。 */
     private static final long STUCK_AFTER_TICKS = 20L * 60 * 3;
-
-    /** 跟丢的原因，决定怎么找和最后怎么说。 */
-    enum Lost {
-        /** 走出视野、传送走了。 */
-        OUT_OF_SIGHT("走远了，没找到"),
-        /** 他死了。 */
-        DIED("他死了，没回来"),
-        /** 他下线了。 */
-        OFFLINE("他下线了，没回来"),
-        /** 跟着过了传送门，那边没看见他。 */
-        AFTER_PORTAL("跟着过了传送门，那边没找到他"),
-        /** 他进了跟不过去的门。 */
-        PORTAL_FAILED("他进了传送门，没跟过去");
-
-        final String ending;
-
-        Lost(String ending) {
-            this.ending = ending;
-        }
-    }
 
     private final FollowInput input;
     private final FollowView view;
@@ -118,17 +93,14 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private final WalkTo walks;
     private final TaskEventSink events;
     private final TerrainPermit permit;
+    private final TargetMotion motion = new TargetMotion();
+    private final VehicleChoices vehicles = new VehicleChoices();
 
     private FollowView.Locked target;
     private FollowView.Sighting last;
     private long lastSeenTick;
     private String lastDirection;
     private long now;
-
-    /** 他往哪走：最近几刻挪动的平滑值（格/刻）。 */
-    private double velocityX;
-    private double velocityZ;
-    private Vec3 previousFeet;
 
     private WalkRun walk;
     /** 这一趟走的目标点；他挪远过它才换。 */
@@ -142,8 +114,11 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     private Problem blockedBecause;
     private BlockPos blockedAnchor;
     private long lastTryTick = Long.MIN_VALUE / 2;
+    /** 在岸边避险等待从哪一刻起算。 */
+    private long waterWaitSince = -1;
+    private long lastShoreTryTick = Long.MIN_VALUE / 2;
 
-    private Lost lost;
+    private LostReason lost;
     private long lostSince;
     private Vec3 lookOut;
 
@@ -152,9 +127,6 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
 
     private Action boarding;
     private Integer boardingVehicle;
-    private final Map<Integer, Long> refusedVehicles = new HashMap<>();
-    private final Map<Integer, Integer> boardFailures = new HashMap<>();
-    private Integer toldNoSeat;
     private Action gettingOff;
 
     private Battle help;
@@ -202,6 +174,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             case LOCK -> lock(context);
             case KEEP -> keep(context);
             case BLOCKED -> blocked(context);
+            case WATER_WAIT -> waterWait(context);
             case SEARCH -> search(context);
             case PORTAL -> portal(context);
             case BOARD -> board(context);
@@ -223,22 +196,11 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         return Next.go(Phase.KEEP, "锁定了目标 " + locked.name());
     }
 
-    // 看他一眼：记下最后看见的样子与他往哪走（平滑掉一刻一刻的抖动；一下子挪很远是传送或上下车，不算走）。
+    // 看他一眼：记下最后看见的样子与他往哪走。
     private FollowView.Sighting see(TickContext context) {
         FollowView.Sighting him = view.observe(context);
         if (him == null) return null;
-        if (previousFeet != null) {
-            double dx = him.feet().x - previousFeet.x;
-            double dz = him.feet().z - previousFeet.z;
-            if (Math.hypot(dx, dz) > 8.0) {
-                velocityX = 0;
-                velocityZ = 0;
-            } else {
-                velocityX = velocityX * 0.5 + dx * 0.5;
-                velocityZ = velocityZ * 0.5 + dz * 0.5;
-            }
-        }
-        previousFeet = him.feet();
+        motion.observe(him.feet());
         last = him;
         lastSeenTick = now;
         lastDirection = him.direction();
@@ -256,7 +218,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         return keepPace(context, him);
     }
 
-    // 他坐车、我坐着别的、他在打架：这几样先于走路处理。
+    // 他坐车、我坐着别的、前面是危险水域、他在打架：这几样先于走路处理。
     private Next<Phase> turnFor(TickContext context, FollowView.Sighting him) {
         if (him.sameVehicle()) {
             closeWalk();
@@ -266,9 +228,14 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             closeWalk();
             return Next.go(Phase.GET_OFF, "我坐在别的东西上，先下来再跟");
         }
-        if (him.vehicleId() != null) {
+        Optional<DangerousWater.Hazard> hazard = view.waterHazard(context, him);
+        if (him.vehicleId() != null && (hazard.isEmpty() || him.distance() <= 4.0)) {
             Next<Phase> boardTurn = tryBoard(context, him);
             if (boardTurn != null) return boardTurn;
+        }
+        if (hazard.isPresent()) {
+            if (phase() == Phase.WATER_WAIT) return null;
+            return startWaterWait(context, him, hazard.get());
         }
         if (him.inFight() && mayHelp() && now - helpEndedTick >= helpCooldown) {
             closeWalk();
@@ -280,10 +247,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     // 他坐上了车：同一辆上有空座就去坐；没空座、刚没坐上的，走路跟并说一声。
     private Next<Phase> tryBoard(TickContext context, FollowView.Sighting him) {
         int vehicle = him.vehicleId();
-        Long refused = refusedVehicles.get(vehicle);
-        if (refused != null && now - refused < BOARD_RETRY_TICKS) return null;
-        // 同一辆连着没坐上两次：不再去坐，走路跟。
-        if (boardFailures.getOrDefault(vehicle, 0) >= BOARD_TRIES) return null;
+        if (!vehicles.mayTry(vehicle, now)) return null;
         Optional<Action> board = moves.rideAlong(context, vehicle, input.permissions());
         if (board.isPresent()) {
             closeWalk();
@@ -293,8 +257,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             tell("他坐上了 " + him.vehicleType() + "，上面还有空座，走过去坐上");
             return Next.go(Phase.BOARD, "走过去坐上他那辆");
         }
-        if (!Integer.valueOf(vehicle).equals(toldNoSeat)) {
-            toldNoSeat = vehicle;
+        if (vehicles.shouldTellNoSeat(vehicle)) {
             tell("他坐上了 " + him.vehicleType() + "，上面没有我的座，走路跟着；跟不上会去找他");
         }
         return null;
@@ -307,7 +270,8 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             // 跟上了：之前跟不过去的话说一声，计时清零，算一次真实进展。
             if (blockedSince >= 0) tell("又跟上了，接着跟");
             blockedSince = -1;
-            recordProgress("跟着他，相距 " + round(him.distance()) + " 格");
+            waterWaitSince = -1;
+            recordProgress("跟着他，相距 " + FollowWording.round(him.distance()) + " 格");
         }
         if (walk != null) {
             if (!yielding) {
@@ -381,9 +345,10 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     // 让路：挡了他的道、又过了让路的冷却，在他行进方向两侧挑一格走过去；挑不出就原地不动。
     private void maybeYield(TickContext context, FollowView.Sighting him) {
         if (now - lastYieldTick < YIELD_COOLDOWN_TICKS) return;
-        if (!AsideSpot.inTheWay(him.me(), him.feet(), velocityX, velocityZ)) return;
-        double[] heading = Math.hypot(velocityX, velocityZ) >= AsideSpot.MOVING
-                ? new double[] {velocityX, velocityZ} : AsideSpot.facing(him.yaw());
+        double vx = motion.velocityX();
+        double vz = motion.velocityZ();
+        if (!AsideSpot.inTheWay(him.me(), him.feet(), vx, vz)) return;
+        double[] heading = Math.hypot(vx, vz) >= AsideSpot.MOVING ? new double[] {vx, vz} : AsideSpot.facing(him.yaw());
         lastYieldTick = now;
         Optional<BlockPos> spot = view.asideSpot(context, him, heading[0], heading[1], input.distance());
         if (spot.isEmpty()) return;
@@ -403,8 +368,9 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         boolean fresh = blockedSince < 0;
         if (fresh) {
             blockedSince = now;
-            tell("跟不过去：" + cause.message() + "；他在 " + spot(last) + "，我停在 " + mine(last)
-                    + "；" + openingHint() + "；他挪到我走得到的地方就接着跟");
+            tell("跟不过去：" + cause.message() + "；他在 " + FollowWording.spot(last)
+                    + "，我停在 " + FollowWording.mine(last)
+                    + "；" + FollowWording.openingHint(permit) + "；他挪到我走得到的地方就接着跟");
         }
         recordAttempt("跟过去", "走不通：" + cause.message());
         return Next.go(Phase.BLOCKED, "跟不过去，停下等他");
@@ -435,7 +401,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             return Next.go(Phase.KEEP, "他回来了");
         }
         if (now - blockedSince >= BLOCKED_LIMIT_TICKS) {
-            return Next.fail(unreachable());
+            return Next.fail(FollowWording.unreachable(blockedBecause, BLOCKED_LIMIT_TICKS, permit));
         }
         moves.lookAt(context, him.eye());
         boolean moved = blockedAnchor == null
@@ -447,18 +413,63 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         return Next.stay();
     }
 
-    private Problem unreachable() {
-        String cause = blockedBecause == null ? "路走不通" : blockedBecause.message();
-        return Problem.of(Problem.Kind.UNREACHABLE,
-                "跟不上目标：连续 " + BLOCKED_LIMIT_TICKS / 20 / 60 + " 分钟都过不去——" + cause,
-                openingHint());
+    // 前面是危险水域：不下水去追也不下水帮打；自己已经泡在水里就先走上最近的岸，在岸边看着他等。
+    private Next<Phase> startWaterWait(TickContext context, FollowView.Sighting him, DangerousWater.Hazard hazard) {
+        closeWalk();
+        endHelp();
+        if (waterWaitSince < 0) {
+            waterWaitSince = now;
+            tell("前面" + hazard.reason() + "（他在 " + FollowWording.spot(him) + "），下水太危险，在岸边等他上岸或绕开");
+        }
+        if (hazard.meInWater()) {
+            retreatToShore(context, him, hazard);
+        }
+        recordAttempt("下水跟过去", hazard.reason());
+        return Next.go(Phase.WATER_WAIT, "水里危险，在岸边等他");
     }
 
-    // 跟不过去时给 LLM 的出路：许可还不让动地形就说放开哪项，已经放开了就说等他回来或取消。
-    private String openingHint() {
-        return permit.mayChangeTerrain()
-                ? "允许的地形改动已经用上还是过不去；等它走回来，或取消跟随"
-                : "这次任务不允许改地形（change_blocks=none）；把 change_blocks 提到 temporary 或更高，也许就能跟过去";
+    private Next<Phase> waterWait(TickContext context) {
+        FollowView.Sighting him = see(context);
+        if (him == null || him.dead()) {
+            closeWalk();
+            return lose(context, him);
+        }
+        Next<Phase> turn = turnFor(context, him);
+        if (turn != null) return turn;
+        Optional<DangerousWater.Hazard> hazard = view.waterHazard(context, him);
+        if (hazard.isEmpty()) {
+            closeWalk();
+            waterWaitSince = -1;
+            tell("他离开危险水域了，接着跟");
+            recordProgress("离开危险水域，接着跟");
+            return Next.go(Phase.KEEP, "水里不挡了，接着跟");
+        }
+        if (walk != null) {
+            ActionStatus status = walk.tick(context);
+            if (status instanceof ActionStatus.Running running && running.progressed()) {
+                recordProgress("退回岸边干地");
+            } else if (!(status instanceof ActionStatus.Running)) {
+                closeWalk();
+            }
+        } else if (hazard.get().meInWater() && now - lastShoreTryTick >= RETRY_GAP_TICKS) {
+            retreatToShore(context, him, hazard.get());
+        } else {
+            moves.lookAt(context, him.eye());
+        }
+        if (now - waterWaitSince >= BLOCKED_LIMIT_TICKS) {
+            return Next.fail(FollowWording.waterDanger(hazard.get(), BLOCKED_LIMIT_TICKS));
+        }
+        return Next.stay();
+    }
+
+    private void retreatToShore(TickContext context, FollowView.Sighting him, DangerousWater.Hazard hazard) {
+        lastShoreTryTick = now;
+        view.shoreWaitSpot(context, him, hazard).ifPresent(shore -> {
+            walk = walks.start(GoalCompiler.standOn(shore), permit);
+            hold(walk);
+            walkAnchor = null;
+            yielding = false;
+        });
     }
 
     // 看不见他了：分清是过门、死了、下线还是走远了，各说一声；过门就跟进去，走远就去最后看见他的地方找。
@@ -467,39 +478,42 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         endHelp();
         lostSince = now;
         if (dead != null || last != null && last.dead()) {
-            lost = Lost.DIED;
-            tell("他死了（最后在 " + spot(dead != null ? dead : last) + "），在原地等他回来");
+            lost = LostReason.DIED;
+            tell("他死了（最后在 " + FollowWording.spot(dead != null ? dead : last) + "），在原地等他回来");
             return Next.go(Phase.SEARCH, "他死了，等他回来");
         }
         if (last != null && last.portal() != null) {
             String destination = PortalTrail.destination(last.position().dimension(), last.portal());
             if (destination != null) {
                 portalTarget = destination;
-                tell("他走进了 " + last.portal() + "（" + spot(last) + "），跟着进去");
+                tell("他走进了 " + last.portal() + "（" + FollowWording.spot(last) + "），跟着进去");
                 return Next.go(Phase.PORTAL, "他进了传送门，跟进去");
             }
-            lost = Lost.PORTAL_FAILED;
+            lost = LostReason.PORTAL_FAILED;
             // 出口门把每个人送回各自的重生点：跟进去也落不到他身边，就在原地等。
             tell("他走进了末地的出口门，这扇门把人送回各自的重生点，跟进去也找不到他；在原地等他回来");
             return Next.go(Phase.SEARCH, "他进了跟不过去的门");
         }
         if (view.presence(context) == FollowView.Presence.OFFLINE) {
-            lost = Lost.OFFLINE;
-            tell("他下线了（最后在 " + spot(last) + "），在原地等他上线");
+            lost = LostReason.OFFLINE;
+            tell("他下线了（最后在 " + FollowWording.spot(last) + "），在原地等他上线");
             return Next.go(Phase.SEARCH, "他下线了，等他回来");
         }
-        lost = Lost.OUT_OF_SIGHT;
-        String where = last == null ? "看不见了" : "最后看见他在 " + spot(last) + "（" + lastDirection + "）";
+        lost = LostReason.OUT_OF_SIGHT;
+        String where = last == null ? "看不见了" : "最后看见他在 " + FollowWording.spot(last) + "（" + lastDirection + "）";
+        Optional<DangerousWater.Hazard> waterHazard = last == null ? Optional.empty() : view.waterHazard(context, last);
+        if (waterHazard.isPresent()) {
+            tell("跟丢了：" + where + "，那片" + waterHazard.get().reason() + "，不下水去找，在岸边等他");
+            lookOut = last.eye();
+            return Next.go(Phase.SEARCH, "跟丢了，水里危险不下水找");
+        }
         tell("跟丢了：" + where + "，去那儿找");
         if (last != null) {
             walk = walks.start(GoalCompiler.near(last.ground(), 1.5), permit);
             hold(walk);
             walkAnchor = null;
             yielding = false;
-            // 找人时朝他离开的方向看：从最后的位置顺着他走的方向往前 8 格。
-            double speed = Math.hypot(velocityX, velocityZ);
-            lookOut = speed < AsideSpot.MOVING ? last.eye()
-                    : last.eye().add(velocityX / speed * 8, 0, velocityZ / speed * 8);
+            lookOut = motion.lookOutFrom(last.eye());
         }
         return Next.go(Phase.SEARCH, "跟丢了，去找");
     }
@@ -510,7 +524,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         if (him != null && !him.dead()) {
             closeWalk();
             blockedSince = -1;
-            tell("又看见他了（" + spot(him) + "），接着跟");
+            tell("又看见他了（" + FollowWording.spot(him) + "），接着跟");
             return Next.go(Phase.KEEP, "找回来了");
         }
         if (walk != null) {
@@ -524,7 +538,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             moves.lookAt(context, lookOut);
         }
         if (now - lostSince >= SEARCH_LIMIT_TICKS) {
-            String where = last == null ? "" : "，最后看见他在 " + spot(last) + "（" + lastDirection + "）";
+            String where = last == null ? "" : "，最后看见他在 " + FollowWording.spot(last) + "（" + lastDirection + "）";
             return Next.fail(Problem.of(Problem.Kind.TARGET_GONE,
                     "跟丢了目标：" + lost.ending + where,
                     "再 observe 一次，找到它后用新的观察编号或名字重新跟随"));
@@ -548,11 +562,11 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         lostSince = now;
         lookOut = null;
         if (crossed.status() == TaskResult.Status.DONE) {
-            lost = Lost.AFTER_PORTAL;
+            lost = LostReason.AFTER_PORTAL;
             tell("跟着过了传送门，到了 " + portalTarget + "，在这边找他");
             return Next.go(Phase.SEARCH, "过了门，找他");
         }
-        lost = Lost.PORTAL_FAILED;
+        lost = LostReason.PORTAL_FAILED;
         String why = crossed.problem() == null ? crossed.summary() : crossed.problem().message();
         recordAttempt("跟着过传送门", why);
         tell("没跟着过去传送门：" + why + "；在原地等他回来");
@@ -573,8 +587,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             return Next.stay();
         }
         if (status instanceof ActionStatus.Failed failed) {
-            refusedVehicles.put(boardingVehicle, now);
-            boardFailures.merge(boardingVehicle, 1, Integer::sum);
+            vehicles.noteFailure(boardingVehicle, now);
             recordAttempt("坐上他那辆 " + him.vehicleType(), failed.problem().message());
             tell("没坐上他那辆 " + him.vehicleType() + "：" + failed.problem().message() + "；走路跟着");
             endBoarding();
@@ -620,15 +633,21 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         return Next.go(Phase.KEEP, "下来了，接着跟");
     }
 
-    // 帮打：战斗引擎打他身边的敌对生物和打我的；打完、撤出来都回去跟；他不见了先把这场打完再去找。
+    // 帮打：战斗引擎打他身边的敌对生物和打我的；他进了危险水域就立刻收手退回岸边；打完、撤出来都回去跟。
     private Next<Phase> help(TickContext context) {
         FollowView.Sighting him = see(context);
+        if (him != null) {
+            Optional<DangerousWater.Hazard> hazard = view.waterHazard(context, him);
+            if (hazard.isPresent()) {
+                return startWaterWait(context, him, hazard.get());
+            }
+        }
         if (help == null) {
             help = moves.helpFight(() -> last == null ? null : last.feet());
             helpHand = help.asAction();
             hold(helpHand);
             helpLanded = false;
-            tell("他在跟敌对生物打（" + spot(last) + "），上去帮他");
+            tell("他在跟敌对生物打（" + FollowWording.spot(last) + "），上去帮他");
         }
         Battle.Moment moment = help.tick(context);
         if (moment.progressed()) {
@@ -698,22 +717,6 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
         events.publish(TaskEvent.Kind.FOLLOW_STATUS, who + what, player);
     }
 
-    private static String spot(FollowView.Sighting him) {
-        if (him == null) return "未知位置";
-        WorldPosition p = him.position();
-        return p.x() + ", " + p.y() + ", " + p.z();
-    }
-
-    private static String mine(FollowView.Sighting him) {
-        if (him == null) return "原地";
-        Vec3 me = him.me();
-        return (int) Math.floor(me.x) + ", " + (int) Math.floor(me.y) + ", " + (int) Math.floor(me.z);
-    }
-
-    private static double round(double value) {
-        return Math.round(value * 10) / 10.0;
-    }
-
     /** 陪着的人睡没睡：最近一刻看见他躺在床上。夜晚需求据此决定去不去睡。 */
     @Override
     public boolean companionAsleep() {
@@ -751,6 +754,7 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
             case LOCK -> "锁定目标";
             case KEEP -> "跟着";
             case BLOCKED -> "跟不过去，等他";
+            case WATER_WAIT -> "水里危险，岸边等他";
             case SEARCH -> "跟丢了，找他";
             case PORTAL -> "跟着过传送门";
             case BOARD -> "坐上他那辆";
@@ -764,9 +768,6 @@ final class FollowTask extends PhasedTask<FollowTask.Phase> implements Standing,
     protected ResultDetails details() {
         return target == null ? ResultDetails.NONE
                 : new FollowDetails(target.type() + "（实体 " + target.entityId() + "）",
-                        last == null ? null : round(last.distance()), lastDirection);
+                        last == null ? null : FollowWording.round(last.distance()), lastDirection);
     }
-
-    /** 跟随任务的结果细节：跟的是谁、结束时的距离与最后一次看到目标在哪个方位。 */
-    record FollowDetails(String targetId, Double keptDistance, String lastDirection) implements ResultDetails {}
 }
