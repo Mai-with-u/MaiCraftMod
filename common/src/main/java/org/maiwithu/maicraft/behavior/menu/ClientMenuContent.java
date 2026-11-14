@@ -109,6 +109,14 @@ public final class ClientMenuContent implements MenuContent {
         return reading(layouts.classify(slots), slots, channel, snapshotAt);
     }
 
+    @Override
+    public boolean unrecognizedLayout() {
+        bindOnce();
+        PlayerContext context = contexts.get();
+        if (context == null || channel == null || slots == null) return false;
+        return !(layouts.classify(slots) instanceof MenuLayout.Supported);
+    }
+
     // 同步判断：看到菜单版本变过，或稳定地过了不止一次往返窗口，才算同步到了。
     private boolean synced(PlayerContext context) {
         if (context.localPlayer().containerMenu.getStateId() != boundStateId) return true;

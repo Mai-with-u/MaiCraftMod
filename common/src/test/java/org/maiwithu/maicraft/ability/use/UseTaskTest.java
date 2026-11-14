@@ -577,6 +577,46 @@ class UseTaskTest {
     }
 
     @Test
+    void 往不认识的加工容器塞进物品或点开不认识界面_明说不确认会不会做出东西() {
+        // 第 61 场 C12 回归 1：拿着生鸡肉往未知模组煎锅/砧板上右键塞了进去（带方块实体，手中物品减少，方块未变）。
+        Rig skilletRig = new Rig();
+        skilletRig.world.blocks.put(LEVER, "farmersdelight:skillet");
+        skilletRig.world.blockEntities.add(LEVER);
+        skilletRig.world.held = new UseSeams.ReadsWorld.Held("minecraft:chicken", 1);
+        skilletRig.interactions.placed("minecraft:chicken", "放上了东西",
+                () -> skilletRig.world.held = null);
+        TaskResult placedResult = skilletRig.run(skilletRig.input(position(LEVER), "minecraft:chicken", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, placedResult.status());
+        assertTrue(placedResult.summary().contains("放进去了，不确认会不会做出东西"), placedResult.summary());
+        UseDetails placedDetails = (UseDetails) placedResult.details();
+        assertEquals(Boolean.TRUE, placedDetails.unrecognizedProcessor());
+
+        // 第 61 场 C12 回归 2：拿着生鸡肉点开不认识的厨锅界面，手上的鸡肉一丁点都没少。
+        Rig potRig = new Rig();
+        potRig.world.blocks.put(LEVER, "farmersdelight:cooking_pot");
+        potRig.world.blockEntities.add(LEVER);
+        potRig.world.held = new UseSeams.ReadsWorld.Held("minecraft:chicken", 1);
+        potRig.interactions.placed("minecraft:chicken", "点开了界面", () -> { });
+        FakeLook unknownLook = new FakeLook(null);
+        unknownLook.unrecognized = true;
+        potRig.menus.look = unknownLook;
+        TaskResult menuResult = potRig.run(potRig.input(position(LEVER), "minecraft:chicken", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, menuResult.status());
+        assertTrue(menuResult.summary().contains("点开了不认识的加工或容器界面")
+                && menuResult.summary().contains("没有放进去"), menuResult.summary());
+        assertEquals(Boolean.TRUE, ((UseDetails) menuResult.details()).unrecognizedProcessor());
+        assertTrue(unknownLook.closed, "不认识的界面照样关上");
+
+        // 对照：往原版唱片机放唱片属于纯摆设交互，不标成未知加工容器。
+        Rig jukeboxRig = new Rig();
+        jukeboxRig.world.blocks.put(LEVER, "minecraft:jukebox");
+        jukeboxRig.world.blockEntities.add(LEVER);
+        jukeboxRig.interactions.placed("minecraft:music_disc_13", "塞进了唱片", () -> jukeboxRig.world.held = null);
+        TaskResult discResult = jukeboxRig.run(jukeboxRig.input(position(LEVER), "minecraft:music_disc_13", null, null, 1));
+        assertNull(((UseDetails) discResult.details()).unrecognizedProcessor());
+    }
+
+    @Test
     void 写告示牌_字写上去才算做成一次() {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:oak_sign");
@@ -989,6 +1029,8 @@ class UseTaskTest {
             return blockId(cell).map(blockOrTag::equals).orElse(false);
         }
         @Override public Optional<BlockPos> ground(int x, int z) { return Optional.empty(); }
+        final Set<BlockPos> blockEntities = new HashSet<>();
+        @Override public boolean hasBlockEntity(BlockPos cell) { return blockEntities.contains(cell); }
         @Override public Optional<Boolean> doorOpen(BlockPos cell) { return Optional.ofNullable(doors.get(cell)); }
         @Override public Fluid fluid(BlockPos cell) { return fluids.getOrDefault(cell, Fluid.NONE); }
         @Override public Optional<BlockPos> nearestSource(BlockPos near, int radius) {
@@ -1182,6 +1224,7 @@ class UseTaskTest {
 
     private static final class FakeLook implements UseSeams.MenuLook {
         private final Map<String, Integer> contents;
+        boolean unrecognized;
         boolean closed;
         private int ran;
 
@@ -1190,7 +1233,10 @@ class UseTaskTest {
         }
 
         @Override public Optional<Map<String, Integer>> contents() {
-            return ran >= 2 ? Optional.of(contents) : Optional.empty();
+            return ran >= 2 && contents != null ? Optional.of(contents) : Optional.empty();
+        }
+        @Override public boolean unrecognizedLayout() {
+            return unrecognized;
         }
         @Override public ActionStatus tick(TickContext context) {
             return ++ran >= 2 ? ActionStatus.done() : ActionStatus.progressed();

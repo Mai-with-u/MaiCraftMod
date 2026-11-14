@@ -20,6 +20,11 @@ public interface MenuContent {
      */
     Optional<Reading> current();
 
+    /** 当前打开的界面是不是不在已支持的布局里（例如未联动的模组厨锅、村民交易界面）；默认按假算。 */
+    default boolean unrecognizedLayout() {
+        return false;
+    }
+
     /**
      * 一次分侧读数。
      *

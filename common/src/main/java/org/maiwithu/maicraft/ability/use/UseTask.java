@@ -93,6 +93,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private String lastModifiedBy;
     /** 这一次点开方块容器之前，世界记忆里有没有角色亲手打开过它的记录；没点开方块容器为 null。 */
     private Boolean containerOpenedBefore;
+    /** 本次交互有没有把手中物品放进不认识的加工容器，或点开了不认识的方块界面。 */
+    private boolean placedIntoUnrecognizedProcessor;
+    private boolean openedUnrecognizedBlockMenu;
+    private boolean consumedHeldInUse;
     private String riding;
     private List<String> signLines = List.of();
     /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
@@ -441,7 +445,13 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 if (!input.writesText()) {
                     appliedTimes++;
                     worldChangeNotice.run();
-                    UseChanges.recordApplied(this::recordChange, services.world(), target, interaction, result);
+                    if (UseChanges.consumedHeld(interaction.heldBefore(), services.world().heldItem().orElse(null))) {
+                        consumedHeldInUse = true;
+                    }
+                    if (UseChanges.recordApplied(this::recordChange, services.world(), services.facilities(),
+                            target, interaction, result)) {
+                        placedIntoUnrecognizedProcessor = true;
+                    }
                     rememberPlacedFacility();
                 }
                 yield afterApplied();
@@ -538,7 +548,12 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             rememberContainer(List.copyOf(contents.get().keySet()));
             recordProgress("看清了点开的界面");
         } else {
-            recordAttempt("列出点开的界面", "界面认不出或内容一直没同步完，列不出里面有什么");
+            if (looking.unrecognizedLayout() && target != null && !target.isEntity()) {
+                openedUnrecognizedBlockMenu = true;
+                recordAttempt("列出点开的界面", "这个方块的界面不在已支持的布局里，看不出里面有什么、也不确认怎么加工，已关上界面");
+            } else {
+                recordAttempt("列出点开的界面", "界面认不出或内容一直没同步完，列不出里面有什么");
+            }
         }
         if (status instanceof ActionStatus.Failed failed) {
             recordAttempt("关上界面", failed.problem().message());
@@ -594,8 +609,18 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();
         }
-        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + doorNow()
-                + (othersAtHome.isEmpty() ? "" : "；它" + othersAtHome)));
+        String tail = doorNow() + (othersAtHome.isEmpty() ? "" : "；它" + othersAtHome);
+        if (placedIntoUnrecognizedProcessor || openedUnrecognizedBlockMenu && consumedHeldInUse) {
+            return Next.done(TaskResult.done(describeTarget()
+                    + "：放进去了，不确认会不会做出东西（确认生效了 " + appliedTimes + " 次）" + tail));
+        }
+        if (openedUnrecognizedBlockMenu) {
+            String note = input.item() != null
+                    ? "：点开了不认识的加工或容器界面，手上的 " + input.item() + " 没有放进去，不确认会不会做出东西，已关上界面"
+                    : "：点开了不认识的界面，看不出里面有什么、也不确认会不会做出东西，已关上界面";
+            return Next.done(TaskResult.done(describeTarget() + note + tail));
+        }
+        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + tail));
     }
 
     // 开关门、活板门、栅栏门：收场时按现场写明门现在开着还是关着，点两下回到原样也看得出来；别的方块不加。
@@ -635,8 +660,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
+        Boolean unrecognized = placedIntoUnrecognizedProcessor || openedUnrecognizedBlockMenu ? Boolean.TRUE : null;
         return new UseDetails(appliedTimes, usedOn(), openedMenu, containerWhose, lastModifiedBy,
-                containerOpenedBefore, signLines, riding, gameMessages);
+                containerOpenedBefore, signLines, riding, gameMessages, unrecognized);
     }
 
     // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here 且没配 face）就是对着空气用。

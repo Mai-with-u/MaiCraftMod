@@ -90,6 +90,11 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         return BuiltInRegistries.BLOCK.getKey(state.get().getBlock()).toString().equals(spec);
     }
 
+    @Override public boolean hasBlockEntity(BlockPos cell) {
+        ClientLevel level = level();
+        return level != null && level.isLoaded(cell) && level.getBlockEntity(cell) != null;
+    }
+
     // 门、活板门、栅栏门读方块状态里的"开着"；木桶等别的带"开着"的方块不算门，不报。
     @Override public Optional<Boolean> doorOpen(BlockPos cell) {
         return state(cell).filter(state -> state.getBlock() instanceof DoorBlock || state.getBlock() instanceof TrapDoorBlock

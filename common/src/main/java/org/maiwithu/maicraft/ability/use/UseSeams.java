@@ -77,6 +77,11 @@ final class UseSeams {
         /** 那一格是不是给定的方块，或在给定的标签里（# 开头）；没加载为假。 */
         boolean blockIs(BlockPos cell, String blockOrTag);
 
+        /** 那一格有没有方块实体（模组厨锅、砧板、坩埚、营火这类能塞东西的方块都有方块实体）；没加载或普通方块为假。 */
+        default boolean hasBlockEntity(BlockPos cell) {
+            return false;
+        }
+
         /** 那一格是门、活板门或栅栏门时此刻开着没有；不是这几样、或没加载为空。 */
         default Optional<Boolean> doorOpen(BlockPos cell) {
             return Optional.empty();
@@ -305,6 +310,11 @@ final class UseSeams {
         /** 容器那一侧看到的稀罕贵重物品（taken=0，只打开查看不取物）；测试替身默认为空。 */
         default List<RareLootNotice.SeenPrecious> preciousItems() {
             return List.of();
+        }
+
+        /** 点开的界面是不是不在已支持的容器布局里（例如未专门联动的模组厨锅界面）。 */
+        default boolean unrecognizedLayout() {
+            return false;
         }
     }
 }

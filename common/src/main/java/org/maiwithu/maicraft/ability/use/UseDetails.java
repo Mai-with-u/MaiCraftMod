@@ -17,13 +17,20 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
  * @param openedBySelf     这一次点开之前世界记忆里有没有角色亲手打开过这只方块容器的记录；没点开方块容器为 null
  * @param signText         告示牌上实际写下的字，逐行；没写告示牌为空列表
  * @param riding           骑上的东西；没骑为 null
- * @param gameMessages     生效的那几下前后聊天栏收到的服务端系统消息原话，按收到先后；没有为 null
+ * @param gameMessages          生效的那几下前后聊天栏收到的服务端系统消息原话，按收到先后；没有为 null
+ * @param unrecognizedProcessor 对着不认识的加工容器交互生效时为 true（塞进了东西不确认会不会出产物，或点开了不认识的加工界面）；其余为 null
  */
 record UseDetails(long appliedTimes, String usedOn, String opened, String whose, String lastModifiedBy,
-        Boolean openedBySelf, List<String> signText, String riding, List<String> gameMessages) implements ResultDetails {
+        Boolean openedBySelf, List<String> signText, String riding, List<String> gameMessages,
+        Boolean unrecognizedProcessor) implements ResultDetails {
     UseDetails {
         signText = List.copyOf(signText);
         gameMessages = gameMessages == null || gameMessages.isEmpty() ? null : List.copyOf(gameMessages);
+    }
+
+    UseDetails(long appliedTimes, String usedOn, String opened, String whose, String lastModifiedBy,
+            Boolean openedBySelf, List<String> signText, String riding, List<String> gameMessages) {
+        this(appliedTimes, usedOn, opened, whose, lastModifiedBy, openedBySelf, signText, riding, gameMessages, null);
     }
 
     UseDetails(long appliedTimes, String usedOn, String opened, String lastModifiedBy, List<String> signText,
