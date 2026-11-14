@@ -7,6 +7,7 @@ import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneCampPit;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
@@ -93,6 +94,7 @@ public final class DetailView {
                 now = switch (sighting) {
                     case SceneEntity entity -> SceneView.entity(entity);
                     case TerrainFeature feature -> SceneView.feature(feature);
+                    case SceneCampPit pit -> SceneView.campPit(pit);
                     case FacilitySighting facility -> SceneView.facility(facility, facilityOrigin);
                     case SceneSign sign -> sign(sign);
                     // 模组的东西单独收着：它的详情要并进同号实体的样子里，见下面。

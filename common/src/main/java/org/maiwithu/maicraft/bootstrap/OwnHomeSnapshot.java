@@ -36,7 +36,18 @@ final class OwnHomeSnapshot implements ReadsOwnHome {
     private volatile List<Building> ownBuildings = List.of();
     /** 建筑档案里每一栋图上的格：维度 → 格 → 那一栋的名字。自动挑取材点时跳过这些格。 */
     private volatile Map<String, Map<BlockPos, String>> archivedCells = Map.of();
+    /** 建筑档案里每一栋的水平加垂直外框：室内空地或院内凹槽不算营地野坑。 */
+    private volatile List<Bounds> archivedBounds = List.of();
     private long refreshedAtMillis = Long.MIN_VALUE;
+
+    private record Bounds(String dimension, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        boolean contains(WorldPosition pos) {
+            return (pos.dimension() == null || dimension.equals(pos.dimension()))
+                    && pos.x() >= minX && pos.x() <= maxX
+                    && pos.y() >= minY && pos.y() <= maxY
+                    && pos.z() >= minZ && pos.z() <= maxZ;
+        }
+    }
     /** 上次重读各栋时档案库的记号：没变就不再解码。 */
     private String archivesRevision;
 
@@ -59,16 +70,44 @@ final class OwnHomeSnapshot implements ReadsOwnHome {
         archivesRevision = revision;
         List<Building> buildings = new ArrayList<>();
         Map<String, Map<BlockPos, String>> cells = new HashMap<>();
+        List<Bounds> bounds = new ArrayList<>();
         for (BuildingArchive archive : archives.all()) {
             // 取材时不拆房子：每一栋图上的格都记下，读现场建的也算（多半是别人的房子，更不能拆）。
             Map<BlockPos, String> inDimension = cells.computeIfAbsent(archive.dimension(), dimension -> new HashMap<>());
-            for (PlannedCell cell : archive.laid().cells()) inDimension.putIfAbsent(cell.pos().immutable(), archive.name());
+            List<PlannedCell> laid = archive.laid().cells();
+            addBounds(bounds, archive.dimension(), laid);
+            for (PlannedCell cell : laid) inDimension.putIfAbsent(cell.pos().immutable(), archive.name());
             // 读现场建的档可能是别人的房子；没记下真放下过哪几格的旧档也不认：宁可认小。
             if (archive.readFromSite() || archive.placedCells().isEmpty()) continue;
             buildings.add(new Building(archive.name(), archive.dimension(), Set.copyOf(archive.placedCells())));
         }
         ownBuildings = List.copyOf(buildings);
         archivedCells = cells;
+        archivedBounds = List.copyOf(bounds);
+    }
+
+    private static void addBounds(List<Bounds> bounds, String dimension, List<PlannedCell> laid) {
+        if (laid.isEmpty()) return;
+        int minX = Integer.MAX_VALUE, minY = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxY = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (PlannedCell cell : laid) {
+            BlockPos p = cell.pos();
+            minX = Math.min(minX, p.getX());
+            minY = Math.min(minY, p.getY());
+            minZ = Math.min(minZ, p.getZ());
+            maxX = Math.max(maxX, p.getX());
+            maxY = Math.max(maxY, p.getY());
+            maxZ = Math.max(maxZ, p.getZ());
+        }
+        bounds.add(new Bounds(dimension, minX, minY, minZ, maxX, maxY, maxZ));
+    }
+
+    boolean insideArchivedBuilding(WorldPosition position) {
+        if (archivedBuildingAt(position).isPresent()) return true;
+        for (Bounds bound : archivedBounds) {
+            if (bound.contains(position)) return true;
+        }
+        return false;
     }
 
     @Override public Optional<WorldPosition> sleptBed() {

@@ -8,6 +8,7 @@ import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneCampPit;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.SceneSighting;
@@ -57,6 +58,7 @@ public final class LiveSeenResolver implements ResolvesSeen {
             case FacilitySighting facility -> facility.blockType();
             case SceneEntity entity -> entity.type();
             case TerrainFeature feature -> feature.kind();
+            case SceneCampPit pit -> "营地地面坑";
             case SceneSign sign -> sign.blockType();
             case SceneThing thing -> thing.category();
         });

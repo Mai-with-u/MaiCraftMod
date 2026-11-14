@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.HeardSound;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneCampPit;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSighting;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
@@ -130,6 +131,10 @@ final class ClientLookingWorld implements LookingWorld {
         for (TerrainFeature feature : scene.features()) {
             if (feature.distance() > SPOT_BLOCKS) continue;
             addIfSeen(spots, at(self, eye, feature.id(), feature.center(), Kind.OTHER, null, true));
+        }
+        for (SceneCampPit pit : scene.campPits()) {
+            if (pit.distance() > SPOT_BLOCKS) continue;
+            addIfSeen(spots, at(self, eye, pit.id(), pit.position(), Kind.OTHER, null, true));
         }
         for (FacilitySighting facility : scene.facilities()) {
             if (facility.distance() > SPOT_BLOCKS) continue;

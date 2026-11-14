@@ -11,6 +11,7 @@ import org.joml.Vector3f;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneCampPit;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSighting;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
@@ -78,6 +79,14 @@ public final class PictureSightings {
             Vec3 point = new Vec3(at.x() + 0.5, at.y() + 0.5, at.z() + 0.5);
             if (!ObservationVisibility.pointFrom(self, origin, point)) continue;
             out.add(new PictureView.Sighting(feature.id(), "kind", feature.kind(), null, PictureLabels.Rank.FEATURE,
+                    point.x, point.y, point.z, origin.distanceTo(point)));
+        }
+        for (SceneCampPit pit : scene.campPits()) {
+            WorldPosition at = pit.position();
+            if (!sameDimension(level, at)) continue;
+            Vec3 point = new Vec3(at.x() + 0.5, at.y() + 0.5, at.z() + 0.5);
+            if (!ObservationVisibility.pointFrom(self, origin, point)) continue;
+            out.add(new PictureView.Sighting(pit.id(), "kind", "营地地面坑", null, PictureLabels.Rank.FEATURE,
                     point.x, point.y, point.z, origin.distanceTo(point)));
         }
         return out;
@@ -184,6 +193,7 @@ public final class PictureSightings {
             case SceneSign sign -> sign.position();
             case SceneThing thing -> thing.position();
             case TerrainFeature feature -> feature.center();
+            case SceneCampPit pit -> pit.position();
             case SceneEntity entity -> null;
         };
     }

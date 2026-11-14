@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.HeardSound;
 import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneCampPit;
 import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneEnvironment;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
@@ -71,6 +72,12 @@ public final class SceneView {
         JsonArray features = new JsonArray();
         scene.features().forEach(feature -> features.add(feature(feature)));
         json.add("features", features);
+        // 营地地面坑：床、箱子、工作站周围深度不低于两格的地面竖坑与爆炸弹坑，有坑时单列出来方便顺手填平。
+        if (!scene.campPits().isEmpty()) {
+            JsonArray pits = new JsonArray();
+            scene.campPits().forEach(pit -> pits.add(campPit(pit)));
+            json.add("camp_pits", pits);
+        }
         JsonArray facilities = new JsonArray();
         scene.facilities().forEach(facility -> facilities.add(facility(facility, facilityOrigin)));
         json.add("facilities", facilities);
@@ -147,6 +154,18 @@ public final class SceneView {
         json.addProperty("distance", feature.distance());
         json.addProperty("size", feature.size());
         json.add("position", position(feature.center()));
+        return json;
+    }
+
+    static JsonObject campPit(SceneCampPit pit) {
+        JsonObject json = new JsonObject();
+        json.addProperty("id", pit.id());
+        json.add("position", position(pit.position()));
+        json.addProperty("depth", pit.depth());
+        json.addProperty("cells", pit.cells());
+        json.addProperty("direction", pit.direction());
+        json.addProperty("compass", pit.compass());
+        json.addProperty("distance", pit.distance());
         return json;
     }
 

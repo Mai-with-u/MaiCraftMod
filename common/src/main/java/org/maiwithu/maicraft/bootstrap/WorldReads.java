@@ -3,7 +3,9 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.Objects;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
+import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
@@ -31,7 +33,16 @@ record WorldReads(
         /** 和别的玩家之间肢体动作的你来我往：最近谁冲角色做过、谁扔了东西过来，回过他了告诉回头看。 */
         NonverbalExchange nonverbal,
         /** 这个世界的世界生成铺的地形方块：采掘、挖楼梯、设计读现场认天然地形时在标签之外也认它。 */
-        GeneratedTerrain generatedTerrain) {
+        GeneratedTerrain generatedTerrain,
+        /** 营地地面坑的客户端扫描读端：场景刷新与填坑能力共用同一份。 */
+        ClientCampPitSight campPits) {
+
+    WorldReads(Scene scene, WorldMemory memory, BlockScanService blockScans, FacilityKinds facilities,
+               ReadsLightLevels lightLevels, LightingWorld lightingWorld, KeepInventoryRule keepInventory,
+               NonverbalExchange nonverbal, GeneratedTerrain generatedTerrain) {
+        this(scene, memory, blockScans, facilities, lightLevels, lightingWorld, keepInventory, nonverbal,
+                generatedTerrain, new ClientCampPitSight(Campground.NOWHERE, pos -> false));
+    }
 
     WorldReads {
         Objects.requireNonNull(scene, "scene");
@@ -43,5 +54,6 @@ record WorldReads(
         Objects.requireNonNull(keepInventory, "keepInventory");
         Objects.requireNonNull(nonverbal, "nonverbal");
         Objects.requireNonNull(generatedTerrain, "generatedTerrain");
+        Objects.requireNonNull(campPits, "campPits");
     }
 }

@@ -40,10 +40,14 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.permission.RegionsSnapshot;
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
+import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.ClientCaveOpeningSight;
+import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.ClientEnvironmentSight;
@@ -153,6 +157,8 @@ public final class WorldScope {
     private final ClientNearbyBlocksSight facilitySight;
     /** 洞口观察的读端：扫一圈要两秒上下，跨刻接着扫，只建一个。 */
     private final ClientCaveOpeningSight openingSight = new ClientCaveOpeningSight();
+    /** 营地地面坑的读端：每两秒扫一轮营地内的地面竖坑与爆炸弹坑，填坑能力也复用同一份。 */
+    private final ClientCampPitSight campPitSight;
     /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
     private final List<ModSight> modSights;
     /** 模组的东西在角色周围多大范围里看（格）。 */
@@ -257,6 +263,8 @@ public final class WorldScope {
         this.modSights = compat.modSights();
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
+        ClientCreatureSituations creatures = new ClientCreatureSituations(now, trusted);
+        this.campPitSight = assembleCampPitSight(creatures);
         // 死亡不掉落：单人读本机，连服务器读服务端握手时报的（改了再推）；寻死、寻死出路和 observe(self) 读同一份。
         this.keepInventory = new KeepInventoryRule(() -> session.capabilities().keepInventory());
         GeneratedTerrain generatedTerrain = generatedTerrain(session);
@@ -266,22 +274,25 @@ public final class WorldScope {
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
                 compat::recipePages, instanceConfig.idleLooking());
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份；动了别人放的方块一并入账。
-        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions,
-                digTools, othersNotice);
+        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools, othersNotice);
         // 能力按清单登记进客户端全程共用的注册表，并拿回当前世界的随身背包、挖掘加速与连锁统计账本。
         this.worldAbilities = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
                 characterReads(now, suicideWayOut),
-                new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
-                        new RegistryToolRequirements(), furnaceFuels),
-                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain),
+                new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(), new RegistryToolRequirements(), furnaceFuels),
+                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain, campPitSight),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
                 new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
-                new Guards(protection, new ClientCreatureSituations(now, trusted), trusted, othersNotice, rareLootNotice),
+                new Guards(protection, creatures, trusted, othersNotice, rareLootNotice),
                 channels(minecraft, now, events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
-                compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig,
-                sparPartner), abilities);
+                compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig, sparPartner), abilities);
+    }
+
+    private ClientCampPitSight assembleCampPitSight(ClientCreatureSituations creatures) {
+        Campground campground = Campground.of(new PermissionCheck(protection, creatures), memory);
+        return new ClientCampPitSight(campground, pos -> ownHome.insideArchivedBuilding(pos)
+                || memory.recordsNear(pos, 2.5).stream().anyMatch(rec -> rec.kind() == MemoryKind.MACHINE));
     }
 
     // 当刻角色全身读端按同一份角色供给者组装：背包、副手、饱食、口粮、装备、状态效果、合身度、坐标与寻死出路。
@@ -402,6 +413,8 @@ public final class WorldScope {
         scene.updateSigns(gameTick, facilitySight.signs());
         // 洞口与峡谷：每刻扫一小段，扫完一圈才换上这一圈看到的；看见的顺路记进世界记忆。
         openingSight.tick(current).ifPresent(found -> scene.updateOpenings(gameTick, when, found));
+        // 营地地面坑：两秒或挪过六格扫一轮营地内的地面竖坑与爆炸弹坑，给观察编号方便顺手填平。
+        campPitSight.tick(current, gameTick).ifPresent(found -> scene.updateCampPits(gameTick, found));
         // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
         List<ModThing> things = new ArrayList<>();
         AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);
