@@ -8,6 +8,7 @@ import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -145,8 +146,12 @@ public final class SleepModule implements AbilityModule, EstimatesGoal, Nightfal
                 ParamSpecs.of(
                         ParamSpec.of("operation", ParamType.CHOICE).defaultValue("sleep")
                                 .choices("sleep", "auto_on", "auto_off", "auto_status")
-                                .doc("sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用）"
-                                        + " / auto_on 打开 / auto_status 查开没开").build()),
+                                .doc("sleep 现在去睡（默认）/ auto_off 临时关掉夜里自动去睡（有人说晚上别睡或今晚守夜时用，到期自己恢复）"
+                                        + " / auto_on 打开 / auto_status 查开没开与剩余秒数").build(),
+                        ParamSpec.of("max_seconds", ParamType.INTEGER)
+                                .range(AutoSleep.MIN_OFF_SECONDS, AutoSleep.MAX_OFF_SECONDS)
+                                .defaultValue(AutoSleep.DEFAULT_OFF_SECONDS)
+                                .doc("配合 operation=auto_off：临时关掉多少秒（游戏时间，默认 1200 秒即一个完整昼夜，到期自动恢复为开）").build()),
                 Set.of(TargetKind.HERE, TargetKind.LANDMARK, TargetKind.POSITION, TargetKind.SEEN),
                 ExecutionMode.CONTROLS_PLAYER,
                 Set.of(), List.of(), Listing.LISTED);
@@ -158,16 +163,39 @@ public final class SleepModule implements AbilityModule, EstimatesGoal, Nightfal
         String operation = step.goal().params().has("operation") ? step.goal().params().text("operation") : "sleep";
         switch (operation) {
             case "auto_off" -> {
-                autoSleep.disable();
-                return finished(TaskResult.done("夜里自动去睡已关：天黑了不会自己找床睡；"
-                        + "要睡时下达 sleep，或用 auto_on 打开"));
+                long requested = step.goal().params().has("max_seconds")
+                        ? step.goal().params().integer("max_seconds")
+                        : AutoSleep.DEFAULT_OFF_SECONDS;
+                OptionalLong tickNow = currentTick(step);
+                long applied = tickNow.isPresent()
+                        ? autoSleep.disableForSeconds(tickNow.getAsLong(), requested)
+                        : fallbackDisable(requested);
+                return finished(TaskResult.builder(TaskResult.Status.DONE,
+                                "夜里自动去睡已临时关掉 " + applied + " 秒（游戏时间，到期自己恢复为开）："
+                                        + "期间天黑了不会自己找床睡；要提前睡下达 sleep，或用 auto_on 打开")
+                        .details(new AutoSleepDetails(false, applied))
+                        .build());
             }
             case "auto_on" -> {
                 autoSleep.enable();
-                return finished(TaskResult.done("夜里自动去睡已开：天黑了有床就在干活间隙自己去睡"));
+                return finished(TaskResult.builder(TaskResult.Status.DONE,
+                                "夜里自动去睡已开：天黑了有床就在干活间隙自己去睡")
+                        .details(new AutoSleepDetails(true, null))
+                        .build());
             }
             case "auto_status" -> {
-                return finished(TaskResult.done(autoSleep.enabled() ? "夜里自动去睡开着" : "夜里自动去睡关着"));
+                OptionalLong tickNow = currentTick(step);
+                tickNow.ifPresent(autoSleep::tick);
+                OptionalLong left = tickNow.isPresent()
+                        ? autoSleep.remainingSeconds(tickNow.getAsLong())
+                        : OptionalLong.empty();
+                Long leftBoxed = left.isPresent() ? left.getAsLong() : null;
+                String statusText = autoSleep.enabled() ? "夜里自动去睡开着"
+                        : leftBoxed != null ? "夜里自动去睡临时关着（约 " + leftBoxed + " 秒后自动恢复为开）"
+                        : "夜里自动去睡关着";
+                return finished(TaskResult.builder(TaskResult.Status.DONE, statusText)
+                        .details(new AutoSleepDetails(autoSleep.enabled(), leftBoxed))
+                        .build());
             }
             default -> {
             }
@@ -398,5 +426,22 @@ public final class SleepModule implements AbilityModule, EstimatesGoal, Nightfal
     @Override
     public Task prepareBed(TickContext tick) {
         return new PrepareBedTask(obtain, currentPermissions(), beds::carriedBed);
+    }
+
+    // 优先取步骤上下文的游戏刻，离线替身没传每刻上下文时退回玩家上下文的游戏刻。
+    private OptionalLong currentTick(StepContext step) {
+        if (step.tick() != null) {
+            return OptionalLong.of(step.tick().gameTick());
+        }
+        PlayerContext current = context.get();
+        if (current != null && current.level() != null) {
+            return OptionalLong.of(current.level().getGameTime());
+        }
+        return OptionalLong.empty();
+    }
+
+    private long fallbackDisable(long requested) {
+        autoSleep.disable();
+        return Math.max(AutoSleep.MIN_OFF_SECONDS, Math.min(AutoSleep.MAX_OFF_SECONDS, requested));
     }
 }

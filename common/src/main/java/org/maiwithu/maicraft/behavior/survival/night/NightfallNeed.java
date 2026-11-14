@@ -126,6 +126,7 @@ public final class NightfallNeed implements SurvivalNeed {
 
     @Override
     public Urgency urgency(TickContext context, Task currentTask) {
+        autoSleep.tick(context.gameTick());
         Facts facts = reader.read(context);
         if (facts == null) {
             lastDecision = null;

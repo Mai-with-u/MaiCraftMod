@@ -89,7 +89,7 @@
       {
         "ability": "maicraft:sleep",
         "summary": "找一张床躺下睡觉，白天会先备好今晚的床再报告睡不了；也能开、关、查夜里自动去睡（默认开）",
-        "parameters": "operation: string (sleep / auto_on / auto_off / auto_status) = sleep",
+        "parameters": "operation: string (sleep / auto_on / auto_off / auto_status) = sleep, max_seconds: integer (60..7200) = 1200",
         "targets": [
           "here",
           "landmark",
@@ -813,7 +813,7 @@
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "sleep 现在去睡（默认）/ auto_off 关掉夜里自动去睡（有人说晚上别睡时用） / auto_on 打开 / auto_status 查开没开",
+          "doc": "sleep 现在去睡（默认）/ auto_off 临时关掉夜里自动去睡（有人说晚上别睡或今晚守夜时用，到期自己恢复） / auto_on 打开 / auto_status 查开没开与剩余秒数",
           "default": "sleep",
           "choices": [
             "sleep",
@@ -821,6 +821,15 @@
             "auto_off",
             "auto_status"
           ]
+        },
+        {
+          "name": "max_seconds",
+          "type": "integer",
+          "required": false,
+          "doc": "配合 operation=auto_off：临时关掉多少秒（游戏时间，默认 1200 秒即一个完整昼夜，到期自动恢复为开）",
+          "default": 1200,
+          "min": 60,
+          "max": 7200
         }
       ],
       "targets": [

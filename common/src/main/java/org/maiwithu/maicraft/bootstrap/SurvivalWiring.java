@@ -12,6 +12,8 @@ import org.maiwithu.maicraft.behavior.survival.night.NightfallNeed;
 import org.maiwithu.maicraft.behavior.survival.night.ReadsMeleeWeapons;
 import org.maiwithu.maicraft.behavior.survival.night.WeaponBeforeBed;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
+import org.maiwithu.maicraft.kernel.event.TaskEvent;
+import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Task;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -37,6 +39,14 @@ final class SurvivalWiring implements NightfallNeed.ReadsBedAvailability, Nightf
 
     AutoSleep autoSleep() {
         return autoSleep;
+    }
+
+    /** 每刻核对临时关掉的夜里自动去睡到点没有：到点自动恢复为开并发一条提醒告诉宿主。 */
+    void tick(long gameTick, TaskEventSink events) {
+        if (autoSleep.tick(gameTick)) {
+            events.publish(TaskEvent.Kind.REMINDER,
+                    "夜里自动去睡的临时关闭已到期，已自动恢复为开（天黑了有床会在干活间隙自己去睡）");
+        }
     }
 
     /** 拿东西的引擎建好后接上：饿了身上没吃的时经它去弄口粮。 */

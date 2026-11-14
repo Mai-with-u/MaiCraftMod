@@ -708,6 +708,7 @@ public final class Bootstrap {
             if (nonverbal != null) tickGuard.run("别人的肢体动作", () -> nonverbal.tick(current));
             tickGuard.run("换维度", () -> dimensionChanges.tick(current));
             tickGuard.run("天色变化", () -> skyChanges.tick(current));
+            tickGuard.run("自动睡觉期限", () -> survivalWiring.tick(gameTick, taskEvents));
             // 计时到点照样叫：人按 F8 接过角色时也发，计时是 LLM 自己的事。
             tickGuard.run("计时", () -> timers.tick(current));
             // 目标停滞每刻看一眼：太久没有任何事件、又没有终态的目标发一条提醒，受理方不用自己干等。
@@ -770,13 +771,9 @@ public final class Bootstrap {
             LOG.info("{} 客户端即将退出", ModIdentity.NAME);
         }
 
-        @Override public void serverLinkReceived(Minecraft minecraft, String json) {
-            session.received(minecraft, json);
-        }
+        @Override public void serverLinkReceived(Minecraft minecraft, String json) { session.received(minecraft, json); }
 
-        @Override public void serverLinkDisconnected(Minecraft minecraft) {
-            session.disconnected(minecraft);
-        }
+        @Override public void serverLinkDisconnected(Minecraft minecraft) { session.disconnected(minecraft); }
 
         // 聊天栏收到玩家说的话：认出发言人、私聊与自己的回显后记进聊天流；不在世界里时没有角色，不记。
         @Override public void playerChatReceived(Minecraft minecraft, Component line, Component content, UUID senderId,
