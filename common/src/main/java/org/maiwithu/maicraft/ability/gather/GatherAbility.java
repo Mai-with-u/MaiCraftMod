@@ -2,10 +2,12 @@
 package org.maiwithu.maicraft.ability.gather;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
@@ -53,10 +55,18 @@ public final class GatherAbility implements AbilityModule {
     private final BackpackView backpack;
     private final OffhandContents offhand;
     private final HitsItemFrames frames;
+    private final ChainMiningLedger chainLedger;
 
     public GatherAbility(SeesTargets seen, ReadsSpot world, ApproachesTargets approaches, DigsBlocks digs,
             ReadsToolRequirements tools, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
             BackpackView backpack, OffhandContents offhand, HitsItemFrames frames) {
+        this(seen, world, approaches, digs, tools, replants, drops, permission, backpack, offhand, frames,
+                new ChainMiningLedger());
+    }
+
+    public GatherAbility(SeesTargets seen, ReadsSpot world, ApproachesTargets approaches, DigsBlocks digs,
+            ReadsToolRequirements tools, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
+            BackpackView backpack, OffhandContents offhand, HitsItemFrames frames, ChainMiningLedger chainLedger) {
         this.seen = seen;
         this.world = world;
         this.approaches = approaches;
@@ -68,6 +78,7 @@ public final class GatherAbility implements AbilityModule {
         this.backpack = backpack;
         this.offhand = offhand;
         this.frames = frames;
+        this.chainLedger = Objects.requireNonNull(chainLedger, "chainLedger");
     }
 
     /** 观察编号对应的现场：最后看到的方位，以及它是方块/设施还是实体（掉落物）。 */
@@ -170,6 +181,6 @@ public final class GatherAbility implements AbilityModule {
 
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(GatherSpot.class, input -> new GatherTask(input, approaches, digs, tools,
-                world, replants, drops, permission, backpack, offhand, frames, input.permissions()));
+                world, replants, drops, permission, backpack, offhand, frames, input.permissions(), chainLedger));
     }
 }

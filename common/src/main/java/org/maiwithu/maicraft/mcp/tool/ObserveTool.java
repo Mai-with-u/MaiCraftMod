@@ -8,6 +8,7 @@ import com.google.gson.Gson;
 import com.google.gson.FieldNamingPolicy;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.PictureLook;
@@ -107,6 +108,10 @@ public final class ObserveTool implements McpTool {
     private final Supplier<Protection> protection;
     /** 角色身上背着或揣着的随身背包（含 Curios 等饰品栏）；不在世界里或没带时为空列表。 */
     private final Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks;
+    /** 当前世界真正就绪可用的模组能力代号（按字母排）；没有时为空列表。 */
+    private final Supplier<List<String>> modFeatures;
+    /** 本世界最近一次挖掘动作的连锁统计；还没挖过方块时为 null。 */
+    private final Supplier<ChainMiningLedger.Summary> lastChainMining;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -181,9 +186,28 @@ public final class ObserveTool implements McpTool {
                        Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
                        Supplier<Protection> protection,
                        Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, pictures,
+                protection, carriedBackpacks, List::of, () -> null);
+    }
+
+    /**
+     * @param modFeatures     当前世界真正就绪可用的模组能力列表（空数组也保留）
+     * @param lastChainMining 本世界最近一次挖掘动作的连锁统计；还没挖过方块时给 null
+     */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity,
+                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
+                       Supplier<Protection> protection,
+                       Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks,
+                       Supplier<List<String>> modFeatures,
+                       Supplier<ChainMiningLedger.Summary> lastChainMining) {
         this.pictures = Objects.requireNonNull(pictures, "pictures");
         this.protection = protection;
         this.carriedBackpacks = Objects.requireNonNull(carriedBackpacks, "carriedBackpacks");
+        this.modFeatures = Objects.requireNonNull(modFeatures, "modFeatures");
+        this.lastChainMining = Objects.requireNonNull(lastChainMining, "lastChainMining");
         this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
@@ -554,6 +578,9 @@ public final class ObserveTool implements McpTool {
         SelfView.addIdentity(view, identity.get());
         // 死一次会怎样：死亡不掉落开没开、会在哪重生；LLM 看着它决定要不要寻死回家。
         SelfView.addAfterDeath(view, afterDeath.get());
+        // 当前实例在这个世界里真正就绪可用的模组能力，与本世界最近一次挖掘动作的连锁统计。
+        SelfView.addModFeatures(view, modFeatures.get());
+        SelfView.addLastChainMining(view, lastChainMining.get());
         return view;
     }
 }

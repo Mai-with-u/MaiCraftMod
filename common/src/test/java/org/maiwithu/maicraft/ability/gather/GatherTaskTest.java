@@ -13,7 +13,10 @@ import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
 
+import com.google.gson.JsonObject;
+
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.TellsToolUse;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
@@ -38,6 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
+import org.maiwithu.maicraft.mcp.tool.ResultJson;
 
 /**
  * 采集的任务：只收熟了的作物、工具不够格如实说、收完顺手补种且补种失败不白收、
@@ -615,5 +619,49 @@ class GatherTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
         assertTrue(actions.log.contains("普通挖"), "没点名要掉什么：照常挑工具");
         assertTrue(result.summary().contains("有机会掉 minecraft:wheat_seeds"), result.summary());
+    }
+
+    @Test
+    void 挖方块时结果细节带chain_mining_捡地上掉落物时不出现() {
+        FakeBackpack backpack = new FakeBackpack();
+        ChainMiningLedger chainLedger = new ChainMiningLedger();
+        FakeActions digActions = new FakeActions(backpack, "minecraft:cobblestone", 1) {
+            @Override public Optional<Action> dig(BlockPos target) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        chainLedger.recordSingle("单点采集只挖指定一格");
+                        backpack.add("minecraft:cobblestone", 1);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() { return "单格挖"; }
+                });
+            }
+        };
+        GatherTask digTask = new GatherTask(blockSpot(null), digActions, digActions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, digActions, permission(), backpack, null, null,
+                PERMS, chainLedger);
+        JsonObject digJson = ResultJson.result(run(digTask));
+        JsonObject chain = digJson.getAsJsonObject("details").getAsJsonObject("chain_mining");
+        assertEquals(0, chain.get("chained_batches").getAsInt());
+        assertEquals(1, chain.get("single_blocks").getAsInt());
+        assertEquals("单点采集只挖指定一格", chain.get("not_chained_reason").getAsString());
+
+        // 捡掉落物目标未挖方块，不挂 details.chain_mining。
+        GatherSpot dropSpot = new GatherSpot(AT, true, null, "minecraft:rotten_flesh", PERMS, false, "捡起 e9");
+        FakeActions pickActions = new FakeActions(backpack, "minecraft:rotten_flesh", 1) {
+            @Override public Action toward(BlockPos target, Permissions permissions, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add("minecraft:rotten_flesh", 1);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() { return "走近捡起"; }
+                };
+            }
+        };
+        GatherTask pickTask = new GatherTask(dropSpot, pickActions, pickActions, new NoToolsNeeded(),
+                new FakeWorld(null, false), null, pickActions, permission(), backpack, null, null, PERMS, chainLedger);
+        JsonObject pickJson = ResultJson.result(run(pickTask));
+        assertFalse(pickJson.has("details"), "只捡地上掉落物时不带 chain_mining 细节：" + pickJson);
     }
 }

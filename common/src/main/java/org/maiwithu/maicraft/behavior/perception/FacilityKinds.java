@@ -69,6 +69,11 @@ public final class FacilityKinds {
         return !blockTags.contains(ENDER_CHEST_TAG) && blockTags.contains(LOOTR_CONTAINER_TAG);
     }
 
+    /** 当前世界是否同步了带 lootr:containers 标签的自然战利品容器（装了 Lootr 且在当前世界生效时非空）。 */
+    public boolean hasLootrContainers() {
+        return !tags.blocksIn(LOOTR_CONTAINER_TAG).isEmpty();
+    }
+
     /** 是工作设施：原版 ID 表里的，或挂着铁砧、工作台、熔炉标签的。 */
     public boolean isWorkstation(String blockType) {
         if (WORKSTATIONS.contains(blockType)) {

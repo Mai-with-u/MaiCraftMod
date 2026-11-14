@@ -9,6 +9,7 @@ import java.util.Set;
 import org.maiwithu.maicraft.ability.obtain.ObtainAbility;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientCollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ClientStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
@@ -82,8 +83,8 @@ final class AcquisitionWiring {
      */
     static AbilityModule obtainModule(AbilityCatalog.Deps deps, PlayerServices playerServices, LiveApproaches bringsClose,
             ClientMovesToMainhand toMainhand, PermissionCheck permission, DeferredInnerNeeds innerNeeds,
-            ClientCollectsBlocks collects, DigsBlocks digging, InventorySpace space, ContainerSource containerSource,
-            ClientDropPickup drops, Optional<StepsAside> stepsAside) {
+            ClientCollectsBlocks collects, DigsBlocks digging, ChainMiningLedger chainMining, InventorySpace space,
+            ContainerSource containerSource, ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
         FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(timersOf(deps.channels().timers()));
         DugPits dugPits = new DugPits();
@@ -153,7 +154,7 @@ final class AcquisitionWiring {
         // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
         // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
         return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
-                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking, dugPits);
+                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking, dugPits, chainMining);
     }
 
     /** 创建采掘来源：挂上营地地面避让、往下挖台阶入口与平地竖坑收工回填及坑位记账。 */

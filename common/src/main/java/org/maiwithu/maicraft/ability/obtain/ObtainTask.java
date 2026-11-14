@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -63,24 +64,36 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     /** 采掘在地面挖出的坑位账本：开场记下游标，收场时挑出这一场留下的坑。 */
     private final DugPits dugPits;
     private int pitsMark;
+    /** 挖掘方块的连锁统计账本：开场记下游标，收场时汇总本次任务期间的挖掘批数与单挖原因。 */
+    private final ChainMiningLedger chainLedger;
+    private int chainMark;
+    private boolean chainSettled;
+    private ChainMiningLedger.Summary settledChainMining;
 
     /** 不接装炉就走与坑位账本的记录。 */
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
         this(input, acquisition, backpack, offhand, tags,
-                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits());
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), new ChainMiningLedger());
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking) {
-        this(input, acquisition, backpack, offhand, tags, leftCooking, new DugPits());
+        this(input, acquisition, backpack, offhand, tags, leftCooking, new DugPits(), new ChainMiningLedger());
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits) {
+        this(input, acquisition, backpack, offhand, tags, leftCooking, dugPits, new ChainMiningLedger());
+    }
+
+    ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
+            OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits,
+            ChainMiningLedger chainLedger) {
         super("拿东西", Phase.COUNT, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.leftCooking = leftCooking;
         this.dugPits = dugPits;
+        this.chainLedger = chainLedger;
         this.input = input;
         this.acquisition = acquisition;
         this.backpack = backpack;
@@ -108,6 +121,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     private Next<Phase> countPhase() {
         leftMark = leftCooking.timesLeft();
         pitsMark = dugPits.mark();
+        chainMark = chainLedger.mark();
         int total = 0;
         int wanted = 0;
         for (ItemRequest request : input.requests()) {
@@ -223,7 +237,11 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
         List<ObtainedVia.LeftFurnace> furnaces = left == null ? null
                 : left.stream().map(ObtainedVia.LeftFurnace::of).toList();
         List<ObtainedVia.Pit> pits = dugPits.since(pitsMark).stream().map(ObtainedVia.Pit::of).toList();
-        return new ObtainedVia(List.copyOf(obtainedVia), furnaces, pits);
+        if (!chainSettled) {
+            chainSettled = true;
+            settledChainMining = chainLedger.completeSince(chainMark).orElse(null);
+        }
+        return new ObtainedVia(List.copyOf(obtainedVia), furnaces, pits, settledChainMining);
     }
 
     // 要的是一类（标签）时说清拿到的是哪几样：要"能吃的"拿回来面包还是生牛肉，下一步怎么吃、要不要烤不一样。

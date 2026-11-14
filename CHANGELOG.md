@@ -8,6 +8,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- `observe(what="self")` 新增当前世界就绪可用的模组能力列表 `mod_features`（按字母排列 `ae2`、`chain_mining`、`create`、`ftb_quests`、`lootr`、`mekanism`、`sable`、`sophisticated_backpacks`、`touhou_little_maid`，空数组也保留）与最近一次挖掘动作的连锁统计 `last_chain_mining`；`obtain`（动过挖掘时）与 `gather`（挖方块时）的结果细节同步新增 `chain_mining`（`chained_batches`、`chained_blocks`、`single_blocks`、`not_chained_reason`）。
 - `machine_inspect` 的 `devices[]` 新增 `settings`（多格设备各格设置不同时为 `setting_groups`），直接列出工作盆与朝上动力锯的配方产物过滤槽（`filter`，无过滤时为 `empty`）、漏斗过滤与件数、转速控制器数值等已激活设置项，设过滤或清空过滤照旧走 `machine_configure`。
 - `obtain` 新增机械动力手工涂抹来源（`via=item_application`）：要安山机壳、铜机壳、黄铜机壳、列车机壳、捆绑纸板箱等手工涂抹产物时，自动备齐基底与涂抹材料（身上只有原木时自动先拿斧头去皮），在身边空位放下涂抹并挖回进包，不再报没有配方。
 - `obtain` 支持斧头去皮（归入 `via=craft`）：要去皮原木、去皮木头、去皮菌柄菌核或去皮竹块时，自动备齐斧头与原木，在身边避开窄道与门口的空位一块块放下削皮再挖回进包，半途失败也会把刚放下的原木收回。

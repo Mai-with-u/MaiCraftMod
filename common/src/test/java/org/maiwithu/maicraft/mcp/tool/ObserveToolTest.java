@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
@@ -765,5 +766,34 @@ class ObserveToolTest {
         assertFalse(unseen.get("seen").getAsBoolean());
         assertFalse(unseen.has("free_slots"), "没打开看过的包不编造空槽数与内容");
         assertFalse(unseen.has("contents"));
+    }
+
+    @Test
+    void selfReportsSortedModFeaturesKeepingEmptyArrayAndOptionalLastChainMining() {
+        JsonObject defaultSelf = data(observe("{\"what\": \"self\"}"));
+        assertEquals(0, defaultSelf.getAsJsonArray("mod_features").size(), "无联动模组时保留空数组");
+        assertFalse(defaultSelf.has("last_chain_mining"), "还没挖过方块时不出现 last_chain_mining");
+
+        ChainMiningLedger.Summary summary = new ChainMiningLedger.Summary(5, 42, 2, "工具剩余耐久不够一整批");
+        ToolDispatcher withChain = new ToolDispatcher(List.of(new ObserveTool(
+                () -> scene, () -> memory, table, direct, () -> reminders,
+                () -> new MenuView.Reads(() -> openScreen, noTrades), List::of, x -> { },
+                () -> identity, () -> null, ObserveTool.Pictures.NONE, () -> null, List::of,
+                () -> List.of("sophisticated_backpacks", "chain_mining", "create"),
+                () -> summary)));
+
+        JsonObject enriched = data(withChain.call("observe",
+                JsonParser.parseString("{\"what\": \"self\"}").getAsJsonObject()));
+        JsonArray features = enriched.getAsJsonArray("mod_features");
+        assertEquals(3, features.size());
+        assertEquals("chain_mining", features.get(0).getAsString());
+        assertEquals("create", features.get(1).getAsString());
+        assertEquals("sophisticated_backpacks", features.get(2).getAsString());
+
+        JsonObject lastChain = enriched.getAsJsonObject("last_chain_mining");
+        assertEquals(5, lastChain.get("chained_batches").getAsInt());
+        assertEquals(42, lastChain.get("chained_blocks").getAsInt());
+        assertEquals(2, lastChain.get("single_blocks").getAsInt());
+        assertEquals("工具剩余耐久不够一整批", lastChain.get("not_chained_reason").getAsString());
     }
 }

@@ -11,6 +11,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.TellsToolUse;
 import org.maiwithu.maicraft.behavior.acquire.mining.ToolScene;
@@ -27,6 +28,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -64,6 +66,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private final OffhandContents offhand;
     private final HitsItemFrames frames;
     private final Permissions permissions;
+    private final ChainMiningLedger chainLedger;
+    private int chainMark;
+    private boolean chainSettled;
+    private ChainMiningLedger.Summary settledChainMining;
 
     /** 动手前背包里每样东西有几件；捡没捡到以它和结算时的差为准。 */
     private Map<String, Integer> baseline;
@@ -85,6 +91,14 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     GatherTask(GatherSpot spot, ApproachesTargets approaches, DigsBlocks digs, ReadsToolRequirements tools,
             ReadsSpot world, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
             BackpackView backpack, OffhandContents offhand, HitsItemFrames frames, Permissions permissions) {
+        this(spot, approaches, digs, tools, world, replants, drops, permission, backpack, offhand, frames,
+                permissions, new ChainMiningLedger());
+    }
+
+    GatherTask(GatherSpot spot, ApproachesTargets approaches, DigsBlocks digs, ReadsToolRequirements tools,
+            ReadsSpot world, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
+            BackpackView backpack, OffhandContents offhand, HitsItemFrames frames, Permissions permissions,
+            ChainMiningLedger chainLedger) {
         super("采集", Phase.WALK, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.spot = spot;
         this.approaches = approaches;
@@ -98,12 +112,14 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         this.offhand = offhand;
         this.frames = frames;
         this.permissions = permissions;
+        this.chainLedger = chainLedger;
     }
 
     @Override protected Action enter(Phase phase) {
         if (phase == Phase.WALK) {
-            // 出发前记下背包里每样东西有几件：走过去时顺路吸进包的掉落物也算这次捡到的。
+            // 出发前记下背包里每样东西有几件与挖掘统计游标：走过去时顺路吸进包的掉落物也算这次捡到的。
             snapshotBaseline();
+            chainMark = chainLedger.mark();
             // 走近交给站位与靠近的模型；展示框按它挂着的包围盒找够得着的站位；
             // 要挖的方块在脚下、旁边站不了就地挖时，说明经记账口进结果。
             return spot.frame() ? frames.approach(spot.itemFrame(), spot.permissions())
@@ -279,7 +295,8 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
             recordChange(Change.of(Change.Kind.ITEM_GAINED, entry.getKey(), entry.getValue()));
         }
         if (!gained.isEmpty()) {
-            return Next.done(TaskResult.done("采集完成：" + gainedText(gained) + " 进了背包" + missedChance(gained)));
+            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                    "采集完成：" + gainedText(gained) + " 进了背包" + missedChance(gained)).details(details()).build());
         }
         if (spot.frame()) {
             return Next.fail(Problem.of(Problem.Kind.NOT_FOUND, frameItem
@@ -287,14 +304,24 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         }
         // 概率掉落的方块挖开了：这一下没掉是常态，算做完，写明没掉什么、原版每块的机会。
         if (!chanceDrops.isEmpty() && (spot.expectedItem() == null || expectedChanceDrop().isPresent())) {
-            return Next.done(TaskResult.done("采集完成：挖开了 " + liveType + "，这一下什么都没掉" + chanceText()));
+            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                    "采集完成：挖开了 " + liveType + "，这一下什么都没掉" + chanceText()).details(details()).build());
         }
         if (spot.expectedItem() != null) {
             return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
                     spot.expectedItem() + " 没进背包：采开了但没等到掉落物（可能没掉、被别人捡走，"
                             + "或掉在够不着的地方）"));
         }
-        return Next.done(TaskResult.done("采集完成：没有东西掉落入包，按现场如实记录"));
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                "采集完成：没有东西掉落入包，按现场如实记录").details(details()).build());
+    }
+
+    @Override protected ResultDetails details() {
+        if (!chainSettled) {
+            chainSettled = true;
+            settledChainMining = chainLedger.completeSince(chainMark).orElse(null);
+        }
+        return settledChainMining == null ? ResultDetails.NONE : new GatherDetails(settledChainMining);
     }
 
     // 点名要的东西正好是这格的概率掉落（草出种子、树叶出树苗）；不是为空。

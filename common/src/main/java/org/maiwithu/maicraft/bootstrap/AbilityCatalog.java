@@ -10,8 +10,10 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.random.RandomGenerator;
 
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ToolFirstDigging;
+import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.ability.bodylanguage.LiveNonverbalMoves;
 import org.maiwithu.maicraft.ability.bodylanguage.NonverbalModule;
 import org.maiwithu.maicraft.ability.build.BuildModule;
@@ -237,8 +239,8 @@ public final class AbilityCatalog {
         return into;
     }
 
-    /** 进世界登记全部能力并返回同一套随身背包实例，让自身观察与腾格子读同一本开包账。 */
-    static List<CarriedBackpack> registerInWorld(Deps deps, AbilityRegistry registry) {
+    /** 进世界登记全部能力并返回同一套随身背包、挖掘加速与连锁统计账本，供自身观察直接读取。 */
+    static ModFeatures.WorldAbilities registerInWorld(Deps deps, AbilityRegistry registry) {
         registry.clearRegistered();
         Shared shared = sharedOf(deps);
 
@@ -293,7 +295,8 @@ public final class AbilityCatalog {
         registry.register(lightModule(deps, construction));
 
         registerStandalone(registry, deps, shared, construction);
-        return shared.carriedBackpacks();
+        return new ModFeatures.WorldAbilities(shared.carriedBackpacks(), shared.breakAccelerators(),
+                shared.chainMining());
     }
 
     /**
@@ -304,7 +307,8 @@ public final class AbilityCatalog {
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
             DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space,
-            List<NetworkStorage> networks, List<CarriedBackpack> carriedBackpacks) {
+            List<NetworkStorage> networks, List<CarriedBackpack> carriedBackpacks,
+            List<BreakAccelerator> breakAccelerators, ChainMiningLedger chainMining) {
     }
 
     /** 把共用的现场部件一次建好：世界记忆之外的每刻现场都从这里出。 */
@@ -337,8 +341,10 @@ public final class AbilityCatalog {
         // 挖一格与捡掉落物共用一套：采集、拿东西时挖矿收庄稼、存东西挖开盖子，都是"走过去、挖掉、捡起这一下掉出来的"。
         // 联动的连锁挖进世界时建一次：采掘整脉、清障一片、开路一行都经这一份按住连锁键挖，没装就是空表、逐格挖。
         // 现做工具包在外面：挖楼梯、清障、采掘带着这一趟的规模挖时，身上没有对路的工具、划算又有料就先做一把。
+        ChainMiningLedger chainMining = new ChainMiningLedger();
+        List<BreakAccelerator> breakAccelerators = deps.compat().breakAccelerators(playerServices);
         DigsBlocks digging = new ToolFirstDigging(new LiveBlockDigging(deps.hands().digging(),
-                deps.compat().breakAccelerators(playerServices), deps.guards().othersNotice()), deps.hands().digTools(),
+                breakAccelerators, deps.guards().othersNotice(), chainMining), deps.hands().digTools(),
                 innerNeeds, deps.kept(), deps.items().itemTags());
         ClientDropPickup drops = new ClientDropPickup(deps.character().context(), deps.travel().walks(),
                 deps.dropConfirmations());
@@ -368,7 +374,8 @@ public final class AbilityCatalog {
                 Optional.of(storing),
                 () -> networks.stream().findFirst());
         return new Shared(bringsClose, toMainhand, digging, drops, collects, innerNeeds, refusals,
-                permission, playerServices, dropping, storing, space, networks, carriedBackpacks);
+                permission, playerServices, dropping, storing, space, networks, carriedBackpacks,
+                breakAccelerators, chainMining);
     }
 
     /** 往下挖楼梯的现场部件：出行往上/往下挖台阶时走下一级，挖一格与捡这一级掉的东西共用采掘那一套。 */
@@ -677,11 +684,11 @@ public final class AbilityCatalog {
                 deps.config().chatTypewriter(), commandTree::adminOnly, listeners);
     }
 
-    /** 拿到物品能力的一份：身外的来源清单、营地避让与采掘坑口回填账本见 AcquisitionWiring。 */
+    /** 拿到物品能力的一份：身外的来源清单、营地避让、采掘坑口回填与连锁挖掘统计见 AcquisitionWiring。 */
     private static AbilityModule obtainModule(Deps deps, Shared shared, ContainerSource containerSource) {
         return AcquisitionWiring.obtainModule(deps, shared.playerServices(), shared.bringClose(),
                 shared.toMainhand(), shared.permission(), shared.innerNeeds(), shared.collects(), shared.digging(),
-                shared.space(), containerSource, shared.drops(), shared.dropping().stepsAside());
+                shared.chainMining(), shared.space(), containerSource, shared.drops(), shared.dropping().stepsAside());
     }
 
     /** 照明能力的一份：区域补光量光选灯位、放灯交给施工引擎；随行补光的开关接会话设置。 */
@@ -774,7 +781,7 @@ public final class AbilityCatalog {
                 new ClientCropReplanting(shared.toMainhand(), deps.hands().interactions(),
                         deps.character().context()),
                 shared.drops(), shared.permission(), deps.character().backpack(), deps.character().offhand(),
-                frames);
+                frames, shared.chainMining());
     }
 
     /** 采集的靠近：目标落实成一格要挖掉的方块后交给靠近模型，走过去能动多少地形按这次任务的许可来。 */

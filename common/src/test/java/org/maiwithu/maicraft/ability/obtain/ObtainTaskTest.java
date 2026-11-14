@@ -17,6 +17,7 @@ import com.google.gson.JsonObject;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -453,6 +454,57 @@ class ObtainTaskTest {
         assertEquals(3, entry.get("depth").getAsInt());
         assertTrue(entry.get("filled").getAsBoolean());
         assertEquals("收工前用圆石把台阶入口封平了", entry.get("note").getAsString());
+    }
+
+    @Test
+    void 动过挖掘时结果细节带chain_mining并保留null原因_纯合成未挖时不出现() {
+        FakeBackpack backpack = new FakeBackpack();
+        ChainMiningLedger chainLedger = new ChainMiningLedger();
+
+        ScriptedAcquisition craftOnly = new ScriptedAcquisition();
+        craftOnly.backpack = backpack;
+        craftOnly.deliverPerTick = 2;
+        craftOnly.deliveredVia = "craft";
+        ObtainTask craftTask = new ObtainTask(input(2, ItemAcquisition.Scope.ALL), craftOnly, backpack, null,
+                itemId -> Set.of(), new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(),
+                chainLedger);
+        craftTask.start(tick(0));
+        JsonObject craftDetails = ResultJson.result(runTask(craftTask)).getAsJsonObject("details");
+        assertFalse(craftDetails.has("chain_mining"), "没动过挖掘时不输出 chain_mining：" + craftDetails);
+
+        StartsAcquisition withMining = new StartsAcquisition() {
+            @Override public Action need(ItemRequest request, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return needSeveral(List.of(request), permissions, scope, onDelivered, records);
+            }
+
+            @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add("minecraft:cobblestone", 16);
+                        onDelivered.accept("mine");
+                        chainLedger.recordChained(16, null);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() { return "连锁挖石"; }
+                };
+            }
+        };
+        ObtainItems cobbleInput = new ObtainItems(
+                List.of(new ItemRequest(WantedItem.ofItem("minecraft:cobblestone"), 16, "取材")),
+                ItemAcquisition.Scope.ALL, Permissions.DEFAULT, "取材", "再拿 16 个圆石", null);
+        ObtainTask mineTask = new ObtainTask(cobbleInput, withMining, backpack, null, itemId -> Set.of(),
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), chainLedger);
+        mineTask.start(tick(0));
+        JsonObject chainMining = ResultJson.result(runTask(mineTask))
+                .getAsJsonObject("details").getAsJsonObject("chain_mining");
+        assertEquals(1, chainMining.get("chained_batches").getAsInt());
+        assertEquals(16, chainMining.get("chained_blocks").getAsInt());
+        assertEquals(0, chainMining.get("single_blocks").getAsInt());
+        assertTrue(chainMining.has("not_chained_reason") && chainMining.get("not_chained_reason").isJsonNull(),
+                "全部连上时 not_chained_reason 显式为 null：" + chainMining);
     }
 
     private TaskResult runTask(ObtainTask task) {

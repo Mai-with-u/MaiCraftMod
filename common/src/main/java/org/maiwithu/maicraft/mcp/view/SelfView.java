@@ -2,7 +2,10 @@
 package org.maiwithu.maicraft.mcp.view;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
@@ -165,6 +168,27 @@ public final class SelfView {
             list.add(json);
         }
         view.add("carried_backpacks", list);
+    }
+
+    /** 当前世界真正就绪可用的模组能力（按字母排；空数组也原样保留）。 */
+    public static void addModFeatures(JsonObject view, List<String> modFeatures) {
+        JsonArray list = new JsonArray();
+        if (modFeatures != null) {
+            modFeatures.stream().sorted().forEach(list::add);
+        }
+        view.add("mod_features", list);
+    }
+
+    /** 本世界最近一次挖掘动作的连锁统计；本世界还没挖过方块时不写这一项。 */
+    public static void addLastChainMining(JsonObject view, ChainMiningLedger.Summary summary) {
+        if (summary == null) return;
+        JsonObject json = new JsonObject();
+        json.addProperty("chained_batches", summary.chainedBatches());
+        json.addProperty("chained_blocks", summary.chainedBlocks());
+        json.addProperty("single_blocks", summary.singleBlocks());
+        json.add("not_chained_reason", summary.notChainedReason() == null
+                ? JsonNull.INSTANCE : new JsonPrimitive(summary.notChainedReason()));
+        view.add("last_chain_mining", json);
     }
 
     /**

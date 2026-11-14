@@ -6,6 +6,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSerializer;
@@ -61,9 +62,20 @@ public final class ResultJson {
         }
         json.add("attempts", attempts);
         if (result.details() != ResultDetails.NONE) {
-            json.add("details", DETAILS.toJsonTree(result.details()));
+            JsonElement details = DETAILS.toJsonTree(result.details());
+            preserveChainMiningNullReason(details);
+            json.add("details", details);
         }
         return json;
+    }
+
+    // 全部连上且无被拒时 chain_mining.not_chained_reason 显式保留为 null，不随 Gson 默认空值省略被删掉。
+    private static void preserveChainMiningNullReason(JsonElement details) {
+        if (!details.isJsonObject()) return;
+        JsonElement chain = details.getAsJsonObject().get("chain_mining");
+        if (chain != null && chain.isJsonObject() && !chain.getAsJsonObject().has("not_chained_reason")) {
+            chain.getAsJsonObject().add("not_chained_reason", JsonNull.INSTANCE);
+        }
     }
 
     /**

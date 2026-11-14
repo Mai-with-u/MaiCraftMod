@@ -26,6 +26,7 @@
 - `status`：`done` 采完（概率掉落的方块挖开了没掉也算）；`failed` 没采成（问题里写清是缺工具、到不了、目标没了还是游戏拒绝）。
 - `changes`：`block_broken` 挖掉了哪格；`item_gained` 捡到背包里的每样东西和数量——`item`
   只是用来确认的预期，实际掉什么按现场记录。
+- `details.chain_mining`：本次采集挖了方块时给出挖掘统计（捡地上掉落物、打展示框未挖方块时不出现）——`chained_batches`、`chained_blocks`、`single_blocks` 与 `not_chained_reason`。
 - 常见问题：`NEED_ITEM` 工具不够格（写清需要什么等级）；`TARGET_GONE` 那格已经不是要采的东西；
   `UNREACHABLE` 试过的站位都到不了；`WRONG_TIME` 庄稼还没熟（收了也白长，不收）。
 

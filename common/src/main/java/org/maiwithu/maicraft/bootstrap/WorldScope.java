@@ -62,6 +62,7 @@ import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
 import org.maiwithu.maicraft.behavior.travel.planning.ClientTravelWorldView;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgress;
 import org.maiwithu.maicraft.behavior.travel.settle.TravelProgressListener;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.trade.ClientTradeMenuReads;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -175,8 +176,9 @@ public final class WorldScope {
     private final RespawnPoint respawnPoint = new RespawnPoint();
     /** 走投无路时提的那句寻死出路：能力从角色读端拿，寻路与吃饭经启动一侧转到当前世界这一份。 */
     private final SuicideWayOut suicideWayOut;
-    /** 当前世界的随身背包实例：与腾格子和取货来源共用同一份开包存货账本，供 observe(self) 呈现背在身上的包。 */
-    private final List<CarriedBackpack> carriedBackpacks;
+    private final CompatRegistry compat;
+    /** 当前世界的随身背包、挖掘加速与连锁统计账本，供自身观察直接读取。 */
+    private final ModFeatures.WorldAbilities worldAbilities;
 
     /** 保留最近一刻出行进展的收件口：宿主查任务面板时读它，不攒历史。 */
     private static final class LatestTravelProgress implements TravelProgressListener {
@@ -214,6 +216,7 @@ public final class WorldScope {
             UnreachableFromHere unreachable, NonverbalExchange nonverbal, SparPartner sparPartner) {
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
+        this.compat = Objects.requireNonNull(compat, "compat");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
@@ -265,8 +268,8 @@ public final class WorldScope {
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份；动了别人放的方块一并入账。
         Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions,
                 digTools, othersNotice);
-        // 能力按清单登记进客户端全程共用的那一份注册表：MCP 的 lookup 与 execute 读的就是它。
-        this.carriedBackpacks = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
+        // 能力按清单登记进客户端全程共用的注册表，并拿回当前世界的随身背包、挖掘加速与连锁统计账本。
+        this.worldAbilities = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
                 characterReads(now, suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         new RegistryToolRequirements(), furnaceFuels),
@@ -278,8 +281,7 @@ public final class WorldScope {
                 channels(minecraft, now, events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig,
-                sparPartner),
-                abilities);
+                sparPartner), abilities);
     }
 
     // 当刻角色全身读端按同一份角色供给者组装：背包、副手、饱食、口粮、装备、状态效果、合身度、坐标与寻死出路。
@@ -515,9 +517,19 @@ public final class WorldScope {
     /** 此刻角色身上各栏位（含饰品栏、胸甲、副手与主背包）背着或揣着的随身背包摘要。 */
     public List<CarriedBackpack.CarriedPack> carriedBackpacks() {
         List<CarriedBackpack.CarriedPack> packs = new ArrayList<>();
-        for (CarriedBackpack backpack : carriedBackpacks) {
+        for (CarriedBackpack backpack : worldAbilities.carriedBackpacks()) {
             packs.addAll(backpack.carried());
         }
         return List.copyOf(packs);
+    }
+
+    /** 当前世界真正就绪可用的模组能力代号（按字母排）。 */
+    public List<String> modFeatures() {
+        return ModFeatures.activeInWorld(compat, worldAbilities.breakAccelerators(), kinds.hasLootrContainers());
+    }
+
+    /** 本世界最近一次挖掘动作的连锁统计；还没挖过方块时返回 null。 */
+    public ChainMiningLedger.Summary lastChainMining() {
+        return worldAbilities.chainMining().lastSummary().orElse(null);
     }
 }
