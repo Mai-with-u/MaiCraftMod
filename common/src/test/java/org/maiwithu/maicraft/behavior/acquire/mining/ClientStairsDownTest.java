@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.behavior.permission.SeesVillagers;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
+import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -150,11 +151,34 @@ class ClientStairsDownTest {
 
         /** 装了连锁挖时才连锁；记下每次连锁的形状、命中面和挖掉了几格。 */
         boolean chaining;
+        String forcedChainRefusal;
+        int chainAttempts;
+        int skippedChainDigs;
         final List<String> chains = new ArrayList<>();
+
+        @Override public Optional<Action> digSkippingChain(BlockPos target, ToolPrep prep, String skippedReason) {
+            skippedChainDigs++;
+            return dig(target);
+        }
 
         @Override public Optional<Action> digChained(BlockPos trigger, Direction face,
                 BreakAccelerator.ChainShape shape, Predicate<BlockPos> mayBreak) {
             if (!chaining) return dig(trigger);
+            chainAttempts++;
+            if (forcedChainRefusal != null) {
+                String why = forcedChainRefusal;
+                return Optional.of(new TellsToolUse() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        dug.add(trigger);
+                        types.add(world.type(trigger));
+                        world.placed.put(trigger, "minecraft:air");
+                        return ActionStatus.done();
+                    }
+                    @Override public String notChainedReason() { return why; }
+                    @Override public List<DigToolUse> toolUses() { return List.of(); }
+                    @Override public String describe() { return "拒连单挖"; }
+                });
+            }
             boolean down = shape == BreakAccelerator.ChainShape.DOWNWARD_LINE;
             Direction heading = face.getAxis().isVertical() ? world.facing : face.getOpposite();
             List<BlockPos> line = new ArrayList<>();
@@ -709,5 +733,35 @@ class ClientStairsDownTest {
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, run(1));
         assertEquals(Problem.Kind.NOT_FOUND, failed.problem().kind());
         assertEquals(ClientStairsDown.MAX_DRY_STEPS, world.walkedTo.size());
+    }
+
+    @Test
+    void 往下挖楼梯找石头也走斜线连锁_一长条直接凑够收工() {
+        digs.chaining = true;
+        ActionStatus status = run(12);
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertTrue(digs.chains.stream().anyMatch(c -> c.startsWith("DOWNWARD_LINE")),
+                "普通往下挖楼梯现在也走斜线连锁：" + digs.chains);
+        assertTrue(world.walkedTo.size() <= 4, "斜线连锁顺带挖够了石头，不用再一格一格挖完十二级：" + world.walkedTo);
+    }
+
+    @Test
+    void 横挖通道遇到远端区块未加载被拒_同区块内直接单挖_跨进下一区块恢复试一次() {
+        digs.chaining = true;
+        digs.forcedChainRefusal = "选区里 100, 40, 0 没加载";
+        // 从 z=0 朝南挖到 z=6（全程在区块 z=0 内）：只试一次连锁，其余直接单挖。
+        world.feet = new BlockPos(0, 40, 0);
+        world.facing = Direction.SOUTH;
+        prospectSeeing(40, 0, feet -> feet.getZ() >= 6);
+        assertEquals(1, digs.chainAttempts, "同一区块同一朝向只试一次连锁");
+        assertTrue(digs.skippedChainDigs >= 10, "后续格子直接走跳过连锁的单挖：" + digs.skippedChainDigs);
+
+        // 再从 z=14 挖过 z=16 区块边界：跨进下一区块时自动再试一次连锁。
+        digs.chainAttempts = 0;
+        digs.skippedChainDigs = 0;
+        world.feet = new BlockPos(0, 40, 14);
+        prospectSeeing(40, 0, feet -> feet.getZ() >= 18);
+        assertEquals(2, digs.chainAttempts, "区块 0 试一次，跨进区块 1 后恢复再试一次");
+        assertTrue(digs.skippedChainDigs >= 6);
     }
 }

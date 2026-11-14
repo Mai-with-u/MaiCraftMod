@@ -126,6 +126,8 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
         private final TaskRecords records;
         /** 整批挖下来的格子各用了什么工具，按先后：整批收完拼成结果里的一条。 */
         private final List<DigToolUse> toolUses = new ArrayList<>();
+        /** 同一连通批次内的连锁拒绝记忆：首格试连锁因固定原因被拒后，本批剩余相连格直接单挖不白等。 */
+        private final ChainSkipMemory chainSkip = new ChainSkipMemory();
         /** 工具现场已经记过了：整批只记一条，不逐格刷屏。 */
         private boolean toolsReported;
         private int index;
@@ -236,8 +238,10 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
                     // 采掘要掉落：挖不到掉落的候选不参与挑工具，宁可先备一把对的工具。
                     DigsBlocks.ToolPrep prep = new DigsBlocks.ToolPrep(
                             cells.size() - index, true, permissions, records, digTool);
-                    yield chanceDrops ? digs.dig(cell(), prep)
-                            : chainable == null ? digs.dig(cell(), prep)
+                    if (chanceDrops || chainable == null) yield digs.dig(cell(), prep);
+                    Optional<String> skip = chainSkip.skipReason(null, null, false, null);
+                    yield skip.isPresent()
+                            ? digs.digSkippingChain(cell(), prep, skip.get())
                             : digs.digChained(cell(), null, BreakAccelerator.ChainShape.CONNECTED, chainable, prep);
                 }
                 // 一下都没挖（每一格都被连锁或别人挖掉了）：没有这一下掉出来的东西要捡。
@@ -275,9 +279,14 @@ public final class ClientCollectsBlocks implements CollectsBlocks {
             return stage == Stage.DONE ? report(ActionStatus.done()) : ActionStatus.progressed();
         }
 
-        // 手上这一步挖完（或不用挖）就把它用了什么工具收上来，整批收完再记一条。
+        // 手上这一步挖完（或不用挖）就把它用了什么工具收上来，并记下连锁被拒的原因避免本批重复白等。
         private void harvestToolUses() {
-            if (step instanceof TellsToolUse tells) toolUses.addAll(tells.toolUses());
+            if (step instanceof TellsToolUse tells) {
+                toolUses.addAll(tells.toolUses());
+                if (stage == Stage.DIG && chainable != null && tells.notChainedReason() != null) {
+                    chainSkip.noteRefusal(tells.notChainedReason(), null, null, false, null);
+                }
+            }
         }
 
         // 整批收完：把这一趟的工具现场记进结果，一条说清用了什么、磨了多少、省了多少；只记一次。

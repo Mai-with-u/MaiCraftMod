@@ -191,11 +191,15 @@ public final class ClientStairsDown implements DigsStairsDown {
         private Direction heading;
         private BlockPos feet;
         private Action step;
-        /** 手上正挖的这一格是什么：挖完记账、判掉不掉想要的东西都要用。 */
+        /** 手上正挖的这一格在哪、是什么：挖完记账、判掉不掉想要的东西与单格耐心超时都用它。 */
+        private BlockPos diggingCell;
         private String diggingType;
         /** 手上正挖的这一格挖掉会不会掉想要的东西：挖完才算数。 */
         private boolean diggingYields;
+        private int digTicks;
         private int digsThisStep;
+        /** 同一趟楼梯或通道内的连锁拒绝记忆：前方未加载、紧挨流体或工具挖不下只试一次，同区块同朝向不再每格白等。 */
+        private final ChainSkipMemory chainSkip = new ChainSkipMemory();
         private int yielded;
         private int steps;
         /** 长程挖矿横着走了几步。 */
@@ -263,6 +267,7 @@ public final class ClientStairsDown implements DigsStairsDown {
             if (paused) {
                 paused = false;
                 closeStep();
+                digTicks = 0;
                 stage = Stage.LOOK;
                 filledThisStep = false;
                 // 还没挖第一级就被叫走：回来时重新看一次在不在家里。
@@ -270,7 +275,22 @@ public final class ClientStairsDown implements DigsStairsDown {
             }
             if (step != null) {
                 ActionStatus status = step.tick(context);
-                if (status instanceof ActionStatus.Running) return status;
+                if (status instanceof ActionStatus.Running running) {
+                    if (running.progressed()) {
+                        digTicks = 0;
+                    } else if (stage == Stage.DIG && ++digTicks > DigsBlocks.DIG_PATIENCE_TICKS) {
+                        // 单格连续十五秒都没挖通（视线被卡住或够不着）：不傻等到外层一分钟判卡死，换个方向接着挖。
+                        closeStep();
+                        digTicks = 0;
+                        return turnOrFinish(Problem.of(Problem.Kind.STUCK,
+                                "往下挖楼梯：" + at(diggingCell) + " 挖了十五秒都没挖下来，换个方向再挖"));
+                    }
+                    return status;
+                }
+                if (stage == Stage.DIG && step instanceof TellsToolUse tells && tells.notChainedReason() != null) {
+                    chainSkip.noteRefusal(tells.notChainedReason(), feet, heading, down(), diggingType);
+                }
+                digTicks = 0;
                 closeStep();
                 return switch (stage) {
                     case WALK_OUT -> walkedOut(status);
@@ -478,12 +498,15 @@ public final class ClientStairsDown implements DigsStairsDown {
                 Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
                         position(context, cell), blockType);
                 if (refused.isPresent()) return turnOrFinish(refused.get());
-                Optional<Action> dig = tunnel == null ? digs.dig(cell, toolPrep()) : chainDig(context, cell, row, way);
+                // 往下挖楼梯与长程挖矿统一走连锁挖掘：装了连锁时每行按斜下或水平通道成批挖通，没装或被拒时自动落回单挖。
+                Optional<Action> dig = chainDig(context, cell, row, way);
                 if (dig.isEmpty()) {
                     return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
                 }
                 step = dig.get();
+                diggingCell = cell;
                 diggingType = blockType;
+                digTicks = 0;
                 // 数想要的方块算停点的挖法只数想要的；够深就停的挖法挖掉的每一格都算进展。
                 diggingYields = yields == null || yields.test(blockType);
                 digsThisStep++;
@@ -574,10 +597,15 @@ public final class ClientStairsDown implements DigsStairsDown {
             return ActionStatus.progressed();
         }
 
-        // 长程挖矿挖一行：往下对准迎面（最下一行对准顶面，迎面贴着脚下那格打不着）用斜着往下的连锁，
-        // 横着对准迎面用直着往前的连锁；线上从这一格起连着的每一格都挖得、许可准挖、四周不挨水和岩浆才算这一行的，
-        // 模组给的那一条超出这些就不连锁、只挖这一格。
+        // 往下挖楼梯或长程挖矿挖一行：往下对准迎面（最下一行对准顶面，迎面贴着脚下那格打不着）用斜着往下的连锁，
+        // 横着对准迎面用直着往前的连锁；换格也不会变的拒绝原因同区块同朝向内只试一次，命中记忆直接跳过按键单挖。
         private Optional<Action> chainDig(TickContext context, BlockPos trigger, int row, StairStepShape.Heading way) {
+            Optional<String> skip = chainSkip.skipReason(feet, heading, way.down(), site.blockType(context, trigger));
+            if (skip.isPresent()) {
+                chainTrigger = null;
+                chainedRow = Map.of();
+                return digs.digSkippingChain(trigger, toolPrep(), skip.get());
+            }
             Direction face = way.down() && row == 2 ? Direction.UP : heading.getOpposite();
             Map<BlockPos, String> line = lineAhead(context, trigger, way.down());
             chainTrigger = trigger;
@@ -597,17 +625,18 @@ public final class ClientStairsDown implements DigsStairsDown {
                     permissions == null ? Permissions.DEFAULT : permissions, records, null);
         }
 
-        // 从触发格顺着挖的方向排下去的那一行：往下的不出这种矿的生成范围，横着的不超过通道长度；到第一格不合适的为止。
+        // 从触发格顺着挖的方向排下去的那一行：伸出计划通道长度或矿脉下界的部分，只要仍是天然地形、不在营地或建筑档案里、
+        // 不碰设施和别人搭的方块、四周不挨水或岩浆，就一并放进可连锁集合，不因多挖几格天然石头而整条拒掉。
         private Map<BlockPos, String> lineAhead(TickContext context, BlockPos trigger, boolean down) {
             Map<BlockPos, String> line = new LinkedHashMap<>();
             for (int k = 0; k < CHAIN_REACH; k++) {
                 BlockPos cell = trigger.relative(heading, k).below(down ? k : 0);
-                if (down && cell.getY() < tunnel.floorY()) break;
-                if (!down && levelSteps + k >= LEVEL_STEPS) break;
+                WorldPosition where = position(context, cell);
+                if (k > 0 && (atHome(context, cell) || permission.archivedBuildingAt(where).isPresent())) break;
                 if (site.ground(context, cell) != Ground.DIGGABLE) break;
                 String blockType = site.blockType(context, cell);
                 if (permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                        position(context, cell), blockType).isPresent()) break;
+                        where, blockType).isPresent()) break;
                 if (touchesFluid(context, cell)) break;
                 line.put(cell, blockType);
             }
@@ -633,8 +662,9 @@ public final class ClientStairsDown implements DigsStairsDown {
             if (records != null) dugByType.merge(diggingType, 1, Integer::sum);
             if (diggingYields) yielded++;
             for (Map.Entry<BlockPos, String> cell : row.entrySet()) {
-                if (cell.getKey().equals(trigger) || !yields.test(cell.getValue())) continue;
-                if (site.ground(context, cell.getKey()) == Ground.OPEN) yielded++;
+                if (cell.getKey().equals(trigger) || site.ground(context, cell.getKey()) != Ground.OPEN) continue;
+                if (records != null) dugByType.merge(cell.getValue(), 1, Integer::sum);
+                if (yields == null || yields.test(cell.getValue())) yielded++;
             }
             return ActionStatus.progressed();
         }

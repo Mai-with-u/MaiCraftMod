@@ -103,14 +103,16 @@ final class PlaceTorchTask extends PhasedTask<PlaceTorchTask.Phase> {
         return Next.go(Phase.HOLD, "看中了 " + spot.lamp().toShortString() + " 这一处");
     }
 
-    // 火把换到主手；身上没有就不插（评估时还有，现在没了也一样），已在手上就直接去插。
+    // 火把换到主手；身上没有或被预留拿不出来就不插，并记下出过手避免原地反复打断主任务。
     private Next<Phase> hold(TickContext context) {
-        if (scenes.apply(context).heldItem(InteractionHand.MAIN_HAND).is(Items.TORCH)) {
+        FirstPersonScene scene = scenes.apply(context);
+        if (scene.heldItem(InteractionHand.MAIN_HAND).is(Items.TORCH)) {
             return startPlacing();
         }
         if (action() == null) {
             holding = toMainhand.moveToMainhand(TORCH_ID).orElse(null);
             if (holding == null) {
+                onAttempt.accept(feetOf(scene));
                 return Next.fail(Problem.of(Problem.Kind.NEED_ITEM, "包里没有火把可插", null));
             }
             // 换手交给本阶段逐刻推进：重进阶段时 enter 会把它递回来。
@@ -118,9 +120,16 @@ final class PlaceTorchTask extends PhasedTask<PlaceTorchTask.Phase> {
         }
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Failed failed -> Next.fail(failed.problem());
+            case ActionStatus.Failed failed -> {
+                onAttempt.accept(feetOf(scene));
+                yield Next.fail(failed.problem());
+            }
             case ActionStatus.Done done -> startPlacing();
         };
+    }
+
+    private static BlockPos feetOf(FirstPersonScene scene) {
+        return BlockPos.containing(scene.eyePosition().x, scene.eyePosition().y - 1.62, scene.eyePosition().z);
     }
 
     private Next<Phase> startPlacing() {

@@ -120,12 +120,14 @@ class PlaceTorchTaskTest {
     }
 
     @Test
-    void 包里没火把_如实收场不牵连主任务() {
+    void 包里没火把_记出过手并如实收场不牵连主任务() {
         FakeScene scene = new FakeScene();
         scene.mainhand = ItemStack.EMPTY;
-        TaskResult result = run(task(scene, new ArrayList<>(), new ArrayDeque<>(), Optional.empty()));
+        List<BlockPos> attempts = new ArrayList<>();
+        TaskResult result = run(task(scene, attempts, new ArrayDeque<>(), Optional.empty()));
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertEquals(1, attempts.size(), "换手拿不出火把也记一回出手，避免原地死循环打断");
     }
 
     @Test

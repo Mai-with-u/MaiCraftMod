@@ -1,29 +1,40 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.survival;
 
+import java.util.Objects;
 import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
-import org.maiwithu.maicraft.game.world.ReadsLightLevels;
+import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.ReadsLightLevels;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 太暗处境的生产读取：脚部与眼部实测方块光的最小值、天空光的较大值（头顶见不见得到天；
  * 亮度读数从只读亮度接缝来，测试换替身），头顶是不是只有树叶（不算树叶的地表高度不高过脚），
- * 包里有没有火把按背包视图数。角色不在世界里时如实交空，这一刻不评估。
+ * 包里有没有可插的火把按背包与副手总数扣除要留的件数（{@link ItemsToKeep}）算——全部被预留着时不打断主任务。
+ * 角色不在世界里时如实交空，这一刻不评估。
  */
 public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
 
     private static final String TORCH_ID = "minecraft:torch";
 
     private final ReadsLightLevels lights;
+    private final ItemsToKeep keeps;
 
     public LiveDarkView(ReadsLightLevels lights) {
-        this.lights = lights;
+        this(lights, itemId -> 0);
+    }
+
+    public LiveDarkView(ReadsLightLevels lights, ItemsToKeep keeps) {
+        this.lights = Objects.requireNonNull(lights, "lights");
+        this.keeps = Objects.requireNonNull(keeps, "keeps");
     }
 
     @Override public DarknessNeed.DarknessFacts read(TickContext context) {
@@ -51,8 +62,10 @@ public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
         // 客户端只同步了含树叶的高度图，"忽略树叶"那张一直是空的（整列读成世界最底层）；从同步的那张往下补读。
         boolean onlyLeaves = player.level() != null
                 && ClientSurfaceHeight.motionBlockingNoLeaves(player.level(), feet.getX(), feet.getZ()) <= feet.getY();
-        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest), carriedTorches(player.backpack()) > 0, feet, sky,
-                onlyLeaves);
+        ItemStack offhand = player.localPlayer().getOffhandItem();
+        int offhandTorches = offhand.is(Items.TORCH) ? offhand.getCount() : 0;
+        return new DarknessNeed.DarknessFacts(OptionalInt.of(darkest),
+                availableTorches(player.backpack(), offhandTorches, keeps) > 0, feet, sky, onlyLeaves);
     }
 
     /** 背包里的火把数：主格为准，副手不占背包格、单独清点时另算。 */
@@ -62,5 +75,12 @@ public final class LiveDarkView implements DarknessNeed.ReadsDarkness {
             if (stack.itemId().equals(TORCH_ID)) total += stack.count();
         }
         return total;
+    }
+
+    /** 扣除预留与正要用件数后真正能拿出来插的火把数量。 */
+    static int availableTorches(BackpackView backpack, int offhandTorches, ItemsToKeep keeps) {
+        int total = carriedTorches(backpack) + Math.max(0, offhandTorches);
+        int reserved = Math.max(0, keeps.keep(TORCH_ID));
+        return Math.max(0, total - Math.min(total, reserved));
     }
 }

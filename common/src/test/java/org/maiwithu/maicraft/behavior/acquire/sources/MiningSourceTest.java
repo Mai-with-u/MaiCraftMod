@@ -295,9 +295,10 @@ class MiningSourceTest {
                 .orElseThrow();
         runAll(action);
         assertTrue(digs.chainable.test(new BlockPos(2, 64, 0)), "旁边埋着的天然煤矿一起挖");
+        assertTrue(digs.chainable.test(new BlockPos(56, 64, 0)), "顺势伸出计划搜索半径几格的天然煤矿允许并入连锁");
         assertFalse(digs.chainable.test(new BlockPos(4, 64, 0)), "搭出来的那格不连锁");
         assertFalse(digs.chainable.test(new BlockPos(3, 63, 0)), "不掉煤的不连锁");
-        assertFalse(digs.chainable.test(new BlockPos(300, 64, 0)), "超出这次找的范围不连锁");
+        assertFalse(digs.chainable.test(new BlockPos(300, 64, 0)), "远超自然延伸余量的地方不连锁");
     }
 
     @Test

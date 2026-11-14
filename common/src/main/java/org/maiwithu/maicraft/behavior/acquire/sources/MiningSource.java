@@ -611,19 +611,31 @@ public final class MiningSource implements ItemSource {
         return new StepwiseActions("往下挖楼梯找" + request.wanted().describe(), steps.toArray(Action[]::new));
     }
 
+    /** 连通矿脉或地形从本次搜索半径边缘自然往外延伸时允许顺带并入连锁的余量（格）。 */
+    private static final int CHAIN_SPILL_BLOCKS = 16;
+
     /**
-     * 连锁挖一起挖到的每一格都要过：在这次愿意找的范围里、地图上自然长的、挖了掉要的东西、许可准挖。
-     * 连锁的预览是模组画给玩家看的，埋在里面的那几格也算看见了；有一格不过就不连锁，只挖手上那一格。
+     * 连锁挖一起挖到的每一格都要过：地图上自然长的、挖了掉要的东西、许可准挖、不拆建筑档案里的房子；
+     * 选区从搜索半径边缘顺势伸出去一截（{@link #CHAIN_SPILL_BLOCKS} 格以内）的天然地形，只要不在自家或营地范围里，
+     * 也一并放行，不因矿脉末端超出计划半径而整批拒掉；非原木地面采掘一律不许漫进自家或营地地面。
      */
     private Predicate<BlockPos> chainable(ItemRequest request, WorldPosition here, int radius, Permissions permissions) {
+        double maxRadius = (double) radius + CHAIN_SPILL_BLOCKS;
+        double maxDistSqr = maxRadius * maxRadius;
         return pos -> {
             double dx = pos.getX() - here.x();
             double dy = pos.getY() - here.y();
             double dz = pos.getZ() - here.z();
-            if (dx * dx + dy * dy + dz * dz > (double) radius * radius) return false;
+            if (dx * dx + dy * dy + dz * dz > maxDistSqr) return false;
             Optional<String> blockType = minables.minableAt(request.wanted(), request.dropsFrom(), pos);
-            return blockType.isPresent() && permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                    WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()), blockType.get()).isEmpty();
+            if (blockType.isEmpty()) return false;
+            WorldPosition at = new WorldPosition(pos.getX(), pos.getY(), pos.getZ(), here.dimension());
+            if (permission.archivedBuildingAt(at).isPresent()) return false;
+            if ((campground.covers(at) || permission.atOwnHome(at)) && !SurfaceMiningPolicy.isLog(blockType.get())) {
+                return false;
+            }
+            return permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
+                    at, blockType.get()).isEmpty();
         };
     }
 

@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.OptionalInt;
 import java.util.Optional;
 
@@ -15,6 +16,8 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.HandlesOwnLighting;
 import org.maiwithu.maicraft.behavior.lighting.TorchesAlongTheWay;
+import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
@@ -125,22 +128,37 @@ class DarknessNeedTest {
     }
 
     @Test
-    void 距上次出手不足两格不再出手() {
+    void 距上次出手不足六格不再出手_斜楼梯不每两级打断一次() {
         FollowLighting follow = new FollowLighting();
-        DarknessNeed need = new DarknessNeed(dark(0, true), (context, onAttempt) -> {
-            onAttempt.accept(FEET.east());
-            return null;
-        }, follow);
-        need.createTask(tick());
-        assertNull(urgency(need, null), "刚在旁边出过手（原生被拒也算），不原地撒灯");
-        // 走远了：照插。
-        DarknessNeed moved = new DarknessNeed(dark(0, true, new BlockPos(50, 64, 50)),
+        BlockPos[] currentFeet = {FEET};
+        DarknessNeed need = new DarknessNeed(
+                context -> new DarknessNeed.DarknessFacts(OptionalInt.of(0), true, currentFeet[0], OptionalInt.of(0), false),
                 (context, onAttempt) -> {
-                    onAttempt.accept(FEET.east());
+                    onAttempt.accept(FEET);
                     return null;
                 }, follow);
-        moved.createTask(tick());
-        assertEquals(Urgency.LATER, urgency(moved, null), "离上次出手远了照插");
+        need.createTask(tick());
+        assertNull(urgency(need, null), "刚在原地出过手，不原地撒灯");
+        // 斜着往下挖两级楼梯（水平 2 格、下降 2 格，距离平方 8 < 36）：找不到灯位时不紧接着又打断一次。
+        currentFeet[0] = FEET.north(2).below(2);
+        assertNull(urgency(need, null), "斜楼梯刚挖两级还在节制范围内，不每八秒打断一次");
+        // 走远了（超出六格）：照常补光。
+        currentFeet[0] = new BlockPos(50, 64, 50);
+        assertEquals(Urgency.LATER, urgency(need, null), "离上次出手远了照插");
+    }
+
+    @Test
+    void 身上火把全被预留着时不触发太暗打断() {
+        BackpackView backpack = new BackpackView() {
+            @Override public List<BackpackStack> stacks() {
+                return List.of(new BackpackStack("minecraft:torch", 16, 64, false, false, false, false));
+            }
+            @Override public int usedSlots() { return 1; }
+            @Override public int totalSlots() { return 36; }
+        };
+        assertEquals(0, LiveDarkView.availableTorches(backpack, 0, itemId -> 16), "全被预留时可用火把为 0");
+        assertEquals(4, LiveDarkView.availableTorches(backpack, 0, itemId -> 12), "超出预留件数的部分可拿出来插");
+        assertEquals(8, LiveDarkView.availableTorches(backpack, 8, itemId -> 16), "副手多揣着的火把一并计入");
     }
 
     @Test

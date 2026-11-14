@@ -106,7 +106,7 @@ final class SurvivalNeedCatalog {
                 new SelfDefenseNeed(combatSenses, new LiveBattleMoves(walks, interactions.heldProjection(), ranged, keeps), events,
                         trusted).pickingUp(lostDrops).knowingHome(places),
                 new HungerNeed(new LiveHungerView(foods, keeps), foodMoves, events),
-                new DarknessNeed(new LiveDarkView(lightLevels),
+                new DarknessNeed(new LiveDarkView(lightLevels, keeps),
                         new LiveTorchMoves(interactions, hands, protection, Set.of()), followLighting),
                 new NightfallNeed(new LiveNightView(combatSenses),
                         survivalWiring, survivalWiring, survivalWiring, survivalWiring, survivalWiring.autoSleep()),
