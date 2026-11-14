@@ -117,6 +117,12 @@ class SuicideModuleTest {
         assertTrue(!far.ok(), "半径最多 64");
     }
 
+    @Test
+    void 寻死能力从下达起就关掉生存需求且被撤离后能在新位置接着做() {
+        assertTrue(module.survivalNeedsOff(), "寻死能力在第 0 刻建出子任务前也关掉生存需求");
+        assertTrue(module.resumesAnywhere(), "被自卫撤离带离原地后仍能在新位置接着寻死");
+    }
+
     private StepDecision decide(String paramsJson, Permissions permissions, List<String> answers) {
         ParseResult parsed = module.spec().paramSpecs().parse(JsonParser.parseString(paramsJson).getAsJsonObject());
         assertTrue(parsed.ok(), "参数应能解析：" + parsed.errors());

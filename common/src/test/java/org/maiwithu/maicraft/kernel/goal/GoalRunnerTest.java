@@ -4,7 +4,9 @@ package org.maiwithu.maicraft.kernel.goal;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.ScriptedGoalTask;
+import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.SharedTasks;
 import org.maiwithu.maicraft.kernel.goal.GoalTestAbility.TestInput;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
@@ -810,5 +812,54 @@ class GoalRunnerTest {
 
         assertEquals(TaskResult.Status.CANCELLED,
                 assertInstanceOf(TickResult.Finished.class, runner.tick(TICK0)).result().status());
+    }
+
+    @Test
+    void survivalOffAbilityBlocksNeedsBeforeFirstTickAndFollowsChildOnceRunning() {
+        // 第 59 场 21:51 回归：寻死目标刚下达、第 0 刻还没建出子任务时，就已经关掉全部生存需求；
+        // 子任务跑起来后（如重生后穿回护甲阶段拨成 false）听子任务自己说的恢复。
+        GoalTestAbility ability = new GoalTestAbility("maicraft:suicide");
+        ability.moduleSurvivalOff = true;
+        ability.shared().keepRunning("寻死");
+        ability.next(new StepDecision.Run(new TestInput("寻死")));
+        GoalRunner runner = launch(Goal.of("maicraft:suicide", null, null), ability,
+                new InMemoryGoalRunStore(), new TestMemory());
+
+        assertTrue(runner.survivalNeedsOff(), "还没 start/tick 时就已经关掉生存需求，不让吃饭抢先插队");
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        ScriptedGoalTask running = ability.shared().created.get("寻死");
+        running.needsOff = true;
+        assertTrue(runner.survivalNeedsOff());
+        running.needsOff = false;
+        assertFalse(runner.survivalNeedsOff(), "子任务进入重生穿回阶段后恢复生存需求");
+    }
+
+    @Test
+    void sequenceInheritsOuterRoutineOffAndDelegatesResumesAnywhereToCurrentStep() {
+        // sequence 外层写了 survival_needs=off 时，子步骤没重复写也保持关闭起居打断；
+        // 当前步骤是在哪做都一样的能力时，整条 sequence 也允许在撤离后的新位置接着推进。
+        SharedTasks shared = new SharedTasks();
+        GoalTestAbility seq = new GoalTestAbility("maicraft:sequence", shared);
+        GoalTestAbility travel = new GoalTestAbility("maicraft:travel", shared);
+        travel.anywhere = true;
+        shared.keepRunning("赶路");
+        travel.next(new StepDecision.Run(new TestInput("赶路")));
+        TaskFactories factories = new TaskFactories();
+        AbilityRegistry registry = new AbilityRegistry(factories);
+        registry.register(seq);
+        registry.register(travel);
+        Permissions outerOff = Permissions.DEFAULT.mergedWith(null, null, null, null, Permissions.SurvivalNeeds.OFF, null);
+        Goal step = Goal.of("maicraft:travel", null, null);
+        Goal outer = new Goal("maicraft:sequence", null, null, ParamValues.EMPTY, outerOff, List.of(step), null);
+
+        GoalRunner runner = GoalRunner.launch(outer, registry, new InMemoryGoalRunStore(), new TestMemory());
+        assertTrue(runner.routineNeedsOff(), "启动前外层 off 生效");
+        assertTrue(runner.resumesAnywhere(), "第 0 步是 travel，两步之间也能从新位置续上");
+
+        runner.start(TICK0);
+        runner.tick(new GoalTestTick(101));
+        assertTrue(runner.routineNeedsOff(), "进入未重复设 off 的子步骤后，外层 off 依然保持生效");
+        assertTrue(runner.resumesAnywhere(), "子步骤运行期间同样委托当前步骤的 resumesAnywhere");
     }
 }

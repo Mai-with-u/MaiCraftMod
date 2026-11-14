@@ -5,7 +5,6 @@ import org.maiwithu.maicraft.game.player.DeathFacts;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
-import org.maiwithu.maicraft.kernel.child.ChildTaskRunner;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.CloseReason;
@@ -66,6 +65,11 @@ public final class ControlLoop {
 
     /** 手上的任务连着停下不安全多久（刻），不急的需求才叫它先到安全的地方：两秒，一会儿就过去的不打扰。 */
     static final long ASK_SAFE_STOP_AFTER_TICKS = 40;
+    /**
+     * 不要起居打断的主任务刚结束或取消后，给上层思考下一条指令留出的交接窗口（刻）：二十秒内不在目标间隙抢着发起备床、弄吃的，
+     * 免得下一条不许起居打断的目标一到又当场中止；新目标允许起居打断或窗口到期后立即恢复。
+     */
+    static final long ROUTINE_OFF_HANDOFF_TICKS = 20L * 20;
 
     /** 插一下最多排几件：再多就是一口气下得太多，前面的还没做完。 */
     public static final int CUT_IN_QUEUE = CutIns.MAX_QUEUED;
@@ -81,10 +85,14 @@ public final class ControlLoop {
     private boolean waitingRespawn;
     /** 上一刻看到的重生次数；还没看过为 -1。 */
     private long seenRespawns = -1;
+    /** 最近一次推进看到的游戏刻，取消主任务计算交接窗口用。 */
+    private long lastGameTick = Long.MIN_VALUE;
+    /** 不要起居打断的主任务刚收尾后暂缓起居打断到哪一刻；未处于交接窗口时为 Long.MIN_VALUE。 */
+    private long routineOffHoldUntil = Long.MIN_VALUE;
     /** 主任务被停在半路时的一句话说明；没被停过为 null。 */
     private String parkedWhere;
     /** 从底到顶的运行栈；最底是主任务，上面是插进来的临时任务。只在客户端线程读写。 */
-    private final List<Frame> stack = new ArrayList<>();
+    private final List<LoopFrame> stack = new ArrayList<>();
     /** 临时任务没做成的需求在等着再试：没到时间、处境也没更急就先不插。 */
     private final NeedRetries retries = new NeedRetries();
     /** 判断时抛过异常的需求；同一个需求的异常只记一次日志，免得每刻刷屏。 */
@@ -138,9 +146,11 @@ public final class ControlLoop {
      */
     public TaskResult setMainTask(Task task) {
         Objects.requireNonNull(task, "task");
-        TaskResult replaced = endMain(CloseReason.REPLACED);
+        TaskResult replaced = endMain(CloseReason.REPLACED, false);
+        // 新主任务已经接手，旧主任务留下的起居交接窗口作废，完全听新主任务自己的许可。
+        routineOffHoldUntil = Long.MIN_VALUE;
         rouseOccupying();
-        stack.add(0, new Frame(task, null, null));
+        stack.add(0, new LoopFrame(task, null, null));
         closeRoutineTempTasks();
         return replaced;
     }
@@ -155,7 +165,7 @@ public final class ControlLoop {
 
     /** 此刻在做（或被立刻的急事压着等恢复）的插一下；没有时为 null。查询端据此说清主目标为什么停了几秒。 */
     public Task cutInRunning() {
-        for (Frame frame : stack) {
+        for (LoopFrame frame : stack) {
             if (frame.from == cutIns) return frame.task;
         }
         return null;
@@ -163,10 +173,10 @@ public final class ControlLoop {
 
     /**
      * 结束主任务（LLM 取消、角色离开世界）：按给定原因收尾并返回它交代的结果；没有主任务时为 null。
-     * 已经插进来的临时任务不受影响。
+     * 已经插进来的临时任务不受影响。LLM 取消了一条不要起居打断的主任务时，同样留出交接窗口等下一条指令。
      */
     public TaskResult endMainTask(CloseReason reason) {
-        TaskResult ended = endMain(reason);
+        TaskResult ended = endMain(reason, reason == CloseReason.CANCELLED);
         rouseOccupying();
         return ended;
     }
@@ -177,7 +187,7 @@ public final class ControlLoop {
      */
     public void leaveWorld() {
         for (int i = stack.size() - 1; i >= 0; i--) {
-            Frame frame = stack.remove(i);
+            LoopFrame frame = stack.remove(i);
             if (frame.from != null) {
                 reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
             }
@@ -187,6 +197,8 @@ public final class ControlLoop {
         brokenNeeds.clear();
         parkedWhere = null;
         waitingRespawn = false;
+        lastGameTick = Long.MIN_VALUE;
+        routineOffHoldUntil = Long.MIN_VALUE;
     }
 
     /**
@@ -195,9 +207,9 @@ public final class ControlLoop {
      * 对眼前危险的反应（自卫、换气、脱险）不动，主任务干着活也不能不躲车、不还手。
      */
     private void closeRoutineTempTasks() {
-        if (!routineNeedsOff()) return;
+        if (!mainRoutineNeedsOff()) return;
         for (int i = stack.size() - 1; i > 0; i--) {
-            Frame frame = stack.get(i);
+            LoopFrame frame = stack.get(i);
             if (frame.from != null && frame.from.routine()) {
                 stack.remove(i);
                 LOG.info("{}收场：主任务不要起居打断", frame.task.describe());
@@ -209,7 +221,7 @@ public final class ControlLoop {
     // 换了主任务或取消旧目标：压着的临时任务里若有人声明能被新指令叫起（正睡着等天亮这类），
     // 叫它起身让出身体。它随后以没做完收场，自己的需求照"没做成"先缓一阵，新主任务才动得起来。
     private void rouseOccupying() {
-        for (Frame frame : stack) {
+        for (LoopFrame frame : stack) {
             if (frame.from != null && frame.task instanceof WakesForNewOrders rouse
                     && rouse.wakeForNewOrders()) {
                 LOG.info("{}被新指令叫醒，起身让出身体", frame.task.describe());
@@ -220,16 +232,27 @@ public final class ControlLoop {
     // 主任务自己声明不要生存需求（寻死这类明确的事）：一个生存需求都不插，临时任务也不建，不在打断规则里开后门。
     private boolean allSurvivalNeedsOff() {
         if (stack.isEmpty()) return false;
-        Frame bottom = stack.get(0);
+        LoopFrame bottom = stack.get(0);
         return bottom.from == null && bottom.task instanceof SurvivalNeedsOff off && off.survivalNeedsOff();
     }
 
-    // 主任务的许可写了 survival_needs=off：起居类的生存需求（吃饭、睡觉、补光、捡回遗物）不插队，
-    // 角色能把手里的一件事干完；对眼前危险的反应（自卫、换气、脱险）照插，不干活干到淹死。
-    private boolean routineNeedsOff() {
+    // 栈底主任务此刻是否声明不要起居打断；声明过就记在栈帧上，供主任务结束那刻开启交接窗口。
+    private boolean mainRoutineNeedsOff() {
         if (stack.isEmpty()) return false;
-        Frame bottom = stack.get(0);
-        return bottom.from == null && bottom.task instanceof RoutineNeedsOff off && off.routineNeedsOff();
+        LoopFrame bottom = stack.get(0);
+        if (bottom.from != null) return false;
+        boolean offNow = bottom.task instanceof RoutineNeedsOff off && off.routineNeedsOff();
+        if (offNow) bottom.hadRoutineNeedsOff = true;
+        return offNow;
+    }
+
+    // 此刻起居类的生存需求（吃饭、睡觉、备床、补光、捡回遗物）要不要压住：
+    // 主任务声明了 survival_needs=off，或刚结束一条这样的主任务、还在等上层下达下一步的交接窗口内时都不插队；
+    // 对眼前危险的反应（自卫、换气、脱险）照插，不干活干到淹死。
+    private boolean routineNeedsOff(long gameTick) {
+        if (mainRoutineNeedsOff()) return true;
+        if (!stack.isEmpty() && stack.get(0).from == null) return false;
+        return routineOffHoldUntil != Long.MIN_VALUE && gameTick < routineOffHoldUntil;
     }
 
     // 这个需求此刻参不参与挑选：全关时生存需求都不参与；只关起居类时，眼前危险的反应照常参与。
@@ -241,7 +264,7 @@ public final class ControlLoop {
 
     // 没走到结局就被收场（角色不在了、新主任务不要起居打断）的临时任务也发一条结束事件：
     // 开始那条已经发过，缺了这条，读事件流的一方分不清身体已经交还还是还在被占着。
-    private void reportTempClosedEarly(Frame frame, TaskResult result, String why) {
+    private void reportTempClosedEarly(LoopFrame frame, TaskResult result, String why) {
         if (!frame.from.announcesTempTask()) return;
         events.publish(TaskEvent.Kind.TEMPORARY_TASK_FINISHED,
                 why + "，" + frame.task.describe() + "收场：" + result.summary());
@@ -262,14 +285,14 @@ public final class ControlLoop {
         if (stack.isEmpty()) {
             return null;
         }
-        Frame topFrame = stack.getLast();
+        LoopFrame topFrame = stack.getLast();
         return topFrame.from == null || topFrame.from == cutIns ? null : topFrame.task;
     }
 
     /** 运行栈每一层此刻的样子，从下往上（最底是主任务，最上是此刻在推进的）：给调试面板看角色听谁的。 */
     public List<Layer> layers() {
         List<Layer> layers = new ArrayList<>(stack.size());
-        for (Frame frame : stack) {
+        for (LoopFrame frame : stack) {
             layers.add(new Layer(frame.task, frame.from == null ? null : frame.from.name(), frame.urgency, frame.paused));
         }
         return List.copyOf(layers);
@@ -309,6 +332,7 @@ public final class ControlLoop {
     public Decision tick(TickContext context) {
         askedInterruptibility = null;
         heldBackNeed = null;
+        lastGameTick = context.gameTick();
         // 角色死了（血量见底、死亡界面）循环就停摆：不再插生存需求的临时任务、不推进任务，
         // 也不把死亡当成"处境不急"继续谎报。重生后（角色对象换掉、活着）从这里自然恢复。
         PlayerContext player = context.player();
@@ -337,11 +361,11 @@ public final class ControlLoop {
             Choice choice = choose(context, Interruptibility.BETWEEN_ACTIONS, null, null);
             return choice.chosen == null ? Decision.IDLE : takeOver(choice, context, null);
         }
-        Frame current = top();
+        LoopFrame current = top();
         // 主任务被停在了半路：只等生存需求先救命，活不接着干；建不出救命任务就继续停着。
         if (current.paused) {
             boolean allOff = allSurvivalNeedsOff();
-            boolean routineOff = routineNeedsOff();
+            boolean routineOff = routineNeedsOff(context.gameTick());
             for (SurvivalNeed need : needs) {
                 if (excluded(need, allOff, routineOff)) continue;
                 if (hasLiveTask(need)) continue;
@@ -356,7 +380,7 @@ public final class ControlLoop {
                     retries.failed(need, urgency, context.gameTick(), "创建临时任务时程序出错：" + exception.getClass().getSimpleName());
                     continue;
                 }
-                stack.add(new Frame(rescue, need, urgency));
+                stack.add(new LoopFrame(rescue, need, urgency));
                 return advance(top(), context, null);
             }
             return new Decision.Parked(current.task, parkedWhere == null ? "位置不明" : parkedWhere);
@@ -383,7 +407,7 @@ public final class ControlLoop {
 
     // 不急的需求只因为手上的任务一直停下不安全才插不进来：叫它先到安全的地方再停，停稳了下一刻需求就插得进来。
     // 正在等着再试的需求不算（它本来就插不进来，不值得为它落地）；需求没了或缓成 LATER，就叫它照原样接着做。
-    private void windDownFor(Frame current, Choice choice, TickContext context) {
+    private void windDownFor(LoopFrame current, Choice choice, TickContext context) {
         // 插一下不值得叫手上的事先落地、刹停：等不到空当它自己 3 秒后收场。
         boolean wanted = choice.deferred != null && choice.deferredUrgency == Urgency.SOON
                 && choice.deferred != cutIns && !retries.has(choice.deferred);
@@ -424,7 +448,7 @@ public final class ControlLoop {
     // 角色没了：插着的临时任务按"角色不在了"收尾弹出，主任务停手（不收尾）。
     private void endTempTasks() {
         for (int i = stack.size() - 1; i >= 0; i--) {
-            Frame frame = stack.get(i);
+            LoopFrame frame = stack.get(i);
             if (frame.from != null) {
                 stack.remove(i);
                 reportTempClosedEarly(frame, frame.close(CloseReason.PLAYER_GONE), "角色不在了");
@@ -469,10 +493,10 @@ public final class ControlLoop {
      * 按打断规则挑出这一刻最急又能插进来的需求，同时记下最急的那个被按住的需求。
      * 手上是临时任务时，排在它后面的需求不参与（见 {@link #outranks}）。
      */
-    private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask, Frame top) {
+    private Choice choose(TickContext context, Interruptibility interruptibility, Task currentTask, LoopFrame top) {
         Choice choice = new Choice();
         boolean allOff = allSurvivalNeedsOff();
-        boolean routineOff = routineNeedsOff();
+        boolean routineOff = routineNeedsOff(context.gameTick());
         for (SurvivalNeed need : needs) {
             if (excluded(need, allOff, routineOff)) continue;
             if (hasLiveTask(need)) continue;
@@ -505,7 +529,7 @@ public final class ControlLoop {
      *
      * @param interrupted 被打断的那一层；手上没有任务时为 null
      */
-    private Decision takeOver(Choice choice, TickContext context, Frame interrupted) {
+    private Decision takeOver(Choice choice, TickContext context, LoopFrame interrupted) {
         Task task;
         try {
             task = choice.chosen.createTask(context);
@@ -525,12 +549,12 @@ public final class ControlLoop {
             interrupted.stopAsked = false;
             interrupted.pause();
         }
-        stack.add(new Frame(task, choice.chosen, choice.urgency));
+        stack.add(new LoopFrame(task, choice.chosen, choice.urgency));
         return advance(top(), context, null);
     }
 
     /** 推进这一层一刻（第一次推进时先 start）；它若走到结局就弹出，临时任务没做成时它的需求先缓一阵。 */
-    private Decision advance(Frame frame, TickContext context, SurvivalNeed deferred) {
+    private Decision advance(LoopFrame frame, TickContext context, SurvivalNeed deferred) {
         // 换了一件事做：先让上一件留下的界面关上，新的这件再动手。
         if (frame.task != lastAdvanced) {
             if (lastAdvanced != null) onSwitch.accept(context);
@@ -556,6 +580,9 @@ public final class ControlLoop {
         }
         LOG.info("任务结束：{}（{}）", frame.task.describe(), finished.result().summary());
         stack.remove(frame);
+        if (frame.from == null && frame.hadRoutineNeedsOff) {
+            routineOffHoldUntil = context.gameTick() + ROUTINE_OFF_HANDOFF_TICKS;
+        }
         // 收场事件统一在这里发，与开始那条成对：观察者才确认得了身体什么时候被借走、什么时候还回来。
         // 任务能给更具体的收场说明（夜里自己去睡了一觉、自卫的战况）就用它的；给不出就用结果的结论句。
         if (frame.from != null && frame.from.announcesTempTask()) {
@@ -596,18 +623,21 @@ public final class ControlLoop {
     }
 
     /** 收尾主任务并移出栈底；主任务还没被推进过时也按同样的原因收尾，让它交代结果。 */
-    private TaskResult endMain(CloseReason reason) {
+    private TaskResult endMain(CloseReason reason, boolean keepRoutineHold) {
         if (stack.isEmpty() || stack.get(0).from != null) {
             return null;
         }
-        Frame bottom = stack.remove(0);
+        LoopFrame bottom = stack.remove(0);
+        if (keepRoutineHold && bottom.hadRoutineNeedsOff && lastGameTick != Long.MIN_VALUE) {
+            routineOffHoldUntil = lastGameTick + ROUTINE_OFF_HANDOFF_TICKS;
+        }
         LOG.info("主任务结束（{}）：{}", reason, bottom.task.describe());
         return bottom.close(reason);
     }
 
     // 手上是临时任务时，这个需求能不能抢它：更急的能；同样急的只有登记在前面的能（自卫排在夜晚前面）；更缓的不能。
     // 手上是主任务或没有任务时都能（照打断规则）。
-    private boolean outranks(SurvivalNeed need, Urgency urgency, Frame top) {
+    private boolean outranks(SurvivalNeed need, Urgency urgency, LoopFrame top) {
         if (top == null || top.from == null) return true;
         // 插一下最多十几秒：只让立刻要处理的急事打断，尽快、找空当的等它做完。
         if (top.from == cutIns) return urgency == Urgency.NOW;
@@ -635,7 +665,7 @@ public final class ControlLoop {
         return result.problem() != null && result.problem().kind() == Problem.Kind.INTERNAL_ERROR;
     }
 
-    private Frame top() {
+    private LoopFrame top() {
         return stack.get(stack.size() - 1);
     }
 
@@ -650,59 +680,6 @@ public final class ControlLoop {
         Urgency urgency;
         SurvivalNeed deferred;
         Urgency deferredUrgency;
-    }
-
-    /** 栈里的一层：一个任务、推进它的子任务运行器、它来自哪个生存需求（主任务为 null）与插进来时多急。 */
-    private static final class Frame {
-        final Task task;
-        final ChildTaskRunner runner = new ChildTaskRunner(ChildTaskRunner.NO_LIMIT);
-        final SurvivalNeed from;
-        final Urgency urgency;
-        boolean started;
-        /** 主任务被临时任务留在了半路：不能再推进，等 LLM 明确换任务或解除暂停。 */
-        boolean paused;
-        /** 为了让不急的需求插进来，已经叫它先到安全的地方再停。 */
-        boolean stopAsked;
-        /** 从哪一刻起一直停下不安全；此刻能停为 Long.MIN_VALUE。 */
-        long unsafeSince = Long.MIN_VALUE;
-
-        Frame(Task task, SurvivalNeed from, Urgency urgency) {
-            this.task = Objects.requireNonNull(task, "task");
-            this.from = from;
-            this.urgency = urgency;
-        }
-
-        /** 被打断：推进过的经子任务运行器转发暂停，还没推进过的直接告诉任务。 */
-        void pause() {
-            if (started) {
-                runner.pause();
-            } else {
-                task.pause();
-            }
-        }
-
-        /** 先到安全的地方再停：只有推进过的任务才可能停下不安全，还没推进过的现在就能停。 */
-        boolean stopSafely() {
-            return started && runner.stopSafely();
-        }
-
-        /** 此刻能不能打断：推进过的问子任务运行器，还没推进过的直接问任务自己。 */
-        Interruptibility interruptibility(TickContext context) {
-            return started ? runner.interruptibility(context) : task.interruptibility(context);
-        }
-
-        /** 按原因收尾并拿结果：推进过的经子任务运行器收尾，还没推进过的直接让任务交代。 */
-        TaskResult close(CloseReason reason) {
-            if (started) {
-                return runner.finished() ? runner.result() : runner.close(reason);
-            }
-            try {
-                return task.close(reason);
-            } catch (RuntimeException exception) {
-                LOG.warn("还没开始的任务收尾时出错：{}", task.describe(), exception);
-                return TaskResult.cancelled("任务还没开始就结束了：" + reason);
-            }
-        }
     }
 
     /**

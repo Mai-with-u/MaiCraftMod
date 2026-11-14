@@ -172,6 +172,16 @@ public final class SuicideModule implements AbilityModule {
         return new StepDecision.Finish(TaskResult.failed("不寻死：" + message, Problem.of(kind, message, suggestion)));
     }
 
+    @Override public boolean survivalNeedsOff() {
+        // 寻死目标从下达的第 0 刻起就不插任何生存需求，不在启动前被吃饭或自卫抢走身体。
+        return true;
+    }
+
+    @Override public boolean resumesAnywhere() {
+        // 被打断带离原地后照样能在新位置找死法或发命令，不用停在半路等指令。
+        return true;
+    }
+
     @Override public void registerTasks(TaskFactories factories) {
         factories.register(SuicideInput.class,
                 input -> new SuicideTask(input, player, worlds.apply(input.permissions()), moves, gear, commands));

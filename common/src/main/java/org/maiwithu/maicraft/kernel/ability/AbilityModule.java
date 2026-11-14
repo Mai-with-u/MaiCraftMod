@@ -56,6 +56,14 @@ public interface AbilityModule {
         return false;
     }
 
+    /**
+     * 这个能力跑作主目标时，是不是从头到尾都不让任何生存需求插队（寻死这类明确要去死的事）：
+     * 在第 0 刻还没建出具体任务之前也照此拦住，不让吃饭或自卫在目标启动前抢先插进来。默认不关。
+     */
+    default boolean survivalNeedsOff() {
+        return false;
+    }
+
     /** 本能力的特殊处理；绝大多数能力用不到。 */
     default AbilityHooks hooks() {
         return AbilityHooks.NONE;

@@ -210,6 +210,12 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
                 .findFirst();
     }
 
+    @Override
+    public boolean resumesAnywhere() {
+        // 穿卸随身装备不挑地点，被自卫撤离后接着完成剩余栏位。
+        return true;
+    }
+
     /** 没卸下来、仍穿着的栏位；只有卸下且部分完成时非空。 */
     record EquipDetails(List<String> stillWorn) implements ResultDetails {
         public EquipDetails {

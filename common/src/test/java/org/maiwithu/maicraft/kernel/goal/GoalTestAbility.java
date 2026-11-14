@@ -161,6 +161,8 @@ final class GoalTestAbility implements AbilityModule {
     AbilityHooks hooks = AbilityHooks.NONE;
     /** 这个替身能力在哪做都一样（像去某地、拿东西）；默认守着原地。 */
     boolean anywhere;
+    /** 这个替身能力从第 0 刻起就关掉全部生存需求（像寻死）；默认不关。 */
+    boolean moduleSurvivalOff;
     /** 这个替身能力的执行方式；默认控制角色、替换主目标，拨成插一下时不替换主目标。 */
     ExecutionMode mode = ExecutionMode.CONTROLS_PLAYER;
     /** 按这一次的目标答执行方式；默认就是声明的那一种，拨了就像 chat 那样按参数分。 */
@@ -214,6 +216,10 @@ final class GoalTestAbility implements AbilityModule {
 
     @Override public boolean resumesAnywhere() {
         return anywhere;
+    }
+
+    @Override public boolean survivalNeedsOff() {
+        return moduleSurvivalOff;
     }
 
     /** 已启动的任务输入，按顺序。 */

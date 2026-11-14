@@ -628,6 +628,11 @@ final class SuicideTask extends PhasedTask<SuicideTask.Phase> implements Surviva
         return !died && !windDown && phase() != Phase.RE_EQUIP;
     }
 
+    @Override public boolean resumesAnywhere() {
+        // 被临时任务带离原地后从新位置接着找死法或穿回护甲，不用停在半路等指令。
+        return true;
+    }
+
     @Override protected String describePhase(Phase value) {
         return switch (value) {
             case COMMAND -> "发寻死命令";

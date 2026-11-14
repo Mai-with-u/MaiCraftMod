@@ -78,6 +78,12 @@ public final class FollowModule implements AbilityModule {
     }
 
     @Override
+    public boolean resumesAnywhere() {
+        // 跟随目标本来就是追着对象走，自卫撤离后从当前位置继续跟上，不停在原地。
+        return true;
+    }
+
+    @Override
     public void registerTasks(TaskFactories factories) {
         factories.register(FollowInput.class, input -> new FollowTask(input, view, moves, walks, events));
     }

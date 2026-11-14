@@ -178,8 +178,33 @@ public final class EatsCarriedFood implements EatSoonTask.FoodMoves {
             heldBefore = held.copy();
             biting = new SustainedUse(InteractionHand.MAIN_HAND,
                     InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, heldBefore),
-                    projection, 0, FirstPersonScene::of);
+                    projection, holdTicks(), FirstPersonScene::of);
             return ActionStatus.running();
+        }
+
+        // 按食物组件的进食秒数加两秒余量定按住上限；读不到组件时保底三秒，不传无上限让角色无限按住空转。
+        private int holdTicks() {
+            int eatTicks = foods.of(food)
+                    .map(value -> (int) Math.ceil(value.eatSeconds() * 20) + 40)
+                    .orElse(60);
+            return Math.max(60, eatTicks);
+        }
+
+        // 被自卫等更急的临时任务打断：把换手或按住一并暂停，交还按住投影，恢复后再按现场续吃或重挑。
+        @Override
+        public void pause() {
+            if (moving != null) moving.pause();
+            if (biting != null) {
+                if (projection != null) projection.release(biting);
+                biting.pause();
+            }
+        }
+
+        // 任务收尾：子动作一并收尾，交还投影并松开使用键，不留悬挂确认。
+        @Override
+        public void close() {
+            if (moving != null) moving.close();
+            if (biting != null) biting.close();
         }
 
         // 换手做成了主手却还不是它：可能被别的流程动了手，这一口如实失败，由吃饭任务决定要不要再试。

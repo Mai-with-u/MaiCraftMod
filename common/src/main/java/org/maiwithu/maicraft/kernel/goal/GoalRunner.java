@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -80,16 +81,21 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
     /** 先到安全的地方再暂停或取消的收尾：手上的任务停下不安全时，收尾到它停稳再停。 */
     private final GoalWindDown windDown = new GoalWindDown();
 
-    // 全关是寻死这类任务自己声明的；许可 survival_needs=off 走 routineNeedsOff 只停起居类。都在目标跑着时才关，sequence 按那一步。
+    // 全关是寻死这类能力或任务自己声明的：子任务跑起来后听子任务按阶段说的（重生穿回护甲时恢复），还没建出子任务的第 0 刻先按能力声明拦住。
+    // 许可 survival_needs=off 走 routineNeedsOff 只停起居类；sequence 外层写了 off 时覆盖它包含的每一步。
     @Override public boolean survivalNeedsOff() {
         if (run.state() != GoalRunState.RUNNING) return false;
-        return stepRunner != null ? stepRunner.survivalNeedsOff()
-                : child != null && !child.finished() && child.running() instanceof SurvivalNeedsOff own && own.survivalNeedsOff();
+        if (stepRunner != null) return stepRunner.survivalNeedsOff();
+        if (child != null && !child.finished()) {
+            return child.running() instanceof SurvivalNeedsOff own && own.survivalNeedsOff();
+        }
+        return currentAbilitySays(AbilityModule::survivalNeedsOff);
     }
 
     @Override public boolean routineNeedsOff() {
-        return run.state() == GoalRunState.RUNNING && (stepRunner != null ? stepRunner.routineNeedsOff()
-                : goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF);
+        return run.state() == GoalRunState.RUNNING
+                && (goal.permissions().survivalNeeds() == Permissions.SurvivalNeeds.OFF
+                        || stepRunner != null && stepRunner.routineNeedsOff());
     }
 
     /** 生存需求的临时任务在这条目标身上做成的事（顺手插的火把、垫的料）：它自己的结果没有别人再看，变化与没能确认的交互记到这里，目标收尾时随最终结果一起交代。 */
@@ -386,10 +392,26 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         return running == null ? this : running.activeTask();
     }
 
-    // 能不能在新地点接着做：能力说在哪做都一样（去某地、拿东西）就能，两件事之间也一样；别的看手上正在做的那一步。
+    // 能不能在新地点接着做：sequence 委托当前那一步；普通目标看能力声明（去某地、拿东西、寻死、跟随、探索、吃穿）或正在跑的子任务。
     @Override public boolean resumesAnywhere() {
-        return goal.steps().isEmpty() && registry.find(goal.ability()).map(AbilityModule::resumesAnywhere).orElse(false)
+        if (stepRunner != null) {
+            return stepRunner.resumesAnywhere();
+        }
+        return currentAbilitySays(AbilityModule::resumesAnywhere)
                 || child != null && !child.finished() && child.resumesAnywhere();
+    }
+
+    // 查当前要跑的能力模块（普通目标是本目标的能力，sequence 两步之间是当前步骤的能力）是否满足给定特征。
+    private boolean currentAbilitySays(Predicate<AbilityModule> check) {
+        String abilityId;
+        if (goal.steps().isEmpty()) {
+            abilityId = goal.ability();
+        } else if (run.stepIndex() >= 0 && run.stepIndex() < goal.steps().size()) {
+            abilityId = goal.steps().get(run.stepIndex()).ability();
+        } else {
+            return false;
+        }
+        return registry.find(abilityId).map(check::test).orElse(false);
     }
 
     @Override public TaskResult finishWithoutControl(TickContext context) {

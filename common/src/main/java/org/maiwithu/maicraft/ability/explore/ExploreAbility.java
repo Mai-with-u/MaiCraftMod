@@ -290,6 +290,12 @@ public final class ExploreAbility implements AbilityModule {
     }
 
     @Override
+    public boolean resumesAnywhere() {
+        // 探索与钻洞在被自卫撤离后从当前位置接着往前探，不用停在原地等指令。
+        return true;
+    }
+
+    @Override
     public void registerTasks(TaskFactories factories) {
         // 钻洞交给钻洞任务：转头看一圈、量路、看矿都在里面；其余目标照旧跑图。
         factories.register(ExploreInput.class, input -> input.objective().target() == ExploreObjective.Kind.CAVE

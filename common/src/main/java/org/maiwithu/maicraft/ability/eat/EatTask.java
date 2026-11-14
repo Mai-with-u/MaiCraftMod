@@ -218,6 +218,12 @@ final class EatTask extends PhasedTask<EatTask.Phase> {
         return total;
     }
 
+    @Override
+    public boolean resumesAnywhere() {
+        // 吃随身食物不挑地点，被自卫撤离后在新位置接着吃。
+        return true;
+    }
+
     /** 吃出来的状态效果；没效果为空列表。 */
     record EatDetails(List<String> effectsGained) implements ResultDetails {
         public EatDetails {

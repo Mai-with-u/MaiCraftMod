@@ -674,6 +674,54 @@ class ControlLoopTest {
         assertFalse(bed.closed, "全关不收场在跑的临时任务，只关以后的插入");
     }
 
+    @Test
+    void routineOffHandoffGapSuppressesBedPrepBetweenConsecutiveGoals() {
+        // 第 65 场回归：连续下达 survival_needs=off 目标时，上一条刚结束到下一条送达之间的十来秒思考间隙里，
+        // 不再抢着发起夜晚备床又被下一条目标秒中止；眼前危险（自卫）照常插，换普通目标或超 20 秒无新指令则恢复。
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON,
+                () -> new FakeTask("备床临时", Interruptibility.WORKING));
+        FakeNeed defense = new FakeNeed("自卫", new Urgency[] {null, Urgency.NOW, null, null, null},
+                () -> new FakeTask("自卫临时", Interruptibility.WORKING).finishingAfter(1)) {
+            @Override public boolean reactsToImmediateDanger() {
+                return true;
+            }
+        };
+        ControlLoop loop = new ControlLoop(List.of(defense, night));
+        loop.setMainTask(new RoutineOffTask(Interruptibility.BETWEEN_ACTIONS).finishingAfter(1));
+
+        // 第 100 刻：off 主任务一步做完，开启 400 刻交接窗口。
+        assertEquals(TaskResult.Status.DONE, assertAdvanced(loop.tick(new TestContext(100))).finished().status());
+        // 第 200 刻（间隙第 5 秒）：自卫照常响应，夜晚备床不发起。
+        assertEquals("自卫", assertAdvanced(loop.tick(new TestContext(200))).interrupting().name());
+        assertEquals(0, night.created, "交接窗口内不抢着发起备床");
+        // 第 350 刻（间隙第 12.5 秒）：依然不发起备床。
+        assertSame(ControlLoop.Decision.IDLE, loop.tick(new TestContext(350)));
+        assertEquals(0, night.created, "12.5 秒内仍等下一条指令，0 次白发起备床");
+
+        // 第 500 刻（满 20 秒仍无新指令）：自动放开，夜晚备床正常发起。
+        assertAdvancedIsTempTask(loop.tick(new TestContext(100 + ControlLoop.ROUTINE_OFF_HANDOFF_TICKS)), "夜晚");
+        assertEquals(1, night.created, "超过交接窗口没人派活，起居需求自动恢复");
+    }
+
+    @Test
+    void cancellingRoutineOffMainKeepsHandoffGapUntilNormalGoalLiftsIt() {
+        // LLM 先取消旧的 off 目标再下新目标：取消后的几秒间隙内同样不抢着备床；若新目标是普通目标则当刻放开。
+        FakeNeed night = FakeNeed.always("夜晚", Urgency.SOON,
+                () -> new FakeTask("备床临时", Interruptibility.WORKING));
+        ControlLoop loop = new ControlLoop(List.of(night));
+        loop.setMainTask(new RoutineOffTask(Interruptibility.WORKING));
+        loop.tick(new TestContext(50));
+
+        loop.endMainTask(CloseReason.CANCELLED);
+        assertSame(ControlLoop.Decision.IDLE, loop.tick(new TestContext(120)));
+        assertEquals(0, night.created, "取消 off 目标后的换活间隙内不抢着发起备床");
+
+        // 新下达普通主目标（允许起居需求）：交接窗口当刻解除，备床正常插队。
+        loop.setMainTask(new FakeTask("闲逛", Interruptibility.BETWEEN_ACTIONS));
+        assertAdvancedIsTempTask(loop.tick(new TestContext(130)), "夜晚");
+        assertEquals(1, night.created, "普通主目标一到立即恢复起居需求");
+    }
+
     /** 许可里写了 survival_needs=off 的目标外壳替身：只关起居类需求，眼前危险的反应照插。 */
     static final class RoutineOffTask extends FakeTask implements RoutineNeedsOff {
         RoutineOffTask(Interruptibility interruptibility) {

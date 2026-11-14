@@ -172,6 +172,12 @@ public final class EatModule implements AbilityModule {
         return stacks;
     }
 
+    @Override
+    public boolean resumesAnywhere() {
+        // 吃的是身上揣着的食物，被自卫带离原地后在新位置照吃不误。
+        return true;
+    }
+
     /** 直接结束的失败：问题种类写明是缺食物、时间不对，还是不支持。 */
     private StepDecision.Finish asFailure(Problem.Kind kind, String message) {
         return new StepDecision.Finish(TaskResult.failed("没有吃东西：" + message,

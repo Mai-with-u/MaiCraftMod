@@ -202,6 +202,12 @@ public final class EquipModule implements AbilityModule {
     }
 
     @Override
+    public boolean resumesAnywhere() {
+        // 穿卸的是自己身上的装备，被自卫撤离后在新位置照常穿卸。
+        return true;
+    }
+
+    @Override
     public void registerTasks(TaskFactories factories) {
         factories.register(EquipInput.class, input -> new EquipTask(input, equipment, space, gear));
     }

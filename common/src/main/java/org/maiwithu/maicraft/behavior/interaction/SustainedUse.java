@@ -43,6 +43,8 @@ public final class SustainedUse implements Action {
     private static final int MAX_AIM_ATTEMPTS = 2;
     /** 按住被原版松开后重新瞄准再点的次数上限；反复接不上说明现场留不住按住，如实收场。 */
     private static final int MAX_RESTARTS = 4;
+    /** 调用方未给按住上限时的保底上限（刻）：进食、喝药最多几秒，连按十五秒仍没结果说明使用已失效，不空转卡死。 */
+    static final int UNBOUNDED_HOLD_SAFETY_TICKS = 20 * 15;
 
     /** 动作内部的进度：对格先瞄准 → 点下去等开始 → 按住并逐刻核对 → 松手等收尾。 */
     private enum Stage { AIMING, STARTING, HOLDING, RELEASING }
@@ -65,6 +67,7 @@ public final class SustainedUse implements Action {
     private int aimTicks;
     private int restarts;
     private int heldTicks;
+    private boolean sawUsingItem;
     private String releaseReason = "";
     private InteractionResult result;
     private PlayerContext lastContext;
@@ -194,6 +197,7 @@ public final class SustainedUse implements Action {
             result = InteractionResult.applied("手持" + describeHeld() + "一按就做成了");
             return ActionStatus.done();
         }
+        sawUsingItem = player.usingItem();
         stage = Stage.HOLDING;
         return ActionStatus.progressed();
     }
@@ -232,9 +236,20 @@ public final class SustainedUse implements Action {
         };
     }
 
-    // 按住期间每刻做几件事：续投影让原版继续看到"按住"，镜头被带偏就转回来，核对做成没有，
-    // 对格按住再看目标格还在不在、这次使用还归不归本动作管、按住有没有到期。
+    // 按住期间每刻做几件事：先核对归属是否还在本动作名下，再续投影让原版继续看到"按住"、转回偏掉的镜头、
+    // 核对做成没有；中途被原版或打断松开时按现场续按或收场，按住到期同样松手收尾。
     private ActionStatus holdAndWatch(PlayerContext player) {
+        // 归属不再成立（例如被打断期间自卫挥剑换走了主手并接管交互）：必须在核对 done 之前退出，
+        // 否则"主手已不是原食物"会被误认成吃完了，再去调 releaseUsingItem 就会因归属不符抛异常。
+        if (!player.interactionSender().ownsItemUse(pending)) {
+            if (projection != null) projection.release(this);
+            result = InteractionResult.unexpected(
+                    "手持" + describeHeld() + "的持续使用不再归本动作管，已松手");
+            return ActionStatus.failed(new Problem(Problem.Kind.STUCK, result.scene(), null));
+        }
+        if (player.usingItem()) {
+            sawUsingItem = true;
+        }
         if (projection != null) {
             projection.renew(this, player, pending, hand, heldAtSubmission);
         }
@@ -252,32 +267,47 @@ public final class SustainedUse implements Action {
             return ActionStatus.failed(new Problem(Problem.Kind.TARGET_GONE,
                     "目标格 " + targetCell.toShortString() + " 在按住时空了，已松手", null));
         }
-        // 原版把按住松开了（视线移开、使用到期、被打断）而还没做成：重新瞄准再点，真人就是这么续的。
-        if (targetCell != null && !player.usingItem()) {
-            if (++restarts > MAX_RESTARTS) {
-                if (projection != null) projection.release(this);
-                result = InteractionResult.unconfirmed("对 " + targetCell.toShortString()
-                        + " 按住了 " + restarts + " 轮还没做成，不再接着按");
-                return ActionStatus.failed(new Problem(Problem.Kind.STUCK, result.scene(), null));
-            }
-            stage = Stage.AIMING;
-            aimPoint = null;
-            aimAttempts = 0;
-            aimTicks = 0;
-            return ActionStatus.progressed();
+        // 原版把按住松开了（视线移开、临时任务打断期间投影过期、被击退）而还没做成：重新点上或收场。
+        if (!player.usingItem() && (targetCell != null || sawUsingItem)) {
+            return targetCell != null ? restartAimedHold() : resumeOrStopBrokenItemHold(player);
         }
-        // 归属不再成立（确认记录被游戏收回或换了主人）时按住已无意义，松手并如实报告。
-        if (!player.interactionSender().ownsItemUse(pending)) {
-            if (projection != null) projection.release(this);
-            result = InteractionResult.unexpected(
-                    "手持" + describeHeld() + "的持续使用不再归本动作管，已松手");
-            return ActionStatus.failed(new Problem(Problem.Kind.STUCK, result.scene(), null));
-        }
-        if (maxHoldTicks > 0 && ++heldTicks >= maxHoldTicks) {
-            return release(player, "按住已到 " + maxHoldTicks + " 刻的上限");
+        int holdLimit = maxHoldTicks > 0 ? maxHoldTicks : UNBOUNDED_HOLD_SAFETY_TICKS;
+        if (++heldTicks >= holdLimit) {
+            return release(player, "按住已到 " + holdLimit + " 刻的上限");
         }
         // 持续使用本身就是进展：吃东西的每一刻都在少一口，不算原地打转。
         return ActionStatus.progressed();
+    }
+
+    // 对格按住中途断掉：未超重试上限就回到瞄准再点，超限如实按没做成收场。
+    private ActionStatus restartAimedHold() {
+        if (++restarts > MAX_RESTARTS) {
+            if (projection != null) projection.release(this);
+            result = InteractionResult.unconfirmed("对 " + targetCell.toShortString()
+                    + " 按住了 " + restarts + " 轮还没做成，不再接着按");
+            return ActionStatus.failed(new Problem(Problem.Kind.STUCK, result.scene(), null));
+        }
+        stage = Stage.AIMING;
+        aimPoint = null;
+        aimAttempts = 0;
+        aimTicks = 0;
+        return ActionStatus.progressed();
+    }
+
+    // 手持按住（如吃食物）被打断后原版已松手：手上还是原物品且未超重试上限就重新右键续上，否则交还投影按卡住收场，绝不原地空转。
+    private ActionStatus resumeOrStopBrokenItemHold(PlayerContext player) {
+        if (projection != null) projection.release(this);
+        ItemStack nowHeld = scenes.apply(player).heldItem(hand);
+        boolean sameItem = heldAtSubmission != null && !heldAtSubmission.isEmpty()
+                && nowHeld != null && ItemStack.isSameItemSameComponents(nowHeld, heldAtSubmission);
+        if (sameItem && ++restarts <= MAX_RESTARTS) {
+            pending = null;
+            sawUsingItem = false;
+            stage = Stage.STARTING;
+            return ActionStatus.progressed();
+        }
+        result = InteractionResult.unconfirmed("手持" + describeHeld() + "的持续使用中途断开了，没有做成");
+        return ActionStatus.failed(new Problem(Problem.Kind.STUCK, result.scene(), null));
     }
 
     // 按住期间镜头被带偏：先悄悄转回原瞄准点，原版射线还留在方块上就不用松手重来。转回来了返回真。
@@ -345,9 +375,10 @@ public final class SustainedUse implements Action {
         if (projection != null) {
             projection.release(this);
         }
-        // 本刻已经没有交互机会时发不了松开：投影已经交还，原版两刻内就看到松键，不硬发第二下。
+        // 本刻已经没有交互机会或归属已被别的动作接管时发不了松开：投影已经交还，原版两刻内就看到松键，不硬发第二下。
         if (stage == Stage.HOLDING && lastContext != null && lastContext.interactionSender() != null
-                && pending != null && lastContext.canInteractThisTick()) {
+                && pending != null && lastContext.canInteractThisTick()
+                && lastContext.interactionSender().ownsItemUse(pending)) {
             PendingInteraction released = lastContext.interactionSender().releaseUsingItem(lastContext, pending);
             // 松开没发出去（本刻不收）就不改结果：投影已交还，原版两刻内看到松键。
             if (released != null) {

@@ -11,6 +11,8 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.SharedConstants;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -345,5 +347,64 @@ class SustainedUseTest {
         assertTrue(status instanceof ActionStatus.Failed failed
                 && "TARGET_GONE".equals(failed.problem().kind().name()));
         assertTrue(rig.sender.submissions.isEmpty(), "目标没了不出手");
+    }
+
+    @Test
+    void lostOwnershipCheckedBeforeDoneSoSwappedWeaponDoesNotReleaseForeignPending() {
+        // 第 59 场 22:03 回归：吃饭按住腐肉途中被自卫打断，自卫换上铁剑并接管了交互发送器；
+        // 恢复时虽然"主手不再是原来的腐肉"让 done 返回 APPLIED，必须先认出归属已丢并退出，绝不能调 releaseUsingItem 抛异常。
+        Rig rig = Rig.create();
+        rig.scene.held = new ItemStack(Items.ROTTEN_FLESH, 6);
+        SustainedUse action = rig.action(context -> InteractionConfirmation.Verdict.APPLIED, 0);
+        // 第 1 刻提交后先设 using=true，模拟进入按住阶段。
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
+        rig.context.using = true;
+        rig.sender.nextStatus = PendingInteraction.Status.CONFIRMED_APPLIED;
+        rig.context.advance();
+        // startConfirmation 因 done=APPLIED 且 using=true 进入 HOLDING。
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
+        rig.context.advance();
+
+        // 自卫接管交互并把主手换成铁剑。
+        rig.sender.ownsUse = false;
+        rig.scene.held = new ItemStack(Items.IRON_SWORD);
+        ActionStatus status = action.tick(rig.context.asTickContext());
+        assertTrue(status instanceof ActionStatus.Failed, "归属已丢必须失败退出，不冒充吃完去松手");
+        assertEquals(0, rig.sender.releaseCalls, "不再归本动作管时绝不能调 releaseUsingItem");
+        assertEquals(1, rig.projection.releaseCalls, "交还投影");
+
+        // 收尾时若归属已丢，同样只交还投影，不调 releaseUsingItem。
+        action.close();
+        assertEquals(0, rig.sender.releaseCalls);
+    }
+
+    @Test
+    void brokenItemHoldRestartsWhenSameFoodRemainsAndStopsWhenSwapped() {
+        // 第 59 场 21:52 回归：吃腐肉进入按住（using=true）后被自卫打断导致原版松手（using=false），
+        // 恢复时若腐肉还在手上则重新右键续吃，若已被换走则立即失败收场，不再原地返回 progressed 空转九分钟。
+        Rig rig = Rig.create();
+        rig.scene.held = new ItemStack(Items.ROTTEN_FLESH, 6);
+        SustainedUse action = rig.action(NEVER_DONE, 0);
+        rig.context.using = true;
+        reachHolding(rig, action);
+        assertEquals(1, rig.sender.submissions.size());
+
+        // 被打断期间投影过期，原版停止进食，但手上的腐肉还在：回到 STARTING 重新右键。
+        rig.context.using = false;
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
+        rig.context.advance();
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
+        assertEquals(2, rig.sender.submissions.size(), "手上还是原食物时自动重新右键续吃");
+
+        // 再次进入 HOLDING 后，手上被换成了铁剑且 using=false：当刻失败退出，不空转。
+        rig.context.using = true;
+        rig.sender.nextStatus = PendingInteraction.Status.CONFIRMED_APPLIED;
+        rig.context.advance();
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Running);
+        rig.context.advance();
+        rig.context.using = false;
+        rig.scene.held = new ItemStack(Items.IRON_SWORD);
+        assertTrue(action.tick(rig.context.asTickContext()) instanceof ActionStatus.Failed,
+                "手上的东西已换且未在使用中，当刻失败交给上层重挑");
     }
 }
