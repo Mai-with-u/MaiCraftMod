@@ -86,7 +86,7 @@ final class PlacingWork extends ConstructionWork {
     }
 
     /** 一次没走到的走近：人停在哪一格，要去点哪一格的哪一面。 */
-    private record FailedApproach(BlockPos from, BlockPos clicked, Direction face) {}
+    record FailedApproach(BlockPos from, BlockPos clicked, Direction face) {}
 
     /** 补一轮队列的结果：补上了、这一阶段做完了、或者只剩按时回头的格要等一会儿。 */
     private enum Refill { REFILLED, DONE, WAIT }
@@ -333,10 +333,18 @@ final class PlacingWork extends ConstructionWork {
         return Optional.empty();
     }
 
-    // 放成了一块：放一放的格拿它判断情况变没变；附近有了新方块，没走到过的站位也值得再试。
+    // 放成了一块：放一放的格拿它判断情况变没变；走不过去的记忆按影响清——只有旁边新放了方块才可能改变
+    // "从这里走不到"的成立与否，远处的照旧留着；人挪了位置后记忆本来就不匹配，无需清理。
     private void blockPlaced(BlockPos pos) {
         deferred.placed(pos);
-        failedApproaches.clear();
+        failedApproaches.removeIf(failed -> invalidatedBy(pos, failed));
+    }
+
+    // 一条走不过去的记忆被这个新方块作废了吗：起点或点击面在新方块触及范围（交互距离 4.0 格加 1 格余量）内就算。
+    static boolean invalidatedBy(BlockPos placed, FailedApproach failed) {
+        double reach = REACH_FROM_HERE + 1;
+        return (failed.from() != null && failed.from().distSqr(placed) <= reach * reach)
+                || failed.clicked().distSqr(placed) <= reach * reach;
     }
 
     // 这一格要等的、蓝图里写了而且还没做好的格。

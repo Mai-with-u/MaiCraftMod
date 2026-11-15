@@ -14,6 +14,7 @@ import java.util.Set;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
@@ -109,5 +110,17 @@ class PlacingWorkTest {
         WorldStub world = new WorldStub();
         assertFalse(PlacingWork.reachableFromHere(world, cellAt(new BlockPos(3, 64, 0)),
                 new BlockPos(3, 64, 0), new BlockPos(0, 64, 0)), "下面和四周都是空气，没有能点的面");
+    }
+
+    // ===== 走不过去的记忆作废 =====
+
+    @Test
+    void 新方块旁边的记忆作废_远处的保留() {
+        PlacingWork.FailedApproach failed = new PlacingWork.FailedApproach(
+                new BlockPos(0, 64, 0), new BlockPos(5, 64, 1), Direction.NORTH);
+        assertTrue(PlacingWork.invalidatedBy(new BlockPos(5, 64, 3), failed), "点击面旁边两格有新方块");
+        assertTrue(PlacingWork.invalidatedBy(new BlockPos(1, 64, 0), failed), "起点旁边有新方块");
+        assertTrue(PlacingWork.invalidatedBy(new BlockPos(0, 64, 1), failed), "正好压在触及范围边界上算受影响");
+        assertFalse(PlacingWork.invalidatedBy(new BlockPos(0, 64, 8), failed), "离起点和点击面都远，记忆照旧成立");
     }
 }
