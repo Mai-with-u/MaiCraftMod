@@ -46,8 +46,8 @@ public final class Approach implements Action {
 
     private static final Logger LOG = LoggerFactory.getLogger(Approach.class);
 
-    /** 动作内部的推进位置：先确认原地，再逐个候选走过去，最后才补救。 */
-    private enum Stage { CHECK_HERE, NEXT_SPOT, WALKING, OPENING }
+    /** 动作内部的推进位置：先确认原地，再逐个候选走过去（三格内平地先试直走），最后才补救。 */
+    private enum Stage { CHECK_HERE, NEXT_SPOT, SHORT_WALK, WALKING, OPENING }
 
     private final ApproachTarget target;
     private final ReachRules reach;
@@ -55,6 +55,8 @@ public final class Approach implements Action {
     private final WalkCost walking;
     private final ProtectedCells guarded;
     private final WalkTo walks;
+    /** 短途直走的接缝：三格内平地换站位不走寻路，直接按键走过去。 */
+    private final StraightWalks strolls;
     private final TerrainPermit permit;
     private final StandOpener opener;
     private final Permissions permissions;
@@ -71,6 +73,8 @@ public final class Approach implements Action {
 
     /** 手上这一趟走向站位；没有在路上的一趟时为 null。暂停与停稳都由走到运行自己记，这里只读它的情况。 */
     private WalkRun walk;
+    /** 手上这一趟的直走；没有在直走时为 null。直走不持有走路运行，被停就整趟作废。 */
+    private Action stroll;
     /** 已叫这趟安全停、还在等落地：落地站稳前原地等着，不把停稳当作到了，也不重新上路。 */
     private boolean holdingStop;
 
@@ -89,6 +93,7 @@ public final class Approach implements Action {
      * @param walking     走过去的代价查询；寻路没接上时传按直线距离回答的实现
      * @param guarded     受保护格判断；许可与保护模型没接上时传永远回答否的实现
      * @param walks       出行轨的走到入口，站位这一趟由它上路
+     * @param strolls     短途直走的接缝，三格内平地换站位由它发起；判不过的站位仍走走到
      * @param permit      这次任务许可折算出的地形许可，路上能动多少地形按它来
      * @param opener      站位补救；交互轨没接上之前传 null，等于不挖不垫
      * @param permissions 这次的许可，决定最后手段能不能用
@@ -96,8 +101,8 @@ public final class Approach implements Action {
      * @param unreachable 记得的"从这里到不了"，各次靠近共用一份
      */
     public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
-                    WalkCost walking, ProtectedCells guarded, WalkTo walks, TerrainPermit permit,
-                    StandOpener opener, Permissions permissions, TaskRecords records,
+                    WalkCost walking, ProtectedCells guarded, WalkTo walks, StraightWalks strolls,
+                    TerrainPermit permit, StandOpener opener, Permissions permissions, TaskRecords records,
                     UnreachableFromHere unreachable) {
         this.target = target;
         this.reach = reach;
@@ -105,6 +110,7 @@ public final class Approach implements Action {
         this.walking = walking;
         this.guarded = guarded;
         this.walks = walks;
+        this.strolls = strolls;
         this.permit = permit;
         this.opener = opener;
         this.permissions = permissions;
@@ -117,6 +123,7 @@ public final class Approach implements Action {
             // 第一次推进先看脚下：目标就在身边时一步都不用走。
             case CHECK_HERE -> checkHere();
             case NEXT_SPOT -> takeNextSpot();
+            case SHORT_WALK -> strollStep(context);
             case WALKING -> walkStep(context);
             case OPENING -> openStep(context);
         };
@@ -127,9 +134,16 @@ public final class Approach implements Action {
         return List.copyOf(tried);
     }
 
-    // 被生存需求打断：手上这趟转给走到停下、记着去处，回来时接着走，不把这一趟丢了干等。
+    // 被生存需求打断：直走整趟作废（三五格的路，回来重新挑站位更省事，也不接着用半路的状态）；
+    // 走到那趟转给走到停下、记着去处，回来时接着走，不把这一趟丢了干等。
     @Override public void pause() {
         holdingStop = false;
+        if (stroll != null) {
+            stroll.close();
+            stroll = null;
+            stage = Stage.NEXT_SPOT;
+            return;
+        }
         if (walk != null) walk.pause();
     }
 
@@ -150,6 +164,10 @@ public final class Approach implements Action {
     }
 
     @Override public void close() {
+        if (stroll != null) {
+            stroll.close();
+            stroll = null;
+        }
         if (walk != null) {
             walk.close();
             walk = null;
@@ -161,6 +179,7 @@ public final class Approach implements Action {
         return switch (stage) {
             case CHECK_HERE -> "看看现在是不是已经能对目标动手";
             case NEXT_SPOT -> "在挑下一个能靠近" + describeTarget() + "的站位";
+            case SHORT_WALK -> "直着走向站位 " + (current == null ? "" : current.feet().toShortString());
             case WALKING -> merged > 0 ? "正在走向" + describeTarget() + "剩下 " + merged + " 个站位里走得到的一个"
                     : current == null ? "正在走向" + describeTarget()
                     : "正在走向站位 " + current.feet().toShortString();
@@ -203,11 +222,46 @@ public final class Approach implements Action {
         if (current != null) {
             LOG.debug("[maicraft-approach] 走向站位 {}（还剩 {} 个），靠近{}", current.feet().toShortString(),
                     pending.size(), describeTarget());
+            if (strollTo(current)) {
+                stage = Stage.SHORT_WALK;
+                return ActionStatus.progressed();
+            }
             startWalk(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
             stage = Stage.WALKING;
             return ActionStatus.progressed();
         }
         return lastResort();
+    }
+
+    // 三格内平地直接走过去：像玩家那样几步挪过去，不进寻路。湿脚位、悬空中、判断说不稳的照旧走寻路。
+    private boolean strollTo(StandSpot spot) {
+        BlockPos feet = world.currentFeet();
+        if (feet == null || !world.onGround()) return false;
+        if (target.wetFeetAllowed() && world.inFluid(spot.feet())) return false;
+        Optional<Action> strollAction = strolls.toward(feet, spot.feet(), world, guarded);
+        if (strollAction.isEmpty()) return false;
+        stroll = strollAction.get();
+        LOG.debug("[maicraft-approach] 三格内平地，直着走向站位 {}", spot.feet().toShortString());
+        return true;
+    }
+
+    // 直走这一趟：到了照旧核对；被挡就退回寻路再试这一站位，不再二次直走——快路不通走慢路，不算靠近失败。
+    private ActionStatus strollStep(TickContext context) {
+        return switch (stroll.tick(context)) {
+            case ActionStatus.Running running -> running;
+            case ActionStatus.Done done -> {
+                stroll = null;
+                yield verifyArrival();
+            }
+            case ActionStatus.Failed failed -> {
+                LOG.debug("[maicraft-approach] 直走没走到 {}：退回寻路再试这一站位", current.feet().toShortString());
+                stroll.close();
+                stroll = null;
+                startWalk(current.feet(), target.wetFeetAllowed() && world.inFluid(current.feet()));
+                stage = Stage.WALKING;
+                yield ActionStatus.progressed();
+            }
+        };
     }
 
     /**

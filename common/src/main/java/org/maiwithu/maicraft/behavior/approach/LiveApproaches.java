@@ -99,7 +99,7 @@ public final class LiveApproaches implements BringsPlayerClose {
         StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools,
                 othersNotice);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
-                avoid, walks, permit, opener, permissions, records, unreachable);
+                avoid, walks, new LiveStraightWalks(context), permit, opener, permissions, records, unreachable);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取，到达余量读握手状态。 */

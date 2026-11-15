@@ -35,7 +35,7 @@ class ApproachFromHereTest {
 
     private Approach approach(StubMoves moves) {
         return new Approach(ApproachTarget.ofBlock(CHEST), REACH, world, new StubWalkCost(), new StubGuarded(),
-                moves, TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable);
+                moves, new StubStrolls(world), TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable);
     }
 
     private static ActionStatus noRoute() {

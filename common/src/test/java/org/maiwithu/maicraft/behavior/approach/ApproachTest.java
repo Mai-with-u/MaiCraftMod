@@ -40,6 +40,7 @@ class ApproachTest {
     private final StubWorld world = new StubWorld();
     private final StubWalkCost walking = new StubWalkCost();
     private final StubGuarded guarded = new StubGuarded();
+    private final StubStrolls strolls = new StubStrolls(world);
 
     private Approach approach(StubMoves moves, StandOpener opener, Permissions permissions) {
         return approach(ApproachTarget.ofBlock(目标), moves, opener, permissions, null);
@@ -47,8 +48,13 @@ class ApproachTest {
 
     private Approach approach(ApproachTarget target, StubMoves moves, StandOpener opener,
             Permissions permissions, TaskRecords records) {
+        return approach(target, moves, strolls, opener, permissions, records);
+    }
+
+    private Approach approach(ApproachTarget target, StubMoves moves, StubStrolls strolls, StandOpener opener,
+            Permissions permissions, TaskRecords records) {
         return new Approach(target, REACH, world, walking, guarded,
-                moves, TerrainPermit.WALK_ONLY, opener, permissions, records, UnreachableFromHere.none());
+                moves, strolls, TerrainPermit.WALK_ONLY, opener, permissions, records, UnreachableFromHere.none());
     }
 
     @Test
@@ -470,5 +476,67 @@ class ApproachTest {
                 }
             });
         }
+    }
+
+    // ===== 短途直走 =====
+
+    @Test
+    void 三格内平地换站位直接走过去_不进寻路() {
+        // 站在离目标四五格的地方（原地够不着），第一个候选站位就在三格内：直着走过去，不再上寻路。
+        world.feet = new BlockPos(-2, 64, 0);
+        StubMoves moves = new StubMoves(world);
+        StubStrolls strolls = new StubStrolls(world, ActionStatus.done());
+        strolls.strollable = true;
+        Approach approach = approach(ApproachTarget.ofBlock(目标), moves, strolls, null, Permissions.DEFAULT, null);
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(1)), "原地不够得着，去挑站位");
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)), "挑到站位，发起直走");
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(3)), "直走到了，核对通过");
+        assertEquals(0, moves.begun.size(), "寻路没有上路");
+        assertEquals(1, strolls.begun.size(), "直走发起了一次");
+    }
+
+    @Test
+    void 不是快路的站位照旧走寻路() {
+        world.feet = new BlockPos(-2, 64, 0);
+        StubMoves moves = new StubMoves(world, ActionStatus.done());
+        Approach approach = approach(moves, null, Permissions.DEFAULT);
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(1)));
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)));
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(3)));
+        assertEquals(1, moves.begun.size(), "直走接缝给空，这一站位照旧交给寻路");
+        assertEquals(0, strolls.begun.size(), "没有发起直走");
+    }
+
+    @Test
+    void 直走被挡退回寻路再试同一站位() {
+        world.feet = new BlockPos(-2, 64, 0);
+        StubMoves moves = new StubMoves(world, ActionStatus.done());
+        StubStrolls strolls = new StubStrolls(world, ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "被挡住")));
+        strolls.strollable = true;
+        Approach approach = approach(ApproachTarget.ofBlock(目标), moves, strolls, null, Permissions.DEFAULT, null);
+        approach.tick(new StubTick(1));
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(2)), "发起直走");
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(3)), "直走被挡，退回寻路");
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(4)));
+        assertEquals(1, strolls.begun.size(), "直走只发起一次，不再二次直走");
+        assertEquals(1, moves.begun.size(), "同一站位退回寻路");
+        assertEquals(1, strolls.closes, "被挡的直走收掉了");
+    }
+
+    @Test
+    void 直走途中被打断整趟作废_回来重新挑站位() {
+        world.feet = new BlockPos(-2, 64, 0);
+        StubMoves moves = new StubMoves(world, ActionStatus.done());
+        StubStrolls strolls = new StubStrolls(world, ActionStatus.done());
+        strolls.strollable = true;
+        Approach approach = approach(ApproachTarget.ofBlock(目标), moves, strolls, null, Permissions.DEFAULT, null);
+        approach.tick(new StubTick(1));
+        approach.tick(new StubTick(2));
+        approach.pause();
+        assertEquals(1, strolls.closes, "直走被停就整趟作废");
+        assertEquals(ActionStatus.progressed(), approach.tick(new StubTick(3)), "恢复推进重新挑站位");
+        assertEquals(ActionStatus.done(), approach.tick(new StubTick(4)));
+        assertEquals(2, strolls.begun.size(), "重新挑了站位又发起直走");
+        assertEquals(0, moves.begun.size(), "寻路始终没上路");
     }
 }
