@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -10,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -160,23 +162,50 @@ final class PlacingWork extends ConstructionWork {
     private static final double EYE_HEIGHT = 1.62;
 
     // 同一层、同一阶段（清空、骨架、贴附件）里挑离人最近的一格：先把站的地方够得着的放完再挪。
+    // 挑出来的格先看"站着就够得着吗"（最近的几格里挑够得着的，都没有才照距离挑），不为面向不对的近格白跑一趟。
     // 临时方块链要按链上的顺序垫，队头是临时方块时照原顺序。
     private PlannedCell pollNearest() {
         PlannedCell head = queue.peek();
         BlockPos feet = services.site().feet();
         if (head == null || feet == null || temporaries.contains(head.pos())) return queue.poll();
-        PlannedCell best = head;
-        double bestDistance = Double.MAX_VALUE;
+        List<PlannedCell> tier = new ArrayList<>();
         for (PlannedCell cell : queue) {
             if (temporaries.contains(cell.pos()) || !sameTier(cell, head)) continue;
-            double distance = cell.pos().distToCenterSqr(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5);
-            if (distance < bestDistance) {
-                best = cell;
-                bestDistance = distance;
-            }
+            tier.add(cell);
         }
-        queue.remove(best);
-        return best;
+        tier.sort(Comparator.comparingDouble(cell ->
+                cell.pos().distToCenterSqr(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5)));
+        // 站一处把够得着的放完再挪：只看离人最近的几格，省得每次挑格都把整个队列的面试一遍。
+        PlannedCell picked = pickNearestReachable(tier,
+                cell -> reachableFromHere(services.site(), cell, site.placements().placeAt(cell, services.site()), feet));
+        queue.remove(picked);
+        return picked;
+    }
+
+    /** 挑格预筛只看离人最近的这几格：找不到够得着的就回退按距离挑。 */
+    private static final int REACHABLE_PROBES = 8;
+
+    /**
+     * 挑格预筛的取舍：按距离排好序的档内候选里，前面几格有"站着就够得着"的就挑它，都没有才挑最近的。
+     * 纯函数：够得着与否由调用方回答。
+     */
+    static PlannedCell pickNearestReachable(List<PlannedCell> tier, Predicate<PlannedCell> hasReachableFace) {
+        for (PlannedCell cell : tier.subList(0, Math.min(REACHABLE_PROBES, tier.size()))) {
+            if (hasReachableFace.test(cell)) return cell;
+        }
+        return tier.getFirst();
+    }
+
+    // 这一格现在有没有站着就够得着的面：与 reachableFirst 同一个式子（可点面中心到眼睛不超过 4.0 格），只算几何。
+    static boolean reachableFromHere(ReadsBlocks world, PlannedCell cell, BlockPos placeAt, BlockPos feet) {
+        for (PlacementAttempt.Candidate candidate : PlacementAttempt.candidates(world, cell, placeAt)) {
+            var face = PlacementSpots.faceBox(candidate.clicked(), candidate.face()).getCenter();
+            double dx = face.x - (feet.getX() + 0.5);
+            double dy = face.y - (feet.getY() + EYE_HEIGHT);
+            double dz = face.z - (feet.getZ() + 0.5);
+            if (dx * dx + dy * dy + dz * dz <= REACH_FROM_HERE * REACH_FROM_HERE) return true;
+        }
+        return false;
     }
 
     // 施工顺序里同一档：同一层、同样要不要靠着别的东西、同一阶段。跨档仍按施工顺序，地基先、贴附件后。
