@@ -14,18 +14,34 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.AgeableMob;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.Interaction;
+import net.minecraft.world.entity.LightningBolt;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Marker;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.OwnableEntity;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.animal.Sheep;
 import net.minecraft.world.entity.boss.EnderDragonPart;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.decoration.ArmorStand;
+import net.minecraft.world.entity.decoration.HangingEntity;
 import net.minecraft.world.entity.decoration.ItemFrame;
+import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.projectile.EvokerFangs;
+import net.minecraft.world.entity.projectile.EyeOfEnder;
+import net.minecraft.world.entity.projectile.Projectile;
+import net.minecraft.world.entity.vehicle.AbstractMinecart;
+import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.PushReaction;
 
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation.TamedBy;
@@ -50,6 +66,9 @@ public final class ClientEntitySight implements EntitySight {
     /** 实体形式的战利品容器（Lootr 的箱子矿车等）：挂着该标签的实体在 traits 里标明是战利品容器。 */
     private static final TagKey<EntityType<?>> LOOTR_ENTITY_CONTAINERS =
             TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("lootr", "containers"));
+    /** 禁传送的动态装置实体（如机械动力的旋转装置、列车车厢、电梯轿厢）：虽不可直接准星选中，但属于在场动态装置，不得当技术标记过滤。 */
+    private static final TagKey<EntityType<?>> TELEPORTING_NOT_SUPPORTED =
+            TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("c", "teleporting_not_supported"));
 
     private final Supplier<PlayerContext> context;
     private final TrustedPlayers trusted;
@@ -74,12 +93,8 @@ public final class ClientEntitySight implements EntitySight {
         ClientLevel level = current.level();
         List<Observation> found = new ArrayList<>();
         for (Entity entity : level.entitiesForRendering()) {
-            // 角色自己不在观察里：它是看的那一方，不是被看的。
-            if (entity == player || entity.isRemoved()) {
-                continue;
-            }
-            // 末影龙的身子各段不是一条实体：折到龙主体一条，与找东西、战斗认的是同一只。
-            if (entity instanceof EnderDragonPart) {
+            // 角色自己不在观察里；末影龙分段与强力胶、技术标记这类无交互入口的附着实体也不发观察编号。
+            if (entity == player || !observable(entity)) {
                 continue;
             }
             // 活体生物的血量是看得见的观察事实：按原版的LivingEntity读当前值与上限，
@@ -103,6 +118,59 @@ public final class ClientEntitySight implements EntitySight {
                     ClientCreatureSituations.tamedBy(entity, player, trusted) != TamedBy.NOBODY));
         }
         return found;
+    }
+
+    /**
+     * 判断一只世界实体是否属于角色可观察、可认知的场景实物。
+     *
+     * <p>原版技术标记（{@code Marker}）、隐形触发盒（{@code Interaction}）、投影展示实体（{@code Display}），
+     * 以及已涂抹在方块上的强力胶选区这类不可选中交互的静态附着实体，在游戏里没有实体交互入口，
+     * 过滤后不再发观察编号或标到画面上；动态结构实体、座椅、生物、掉落物与各类载具（含战利品矿车）全部保留。
+     */
+    public static boolean observable(Entity entity) {
+        if (entity == null || entity.isRemoved()) {
+            return false;
+        }
+        // 末影龙的身子各段不是独立实体：折到龙主体一条，与找东西、战斗认的是同一只。
+        if (entity instanceof EnderDragonPart) {
+            return false;
+        }
+        // 原版技术标记、隐形交互触发盒与投影展示实体没有生存模式实体实物语义，不进观察列表。
+        if (entity instanceof Marker || entity instanceof Interaction || entity instanceof Display) {
+            return false;
+        }
+        // 生物（含盔甲架与包裹）、掉落物、经验球、船与矿车（含战利品矿车）、悬挂展示物、水晶、下落方块、点燃的炸药、弹射物与雷电等原版常见实体一律保留。
+        if (entity instanceof LivingEntity
+                || entity instanceof ArmorStand
+                || entity instanceof ItemEntity
+                || entity instanceof ExperienceOrb
+                || entity instanceof Boat
+                || entity instanceof AbstractMinecart
+                || entity instanceof HangingEntity
+                || entity instanceof EndCrystal
+                || entity instanceof FallingBlockEntity
+                || entity instanceof PrimedTnt
+                || entity instanceof Projectile
+                || entity instanceof EyeOfEnder
+                || entity instanceof EvokerFangs
+                || entity instanceof LightningBolt) {
+            return true;
+        }
+        // 准星可选中、有硬碰撞、正在载客或正挂载在别的载具上的实体，以及战利品容器与动态装置标签实体一律保留。
+        if (entity.isPickable()
+                || entity.canBeCollidedWith()
+                || entity.isVehicle()
+                || entity.isPassenger()
+                || entity.getType().is(LOOTR_ENTITY_CONTAINERS)
+                || entity.getType().is(TELEPORTING_NOT_SUPPORTED)) {
+            return true;
+        }
+        // 剩余不可选中、无碰撞、未载客的裸实体中，若同时忽略方块触发且不受活塞推动，
+        // 又没有周期位移同步或视线高度清零（如已放置在方块间的强力胶选区），则属于隐形技术附着实体，予以过滤；
+        // 机械动力座椅（常规活塞反应且不忽略触发）与有周期同步及正视线高度的动态装置实体不会命中此分支，安全保留。
+        return !(entity.isIgnoringBlockTriggers()
+                && entity.getPistonPushReaction() == PushReaction.IGNORE
+                && (entity.getEyeHeight() <= 0.0f || entity.getType().updateInterval() == Integer.MAX_VALUE));
     }
 
     /**

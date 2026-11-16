@@ -8,6 +8,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3f;
+import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
 import org.maiwithu.maicraft.behavior.perception.Scene;
@@ -46,8 +47,8 @@ public final class PictureSightings {
         ClientLevel level = self.clientLevel;
         Vec3 origin = new Vec3(picture.cameraX(), picture.cameraY(), picture.cameraZ());
         for (SceneEntity entity : scene.entities()) {
-            // 不看场景里按眼睛算的 visible：第三人称时镜头在身后，看不看得见以镜头为准，下面按镜头重新算视线。
-            Optional<Entity> live = scene.seen().entityIn(level, entity.id());
+            // 不看场景里按眼睛算的 visible：第三人称时镜头在身后，看不看得见以镜头为准，下面按镜头重新算视线；不可交互技术实体同样不标上画面。
+            Optional<Entity> live = scene.seen().entityIn(level, entity.id()).filter(ClientEntitySight::observable);
             if (live.isEmpty()) continue;
             // 先试身子中间，挡住了再试头顶：有一点看得见就标在那一点。
             Vec3 center = live.get().getBoundingBox().getCenter();
@@ -105,7 +106,7 @@ public final class PictureSightings {
         String id = idOrLandmark.trim().toLowerCase(Locale.ROOT);
         for (SceneSighting sighting : scene.sighting(id)) {
             if (sighting instanceof SceneEntity entity) {
-                Optional<Entity> live = scene.seen().entityIn(level, entity.id());
+                Optional<Entity> live = scene.seen().entityIn(level, entity.id()).filter(ClientEntitySight::observable);
                 if (live.isEmpty()) return Optional.of(new PictureView.Toward(id, turned, notTurnedBecause, null, false, true));
                 AABB box = live.get().getBoundingBox();
                 boolean visible = ObservationVisibility.pointFrom(self, origin, box.getCenter())

@@ -159,6 +159,17 @@ class GatherAbilityTest {
     }
 
     @Test
+    void 点名非掉落物也非展示框的实体直接拒绝不当成掉落物捡() {
+        // 生物、载具或强力胶这类非掉落物实体编号传给 gather 时当场按参数不适用拒绝，不走过去空等捡掉落物。
+        var seen = new FakeSeen(Map.of("e6",
+                new GatherAbility.SeesTargets.SeenTarget(WorldPosition.here(3, 64, 4), false, false, -1)));
+        Goal goal = new Goal("maicraft:gather", null, new Target.Seen("e6"),
+                ability(null).spec().paramSpecs().parse(new JsonObject()).params(), null, List.of(), null);
+        StepDecision.Finish finish = assertInstanceOf(StepDecision.Finish.class, ability(seen).decide(stepOf(goal)));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, finish.result().problem().kind());
+    }
+
+    @Test
     void 给了负高度的坐标照常落成一格() {
         // 深板岩层、钻石层在 0 以下：负高度是合法的一格，不能当成"找不到顶面"拒掉。
         Target.Position deep = new Target.Position(10, -58, 10, null);

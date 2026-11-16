@@ -752,7 +752,7 @@ public final class AbilityCatalog {
      */
     private static GatherAbility gatherModule(Deps deps, Shared shared) {
         ClientItemFrameHits frames = new ClientItemFrameHits(deps.character().context(), shared.bringClose());
-        return new GatherAbility(new LiveSceneTargets(deps.world()::scene, frames),
+        return new GatherAbility(new LiveSceneTargets(deps.world()::scene, frames, deps.character().context()),
                 new LiveSpotReads(deps.character().context()),
                 approaches(shared.bringClose()), shared.digging(), deps.items().toolRequirements(),
                 new ClientCropReplanting(shared.toMainhand(), deps.hands().interactions(),

@@ -81,19 +81,25 @@ public final class GatherAbility implements AbilityModule {
         this.chainLedger = Objects.requireNonNull(chainLedger, "chainLedger");
     }
 
-    /** 观察编号对应的现场：最后看到的方位，以及它是方块/设施还是实体（掉落物）。 */
+    /** 观察编号对应的现场：最后看到的方位，以及它是方块、真正的地上掉落物，还是要打一下的展示框。 */
     public interface SeesTargets {
 
         Optional<SeenTarget> lookup(String id);
 
         /**
          * @param at        最后看到它的位置
+         * @param block     是方块或地形特征时为 true
+         * @param drop      是真正的地上掉落物（{@code ItemEntity}）时为 true
          * @param itemFrame 是展示框时它的游戏实体编号，不是为 -1
          */
-        record SeenTarget(WorldPosition at, boolean block, int itemFrame) {
+        record SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame) {
 
             SeenTarget(WorldPosition at, boolean block) {
-                this(at, block, -1);
+                this(at, block, !block, -1);
+            }
+
+            SeenTarget(WorldPosition at, boolean block, int itemFrame) {
+                this(at, block, !block && itemFrame < 0, itemFrame);
             }
         }
     }
@@ -121,11 +127,18 @@ public final class GatherAbility implements AbilityModule {
         String expectedItem = params.has("item") ? params.text("item") : null;
         if (target instanceof Target.Seen seenId) {
             // 观察编号在册与否当场能查：不在册或已失效，都是"目标没了"，不猜、不当成参数写岔。
-            return seen.lookup(seenId.id())
-                    .map(found -> (StepDecision) new StepDecision.Run(new GatherSpot(found.at(), !found.block(),
-                            null, expectedItem, goal.permissions(), true, describe(seenId.id(), found),
-                            found.itemFrame(), goal.digTool())))
-                    .orElseGet(() -> gone("观察编号 " + seenId.id() + " 对应的东西不在了（失效、走远或被拆）"));
+            Optional<SeesTargets.SeenTarget> lookedUp = seen.lookup(seenId.id());
+            if (lookedUp.isEmpty()) {
+                return gone("观察编号 " + seenId.id() + " 对应的东西不在了（失效、走远或被拆）");
+            }
+            SeesTargets.SeenTarget found = lookedUp.get();
+            // 实体编号既不是展示框、也不是真正的地上掉落物（例如生物、矿车、船或动态装置）时，不能误当成掉落物走过去空等拾取，也不能去挖它脚下的地。
+            if (!found.block() && !found.drop() && found.itemFrame() < 0) {
+                return invalid("观察编号 " + seenId.id() + " 不是可挖的方块，也不是地上的掉落物或展示框，不能用 gather 采集");
+            }
+            return new StepDecision.Run(new GatherSpot(found.at(), found.drop(),
+                    null, expectedItem, goal.permissions(), true, describe(seenId.id(), found),
+                    found.itemFrame(), goal.digTool()));
         }
         if (target instanceof Target.Position position) {
             Optional<GatherSpot> resolved = resolvePosition(position, params, expectedItem, goal.permissions(),
