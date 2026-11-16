@@ -63,6 +63,11 @@ public final class LiveSite implements ConstructionSeams.ReadsSite {
         return player == null ? null : player.blockPosition();
     }
 
+    @Override public Vec3 lookDirection() {
+        LocalPlayer player = player();
+        return player == null ? Vec3.ZERO : player.getViewVector(1.0f);
+    }
+
     @Override public int carried(String itemId) {
         LocalPlayer player = player();
         Item item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(itemId)).orElse(null);

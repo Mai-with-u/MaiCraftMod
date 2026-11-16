@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.player;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -11,6 +12,27 @@ import net.minecraft.world.phys.Vec3;
  * 主动作本刻占用准星时，随行的小动作（例如补光）只能通过辅助瞄准通道借用，不能抢主线。
  */
 public interface PlayerInput {
+    /** 小角度转向的最短平滑预算（刻）：起步加速与阻尼收敛的底线。 */
+    int TURN_MIN_TICKS = 7;
+    /** 180 度大角度转向的平滑预算上限（刻）：覆盖正常帧率（约 17 刻）与低帧率单刻推进（约 21 刻）的完整加减速过程。 */
+    int TURN_MAX_TICKS = 26;
+
+    /** 按初始偏角（度）给出平滑转向刻数预算：偏角越大给的平滑时间越充裕，不在大转角中途强行瞬移甩头。 */
+    static int turnBudgetTicks(double angleDegrees) {
+        if (!Double.isFinite(angleDegrees) || angleDegrees <= 15.0) return TURN_MIN_TICKS;
+        int extra = (int) Math.ceil((angleDegrees - 15.0) / 9.0);
+        return Mth.clamp(TURN_MIN_TICKS + extra, TURN_MIN_TICKS, TURN_MAX_TICKS);
+    }
+
+    /** 按当前视线向量与目标世界坐标的初始夹角计算平滑转向刻数预算。 */
+    static int turnBudgetTicks(Vec3 currentView, Vec3 eye, Vec3 target) {
+        if (currentView == null || eye == null || target == null) return TURN_MIN_TICKS;
+        Vec3 delta = target.subtract(eye);
+        if (currentView.lengthSqr() < 1.0e-8 || delta.lengthSqr() < 1.0e-8) return TURN_MIN_TICKS;
+        double cos = Mth.clamp(currentView.normalize().dot(delta.normalize()), -1.0, 1.0);
+        return turnBudgetTicks(Math.toDegrees(Math.acos(cos)));
+    }
+
     // 一刻内的按键状态：前后、左右、跳跃、潜行和疾跑。两个方向量只允许 -1～1 的有限数值。
     record Movement(float forward, float strafe, boolean jumping, boolean sneaking, boolean sprinting) {
         public static final Movement STOPPED = new Movement(0.0f, 0.0f, false, false, false);
@@ -68,8 +90,16 @@ public interface PlayerInput {
         requestLook(yaw, pitch, requestTick);
     }
 
-    /** 当前游戏刻就要交互时，先让真实镜头射线对准目标，避免点击落到别处。 */
+    /** 当前游戏刻就要交互时，先让真实镜头射线对准目标，避免点击落到别处；仅用于坠落救援等紧急瞬转。 */
     default void requestImmediateLook(float yaw, float pitch, long requestTick) {
+        requestLook(yaw, pitch, requestTick);
+    }
+
+    /**
+     * 平滑转向预算耗尽后的收尾微小角差对齐：把玩家本刻逻辑朝向对齐到目标角保证发包朝向准确，
+     * 同时保留对齐前的上一刻角度（yRotO / xRotO）与平滑相机状态，不抹掉帧间渲染插值。
+     */
+    default void alignLook(float yaw, float pitch, long requestTick) {
         requestLook(yaw, pitch, requestTick);
     }
 

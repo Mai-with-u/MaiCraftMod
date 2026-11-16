@@ -20,6 +20,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -122,5 +123,23 @@ class PlacingWorkTest {
         assertTrue(PlacingWork.invalidatedBy(new BlockPos(1, 64, 0), failed), "起点旁边有新方块");
         assertTrue(PlacingWork.invalidatedBy(new BlockPos(0, 64, 1), failed), "正好压在触及范围边界上算受影响");
         assertFalse(PlacingWork.invalidatedBy(new BlockPos(0, 64, 8), failed), "离起点和点击面都远，记忆照旧成立");
+    }
+
+    @Test
+    void 站位够得着的近格优先顺着当前视线扫过_不在四格内前后折返甩头() {
+        BlockPos feet = new BlockPos(0, 64, 0);
+        // 身后一格（0,64,1）虽然离得比眼前三格（0,64,-3）和右侧两格（2,64,0）更近，但全都在四格内站着够得着：
+        // 角色面朝北（0,0,-1）时先放眼前的（0,64,-3），接着顺势扫右侧（2,64,0），最后才转身放身后（0,64,1）。
+        PlannedCell behind = cellAt(new BlockPos(0, 64, 1));
+        PlannedCell side = cellAt(new BlockPos(2, 64, 0));
+        PlannedCell ahead = cellAt(new BlockPos(0, 64, -3));
+        List<PlannedCell> remaining = new ArrayList<>(List.of(behind, side, ahead));
+
+        PlannedCell first = PlacingWork.pickNearestReachable(remaining, cell -> true, feet, new Vec3(0, 0, -1));
+        assertEquals(ahead.pos(), first.pos(), "面朝北时优先放眼前的够得着格，不为差一格距离猛转 180 度");
+        remaining.remove(first);
+
+        PlannedCell second = PlacingWork.pickNearestReachable(remaining, cell -> true, feet, new Vec3(0, 0, -1));
+        assertEquals(side.pos(), second.pos(), "放完正前方后顺着侧面扫，仍排在正后方之前");
     }
 }

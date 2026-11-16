@@ -238,6 +238,29 @@ public final class LocalPlayerInput implements PlayerInput {
     }
 
     @Override
+    // 平滑转向收尾时的微小角差对齐：只把玩家本刻逻辑朝向对齐到目标角以便精确发包，保留对齐前镜头角作为插值起点，不覆写 yRotO/xRotO 吞掉帧间插值。
+    public void alignLook(float yaw, float pitch, long requestTick) {
+        requestLook(yaw, pitch, requestTick);
+        LocalPlayer player = controlledPlayer;
+        if (player == null) return;
+        float previousYaw = cameraInitialized ? cameraYaw : player.getYRot();
+        float previousPitch = cameraInitialized ? cameraPitch : player.getXRot();
+        alignLogicalLookPreservingInterpolation(player, targetYaw, targetPitch, previousYaw, previousPitch);
+    }
+
+    static void alignLogicalLookPreservingInterpolation(
+            LocalPlayer player, float targetYaw, float targetPitch, float previousYaw, float previousPitch) {
+        player.yRotO = previousYaw;
+        player.xRotO = previousPitch;
+        player.yHeadRotO = previousYaw;
+        player.yBodyRotO = previousYaw;
+        player.setYRot(targetYaw);
+        player.setYHeadRot(targetYaw);
+        player.setYBodyRot(targetYaw);
+        player.setXRot(targetPitch);
+    }
+
+    @Override
     // 松开移动键并停止转头。挖掘、使用物品等动作由 actions 管理，不在这里结束。
     public void releaseAll() {
         sneakKeptUntil = Long.MIN_VALUE;

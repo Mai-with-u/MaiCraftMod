@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -33,6 +34,11 @@ public final class ConstructionSeams {
 
         /** 角色脚下那一格。 */
         BlockPos feet();
+
+        /** 角色此刻视线朝向向量；读不到或替身未提供时为 {@link Vec3#ZERO}，挑格退回纯按距离。 */
+        default Vec3 lookDirection() {
+            return Vec3.ZERO;
+        }
 
         /** 身上这种物品有几件。 */
         int carried(String itemId);

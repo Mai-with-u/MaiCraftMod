@@ -45,8 +45,6 @@ public final class BlockDigger {
     private static final int TOOL_TIMEOUT_TICKS = 20 * 5;
     /** 生存模式破坏一个方块后，到下一次开挖前等待的游戏刻数；与原版破坏间隔一致。 */
     private static final int POST_BREAK_DELAY_TICKS = 5;
-    /** 开挖前镜头转向演出的短上限（刻）：转到位即开挖，满上限贴齐视角直接开挖，不卡在等准星。 */
-    private static final int TURN_MAX_TICKS = 7;
 
     private final LocalPlayer player;
     private final InteractionSender sender;
@@ -106,6 +104,7 @@ public final class BlockDigger {
     public void preferTopFace(boolean value) { preferTopFace = value; }
     private int blockHitDelay;    // 方块破坏后的冷却时间（reset() 后保留）。
     private int aimTicks;         // 当前目标开挖前已转头等待的刻数。
+    private int turnBudget = PlayerInput.TURN_MIN_TICKS; // 按起手偏角动态计算的平滑转向刻数预算。
     /** 开挖时的主手物品快照;中途换持(物品/组件级)即重开进度。 */
     private ItemStack destroyingItem;
 
@@ -299,13 +298,17 @@ public final class BlockDigger {
         if (!context.canInteractThisTick()) {
             return DigResult.PROGRESSING;
         }
-        // 第一次出手先做短上限镜头转向演出：对准或满 7 刻贴齐视角后立即开挖，不再因转头慢无限干站；开始后继续推进同一份挖掘记录。
+        // 第一次出手按初始偏角动态放宽平滑转向预算：大转角走完平滑加减速，满预算再保持渲染插值连续地对齐开挖。
         if (pending == null) {
             if (!aimReady(hit.getLocation())) {
-                if (++aimTicks < TURN_MAX_TICKS) {
+                if (aimTicks == 0) {
+                    turnBudget = PlayerInput.turnBudgetTicks(
+                            player.getViewVector(1.0f), player.getEyePosition(), hit.getLocation());
+                }
+                if (++aimTicks < turnBudget) {
                     return DigResult.PROGRESSING;
                 }
-                snapLookTo(context, hit.getLocation());
+                alignLookTo(context, hit.getLocation());
             }
             if (!preparation.test(hit)) return DigResult.PROGRESSING;
             PendingInteraction started = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
@@ -593,15 +596,16 @@ public final class BlockDigger {
         toolNoRoom = false;
         destroyingItem = null;
         aimTicks = 0;
+        turnBudget = PlayerInput.TURN_MIN_TICKS;
     }
 
-    private void snapLookTo(PlayerContext context, Vec3 target) {
+    private void alignLookTo(PlayerContext context, Vec3 target) {
         Vec3 delta = target.subtract(player.getEyePosition());
         if (delta.lengthSqr() < 1.0e-8) return;
         double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
-        playerInput.requestImmediateLook(yaw, pitch, context.clientTick());
+        playerInput.alignLook(yaw, pitch, context.clientTick());
     }
 
     // 真实可见面被草叶或矿脉凸角挡住、或角色停在容差带内时，在服务端放行距离内按目标格与面直接构造合法挖掘命中。

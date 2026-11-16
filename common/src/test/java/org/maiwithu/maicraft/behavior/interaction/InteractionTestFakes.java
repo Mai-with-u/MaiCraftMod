@@ -80,11 +80,15 @@ final class InteractionTestFakes {
     /** 转头与停步输入替身：记录请求，不写真实玩家。 */
     static final class FakeInput implements PlayerInput {
         final List<Vec3> lookRequests = new ArrayList<>();
+        int immediateLookCalls;
+        int alignLookCalls;
         int haltCalls;
 
         @Override public boolean automationOwnsControls() { return true; }
         @Override public void applyMovement(Movement movement, long requestTick) {}
         @Override public void requestLook(float yaw, float pitch, long requestTick) {}
+        @Override public void requestImmediateLook(float yaw, float pitch, long requestTick) { immediateLookCalls++; }
+        @Override public void alignLook(float yaw, float pitch, long requestTick) { alignLookCalls++; }
         @Override public void clearLook() {}
         @Override public void releaseAll() {}
         @Override public void lookAt(LocalPlayer player, Vec3 point) { lookRequests.add(point); }

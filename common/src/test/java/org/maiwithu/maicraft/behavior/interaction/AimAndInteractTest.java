@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.interaction.ScriptedInteractionSender;
 import org.maiwithu.maicraft.game.interaction.SettledConfirmations;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.RawTextLeaks;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -163,23 +164,28 @@ class AimAndInteractTest {
     }
 
     @Test
-    void aSlowCameraSubmitsAfterShortTurnCapInsteadOfFailing() {
+    void aSlowCameraSubmitsAfterDynamicTurnBudgetWithoutImmediateSnap() {
         ScriptedInteractionSender sender = new ScriptedInteractionSender();
         InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
-        // 镜头替身始终停在反方向（模拟低帧率或大角度转头慢）：前 6 刻保持平滑演出不出手，满 7 刻贴齐视角直接出手。
+        // 大角度转向（反方向）不会在第 7 刻提前瞬移甩头：必须走满按初始偏角动态放宽的平滑预算，收尾用保持插值的 alignLook 对齐。
         InteractionTestFakes.FakeScene sluggishScene = new InteractionTestFakes.FakeScene(context);
-        sluggishScene.fixedView = new Vec3(-1.0, 0.0, 0.0);
+        sluggishScene.fixedView = new Vec3(-1.0, 0.0, -1.0);
         sluggishScene.ray = hitAt(TARGET);
+        int expectedBudget = PlayerInput.turnBudgetTicks(
+                sluggishScene.fixedView, sluggishScene.eyePosition(), Vec3.atCenterOf(TARGET));
+        assertTrue(expectedBudget >= 22, "近 180 度大转角预算应放宽到平滑全程：" + expectedBudget);
         AimAndInteract action = blockAction(sluggishScene, c -> InteractionConfirmation.Verdict.PENDING);
-        for (int i = 1; i < AimAndInteract.TURN_MAX_TICKS; i++) {
+        for (int i = 1; i < expectedBudget; i++) {
             ActionStatus waiting = action.tick(context.asTickContext());
             assertTrue(waiting instanceof ActionStatus.Running running && !running.progressed(),
-                    "未满短上限前继续等镜头转过去：第 " + i + " 刻");
+                    "未满平滑预算前不强行截断瞬移：第 " + i + " 刻");
             assertTrue(sender.submissions.isEmpty());
             context.advance();
         }
         ActionStatus submitted = action.tick(context.asTickContext());
-        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "满短上限当刻直接出手");
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "满动态预算当刻对齐并出手");
+        assertEquals(0, context.input.immediateLookCalls, "不得调用抹除 yRotO 插值的紧急瞬转");
+        assertEquals(1, context.input.alignLookCalls, "收尾通过保持渲染插值的对齐提交");
         assertEquals(1, sender.submissions.size());
     }
 

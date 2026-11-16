@@ -5,6 +5,7 @@ import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.InBedChatScreen;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.player.Input;
+import net.minecraft.util.Mth;
 
 import org.junit.jupiter.api.Test;
 
@@ -138,5 +139,26 @@ class LocalPlayerInputTest {
         Input keyboard = new Input();
         assertTrue(LocalPlayerInput.BotInput.sprintKeyDown(keyboard, true), "人按着疾跑键");
         assertFalse(LocalPlayerInput.BotInput.sprintKeyDown(keyboard, false), "人没按疾跑键");
+    }
+
+    @Test
+    void fullTurnReachesSettledAngleWithinDynamicTurnBudget() {
+        // 180 度转身在最坏的每刻单次采样（0.05s）下也能在动态预算刻数内走完平滑加减速进入 7 度对准容差，无需半途瞬移。
+        int budget = PlayerInput.turnBudgetTicks(180.0);
+        float yaw = 0f;
+        float velocity = 0f;
+        int settledAt = -1;
+        for (int tick = 1; tick <= budget; tick++) {
+            LocalPlayerInput.AxisStep step = LocalPlayerInput.smoothDampAngle(yaw, 180f, velocity, 0.11f, 240f, 0.05f);
+            yaw = step.value();
+            velocity = step.velocity();
+            if (Math.abs(Mth.wrapDegrees(180f - yaw)) <= 7.0f) {
+                settledAt = tick;
+                break;
+            }
+        }
+        assertTrue(settledAt > PlayerInput.TURN_MIN_TICKS && settledAt < budget,
+                "180 度平滑转身需要超过 7 刻且在动态预算内自然到位：settledAt=" + settledAt + ", budget=" + budget);
+        assertEquals(PlayerInput.TURN_MIN_TICKS, PlayerInput.turnBudgetTicks(10.0), "小偏角维持最短预算");
     }
 }

@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.game.interaction.FirstPersonInteractionTargeting;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -51,8 +52,10 @@ public final class AimAndInteract implements Action {
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
     /** 连着点时每一下等确认的期限：抓传送带上跑着的东西，没点中马上点下一下。 */
     public static final int QUICK_CONFIRM_TICKS = 4;
-    /** 镜头转向目标的短上限（刻）：转到位即出手，满上限贴齐角度直接出手，不再因转头慢卡在瞄准。 */
-    public static final int TURN_MAX_TICKS = 7;
+    /** 小角度转向的最短平滑预算（刻）。 */
+    public static final int TURN_MIN_TICKS = PlayerInput.TURN_MIN_TICKS;
+    /** 180 度大角度转向的平滑预算上限（刻）：按初始偏角动态放宽，避免转身中途强行瞬移甩头。 */
+    public static final int TURN_MAX_TICKS = PlayerInput.TURN_MAX_TICKS;
     /** 走物品真实射线的交互（桶、水上放船）准星点到了别处时，最多重新瞄几次。 */
     private static final int MAX_AIM_ATTEMPTS = 2;
 
@@ -71,6 +74,7 @@ public final class AimAndInteract implements Action {
     private BlockHitResult plannedBlockHit;
     private int aimAttempts;
     private int aimTicks;
+    private int turnBudget = TURN_MIN_TICKS;
     private Stage stage = Stage.AIMING;
     private PendingInteraction pending;
     /** 提交时冻结的现场：目标格当时的状态与提交的射线命中。 */
@@ -142,15 +146,17 @@ public final class AimAndInteract implements Action {
                 return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,
                         "从当前位置看不到" + target.describe() + "的任何一面，或者够不着，需要换站位", null));
             }
+            // 按起手那一刻视线与目标点的偏角定平滑转向预算：小偏角快出，转身 180 度给足平滑加减速时间。
+            turnBudget = PlayerInput.turnBudgetTicks(scene.viewVector(), scene.eyePosition(), aimPoint);
         }
         player.input().halt(player.localPlayer());
         player.input().lookAt(player.localPlayer(), aimPoint);
-        // 保留镜头平滑转向的演出；未满短上限时等镜头转到位，满短上限就贴齐剩余角度直接进入出手，不再因转头慢判败。
+        // 镜头未到位时在动态偏角预算内继续平滑转向；满预算后仅做保持渲染插值连续的收尾微角对齐，不在半途瞬移甩头。
         if (!AimCheck.settled(scene.viewVector(), scene.eyePosition(), aimPoint)) {
-            if (++aimTicks < TURN_MAX_TICKS) {
+            if (++aimTicks < turnBudget) {
                 return ActionStatus.running();
             }
-            snapLookTo(player, scene.eyePosition(), aimPoint);
+            alignLookTo(player, scene.eyePosition(), aimPoint);
         }
         if (liveRay) {
             HitResult hit = scene.sightRay();
@@ -215,14 +221,14 @@ public final class AimAndInteract implements Action {
         return scene.entityWithinDirectReach(entity) ? scene.visibleEntityPoint(entity) : null;
     }
 
-    // 满短上限后把剩余转角直接贴齐目标方向，确保紧接着同步给服务端的朝向包与瞄准方向一致（楼梯、箱子朝向不放歪）。
-    private static void snapLookTo(PlayerContext player, Vec3 eye, Vec3 point) {
+    // 满平滑预算后把剩余微小角差贴齐目标方向以保证发包朝向准确，同时保留上一刻镜头角维持渲染插值连续。
+    private static void alignLookTo(PlayerContext player, Vec3 eye, Vec3 point) {
         Vec3 delta = point.subtract(eye);
         if (delta.lengthSqr() < 1.0e-8) return;
         double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
         float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
-        player.input().requestImmediateLook(yaw, pitch, player.clientTick());
+        player.input().alignLook(yaw, pitch, player.clientTick());
     }
 
     // 走真实射线路径时转到位却点到了别的：重新找瞄准点再试；次数用完就是站位问题。
@@ -231,6 +237,7 @@ public final class AimAndInteract implements Action {
             aimPoint = null;
             plannedBlockHit = null;
             aimTicks = 0;
+            turnBudget = TURN_MIN_TICKS;
             return ActionStatus.running();
         }
         return ActionStatus.failed(new Problem(Problem.Kind.UNREACHABLE,

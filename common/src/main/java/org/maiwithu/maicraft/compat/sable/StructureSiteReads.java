@@ -10,6 +10,7 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.construction.ConstructionSeams;
 import org.maiwithu.maicraft.behavior.construction.LiveSite;
@@ -55,6 +56,19 @@ final class StructureSiteReads implements ConstructionSeams.ReadsSite {
         return StructureScene.find(reads, level, player, structureId)
                 .map(ship -> BlockPos.containing(ship.pose().toLocal(player.position())))
                 .orElse(null);
+    }
+
+    @Override public Vec3 lookDirection() {
+        PlayerContext current = context.get();
+        ClientLevel level = current == null ? null : current.level();
+        LocalPlayer player = current == null ? null : current.localPlayer();
+        return StructureScene.find(reads, level, player, structureId)
+                .map(ship -> {
+                    Vec3 eye = ship.pose().toLocal(player.getEyePosition());
+                    Vec3 ahead = ship.pose().toLocal(player.getEyePosition().add(player.getViewVector(1.0f)));
+                    return ahead.subtract(eye);
+                })
+                .orElse(Vec3.ZERO);
     }
 
     @Override public int carried(String itemId) {

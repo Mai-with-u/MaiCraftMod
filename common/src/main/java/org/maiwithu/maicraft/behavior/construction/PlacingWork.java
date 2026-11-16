@@ -17,7 +17,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
@@ -160,24 +162,28 @@ final class PlacingWork extends ConstructionWork {
     private static final double REACH_FROM_HERE = 4.0;
     /** 眼睛比脚底高多少（格）：站着时的视线高度。 */
     private static final double EYE_HEIGHT = 1.62;
+    /** 站着够得着时转头 180 度折算的距离代价（格）：顺着眼前这一侧扫完再转身，不在四格内前后交替甩头。 */
+    private static final double REACHABLE_TURN_WEIGHT = 3.5;
+    /** 需要迈步过去时平局或近距的朝向决胜代价（格）：对称等距时顺着当前朝向挑，不舍近求远跑冤枉路。 */
+    private static final double WALK_TURN_TIEBREAKER = 0.4;
 
-    // 同一层、同一阶段（清空、骨架、贴附件）里挑离人最近的一格：先把站的地方够得着的放完再挪。
-    // 挑出来的格先看"站着就够得着吗"（最近的几格里挑够得着的，都没有才照距离挑），不为面向不对的近格白跑一趟。
+    // 同一层、同一阶段（清空、骨架、贴附件）里挑离人最近且顺手的一格：先把站的地方够得着的顺着视线扫完再转身或挪步。
     // 临时方块链要按链上的顺序垫，队头是临时方块时照原顺序。
     private PlannedCell pollNearest() {
         PlannedCell head = queue.peek();
         BlockPos feet = services.site().feet();
         if (head == null || feet == null || temporaries.contains(head.pos())) return queue.poll();
+        Vec3 look = services.site().lookDirection();
         List<PlannedCell> tier = new ArrayList<>();
         for (PlannedCell cell : queue) {
             if (temporaries.contains(cell.pos()) || !sameTier(cell, head)) continue;
             tier.add(cell);
         }
-        tier.sort(Comparator.comparingDouble(cell ->
-                cell.pos().distToCenterSqr(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5)));
-        // 站一处把够得着的放完再挪：只看离人最近的几格，省得每次挑格都把整个队列的面试一遍。
+        tier.sort(Comparator.comparingDouble(cell -> pickScore(cell, feet, look, WALK_TURN_TIEBREAKER)));
+        // 站一处把够得着的放完再挪：在最近的预筛窗口里综合距离与视线夹角挑最顺手的一格。
         PlannedCell picked = pickNearestReachable(tier,
-                cell -> reachableFromHere(services.site(), cell, site.placements().placeAt(cell, services.site()), feet));
+                cell -> reachableFromHere(services.site(), cell, site.placements().placeAt(cell, services.site()), feet),
+                feet, look);
         queue.remove(picked);
         return picked;
     }
@@ -190,10 +196,41 @@ final class PlacingWork extends ConstructionWork {
      * 纯函数：够得着与否由调用方回答。
      */
     static PlannedCell pickNearestReachable(List<PlannedCell> tier, Predicate<PlannedCell> hasReachableFace) {
-        for (PlannedCell cell : tier.subList(0, Math.min(REACHABLE_PROBES, tier.size()))) {
-            if (hasReachableFace.test(cell)) return cell;
+        return pickNearestReachable(tier, hasReachableFace, null, Vec3.ZERO);
+    }
+
+    /**
+     * 带当前脚位与视线的挑格预筛：预筛窗口内所有站着够得着的格按距离加视线夹角综合打分，
+     * 顺着面朝这一侧依次扫过去再转身，避免在四格内前放一格、后放一格反复 180 度折返转头。
+     */
+    static PlannedCell pickNearestReachable(List<PlannedCell> tier, Predicate<PlannedCell> hasReachableFace,
+            BlockPos feet, Vec3 look) {
+        int limit = Math.min(REACHABLE_PROBES, tier.size());
+        PlannedCell best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        boolean hasLook = feet != null && look != null && look.lengthSqr() > 1.0e-6;
+        for (PlannedCell cell : tier.subList(0, limit)) {
+            if (!hasReachableFace.test(cell)) continue;
+            if (!hasLook) return cell;
+            double score = pickScore(cell, feet, look, REACHABLE_TURN_WEIGHT);
+            if (score < bestScore - 1.0e-9) {
+                bestScore = score;
+                best = cell;
+            }
         }
-        return tier.getFirst();
+        return best != null ? best : tier.getFirst();
+    }
+
+    // 挑一格的综合代价：眼睛到目标格中心的距离，加上视线转向幅度折算的代价（正前方为 0，正后方 180 度为满额）。
+    static double pickScore(PlannedCell cell, BlockPos feet, Vec3 look, double turnWeight) {
+        Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5);
+        Vec3 toCell = Vec3.atCenterOf(cell.pos()).subtract(eye);
+        double distance = toCell.length();
+        if (look == null || look.lengthSqr() <= 1.0e-6 || distance <= 1.0e-6 || turnWeight <= 0.0) {
+            return distance;
+        }
+        double cos = Mth.clamp(look.normalize().dot(toCell.scale(1.0 / distance)), -1.0, 1.0);
+        return distance + turnWeight * (1.0 - cos) * 0.5;
     }
 
     // 这一格现在有没有站着就够得着的面：与 reachableFirst 同一个式子（可点面中心到眼睛不超过 4.0 格），只算几何。
