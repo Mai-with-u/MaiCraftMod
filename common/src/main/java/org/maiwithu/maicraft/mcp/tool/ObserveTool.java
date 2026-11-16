@@ -9,6 +9,7 @@ import com.google.gson.FieldNamingPolicy;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
+import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.PictureLook;
@@ -318,6 +319,12 @@ public final class ObserveTool implements McpTool {
             throw new ClientThread.NotInWorld();
         }
         PlayerContext player = context.player();
+        if (player != null && player.level() != null) {
+            // 读取详情、地点计数或世界记忆前，先按已加载区块现场淘汰刚被破坏的容器记录，避免返回已经不存在的旧箱子。
+            WorldMemoryView.pruneLoadedContainers(currentMemory,
+                    StandingContainers.ReadsCells.inLevel(player.level())::blockIdAt,
+                    currentScene.facilityKinds());
+        }
         String dimension = player == null || player.level() == null
                 ? null : player.level().dimension().location().toString();
         Protection guard = protection == null ? null : protection.get();

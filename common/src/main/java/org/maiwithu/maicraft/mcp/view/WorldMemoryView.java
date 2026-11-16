@@ -20,6 +20,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -77,6 +78,15 @@ public final class WorldMemoryView {
         json.addProperty("whose", origin.wire());
         if (origin.lastModifiedBy() != null) json.addProperty("last_modified_by", origin.lastModifiedBy());
         json.addProperty("opened_by_self", origin.openedBySelf());
+    }
+
+    /** 在渲染世界记忆与地点统计前，先按已加载区块方块读数淘汰已被敲掉或换掉的失效容器记忆；未加载区块保留不动。 */
+    public static void pruneLoadedContainers(WorldMemory memory,
+            Function<WorldPosition, Optional<String>> loadedBlockAt, FacilityKinds kinds) {
+        if (memory == null || loadedBlockAt == null || kinds == null) {
+            return;
+        }
+        memory.pruneGoneContainers(loadedBlockAt, kinds::isContainer);
     }
 
     /** 紧凑的命名地点视图（observe(what=places)）：速览读记住的地点用它，不再拉整份容器与产地记录。 */

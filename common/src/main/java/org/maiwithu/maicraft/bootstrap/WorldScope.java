@@ -39,6 +39,7 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.SolidEntityObstacles;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
+import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -409,7 +410,8 @@ public final class WorldScope {
         // 设施观察：容器、工作设施与床三类都查——容器与工作设施按方块标签认（模组的箱子、损坏的铁砧都算），
         // 床按方块类型名认；三类都报观察编号，只有容器与工作设施写进世界记忆。
         observing = current;
-        scene.updateFacilities(gameTick, when, facilitySight.nearby(kinds.facilityBlockTypes()));
+        scene.updateFacilities(gameTick, when, facilitySight.nearby(kinds.facilityBlockTypes()),
+                StandingContainers.ReadsCells.inLevel(current.level())::blockIdAt);
         // 看得见的告示牌连同牌子上的字：主播在基地立的路牌、留言，observe 里读得到。
         scene.updateSigns(gameTick, facilitySight.signs());
         // 洞口与峡谷：每刻扫一小段，扫完一圈才换上这一圈看到的；看见的顺路记进世界记忆。

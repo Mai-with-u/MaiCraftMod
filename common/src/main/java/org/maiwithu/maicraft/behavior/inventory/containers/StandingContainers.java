@@ -2,12 +2,19 @@
 package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -21,9 +28,37 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  */
 public final class StandingContainers {
 
-    /** 现场只读接缝：那一格加载了就读到此刻的方块 ID；没加载给空。 */
+    /** 现场只读接缝：那一格在当前维度且区块加载了就读到此刻的方块 ID；跨维度或没加载一律给空，避免误删。 */
     public interface ReadsCells {
         Optional<String> blockIdAt(WorldPosition at);
+
+        /** 按给定世界读取已加载格子的当前方块 ID；维度不一致或区块未加载时返回空。 */
+        static ReadsCells inLevel(Level level) {
+            if (level == null) {
+                return at -> Optional.empty();
+            }
+            String currentDimension = level.dimension().location().toString();
+            return at -> {
+                if (at == null || (at.dimension() != null && !at.dimension().equals(currentDimension))) {
+                    return Optional.empty();
+                }
+                BlockPos cell = new BlockPos(at.x(), at.y(), at.z());
+                if (!level.isLoaded(cell)) {
+                    return Optional.empty();
+                }
+                BlockState state = level.getBlockState(cell);
+                return Optional.of(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
+            };
+        }
+
+        /** 按当刻角色所在世界读取已加载格子的方块 ID；不在世界里时返回空。 */
+        static ReadsCells fromPlayer(Supplier<PlayerContext> player) {
+            Objects.requireNonNull(player, "player");
+            return at -> {
+                PlayerContext current = player.get();
+                return current == null ? Optional.empty() : inLevel(current.level()).blockIdAt(at);
+            };
+        }
     }
 
     private final WorldMemory memory;
@@ -51,6 +86,15 @@ public final class StandingContainers {
     /** 指定那一格的记得容器：现场对不上的划掉并给空；没加载的按记忆给，到场再核对。 */
     public Optional<MemoryRecord> at(WorldPosition position) {
         return memory.recordAt(MemoryKind.CONTAINER, position).filter(this::stillThere);
+    }
+
+    /** 扫一遍世界记忆里的全部容器记录：区块已加载且现场确认已不再是该容器的，当场从记忆里淘汰；未加载区块原样保留。 */
+    public void pruneLoaded() {
+        for (MemoryRecord record : List.copyOf(memory.allRecords())) {
+            if (record.kind() == MemoryKind.CONTAINER) {
+                stillThere(record);
+            }
+        }
     }
 
     // 现场核对：格子加载了就按此刻的方块判——不是容器、或不是记下的那种，这条记忆已错，划掉；

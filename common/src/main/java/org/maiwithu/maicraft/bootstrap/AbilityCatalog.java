@@ -126,6 +126,7 @@ import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.inventory.containers.ClientSpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.RememberedContainers;
+import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
@@ -364,10 +365,13 @@ public final class AbilityCatalog {
         List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
         List<CarriedBackpack> carriedBackpacks = deps.compat().carriedBackpacks(playerServices);
         // 腾背包时要留的东西（预留的、正要用的）留够件数不挪；随身背包接联动登记的第一只实现。
+        StandingContainers standingContainers = new StandingContainers(deps.world().memory(),
+                StandingContainers.ReadsCells.fromPlayer(deps.character().context()),
+                deps.world().facilities()::isContainer);
         InventorySpace space = new InventorySpace(deps.kept(), deps.character().backpack(),
                 Optional.of(new ClientStackMerger(deps.character().context())),
                 carriedBackpacks.stream().findFirst(),
-                Optional.of(new RememberedContainers(deps.world().memory(), deps.character().position(),
+                Optional.of(new RememberedContainers(standingContainers, deps.character().position(),
                         deps.guards().protection())),
                 Optional.of(storing),
                 () -> networks.stream().findFirst());

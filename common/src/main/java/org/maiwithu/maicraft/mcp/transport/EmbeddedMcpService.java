@@ -10,11 +10,13 @@ import com.google.gson.JsonParser;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.ByteArrayOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.nio.channels.ClosedChannelException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
@@ -212,7 +214,7 @@ public final class EmbeddedMcpService implements AutoCloseable {
         stop();
     }
 
-    private void handle(HttpExchange exchange) throws IOException {
+    void handle(HttpExchange exchange) throws IOException {
         // 先查是否停服、浏览器来源是否允许、口令是否正确，再按 POST／DELETE 处理请求。
         try {
             if (stopping.get()) {
@@ -244,8 +246,15 @@ public final class EmbeddedMcpService implements AutoCloseable {
             LOG.warn("MCP 请求体超过上限：{}", exception.getMessage());
             sendStatusSafely(exchange, 413, exception.getMessage());
         } catch (Exception exception) {
-            LOG.error("MCP 请求处理中出了没接住的错", exception);
-            sendStatusSafely(exchange, 500, "Internal MCP transport error");
+            if (isClientDisconnect(exception)) {
+                // 客户端主动断开连接、取消等待或提前关闭流属传输常态：降为调试日志并交代请求与断流原因，不再往已关闭通道补写 500。
+                LOG.debug("MCP 客户端已断开连接（{} {}）：{}",
+                        exchange.getRequestMethod(), exchange.getRequestURI(), describeDisconnect(exception), exception);
+                closeExchangeQuietly(exchange);
+            } else {
+                LOG.error("MCP 请求处理中出了没接住的错", exception);
+                sendStatusSafely(exchange, 500, "Internal MCP transport error");
+            }
         }
     }
 
@@ -638,11 +647,69 @@ public final class EmbeddedMcpService implements AutoCloseable {
     }
 
     private static void sendStatusSafely(HttpExchange exchange, int status, String message) {
+        // 响应头一旦发出（getResponseCode 不再是 -1），底层交换流已不允许重发状态码，直接安静收起，不制造二次异常。
+        if (exchange.getResponseCode() != -1) {
+            LOG.debug("MCP 响应通道已发出状态码 {}，跳过补写状态码 {}", exchange.getResponseCode(), status);
+            closeExchangeQuietly(exchange);
+            return;
+        }
         try {
             sendStatus(exchange, status, message);
         } catch (IOException failure) {
-            LOG.warn("回 MCP 状态码 {} 时连接已经断了，这条请求对方收不到", status, failure);
+            if (isClientDisconnect(failure)) {
+                LOG.debug("回 MCP 状态码 {} 时客户端连接已断开：{}", status, describeDisconnect(failure), failure);
+            } else {
+                LOG.warn("回 MCP 状态码 {} 时连接已经断了，这条请求对方收不到", status, failure);
+            }
+            closeExchangeQuietly(exchange);
+        }
+    }
+
+    /** 识别由对端断开 HTTP 或流式连接触发的传输异常（含嵌套异常链）。 */
+    static boolean isClientDisconnect(Throwable throwable) {
+        for (Throwable current = throwable; current != null; current = current.getCause()) {
+            if (current instanceof PayloadTooLargeException) {
+                return false;
+            }
+            if (current instanceof ClosedChannelException || current instanceof EOFException) {
+                return true;
+            }
+            if (current instanceof IOException && matchesDisconnectMessage(current.getMessage())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean matchesDisconnectMessage(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        String text = raw.toLowerCase(Locale.ROOT);
+        return text.contains("connection reset")
+                || text.contains("broken pipe")
+                || text.contains("stream is closed")
+                || text.contains("socket closed")
+                || text.contains("channel is closed")
+                || text.contains("closed channel")
+                || text.contains("connection was aborted")
+                || text.contains("forcibly closed")
+                || text.contains("insufficient bytes written")
+                || text.contains("premature eof")
+                || raw.contains("主机中的软件中止")
+                || raw.contains("远程主机强迫关闭");
+    }
+
+    private static String describeDisconnect(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
+    }
+
+    private static void closeExchangeQuietly(HttpExchange exchange) {
+        try {
             exchange.close();
+        } catch (RuntimeException failure) {
+            LOG.debug("收起已断开的 MCP 交换通道时忽略异常：{}", failure.getMessage(), failure);
         }
     }
 

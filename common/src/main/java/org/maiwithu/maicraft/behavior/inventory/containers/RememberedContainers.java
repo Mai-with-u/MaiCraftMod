@@ -3,39 +3,43 @@ package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 
 /**
  * 已知容器读端：把世界记忆里记过的容器读成腾地方能用的候选。
  *
- * <p>只拿记忆里"这里有只箱子"的事实，按角色当前位置取给定方块距离以内的，由近及远排好；
- * 别人的箱子（不是自己或自家人放的）不往里塞东西，直接不进候选。记忆可能过时：
- * 箱子可能已经搬走，真正开箱存取时以现场为准，开不了由存取如实失败。
+ * <p>每次挑候选时先经 {@link StandingContainers} 核对已加载区块的现场方块：
+ * 若箱子已被敲掉变成空气或换成其他方块，当场从世界记忆里划掉并不再选作腾包目标；
+ * 未加载区块保留记忆候选，待走到现场再核对。别人的箱子（受圈地或保护限制）不往里塞东西。
  */
 public final class RememberedContainers implements KnownContainers {
 
-    private final WorldMemory memory;
+    private final StandingContainers standing;
     private final ReadsCharacterPosition position;
     private final Protection protection;
 
     public RememberedContainers(WorldMemory memory, ReadsCharacterPosition position, Protection protection) {
-        this.memory = Objects.requireNonNull(memory, "memory");
+        this(new StandingContainers(Objects.requireNonNull(memory, "memory"), at -> Optional.empty(), blockId -> true),
+                position, protection);
+    }
+
+    public RememberedContainers(StandingContainers standing, ReadsCharacterPosition position, Protection protection) {
+        this.standing = Objects.requireNonNull(standing, "standing");
         this.position = Objects.requireNonNull(position, "position");
         this.protection = Objects.requireNonNull(protection, "protection");
     }
 
     @Override
     public List<KnownContainer> within(int blockRange) {
-        // 记录时刻近的在前（recordsNear 的排序），腾地方先试新近记下的容器，过时的更可能已经不在了。
-        return memory.recordsNear(position.currentPosition(), blockRange).stream()
-                .filter(record -> record.kind() == MemoryKind.CONTAINER)
-                // 只往能用的容器里存：自己或自家人放的、野外无主的；别人的记忆再近也不碰。
+        // 先经现存性核验淘汰已加载区块里被拆掉的旧箱子，只从眼下仍成立的容器记忆里挑腾包目标。
+        return standing.near(position.currentPosition(), blockRange).stream()
+                // 只往能用的容器里存：自己或自家人放的、野外无主的；受圈地保护的不碰。
                 .filter(record -> protection.mayUseStorage(record.position(), blockTypeOf(record), Set.of()))
                 .map(RememberedContainers::toKnown)
                 .toList();

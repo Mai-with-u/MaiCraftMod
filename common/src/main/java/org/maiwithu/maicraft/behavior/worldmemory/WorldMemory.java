@@ -10,6 +10,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
 import org.maiwithu.maicraft.behavior.permission.ReadsRememberedPlaces;
@@ -98,6 +100,23 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
     @Override
     public void siteSeen(WorldPosition position, List<String> roughlyThere, Instant when) {
         rememberSite(position, roughlyThere, when);
+    }
+
+    /** 核验世界记忆里的容器记录：仅当所在维度区块已加载且确认该格已不再是原容器方块时，从世界记忆中即时淘汰。 */
+    @Override
+    public void pruneGoneContainers(Function<WorldPosition, Optional<String>> loadedBlockAt,
+            Predicate<String> isContainer) {
+        if (loadedBlockAt == null || isContainer == null) {
+            return;
+        }
+        for (MemoryRecord record : List.copyOf(allRecords())) {
+            if (record.kind() != MemoryKind.CONTAINER) continue;
+            String here = loadedBlockAt.apply(record.position()).orElse(null);
+            if (here == null) continue;
+            if (!isContainer.test(here) || (record.blockType() != null && !record.blockType().equals(here))) {
+                forget(MemoryKind.CONTAINER, record.position());
+            }
+        }
     }
 
     /**

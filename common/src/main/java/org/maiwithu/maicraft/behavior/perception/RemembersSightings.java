@@ -3,6 +3,9 @@ package org.maiwithu.maicraft.behavior.perception;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.function.Predicate;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -21,4 +24,8 @@ public interface RemembersSightings {
 
     /** 记一条亲眼看到的产地线索：这一片见过什么，例如路过时看见一片树林。 */
     void siteSeen(WorldPosition position, List<String> roughlyThere, Instant when);
+
+    /** 按已加载区块的现场方块读数淘汰失效容器记录：区块已加载且确认不再是该容器时从记忆里划掉；未加载区块保留不动。 */
+    default void pruneGoneContainers(Function<WorldPosition, Optional<String>> loadedBlockAt,
+            Predicate<String> isContainer) {}
 }

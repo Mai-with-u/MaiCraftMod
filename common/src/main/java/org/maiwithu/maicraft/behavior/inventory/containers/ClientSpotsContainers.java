@@ -138,12 +138,9 @@ public final class ClientSpotsContainers implements SpotsContainers {
         return new StandingContainers(memory, cellsOf(level), kinds::isContainer);
     }
 
-    // 现场只读接缝：加载了的格子读此刻的方块 ID，没加载的给空。
+    // 现场只读接缝：仅当前维度且已加载的格子读此刻的方块 ID，跨维度与未加载区块给空。
     private StandingContainers.ReadsCells cellsOf(ClientLevel level) {
-        return at -> {
-            BlockPos cell = new BlockPos(at.x(), at.y(), at.z());
-            return level.isLoaded(cell) ? Optional.of(blockTypeIdOf(level.getBlockState(cell))) : Optional.empty();
-        };
+        return StandingContainers.ReadsCells.inLevel(level);
     }
 
     // 现场的一格容器读成候选：盖子、坐着的猫、开过的内容都按当刻的事实读；名字带上容器来源说明（最后由谁放下或自然战利品容器）。

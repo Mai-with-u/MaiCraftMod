@@ -308,6 +308,14 @@ public final class Scene {
      * 容器与工作设施亲眼看到就写进世界记忆——看见只记"这里有只"，不猜里面有什么。
      */
     public void updateFacilities(long nowTick, Instant when, List<NearbyBlocksSight.BlockSighting> blockSightings) {
+        updateFacilities(nowTick, when, blockSightings, null);
+    }
+
+    /**
+     * 更新设施观察并顺路核验已加载区块的容器记忆：亲眼看见的容器写入记忆，已加载但已被敲掉或换掉的旧容器当场淘汰。
+     */
+    public void updateFacilities(long nowTick, Instant when, List<NearbyBlocksSight.BlockSighting> blockSightings,
+            Function<WorldPosition, Optional<String>> loadedBlockAt) {
         if (self == null) {
             return;
         }
@@ -324,6 +332,9 @@ public final class Scene {
             } else if (kinds.isWorkstation(sighting.blockType())) {
                 memory.workstationSeen(sighting.position(), sighting.blockType(), when);
             }
+        }
+        if (loadedBlockAt != null) {
+            memory.pruneGoneContainers(loadedBlockAt, kinds::isContainer);
         }
         replace(FacilitySighting.class, next);
     }
