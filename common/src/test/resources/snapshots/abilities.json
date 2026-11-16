@@ -76,6 +76,18 @@
         "mode": "controls_player"
       },
       {
+        "ability": "maicraft:fill_pit",
+        "summary": "用身上现成多余的泥土、圆石把营地或指定位置的地面坑填平",
+        "parameters": "radius: integer (4..32) = 16",
+        "targets": [
+          "here",
+          "landmark",
+          "position",
+          "seen"
+        ],
+        "mode": "controls_player"
+      },
+      {
         "ability": "maicraft:enchant",
         "summary": "在附魔台给一件东西附魔：选料、看三档报价、按选定档，附出什么如实列出",
         "parameters": "item: string, tier: integer (1..3) = 1, radius: integer (1..9223372036854775807) = 32",
@@ -765,6 +777,31 @@
       "required_mods": [],
       "knowledge": [],
       "doc_resource": "assets/maicraft/abilities/loot.md"
+    },
+    {
+      "ability": "maicraft:fill_pit",
+      "summary": "用身上现成多余的泥土、圆石把营地或指定位置的地面坑填平",
+      "parameters": [
+        {
+          "name": "radius",
+          "type": "integer",
+          "required": false,
+          "doc": "不给 target 时在多远内把营地地面坑依次填平（格）",
+          "default": 16,
+          "min": 4,
+          "max": 32
+        }
+      ],
+      "targets": [
+        "here",
+        "landmark",
+        "position",
+        "seen"
+      ],
+      "mode": "controls_player",
+      "required_mods": [],
+      "knowledge": [],
+      "doc_resource": "assets/maicraft/abilities/fill_pit.md"
     },
     {
       "ability": "maicraft:enchant",

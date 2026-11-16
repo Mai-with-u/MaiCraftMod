@@ -73,12 +73,13 @@ class AssemblyTest {
         // 改女仆设置与下五子棋也接上了：办法由登记表按装了的车万女仆建，离线一份没有也照常登记（点名时如实说认不出）。
         // 肢体动作也接上了：不点名时问的那份你来我往离线是空的，照常登记。
         // 搜刮也接上了：挑箱子的价值分级与稀有度判定离线照常登记，开箱交给共用的点开容器那套。
+        // 填坑也接上了：扫描复用场景那份营地地面坑读端，回填只取扣除预留后的现成多余废料。
         assertEquals(Set.of("use", "eat", "equip", "drop", "suicide", "obtain", "gather", "deposit", "sleep", "design", "build",
                 "machine_inspect", "machine_review", "machine_configure", "machine_run",
                 "machine_build", "machine_connect", "light",
                 "fight", "follow", "timer", "travel", "find", "explore", "chat", "maid_configure", "gomoku_play", "reserve",
                 "remember", "sequence", "quest", "vehicle_assemble",
-                "vehicle_drive", "fish", "enchant", "body_language", "loot"), registered,
+                "vehicle_drive", "fish", "enchant", "body_language", "loot", "fill_pit"), registered,
                 "清单里的能力要一个不少地登记上");
     }
 

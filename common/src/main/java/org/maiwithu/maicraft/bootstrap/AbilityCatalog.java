@@ -40,8 +40,6 @@ import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
-import org.maiwithu.maicraft.ability.deposit.DepositModule;
-import org.maiwithu.maicraft.ability.loot.LootModule;
 import org.maiwithu.maicraft.ability.drop.DropModule;
 import org.maiwithu.maicraft.ability.eat.EatModule;
 import org.maiwithu.maicraft.ability.equip.EquipModule;
@@ -268,10 +266,10 @@ public final class AbilityCatalog {
         ContainerSource containerSource = containerSource(deps, shared);
         registry.register(obtainModule(deps, shared, containerSource));
 
-        // 存东西：找容器把现场扫描与世界记忆并起来，打开容器、逐笔搬运与挖盖子都接上了。
-        registry.register(depositModule(deps, shared));
-        // 搜刮战利品容器：按价值分级拿走稀罕物、装备、材料与食物，触发开出稀罕战利品的里程碑。
-        registry.register(lootModule(deps, shared));
+        // 存东西、搜刮战利品容器与用现成多余废料填平地面坑。
+        registry.register(SiteTidyWiring.depositModule(deps, shared));
+        registry.register(SiteTidyWiring.lootModule(deps, shared));
+        registry.register(SiteTidyWiring.fillPitModule(deps, shared));
 
         // 附魔：缺料走受限补齐（身上与记得的容器，要下矿才够就 NEED_ITEM），界面里装料与报价
         // 走容器界面的既有规矩；观察编号查场景、记过的地点查世界记忆、台子分刻扫描找。
@@ -303,7 +301,7 @@ public final class AbilityCatalog {
      * 清单里好几处共用的现场部件：靠近与换手、挖一格与捡掉落物、拿到物品的内需入口、
      * 游戏拒绝读端、许可检查点、联动能用的那份玩家行为、丢东西与存放的现场部件，以及腾地方。
      */
-    private record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, DigsBlocks digging,
+    record Shared(LiveApproaches bringClose, ClientMovesToMainhand toMainhand, DigsBlocks digging,
             ClientDropPickup drops, ClientCollectsBlocks collects, DeferredInnerNeeds innerNeeds,
             ClientGameRefusals refusals, PermissionCheck permission, PlayerServices playerServices,
             DropsItems.Parts dropping, StoresInContainer.Parts storing, InventorySpace space,
@@ -746,27 +744,6 @@ public final class AbilityCatalog {
                 deps.guards().creatures(), space, deps.world().facilities(),
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.compat().menuLayouts(),
                 deps.hands().digging(), deps.guards().othersNotice(), deps.guards().rareLootNotice());
-    }
-
-    /** 存东西能力的一份：找容器把现场扫描与世界记忆并起来，归属与压住盖子的方块问这个世界的保护判断。 */
-    private static DepositModule depositModule(Deps deps, Shared shared) {
-        // 存进网络（into=network）用和腾地方同一份网络存储：联动模组登记的第一个。
-        // 点名一只生物时存进它身上：点开生物身上的界面用共用的靠近、腾空手与按住潜行。
-        return DepositModule.live(deps.character().context(), shared.storing(), shared.collects(),
-                deps.items().itemTags(), deps.world().memory(), deps.character().backpack(),
-                deps.world().blockScans(), deps.guards().protection(), deps.world()::scene,
-                deps.world().facilities(), () -> shared.networks().stream().findFirst(), deps.kept(),
-                deps.compat().menuLayouts(), shared.bringClose(), deps.hands().interactions(), shared.toMainhand(),
-                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()));
-    }
-
-    /** 搜刮战利品容器能力的一份：找容器、归属保护、容器界面搬运与稀罕战利品通报共用同一套现场部件。 */
-    private static LootModule lootModule(Deps deps, Shared shared) {
-        return LootModule.live(deps.character().context(), deps.world()::scene, deps.world().memory(),
-                deps.world().blockScans(), deps.guards().protection(), deps.world().facilities(), shared.collects(),
-                deps.compat().menuLayouts(), shared.bringClose(), deps.hands().interactions(), shared.toMainhand(),
-                new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.kept(),
-                deps.guards().rareLootNotice());
     }
 
     /**
