@@ -664,4 +664,21 @@ class GatherTaskTest {
         JsonObject pickJson = ResultJson.result(run(pickTask));
         assertFalse(pickJson.has("details"), "只捡地上掉落物时不带 chain_mining 细节：" + pickJson);
     }
+
+    @Test
+    void 普通方块采集走带工具准备的挖掘入口() {
+        FakeBackpack backpack = new FakeBackpack();
+        DigsBlocks.ToolPrep[] captured = {null};
+        FakeActions actions = new FakeActions(backpack, "minecraft:oak_planks", 1) {
+            @Override public Optional<Action> dig(BlockPos target, ToolPrep prep) {
+                captured[0] = prep;
+                return super.dig(target);
+            }
+        };
+        GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:oak_planks", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(captured[0] != null && captured[0].wantsDrop() && captured[0].expectedBlocks() == 1);
+    }
 }

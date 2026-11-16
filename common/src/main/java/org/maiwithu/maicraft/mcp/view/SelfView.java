@@ -260,19 +260,37 @@ public final class SelfView {
         return json;
     }
 
-    // 同一样东西合成一项；药水按种类分开列，每项多写一个 potion：几瓶长得一样的药水分得清哪瓶是哪种。
+    // 背包条目合并键：满耐久与无耐久物品按物品种类合并；已受损的可损耗物品按各自剩余耐久独立分项，避免残血工具被满血同类合并隐藏。
+    private record InventoryKey(StackKey stack, int durability, int maxDurability) {
+        static InventoryKey of(BackpackStack stack) {
+            if (stack.damaged()) {
+                return new InventoryKey(StackKey.of(stack), stack.durability(), stack.maxDurability());
+            }
+            return new InventoryKey(StackKey.of(stack), 0, 0);
+        }
+
+        boolean damaged() {
+            return maxDurability > 0;
+        }
+    }
+
+    // 同一样满耐久或无耐久的东西合成一项；药水按种类分开列；已受损的工具与装备按各自耐久独立列项并附带剩余与最大耐久。
     private static JsonArray inventory(BackpackView backpack, ReadsFoodValues foods) {
-        Map<StackKey, Integer> merged = new LinkedHashMap<>();
+        Map<InventoryKey, Integer> merged = new LinkedHashMap<>();
         for (BackpackStack stack : backpack.stacks()) {
-            merged.merge(StackKey.of(stack), stack.count(), Integer::sum);
+            merged.merge(InventoryKey.of(stack), stack.count(), Integer::sum);
         }
         JsonArray list = new JsonArray();
         merged.forEach((key, count) -> {
-            String item = key.itemId();
+            String item = key.stack().itemId();
             JsonObject entry = new JsonObject();
             entry.addProperty("item", item);
-            if (key.potion() != null) entry.addProperty("potion", key.potion());
+            if (key.stack().potion() != null) entry.addProperty("potion", key.stack().potion());
             entry.addProperty("count", count);
+            if (key.damaged()) {
+                entry.addProperty("durability", key.durability());
+                entry.addProperty("max_durability", key.maxDurability());
+            }
             // 吃的写上吃一个补多少、可能带什么效果：模组食物认不全，挑哪样吃、要不要先烤看这一项。
             if (foods != null) foods.of(item).ifPresent(food -> entry.add("food", food(food)));
             list.add(entry);

@@ -2,9 +2,11 @@
 package org.maiwithu.maicraft.behavior.inventory.hands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 
 import org.junit.jupiter.api.Test;
 
@@ -79,10 +81,33 @@ class DigToolChoiceTest {
     }
 
     @Test
-    void 只剩十点耐久的钻石镐不换上来() {
+    void 普通工具按最大耐久折算磨损_只剩一点耐久的铁镐也照常拿来挖() {
+        // 铁镐剩 1 点耐久，按最大耐久 250 折算每格磨损 0.04，远低于空手石头 1.50，允许用到最后一点耐久。
+        var lastPointIron = piece(9, 6, 250, 1, 10, 1, 0, false, false, false);
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(lastPointIron), 0, STONE, 1, false));
+        // 普通钻石镐剩 10 点耐久挖 10 格圆石：磨损按 1561 折算，每格比石镐省约 0.049，十格超过换手代价就换。
         var nearlyBroken = piece(9, 8, 1561, 10, 50, 1, 0, false, false, false);
-        var verdict = DigToolChoice.choose(backpack(pick(0, 4, 131, 1.5), nearlyBroken), 0, COBBLESTONE, 10, true);
-        assertEquals(new DigToolChoice.Verdict.Keep(), verdict);
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(pick(0, 4, 131, 1.5), nearlyBroken), 0, COBBLESTONE, 10, true));
+    }
+
+    @Test
+    void 带经验修补或精准时运的珍贵工具即将碎裂时保底回避() {
+        // 背包里剩 1 点耐久的经验修补钻石镐不换上来；剩 2 点耐久时还能挖一格不碎，照常换。
+        var mendingLast = piece(9, 8, 1561, 1, 50, 1, 5, false, true, false);
+        assertEquals(new DigToolChoice.Verdict.None(200),
+                DigToolChoice.choose(backpack(mendingLast), 0, COBBLESTONE, 1, true));
+        var mendingTwo = piece(9, 8, 1561, 2, 50, 1, 5, false, true, false);
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(mendingTwo), 0, COBBLESTONE, 1, true));
+
+        // 主手握着剩 1 点耐久的精准采集钻石镐：不硬挖碎，背包有普通镐就换普通镐，不要掉落且没别的镐就腾空主手。
+        var silkLast = piece(0, 8, 1561, 1, 50, 1, DigToolChoice.DROP_CHANGING_VALUE, true, false, false);
+        assertEquals(new DigToolChoice.Verdict.Swap(10),
+                DigToolChoice.choose(backpack(silkLast, pick(10, 4, 131, 1.5)), 0, STONE, 1, true));
+        assertEquals(new DigToolChoice.Verdict.BareHand(),
+                DigToolChoice.choose(backpack(silkLast), 0, STONE, 1, false));
     }
 
     @Test
@@ -148,11 +173,19 @@ class DigToolChoiceTest {
     }
 
     @Test
-    void 带经验修补但只剩十点耐久的木镐不换上来() {
-        // 磨损按 0.2 折：1 ÷ 10 × 1 × 0.2 = 0.02，时间 30 刻；还是比石镐贵。
+    void 带经验修补的木镐速度慢_不会顶掉主手石镐() {
+        // 磨损按最大耐久 59 再打两折，但挖圆石每格 30 刻（0.30），仍比石镐 15 刻（约 0.16）贵。
         var mending = piece(9, 2, 59, 10, 1, 1, 0, false, true, false);
         var verdict = DigToolChoice.choose(backpack(pick(0, 4, 131, 1.5), mending), 0, COBBLESTONE, 10, true);
         assertEquals(new DigToolChoice.Verdict.Keep(), verdict);
+    }
+
+    @Test
+    void 清障不要掉落且无可用镐时仍识别出缺对路工具并返回徒手刻数() {
+        // 空手或主手拿剑清障挖石头：choose 虽退回空手，handTicksWithoutTool 照实报 150 刻供现做工具算账；有可用镐则为空。
+        assertEquals(OptionalInt.of(150),
+                DigToolChoice.handTicksWithoutTool(backpack(sword(0)), 0, STONE, false));
+        assertTrue(DigToolChoice.handTicksWithoutTool(backpack(pick(9, 2, 59, 1)), 0, STONE, false).isEmpty());
     }
 
     @Test

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.function.Predicate;
 
 import net.minecraft.client.player.LocalPlayer;
@@ -113,13 +114,23 @@ public final class LiveDigToolRule implements DigToolRule {
 
     /**
      * 挑工具的结论；挖不动的（基岩这类）当主手合适、不换，换了也挖不动。
-     * 现做工具按"身上没有够格的"那一态算账。
      */
     public DigToolChoice.Verdict verdict(LocalPlayer player, BlockState state, int expectedBlocks, boolean wantsDrop) {
         DigToolChoice.Block block = block(player, state);
         if (block == null) return new DigToolChoice.Verdict.Keep();
         Inventory inventory = player.getInventory();
         return DigToolChoice.choose(candidates(inventory, state), inventory.selected, block, expectedBlocks, wantsDrop);
+    }
+
+    /**
+     * 角色身上此刻没有可用的对路工具时，返回徒手挖这一格要多少刻；已有对路工具或这一格挖不动时返回空。
+     * 清障、挖楼梯这类不要掉落的路径同样走这一问，避免没镐时退回空手硬抠硬方块。
+     */
+    public OptionalInt handTicksWithoutTool(LocalPlayer player, BlockState state, boolean wantsDrop) {
+        DigToolChoice.Block block = block(player, state);
+        if (block == null) return OptionalInt.empty();
+        Inventory inventory = player.getInventory();
+        return DigToolChoice.handTicksWithoutTool(candidates(inventory, state), inventory.selected, block, wantsDrop);
     }
 
     /** 要挖的这一格的事实：硬度、要不要够格工具、掉落敏感不敏感；挖不动的为 null。 */

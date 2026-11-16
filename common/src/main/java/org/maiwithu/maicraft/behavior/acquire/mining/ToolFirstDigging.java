@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.WeakHashMap;
 import java.util.function.Predicate;
@@ -54,12 +55,24 @@ public final class ToolFirstDigging implements DigsBlocks {
     static final String PURPOSE = "现做工具";
 
     private final DigsBlocks digs;
-    private final LiveDigToolRule tools;
     private final ItemNeeds needs;
-    private final ItemsToKeep kept;
-    private final ReadsItemTags tags;
+    private final Site site;
     /** 一次任务里已经说过、试过的：按任务的记账口记，任务结束记账口没人用了就跟着丢。 */
     private final Map<TaskRecords, Set<String>> settled = new WeakHashMap<>();
+
+    /** 现做工具在开挖前看的那一眼现场：目标格是什么、身上缺不缺对路工具、能做哪几种、身上的料够不够；离线测试用替身。 */
+    interface Site {
+
+        /** 目标格的现场事实：方块 ID、要不要对的工具才掉东西、挑工具看的方块属性、缺对路工具时的空手刻数、能现做的选项。 */
+        record TargetCell(String blockId, boolean requiresCorrectToolForDrops, DigToolChoice.Block block,
+                OptionalInt handTicksWithoutTool, List<ToolMaking.Option> options) {}
+
+        Optional<TargetCell> inspect(TickContext context, BlockPos target, boolean wantsDrop);
+
+        ToolMaking.Stock stock(TickContext context);
+
+        String reservedMention(TickContext context, BlockPos target, String itemId);
+    }
 
     /**
      * @param digs  共用的挖格
@@ -70,11 +83,16 @@ public final class ToolFirstDigging implements DigsBlocks {
      */
     public ToolFirstDigging(DigsBlocks digs, LiveDigToolRule tools, ItemNeeds needs, ItemsToKeep kept,
             ReadsItemTags tags) {
+        this(digs, needs, new LiveSite(
+                Objects.requireNonNull(tools, "tools"),
+                Objects.requireNonNull(kept, "kept"),
+                Objects.requireNonNull(tags, "tags")));
+    }
+
+    ToolFirstDigging(DigsBlocks digs, ItemNeeds needs, Site site) {
         this.digs = Objects.requireNonNull(digs, "digs");
-        this.tools = Objects.requireNonNull(tools, "tools");
         this.needs = Objects.requireNonNull(needs, "needs");
-        this.kept = Objects.requireNonNull(kept, "kept");
-        this.tags = Objects.requireNonNull(tags, "tags");
+        this.site = Objects.requireNonNull(site, "site");
     }
 
     @Override public Optional<Action> dig(BlockPos target) {
@@ -178,30 +196,26 @@ public final class ToolFirstDigging implements DigsBlocks {
             return dig.tick(context);
         }
 
-        // 身上没有对路的工具才算账：划算且料够就开始做，料不够说一句徒手挖；划不来、看不清现场就直接挖。
+        // 身上没有对路的工具才算账：不论要不要掉落，只要徒手硬抠明显划不来且料够就开始做，料不够说一句徒手挖；划不来、看不清现场就直接挖。
         private Optional<ActionStatus> decide(TickContext context) {
             // 点名了工具就只认那一件：不现做、不换别的，交给挖掘器照点名的挖，身上没有就如实失败。
             if (prep.digTool() != null) return Optional.empty();
-            LocalPlayer player = context.player() == null ? null : context.player().localPlayer();
-            if (player == null || player.level() == null || !player.level().isLoaded(target)) return Optional.empty();
-            BlockState state = player.level().getBlockState(target);
-            if (state.isAir()) return Optional.empty();
-            if (!(tools.verdict(player, state, prep.expectedBlocks(), prep.wantsDrop())
-                    instanceof DigToolChoice.Verdict.None none)) {
+            Optional<Site.TargetCell> inspected = site.inspect(context, target, prep.wantsDrop());
+            if (inspected.isEmpty()) return Optional.empty();
+            Site.TargetCell cell = inspected.get();
+            if (cell.handTicksWithoutTool().isEmpty() || cell.block() == null || cell.options().isEmpty()) {
                 return Optional.empty();
             }
-            DigToolChoice.Block block = tools.block(player, state);
-            List<ToolMaking.Option> options = options(state);
-            if (block == null || options.isEmpty()) return Optional.empty();
-            ToolMaking.Decision decision = ToolMaking.decide(block, none.handTicks(), prep.expectedBlocks(), options,
-                    stock(player));
-            String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            int handTicks = cell.handTicksWithoutTool().getAsInt();
+            ToolMaking.Decision decision = ToolMaking.decide(cell.block(), handTicks, prep.expectedBlocks(),
+                    cell.options(), site.stock(context));
+            String blockId = cell.blockId();
             if (decision instanceof ToolMaking.Decision.NoMaterial lacking) {
                 // 这块方块的掉落要靠对的工具，现做又做不出来：不挖了，如实说缺什么。
                 // 徒手挖下去这几块矿就白毁了，还让人以为采过了。
-                if (prep.wantsDrop() && state.requiresCorrectToolForDrops()) {
+                if (prep.wantsDrop() && cell.requiresCorrectToolForDrops()) {
                     return Optional.of(ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM,
-                            missingToolMessage(player, blockId, lacking, state))));
+                            missingToolMessage(context, blockId, lacking))));
                 }
                 if (settledFor().add("short:" + lacking.option().itemId())) {
                     note("徒手挖 " + blockId, "没现做 " + lacking.option().itemId() + "：" + lacking.why());
@@ -215,38 +229,19 @@ public final class ToolFirstDigging implements DigsBlocks {
             // 现做的是干活用的工具：引擎记下这一层是备工具，做法可以花更外层正在拿的东西。
             making = needs.actionForTool(request, prep.permissions(), prep.records());
             deadline = context.gameTick() + MAKE_BUDGET_TICKS;
-            note("现做 " + makingItem, "挖 " + blockId + " 徒手一格 " + none.handTicks() + " 刻，有它每格省 "
+            note("现做 " + makingItem, "挖 " + blockId + " 徒手一格 " + handTicks + " 刻，有它每格省 "
                     + make.savedPerBlock() + " 刻，这一趟约 " + prep.expectedBlocks() + " 格，划得来");
             return Optional.of(ActionStatus.progressed());
         }
 
         // 缺工具的说明：说清这块方块要的是什么、缺在哪；身上被预留着的那把干得了这件事时点它的名，
         // 让人知道不是身上没有，而是留着的不能用。
-        private String missingToolMessage(LocalPlayer player, String blockId, ToolMaking.Decision.NoMaterial lacking,
-                BlockState state) {
-            String held = reservedMention(player, lacking.option().itemId(), state);
+        private String missingToolMessage(TickContext context, String blockId, ToolMaking.Decision.NoMaterial lacking) {
+            String held = site.reservedMention(context, target, lacking.option().itemId());
             if (held != null) {
                 return "挖 " + blockId + " 要用对的工具才掉东西，够格的是" + held + "，预留着没自动拿来用";
             }
             return "挖 " + blockId + " 要用对的工具才掉东西，" + lacking.why() + "，问过各来源都拿不到";
-        }
-
-        // 身上被预留着、又挖得下这块方块的这类东西：按要做的工具的名字认（stone_pickaxe 认 "pickaxe"）。
-        private String reservedMention(LocalPlayer player, String itemId, BlockState state) {
-            String kind = itemId.substring(itemId.lastIndexOf('_') + 1);
-            int size = Math.min(36, player.getInventory().getContainerSize());
-            for (int slot = 0; slot < size; slot++) {
-                ItemStack stack = player.getInventory().getItem(slot);
-                if (stack.isEmpty()) continue;
-                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-                if (!id.endsWith(kind)) continue;
-                // 够格才点它的名：预留着木镐、眼前是钻石矿时，木镐不背这个锅。
-                if (!stack.isCorrectToolForDrops(state)) continue;
-                int keep = kept.keep(id);
-                if (keep <= 0) continue;
-                return stack.getHoverName().getString() + "（留 " + (keep == ItemsToKeep.ALL ? "全部" : keep + " 件") + "）";
-            }
-            return null;
         }
 
         private void note(String tried, String whatHappened) {
@@ -279,58 +274,108 @@ public final class ToolFirstDigging implements DigsBlocks {
         }
     }
 
-    // 能现做的几种：看这一格归哪种工具挖（镐、斧、锹、锄，按方块标签认），石头优先、圆石不够才做木的——
-    // 石镐每一趟都更便宜，木镐只在料不够时顶用。速度倍数与能不能掉落问原版的物品。
-    private static List<ToolMaking.Option> options(BlockState state) {
-        String kind = state.is(BlockTags.MINEABLE_WITH_PICKAXE) ? "pickaxe"
-                : state.is(BlockTags.MINEABLE_WITH_AXE) ? "axe"
-                : state.is(BlockTags.MINEABLE_WITH_SHOVEL) ? "shovel"
-                : state.is(BlockTags.MINEABLE_WITH_HOE) ? "hoe" : null;
-        if (kind == null) return List.of();
-        List<ToolMaking.Option> options = new ArrayList<>();
-        for (ToolMaking.Head head : List.of(ToolMaking.Head.STONE, ToolMaking.Head.PLANKS)) {
-            String itemId = "minecraft:" + (head == ToolMaking.Head.PLANKS ? "wooden_" : "stone_") + kind;
-            ItemStack tool = new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
-            if (tool.isEmpty()) continue;
-            options.add(new ToolMaking.Option(itemId, head, tool.getDestroySpeed(state),
-                    !state.requiresCorrectToolForDrops() || tool.isCorrectToolForDrops(state)));
-        }
-        return List.copyOf(options);
-    }
+    /** 生产现场读端：从客户端玩家、目标格方块状态与注册表读出现做工具要的事实。 */
+    private static final class LiveSite implements Site {
+        private final LiveDigToolRule tools;
+        private final ItemsToKeep kept;
+        private final ReadsItemTags tags;
 
-    // 身上能拿来做工具的料：每种按身上件数减去要留的，木板、原木、木棍、石质工具材料、工作台分开数；
-    // 被留着的另记，挡住时说得清。
-    private ToolMaking.Stock stock(LocalPlayer player) {
-        Map<String, Integer> carried = new LinkedHashMap<>();
-        var inventory = player.getInventory();
-        for (int slot = 0; slot < Math.min(36, inventory.getContainerSize()); slot++) {
-            ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
-                    stack.getCount(), Integer::sum);
+        LiveSite(LiveDigToolRule tools, ItemsToKeep kept, ReadsItemTags tags) {
+            this.tools = tools;
+            this.kept = kept;
+            this.tags = tags;
         }
-        ItemStack offhand = player.getOffhandItem();
-        if (!offhand.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(offhand.getItem()).toString(),
-                offhand.getCount(), Integer::sum);
-        int planks = 0, logs = 0, sticks = 0, stone = 0, keptPlanks = 0, keptStone = 0;
-        boolean table = false;
-        for (var entry : carried.entrySet()) {
-            String itemId = entry.getKey();
-            int count = entry.getValue();
-            int free = Math.max(0, count - Math.min(count, kept.keep(itemId)));
-            Set<String> itemTags = tags.tagsOf(itemId);
-            if (itemTags.contains("minecraft:planks")) {
-                planks += free;
-                keptPlanks += count - free;
-            } else if (itemTags.contains("minecraft:logs")) {
-                logs += free;
-                keptPlanks += (count - free) * 4;
-            } else if (itemTags.contains("minecraft:stone_tool_materials")) {
-                stone += free;
-                keptStone += count - free;
+
+        @Override public Optional<TargetCell> inspect(TickContext context, BlockPos target, boolean wantsDrop) {
+            LocalPlayer player = player(context);
+            if (player == null || player.level() == null || !player.level().isLoaded(target)) return Optional.empty();
+            BlockState state = player.level().getBlockState(target);
+            if (state.isAir()) return Optional.empty();
+            String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            return Optional.of(new TargetCell(blockId, state.requiresCorrectToolForDrops(),
+                    tools.block(player, state), tools.handTicksWithoutTool(player, state, wantsDrop),
+                    options(state, wantsDrop)));
+        }
+
+        // 能现做的几种：看这一格归哪种工具挖（镐、斧、锹、锄，按方块标签认），石头优先、圆石不够才做木的——
+        // 石镐每一趟都更便宜，木镐只在料不够时顶用；要掉落时只保留真能挖出掉落的档位，避免做把木镐把矿挖废。
+        private static List<ToolMaking.Option> options(BlockState state, boolean wantsDrop) {
+            String kind = state.is(BlockTags.MINEABLE_WITH_PICKAXE) ? "pickaxe"
+                    : state.is(BlockTags.MINEABLE_WITH_AXE) ? "axe"
+                    : state.is(BlockTags.MINEABLE_WITH_SHOVEL) ? "shovel"
+                    : state.is(BlockTags.MINEABLE_WITH_HOE) ? "hoe" : null;
+            if (kind == null) return List.of();
+            List<ToolMaking.Option> options = new ArrayList<>();
+            for (ToolMaking.Head head : List.of(ToolMaking.Head.STONE, ToolMaking.Head.PLANKS)) {
+                String itemId = "minecraft:" + (head == ToolMaking.Head.PLANKS ? "wooden_" : "stone_") + kind;
+                ItemStack tool = new ItemStack(BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId)));
+                if (tool.isEmpty()) continue;
+                boolean drops = !state.requiresCorrectToolForDrops() || tool.isCorrectToolForDrops(state);
+                if (wantsDrop && state.requiresCorrectToolForDrops() && !drops) continue;
+                options.add(new ToolMaking.Option(itemId, head, tool.getDestroySpeed(state), drops));
             }
-            if (itemId.equals("minecraft:stick")) sticks += free;
-            if (itemId.equals("minecraft:crafting_table") && free > 0) table = true;
+            return List.copyOf(options);
         }
-        return new ToolMaking.Stock(planks, logs, sticks, stone, table, keptPlanks, keptStone);
+
+        // 身上能拿来做工具的料：每种按身上件数减去要留的，木板、原木、木棍、石质工具材料、工作台分开数；被留着的另记。
+        @Override public ToolMaking.Stock stock(TickContext context) {
+            LocalPlayer player = player(context);
+            if (player == null) return new ToolMaking.Stock(0, 0, 0, 0, false, 0, 0);
+            Map<String, Integer> carried = new LinkedHashMap<>();
+            var inventory = player.getInventory();
+            for (int slot = 0; slot < Math.min(36, inventory.getContainerSize()); slot++) {
+                ItemStack stack = inventory.getItem(slot);
+                if (!stack.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(),
+                        stack.getCount(), Integer::sum);
+            }
+            ItemStack offhand = player.getOffhandItem();
+            if (!offhand.isEmpty()) carried.merge(BuiltInRegistries.ITEM.getKey(offhand.getItem()).toString(),
+                    offhand.getCount(), Integer::sum);
+            int planks = 0, logs = 0, sticks = 0, stone = 0, keptPlanks = 0, keptStone = 0;
+            boolean table = false;
+            for (var entry : carried.entrySet()) {
+                String itemId = entry.getKey();
+                int count = entry.getValue();
+                int free = Math.max(0, count - Math.min(count, kept.keep(itemId)));
+                Set<String> itemTags = tags.tagsOf(itemId);
+                if (itemTags.contains("minecraft:planks")) {
+                    planks += free;
+                    keptPlanks += count - free;
+                } else if (itemTags.contains("minecraft:logs")) {
+                    logs += free;
+                    keptPlanks += (count - free) * 4;
+                } else if (itemTags.contains("minecraft:stone_tool_materials")) {
+                    stone += free;
+                    keptStone += count - free;
+                }
+                if (itemId.equals("minecraft:stick")) sticks += free;
+                if (itemId.equals("minecraft:crafting_table") && free > 0) table = true;
+            }
+            return new ToolMaking.Stock(planks, logs, sticks, stone, table, keptPlanks, keptStone);
+        }
+
+        // 身上被预留着、又挖得下这块方块的这类东西：按要做的工具的名字认（stone_pickaxe 认 "pickaxe"）。
+        @Override public String reservedMention(TickContext context, BlockPos target, String itemId) {
+            LocalPlayer player = player(context);
+            if (player == null || player.level() == null || !player.level().isLoaded(target)) return null;
+            BlockState state = player.level().getBlockState(target);
+            String kind = itemId.substring(itemId.lastIndexOf('_') + 1);
+            int size = Math.min(36, player.getInventory().getContainerSize());
+            for (int slot = 0; slot < size; slot++) {
+                ItemStack stack = player.getInventory().getItem(slot);
+                if (stack.isEmpty()) continue;
+                String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                if (!id.endsWith(kind)) continue;
+                if (!stack.isCorrectToolForDrops(state)) continue;
+                int keep = kept.keep(id);
+                if (keep <= 0) continue;
+                return stack.getHoverName().getString() + "（留 " + (keep == ItemsToKeep.ALL ? "全部" : keep + " 件") + "）";
+            }
+            return null;
+        }
+
+        private static LocalPlayer player(TickContext context) {
+            return context.player() == null ? null : context.player().localPlayer();
+        }
     }
 }

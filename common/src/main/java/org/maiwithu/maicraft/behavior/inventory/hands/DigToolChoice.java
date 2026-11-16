@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.inventory.hands;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.OptionalInt;
 
 /**
  * 挑工具：对着要挖的一格，把主手、背包里的东西和空手放在同一本账上，挑这一趟最便宜的那样东西。
@@ -10,7 +11,7 @@ import java.util.List;
  *
  * <p>账上算两笔：
  * <ul>
- * <li>磨损成本：挖一格磨掉多少耐久（镐斧锹 1 点、剑 2 点，问工具的方块破坏组件），按剩余耐久折算成这件东西的
+ * <li>磨损成本：挖一格磨掉多少耐久（镐斧锹 1 点、剑 2 点，问工具的方块破坏组件），按最大耐久折算成这件东西的
  *     几分之几，再乘它的材料价值和附魔附加价值。带经验修补的按折扣算——磨掉的耐久多半会被经验补回来。</li>
  * <li>时间成本：挖一格要多少刻乘以时间单价。拿不到掉落的挖法慢一倍多，同样按它算。</li>
  * </ul>
@@ -20,6 +21,8 @@ import java.util.List;
  * <ol>
  * <li>掉落敏感的方块（矿石、玻璃、树叶这类，认不出的模组方块也算）：带精准采集或时运的不参与竞争——
  *     主手握着又对路的不换走，背包里带着的也不换上来，换上去等于替人定了要哪种掉落。</li>
+ * <li>带经验修补、精准采集或时运的珍贵工具再挖这一格就要碎时（剩余耐久不超过单格磨损），停手留住最后一点耐久，
+ *     在背包里不换上来，在主手上主动换走或腾空手；普通无稀有附魔工具允许一直用到最后一点耐久。</li>
  * <li>调用方预留的东西不自动拿来挖；主手已经握着的照用。</li>
  * <li>这一趟要掉落、方块又要对的工具才掉时，挖不到掉落的候选不参与竞争。</li>
  * </ol>
@@ -76,6 +79,11 @@ public final class DigToolChoice {
         public boolean wornOut() {
             return damageable() && durabilityLeft <= 0;
         }
+
+        /** 带经验修补、精准采集或时运的珍贵工具再挖这一格就要碎了：留住最后一点耐久等修补，普通工具允许用到碎。 */
+        public boolean savingBeforeBreak() {
+            return damageable() && wearPerBlock > 0 && (mending || silkOrFortune) && durabilityLeft <= wearPerBlock;
+        }
     }
 
     /**
@@ -118,32 +126,58 @@ public final class DigToolChoice {
         Candidate main = selected >= 0 && selected < slots.size() ? slots.get(selected) : Candidate.emptySlot(selected);
         // 要掉落、又要对的工具才掉的方块：挖不到掉落的候选不算数。
         boolean requiresDrop = wantsDrop && block.needsCorrectTool();
-        // 主手带着改掉落的那把、又挖得下来：握着它的人就是要这个效果，不换走。
-        if (block.dropSensitive() && main.silkOrFortune() && dropsWith(main, block)) {
+        // 主手带着改掉落的那把、对路且这一格不会挖碎它：握着它的人就是要这个效果，不换走。
+        if (block.dropSensitive() && main.silkOrFortune() && !main.wornOut() && !main.savingBeforeBreak()
+                && dropsWith(main, block)) {
             return new Verdict.Keep();
         }
         List<Candidate> pool = new ArrayList<>();
         for (Candidate candidate : slots) {
-            if (candidate.slot() == selected || candidate.empty() || candidate.kept() || candidate.wornOut()) continue;
+            if (candidate.slot() == selected || candidate.empty() || candidate.kept()
+                    || candidate.wornOut() || candidate.savingBeforeBreak()) continue;
             if (block.dropSensitive() && candidate.silkOrFortune()) continue;
             if (requiresDrop && !dropsWith(candidate, block)) continue;
             pool.add(candidate);
         }
         Candidate hands = Candidate.emptySlot(selected);
-        boolean mainHolds = !main.empty() && !main.wornOut();
+        boolean mainOccupied = !main.empty() && !main.wornOut();
+        boolean mainUsable = mainOccupied && !main.savingBeforeBreak() && (!requiresDrop || dropsWith(main, block));
         Trial bareHand = requiresDrop ? null : trial(hands, true, 1, block);
-        Trial heldTool = mainHolds && (!requiresDrop || dropsWith(main, block)) ? trial(main, false, 0, block) : null;
+        Trial heldTool = mainUsable ? trial(main, false, 0, block) : null;
         Trial best = better(bareHand, heldTool);
         for (Candidate candidate : pool) best = better(best, trial(candidate, false, 2, block));
         if (best == null) return new Verdict.None(ticksPerBlock(block, 1.0f, !block.needsCorrectTool()));
         // 主手拿着的最便宜、或者手正空着而空手最便宜：不动。
-        if (heldTool != null && best == heldTool || best.bareHand() && !mainHolds) return new Verdict.Keep();
-        // 换手的账：这一趟省下的超过换手代价才换；主手挖不到掉落时不看省多少，直接换。
-        double mainCost = mainHolds ? costPerBlock(block, main) : costPerBlock(block, hands);
-        boolean mainDrops = !requiresDrop || mainHolds && dropsWith(main, block);
-        double saved = (mainCost - best.cost()) * Math.max(1, expectedBlocks);
-        if (mainDrops && saved <= SWAP_COST) return new Verdict.Keep();
+        if (heldTool != null && best == heldTool || best.bareHand() && !mainOccupied) return new Verdict.Keep();
+        // 换手的账：当前手上的方式本来就能满足要求时，这一趟省下的超过换手代价才换；
+        // 主手或空手挖不到掉落、或主手握着即将碎裂的珍贵工具必须换下时，不看省多少直接换。
+        Trial baseline = mainOccupied ? heldTool : bareHand;
+        if (baseline != null && (baseline.cost() - best.cost()) * Math.max(1, expectedBlocks) <= SWAP_COST) {
+            return new Verdict.Keep();
+        }
         return best.bareHand() ? new Verdict.BareHand() : new Verdict.Swap(best.slot());
+    }
+
+    /**
+     * 角色身上此刻没有可用的对路工具时，返回徒手挖这一格要多少刻；已有可用的对路工具时返回空。
+     * 清障、开路不要掉落时 choose 会退回空手而不报 None，现做工具靠这一问识别"其实缺一把对路工具在徒手硬抠"，
+     * 再按徒手刻数与预计格数算现做一把划不划算。
+     */
+    public static OptionalInt handTicksWithoutTool(List<Candidate> slots, int selected, Block block,
+            boolean wantsDrop) {
+        boolean requiresDrop = wantsDrop && block.needsCorrectTool();
+        for (Candidate candidate : slots) {
+            if (candidate.empty() || candidate.wornOut() || candidate.savingBeforeBreak()) continue;
+            if (candidate.slot() != selected) {
+                if (candidate.kept()) continue;
+                if (block.dropSensitive() && candidate.silkOrFortune()) continue;
+            }
+            // 对路工具挖这一格一定比空手快；这一趟要掉落时还得够格挖出掉落。
+            if (candidate.speed() > 1.0f && (!requiresDrop || dropsWith(candidate, block))) {
+                return OptionalInt.empty();
+            }
+        }
+        return OptionalInt.of(ticksPerBlock(block, 1.0f, !block.needsCorrectTool()));
     }
 
     /** 挖一格要多少刻（原版的破坏时间）：硬度 × 30 ÷ 速度（掉东西时），掉不了东西是硬度 × 100 ÷ 速度。一下就没的方块是 0。 */
@@ -173,11 +207,11 @@ public final class DigToolChoice {
         return candidate.priority() < current.priority() ? candidate : current;
     }
 
-    // 挖这一格要多少成本：磨掉的耐久按剩余耐久折算，加上挖一格的时间。
+    // 挖这一格要多少成本：磨掉的耐久按工具的最大耐久折算成整把工具价值的几分之几，加上挖一格的时间。
     private static double costPerBlock(Block block, Candidate candidate) {
         double wear = 0;
-        if (candidate.damageable() && candidate.durabilityLeft() > 0 && candidate.wearPerBlock() > 0) {
-            wear = (double) candidate.wearPerBlock() / candidate.durabilityLeft()
+        if (candidate.damageable() && candidate.maxDurability() > 0 && candidate.wearPerBlock() > 0) {
+            wear = (double) candidate.wearPerBlock() / candidate.maxDurability()
                     * (candidate.materialValue() + candidate.extraValue())
                     * (candidate.mending() ? MENDING_DISCOUNT : 1.0);
         }

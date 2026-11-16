@@ -197,12 +197,11 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                     PermissionCheck.WorldAction.DIG_BLOCK, spot.at(), liveType);
             if (refusal.isPresent()) return Next.fail(refusal.get());
         }
-        // 点名要的是这格的概率掉落（打草要种子、打树叶要树苗）：挖的时候不拿剪刀和精准采集，拿了只掉方块自己。
-        // 但目标里点名了挖方块工具时以点名为准，概率掉落的挑法让位，只用那一件照挖。
-        Optional<Action> dig = spot.digTool() != null
-                ? digs.dig(asBlock(spot.at()), new DigsBlocks.ToolPrep(1, true, permissions, records(), spot.digTool()))
-                : expectedChanceDrop().isPresent() ? digs.digForChanceDrops(asBlock(spot.at()))
-                : digs.dig(asBlock(spot.at()));
+        // 点名要的是这格的概率掉落（打草要种子、打树叶要树苗）且未显式指定工具时：挖的时候不拿剪刀和精准采集，拿了只掉方块自己；
+        // 其余普通方块采集统一走带工具准备的入口，缺对路工具且徒手耗时超过现做门槛时先备一把再挖。
+        Optional<Action> dig = spot.digTool() == null && expectedChanceDrop().isPresent()
+                ? digs.digForChanceDrops(asBlock(spot.at()))
+                : digs.dig(asBlock(spot.at()), new DigsBlocks.ToolPrep(1, true, permissions, records(), spot.digTool()));
         if (dig.isEmpty()) {
             return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作还没接上，采不了"));
         }

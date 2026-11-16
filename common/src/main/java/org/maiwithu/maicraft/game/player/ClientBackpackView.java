@@ -116,6 +116,11 @@ public final class ClientBackpackView implements BackpackView {
         boolean building = item instanceof BlockItem blockItem
                 && blockItem.getBlock().defaultBlockState().blocksMotion()
                 && !(blockItem.getBlock() instanceof EntityBlock);
+        boolean damageable = stack.isDamageableItem();
+        int maxDurability = damageable ? Math.max(0, stack.getMaxDamage()) : 0;
+        int durability = maxDurability > 0
+                ? Math.max(0, Math.min(maxDurability, maxDurability - stack.getDamageValue()))
+                : 0;
         return new BackpackStack(
                 BuiltInRegistries.ITEM.getKey(item).toString(),
                 stack.getCount(),
@@ -124,7 +129,9 @@ public final class ClientBackpackView implements BackpackView {
                 food,
                 precious,
                 building,
-                potionOf(stack));
+                potionOf(stack),
+                durability,
+                maxDurability);
     }
 
     /**
