@@ -33,9 +33,11 @@ public final class GroundPathSmoothing extends PathBase {
     public static IPath apply(IBaritone baritone, IPath path) {
         var ctx = baritone.getPlayerContext(); var player = ctx.player();
         if (player == null || !player.onGround() || player.isInWater() || player.isPassenger()) return path;
+        // 拉直地面折线前必须一并核对当刻硬碰撞实体与移动结构障碍快照，避免把绕开船或装置的路径重新拉穿障碍。
         var corridor = new GroundCorridor(ctx.world(), pos -> ctx.world().isLoaded(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), player.getBbWidth(), player.getBbHeight(),
-                NavigationProtection.snapshot().noEntryCells(), PhysicalObstacleSnapshot.EMPTY);
+                NavigationProtection.snapshot().noEntryCells(),
+                NavigationObstacles.capture(ctx.world(), player).all());
         return smooth(baritone, path, corridor, ctx.playerFeet(), player.position());
     }
 

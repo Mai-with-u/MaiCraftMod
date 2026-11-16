@@ -56,9 +56,11 @@ public final class MovementGroundStraight extends Movement {
     }
 
     private GroundCorridor corridor() {
+        // 沿合并直线奔跑时每刻按实时实体与动态结构障碍复查前方制动窗口，有船或移动装置挡进走廊立即触发重算。
         return new GroundCorridor(ctx.world(), pos -> ctx.world().isLoaded(pos)
                 && ctx.world().getWorldBorder().isWithinBounds(pos), ctx.player().getBbWidth(), ctx.player().getBbHeight(),
-                NavigationProtection.snapshot().noEntryCells(), PhysicalObstacleSnapshot.EMPTY);
+                NavigationProtection.snapshot().noEntryCells(),
+                NavigationObstacles.capture(ctx.world(), ctx.player()).all());
     }
 
     // 允许角色在直线附近少量偏移，避免不是恰好踩在格心就算离开路线；这份容许位置集合不替代实时碰撞检查。

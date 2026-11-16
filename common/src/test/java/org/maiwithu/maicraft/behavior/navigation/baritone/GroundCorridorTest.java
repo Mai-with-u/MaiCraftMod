@@ -17,6 +17,7 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import net.minecraft.SharedConstants;
@@ -164,5 +165,15 @@ class GroundCorridorTest {
         // 不放行：断口就是断口。
         assertFalse(corridor(pit, 全加载, LongSets.emptySet())
                 .descentWalk(起点, 终点, pos -> false));
+    }
+
+    @Test
+    void 船等硬碰撞实体快照挡在走廊上时不拉直放行() {
+        // 平直石地上停着一只宽 1.375 的船：直线平滑与实时走廊带上实体障碍快照后拒绝直接穿过去。
+        FakeWorld world = flatGround();
+        PhysicalObstacleSnapshot boat = new PhysicalObstacleSnapshot(
+                List.of(new AABB(0.8125, 64.0, -0.1875, 2.1875, 64.5625, 1.1875)), 1, 0, "observed");
+        GroundCorridor corridor = new GroundCorridor(world, 全加载, 0.6, 1.8, LongSets.emptySet(), boat);
+        assertFalse(corridor.clear(起点, 终点));
     }
 }

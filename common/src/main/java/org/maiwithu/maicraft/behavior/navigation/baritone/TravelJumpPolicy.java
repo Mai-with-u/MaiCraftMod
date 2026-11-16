@@ -50,9 +50,9 @@ public final class TravelJumpPolicy {
                 || !isStableTakeoff(ctx, ctx.playerFeet())) return false;
         var policy = NavigationProtection.snapshot();
         if (player.getY() < policy.minimumFeetY()) return false;
-        // 联动的移动结构（Create 的机器）还没接进障碍观察：按没有算，接上后从这里换成实时快照。
+        // 起跳跑道核查同步带上当前硬碰撞实体与移动装置障碍快照，防止朝停着的船或装置起跳撞上。
         Plan plan = plan(ctx.world(), ctx.world()::isLoaded, policy.noEntryCells(),
-                PhysicalObstacleSnapshot.EMPTY, runway,
+                NavigationObstacles.capture(ctx.world(), player).all(), runway,
                 TravelJumpPhysics.capture(player, runway.heading()), player.getBbWidth(), player.getDeltaMovement());
         if (plan == null || !FallDamage.capture(player).survives(plan.apexHeight(),
                 FallDamage.Landing.ORDINARY, false)) return false;

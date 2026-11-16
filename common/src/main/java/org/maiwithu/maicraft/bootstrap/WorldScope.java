@@ -37,6 +37,7 @@ import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
+import org.maiwithu.maicraft.behavior.navigation.baritone.SolidEntityObstacles;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
@@ -258,8 +259,8 @@ public final class WorldScope {
         RareLootNotice rareLootNotice = new RareLootNotice(protection, kinds::isNaturalLootContainer, memory, events);
         this.dimension = minecraft.level.dimension().location().toString();
         installNavigationProtection();
-        // 会动的结构（联动登记的障碍来源）交给寻路：转着的风车、开着的列车、电梯井绕开走，挡路时先等它过去。
-        NavigationObstacles.install(compat.obstacleSources());
+        // 原版硬碰撞实体（船、运输船、潜影贝）与联动模组的移动结构一并交给寻路：静态挡路绕开走，正在动的先等它过去。
+        NavigationObstacles.install(SolidEntityObstacles.with(compat.obstacleSources()));
         this.modSights = compat.modSights();
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);

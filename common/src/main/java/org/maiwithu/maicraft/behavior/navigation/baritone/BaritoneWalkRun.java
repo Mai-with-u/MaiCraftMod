@@ -422,7 +422,7 @@ final class BaritoneWalkRun implements WalkRun {
     private void handleStall(PathingBehavior pathing, IBaritone engine, ClientLevel level, BlockPos feet) {
         MovementStall stall = pathing.consumeStall();
         if (stall != null) {
-            onMovementStalled(stall, level, feet);
+            onMovementStalled(stall, level, feet, engine.getPlayerContext().player());
         }
         if (replanWhenSafe && pathing.isSafeToCancel()) {
             replanWhenSafe = false;
@@ -432,17 +432,17 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     // 执行段放弃了一步：同一面前格第一次卡住，先切换这一步途经的门（没有门就原样重试）；
-    // 第二次仍卡住就把面前格列为障碍、重算绕行；障碍用完就如实走不通。整个过程不额外挖也不额外放。
-    private void onMovementStalled(MovementStall stall, ClientLevel level, BlockPos feet) {
+    // 第二次仍卡住就把面前格及挡路实体足迹列为障碍、重算绕行；障碍用完就如实走不通。整个过程不额外挖也不额外放。
+    private void onMovementStalled(MovementStall stall, ClientLevel level, BlockPos feet, LocalPlayer player) {
         if (stall.front() == null || progress.done() || level == null) return;
-        NavigationStallMemory.Stalled seen = NavigationStallMemory.read(stall, level, stalls::wantOpen);
+        NavigationStallMemory.Stalled seen = NavigationStallMemory.read(stall, level, feet, player, stalls::wantOpen);
         BlockPos front = stall.front();
         BlockPos passage = seen.passage();
         boolean open = seen.open();
         Map<String, Object> facts = seen.facts();
         // 这一格这次卡住会被算数（不是已经列了障碍、正等重算的那格）：换个办法重来，算一次真实进展。
         boolean counted = !stalls.obstacles().contains(front.asLong());
-        NavigationStallMemory.Decision decision = stalls.observe(front, passage, open, facts);
+        NavigationStallMemory.Decision decision = stalls.observe(front, seen.footprint(), passage, open, facts);
         if (counted && decision != NavigationStallMemory.Decision.EXHAUSTED) {
             displacement.confirm(lastDrivenTick);
         }

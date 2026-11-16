@@ -10,42 +10,59 @@ import it.unimi.dsi.fastutil.longs.LongSet;
 import it.unimi.dsi.fastutil.longs.LongSets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.util.Mth;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.phys.AABB;
 
 /**
  * 记住本次导航在哪些面前格反复卡住。同一格第一次卡住：途经可徒手开关的门就登记切到相反状态，没有门就原样重试；
- * 第二次仍卡住：把这格列为本次导航的障碍并撤销它的切门登记，交给重算绕行。障碍数有上限，超过后由导航如实失败。
+ * 第二次仍卡住：把这格（若面前挡着跨越多格的船或潜影贝等硬碰撞实体，则连同其实体碰撞箱覆盖的地面格足迹）
+ * 一并列为本次导航的障碍并撤销切门登记，交给重算绕行。障碍事件数有上限，超过后由导航如实失败。
  */
 final class NavigationStallMemory {
     static final int ATTEMPTS = 2;
     static final int MAX_OBSTACLES = 8;
+    /** 单个挡路硬碰撞实体在面前格四周最多扩展拉黑的水平半径，防止异常超大包围盒一次封死大片地图。 */
+    private static final int MAX_FOOTPRINT_RADIUS = 4;
 
     enum Decision { RETRY, TOGGLE_PASSAGE, OBSTACLE, EXHAUSTED }
 
     /**
      * 执行段在面前格卡住的一次现场。
      *
-     * @param passage 这一步途经、还没登记过的那扇徒手能开关的门（下半格）；没有为 null
-     * @param open    那扇门要切到的开关状态
-     * @param facts   卡住原因、动作、起止、面前格脚头两格的方块与卡了几刻，列为障碍时写进导航诊断
+     * @param passage   这一步途经、还没登记过的那扇徒手能开关的门（下半格）；没有为 null
+     * @param open      那扇门要切到的开关状态
+     * @param footprint 面前挡路硬碰撞实体与面前格共同覆盖的禁入格足迹（已排除角色脚下柱列）
+     * @param facts     卡住原因、动作、起止、面前格脚头两格的方块与卡了几刻，列为障碍时写进导航诊断
      */
-    record Stalled(BlockPos passage, boolean open, Map<String, Object> facts) {}
+    record Stalled(BlockPos passage, boolean open, List<BlockPos> footprint, Map<String, Object> facts) {
+        Stalled {
+            footprint = List.copyOf(footprint);
+        }
+    }
+
+    static Stalled read(MovementStall stall, ClientLevel level, Function<BlockPos, Boolean> registered) {
+        return read(stall, level, null, null, registered);
+    }
 
     /**
-     * 读一次卡住的现场：途经的门里第一扇徒手能开关、还没登记过的，切到相反状态再试；再记下卡住的样子。
-     *
-     * @param registered 这扇门已经登记过的目标开关状态；没登记为 null
+     * 读一次卡住的现场：途经的门里第一扇徒手能开关、还没登记过的，切到相反状态再试；
+     * 同时扫描面前格附近的硬碰撞实体，按其实体碰撞箱算出完整地面格足迹，避免宽体载具只封一格后换半格继续撞。
      */
-    static Stalled read(MovementStall stall, ClientLevel level, Function<BlockPos, Boolean> registered) {
+    static Stalled read(MovementStall stall, ClientLevel level, BlockPos feet, Player viewer,
+            Function<BlockPos, Boolean> registered) {
         BlockPos passage = null;
         boolean open = false;
         for (BlockPos cell : stall.passageCells()) {
@@ -59,6 +76,14 @@ final class NavigationStallMemory {
             break;
         }
         BlockPos front = stall.front();
+        List<AABB> solidBoxes = new ArrayList<>();
+        if (front != null) {
+            AABB probe = new AABB(front).expandTowards(0, 1, 0).inflate(0.35);
+            for (Entity entity : level.getEntities(viewer, probe, candidate -> SolidEntityObstacles.isSolidObstacle(candidate, viewer))) {
+                solidBoxes.add(entity.getBoundingBox());
+            }
+        }
+        List<BlockPos> footprint = footprintOf(front, feet, solidBoxes);
         Map<String, Object> facts = new LinkedHashMap<>();
         facts.put("cause", stall.cause().name().toLowerCase(Locale.ROOT));
         facts.put("movement", stall.movement());
@@ -67,7 +92,45 @@ final class NavigationStallMemory {
         facts.put("feet_block", level.isLoaded(front) ? level.getBlockState(front).toString() : "unloaded");
         facts.put("head_block", level.isLoaded(front.above()) ? level.getBlockState(front.above()).toString() : "unloaded");
         facts.put("stalled_ticks", stall.ticks());
-        return new Stalled(passage, open, facts);
+        return new Stalled(passage, open, footprint, facts);
+    }
+
+    /**
+     * 计算面前格及与其相交的硬碰撞实体包围盒所占的格子足迹；角色当前脚下所在柱列始终留空作脱身出口。
+     */
+    static List<BlockPos> footprintOf(BlockPos front, BlockPos feet, List<AABB> solidBoxes) {
+        if (front == null) {
+            return List.of();
+        }
+        var cells = new LinkedHashSet<BlockPos>();
+        if (!sameColumn(front.getX(), front.getZ(), feet)) {
+            cells.add(front.immutable());
+        }
+        AABB probe = new AABB(front).expandTowards(0, 1, 0).inflate(0.35);
+        for (AABB box : solidBoxes) {
+            if (box == null || !box.intersects(probe)) continue;
+            int minX = Math.max(front.getX() - MAX_FOOTPRINT_RADIUS, Mth.floor(box.minX + 1e-4));
+            int maxX = Math.min(front.getX() + MAX_FOOTPRINT_RADIUS, Mth.floor(box.maxX - 1e-4));
+            int minZ = Math.max(front.getZ() - MAX_FOOTPRINT_RADIUS, Mth.floor(box.minZ + 1e-4));
+            int maxZ = Math.min(front.getZ() + MAX_FOOTPRINT_RADIUS, Mth.floor(box.maxZ - 1e-4));
+            int minY = Math.max(front.getY() - 1, Mth.floor(box.minY + 1e-4));
+            int maxY = Math.min(front.getY() + 2, Mth.floor(box.maxY - 1e-4));
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    if (sameColumn(x, z, feet)) continue;
+                    // 地面寻路节点落在面前格同层高度，连同实体实际跨越的上下层一并记入禁入格。
+                    cells.add(new BlockPos(x, front.getY(), z));
+                    for (int y = minY; y <= maxY; y++) {
+                        cells.add(new BlockPos(x, y, z));
+                    }
+                }
+            }
+        }
+        return List.copyOf(cells);
+    }
+
+    private static boolean sameColumn(int x, int z, BlockPos feet) {
+        return feet != null && feet.getX() == x && feet.getZ() == z;
     }
 
     // 徒手能开关的：木门这类（铁门要红石）和栅栏门。
@@ -84,11 +147,15 @@ final class NavigationStallMemory {
     private final List<Map<String, Object>> toggleOrder = new ArrayList<>();
     private final List<Map<String, Object>> obstacleFacts = new ArrayList<>();
 
-    /**
-     * 记一次卡住并给出下一步：passage 是这一步途经、尚未登记过的门（下半格），open 是它要切到的开关状态；没有门时传 null。
-     * facts 为卡住的现场，列为障碍时原样写进导航诊断。
-     */
     Decision observe(BlockPos front, BlockPos passage, boolean open, Map<String, Object> facts) {
+        return observe(front, List.of(front), passage, open, facts);
+    }
+
+    /**
+     * 记一次卡住并给出下一步：达重试上限后把面前格及挡路实体的整个足迹一并加入禁入格，同时按一次障碍事件计入上限。
+     */
+    Decision observe(BlockPos front, List<BlockPos> footprint, BlockPos passage, boolean open,
+            Map<String, Object> facts) {
         long cell = front.asLong();
         // 已列为障碍但新策略还没来得及装上（角色正在空中等）时，等重算绕开，不重复计数。
         if (obstacles.contains(cell)) return Decision.RETRY;
@@ -107,8 +174,11 @@ final class NavigationStallMemory {
             toggleOrder.add(fact);
             return Decision.TOGGLE_PASSAGE;
         }
-        if (obstacles.size() >= MAX_OBSTACLES) return Decision.EXHAUSTED;
+        if (obstacleFacts.size() >= MAX_OBSTACLES) return Decision.EXHAUSTED;
         obstacles.add(cell);
+        for (BlockPos covered : footprint) {
+            obstacles.add(covered.asLong());
+        }
         // 切门后仍卡在同一格：撤销这扇门的登记，让绕行路线回到按门板朝向判断。
         if (toggledFor.containsKey(cell)) {
             long passageCell = toggledFor.remove(cell);
@@ -118,6 +188,9 @@ final class NavigationStallMemory {
         var fact = new LinkedHashMap<String, Object>();
         fact.put("cell", front.toShortString());
         fact.put("stalls", count);
+        if (footprint.size() > 1) {
+            fact.put("footprint_cells", footprint.size());
+        }
         fact.putAll(facts);
         obstacleFacts.add(fact);
         return Decision.OBSTACLE;

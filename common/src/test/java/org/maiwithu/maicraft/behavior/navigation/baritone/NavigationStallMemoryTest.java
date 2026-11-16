@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.navigation.baritone;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.phys.AABB;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -87,5 +89,31 @@ class NavigationStallMemoryTest {
                 memory.observe(extra, null, false, Map.of()),
                 "obstacles beyond the cap must end the navigation");
         assertEquals(NavigationStallMemory.MAX_OBSTACLES, memory.obstacleCells().size(), "cap must hold");
+    }
+
+    @Test
+    void wideSolidEntityFootprintBlocksCoveredCellsWithoutTrappingFeetOrConsumingCap() {
+        // 撞上横跨 2x2 格的宽体船（1.375 宽）时，第二次卡住按船体实际占地整片拉黑（排除当前脚下柱列），且只记一次障碍上限。
+        var memory = new NavigationStallMemory();
+        BlockPos feet = new BlockPos(2, 64, 0);
+        BlockPos front = new BlockPos(3, 64, 0);
+        AABB wideBoat = new AABB(2.8125, 64.0, -0.1875, 4.1875, 64.5625, 1.1875);
+        List<BlockPos> footprint = NavigationStallMemory.footprintOf(front, feet, List.of(wideBoat));
+
+        assertFalse(footprint.contains(feet), "角色当前站立的脚下格不得封进禁入集合");
+        assertTrue(footprint.contains(new BlockPos(3, 64, 0)));
+        assertTrue(footprint.contains(new BlockPos(4, 64, 0)));
+        assertTrue(footprint.contains(new BlockPos(3, 64, 1)));
+        assertTrue(footprint.contains(new BlockPos(4, 64, 1)));
+
+        assertEquals(NavigationStallMemory.Decision.RETRY,
+                memory.observe(front, footprint, null, false, Map.of("cause", "no_advance")));
+        assertEquals(NavigationStallMemory.Decision.OBSTACLE,
+                memory.observe(front, footprint, null, false, Map.of("cause", "no_advance")));
+
+        for (BlockPos cell : footprint) {
+            assertTrue(memory.obstacles().contains(cell.asLong()), "船体占地各格都应进入禁入集合：" + cell);
+        }
+        assertEquals(1, memory.obstacleCells().size(), "整只船只消耗一次障碍事件额度");
     }
 }
