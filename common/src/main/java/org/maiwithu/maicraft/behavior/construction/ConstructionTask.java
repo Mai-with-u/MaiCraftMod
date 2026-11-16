@@ -202,8 +202,38 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         if (site.allSettled() && temporariesLeft.isEmpty()) return Next.done(result("按图建好了"));
         Problem problem = problem();
         // 总述的格数和问题开头的格数是同一个数：挖不动、受保护没动的格也是没做成的格。
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "按图建了一部分：" + site.notDone() + " 格没做成")
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                "按图建了一部分：" + site.notDone() + " 格没做成" + failureNote())
                 .problem(problem).remaining(remaining()).details(details()).build());
+    }
+
+    /** 总结一句里最多逐格点名几格：再多的只给总数，全表在结果细节 problems。 */
+    private static final int MAX_LISTED_FAILURE_CELLS = 8;
+
+    /**
+     * 没做成的格摊平进总结一句：每种原因带上卡住的格坐标，最多点名 {@link #MAX_LISTED_FAILURE_CELLS} 格，
+     * 再多的给总数；宿主转述里程碑只看总结这一句，不必为一格卡住再专门查一轮结果细节。
+     * 坐标只进总结，问题里那句仍是不带坐标的合并计数（上一层引结论句的口径不变）。
+     */
+    private String failureNote() {
+        List<ConstructionDetails.ProblemGroup> groups = site.problemGroups();
+        if (groups.isEmpty()) return "";
+        StringBuilder note = new StringBuilder("（没做成：");
+        int listed = 0;
+        for (ConstructionDetails.ProblemGroup group : groups) {
+            StringBuilder cells = new StringBuilder();
+            for (BlockPos pos : group.positions()) {
+                if (listed >= MAX_LISTED_FAILURE_CELLS) break;
+                if (cells.length() > 0) cells.append("、");
+                cells.append(pos.toShortString());
+                listed++;
+            }
+            if (cells.length() == 0) continue;
+            if (note.length() > "（没做成：".length()) note.append("；");
+            note.append(group.reason()).append("：").append(cells);
+        }
+        if (listed < site.notDone()) note.append("……共 ").append(site.notDone()).append(" 格，全表在结果细节 problems");
+        return note.append("）").toString();
     }
 
     // 问题按轻重挑：受保护的格要同意；缺料说还缺什么；其余把没做成的格按原因合并计数转述出来，

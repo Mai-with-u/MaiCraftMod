@@ -620,6 +620,9 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
         assertEquals("1 格没做成：要贴的那一面站到跟前也被挡住或看不见", result.problem().message());
+        // 总结一句摊平卡住的格与原因：宿主转述里程碑不再为一格卡住专门查结果细节。
+        assertEquals("按图建了一部分：1 格没做成（没做成：要贴的那一面站到跟前也被挡住或看不见：0, 64, 0）",
+                result.summary());
         assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("为 0, 64, 0 垫临时方块")),
                 "垫过临时方块的经过在试过的办法里：" + result.attempts());
         assertTrue(fake.temporaries.isEmpty(), "垫的临时方块收回了");
@@ -654,6 +657,24 @@ class ConstructionTaskTest {
     }
 
     @Test
+    void 没做成的格超过八格_总结点名前八格再给总数() {
+        // 十格都点不到那一面：总结最多逐格点名 8 格，再多的给总数指到结果细节，总结不随格数无限变长。
+        Fake fake = new Fake().ground(63);
+        fake.carried.put("minecraft:stone", 10);
+        List<PlannedCell> cells = new ArrayList<>();
+        for (int x = 0; x < 10; x++) {
+            BlockPos at = new BlockPos(x * 3, 64, 0);
+            fake.hiddenCells.add(at);
+            cells.add(PlannedCell.block(at, STONE, Set.of()));
+        }
+        TaskResult result = run(fake, new Blueprint(DIM, new BlockPos(0, 64, 0), cells));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertTrue(result.summary().startsWith("按图建了一部分：10 格没做成（没做成："), result.summary());
+        assertTrue(result.summary().endsWith("……共 10 格，全表在结果细节 problems）"), result.summary());
+        assertEquals(8, result.summary().split(", 64, 0", -1).length - 1, result.summary());
+    }
+
+    @Test
     void 挖不动的格也算没做成_总述和问题开头的格数一样() {
         // 一格底下是基岩挖不动、一格视线被挡放不上：两格都没做成。总述和问题开头都说 2 格，
         // 调用方拿哪一处的数字都一样；种类按格数并列时先记下的基岩算在这里做不到。
@@ -667,7 +688,10 @@ class ConstructionTaskTest {
         List<PlannedCell> cells = List.of(PlannedCell.block(bedrock, STONE, Set.of()), PlannedCell.block(hidden, STONE, Set.of()));
         TaskResult result = run(fake, new Blueprint(DIM, bedrock, cells));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
-        assertEquals("按图建了一部分：2 格没做成", result.summary());
+        // 总结一句带两种原因各自的格坐标；问题里仍是合并计数不带坐标。
+        assertEquals("按图建了一部分：2 格没做成（没做成：挖不动（基岩或世界边界）：0, 64, 0；"
+                        + "要贴的那一面站到跟前也被挡住或看不见：2, 64, 0）",
+                result.summary());
         assertTrue(result.problem().message().startsWith("2 格没做成："), result.problem().message());
         assertTrue(result.problem().message().contains("挖不动（基岩或世界边界）"), result.problem().message());
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
