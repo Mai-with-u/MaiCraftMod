@@ -41,8 +41,7 @@ logs/
 .vscode
 .codex/
 .omo
-.claude/worktrees/
-.claude/settings.local.json
+.claude/
 experiments/
 
 # 文档：设计文档、领域清册与规格、移植清单都在 docs/design，进 Git；
