@@ -58,7 +58,7 @@ final class PlacingWork extends ConstructionWork {
     private final Permissions permissions;
     private final String purpose;
     private final Deque<PlannedCell> queue;
-    private final DeferredPlacements deferred = new DeferredPlacements();
+    private final DeferredCells deferred = new DeferredCells();
     /** 走过去没走到之后人停在哪、要点的是哪一面：人没挪、附近也没新放方块之前，不再从同一处为同一面算路。 */
     private final Set<FailedApproach> failedApproaches = new HashSet<>();
     /** 现在第几刻：按时回头的格拿它算时候到没到。 */
@@ -137,7 +137,7 @@ final class PlacingWork extends ConstructionWork {
             }
             // 联动规则说要等别的格先放好（带漏斗等下面的带子）：等的格还没好就先放一放，做别的再回头。
             if (!waiting(cell).isEmpty()) {
-                defer(cell, DeferredPlacements.Reason.WAITS_ON_OTHERS);
+                defer(cell, DeferredCells.Reason.WAITS_ON_OTHERS);
                 continue;
             }
             // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
@@ -273,9 +273,9 @@ final class PlacingWork extends ConstructionWork {
     // 只差站高一格就垫一级台阶站上去，没有能点的面就垫一条临时方块链；都不行如实记下放不成。
     private Refill refill() {
         if (deferred.isEmpty()) return Refill.DONE;
-        List<PlannedCell> changed = deferred.changed(services.site().feet(), now, cell -> !waiting(cell).isEmpty());
-        if (!changed.isEmpty()) {
-            queue.addAll(changed);
+        List<PlannedCell> due = deferred.takeChanged(services.site().feet(), now, cell -> !waiting(cell).isEmpty());
+        if (!due.isEmpty()) {
+            queue.addAll(due);
             return Refill.REFILLED;
         }
         PlannedCell stuck = deferred.takeStuck(cell -> !waiting(cell).isEmpty()).orElse(null);
@@ -284,8 +284,8 @@ final class PlacingWork extends ConstructionWork {
             // 剩下的只有等别的格的、和生物回头几次还挡着的：生物挡着的写明是谁、在哪、等了多久，
             // LLM 能叫它挪开再下一次同样的目标；不为它垫方块，垫方块挪不走生物。
             // 等了一阵生物没走开、等的格没放成，都是干等没有进展，算卡住。
-            for (DeferredPlacements.Left left : deferred.drain()) {
-                site.giveUp(left.cell().pos(), Problem.Kind.STUCK, left.reason() == DeferredPlacements.Reason.CREATURE_IN_THE_WAY
+            for (DeferredCells.Left left : deferred.drain()) {
+                site.giveUp(left.cell().pos(), Problem.Kind.STUCK, left.reason() == DeferredCells.Reason.CREATURE_IN_THE_WAY
                         ? "被" + left.creature() + "挡着，前后等了 " + CREATURE_WAIT_SECONDS + " 秒没走开"
                         : "要等别的格先放好，那些格没放成");
             }
@@ -328,23 +328,23 @@ final class PlacingWork extends ConstructionWork {
 
     /** 生物挡着的格前后最多等多少秒：按时回头的次数乘每次隔的刻数。 */
     private static final long CREATURE_WAIT_SECONDS =
-            DeferredPlacements.MAX_TIMED_RETRIES * DeferredPlacements.CREATURE_RETRY_TICKS / 20;
+            DeferredCells.MAX_TIMED_RETRIES * DeferredCells.CREATURE_RETRY_TICKS / 20;
 
     // 放一放这一格：记下此刻人站在哪、已经放成了几块，情况变了再回头。
-    private void defer(PlannedCell cell, DeferredPlacements.Reason reason) {
+    private void defer(PlannedCell cell, DeferredCells.Reason reason) {
         deferred.defer(cell, reason, services.site().feet(), now);
     }
 
     // 这一下放不上的格先放一放，并记下为什么放不上：之后垫了临时方块还是不成、最后放弃它时照这句交代。
     private void deferStuck(PlannedCell cell, PlacementAttempt.WhyNotPlaced why) {
         whyNot.put(cell.pos().immutable(), why);
-        defer(cell, DeferredPlacements.Reason.NO_FACE_WORKED);
+        defer(cell, DeferredCells.Reason.NO_FACE_WORKED);
     }
 
     // 每一面都试过还没放成：有生物挡着就等它走开再回头，不然按各面试下来最常见的缘故放一放。
     private void deferTried(PlacementAttempt tried) {
         if (tried.creatureInTheWay != null) {
-            deferred.defer(tried.cell, DeferredPlacements.Reason.CREATURE_IN_THE_WAY, tried.creatureInTheWay,
+            deferred.defer(tried.cell, DeferredCells.Reason.CREATURE_IN_THE_WAY, tried.creatureInTheWay,
                     services.site().feet(), now);
         } else {
             PlacementAttempt.WhyNotPlaced why = tried.mostly();
@@ -373,7 +373,7 @@ final class PlacingWork extends ConstructionWork {
     // 放成了一块：放一放的格拿它判断情况变没变；走不过去的记忆按影响清——只有旁边新放了方块才可能改变
     // "从这里走不到"的成立与否，远处的照旧留着；人挪了位置后记忆本来就不匹配，无需清理。
     private void blockPlaced(BlockPos pos) {
-        deferred.placed(pos);
+        deferred.changed(pos);
         failedApproaches.removeIf(failed -> invalidatedBy(pos, failed));
     }
 

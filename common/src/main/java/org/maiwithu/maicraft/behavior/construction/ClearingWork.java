@@ -32,6 +32,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 /**
  * 清障：要清的格从上往下，一格一格问许可、走过去、清掉。受保护的格记下来不动，挖不动的记做不了；
  * 清掉一格算一次真实进展。掉落物等角色自己捡，这里不管。
+ * 走到跟前的路一次没走通先换个站位再走近（一格最多换两次），还是不行就先清别的格，
+ * 等情况变了（人站高了一层、旁边清出了能走的路）再回头，什么都没变才按走不到交代这一格。
+ * 挖格没有换面、垫台阶垫链那些办法（那是放格的），走到跟前只有站位可换。
  * 走到跟前后怎么清：模组工具认领的方块整块拆下；其余按连锁挖一格挖——装了连锁挖时对准的那一面 3×3
  * 每一格都是本来就要清的格、都过许可才整片一起挖，不然只挖这一格。
  */
@@ -39,10 +42,19 @@ final class ClearingWork extends ConstructionWork {
 
     private enum Step { APPROACH, DIG, DISMANTLE }
 
+    /** 同一格"走不到跟前"最多换几次站位重新走近。 */
+    private static final int MAX_RESPOTS = 2;
+
     private final Permissions permissions;
     /** 目标里点名的挖方块工具：清障挖方块时只用那一件，身上没有就直接失败；null 自动挑。 */
     private final DigTool digTool;
     private final Deque<PlannedCell> queue;
+    /** 走近换过站位还是走不到的格先记在这里，等情况变了再回头；什么都没变就按走不到交代。 */
+    private final DeferredCells deferred = new DeferredCells();
+    /** 现在第几刻：回头的格拿它判断情况变没变。 */
+    private long now;
+    /** 这一格走近失败后已经换过几次站位。 */
+    private int respots;
     private PlannedCell cell;
     private Step step;
     private BlockState before;
@@ -62,6 +74,7 @@ final class ClearingWork extends ConstructionWork {
     }
 
     @Override protected ActionStatus advance(TickContext context) {
+        now = context.gameTick();
         if (cell == null) return nextCell();
         if (step == Step.APPROACH) {
             // 挖到一半被叫走回来过：先重新走到这一格跟前再出手，不隔着老远接着挖
@@ -77,13 +90,15 @@ final class ClearingWork extends ConstructionWork {
         return settle();
     }
 
-    // 挑下一格：没加载的跳过；现场已经对上的收下；受保护的、挖不动的记下来；都没问题就走过去。
+    // 挑下一格：先补一轮回头再试的格；没加载的跳过；现场已经对上的收下；受保护的、挖不动的记下来；都没问题就走过去。
     private ActionStatus nextCell() {
+        refillDue();
         while (!queue.isEmpty()) {
             PlannedCell centre = services.digs() != null && services.digs().chains() ? squareCentre() : null;
             chainFace = centre == null ? null : Direction.UP;
             if (centre != null) queue.remove(centre);
             cell = centre != null ? centre : queue.poll();
+            respots = 0;
             BlockPos pos = cell.pos();
             if (!services.site().loaded(pos)) continue;
             before = services.site().state(pos);
@@ -109,7 +124,21 @@ final class ClearingWork extends ConstructionWork {
             return ActionStatus.progressed();
         }
         cell = null;
+        // 主队列清完了，回头再试的格也什么都没等到（人没站高、旁边也没清出新路）：按走不到交代，这一阶段清完。
+        for (DeferredCells.Left left : deferred.drain()) {
+            site.giveUp(left.cell().pos(), Problem.Kind.UNREACHABLE, "走不到能挖这一格的位置");
+        }
         return ActionStatus.done();
+    }
+
+    // 主队列空了先补一轮：走近走不到先放一放的格，人站高了一层、旁边清出了能走的路的回头再试；
+    // 什么都没变就不回头，不把走不到的格再空走一遍。
+    private void refillDue() {
+        while (queue.isEmpty()) {
+            List<PlannedCell> due = deferred.takeChanged(services.site().feet(), now, cell -> false);
+            if (due.isEmpty()) return;
+            queue.addAll(due);
+        }
     }
 
     // 走近的目标与采掘挖格是同一份：普通格按「会被拆掉的方块」靠近——不把要挖的那格上面当站位，
@@ -120,7 +149,7 @@ final class ClearingWork extends ConstructionWork {
     }
 
     // 走近与挖都有限时：走近的耐心是靠近接缝上那份（走向站位的走路自己不出走不通的结论），
-    // 挖的耐心与采掘挖一格同一条。到点按没做成交给 failed 记原因换下一格，不让一格吃满施工的停滞闸。
+    // 挖的耐心与采掘挖一格同一条。到点按没做成交给 failed 决定换站位还是放一放回头，不让一格吃满施工的停滞闸。
     @Override protected long maxActionTicks(Action current) {
         if (step == Step.DIG || step == Step.DISMANTLE) return DigsBlocks.DIG_PATIENCE_TICKS;
         return step == Step.APPROACH ? BringsPlayerClose.WALK_PATIENCE_TICKS : Long.MAX_VALUE;
@@ -237,6 +266,7 @@ final class ClearingWork extends ConstructionWork {
         records.change(new Change(Change.Kind.BLOCK_BROKEN, blockId(before), 1,
                 withOwner("清障 " + cell.pos().toShortString(), cell.pos())));
         site.cleared(cell);
+        deferred.changed(cell.pos());
         if (step == Step.DIG) settleChained();
         cell = null;
         return ActionStatus.progressed();
@@ -252,6 +282,7 @@ final class ClearingWork extends ConstructionWork {
             records.change(new Change(Change.Kind.BLOCK_BROKEN, entry.getValue(), 1,
                     withOwner("连锁清障 " + pos.toShortString(), pos)));
             site.cleared(planned);
+            deferred.changed(pos);
         }
         around = Map.of();
     }
@@ -270,11 +301,18 @@ final class ClearingWork extends ConstructionWork {
         // 模组的工具没拆成：记一笔，这一格照原来的办法挖；走不到或挖不下去的记一笔接着清别的，不让一格卡住整个工地。
         records.attempt("清掉 " + cell.pos().toShortString(), failure.problem().message());
         if (step == Step.DISMANTLE) return dig();
-        // 结果里只转述结论：走不到跟前（包括走了很久没走到）算到不了，同样的格合成一句；
-        // 挖的那一下没成照它自己的种类和结论句记。经过已经记进试过的办法。
         if (step == Step.APPROACH) {
-            site.giveUp(cell.pos(), Problem.Kind.UNREACHABLE, "走不到能挖这一格的位置");
+            // 走不到跟前（包括走了很久没走到）先换个站位再走近一次；换过站位也不行就先清别的格，
+            // 等人站高了一层、旁边清出了能走的路再回头。结果里只转述结论句，经过已经记进试过的办法。
+            if (respots < MAX_RESPOTS) {
+                respots++;
+                begin(services.close().toward(digTarget(), permissions),
+                        "换个站位再走 " + cell.pos().toShortString() + " 跟前");
+                return ActionStatus.progressed();
+            }
+            deferred.defer(cell, DeferredCells.Reason.APPROACH_FAILED, services.site().feet(), now);
         } else {
+            // 挖的那一下没成照它自己的种类和结论句记。
             site.giveUp(cell.pos(), failure.problem().kind(), failure.problem().headline());
         }
         around = Map.of();

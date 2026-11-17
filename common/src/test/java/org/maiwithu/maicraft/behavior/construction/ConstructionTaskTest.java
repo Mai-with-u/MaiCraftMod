@@ -243,14 +243,31 @@ class ConstructionTaskTest {
         @Override public List<BlockPos> temporaries() { return List.copyOf(temporaries); }
         /** 下一次走近交出的动作，只用一次；没给就一刻走到。用来演"施工正悬空走在半路"。 */
         Action approach;
+        /** 每次走近都交出的动作：演走不到的格走近限时一次又一次到点。优先级在一次性 approach 之后。 */
+        Action stuckApproach;
+        /** 走近这些格的头几次交出"走不到"（演换站位也走不到的格）：值还剩几次要拦，拦一次减一。 */
+        final Map<BlockPos, Integer> approachBlocked = new HashMap<>();
         /** 走近被叫了几次：清障挖到一半被打断，回来要先重新走近再挖。 */
         int towardCalls;
         @Override public Action toward(ApproachTarget target, Permissions permissions) {
             towardCalls++;
-            if (approach == null) return new Immediate(() -> { });
-            Action given = approach;
-            approach = null;
-            return given;
+            if (approach != null) {
+                Action given = approach;
+                approach = null;
+                return given;
+            }
+            if (stuckApproach != null) return stuckApproach;
+            Integer blockedLeft = approachBlocked.get(target.block());
+            if (blockedLeft != null && blockedLeft > 0) {
+                approachBlocked.put(target.block(), blockedLeft - 1);
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "附近没有能站的位置"));
+                    }
+                    @Override public String describe() { return "走不到"; }
+                };
+            }
+            return new Immediate(() -> { });
         }
         /** 每次带着"这些格不许站"去靠近时记下那份判断，按靠近的先后。 */
         final List<ProtectedCells> avoided = new ArrayList<>();
@@ -374,6 +391,13 @@ class ConstructionTaskTest {
     private static Blueprint wall(BlockState state, BlockPos... cells) {
         List<PlannedCell> planned = new ArrayList<>();
         for (BlockPos pos : cells) planned.add(PlannedCell.block(pos, state, Set.of()));
+        return new Blueprint(DIM, cells[0], planned);
+    }
+
+    /** 全是清空格的蓝图：格里有东西就先清掉。 */
+    private static Blueprint clearCells(BlockPos... cells) {
+        List<PlannedCell> planned = new ArrayList<>();
+        for (BlockPos pos : cells) planned.add(PlannedCell.air(pos));
         return new Blueprint(DIM, cells[0], planned);
     }
 
@@ -983,21 +1007,43 @@ class ConstructionTaskTest {
     }
 
     @Test
-    void 走不到的站位限时让路_砌筑换面换格不再吃满停滞闸() {
-        // 站位到不了时走向站位的走路自己不出结论（人掉进深坑、站位在够不着的高处）：
-        // 走近到点收掉、换下一面，面试遍了记放不上接着放别的格，整个砌筑不再因一格的走近熔断。
+    void 走不到的格换站位再走近_换遍站位放一放_什么都没变按走不到交代() {
+        // 走到跟前的路走不通（人掉进深坑、站位在够不着的高处）：不再一次就判死这一格——
+        // 先换个站位再走近（最多两次），还不行先放一放；人没站高、旁边也没清出新路就不再空走，
+        // 按走不到交代这一格，整个清障不吃满停滞闸。
         Fake fake = new Fake().ground(63);
         fake.world.put(new BlockPos(0, 64, 0), Blocks.DIRT.defaultBlockState());
-        fake.carried.put("minecraft:stone", 1);
-        fake.approach = new 走着不动();
-        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 64, 0)));
+        fake.stuckApproach = new 走着不动();
+        TaskResult result = run(fake, clearCells(new BlockPos(0, 64, 0)));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
-        // 结果里只说结论（走不到，算到不了）；走了多久没走到记在试过的办法里。
+        // 一格走近限时有三次（头一回加两次换站位），同样的结果在试过的办法里合成一条带次数。
+        assertEquals(3, fake.towardCalls, "走近失败后换了两次站位，没有别的靠近");
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result()
+                .contains("换个站位再走 0, 64, 0 跟前做了 400 刻还没做成（同样的结果又出现 1 次）")), result.attempts().toString());
+        // 结果里只说结论（走不到，算到不了）。
         assertTrue(details(result).problems().stream().anyMatch(group -> group.reason().equals("走不到能挖这一格的位置")),
                 details(result).problems().toString());
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
-        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result().contains("做了 400 刻还没做成")),
-                result.attempts().toString());
+    }
+
+    @Test
+    void 走不到的格放一放_旁边清出新路回头走通了() {
+        // 换过站位也走不到的一格先放一放：清掉旁边那格（多了一条能走的路）情况就变了，
+        // 回头再走近，这一格照常清掉，不再一次判死。
+        Fake fake = new Fake().ground(63);
+        BlockPos stuck = new BlockPos(0, 64, 0);
+        BlockPos beside = new BlockPos(1, 64, 0);
+        fake.world.put(stuck, Blocks.DIRT.defaultBlockState());
+        fake.world.put(beside, Blocks.DIRT.defaultBlockState());
+        fake.approachBlocked.put(stuck, 3);
+        TaskResult result = run(fake, clearCells(stuck, beside));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(AIR, fake.state(stuck), "放一放的格回头清掉了");
+        assertEquals(2, count(result, Change.Kind.BLOCK_BROKEN));
+        // 头一回加两次换站位拦了三次，同样的结果合成一条带次数；回头那一次走近就到了。
+        assertEquals(5, fake.towardCalls, "走近失败三次（含两次换站位），旁边清完后回头一次");
+        assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.result()
+                .contains("附近没有能站的位置（同样的结果又出现 2 次）")), result.attempts().toString());
     }
 
     /** 放置规则替身：认一种方块，说拿什么放、对着哪一格放、要等哪几格。 */
