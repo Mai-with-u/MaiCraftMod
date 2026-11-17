@@ -20,9 +20,9 @@ class FurnaceFuelPickTest {
     @Test
     void smallBatchDoesNotBurnACoalBlock() {
         // 烧两件（400 刻）：一块煤炭块能烧八十件，扔进去就浪费了；一块煤够烧完，挑煤。
-        FurnaceRun.FuelPick pick = FurnaceRun.pickFuel(List.of(
-                new FurnaceRun.FuelStack(0, 3, COAL_BLOCK),
-                new FurnaceRun.FuelStack(1, 5, COAL)), 400);
+        FurnaceFuel.Pick pick = FurnaceFuel.pick(List.of(
+                new FurnaceFuel.Stack(0, 3, COAL_BLOCK),
+                new FurnaceFuel.Stack(1, 5, COAL)), 400);
         assertEquals(1, pick.index());
         assertEquals(1, pick.count());
     }
@@ -30,7 +30,7 @@ class FurnaceFuelPickTest {
     @Test
     void enoughFuelForTheWholeBatchIsPlacedAtOnce() {
         // 烧十六件（3200 刻）：两块煤正好烧完，一次放两块。
-        FurnaceRun.FuelPick pick = FurnaceRun.pickFuel(List.of(new FurnaceRun.FuelStack(4, 10, COAL)), 3200);
+        FurnaceFuel.Pick pick = FurnaceFuel.pick(List.of(new FurnaceFuel.Stack(4, 10, COAL)), 3200);
         assertEquals(4, pick.index());
         assertEquals(2, pick.count());
     }
@@ -38,23 +38,23 @@ class FurnaceFuelPickTest {
     @Test
     void sticksOnlyWhenNothingBetterCoversTheBatch() {
         // 木板和木棍都够烧完时不拿零碎的木棍；只有木棍够时才用木棍。
-        FurnaceRun.FuelPick withPlanks = FurnaceRun.pickFuel(List.of(
-                new FurnaceRun.FuelStack(0, 20, STICK),
-                new FurnaceRun.FuelStack(1, 10, PLANKS)), 600);
+        FurnaceFuel.Pick withPlanks = FurnaceFuel.pick(List.of(
+                new FurnaceFuel.Stack(0, 20, STICK),
+                new FurnaceFuel.Stack(1, 10, PLANKS)), 600);
         assertEquals(1, withPlanks.index());
         assertEquals(2, withPlanks.count());
-        FurnaceRun.FuelPick onlySticksCover = FurnaceRun.pickFuel(List.of(
-                new FurnaceRun.FuelStack(0, 20, STICK),
-                new FurnaceRun.FuelStack(1, 1, PLANKS)), 600);
+        FurnaceFuel.Pick onlySticksCover = FurnaceFuel.pick(List.of(
+                new FurnaceFuel.Stack(0, 20, STICK),
+                new FurnaceFuel.Stack(1, 1, PLANKS)), 600);
         assertEquals(0, onlySticksCover.index());
         assertEquals(6, onlySticksCover.count());
     }
 
     @Test
     void fuelIsCappedAtOneStackAndMissingFuelIsNull() {
-        FurnaceRun.FuelPick pick = FurnaceRun.pickFuel(List.of(new FurnaceRun.FuelStack(2, 64, PLANKS)), 200L * 300);
+        FurnaceFuel.Pick pick = FurnaceFuel.pick(List.of(new FurnaceFuel.Stack(2, 64, PLANKS)), 200L * 300);
         assertEquals(64, pick.count());
-        assertNull(FurnaceRun.pickFuel(List.of(), 200));
+        assertNull(FurnaceFuel.pick(List.of(), 200));
     }
 
     @Test
@@ -64,5 +64,16 @@ class FurnaceFuelPickTest {
         assertEquals(20 * 60, FurnaceRun.waitTicks(8, 0.5f, 200), "最多隔一分钟回来看一眼");
         assertEquals(220, FurnaceRun.waitTicks(1, 0f, 200));
         assertTrue(FurnaceRun.waitTicks(1, 1f, 200) >= 40, "刚烧完也至少等一会儿再回来");
+    }
+
+    @Test
+    void emptyBucketInUnlitFurnaceDoesNotCountAsUsableFuel() {
+        // 炉火熄灭时，燃料槽里占着的空铁桶燃烧时间为 0，不算还有燃料；炉子仍亮着时照常算在烧。
+        assertEquals(false, FurnaceFuel.usable(false, "minecraft:bucket", 0));
+        assertTrue(FurnaceFuel.usable(true, "minecraft:bucket", 0));
+        assertTrue(FurnaceFuel.usable(false, "minecraft:coal", 1600));
+        assertTrue(FurnaceFuel.ownResidue("minecraft:lava_bucket", "minecraft:bucket"));
+        assertEquals(false, FurnaceFuel.ownResidue("minecraft:coal", "minecraft:bucket"));
+        assertEquals(false, FurnaceFuel.ownResidue(null, "minecraft:bucket"));
     }
 }

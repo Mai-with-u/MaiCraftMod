@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.behavior.acquire.cook;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -72,10 +71,8 @@ final class FurnaceRun implements Action {
     /** 换一台炉子多给的时间：走到下一台、点开看一眼。 */
     private static final int SWITCH_TICKS = 20 * 60;
     /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
-    /** 零碎燃料的上限：木棍、树苗一件只烧半件，有木板以上的燃料时不拿它们。 */
-    static final int SMALL_FUEL_TICKS = 300;
     /** 一格最多放一组。 */
-    private static final int STACK = 64;
+    private static final int STACK = FurnaceFuel.STACK;
     /** 熔炉容器侧：0 投入口、1 燃料槽、2 产出格。 */
     private static final int INPUT = 0;
     private static final int FUEL = 1;
@@ -84,14 +81,8 @@ final class FurnaceRun implements Action {
     /** 走过去点开、照看、收拾、关界面、关着界面等。 */
     private enum Stage { VISIT, TEND, TIDY, CLOSE, AWAY }
 
-    /** 手上这一笔搬运在做什么：结论不同各家交待不同，按它分流。 */
-    private enum MoveKind { TAKE_OUTPUT, TIDY, LOAD }
-
-    /** 身上的一堆燃料：角色侧第几格、几件、一件烧多少刻。 */
-    record FuelStack(int index, int count, int burnTicks) {}
-
-    /** 挑中的燃料：角色侧第几格、放几件。 */
-    record FuelPick(int index, int count) {}
+    /** 身上这一笔搬运在做什么：结论不同各家交待不同，按它分流。 */
+    private enum MoveKind { TAKE_OUTPUT, TIDY, LOAD, CLEAR_FUEL }
 
     private final RecipeHolder<?> holder;
     private final WorkstationRecipe recipe;
@@ -145,6 +136,8 @@ final class FurnaceRun implements Action {
     private boolean inputLoaded;
     private boolean fuelTidied;
     private boolean inputTidied;
+    /** 燃料槽里占着自己上次烧剩的空桶时已经试过收进背包，防止收不进时死循环反复点。 */
+    private boolean clearFuelAttempted;
     /** 收场的原因（缺料、缺燃料、炉子正忙、背包满了）；一件没收到时按它失败。 */
     private Problem ending;
     private Problem failure;
@@ -257,7 +250,19 @@ final class FurnaceRun implements Action {
         if (produced >= targetItems) {
             return finish(null);
         }
-        boolean fueled = lit(tick) || !open.containerSnapshots().get(FUEL).isEmpty();
+        SlotSnapshot fuel = open.containerSnapshots().get(FUEL);
+        String fuelId = fuel.isEmpty() ? "" : itemId(fuel.stack());
+        boolean litNow = lit(tick);
+        // 燃料槽不空时要再核对里面物品还能不能烧（burnTicks > 0）：岩浆烧完留下的空铁桶占在槽里不算有燃料。
+        boolean fueled = FurnaceFuel.usable(litNow, fuelId, fuel.isEmpty() ? 0 : burnTicksOf(fuelId));
+        if (!litNow && !fuel.isEmpty() && !fueled) {
+            // 炉火已灭且燃料槽被不可燃物占住：自己上次放岩浆桶留的空桶就收回背包，别人的残物不乱动、直接换炉子。
+            if (!clearFuelAttempted && FurnaceFuel.ownResidue(fuelPlaced, fuelId)) {
+                clearFuelAttempted = true;
+                return clearFuelSlot(open, fuel);
+            }
+            return busy("燃料槽里占着" + fuel.stack().getHoverName().getString());
+        }
         if (input.isEmpty()) {
             // 投入口空了：身上没原料就按做到多少收场；有就先备好燃料再装一组。
             int source = ingredientSource(open);
@@ -308,7 +313,7 @@ final class FurnaceRun implements Action {
 
     // 添燃料：按要烧的件数挑一堆最合适的燃料，分出够烧完的件数放进燃料槽；身上没有能烧的就收场说明。
     private ActionStatus addFuel(TickContext tick, MenuContent.Reading open) {
-        FuelPick pick = pickFuel(fuelStacks(open, null), (long) fuelFor(open) * cookTicks);
+        FurnaceFuel.Pick pick = FurnaceFuel.pick(fuelStacks(open, null), (long) fuelFor(open) * cookTicks);
         if (pick == null) {
             return finish(Problem.of(Problem.Kind.NEED_ITEM, "身上没有能烧的燃料（工具、要烧的原料和成品不算），烧不了"
                     + recipe.result().describe()));
@@ -331,15 +336,15 @@ final class FurnaceRun implements Action {
 
     // 身上能当燃料的几堆：工具、武器这类一格一件的不烧，这次要烧的原料和烧出来的成品也不烧；
     // onlyItem 给了就只要这一种（燃料槽里已经有燃料时只补得进同一种）。
-    private List<FuelStack> fuelStacks(MenuContent.Reading open, String onlyItem) {
-        List<FuelStack> stacks = new ArrayList<>();
+    private List<FurnaceFuel.Stack> fuelStacks(MenuContent.Reading open, String onlyItem) {
+        List<FurnaceFuel.Stack> stacks = new ArrayList<>();
         for (int i = 0; i < open.playerSnapshots().size(); i++) {
             SlotSnapshot stack = open.playerSnapshots().get(i);
             if (stack.isEmpty() || stack.stack().getMaxStackSize() <= 1
                     || isIngredient(stack.stack()) || isResult(stack.stack())) continue;
             if (onlyItem != null && !onlyItem.equals(itemId(stack.stack()))) continue;
             int burn = burnTicksOf(itemId(stack.stack()));
-            if (burn > 0) stacks.add(new FuelStack(i, stack.count(), burn));
+            if (burn > 0) stacks.add(new FurnaceFuel.Stack(i, stack.count(), burn));
         }
         return stacks;
     }
@@ -347,33 +352,6 @@ final class FurnaceRun implements Action {
     // 一件燃料在这种炉子里烧多少刻：燃料表给的是熔炉里烧多久，高炉、烟熏炉里同一件燃料只顶一半。
     private int burnTicksOf(String itemId) {
         return fuels.burnTicks(itemId) / recipe.kind().fuelBurnDivisor();
-    }
-
-    /**
-     * 挑燃料：要烧 needTicks 刻。先挑一堆就够烧完的；再挑木板以上的（木棍、树苗一件只烧半件，太零碎）；
-     * 同样的里挑烧完浪费最少的（烧两件东西不扔一块煤炭块进去），一样少时挑一件烧得久的（少点几下）。
-     * 放几件按够烧完算，一组封顶；身上没有能烧的给 null。
-     */
-    static FuelPick pickFuel(List<FuelStack> stacks, long needTicks) {
-        FuelStack best = null;
-        long[] bestKey = null;
-        long need = Math.max(1, needTicks);
-        for (FuelStack stack : stacks) {
-            if (stack.count() <= 0 || stack.burnTicks() <= 0) continue;
-            long items = Math.min(stack.count(), ceilDiv(need, stack.burnTicks()));
-            long covered = items * stack.burnTicks();
-            long[] key = {covered >= need ? 0 : 1, stack.burnTicks() >= SMALL_FUEL_TICKS ? 0 : 1,
-                    Math.max(0, covered - need), -stack.burnTicks()};
-            if (best == null || Arrays.compare(key, bestKey) < 0) {
-                best = stack;
-                bestKey = key;
-            }
-        }
-        if (best == null) {
-            return null;
-        }
-        long count = Math.min(Math.min(best.count(), STACK), ceilDiv(need, best.burnTicks()));
-        return new FuelPick(best.index(), (int) count);
     }
 
     // 料和燃料都齐了。这一场能装好就走、这一炉还要烧一分钟以上：燃料不够烧完先补，补好了装好炉就走；
@@ -408,7 +386,7 @@ final class FurnaceRun implements Action {
         String inSlot = slot.isEmpty() ? null : itemId(slot.stack());
         long covered = slot.isEmpty() ? 0 : (long) slot.count() * burnTicksOf(inSlot);
         if (covered >= needTicks) return Optional.empty();
-        FuelPick pick = pickFuel(fuelStacks(open, inSlot), needTicks - covered);
+        FurnaceFuel.Pick pick = FurnaceFuel.pick(fuelStacks(open, inSlot), needTicks - covered);
         int room = slot.isEmpty() ? STACK : slot.stack().getMaxStackSize() - slot.count();
         if (pick == null || room <= 0) return Optional.empty();
         ItemStack kind = open.playerSnapshots().get(pick.index()).stack();
@@ -592,6 +570,7 @@ final class FurnaceRun implements Action {
         // 换了一台：点开以后重新核对是不是留下的那台，补燃料也按这一台重新算。
         checkedLeft = false;
         fuelToppedUp = false;
+        clearFuelAttempted = false;
         dropVisit();
         stage = Stage.VISIT;
     }
@@ -674,6 +653,13 @@ final class FurnaceRun implements Action {
                 }
                 return fail(Problem.Kind.REFUSED_BY_GAME, moveWhat + "没能得到游戏确认");
             }
+            case CLEAR_FUEL -> {
+                if (result instanceof TransferRun.MoveResult.Confirmed) {
+                    clearFuelAttempted = false;
+                    return ActionStatus.progressed();
+                }
+                return busy("燃料槽里的" + moveWhat + "收不进背包");
+            }
         }
         return ActionStatus.progressed();
     }
@@ -743,8 +729,19 @@ final class FurnaceRun implements Action {
         return ActionStatus.failed(failure);
     }
 
+    // 把自己上次用岩浆桶烧完留下的空桶整堆快速移动回背包，腾出燃料槽继续添料。
+    private ActionStatus clearFuelSlot(MenuContent.Reading open, SlotSnapshot fuel) {
+        int slotId = open.containerSlotIds().get(FUEL);
+        run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),
+                new TransferRun.Check.IntoBackpack(fuel::sameIdentity, fuel.count()),
+                fuel.stack().getHoverName().getString()));
+        moveKind = MoveKind.CLEAR_FUEL;
+        moveWhat = fuel.stack().getHoverName().getString();
+        return ActionStatus.progressed();
+    }
+
     private static long ceilDiv(long value, long divisor) {
-        return (value + divisor - 1) / divisor;
+        return FurnaceFuel.ceilDiv(value, divisor);
     }
 
     private static String itemId(ItemStack stack) {
