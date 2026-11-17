@@ -16,6 +16,7 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.ChatTypeDecoration;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.EntityType;
@@ -239,5 +240,20 @@ class ClientReceivedChatTest {
         // UUID 在列表里、加载器给的名字却和列表里的对不上：同样不算。
         assertFalse(ClientReceivedChat.player(under.decorate(said), said, ALEX, "Herobrine", under, SELF, "Steve",
                 ALEX_LISTED).orElseThrow().senderOnline());
+    }
+
+    @Test
+    void systemAndPlayerMessagesExtractClickCommandsWithoutDuplicatingVisibleOnes() {
+        // Ess 传送请求只把接受按钮放进 ClickEvent 时，转为纯文本后缀供模型调用 chat 发送；正文已写出命令时不重复附。
+        Component acceptBtn = Component.literal("[接受]")
+                .withStyle(style -> style.withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/tpaccept")));
+        Component request = Component.literal("Alex 请求传送到你这里 ").append(acceptBtn);
+
+        ReceivedChat sysChat = ClientReceivedChat.system(request, false, SELF, "Steve", ONLINE).orElseThrow();
+        assertTrue(sysChat.text().contains("[接受]") && sysChat.text().contains("/tpaccept"), sysChat.text());
+
+        Component alreadyVisible = Component.literal("请输入 /tpaccept 接受 ").append(acceptBtn);
+        ReceivedChat dupChat = ClientReceivedChat.system(alreadyVisible, false, SELF, "Steve", ONLINE).orElseThrow();
+        assertEquals("请输入 /tpaccept 接受 [接受]", dupChat.text());
     }
 }
