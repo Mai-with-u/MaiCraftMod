@@ -6,8 +6,6 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -18,6 +16,7 @@ import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.menu.VanillaHotbar;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ItemMatch;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -178,19 +177,27 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
     static final int ALREADY_SELECTED = -2;
 
     static int findItem(LocalPlayer player, String itemId) {
-        ResourceLocation wanted = ResourceLocation.tryParse(itemId);
-        var inventory = player.getInventory();
+        return player == null ? NOT_CARRIED : findInInventory(player.getInventory(), itemId);
+    }
+
+    /** 在角色背包里按具体物品 ID 或 #标签 找可用格子：优先主手选中格，其次主背包与副手，不认盔甲栏（交外层区分）。 */
+    static int findInInventory(Inventory inventory, String itemOrTag) {
+        if (inventory == null || itemOrTag == null || itemOrTag.isEmpty()) return NOT_CARRIED;
         int selected = inventory.selected;
-        if (isItem(inventory.getItem(selected), wanted)) return ALREADY_SELECTED;
+        if (selected >= 0 && selected < inventory.getContainerSize()
+                && matchesItemOrTag(inventory.getItem(selected), itemOrTag)) {
+            return ALREADY_SELECTED;
+        }
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             if (slot == selected) continue;
-            if (isItem(inventory.getItem(slot), wanted)) return slot;
+            if (matchesItemOrTag(inventory.getItem(slot), itemOrTag)) return slot;
         }
         return NOT_CARRIED;
     }
 
-    private static boolean isItem(ItemStack stack, ResourceLocation wanted) {
-        return !stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).equals(wanted);
+    // 同时支持精确物品 ID（如 ae2:certus_quartz_crystal）与配方 #标签（如 #c:gems/certus_quartz）。
+    static boolean matchesItemOrTag(ItemStack stack, String itemOrTag) {
+        return ItemMatch.matches(stack, itemOrTag);
     }
 
     /** 换手动作：界面搬运 → 关界面 → 副手交换 → 选中，逐刻推进；收进背包也走前两步加一次选中核对。 */

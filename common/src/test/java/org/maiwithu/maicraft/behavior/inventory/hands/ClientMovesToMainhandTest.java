@@ -3,9 +3,18 @@ package org.maiwithu.maicraft.behavior.inventory.hands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import java.util.List;
+import java.util.Map;
+
 import net.minecraft.SharedConstants;
+import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
@@ -19,10 +28,20 @@ import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
  */
 class ClientMovesToMainhandTest {
 
+    /** 离线没有数据包，物品标签得手动绑上：船挂在原版的 boats 标签下。 */
+    private static final TagKey<Item> BOATS = TagKey.create(Registries.ITEM,
+            ResourceLocation.fromNamespaceAndPath("minecraft", "boats"));
+
     @BeforeAll
     static void bootstrapRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+        BuiltInRegistries.ITEM.bindTags(Map.of(BOATS,
+                List.of(holder(Items.OAK_BOAT), holder(Items.SPRUCE_BOAT))));
+    }
+
+    private static Holder<Item> holder(Item item) {
+        return BuiltInRegistries.ITEM.wrapAsHolder(item);
     }
 
     @Test
@@ -65,5 +84,18 @@ class ClientMovesToMainhandTest {
         inventory.setItem(20, new ItemStack(Items.OAK_BOAT));
         assertEquals(20, ClientMovesToMainhand.relocate(inventory, Items.OAK_BOAT));
         assertEquals(null, ClientMovesToMainhand.relocate(inventory, Items.TORCH));
+    }
+
+    @Test
+    void findInInventoryMatchesExactItemsAndItemTags() {
+        // 石磨等机器配方按 #标签 点名备料时，换手查找能按物品标签找到背包里对应的具体物品格。
+        Inventory inventory = new Inventory(null);
+        inventory.selected = 0;
+        inventory.setItem(12, new ItemStack(Items.OAK_BOAT));
+        assertEquals(12, ClientMovesToMainhand.findInInventory(inventory, "#minecraft:boats"));
+        assertEquals(12, ClientMovesToMainhand.findInInventory(inventory, "minecraft:oak_boat"));
+        inventory.setItem(0, new ItemStack(Items.SPRUCE_BOAT));
+        assertEquals(ClientMovesToMainhand.ALREADY_SELECTED,
+                ClientMovesToMainhand.findInInventory(inventory, "#minecraft:boats"));
     }
 }

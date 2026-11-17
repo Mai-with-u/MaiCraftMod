@@ -13,6 +13,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
+import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.kernel.result.Change;
 
 /** 预留：留够几件按身上总数算、标签按合计、全都留着；下令的目标动了预留的从预留里扣，跟着世界存。 */
@@ -149,5 +150,26 @@ class ReservedItemsTest {
     @Test
     void 件数至少为一() {
         assertThrows(IllegalArgumentException.class, () -> keep("minecraft:coal", 0));
+    }
+
+    @Test
+    void 非物品进出的坐标或说明文本不查物品标签也不炸结算() {
+        // 目标带有坐标文本的 OTHER 变化（例如走到某坐标、施工/交互记录），结算时不该拿 "-344, 64, 49" 去查 tagsOf。
+        ReadsItemTags strictTags = itemId -> {
+            if (itemId.contains(" ") || itemId.contains(",")) {
+                throw new IllegalArgumentException("非物品 ID 不该送进标签查询：" + itemId);
+            }
+            return tags.tagsOf(itemId);
+        };
+        ReservedItems guarded = new ReservedItems(strictTags, () -> Map.copyOf(carriedNow));
+        guarded.set(List.of(keep("minecraft:oak_planks", 10)));
+        carriedNow.put("minecraft:oak_planks", 10);
+
+        int[] used = guarded.usedByOrder(List.of(
+                Change.of(Change.Kind.OTHER, "-344, 64, 49", 1),
+                Change.of(Change.Kind.OTHER, "-356, 67, 66 的 minecraft:andesite", 1)));
+
+        assertArrayEquals(new int[] {0, 0}, used);
+        assertEquals(10, guarded.keep("minecraft:oak_planks"));
     }
 }

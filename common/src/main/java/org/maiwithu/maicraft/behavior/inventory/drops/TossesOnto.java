@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.ItemMatch;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -234,7 +235,10 @@ public final class TossesOnto implements Action {
             return stop(Problem.of(Problem.Kind.NEED_ITEM, "换过手之后主手上还是没有 " + itemId));
         }
         before = nearby(player.level());
-        throwing = new ThrowsItems(itemId, Math.min(remaining, held), scenes);
+        // itemId 可能是石磨等机器配方给的 #标签，ThrowsItems 核对主手需要具体物品注册 ID，故取此刻主手实物的 ID。
+        ItemStack heldStack = scenes.apply(player).heldItem(InteractionHand.MAIN_HAND);
+        String concreteId = heldStack != null && !heldStack.isEmpty() ? idOf(heldStack) : itemId;
+        throwing = new ThrowsItems(concreteId, Math.min(remaining, held), scenes);
         return enter(Stage.THROW);
     }
 
@@ -398,7 +402,7 @@ public final class TossesOnto implements Action {
     }
 
     private boolean sameItem(ItemEntity entity) {
-        return idOf(entity.getItem()).equals(itemId);
+        return matchesItem(entity.getItem(), itemId);
     }
 
     // 落地且不再滑、不在潜行（潜行时眼睛矮一截，出手点跟着变）才按此刻的眼睛算抛物线。
@@ -408,7 +412,7 @@ public final class TossesOnto implements Action {
 
     private int heldCount(PlayerContext player) {
         ItemStack held = scenes.apply(player).heldItem(InteractionHand.MAIN_HAND);
-        return held != null && !held.isEmpty() && idOf(held).equals(itemId) ? held.getCount() : 0;
+        return held != null && !held.isEmpty() && matchesItem(held, itemId) ? held.getCount() : 0;
     }
 
     // 主手以外身上还有没有这样东西：主手这一堆丢完了还要丢时，看有没有下一堆可换。
@@ -418,9 +422,14 @@ public final class TossesOnto implements Action {
         for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
             if (slot == inventory.selected) continue;
             ItemStack stack = inventory.getItem(slot);
-            if (!stack.isEmpty() && idOf(stack).equals(itemId)) total += stack.getCount();
+            if (!stack.isEmpty() && matchesItem(stack, itemId)) total += stack.getCount();
         }
         return total;
+    }
+
+    // 支持具体物品 ID 与 #前缀物品标签（如石磨配方中的 #c:gems/certus_quartz）。
+    static boolean matchesItem(ItemStack stack, String itemOrTag) {
+        return ItemMatch.matches(stack, itemOrTag);
     }
 
     // 世界里一格的碰撞框；没加载的格当作挡住。

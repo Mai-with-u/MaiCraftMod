@@ -186,14 +186,17 @@ public final class ReservedItems implements ItemsToKeep {
         return fromReserved;
     }
 
-    // 一条变化让这条预留管的东西净出了背包几件：用掉、存走、丢掉、放下算出，拿到算进（负数）。
+    // 一条变化让这条预留管的东西净出了背包几件：用掉、存走、丢掉、放下算出，拿到算进（负数）；
+    // 先按变化种类筛掉非物品进出的记录，避免拿坐标等说明文本去查物品标签引发异常。
     private int outgoing(Change change, Reservation reservation) {
-        if (!reservation.covers(change.what(), tags.tagsOf(change.what()))) return 0;
-        return switch (change.kind()) {
+        int delta = switch (change.kind()) {
             case ITEM_CONSUMED, ITEM_STORED, ITEM_DROPPED, BLOCK_PLACED -> change.count();
             case ITEM_GAINED -> -change.count();
             default -> 0;
         };
+        if (delta == 0) return 0;
+        if (!reservation.covers(change.what(), tags.tagsOf(change.what()))) return 0;
+        return delta;
     }
 
     // 预留的件数是最后用掉的：从最后一条出背包的变化往前，把动了的件数记上去。

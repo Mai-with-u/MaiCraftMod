@@ -53,17 +53,21 @@ public final class LiveCarryReads {
 
     /** 物品标签的生产实现：一个物品挂着的全部标签，从游戏的注册表读；带药水种类的写法按瓶子那样物品读。 */
     public static ReadsItemTags itemTags() {
-        return itemId -> BuiltInRegistries.ITEM.getOptional(parse(StackKey.parse(itemId).itemId()))
-                .map(item -> {
-                    Set<String> names = new LinkedHashSet<>();
-                    // 遍历物品挂着的标签键：注册表持有者直接给全部标签，不用猜哪个命名空间。
-                    item.builtInRegistryHolder().tags()
-                            .forEach(tag -> names.add(tag.location().toString()));
-                    // 能吃的口粮这一大类按物品自己的食物组件认，模组食物不用一样样点名。
-                    if (EverydayFood.is(item)) names.add(EverydayFood.TAG);
-                    return Set.copyOf(names);
-                })
-                .orElse(Set.of());
+        return itemId -> {
+            ResourceLocation id = parse(StackKey.parse(itemId).itemId());
+            if (id == null) return Set.of();
+            return BuiltInRegistries.ITEM.getOptional(id)
+                    .map(item -> {
+                        Set<String> names = new LinkedHashSet<>();
+                        // 遍历物品挂着的标签键：注册表持有者直接给全部标签，不用猜哪个命名空间。
+                        item.builtInRegistryHolder().tags()
+                                .forEach(tag -> names.add(tag.location().toString()));
+                        // 能吃的口粮这一大类按物品自己的食物组件认，模组食物不用一样样点名。
+                        if (EverydayFood.is(item)) names.add(EverydayFood.TAG);
+                        return Set.copyOf(names);
+                    })
+                    .orElse(Set.of());
+        };
     }
 
     /** 角色位置的生产实现：问价的来源们用它知道角色现在在哪。 */
@@ -85,17 +89,22 @@ public final class LiveCarryReads {
         return new ReadsItemRegistry() {
             @Override
             public boolean itemExists(String itemId) {
-                Optional<Item> found = BuiltInRegistries.ITEM.getOptional(parse(itemId));
+                ResourceLocation id = parse(itemId);
+                if (id == null) return false;
+                Optional<Item> found = BuiltInRegistries.ITEM.getOptional(id);
                 // AIR 与写岔了都算没有。
                 return found.isPresent() && !new ItemStack(found.get()).isEmpty();
             }
 
             @Override
             public boolean tagHasItems(String tagId) {
-                if (EverydayFood.TAG.equals(tagId.startsWith("#") ? tagId.substring(1) : tagId)) {
+                String stripped = tagId != null && tagId.startsWith("#") ? tagId.substring(1) : tagId;
+                if (EverydayFood.TAG.equals(stripped)) {
                     return !EverydayFood.all().isEmpty();
                 }
-                var key = TagKey.create(Registries.ITEM, parse(tagId.startsWith("#") ? tagId.substring(1) : tagId));
+                ResourceLocation id = parse(stripped);
+                if (id == null) return false;
+                var key = TagKey.create(Registries.ITEM, id);
                 return BuiltInRegistries.ITEM.getTag(key)
                         .map(set -> !set.stream().toList().isEmpty()).orElse(false);
             }
@@ -113,7 +122,9 @@ public final class LiveCarryReads {
         return new ReadsToolRequirements() {
             @Override
             public Optional<String> toolRequired(String blockTypeId) {
-                var block = BuiltInRegistries.BLOCK.getOptional(parse(blockTypeId));
+                ResourceLocation id = parse(blockTypeId);
+                if (id == null) return Optional.empty();
+                var block = BuiltInRegistries.BLOCK.getOptional(id);
                 if (block.isEmpty()) {
                     return Optional.empty();
                 }
@@ -139,8 +150,11 @@ public final class LiveCarryReads {
 
             @Override
             public boolean sufficient(String toolItemId, String blockTypeId) {
-                var tool = BuiltInRegistries.ITEM.getOptional(parse(toolItemId));
-                var block = BuiltInRegistries.BLOCK.getOptional(parse(blockTypeId));
+                ResourceLocation toolId = parse(toolItemId);
+                ResourceLocation blockId = parse(blockTypeId);
+                if (toolId == null || blockId == null) return false;
+                var tool = BuiltInRegistries.ITEM.getOptional(toolId);
+                var block = BuiltInRegistries.BLOCK.getOptional(blockId);
                 if (tool.isEmpty() || block.isEmpty()) {
                     return false;
                 }
@@ -150,8 +164,10 @@ public final class LiveCarryReads {
         };
     }
 
+    // 传入非标准 ResourceLocation（如坐标或中文说明）时用 tryParse 安全返回 null，防止上层误传时抛出未捕获异常。
     private static ResourceLocation parse(String id) {
+        if (id == null) return null;
         String plain = id.toLowerCase(Locale.ROOT);
-        return ResourceLocation.parse(plain.startsWith("#") ? plain.substring(1) : plain);
+        return ResourceLocation.tryParse(plain.startsWith("#") ? plain.substring(1) : plain);
     }
 }
