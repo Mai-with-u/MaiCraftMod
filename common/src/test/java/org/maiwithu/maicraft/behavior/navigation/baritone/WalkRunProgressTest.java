@@ -131,6 +131,9 @@ class WalkRunProgressTest {
         var conclusion = progress.observe(seen(ELSEWHERE, true, false, false, true));
         assertEquals(WalkReport.State.FAILED, conclusion.report().state());
         assertEquals(Problem.Kind.UNREACHABLE, conclusion.report().problem().kind());
+        // 定案"没有路"前已经过几次重算与脱困，与连续算路没有路线同待遇：
+        // 也标成"从这里到不了"，靠近据此合并剩下的站位再算一次、全没路记进记忆。
+        assertTrue(conclusion.report().noRouteFromHere());
         assertTrue(conclusion.done());
     }
 
@@ -144,6 +147,8 @@ class WalkRunProgressTest {
         assertEquals(WalkReport.State.FAILED, conclusion.report().state());
         Problem problem = conclusion.report().problem();
         assertEquals(Problem.Kind.INTERNAL_ERROR, problem.kind());
+        // 程序出错不是"从这里到不了"：不能让靠近把剩下的站位合起来空算一遍。
+        assertFalse(conclusion.report().noRouteFromHere());
         assertTrue(problem.message().startsWith("寻路程序出错，这次没算出路线，不是没有路"));
         assertTrue(problem.message().contains("IllegalStateException"), "异常本身要带上，方便对着日志查");
         assertFalse(problem.message().contains("没有能走到目标的路线"));

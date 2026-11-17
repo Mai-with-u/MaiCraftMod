@@ -147,4 +147,20 @@ class ApproachFromHereTest {
         assertEquals(ActionStatus.done(), runToEnd(approach(moves)));
         assertEquals("Exact", moves.goals.get(1).goal().getClass().getSimpleName());
     }
+
+    @Test
+    void givingUpWithSpotsExhaustedIsAlsoRemembered() {
+        // 站位耗尽的放弃同样是"从这里到不了"：也记下来，起点附近再靠近同一个对象一步不走直接收场，
+        // 不把同一批候选位置重新挑一遍（实机砌筑同一批格跨目标原样重败）。
+        world.hidden = (eye, t) -> true;
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, runToEnd(approach(new StubMoves(world))));
+        assertEquals(Problem.Kind.UNREACHABLE, failed.problem().kind());
+        assertTrue(failed.problem().message().contains("候选位置"), failed.problem().message());
+
+        StubMoves again = new StubMoves(world);
+        ActionStatus.Failed recalled = assertInstanceOf(ActionStatus.Failed.class, approach(again).tick(new StubTick(1)));
+        assertEquals(Problem.Kind.UNREACHABLE, recalled.problem().kind());
+        assertTrue(recalled.problem().message().contains("这次目标里刚试过"), recalled.problem().message());
+        assertEquals(0, again.begun.size(), "记住了就不再重新挑站位");
+    }
 }

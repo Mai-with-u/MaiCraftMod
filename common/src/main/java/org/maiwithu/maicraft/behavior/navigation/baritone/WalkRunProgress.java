@@ -163,8 +163,12 @@ final class WalkRunProgress {
 
         if (o.calcFailed && !o.routePresent) {
             // 算路程序出错与真的没有路分开说：程序出错时换目标、带垫料都绕不开，不能让调用方当成地形问题反复试。
-            report = WalkReport.failed(o.calcError != null ? programError(o.calcError)
-                    : Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null), o.feet, crossedWater);
+            // 真的没有路在定案前已经过几次一时重算与"搭→挖"脱困，与连续算路没有路线一样可信：
+            // 也标成"从这里到不了"，靠近据此把剩下的站位合起来再算一次，全没路记进记忆不再一个个空算。
+            report = o.calcError != null
+                    ? WalkReport.failed(programError(o.calcError), o.feet, crossedWater)
+                    : WalkReport.failedNoRoute(Problem.of(Problem.Kind.UNREACHABLE, "没有能走到目标的路线", null),
+                            o.feet, crossedWater);
             return new Conclusion(report, Action.CANCEL_ROUTE, true, false);
         }
 

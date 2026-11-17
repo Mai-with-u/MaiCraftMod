@@ -394,6 +394,9 @@ final class BaritoneWalkRun implements WalkRun {
         // 引擎这次没算出路线时先看是不是程序出错：程序出错不做只读复算、不升级脱困，直接按程序出错收场。
         String calcError = engineFailedPath && !routePresent ? pathing.calculationFailure() : null;
         boolean noPath = calcError != null || concludeNoPath(engine, routePresent, feet, context.clientTick());
+        // 引擎定案"没有路"这一刻记一行诊断（目标格、起点、定案前现场重算几次、许可档=搜索含不含挖垫、脱困是否升到头；只许挖垫时复算的挖垫明细走问题说明）：实机砌筑对高处站位大量判"没有路"而事件里查不到缘由，对着这行查搜索当时的处境。
+        if (noPath && calcError == null) LOG.debug("[maicraft-path] 定案没有能走到目标的路线：目标 {}，起点 {}，现场重算 {} 次，许可 {}，脱困{}",
+                goal.center().toShortString(), feet.toShortString(), transientRetries, permit.changes(), escape.active() ? "已升到头仍没有路" : "未升格");
         watchProgress(context, player, engine, routePresent, calculating || probe.waiting(), feet);
         progress.observe(new WalkRunProgress.Observation(
                 feet, onGround, inWater, routePresent, calculating, noPath, calcError));
