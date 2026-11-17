@@ -158,6 +158,34 @@ class ClientGearChangesTest {
         assertEquals(Problem.Kind.STUCK, failed.problem().kind());
     }
 
+    @Test
+    void wearingNonEquipableChestItemSwapsThroughArmorMenuSlotAndCloses() {
+        // 精妙背包等未实现原版 Equipable 的护甲位物品：右键空气会开背包界面，
+        // 必须开玩家背包界面把当前快捷栏物品 SWAP 进胸甲格（槽位 6），再关上背包完成穿戴。
+        Inventory inventory = new Inventory(null);
+        inventory.selected = 2;
+        inventory.setItem(2, new ItemStack(Items.CHEST));
+        OffhandMenus menus = new OffhandMenus(inventory);
+        AtomicReference<PlayerContext> current = new AtomicReference<>(context(menus, 50));
+        ClientGearChanges gear = gearChanges(current, inventory);
+
+        Action action = gear.wear("minecraft:chest", GearSlotName.CHEST).orElseThrow();
+        assertInstanceOf(ActionStatus.Running.class, action.tick(TickContext.of(50, current.get())));
+        assertEquals(1, menus.clickSubmissions);
+        assertEquals(6, menus.lastClickSlot);
+        assertEquals(2, menus.lastClickButton);
+        assertEquals(ClickType.SWAP, menus.lastClickType);
+
+        menus.confirmActive("已把物品放进胸甲格");
+        current.set(context(menus, 51));
+        assertInstanceOf(ActionStatus.Running.class, action.tick(TickContext.of(51, current.get())));
+        assertEquals(1, menus.closeSubmissions);
+
+        menus.confirmClose("背包界面已关上");
+        current.set(context(menus, 52));
+        assertInstanceOf(ActionStatus.Done.class, action.tick(TickContext.of(52, current.get())));
+    }
+
     private static ClientGearChanges gearChanges(AtomicReference<PlayerContext> contexts, Inventory inventory) {
         return new ClientGearChanges(contexts::get, new ClientMovesToMainhand(contexts::get), player -> inventory);
     }
@@ -181,10 +209,16 @@ class ClientGearChangesTest {
     private static final class OffhandMenus implements MenuActions {
         private final Inventory inventory;
         private PendingMenuAction active;
+        private PendingMenuAction closePending;
         private String pendingConfirmDetail;
         boolean screenBusy;
         int swapSubmissions;
         int lastSwappedSlot = -1;
+        int clickSubmissions;
+        int lastClickSlot = -1;
+        int lastClickButton = -1;
+        ClickType lastClickType;
+        int closeSubmissions;
         int pollCount;
 
         OffhandMenus(Inventory inventory) {
@@ -225,6 +259,10 @@ class ClientGearChangesTest {
             TestPendingMenuActions.finish(active, PendingMenuAction.Status.CONFIRMED_APPLIED, detail);
         }
 
+        void confirmClose(String detail) {
+            TestPendingMenuActions.finish(closePending, PendingMenuAction.Status.CONFIRMED_APPLIED, detail);
+        }
+
         void failActive(PendingMenuAction.Status status, String detail) {
             TestPendingMenuActions.finish(active, status, detail);
         }
@@ -234,12 +272,23 @@ class ClientGearChangesTest {
         @Override public boolean ensureVisible(PlayerContext context) { return true; }
         @Override public void interactionSubmitted(PlayerContext context) {}
         @Override public PendingMenuAction click(PlayerContext context, int slot, int button, ClickType clickType,
-                MenuConfirmation confirmation, int timeoutTicks) { return null; }
+                MenuConfirmation confirmation, int timeoutTicks) {
+            clickSubmissions++;
+            lastClickSlot = slot;
+            lastClickButton = button;
+            lastClickType = clickType;
+            active = TestPendingMenuActions.pendingClick(context, slot, timeoutTicks);
+            return active;
+        }
         @Override public PendingMenuAction swapInventoryToHotbar(PlayerContext context, int sourceInventorySlot,
                 int hotbarSlot, int timeoutTicks) { return null; }
         @Override public PendingMenuAction placeRecipe(PlayerContext context, RecipeHolder<?> recipe, boolean shift,
                 MenuConfirmation confirmation, int timeoutTicks) { return null; }
-        @Override public PendingMenuAction close(PlayerContext context, int timeoutTicks) { return null; }
+        @Override public PendingMenuAction close(PlayerContext context, int timeoutTicks) {
+            closeSubmissions++;
+            closePending = TestPendingMenuActions.pendingClick(context, -1, timeoutTicks);
+            return closePending;
+        }
         @Override public PendingMenuAction closeForTaskBoundary(PlayerContext context, int timeoutTicks,
                 String boundaryReason) { return null; }
     }

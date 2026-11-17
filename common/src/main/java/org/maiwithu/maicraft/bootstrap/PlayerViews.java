@@ -115,8 +115,8 @@ public final class PlayerViews {
     /** 物品与栏位的匹配：头盔进不了胸甲栏，按当刻的角色读游戏规则。 */
     public static ReadsGearFit gearFit(Supplier<PlayerContext> context) {
         Objects.requireNonNull(context, "context");
-        // 物品与栏位的匹配是游戏自己的规则，与哪一刻的角色无关；接成视图只为让调用方按接缝问。
-        return new ClientGearFit();
+        // 优先核对原版 Equipable，模组扩展穿戴物（如精妙背包）再经当前角色的背包护甲槽问加载器。
+        return new ClientGearFit(context);
     }
 
     private static BackpackView currentBackpack(Supplier<PlayerContext> context) {

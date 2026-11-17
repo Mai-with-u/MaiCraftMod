@@ -10,6 +10,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.item.Equipable;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.InteractionHand;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -19,6 +21,7 @@ import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.GearSlotName;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ItemMatch;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -49,17 +52,6 @@ public final class ClientGearChanges implements GearChanges {
 
     /** 快捷栏在背包界面里从第 36 格开始：选中的那一格就是主手。 */
     private static final int HOTBAR_MENU_START = 36;
-
-    /** 护甲四格在背包界面里的槽位号：头盔 5、胸甲 6、护腿 7、靴子 8。 */
-    private static int armorMenuSlot(GearSlotName slot) {
-        return switch (slot) {
-            case HEAD -> 5;
-            case CHEST -> 6;
-            case LEGS -> 7;
-            case FEET -> 8;
-            default -> -1;
-        };
-    }
 
     private final Supplier<PlayerContext> contexts;
     private final ClientMovesToMainhand movesToMainhand;
@@ -127,7 +119,9 @@ public final class ClientGearChanges implements GearChanges {
         private final int sourceSlot;
         private Action stage;
         private PendingMenuAction menuPending;
+        private PendingMenuAction closePending;
         private PendingInteraction usePending;
+        private boolean wearingByMenu;
         private long busySince = Long.MIN_VALUE;
         private Problem failure;
 
@@ -145,7 +139,7 @@ public final class ClientGearChanges implements GearChanges {
 
         // 换到主手起手：东西已在主手时给空（不用换），身上没有时这单就做不成。
         private Action handStage() {
-            if (!movesToMainhand.carried(itemId)) {
+            if (!carriedByInventory()) {
                 failure = Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + itemId + "，穿不上", null);
                 return null;
             }
@@ -154,6 +148,23 @@ public final class ClientGearChanges implements GearChanges {
                 return movesToMainhand.actionToMainhandFrom(sourceSlot, "把 " + itemId + " 换到主手").orElse(null);
             }
             return movesToMainhand.actionToMainhand(itemId).orElse(null);
+        }
+
+        /**
+         * 这件东西在不在身上：按本类拿到的背包来源逐格找，不经 {@link ClientMovesToMainhand}。
+         *
+         * <p>换手那条路认的是角色的实时背包，这里认的是同一个背包但走的是本类注入的那一份，
+         * 两边在实机上是一回事，判定却要一致：不在身上时说"穿不上"，别走到穿戴那一步才失败。
+         */
+        private boolean carriedByInventory() {
+            PlayerContext player = contexts.get();
+            Inventory inventory = player == null ? null : inventories.apply(player);
+            if (inventory == null) return false;
+            if (ItemMatch.matches(inventory.getItem(inventory.selected), itemId)) return true;
+            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+                if (ItemMatch.matches(inventory.getItem(slot), itemId)) return true;
+            }
+            return false;
         }
 
         @Override
@@ -174,8 +185,70 @@ public final class ClientGearChanges implements GearChanges {
                 // 副手：一次原生交换把东西放进副手；主手：换到手就算穿好。
                 case OFFHAND -> offhandSwap(player);
                 case MAINHAND -> ActionStatus.done();
-                // 护甲：对自己使用一次，确认护甲格换上了这件。
-                default -> useOnSelf(player);
+                // 护甲：原版 Equipable 走手持对自己右键（快捷栏直接穿）；精妙背包等右键会开界面的改走背包 SWAP 进护甲格。
+                default -> wearArmor(player);
+            };
+        }
+
+        // 护甲槽穿戴分流：首次进本阶段时锁定走右键还是走界面，避免中途背包状态变化来回切路线。
+        private ActionStatus wearArmor(PlayerContext player) {
+            if (!wearingByMenu && usePending == null && menuPending == null && closePending == null) {
+                Inventory inventory = inventories.apply(player);
+                ItemStack handStack = inventory != null
+                        ? inventory.getSelected()
+                        : player.localPlayer() != null ? player.localPlayer().getMainHandItem() : ItemStack.EMPTY;
+                if (Equipable.get(handStack) == null) {
+                    wearingByMenu = true;
+                }
+            }
+            return wearingByMenu ? menuWear(player) : useOnSelf(player);
+        }
+
+        // 非原版 Equipable 护甲位物品（如精妙背包）：打开背包界面把当前选中的快捷栏物品 SWAP 进对应护甲格，再关界面。
+        private ActionStatus menuWear(PlayerContext player) {
+            MenuActions actions = player.menuActions();
+            if (closePending != null) {
+                if (!closePending.terminal()) {
+                    closePending = actions.poll(player, closePending);
+                    return ActionStatus.running();
+                }
+                return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
+                        ? ActionStatus.done()
+                        : fail("穿上 " + slot.paramName() + " 没能确认：" + menuPending.detail());
+            }
+            if (menuPending == null) {
+                if (!actions.ensureVisible(player)) return ActionStatus.running();
+                Inventory inventory = inventories.apply(player);
+                if (inventory == null) return ActionStatus.running();
+                int hotbar = inventory.selected;
+                ItemStack targetBefore = inventory.getItem(hotbar).copy();
+                if (targetBefore.isEmpty()) {
+                    return fail("主手上没有 " + itemId + "，放不进 " + slot.paramName());
+                }
+                int menuSlot = slot.armorScreenSlot();
+                menuPending = actions.click(player, menuSlot, hotbar, ClickType.SWAP,
+                        slotFilledWith(menuSlot, targetBefore), STEP_TIMEOUT_TICKS);
+                if (!menuPending.terminal()) return ActionStatus.running();
+            } else if (!menuPending.terminal()) {
+                menuPending = actions.poll(player, menuPending);
+                if (!menuPending.terminal()) return ActionStatus.running();
+            }
+            closePending = actions.close(player, STEP_TIMEOUT_TICKS);
+            return ActionStatus.running();
+        }
+
+        // 确认条件：目标护甲格放进了要穿的那件物品才算生效（同种同组件即对上，不纠结堆叠）。
+        private static MenuConfirmation slotFilledWith(int menuSlot, ItemStack expected) {
+            ItemStack frozen = expected.copy();
+            return (context, pending) -> {
+                if (context.localPlayer() == null) return MenuConfirmation.Verdict.PENDING;
+                var menu = context.localPlayer().containerMenu;
+                if (menu.containerId != pending.containerId() || menuSlot >= menu.slots.size()) {
+                    return MenuConfirmation.Verdict.PENDING;
+                }
+                return ItemStack.isSameItemSameComponents(menu.getSlot(menuSlot).getItem(), frozen)
+                        ? MenuConfirmation.Verdict.APPLIED
+                        : MenuConfirmation.Verdict.PENDING;
             };
         }
 
@@ -315,7 +388,7 @@ public final class ClientGearChanges implements GearChanges {
                 return closing(player);
             }
             int menuSlot = slot == GearSlotName.MAINHAND
-                    ? HOTBAR_MENU_START + player.localPlayer().getInventory().selected : armorMenuSlot(slot);
+                    ? HOTBAR_MENU_START + player.localPlayer().getInventory().selected : slot.armorScreenSlot();
             if (menuPending == null) {
                 if (!actions.ensureVisible(player)) return ActionStatus.running();
                 menuPending = actions.click(player, menuSlot, 0,

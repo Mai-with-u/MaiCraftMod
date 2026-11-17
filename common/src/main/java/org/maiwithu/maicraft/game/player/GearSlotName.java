@@ -33,6 +33,22 @@ public enum GearSlotName {
         return List.of(HEAD, CHEST, LEGS, FEET);
     }
 
+    /**
+     * 这一格在角色背包界面里的槽位号：头盔 5、胸甲 6、护腿 7、靴子 8。
+     *
+     * <p>背包界面里排在前面的合成格与产出格占了前五个槽位，护甲四格接着排，主手与副手不在护甲格上，给 -1。
+     * 穿戴与卸下都要经这个界面搬东西，按这个号点才对得上格。
+     */
+    public int armorScreenSlot() {
+        return switch (this) {
+            case HEAD -> 5;
+            case CHEST -> 6;
+            case LEGS -> 7;
+            case FEET -> 8;
+            default -> -1;
+        };
+    }
+
     /** 把参数取值读成栏位；写法不对时返回 null，由调用方决定怎么拒绝。 */
     public static GearSlotName fromParam(String value) {
         for (GearSlotName slot : values()) {
