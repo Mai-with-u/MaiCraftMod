@@ -4,28 +4,36 @@ package org.maiwithu.maicraft.game.player;
 import java.util.List;
 
 /**
- * 装备与卸下的目标栏位：主手、副手和四格护甲。
+ * 装备与卸下的目标栏位：主手、副手和四格护甲（头上、身上、腿上、脚上）。
  *
  * <p>参数里用小写英文名（mainhand、offhand、head、chest、legs、feet），与玩家在游戏里的说法一致；
+ * 结果、说明这类给人读的文字里报栏位用中文说法（{@link #displayName()}）。
  * 整套卸下不在这里表达，由调用方逐格遍历护甲四格完成。
  */
 public enum GearSlotName {
-    MAINHAND("mainhand"),
-    OFFHAND("offhand"),
-    HEAD("head"),
-    CHEST("chest"),
-    LEGS("legs"),
-    FEET("feet");
+    MAINHAND("mainhand", "主手"),
+    OFFHAND("offhand", "副手"),
+    HEAD("head", "头上"),
+    CHEST("chest", "身上"),
+    LEGS("legs", "腿上"),
+    FEET("feet", "脚上");
 
     private final String paramName;
+    private final String displayName;
 
-    GearSlotName(String paramName) {
+    GearSlotName(String paramName, String displayName) {
         this.paramName = paramName;
+        this.displayName = displayName;
     }
 
     /** 参数里的写法，例如 mainhand。 */
     public String paramName() {
         return paramName;
+    }
+
+    /** 栏位的中文说法，例如 主手、头上：结果与说明里提到栏位都用它，参数取值才用英文名。 */
+    public String displayName() {
+        return displayName;
     }
 
     /** 护甲四格，从头到脚：清点身上穿着的、脱下护甲拿去用都按这个顺序看。 */

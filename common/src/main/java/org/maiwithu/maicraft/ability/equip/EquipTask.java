@@ -41,11 +41,11 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     /** 这次已经处理过的栏位。 */
     private final Set<GearSlotName> processed = new HashSet<>();
     /** 动手了但没能确认结果的栏位。 */
-    private final List<String> unconfirmedSlots = new ArrayList<>();
+    private final List<GearSlotName> unconfirmedSlots = new ArrayList<>();
     /** 确认完成了的栏位数。 */
     private int settled;
     /** 动作当场失败（界面没开上、那件没找到）的栏位：穿上时它们没穿上，要列进还差的。 */
-    private final List<String> failedSlots = new ArrayList<>();
+    private final List<GearSlotName> failedSlots = new ArrayList<>();
     /** 最近一次动作失败的原因：一个栏位都没弄成时整件事按它失败。 */
     private Problem lastFailure;
     /** 当前动手的栏位，以及动手前栏位里是什么（卸下记账用）。 */
@@ -100,10 +100,10 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
             case ActionStatus.Done done -> afterHandled(slot);
             case ActionStatus.Failed failed -> {
                 processed.add(slot);
-                failedSlots.add(slot.paramName());
+                failedSlots.add(slot);
                 lastFailure = failed.problem();
-                recordAttempt((input.unequip() ? "取下 " : "穿上 ") + slot.paramName(),
-                        failed.problem().message());
+                // 试过的动作按栏位说：手部是"拿到主手"，护甲是"穿上 头上"。
+                recordAttempt(input.actionLabel(slot), failed.problem().message());
                 yield nextSlotOrSettle();
             }
         };
@@ -132,22 +132,21 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
             if (empty) {
                 settled++;
                 recordChange(new Change(Change.Kind.ITEM_GAINED, wornAtStart, 1,
-                        "从 " + slot.paramName() + " 取下放进了背包"));
+                        "从 " + slot.displayName() + " 取下放进了背包"));
             } else {
                 // 动作"做完"了栏位还有东西：没等到确认，收尾时按仍穿着如实列出。
-                unconfirmedSlots.add(slot.paramName());
+                unconfirmedSlots.add(slot);
                 recordUnconfirmed(new Change(Change.Kind.OTHER, wornAtStart, 1,
-                        "从 " + slot.paramName() + " 取下的操作没能确认"));
+                        "从 " + slot.displayName() + " 取下的操作没能确认"));
             }
         } else if (!empty && equipment.slot(slot).get().itemId().equals(input.itemId())) {
             settled++;
-            recordChange(new Change(Change.Kind.OTHER, input.itemId(), 1,
-                    "穿在了 " + slot.paramName()));
+            // 穿好的说法跟着动作词走：手部是"拿到了主手"，护甲是"穿在了 头上"。
+            recordChange(new Change(Change.Kind.OTHER, input.itemId(), 1, input.wornNote(slot)));
         } else {
             // 穿的动作做完了，栏位里却不是这件：没等到确认，不冒充穿上了。
-            unconfirmedSlots.add(slot.paramName());
-            recordUnconfirmed(new Change(Change.Kind.OTHER, input.itemId(), 1,
-                    "穿上 " + slot.paramName() + " 的操作没能确认"));
+            unconfirmedSlots.add(slot);
+            recordUnconfirmed(new Change(Change.Kind.OTHER, input.itemId(), 1, input.unconfirmedNote(slot)));
         }
         return nextSlotOrSettle();
     }
@@ -159,44 +158,49 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
     }
 
     private Next<Phase> settle() {
-        List<String> worn = stillWornNow();
-        String label = input.unequip() ? "卸下" : "穿上";
+        List<GearSlotName> worn = stillWornNow();
+        String label = input.actionWord();
+        // 这次动的是单个手部栏位：成功句就是动作本身（"拿到主手"），不再带护甲那样的"（N 个栏位）"计数。
+        boolean singleHand = EquipInput.handSlot(input.slot());
         // 一个栏位都没弄成、又都是动作当场失败：按失败收场带上原因，不把"0 个栏位"说成完成。
         if (settled == 0 && unconfirmedSlots.isEmpty() && lastFailure != null) {
             return Next.fail(lastFailure);
         }
         // 穿上时动作失败的栏位没穿上（卸下失败的栏位还穿着，由 stillWornNow 列出）。
-        List<String> notWorn = input.unequip() ? List.of() : failedSlots;
+        List<GearSlotName> notWorn = input.unequip() ? List.of() : List.copyOf(failedSlots);
         if (unconfirmedSlots.isEmpty() && worn.isEmpty() && notWorn.isEmpty()) {
-            return Next.done(TaskResult.done(label + "完成（" + settled + " 个栏位）"));
+            return Next.done(TaskResult.done(singleHand ? label : label + "完成（" + settled + " 个栏位）"));
         }
         if (!notWorn.isEmpty()) {
-            List<String> left = new ArrayList<>(notWorn.stream().map(s -> "穿上 " + s).toList());
-            unconfirmedSlots.forEach(s -> left.add("确认 " + s + " 的穿上结果"));
+            // 没做成的收尾跟着动作词走：手部是"没拿到"，护甲是"没穿上"。
+            String notDoneTail = singleHand ? " 没拿到" : " 没穿上";
+            List<String> left = new ArrayList<>(notWorn.stream().map(input::actionLabel).toList());
+            unconfirmedSlots.forEach(s -> left.add(input.confirmLabel(s)));
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                            "穿上做了一部分：" + String.join("、", notWorn) + " 没穿上")
+                            label + "做了一部分：" + String.join("、",
+                                    notWorn.stream().map(GearSlotName::displayName).toList()) + notDoneTail)
                     .problem(lastFailure).remaining(left).build());
         }
         if (worn.isEmpty()) {
             return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
                             label + "的操作没能全部确认，做过什么见 unconfirmed")
-                    .remaining(unconfirmedSlots.stream()
-                            .map(s -> "确认 " + s + " 的" + label + "结果").toList())
+                    .remaining(unconfirmedSlots.stream().map(input::confirmLabel).toList())
                     .build());
         }
+        List<String> wornNames = worn.stream().map(GearSlotName::displayName).toList();
         TaskResult.Builder builder = TaskResult.builder(TaskResult.Status.PARTIAL,
-                label + "做了一部分：还穿着 " + String.join("、", worn));
-        builder.remaining(worn.stream().map(s -> "仍穿着 " + s).toList());
-        builder.details(new EquipDetails(worn));
+                label + "做了一部分：还穿着 " + String.join("、", wornNames));
+        builder.remaining(worn.stream().map(s -> "仍穿着 " + s.displayName()).toList());
+        builder.details(new EquipDetails(wornNames));
         return Next.done(builder.build());
     }
 
     // 这次没卸完、现在还穿在身上的栏位。
-    private List<String> stillWornNow() {
-        List<String> worn = new ArrayList<>();
+    private List<GearSlotName> stillWornNow() {
+        List<GearSlotName> worn = new ArrayList<>();
         if (input.unequip()) {
             for (GearSlotName slot : input.slots()) {
-                if (equipment.slot(slot).isPresent()) worn.add(slot.paramName());
+                if (equipment.slot(slot).isPresent()) worn.add(slot);
             }
         }
         return worn;
@@ -216,7 +220,7 @@ final class EquipTask extends PhasedTask<EquipTask.Phase> {
         return true;
     }
 
-    /** 没卸下来、仍穿着的栏位；只有卸下且部分完成时非空。 */
+    /** 没卸下来、仍穿着的栏位（中文说法，如 头上）；只有卸下且部分完成时非空。 */
     record EquipDetails(List<String> stillWorn) implements ResultDetails {
         public EquipDetails {
             stillWorn = List.copyOf(stillWorn);

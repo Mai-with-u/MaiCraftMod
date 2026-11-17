@@ -35,6 +35,7 @@ class EquipTaskTest {
 
     private static final String HELMET = "minecraft:iron_helmet";
     private static final String CHESTPLATE = "minecraft:iron_chestplate";
+    private static final String SWORD = "minecraft:iron_sword";
 
     /** 装备栏替身：一张可以改的格子表。 */
     static final class FakeEquipment implements ReadsEquipment {
@@ -159,7 +160,9 @@ class EquipTaskTest {
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.PARTIAL);
         TaskResult partial = ((TickResult.Finished) result).result();
-        assertTrue(partial.remaining().stream().anyMatch(text -> text.contains("仍穿着")));
+        // 还穿着的栏位报中文说法（头上、身上），不再是英文参数名。
+        assertEquals("卸下做了一部分：还穿着 头上、身上", partial.summary());
+        assertTrue(partial.remaining().contains("仍穿着 头上"));
         assertTrue(partial.details() instanceof EquipTask.EquipDetails details
                 && !details.stillWorn().isEmpty());
     }
@@ -174,6 +177,72 @@ class EquipTaskTest {
         assertTrue(result instanceof TickResult.Finished finished
                 && finished.result().status() == TaskResult.Status.PARTIAL);
         assertTrue(!((TickResult.Finished) result).result().unconfirmed().isEmpty());
+    }
+
+    @Test
+    void 主手穿上成功_成功句就是拿到主手_不带栏位计数() {
+        // 往主手拿一把剑不是"穿上"：成功句直接说拿到主手，读的人不会再以为是穿盔甲；
+        // 变化记录也不再写"穿在了 mainhand"。
+        FakeEquipment equipment = new FakeEquipment();
+        StubGearChanges gear = new StubGearChanges(equipment);
+        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.MAINHAND, SWORD, null),
+                equipment, Optional.empty(), Optional.of(gear)), 10);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE);
+        assertEquals("拿到主手", ((TickResult.Finished) result).result().summary());
+        assertTrue(((TickResult.Finished) result).result().changes().stream()
+                .anyMatch(change -> change.note().equals("拿到了主手")));
+    }
+
+    @Test
+    void 副手穿上成功_成功句就是拿到副手() {
+        FakeEquipment equipment = new FakeEquipment();
+        StubGearChanges gear = new StubGearChanges(equipment);
+        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.OFFHAND, SWORD, null),
+                equipment, Optional.empty(), Optional.of(gear)), 10);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE);
+        assertEquals("拿到副手", ((TickResult.Finished) result).result().summary());
+    }
+
+    @Test
+    void 主手卸下成功_成功句就是腾出主手() {
+        FakeEquipment equipment = new FakeEquipment();
+        equipment.put(GearSlotName.MAINHAND, SWORD);
+        StubGearChanges gear = new StubGearChanges(equipment);
+        TickResult result = run(new EquipTask(new EquipInput(true, GearSlotName.MAINHAND, null, null),
+                equipment, Optional.empty(), Optional.of(gear)), 10);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.DONE);
+        assertEquals("腾出主手", ((TickResult.Finished) result).result().summary());
+    }
+
+    @Test
+    void 主手穿上没换上_按拿到主手交代没能确认() {
+        // 动作做完了主手里却不是这件：总结说"拿到主手的操作没能全部确认"，还差的事是确认主手拿到没有。
+        FakeEquipment equipment = new FakeEquipment();
+        StubGearChanges gear = new StubGearChanges(equipment);
+        gear.wearSucceeds = false;
+        TickResult result = run(new EquipTask(new EquipInput(false, GearSlotName.MAINHAND, SWORD, null),
+                equipment, Optional.empty(), Optional.of(gear)), 10);
+        assertTrue(result instanceof TickResult.Finished finished
+                && finished.result().status() == TaskResult.Status.PARTIAL);
+        TaskResult partial = ((TickResult.Finished) result).result();
+        assertEquals("拿到主手的操作没能全部确认，做过什么见 unconfirmed", partial.summary());
+        assertEquals(List.of("确认主手拿到没有"), partial.remaining());
+        assertTrue(partial.unconfirmed().stream()
+                .allMatch(change -> change.note().equals("拿到主手的操作没能确认")));
+    }
+
+    @Test
+    void 说法按栏位分家_手部是拿到腾出_护甲是穿上卸下() {
+        assertEquals("拿到主手 minecraft:iron_sword",
+                new EquipInput(false, GearSlotName.MAINHAND, SWORD, null).describe());
+        assertEquals("腾出副手", new EquipInput(true, GearSlotName.OFFHAND, null, null).describe());
+        assertEquals("卸下 头上", new EquipInput(true, GearSlotName.HEAD, null, null).describe());
+        assertEquals("穿上 身上 minecraft:iron_chestplate",
+                new EquipInput(false, GearSlotName.CHEST, CHESTPLATE, null).describe());
+        assertEquals("卸下 整套护甲", new EquipInput(true, null, null, null).describe());
     }
 
     @Test
