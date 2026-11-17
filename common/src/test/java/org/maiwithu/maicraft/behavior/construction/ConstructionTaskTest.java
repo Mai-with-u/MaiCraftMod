@@ -204,8 +204,13 @@ class ConstructionTaskTest {
                 nextDig = null;
                 return Optional.of(given);
             }
+            // 每一挖都当场失败：演收临时方块时走得到却拆不下来的块。
+            if (digsFail) return Optional.of(new Failing("拆不动"));
             return Optional.of(new Immediate(() -> world.put(target, AIR)));
         }
+
+        /** 为真时每一次挖都当场失败：只用于不用清障的场景，收临时方块收不下来。 */
+        boolean digsFail;
 
         /** 下一次挖交出的动作，只用一次；没给就一刻挖掉。用来演挖着不动的格。 */
         Action nextDig;
@@ -551,6 +556,22 @@ class ConstructionTaskTest {
         assertTrue(details(result).temporaryBlocksLeft().isEmpty());
     }
 
+    @Test
+    void 格全建好_临时方块没收回来_总结只说遗留不说零格没做成() {
+        // 垫的三块临时方块一块都拆不下来：格全部建好了，总结不再说"按图建了一部分：0 格没做成"的自相矛盾话，
+        // 改说还有几块临时方块没收回；状态仍是部分完成、问题仍是临时方块没收回。
+        Fake fake = new Fake().ground(66);
+        fake.digsFail = true;
+        fake.carried.put("minecraft:stone", 1);
+        fake.carried.put("minecraft:cobblestone", 8);
+        TaskResult result = run(fake, wall(STONE, new BlockPos(0, 70, 0)));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals("按图建好了，还有 3 块临时方块没收回（下次施工会接着收）", result.summary());
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertEquals("有 3 块临时方块没收回", result.problem().message());
+        assertEquals(3, details(result).temporaryBlocksLeft().size());
+    }
+
     private static final String MAID = "阿缕（touhou_little_maid:maid）";
 
     @Test
@@ -621,7 +642,7 @@ class ConstructionTaskTest {
         assertEquals(Problem.Kind.UNREACHABLE, result.problem().kind());
         assertEquals("1 格没做成：要贴的那一面站到跟前也被挡住或看不见", result.problem().message());
         // 总结一句摊平卡住的格与原因：宿主转述里程碑不再为一格卡住专门查结果细节。
-        assertEquals("按图建了一部分：1 格没做成（没做成：要贴的那一面站到跟前也被挡住或看不见：0, 64, 0）",
+        assertEquals("按图建了一部分：1 格没做成（要贴的那一面站到跟前也被挡住或看不见：0, 64, 0）",
                 result.summary());
         assertTrue(result.attempts().stream().anyMatch(attempt -> attempt.tried().equals("为 0, 64, 0 垫临时方块")),
                 "垫过临时方块的经过在试过的办法里：" + result.attempts());
@@ -669,7 +690,7 @@ class ConstructionTaskTest {
         }
         TaskResult result = run(fake, new Blueprint(DIM, new BlockPos(0, 64, 0), cells));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
-        assertTrue(result.summary().startsWith("按图建了一部分：10 格没做成（没做成："), result.summary());
+        assertTrue(result.summary().startsWith("按图建了一部分：10 格没做成（"), result.summary());
         assertTrue(result.summary().endsWith("……共 10 格，全表在结果细节 problems）"), result.summary());
         assertEquals(8, result.summary().split(", 64, 0", -1).length - 1, result.summary());
     }
@@ -689,7 +710,7 @@ class ConstructionTaskTest {
         TaskResult result = run(fake, new Blueprint(DIM, bedrock, cells));
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         // 总结一句带两种原因各自的格坐标；问题里仍是合并计数不带坐标。
-        assertEquals("按图建了一部分：2 格没做成（没做成：挖不动（基岩或世界边界）：0, 64, 0；"
+        assertEquals("按图建了一部分：2 格没做成（挖不动（基岩或世界边界）：0, 64, 0；"
                         + "要贴的那一面站到跟前也被挡住或看不见：2, 64, 0）",
                 result.summary());
         assertTrue(result.problem().message().startsWith("2 格没做成："), result.problem().message());

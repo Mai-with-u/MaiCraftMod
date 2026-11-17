@@ -200,25 +200,29 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
             return Next.fail(stuckProblem);
         }
         if (site.allSettled() && temporariesLeft.isEmpty()) return Next.done(result("按图建好了"));
-        Problem problem = problem();
-        // 总述的格数和问题开头的格数是同一个数：挖不动、受保护没动的格也是没做成的格。
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                "按图建了一部分：" + site.notDone() + " 格没做成" + failureNote())
-                .problem(problem).remaining(remaining()).details(details()).build());
+        // 格全建好（没做成的格为 0）只剩临时方块没收回时，不再说"按图建了一部分：0 格没做成"的自相矛盾话，
+        // 总结只交代遗留的临时方块；状态仍是部分完成、问题仍是"临时方块没收回"（完成态带不上问题，这是任务结果的硬校验）。
+        // 其余总结的格数和问题开头的格数是同一个数：挖不动、受保护没动的格也是没做成的格。
+        String summary = site.notDone() == 0
+                ? "按图建好了，还有 " + temporariesLeft.size() + " 块临时方块没收回（下次施工会接着收）"
+                : "按图建了一部分：" + site.notDone() + " 格没做成" + failureNote();
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary)
+                .problem(problem()).remaining(remaining()).details(details()).build());
     }
 
     /** 总结一句里最多逐格点名几格：再多的只给总数，全表在结果细节 problems。 */
     private static final int MAX_LISTED_FAILURE_CELLS = 8;
 
     /**
-     * 没做成的格摊平进总结一句：每种原因带上卡住的格坐标，最多点名 {@link #MAX_LISTED_FAILURE_CELLS} 格，
-     * 再多的给总数；宿主转述里程碑只看总结这一句，不必为一格卡住再专门查一轮结果细节。
+     * 没做成的格摊平进总结一句：主句已说"N 格没做成"，括号里按原因组直接列坐标，不再重复"没做成"一层，
+     * 组间用"；"、组内"原因：坐标、坐标"；最多点名 {@link #MAX_LISTED_FAILURE_CELLS} 格，再多的给总数。
+     * 宿主转述里程碑只看总结这一句，不必为一格卡住再专门查一轮结果细节。
      * 坐标只进总结，问题里那句仍是不带坐标的合并计数（上一层引结论句的口径不变）。
      */
     private String failureNote() {
         List<ConstructionDetails.ProblemGroup> groups = site.problemGroups();
         if (groups.isEmpty()) return "";
-        StringBuilder note = new StringBuilder("（没做成：");
+        StringBuilder note = new StringBuilder("（");
         int listed = 0;
         for (ConstructionDetails.ProblemGroup group : groups) {
             StringBuilder cells = new StringBuilder();
@@ -229,7 +233,7 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
                 listed++;
             }
             if (cells.length() == 0) continue;
-            if (note.length() > "（没做成：".length()) note.append("；");
+            if (note.length() > "（".length()) note.append("；");
             note.append(group.reason()).append("：").append(cells);
         }
         if (listed < site.notDone()) note.append("……共 ").append(site.notDone()).append(" 格，全表在结果细节 problems");
