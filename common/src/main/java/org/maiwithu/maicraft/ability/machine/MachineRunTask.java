@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
@@ -311,7 +312,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     // 投料：交给机器类型的投法（手持右键顶面、放进输入槽），投好一样记一样；
-    // 若现场朝向不对或缺配套台位导致给不出投法，按现场摆法原因报 NOT_POSSIBLE_HERE，不误报成机器不收这种物品。
+    // 现场朝向不对或缺配套台位导致给不出投法的，按现场摆法原因报 NOT_POSSIBLE_HERE；
+    // 连摆法原因都没有的是联动认领了机器但没接投料方法，如实按 UNSUPPORTED 说，不再误报成机器不收这种物品。
     private Next<Phase> feed(TickContext context) {
         if (action() != null) {
             return switch (runAction(context)) {
@@ -337,7 +339,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 .orElseGet(() -> stop(type.whyCannotFeed(cell, next.item())
                         .map(this::cannotFeedProblem)
                         .orElseGet(() -> Problem.of(Problem.Kind.UNSUPPORTED,
-                                describeMachine() + "不收 " + next.item() + " 这种料"))));
+                                describeMachine() + "投不了 " + next.item() + "：联动认得这台机器，但还没接它的投料方法",
+                                "用 use 打开它的界面手动放料试试"))));
     }
 
     private Problem cannotFeedProblem(String why) {

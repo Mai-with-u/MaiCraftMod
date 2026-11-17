@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.mekanism;
+package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -7,9 +7,6 @@ import java.util.Objects;
 
 import net.minecraft.core.BlockPos;
 
-import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
-import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
-import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -25,14 +22,16 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 只放一部分时拆出这几件放进一格收它的空格），关上界面。界面认不认得、哪几格能点，看联动登记的界面布局。
  * 搬运与存东西能力同一套，每一笔按背包少了几件、界面里多了几件对上才算放进去。
  *
- * <p>做完交出实情：放进去几件；放不下（输入格满了、这样东西它不收）、两边件数对不上的写进说明。一件都没放进去时失败。
+ * <p>做完交出实情：放进去几件（{@link #delivered()}）、过程中的说明（{@link #notes()}）；
+ * 放不下（输入格满了、这样东西它不收）、两边件数对不上的写进说明。一件都没放进去时失败。
  *
- * <p>投的是换灌注物的物品（往附加格投煤）时，界面一打开先按机器储罐里已有的扣掉几件，扣完不用投就算做完。
+ * <p>机器里已经有的够几件就少投几件的（按机器储罐或格子里现成的扣），由构造方给 {@link TopUp}：
+ * 界面一打开、第一次要搬之前问一次要扣掉几件，扣完不用投就算做完。
  */
-public final class MenuFeed implements Action, FeedReport {
+public final class MenuFeed implements Action {
 
     /** 界面开着、第一次要搬之前问一次：少投几件，原因写进 notes。 */
-    interface TopUp {
+    public interface TopUp {
         int skip(int asked, List<String> notes);
     }
 
@@ -55,7 +54,7 @@ public final class MenuFeed implements Action, FeedReport {
     }
 
     /** @param topUp 界面打开后先扣掉机器里已有的几件；不用扣给 null */
-    MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
+    public MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
             Permissions permissions, TopUp topUp) {
         Objects.requireNonNull(services, "services");
         this.itemId = Objects.requireNonNull(itemId, "itemId");
@@ -110,11 +109,13 @@ public final class MenuFeed implements Action, FeedReport {
         return status;
     }
 
-    @Override public int delivered() {
+    /** 确认放进界面的件数；给调用方交投料实情用。 */
+    public int delivered() {
         return stored;
     }
 
-    @Override public List<String> notes() {
+    /** 放不下的、两边对不上的那些事，一句一条。 */
+    public List<String> notes() {
         return List.copyOf(notes);
     }
 

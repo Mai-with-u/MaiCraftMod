@@ -8,6 +8,7 @@ import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;

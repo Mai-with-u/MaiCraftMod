@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.machine;
+package org.maiwithu.maicraft.behavior.menu;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,11 +11,6 @@ import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.behavior.menu.MenuContent;
-import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.MenuTakeRound;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
-import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -24,15 +19,15 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 点开机器的界面看一眼出口：走到跟前右键点开（和开箱子同一个打开动作），数界面里有几件要的东西；
+ * 点开界面看一眼出口：走到跟前右键点开（和开箱子同一个打开动作），数界面里有几件要的东西；
  * 要收就按取货一轮把它们整堆搬进背包，最后关上界面。收了几件以背包前后清点为准。
  *
- * <p>界面里认得出的格都数（通用机械的机器把产物放在输出格，原料是另一样东西，不会数混）；
- * 点不开、界面认不出两侧，都按打开动作的原因如实失败，调用方据此收手，不对着打不开的机器反复跑。
+ * <p>界面里认得出的格都数（出口在界面里的机器把产物放在输出格，原料是另一样东西，不会数混）；
+ * 点不开、界面认不出两侧，都按打开动作的原因如实失败，调用方据此收手，不对着打不开的界面反复跑。
  */
-final class MenuOutputLook implements OutputLook {
+public final class MenuOutputLook implements OutputLook {
 
-    /** 点开以后看完、搬完、关上的总期限（刻）：到点如实收场，不在一台机器的界面上耗死。 */
+    /** 点开以后看完、搬完、关上的总期限（刻）：到点如实收场，不在一个界面上耗死。 */
     private static final int GIVE_UP_TICKS = 20 * 20;
 
     private final String itemId;
@@ -49,7 +44,7 @@ final class MenuOutputLook implements OutputLook {
     private int taken;
     private int waited;
 
-    MenuOutputLook(String itemId, boolean collect, MenuOpening opening, Supplier<PlayerContext> contexts) {
+    public MenuOutputLook(String itemId, boolean collect, MenuOpening opening, Supplier<PlayerContext> contexts) {
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         this.collect = collect;
         this.opening = Objects.requireNonNull(opening, "opening");

@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;

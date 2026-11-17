@@ -30,7 +30,11 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
+import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
+import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.CompatMenuFeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -44,15 +48,18 @@ final class Ae2MachineType implements MachineType {
 
     private final Ae2MachineCatalog.Kind kind;
     private final Ae2Compat compat;
+    private final Ae2Inscribers inscribers;
     private final PlayerServices services;
     private final Set<Block> blocks;
     private final MeCables cables;
     /** 每台样板供应器上次打开界面时样板格里样板的产出：样板格只在开着界面时同步。 */
     private final Map<BlockPos, List<String>> patternsSeen = new HashMap<>();
 
-    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, PlayerServices services, Set<Block> blocks) {
+    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+            Set<Block> blocks) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.compat = Objects.requireNonNull(compat, "compat");
+        this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
         this.services = Objects.requireNonNull(services, "services");
         this.blocks = Set.copyOf(blocks);
         this.cables = new MeCables(compat, services);
@@ -192,20 +199,36 @@ final class Ae2MachineType implements MachineType {
         return outputs;
     }
 
+    // 投料：压印器放好料自己压，料从界面放进中间输入格（槽位只收能与当前模板凑成配方的，放不进的写进实情）；
+    // 线缆格、样板供应器这类不收料，照旧给空。压印器是单方块设备，编号就是方块注册 ID。
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
+        if (!isInscriber()) return Optional.empty();
+        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, kind.id(), itemId, count,
+                permissions, null)));
     }
 
+    // 出口：压印器的产物格随方块实体同步，站在外面读得到。
     @Override public List<MachineState.Shown> output(BlockPos at) {
-        return List.of();
+        ClientLevel level = level();
+        if (level == null || !isInscriber()) return List.of();
+        return compat.inscriberOutput(level, at).orElse(List.of());
     }
 
+    // 收产物：点开压印器的界面把产物搬进背包，看完关上；不是压印器给空。
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
+        if (!isInscriber()) return Optional.empty();
+        return Optional.of(new MenuOutputLook(itemId, true,
+                new ClientMenuOpening(at, permissions, services.menuLayouts(), services.approach(),
+                        services.interactions(), services.context()),
+                services.context()));
     }
 
     private boolean isCableBus() {
         return kind.id().equals(Ae2MachineCatalog.CABLE_BUS);
+    }
+
+    private boolean isInscriber() {
+        return kind.id().equals("ae2:inscriber");
     }
 
     private ClientLevel level() {

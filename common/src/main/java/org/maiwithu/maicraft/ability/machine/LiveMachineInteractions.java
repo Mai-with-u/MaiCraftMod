@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
+import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

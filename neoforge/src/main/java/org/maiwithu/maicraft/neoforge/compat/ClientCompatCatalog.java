@@ -23,6 +23,7 @@ import org.maiwithu.maicraft.compat.ponder.PonderCompat;
 import org.maiwithu.maicraft.compat.touhoulittlemaid.TouhouLittleMaidCompat;
 import org.maiwithu.maicraft.compat.ultimine.UltimineCompat;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGrid;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsInscribers;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsPatterns;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
@@ -80,7 +81,7 @@ public final class ClientCompatCatalog {
                 new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
                         () -> new Ae2Compat(new AppliedEnergisticsTerminals(), new AppliedEnergisticsTerminalMenu(),
                                 new AppliedEnergisticsGrid(), new AppliedEnergisticsPatterns(),
-                                new AppliedEnergisticsTransforms())),
+                                new AppliedEnergisticsTransforms(), new AppliedEnergisticsInscribers())),
                 // 思索（Ponder）：随 Create 6.0.11 装的 1.0.82；装了 1.0.83 及以上不登记，实测通过后再放宽
                 // （读旁白要用它的几个非公开字段，换了版本可能改名）。
                 new SupportedMod<>(PonderCompat.MOD_ID, "思索（Ponder）", new VerifiedVersions("1.0.82", "1.0.83"),

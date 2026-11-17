@@ -20,6 +20,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
+import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
@@ -46,6 +47,7 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Grid grid;
     private final Ae2Patterns patterns;
     private final Ae2Transforms transforms;
+    private final Ae2Inscribers inscribers;
     /** 进世界时物品来源建好，落地补料也用这一份；没进世界时为空。 */
     private volatile PlayerServices services;
     /**
@@ -64,14 +66,21 @@ public final class Ae2Compat extends CompatModule {
         this(terminals, menus, grid, patterns, Ae2Transforms.NONE);
     }
 
+    /** 没有压印器读写端时：读不出压印器的输出槽。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
             Ae2Transforms transforms) {
+        this(terminals, menus, grid, patterns, transforms, Ae2Inscribers.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
+            Ae2Transforms transforms, Ae2Inscribers inscribers) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
         this.grid = Objects.requireNonNull(grid, "grid");
         this.patterns = Objects.requireNonNull(patterns, "patterns");
         this.transforms = Objects.requireNonNull(transforms, "transforms");
+        this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -80,6 +89,8 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
         // 无线访问点的界面：只认绑定格与产出格，放进终端、取回绑定副本都在这两格。
         registry.menuLayout(this, new Ae2AccessPointLayout());
+        // 压印器的界面：四个工作格加四个升级格，投料取产物都经它。
+        registry.menuLayout(this, new Ae2InscriberLayout());
         registry.itemSource(this, services -> {
             this.services = services;
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
@@ -94,7 +105,8 @@ public final class Ae2Compat extends CompatModule {
         registry.landingMaterial(this, new Ae2LandingMaterials(this, this::services));
         // 机器这一半：每种 ME 设备、ME 网络读取器（汇总经服务端只读操作问），线缆格还管接线缆与装部件。
         for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
-            registry.machineType(this, services -> new Ae2MachineType(kind, this, services, blocksOf(kind.blocks())));
+            registry.machineType(this, services -> new Ae2MachineType(kind, this, inscribers, services,
+                    blocksOf(kind.blocks())));
         }
         registry.networkReader(this, services -> new MeNetworkReader(this, services));
         registry.serverRead(this, NETWORK_OPERATION, 1);
@@ -131,6 +143,11 @@ public final class Ae2Compat extends CompatModule {
     /** 一格 ME 设备的读数；见 {@link Ae2Grid#cell}。 */
     public Optional<Ae2Grid.GridCell> gridCell(ClientLevel level, BlockPos at) {
         return call("读 ME 设备", () -> grid.cell(level, at));
+    }
+
+    /** 一格压印器的输出槽；见 {@link Ae2Inscribers#output}。 */
+    public Optional<List<MachineState.Shown>> inscriberOutput(ClientLevel level, BlockPos at) {
+        return call("读压印器的输出槽", () -> inscribers.output(level, at));
     }
 
     /** 是不是 AE2 的部件；见 {@link Ae2Grid#partItem}。 */

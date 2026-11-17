@@ -460,14 +460,17 @@ class MachineRunTaskTest {
     }
 
     @Test
-    void 机器本身确实不收料_仍按不支持说明不收这种料() {
+    void 机器类型没接投料方法_按不支持如实说并指出手动放料的出路() {
         Rig rig = new Rig();
         rig.viewer.putMaking(PLATE, List.of(pressingRecipe()));
         TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
                 Permissions.DEFAULT));
         assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
         assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
-        assertTrue(result.problem().message().contains("不收 " + INGOT + " 这种料"), result.problem().message());
+        assertTrue(result.problem().message().contains("没接它的投料方法"), result.problem().message());
+        assertTrue(result.problem().message().contains(INGOT), result.problem().message());
+        assertTrue(result.problem().suggestion() != null && result.problem().suggestion().contains("手动放料"),
+                String.valueOf(result.problem().suggestion()));
     }
 
     @Test

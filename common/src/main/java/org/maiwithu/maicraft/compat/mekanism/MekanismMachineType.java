@@ -26,9 +26,11 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.CompatMenuFeed;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -209,7 +211,8 @@ final class MekanismMachineType implements MachineType {
             if (!deduction.note().isEmpty()) notes.add(deduction.note());
             return deduction.skip();
         };
-        return Optional.of(new MenuFeed(services, kind.name(), at, blockId, itemId, count, permissions, topUp));
+        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, blockId, itemId, count,
+                permissions, topUp)));
     }
 
     // 配方要的化学品（灌注物这类）背包带不进去：加工机器从附加格吃物品再换成它。按化学品转化配方挑一样能换的，
