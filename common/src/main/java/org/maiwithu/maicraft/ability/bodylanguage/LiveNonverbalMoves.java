@@ -304,14 +304,17 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
             if (report != null && report.state() == WalkReport.State.FAILED) {
                 return ActionStatus.failed(report.problem());
             }
+            boolean started = false;
             if (run == null || report.state() == WalkReport.State.ARRIVED || report.state() == WalkReport.State.STOPPED) {
                 if (++starts > WALK_RETRIES) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "走不到他跟前", "他停下来以后再试"));
                 }
                 run = walks.start(GoalCompiler.near(him.blockPosition(), Math.max(1, within - 1)),
                         TerrainPermit.WALK_ONLY);
+                started = true;
             }
-            return ActionStatus.progressed();
+            // 仅在新发起/重算寻路那一刻报 progressed；常规行走过程报 running，防止走不到时死循环刷满进度。
+            return started ? ActionStatus.progressed() : ActionStatus.running();
         }
 
         private void stop() {

@@ -28,9 +28,9 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     /** 认人 → 拿东西 → 走过去 → 做 → 收手。 */
     enum Phase { FIND, TAKE_OUT, CLOSE_IN, DO, PUT_BACK }
 
-    /** 扔东西：他要在几格内，走到离他几格。 */
+    /** 扔东西：他要在几格内，走到离他 3.2 格以内（避开对角线加半格偏移停在 2.1~2.3 格卡死）；有视线就能抛。 */
     static final double TOSS_FROM_BLOCKS = 6;
-    static final double TOSS_NEAR_BLOCKS = 2;
+    static final double TOSS_NEAR_BLOCKS = 3.2;
     /** 拍一下：他要在几格内，走到离他几格（伸手够得着）。 */
     static final double POKE_FROM_BLOCKS = 3;
     static final double POKE_NEAR_BLOCKS = 2.5;
