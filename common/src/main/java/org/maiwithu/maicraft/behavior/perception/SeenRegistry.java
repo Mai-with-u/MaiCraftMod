@@ -70,9 +70,20 @@ public final class SeenRegistry {
 
     /**
      * 登记一只实体，返回它的观察编号：同一只实体（按游戏实体编号）还在册就沿用旧编号
-     * 并刷新方位与时刻；不在册或已失效就发新编号。
+     * 并刷新方位与时刻；不在册或已失效就发新编号。实体类型说不出时用这个入口。
      */
     public String entity(int entityId, WorldPosition position, String direction, long nowTick) {
+        return entity(entityId, null, null, position, direction, nowTick);
+    }
+
+    /**
+     * 登记一只实体并记下它登记时的实体类型，掉落物连当时装的物品一起记：
+     * 实体被移除后（走近时被原版自动拾取吸进背包、死掉）登记项还在保留期内，
+     * 采集靠这两样认出"这是个掉落物、装的是什么"，不再把已被捡走的目标错报成不是掉落物。
+     * 类型说不出时给 null。
+     */
+    public String entity(int entityId, String entityType, String itemType,
+            WorldPosition position, String direction, long nowTick) {
         String existing = entityIds.get(entityId);
         if (existing != null && entries.containsKey(existing)) {
             refresh(existing, position, direction, nowTick, null);
@@ -80,7 +91,8 @@ public final class SeenRegistry {
         }
         String id = "e" + nextEntity++;
         entityIds.put(entityId, id);
-        put(new Entry(id, Kind.ENTITY, position, direction, nowTick, ENTITY_RETENTION_TICKS, null));
+        put(new Entry(id, Kind.ENTITY, position, direction, nowTick, ENTITY_RETENTION_TICKS, null,
+                entityType, itemType));
         return id;
     }
 
@@ -114,7 +126,7 @@ public final class SeenRegistry {
         }
         String id = "s" + nextStructure++;
         structureIds.put(identity, id);
-        put(new Entry(id, Kind.STRUCTURE, position, direction, nowTick, ENTITY_RETENTION_TICKS, null));
+        put(new Entry(id, Kind.STRUCTURE, position, direction, nowTick, ENTITY_RETENTION_TICKS, null, null, null));
         return id;
     }
 
@@ -238,7 +250,7 @@ public final class SeenRegistry {
         }
         String id = newId.get();
         placeIds.put(placeKey(position), id);
-        put(new Entry(id, kind, position, direction, nowTick, PLACE_RETENTION_TICKS, blockType));
+        put(new Entry(id, kind, position, direction, nowTick, PLACE_RETENTION_TICKS, blockType, null, null));
         return id;
     }
 
@@ -247,10 +259,11 @@ public final class SeenRegistry {
     }
 
     // 再看见时刷新方位与时刻；这次说得出方块种类就按这次的记，说不出沿用登记时的。
+    // 实体类型与掉落物的物品是登记时的事实，同一只实体上不会变，照登记时的保持。
     private void refresh(String id, WorldPosition position, String direction, long nowTick, String blockType) {
         Entry old = entries.get(id);
         entries.put(id, new Entry(id, old.kind(), position, direction, nowTick, old.retentionTicks(),
-                blockType != null ? blockType : old.blockType()));
+                blockType != null ? blockType : old.blockType(), old.entityType(), old.itemType()));
     }
 
     private static long placeKey(WorldPosition position) {
@@ -258,7 +271,12 @@ public final class SeenRegistry {
         return position.x() & 0x3FFFFFFL | (position.z() & 0x3FFFFFFL) << 26 | (position.y() & 0xFFL) << 52;
     }
 
-    /** 登记项：编号、种类、最后位置、最后方位、最后看见的时刻与保留时长；设施另记是哪种方块（说不出为 null）。 */
+    /**
+     * 登记项：编号、种类、最后位置、最后方位、最后看见的时刻与保留时长；
+     * 设施另记是哪种方块（说不出为 null），实体另记登记时的实体类型注册 ID 与
+     * 掉落物当时装的物品注册 ID（说不出为 null，非掉落物实体物品为 null）。
+     */
     public record Entry(String id, Kind kind, WorldPosition position, String direction,
-            long lastSeenTick, int retentionTicks, String blockType) {}
+            long lastSeenTick, int retentionTicks, String blockType,
+            String entityType, String itemType) {}
 }

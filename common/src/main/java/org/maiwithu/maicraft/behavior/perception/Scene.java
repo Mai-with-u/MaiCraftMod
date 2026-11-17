@@ -135,7 +135,8 @@ public final class Scene {
 
     /**
      * 更新实体观察：每个实体整理出方位、距离、高低差并发观察编号；
-     * 同一只实体还在保留期内就沿用旧编号。
+     * 同一只实体还在保留期内就沿用旧编号。实体类型与掉落物装的物品随编号一起登记，
+     * 实体被移除后采集还能认出"这是个掉落物、装的是什么"。
      */
     public void updateEntities(long nowTick, List<EntitySight.Observation> entitySightings) {
         if (self == null) {
@@ -149,7 +150,7 @@ public final class Scene {
             // 高低差单独带着：实体条目还要报"高几格、低几格"。
             int dy = sighting.position().y() - (int) Math.floor(self.y());
             String direction = bearing.direction();
-            String id = ids.entity(sighting.entityId(),
+            String id = ids.entity(sighting.entityId(), sighting.type(), sighting.traits().get("物品"),
                     WorldPosition.here(sighting.position().x(), sighting.position().y(), sighting.position().z()),
                     direction, nowTick);
             String name = sighting.name() != null ? sighting.name()

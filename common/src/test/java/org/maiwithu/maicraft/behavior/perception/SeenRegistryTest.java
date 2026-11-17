@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 观察编号的发放与失效：同一样东西编号不变，超期没再见到以失效报告交代最后一次方位。 */
@@ -52,6 +53,24 @@ class SeenRegistryTest {
         registry.expire(500);
         String second = registry.entity(9, WorldPosition.here(0, 64, 0), "前方", 600);
         assertTrue(!first.equals(second), "隔了保留期再见是新的观察，发新编号");
+    }
+
+    @Test
+    void entityRemembersRegisteredTypeAndDroppedItem() {
+        SeenRegistry registry = new SeenRegistry();
+        String id = registry.entity(7, "minecraft:item", "minecraft:charcoal",
+                WorldPosition.here(1, 64, 1), "前方", 100);
+        assertEquals("minecraft:item", registry.get(id).orElseThrow().entityType());
+        assertEquals("minecraft:charcoal", registry.get(id).orElseThrow().itemType());
+        // 再次看见沿用编号，登记时的类型与装的物品保持。
+        String again = registry.entity(7, "minecraft:item", "minecraft:charcoal",
+                WorldPosition.here(2, 64, 1), "前方偏右", 150);
+        assertEquals(id, again);
+        assertEquals("minecraft:charcoal", registry.get(id).orElseThrow().itemType());
+        // 类型说不出的实体（旧入口）照常登记，两项留空。
+        String unnamed = registry.entity(8, WorldPosition.here(3, 64, 1), "左侧", 120);
+        assertNull(registry.get(unnamed).orElseThrow().entityType());
+        assertNull(registry.get(unnamed).orElseThrow().itemType());
     }
 
     @Test

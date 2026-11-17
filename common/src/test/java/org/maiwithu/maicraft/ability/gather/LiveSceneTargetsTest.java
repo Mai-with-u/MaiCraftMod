@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 采集观察目标解析测试：只有真正的掉落物才标为可捡掉落物，非掉落物实体不再误标。 */
@@ -59,7 +60,7 @@ class LiveSceneTargetsTest {
     }
 
     @Test
-    void onlyRealItemEntitiesAreMarkedAsDrops() {
+    void 只有真正的掉落物才标为可捡的掉落物() {
         // 登记地上掉落物、绵羊、强力胶选区与展示框四只实体，核对只有真正的掉落物标为 drop。
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(10, "minecraft:item", null, null,
@@ -103,5 +104,42 @@ class LiveSceneTargetsTest {
         GatherAbility.SeesTargets.SeenTarget structure = targets.lookup("s1").orElseThrow();
         assertFalse(structure.block());
         assertFalse(structure.drop());
+    }
+
+    @Test
+    void 被移除的掉落物凭登记认出它曾经是掉落物() {
+        // 原版自动拾取把脚边物品吸进背包、实体随之移除；下一轮实体观察里不再有它，
+        // 场景表全量替换后条目消失——登记项还在保留期内，靠登记时的实体类型与装的物品认出它。
+        scene.updateEntities(10, List.of(
+                new EntitySight.Observation(10, "minecraft:item", null, null,
+                        WorldPosition.here(2, 64, 2), true, false, false, null, Map.of("物品", "minecraft:charcoal")),
+                new EntitySight.Observation(20, "minecraft:sheep", null, null,
+                        WorldPosition.here(4, 64, 2), true, false, false, null, Map.of())));
+        scene.updateEntities(30, List.of());
+
+        GatherAbility.SeesTargets.SeenTarget drop = targets.lookup("e1").orElseThrow();
+        assertFalse(drop.block());
+        assertFalse(drop.drop(), "实体已被移除，不能标为可捡");
+        assertTrue(drop.registeredDrop(), "登记过掉落物：采集按目标不在了报，不按不是掉落物报");
+        assertEquals("minecraft:charcoal", drop.droppedItem());
+
+        GatherAbility.SeesTargets.SeenTarget sheep = targets.lookup("e2").orElseThrow();
+        assertFalse(sheep.drop());
+        assertFalse(sheep.registeredDrop(), "登记的是生物：仍按不是掉落物报");
+        assertNull(sheep.droppedItem());
+    }
+
+    @Test
+    void 掉落物还在场景表时照常可捡并带上登记的物品() {
+        scene.updateEntities(10, List.of(new EntitySight.Observation(10, "minecraft:item", null, null,
+                WorldPosition.here(2, 64, 2), true, false, false, null, Map.of("物品", "minecraft:charcoal"))));
+        // 再次看见同一只：编号沿用，登记时的实体类型与装的物品保持。
+        scene.updateEntities(20, List.of(new EntitySight.Observation(10, "minecraft:item", null, null,
+                WorldPosition.here(3, 64, 2), true, false, false, null, Map.of("物品", "minecraft:charcoal"))));
+
+        GatherAbility.SeesTargets.SeenTarget still = targets.lookup("e1").orElseThrow();
+        assertTrue(still.drop(), "场景表里还在，照常按可捡掉落物对待");
+        assertTrue(still.registeredDrop());
+        assertEquals("minecraft:charcoal", still.droppedItem());
     }
 }

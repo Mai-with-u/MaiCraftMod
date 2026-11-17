@@ -19,8 +19,13 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * <p>编号已失效、场景还没建好都查不到，采集按"目标不在了"如实收场。
  * 实体编号先核对是不是展示框（是就改成打一下取出框里物品），再核对是不是真正的地上掉落物（{@code ItemEntity}），
  * 生物、载具、装置等非掉落物实体不再被误标成掉落物尝试拾取。
+ * 实体已被移除（走近时被原版自动拾取吸进背包）时活体与场景表都核对不到，
+ * 登记时的实体类型与装的物品随 {@link SeenTarget} 带出，采集据此把"已被捡走"与"不是掉落物"分开说。
  */
 public final class LiveSceneTargets implements GatherAbility.SeesTargets {
+
+    /** 原版掉落物的实体类型注册 ID：登记时按它认出"这是个掉落物"。 */
+    private static final String DROPPED_ITEM_TYPE = "minecraft:item";
 
     private final Supplier<Scene> scene;
     private final HitsItemFrames frames;
@@ -54,13 +59,18 @@ public final class LiveSceneTargets implements GatherAbility.SeesTargets {
                     return new SeenTarget(entry.position(), false, false, frame);
                 }
                 // 只有真正的掉落物实体才按掉落物走过去拾取；生物、载具、技术实体等非掉落物绝不标为 drop。
-                return new SeenTarget(entry.position(), false, isDroppedItem(current, id), -1);
+                // 登记时的实体类型与装的物品一并带出：实体被移除后采集凭它们认出"这是个已被捡走的掉落物"。
+                boolean registeredDrop = DROPPED_ITEM_TYPE.equals(entry.entityType());
+                return new SeenTarget(entry.position(), false, isDroppedItem(current, id), -1,
+                        registeredDrop, registeredDrop ? entry.itemType() : null);
             }
             // 物理结构既不是单格可挖方块，也不是地上掉落物或展示框。
             return new SeenTarget(entry.position(), false, false, -1);
         });
     }
 
+    // 这个编号该不该按掉落物对待：活体在场按真实类型认；活体不在场（被移除、走远卸载）时，
+    // 场景表里最后一次看到它还是掉落物也算——等下一次感知刷新把它抹掉之前，采集照常按掉落物走。
     private boolean isDroppedItem(Scene current, String id) {
         PlayerContext playerContext = context.get();
         if (playerContext != null && playerContext.level() != null) {
@@ -71,6 +81,6 @@ public final class LiveSceneTargets implements GatherAbility.SeesTargets {
         }
         return current.sighting(id).stream()
                 .anyMatch(sighting -> sighting instanceof SceneEntity entity
-                        && "minecraft:item".equals(entity.type()));
+                        && DROPPED_ITEM_TYPE.equals(entity.type()));
     }
 }

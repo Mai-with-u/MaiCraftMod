@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -87,12 +88,17 @@ public final class GatherAbility implements AbilityModule {
         Optional<SeenTarget> lookup(String id);
 
         /**
-         * @param at        最后看到它的位置
-         * @param block     是方块或地形特征时为 true
-         * @param drop      是真正的地上掉落物（{@code ItemEntity}）时为 true
-         * @param itemFrame 是展示框时它的游戏实体编号，不是为 -1
+         * @param at             最后看到它的位置
+         * @param block          是方块或地形特征时为 true
+         * @param drop           是真正的地上掉落物（{@code ItemEntity}）时为 true
+         * @param itemFrame      是展示框时它的游戏实体编号，不是为 -1
+         * @param registeredDrop 登记时它是一只掉落物：这会儿活体与场景都核对不到时，采集靠它把
+         *                       "多半已被捡走"与"根本不是掉落物"分开说
+         * @param droppedItem    登记时这只掉落物装的物品注册 ID；非掉落物或说不出为 null。
+         *                       目标物品已被原版自动拾取吸进背包时，靠它去背包里确认
          */
-        record SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame) {
+        record SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame,
+                boolean registeredDrop, String droppedItem) {
 
             SeenTarget(WorldPosition at, boolean block) {
                 this(at, block, !block, -1);
@@ -100,6 +106,10 @@ public final class GatherAbility implements AbilityModule {
 
             SeenTarget(WorldPosition at, boolean block, int itemFrame) {
                 this(at, block, !block && itemFrame < 0, itemFrame);
+            }
+
+            SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame) {
+                this(at, block, drop, itemFrame, false, null);
             }
         }
     }
@@ -134,6 +144,17 @@ public final class GatherAbility implements AbilityModule {
             SeesTargets.SeenTarget found = lookedUp.get();
             // 实体编号既不是展示框、也不是真正的地上掉落物（例如生物、矿车、船或动态装置）时，不能误当成掉落物走过去空等拾取，也不能去挖它脚下的地。
             if (!found.block() && !found.drop() && found.itemFrame() < 0) {
+                // 登记时是掉落物、这会儿活体与场景表都核对不到：多半是走近时被原版自动拾取吸进了背包，
+                // 实体随之移除。先查背包确认——目标物品已经在身上就按达成收场；确认不上才报"不在了"，
+                // 不再把它错报成"不是掉落物"，让人以为投喂被拒又扔一次。
+                if (found.registeredDrop()) {
+                    String targetItem = expectedItem != null ? expectedItem : found.droppedItem();
+                    if (targetItem != null && backpack != null && countCarried(targetItem) > 0) {
+                        return new StepDecision.Finish(TaskResult.done(seenId.id() + " 的 " + targetItem
+                                + " 已经在身上（走近时自动拾取的）"));
+                    }
+                    return gone("观察编号 " + seenId.id() + " 对应的东西不在了（可能已经被捡起）");
+                }
                 return invalid("观察编号 " + seenId.id() + " 不是可挖的方块，也不是地上的掉落物或展示框，不能用 gather 采集");
             }
             return new StepDecision.Run(new GatherSpot(found.at(), found.drop(),
@@ -155,6 +176,16 @@ public final class GatherAbility implements AbilityModule {
     private static String describe(String id, SeesTargets.SeenTarget found) {
         if (found.itemFrame() >= 0) return "打一下 " + id + " 展示框，取出里面的东西";
         return "采集 " + id + (found.block() ? " 处的方块" : " 的掉落物");
+    }
+
+    // 目标物品此刻在背包主格里的件数：原版自动拾取吸走的东西从这里确认。
+    // 只数主背包，与采集任务的拾取确认同一把尺。
+    private int countCarried(String itemId) {
+        int count = 0;
+        for (BackpackStack stack : backpack.stacks()) {
+            if (stack.itemId().equals(itemId)) count += stack.count();
+        }
+        return count;
     }
 
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。
