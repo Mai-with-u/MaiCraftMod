@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
@@ -21,12 +23,21 @@ import org.maiwithu.maicraft.behavior.recipe.ShownStack;
  * <p>配方页一条不省，每条带原料、催化剂、产出与原始定义；用途页可能上百条，每条压成一行（配方 ID、产出、原料），
  * 不带原始定义，要看某一条的细节查它产出物的配方页。两种页都按配方类别分组，写明这一类在哪做。
  * 给了过滤词就只留产出或原料沾词的配方；一段超过一次看得下的条数时只给总数与缩窄建议，不逐条倾倒。
+ * 条数没超但条目太大（一行的原料写了几十样替代品、原始定义特别长）时，按配方类别整组装到回包装得下为止，
+ * 装不下的组折起来记账（folded），回包整体不再顶到工具分发的单次上限。
  */
 public final class RecipePages {
     private RecipePages() {}
 
     /** 一段逐条列出的上限：超过时只给总数与缩窄建议；工作站配方成千条，全量倒出来会把上下文撑爆。 */
     static final int SECTION_LIMIT = 100;
+
+    /** 一页配方装填的字数预算：加给外层信封与说明的余量后，控制在工具分发约 5 万字符的单次上限之内。 */
+    static final int MAX_PAGE_CHARS = 38_000;
+    /** 预算之外再留的字数：信封、notes、两段的段头、folded 记账与缩窄建议都从这里出。 */
+    private static final int ENVELOPE_CHARS = 1024;
+
+    private static final Gson COMPACT = new GsonBuilder().disableHtmlEscaping().create();
 
     /** 配方页：能做出这件物品的全部配方；给了过滤词就只留产出或原料沾词的。 */
     public static JsonObject making(String itemId, String name, RecipeLookup.Answer answer, List<String> terms) {
@@ -37,7 +48,9 @@ public final class RecipePages {
             page.addProperty("note", tooMany(recipes.size(), terms, ""));
             return page;
         }
-        page.add("categories", categories(recipes, true));
+        Packed packed = pack(recipes, true, "/categories", budget(page));
+        page.add("categories", packed.categories());
+        writeFolded(page, packed, terms, "");
         return page;
     }
 
@@ -51,9 +64,16 @@ public final class RecipePages {
     public static JsonObject uses(String itemId, String name, RecipeLookup.Answer asIngredient,
             RecipeLookup.Answer asWorkstation, List<String> terms) {
         JsonObject page = header(itemId, name, asIngredient);
-        page.add("as_ingredient", section(asIngredient, terms));
-        page.add("as_workstation", section(asWorkstation, terms));
+        // 两段共用一份预算：先到的先装，一段把预算装满了，后一段整段折起来记账，回包整体不超上限。
+        Room room = budget(page);
+        page.add("as_ingredient", section(asIngredient, terms, "/as_ingredient/categories", room));
+        page.add("as_workstation", section(asWorkstation, terms, "/as_workstation/categories", room));
         return page;
+    }
+
+    // 一页的装填余量：页头写成 JSON 的字数加信封余量，从这里扣。
+    private static Room budget(JsonObject pageSoFar) {
+        return new Room(MAX_PAGE_CHARS - COMPACT.toJson(pageSoFar).length() - ENVELOPE_CHARS);
     }
 
     private static JsonObject header(String itemId, String name, RecipeLookup.Answer answer) {
@@ -64,7 +84,7 @@ public final class RecipePages {
         return page;
     }
 
-    private static JsonObject section(RecipeLookup.Answer answer, List<String> terms) {
+    private static JsonObject section(RecipeLookup.Answer answer, List<String> terms, String path, Room room) {
         List<ShownRecipe> recipes = filtered(answer, terms);
         JsonObject section = new JsonObject();
         section.addProperty("read_from", answer.readFrom());
@@ -73,14 +93,68 @@ public final class RecipePages {
             section.addProperty("note", tooMany(recipes.size(), terms, "，或直接查某一件产出物的配方页"));
             return section;
         }
-        section.add("categories", categories(recipes, false));
+        Packed packed = pack(recipes, false, path, room);
+        section.add("categories", packed.categories());
+        writeFolded(section, packed, terms, "，或直接查某一件产出物的配方页");
         return section;
     }
+
+    /** 装填的结果：折起的块在哪条路径下、列出的类别组，与列出了几条、折起了几条（多少字）。 */
+    private record Packed(String path, JsonArray categories, int listedRows, int foldedRows, int foldedChars) {}
 
     // 命中太多的一段只给总数与缩窄建议：全量清单本来也读不完，与其倾倒不如指个缩小问题的路。
     private static String tooMany(int count, List<String> terms, String extra) {
         String narrow = terms.isEmpty() ? "给 query 一个更具体的词" : "换个更具体的词";
         return "命中 " + count + " 条，一次列不下；" + narrow + "再查" + extra;
+    }
+
+    /** 配方页装填后的记账：折起的条数写进 folded（与目标结果里的 folded 同一格式），附列出了几条与缩窄建议。 */
+    private static void writeFolded(JsonObject page, Packed packed, List<String> terms, String extra) {
+        if (packed.foldedRows() == 0) return;
+        page.addProperty("recipe_listed", packed.listedRows());
+        page.add("folded", reference(packed.path(), packed.foldedRows(), packed.foldedChars()));
+        page.addProperty("note", "命中 " + (packed.listedRows() + packed.foldedRows()) + " 条，一次给不下；这次列出 "
+                + packed.listedRows() + " 条，" + (terms.isEmpty() ? "给 query 一个更具体的词" : "换个更具体的词") + "再查" + extra);
+    }
+
+    /** 折起来的一块：路径、形状、几项、多少字；与目标结果里的 folded 同一格式，这里是记账占位，按 note 指的路重查。 */
+    private static JsonArray reference(String path, int items, int chars) {
+        JsonArray folded = new JsonArray();
+        JsonObject block = new JsonObject();
+        block.addProperty("path", path);
+        block.addProperty("type", "list");
+        block.addProperty("items", items);
+        block.addProperty("chars", chars);
+        folded.add(block);
+        return folded;
+    }
+
+    /**
+     * 按配方类别分组装填：装得下的组照原样列出，装不下下一组时从它起整组折进 folded 记账。
+     * 只按整组装、不列半组：组里的 recipe_count 与列出的行保持一致，不出现数出来对不上的清单。
+     */
+    private static Packed pack(List<ShownRecipe> recipes, boolean full, String path, Room room) {
+        Map<String, List<ShownRecipe>> grouped = new LinkedHashMap<>();
+        for (ShownRecipe recipe : recipes) {
+            grouped.computeIfAbsent(recipe.category(), category -> new ArrayList<>()).add(recipe);
+        }
+        JsonArray categories = new JsonArray();
+        int listed = 0;
+        int foldedRows = 0;
+        int foldedChars = 0;
+        for (List<ShownRecipe> group : grouped.values()) {
+            JsonObject category = category(group, full);
+            int chars = COMPACT.toJson(category).length() + 1;
+            if (foldedRows == 0 && room.fits(chars)) {
+                room.take(chars);
+                categories.add(category);
+                listed += group.size();
+            } else {
+                foldedRows += group.size();
+                foldedChars += chars;
+            }
+        }
+        return new Packed(path, categories, listed, foldedRows, foldedChars);
     }
 
     // 按词过滤：每个词都要在这条配方的配方 ID、产出、原料或催化剂（名字、ID、标签）里出现；词为空不过滤。
@@ -113,31 +187,41 @@ public final class RecipePages {
         ingredient.options().forEach(stack -> appendWords(text, stack));
     }
 
-    // 按配方类别分组，组内照查看器给的顺序；每组写类别、名字、在哪做与条数。
-    private static JsonArray categories(List<ShownRecipe> recipes, boolean full) {
-        Map<String, List<ShownRecipe>> grouped = new LinkedHashMap<>();
-        for (ShownRecipe recipe : recipes) {
-            grouped.computeIfAbsent(recipe.category(), category -> new ArrayList<>()).add(recipe);
+    // 一组配方：写类别、名字、在哪做与条数，组内照查看器给的顺序逐条列出。
+    private static JsonObject category(List<ShownRecipe> group, boolean full) {
+        ShownRecipe first = group.getFirst();
+        JsonObject category = new JsonObject();
+        category.addProperty("category", first.category());
+        category.addProperty("category_name", first.categoryName());
+        JsonArray workstations = new JsonArray();
+        first.workstations().forEach(stack -> workstations.add(stack(stack, stack.amount())));
+        category.add("workstations", workstations);
+        category.addProperty("recipe_count", group.size());
+        JsonArray rows = new JsonArray();
+        for (ShownRecipe recipe : group) {
+            if (full) rows.add(recipe(recipe));
+            else rows.add(line(recipe));
         }
-        JsonArray categories = new JsonArray();
-        for (List<ShownRecipe> group : grouped.values()) {
-            ShownRecipe first = group.getFirst();
-            JsonObject category = new JsonObject();
-            category.addProperty("category", first.category());
-            category.addProperty("category_name", first.categoryName());
-            JsonArray workstations = new JsonArray();
-            first.workstations().forEach(stack -> workstations.add(stack(stack, stack.amount())));
-            category.add("workstations", workstations);
-            category.addProperty("recipe_count", group.size());
-            JsonArray rows = new JsonArray();
-            for (ShownRecipe recipe : group) {
-                if (full) rows.add(recipe(recipe));
-                else rows.add(line(recipe));
-            }
-            category.add("recipes", rows);
-            categories.add(category);
+        category.add("recipes", rows);
+        return category;
+    }
+
+    /** 一页的装填余量：逐组量字数扣减，装不下就记满；用途页的两段共用一份，先到的段先装。 */
+    private static final class Room {
+        private int remaining;
+
+        Room(int budgetChars) {
+            remaining = budgetChars;
         }
-        return categories;
+
+        /** 这一组写成 JSON 的字数还装得下吗；装不下的组整组折起来记账。 */
+        boolean fits(int chars) {
+            return chars <= remaining;
+        }
+
+        void take(int chars) {
+            remaining -= chars;
+        }
     }
 
     // 配方页的一条：配方 ID（给不出就是 null，不编）、原料、催化剂（有才写）、产出、原始定义（有才写）。

@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeNotReady;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.mcp.knowledge.KnowledgeLibrary;
+import org.maiwithu.maicraft.mcp.knowledge.KnowledgePages;
 import org.maiwithu.maicraft.mcp.knowledge.RecipePages;
 import org.maiwithu.maicraft.mcp.knowledge.web.WebKnowledgeService;
 
@@ -42,11 +43,13 @@ import java.util.function.Supplier;
  *
  * <p>topic=knowledge 查资料：随包的机制常识、物品资料页、联动模组登记的资料（思索、任务书……）。
  * 不带 id、query 列目录并附各来源现状，query 按关键词找，id 读一篇；id 给物品的注册 ID 读它的物品资料页。
+ * 目录与搜索清单装到一次回包的预算以内，装不下的行折起来记账；正文太长时按行装一页，照 offset 翻页读得回全文。
  * 物品资料页与模组的资料要读游戏现场，在客户端线程上读；角色不在世界里时只查得到随包常识，并如实说明。
  *
  * <p>topic=recipe 查配方：id 是物品 ID，默认给配方页（怎么做出它），uses=true 给用途页（能拿它做什么、
  * 它当工作站能做什么）；query 单独给时按名字找物品 ID，与 id 一起给时按词过滤那一页（产出或原料沾词的才留），
- * 命中太多的一段只给总数与缩窄建议。配方要读游戏现场，角色不在世界里时回答 not_in_world。
+ * 命中太多的一段只给总数与缩窄建议；条数不多但条目太大装不下时，装得下的类别组照常列出，
+ * 装不下的组折起来记账（folded），不再整包退回 too_large。配方要读游戏现场，角色不在世界里时回答 not_in_world。
  *
  * <p>topic=wiki 联网查 Minecraft Wiki 与 MC百科（{@link WikiTopic}）：在 MCP 请求线程上联网，不交给客户端线程；
  * 启动开关关着时照实说关着。
@@ -156,7 +159,14 @@ public final class LookupTool implements McpTool {
             check.error("query", "id 和 query 只能给一个", "精确查用 id，搜索用 query");
         }
         if (url != null && !"wiki".equals(topic)) check.error("url", "url 只在 topic=wiki 时用", null);
-        if (offset != null && !"wiki".equals(topic)) check.error("offset", "offset 只在 topic=wiki 读一篇时用", null);
+        // offset 翻页只在读一篇时用：wiki 读条目按段翻，knowledge 读资料正文按行翻。
+        if (offset != null && !"wiki".equals(topic) && !"knowledge".equals(topic)) {
+            check.error("offset", "offset 只在 topic=wiki 或 topic=knowledge 读一篇时用", null);
+        }
+        if (offset != null && "knowledge".equals(topic) && id == null) {
+            check.error("offset", "offset 在 topic=knowledge 读一篇（给 id）时用", "照抄上一页的 next_offset");
+        }
+        if (offset != null && offset < 0) check.error("offset", "offset 不能是负数", "0 或更大的整数");
         if ("wiki".equals(topic)) wiki.check(check, id, query, url, offset);
         if (uses != null && !"recipe".equals(topic)) check.error("uses", "uses 只在 topic=recipe 时用", null);
         if ("recipe".equals(topic) && id == null && query == null) {
@@ -167,7 +177,7 @@ public final class LookupTool implements McpTool {
                     check.errors(), null);
         }
         if ("knowledge".equals(topic)) {
-            return knowledgeNow(id, query, check);
+            return knowledgeNow(id, query, offset, check);
         }
         if ("recipe".equals(topic)) {
             return recipeNow(id, query, Boolean.TRUE.equals(uses), check);
@@ -200,11 +210,11 @@ public final class LookupTool implements McpTool {
     // 查资料在客户端线程上做：物品资料页与模组的资料都读游戏现场。一篇资料一刻准备不完（思索场景要在演示世界里放一遍）
     // 就下一刻接着读同一篇，等到准备好或超时；超时如实说还在准备，不拿半截冒充完整的。
     // 角色不在世界里时退到只有随包常识的那份，并如实说这一次查不到物品与模组的资料；客户端迟迟轮不到就回答 busy。
-    private JsonObject knowledgeNow(String id, String query, RequestCheck check) {
+    private JsonObject knowledgeNow(String id, String query, Integer offset, RequestCheck check) {
         long deadline = System.nanoTime() + PREPARE_WAIT.toNanos();
         while (true) {
             try {
-                return knowledgeOnce(id, query, check);
+                return knowledgeOnce(id, query, offset, check);
             } catch (KnowledgeNotReady preparing) {
                 if (System.nanoTime() > deadline) {
                     return ToolReply.error(ErrorCode.BUSY, "这篇资料还在准备：" + preparing.getMessage() + "；过一会儿再读同一篇");
@@ -213,23 +223,24 @@ public final class LookupTool implements McpTool {
         }
     }
 
-    private JsonObject knowledgeOnce(String id, String query, RequestCheck check) {
+    private JsonObject knowledgeOnce(String id, String query, Integer offset, RequestCheck check) {
         try {
-            return clientThread.call(context -> knowledge(knowledge, id, query, new ArrayList<>(check.notes())));
+            return clientThread.call(context -> knowledge(knowledge, id, query, offset, new ArrayList<>(check.notes())));
         } catch (ClientThread.NotInWorld absent) {
             List<String> notes = new ArrayList<>(check.notes());
             notes.add("角色不在世界里：这次只查得到随包的机制常识，物品资料页与模组的资料要进了世界才读得到");
-            return knowledge(offline, id, query, notes);
+            return knowledge(offline, id, query, offset, notes);
         } catch (ClientThread.Busy busy) {
             return ToolReply.error(ErrorCode.BUSY, "游戏这会儿腾不出手查资料：" + busy.getMessage() + "；稍后再试");
         }
     }
 
     /**
-     * 查资料：给 id 读一篇正文（完整地址、末段名或物品的注册 ID 都行），给 query 按关键词找，都不给就列出目录并附各来源现状。
-     * 常识只讲游戏规则，让角色去做时看对应能力的说明。
+     * 查资料：给 id 读一篇正文（完整地址、末段名或物品的注册 ID 都行，正文太长时按行翻页），给 query 按关键词找，
+     * 都不给就列出目录并附各来源现状。常识只讲游戏规则，让角色去做时看对应能力的说明。
      */
-    private static JsonObject knowledge(KnowledgeLibrary knowledge, String id, String query, List<String> notes) {
+    private static JsonObject knowledge(KnowledgeLibrary knowledge, String id, String query, Integer offset,
+            List<String> notes) {
         if (id != null) {
             KnowledgeDocument document = knowledge.find(id).orElse(null);
             if (document == null) {
@@ -239,29 +250,41 @@ public final class LookupTool implements McpTool {
             if (!document.uri().equals(id.strip())) {
                 notes.add("id \"" + id + "\" 按 " + document.uri() + " 读取");
             }
-            JsonObject data = new JsonObject();
-            data.addProperty("id", document.uri());
-            data.addProperty("title", document.title());
-            data.addProperty("text", document.text());
-            return ToolReply.ok(data, notes, null);
+            int totalLines = KnowledgePages.lines(document.text());
+            int fromLine = offset == null ? 0 : offset;
+            if (fromLine > 0 && fromLine >= totalLines) {
+                return ToolReply.error(ErrorCode.INVALID_PARAMETER, "参数有 1 处问题",
+                        List.of(new FieldError("offset",
+                                totalLines == 0 ? "这篇没有正文，没有下一页"
+                                        : "这一篇共 " + totalLines + " 行，offset 最大是 " + (totalLines - 1),
+                                "0")), null);
+            }
+            KnowledgePages.Page page = KnowledgePages.document(document.uri(), document.title(), document.text(), fromLine);
+            JsonObject next = null;
+            if (page.nextLine() != null) {
+                // 正文长到折了账：告诉调用方这次给了多少、怎么接着读，folded 里的字数是没给出来的那部分。
+                notes.add("这篇正文共 " + page.totalLines() + " 行约 " + document.text().length() + " 字，一次给不下；"
+                        + "这次从第 " + (fromLine + 1) + " 行读起，folded 里是没给出来的字数，照抄 next 读下一页");
+                JsonObject arguments = new JsonObject();
+                arguments.addProperty("topic", "knowledge");
+                arguments.addProperty("id", document.uri());
+                arguments.addProperty("offset", page.nextLine());
+                next = ToolReply.next(ToolCatalog.LOOKUP, arguments);
+            }
+            return ToolReply.ok(page.content(), notes, next);
         }
         List<KnowledgeDocument.Entry> entries = query == null ? knowledge.listing() : knowledge.matching(query);
-        JsonArray list = new JsonArray();
-        for (KnowledgeDocument.Entry entry : entries) {
-            JsonObject row = new JsonObject();
-            row.addProperty("id", entry.uri());
-            row.addProperty("title", entry.title());
-            row.addProperty("summary", entry.description());
-            list.add(row);
+        KnowledgePages.Listing listing = KnowledgePages.listing(entries,
+                query == null ? knowledge.sourceStatuses() : null);
+        if (listing.foldedRows() > 0) {
+            // 装不下的行折在 folded 里记账：总数如实，指一条把问题收窄的路。
+            notes.add(query == null
+                    ? "资料目录共 " + entries.size() + " 篇，一次列不下，这次列出前 " + listing.listedRows()
+                            + " 篇；给 query 按关键词找要读的那篇"
+                    : "命中 " + entries.size() + " 篇，按相关度列出最靠前的 " + listing.listedRows()
+                            + " 篇；换个更具体的关键词再查");
         }
-        JsonObject data = new JsonObject();
-        data.add("knowledge", list);
-        if (query == null) {
-            // 目录最后附各来源现状：没列出来的来源就是这个实例没有，列出来但读不了的写明为什么。
-            JsonArray sources = new JsonArray();
-            knowledge.sourceStatuses().forEach(sources::add);
-            data.add("sources", sources);
-        }
+        JsonObject data = listing.content();
         JsonObject next = null;
         if (query != null) {
             // 找到了就建议读排在最前的那篇；没找到不等于没有这条规则，建议列出完整目录自己挑。

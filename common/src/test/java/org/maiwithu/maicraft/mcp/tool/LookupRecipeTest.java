@@ -135,6 +135,50 @@ class LookupRecipeTest {
     }
 
     @Test
+    void 配方页条目太大时按类别装到预算内_装不下的整组折起记账() {
+        // 条数没超但定义特别长：装得下的小类照常列出，装不下的大类整组折进 folded，回包不再整包退回 too_large。
+        ToolDispatcher dispatcher = new ToolDispatcher(List.of(lookup(true, new HugeViewer())));
+        JsonObject reply = dispatcher.call("lookup", args("recipe", ALLOY, null, null));
+
+        assertTrue(reply.get("ok").getAsBoolean(), reply::toString);
+        assertTrue(ToolCatalog.GSON.toJson(reply).length() <= ToolDispatcher.MAX_REPLY_CHARS, "装填后的回包在单次上限之内");
+        JsonObject data = reply.getAsJsonObject("data");
+        assertEquals(55, data.get("recipe_count").getAsInt());
+        assertEquals(5, data.get("recipe_listed").getAsInt());
+        assertEquals(1, data.getAsJsonArray("categories").size(), "只有装得下的小类照常列出");
+        assertEquals(5, data.getAsJsonArray("categories").get(0).getAsJsonObject().getAsJsonArray("recipes").size());
+        JsonObject folded = data.getAsJsonArray("folded").get(0).getAsJsonObject();
+        assertEquals("/categories", folded.get("path").getAsString());
+        assertEquals("list", folded.get("type").getAsString());
+        assertEquals(50, folded.get("items").getAsInt());
+        assertTrue(folded.get("chars").getAsInt() > 0);
+        assertTrue(data.get("note").getAsString().contains("命中 55 条"), data::toString);
+    }
+
+    @Test
+    void 用途页两段共用一份预算_装不下的段整段折起记账() {
+        ToolDispatcher dispatcher = new ToolDispatcher(List.of(lookup(true, new HugeViewer())));
+        JsonObject reply = dispatcher.call("lookup", args("recipe", MIXER, null, true));
+
+        assertTrue(reply.get("ok").getAsBoolean(), "装填后不再整包 too_large：" + reply);
+        assertTrue(ToolCatalog.GSON.toJson(reply).length() <= ToolDispatcher.MAX_REPLY_CHARS);
+        JsonObject data = reply.getAsJsonObject("data");
+        JsonObject ingredient = data.getAsJsonObject("as_ingredient");
+        assertEquals(55, ingredient.get("recipe_count").getAsInt());
+        assertEquals(5, ingredient.get("recipe_listed").getAsInt());
+        JsonObject folded = ingredient.getAsJsonArray("folded").get(0).getAsJsonObject();
+        assertEquals("/as_ingredient/categories", folded.get("path").getAsString());
+        assertEquals(50, folded.get("items").getAsInt());
+        // 前一段把预算用掉后，后一段整段折起：条数照写，一行不列（categories 空着，与一段零条命中的样子一致）。
+        JsonObject station = data.getAsJsonObject("as_workstation");
+        assertEquals(40, station.get("recipe_count").getAsInt());
+        assertEquals(0, station.get("recipe_listed").getAsInt());
+        assertEquals(0, station.getAsJsonArray("categories").size(), "预算装满后的段一行不列");
+        assertEquals(40, station.getAsJsonArray("folded").get(0).getAsJsonObject().get("items").getAsInt());
+        assertTrue(station.get("note").getAsString().contains("40"), station::toString);
+    }
+
+    @Test
     void 参数写错一次报全_没有的物品回答unknown_id() {
         JsonObject missing = lookup(true).call(args("recipe", null, null, null));
         assertEquals(ErrorCode.INVALID_PARAMETER.wireName(), missing.getAsJsonObject("error").get("code").getAsString());
@@ -313,6 +357,61 @@ class LookupRecipeTest {
                     List.of(ShownStack.item(MIXER, "动力搅拌器", 1)),
                     List.of(ShownIngredient.of(ShownStack.item("minecraft:apple", inputName, 1))), List.of(),
                     List.of(ShownStack.item(outputId, outputName, 1)), null);
+        }
+    }
+
+    /** 替身配方查看器：条数不多但条目特别大（原料列几十样替代品、原始定义很长），做装填折叠的料。 */
+    private static final class HugeViewer implements RecipeViewer {
+        private static final String LONG_NAME = "模组加的长名字物品一二三四五六七八九十甲乙丙丁戊己庚辛壬癸";
+
+        @Override public String name() { return "emi"; }
+        @Override public boolean importsOtherViewers() { return true; }
+        @Override public Readiness readiness() { return Readiness.yes(); }
+        // 当原料：一小类 5 条小行装得下，一大类 50 条大行整组折起。
+        @Override public List<ShownRecipe> using(String itemId) {
+            List<ShownRecipe> recipes = new ArrayList<>();
+            for (int i = 1; i <= 5; i++) recipes.add(dish("create:small/dish_" + i, "小菜 " + i, "create:small", false, null));
+            for (int i = 1; i <= 50; i++) recipes.add(dish("create:wide/dish_" + i, "大菜 " + i, "create:wide", true, null));
+            return List.copyOf(recipes);
+        }
+
+        // 当工作站：一大类 40 条大行，前一段用掉预算后这里整段折起。
+        @Override public List<ShownRecipe> atWorkstation(String itemId) {
+            List<ShownRecipe> recipes = new ArrayList<>();
+            for (int i = 1; i <= 40; i++) recipes.add(dish("create:bench/roast_" + i, "烤肉 " + i, "create:bench", true, null));
+            return List.copyOf(recipes);
+        }
+
+        // 配方页：一小类 5 条定义短的，一大类 50 条定义特别长的。
+        @Override public List<ShownRecipe> making(String itemId) {
+            List<ShownRecipe> recipes = new ArrayList<>();
+            for (int i = 1; i <= 5; i++) recipes.add(dish("create:small/dish_" + i, "小菜 " + i, "create:small", false, null));
+            for (int i = 1; i <= 50; i++) recipes.add(dish("create:long/dish_" + i, "长谱 " + i, "create:long", false, longDefinition()));
+            return List.copyOf(recipes);
+        }
+
+        // 一条配方：wide 时原料一格写几十样替代品（用途页的一行因此特别长），definition 非空时带很长的原始定义（配方页的一条因此特别大）。
+        private static ShownRecipe dish(String id, String outputName, String category, boolean wide, JsonObject definition) {
+            ShownIngredient input = wide ? new ShownIngredient(null, manyOptions(), 1)
+                    : ShownIngredient.of(ShownStack.item("minecraft:apple", "苹果", 1));
+            return new ShownRecipe(id, category, "流水席",
+                    List.of(ShownStack.item(MIXER, "动力搅拌器", 1)), List.of(input), List.of(),
+                    List.of(ShownStack.item(id + "/out", outputName, 1)), definition);
+        }
+
+        private static List<ShownStack> manyOptions() {
+            List<ShownStack> options = new ArrayList<>();
+            for (int i = 1; i <= 30; i++) {
+                options.add(ShownStack.item("minecraft:alt_" + i, LONG_NAME + i, 1));
+            }
+            return List.copyOf(options);
+        }
+
+        private static JsonObject longDefinition() {
+            JsonObject definition = new JsonObject();
+            definition.addProperty("type", "create:sequenced");
+            definition.addProperty("pattern", "格".repeat(1200));
+            return definition;
         }
     }
 }

@@ -29,7 +29,7 @@ final class WikiTopic {
         this.web = Objects.requireNonNull(web, "web");
     }
 
-    /** 核对 topic=wiki 的参数：query 与 url 二选一，不用 id；url 要是能读的条目地址；offset 只配 url。 */
+    /** 核对 topic=wiki 的参数：query 与 url 二选一，不用 id；url 要是能读的条目地址；offset 只配 url（负数在 lookup 的公共核对里拒）。 */
     void check(RequestCheck check, String id, String query, String url, Integer offset) {
         if (id != null) check.error("id", "topic=wiki 不用 id：按标题搜用 query，读一篇用 url", null);
         if (query == null && url == null) {
@@ -47,7 +47,6 @@ final class WikiTopic {
             }
         }
         if (offset != null && url == null) check.error("offset", "offset 只在读一篇（给 url）时用", "照抄上一页的 next_offset");
-        if (offset != null && offset < 0) check.error("offset", "offset 不能是负数", "0 或更大的整数");
     }
 
     /** 参数核对过以后回答：关着就照实说关着；搜索给最相关的几条，读一篇给一页。 */
