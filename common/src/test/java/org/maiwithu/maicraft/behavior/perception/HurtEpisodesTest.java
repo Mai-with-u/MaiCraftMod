@@ -2,11 +2,14 @@
 package org.maiwithu.maicraft.behavior.perception;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import net.minecraft.core.BlockPos;
 
@@ -186,5 +189,42 @@ class HurtEpisodesTest {
         hurts.health(17f, false, 130);
         assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
         assertTrue(facts.isEmpty(), "摔落没有攻击者，事件上不铺字段");
+    }
+
+    @Test
+    void 全程没看见凶手时不报骷髅名字也不铺攻击者事实() {
+        HurtEpisodes blind = new HurtEpisodes(sink, id -> Optional.of("e3"), id -> false, type -> Optional.empty());
+        HurtEpisodes.Hit unseenSkeleton = new HurtEpisodes.Hit("entity:7", "骷髅", "arrow",
+                "minecraft:skeleton", "骷髅", 7);
+        blind.health(20f, false, 0);
+        blind.hit(unseenSkeleton, false, 10);
+        blind.health(17f, false, 10);
+        blind.hit(unseenSkeleton, false, 30);
+        blind.health(14f, false, 30);
+        blind.health(14f, false, 130);
+
+        assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
+        assertEquals("不知从哪射来箭打中 2 下，掉了 6 点血，还剩 14 点", messages.getFirst());
+        assertFalse(messages.getFirst().contains("骷髅"));
+        assertTrue(facts.isEmpty(), "没看见凶手时不能透视铺出攻击者字段");
+    }
+
+    @Test
+    void 挨打当刻没看见但发出前转头看见了凶手_补认名字与观察编号() {
+        Set<Integer> visibleNow = new HashSet<>();
+        HurtEpisodes turning = new HurtEpisodes(sink, id -> Optional.of("e5"), visibleNow::contains, type -> Optional.empty());
+        HurtEpisodes.Hit behindSkeleton = new HurtEpisodes.Hit("entity:7", "骷髅", "arrow",
+                "minecraft:skeleton", "骷髅", 7);
+        turning.health(20f, false, 0);
+        turning.hit(behindSkeleton, false, 10);
+        turning.health(17f, false, 10);
+        // 第 40 刻角色转过头在视野里看见了背后的骷髅
+        visibleNow.add(7);
+        turning.health(17f, false, 40);
+        turning.health(17f, false, 110);
+
+        assertEquals(List.of(TaskEvent.Kind.HURT), kinds);
+        assertEquals("被骷髅（e5）射中一下，掉了 3 点血，还剩 17 点", messages.getFirst());
+        assertEquals(List.of(new AttackerFacts("minecraft:skeleton", "骷髅", 7)), facts);
     }
 }

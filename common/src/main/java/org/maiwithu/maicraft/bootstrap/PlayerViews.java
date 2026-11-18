@@ -5,7 +5,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Optional;
+import java.util.function.IntPredicate;
 import java.util.function.Supplier;
+
+import net.minecraft.world.entity.Entity;
 
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -21,6 +24,7 @@ import org.maiwithu.maicraft.game.player.ReadsEquipment;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsGearFit;
 import org.maiwithu.maicraft.game.player.ReadsHunger;
+import org.maiwithu.maicraft.game.world.FieldOfView;
 
 /**
  * 当刻角色视图的接法：能力与玩家行为模型构造一次、用到整局，读的却是每一刻的角色——
@@ -117,6 +121,19 @@ public final class PlayerViews {
         Objects.requireNonNull(context, "context");
         // 优先核对原版 Equipable，模组扩展穿戴物（如精妙背包）再经当前角色的背包护甲槽问加载器。
         return new ClientGearFit(context);
+    }
+
+    /** 眼前视野看不看得见指定实体：挨打后转头追认凶手与连打入账时，按当刻角色的前方视锥和无遮挡视线判断。 */
+    public static IntPredicate canSeeEntity(Supplier<PlayerContext> context) {
+        Objects.requireNonNull(context, "context");
+        return entityId -> {
+            PlayerContext current = context.get();
+            if (current == null || current.localPlayer() == null || current.level() == null) {
+                return false;
+            }
+            Entity target = current.level().getEntity(entityId);
+            return FieldOfView.canSeeEntity(current.localPlayer(), target, 64.0);
+        };
     }
 
     private static BackpackView currentBackpack(Supplier<PlayerContext> context) {

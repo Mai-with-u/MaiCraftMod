@@ -366,10 +366,11 @@ public final class Bootstrap {
             // 一次伤害包两处要：自卫的伤害证据，与提醒（黑暗里挨打、战斗压力）。
             CombatMemory memory = combatMemory;
             PlayerReminders playerReminders = reminders;
-            // 挨打的片段：攻击者看得见时带观察编号；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
+            // 挨打的片段：亲眼在视野里看见凶手才带观察编号与身份；碰着方块扎的先由吃过亏的方块认出、记下，那一句才说得出是它。
             hurtEpisodes = new HurtEpisodes(taskEvents, entityId -> worldScope[0] == null ? Optional.empty()
-                    : worldScope[0].scene().seen().idOfEntity(entityId), type -> worldScope[0] == null
-                    ? Optional.empty() : worldScope[0].pains().culpritOf(type));
+                    : worldScope[0].scene().seen().idOfEntity(entityId),
+                    PlayerViews.canSeeEntity(() -> playerControl.activeContext().orElse(null)),
+                    type -> worldScope[0] == null ? Optional.empty() : worldScope[0].pains().culpritOf(type));
             HurtEpisodes hurts = hurtEpisodes;
             // 别的玩家冲角色做的肢体动作：看得见的带观察编号；发出一段就让闲时看先看他。
             // 被玩家连打的那一下交给挨打片段与战斗证据（自卫据此退开举盾）；拍一下只在肢体动作事件里说。
