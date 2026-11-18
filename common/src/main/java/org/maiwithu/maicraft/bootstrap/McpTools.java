@@ -57,7 +57,11 @@ final class McpTools {
                             WorldScope scope = worldScope.get();
                             return scope == null ? List.of() : scope.modFeatures();
                         },
-                        inWorld(worldScope, WorldScope::lastChainMining)),
+                        inWorld(worldScope, WorldScope::lastChainMining),
+                        () -> {
+                            WorldScope scope = worldScope.get();
+                            return scope == null ? List.of() : scope.rememberedNetworks();
+                        }),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
                 new ExecuteTool(abilities, goals, clientWork, looks),

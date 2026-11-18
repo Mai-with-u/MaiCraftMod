@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.acquire.trade.ReadsTradeMenu;
 import org.maiwithu.maicraft.behavior.acquire.trade.TradeOffers;
 import org.maiwithu.maicraft.behavior.menu.OpenScreen;
@@ -62,6 +63,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -70,6 +72,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -491,9 +494,17 @@ class ObserveToolTest {
         assertEquals(1, placesOnly.keySet().size(), placesOnly::toString);
         assertEquals("家", placesOnly.getAsJsonArray("places").get(0).getAsJsonObject().get("name").getAsString());
 
-        JsonObject allThree = data(observe(
+        JsonObject threeWithoutNetwork = data(observe(
                 "{\"what\": \"world_memory\", \"sections\": [\"places\", \"regions\", \"records\"]}"));
-        assertEquals(data(observe("{\"what\": \"world_memory\"}")), allThree, "三节都点名等于缺省不点名");
+        assertFalse(threeWithoutNetwork.has("network_stock"));
+
+        JsonObject networkOnly = data(observe("{\"what\": \"world_memory\", \"sections\": [\"network_stock\"]}"));
+        assertEquals(1, networkOnly.keySet().size(), networkOnly::toString);
+        assertEquals(0, networkOnly.getAsJsonArray("network_stock").size());
+
+        JsonObject allFour = data(observe(
+                "{\"what\": \"world_memory\", \"sections\": [\"places\", \"regions\", \"records\", \"network_stock\"]}"));
+        assertEquals(data(observe("{\"what\": \"world_memory\"}")), allFour, "四节都点名等于缺省不点名");
     }
 
     @Test
@@ -795,5 +806,35 @@ class ObserveToolTest {
         assertEquals(42, lastChain.get("chained_blocks").getAsInt());
         assertEquals(2, lastChain.get("single_blocks").getAsInt());
         assertEquals("工具剩余耐久不够一整批", lastChain.get("not_chained_reason").getAsString());
+    }
+
+    @Test
+    void worldMemoryIncludesRememberedNetworkStockAndFiltersFixedByRadiusKeepingWireless() {
+        Instant seenAt = Instant.parse("2026-11-18T05:00:00Z");
+        List<NetworkStorage.RememberedNetwork> networks = List.of(
+                NetworkStorage.RememberedNetwork.wireless("ae2:wireless_crafting_terminal", true, true,
+                        Map.of("minecraft:cobblestone", 2048L, "minecraft:iron_ingot", 64L),
+                        Set.of("minecraft:piston"), seenAt),
+                NetworkStorage.RememberedNetwork.placed("ae2:crafting_terminal",
+                        new WorldPosition(4, 64, 0, "minecraft:overworld"), Direction.NORTH,
+                        true, false, Map.of("minecraft:redstone", 512L), Set.of(), seenAt),
+                NetworkStorage.RememberedNetwork.placed("ae2:terminal",
+                        new WorldPosition(40, 64, 0, "minecraft:overworld"), Direction.SOUTH,
+                        true, true, Map.of("minecraft:coal", 128L), Set.of(), seenAt));
+        ToolDispatcher withNetworks = new ToolDispatcher(List.of(new ObserveTool(
+                () -> scene, () -> memory, table, direct, () -> reminders,
+                () -> new MenuView.Reads(() -> openScreen, noTrades), List::of, x -> { },
+                () -> identity, () -> null, ObserveTool.Pictures.NONE, () -> null, List::of,
+                List::of, () -> null, () -> networks)));
+
+        JsonArray stock = data(withNetworks.call("observe",
+                JsonParser.parseString("{\"what\":\"world_memory\",\"radius\":10,\"sections\":[\"network_stock\"]}")
+                        .getAsJsonObject())).getAsJsonArray("network_stock");
+        assertEquals(2, stock.size(), "随身无线终端保留，10 格外的固定终端被过滤");
+        assertTrue(stock.get(0).getAsJsonObject().get("wireless").getAsBoolean());
+        assertEquals(2112L, stock.get(0).getAsJsonObject().get("total_items").getAsLong());
+        assertEquals("ae2:crafting_terminal", stock.get(1).getAsJsonObject().get("terminal").getAsString());
+        assertEquals("north", stock.get(1).getAsJsonObject().get("side").getAsString());
+        assertEquals(4, stock.get(1).getAsJsonObject().get("distance").getAsInt());
     }
 }

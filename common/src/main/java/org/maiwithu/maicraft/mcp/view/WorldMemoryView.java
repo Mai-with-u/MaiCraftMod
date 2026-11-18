@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
@@ -29,9 +30,9 @@ import java.util.function.Function;
  * 世界记忆与命名地点的观察视图：
  * <ul>
  *   <li>{@code observe(what=places)}：紧凑列出按名字记的地点、建筑档案、机器档案和地盘，以及自动记录的分类总数；</li>
- *   <li>{@code observe(what=world_memory)}：支持按 {@code radius}、{@code kind} 过滤，只出点名的节（places / regions / records）；
- *       未过滤且三节都要时按由近到远装到回包上限以内，不触发整包 {@code too_large} 失败，
- *       超出的部分在 {@code records_not_listed} 里按种类如实报数。</li>
+ *   <li>{@code observe(what=world_memory)}：支持按 {@code radius}、{@code kind} 过滤，只出点名的节
+ *       （places / regions / records / network_stock）；未过滤且四节都要时按由近到远装到回包上限以内，
+ *       不触发整包 {@code too_large} 失败，超出的部分在 {@code records_not_listed} 与 {@code items_not_listed} 里如实报数。</li>
  * </ul>
  */
 public final class WorldMemoryView {
@@ -123,16 +124,25 @@ public final class WorldMemoryView {
         return of(memory, self, dimension, radius, kindFilter, fromLegacyModifier(lastModifier), notes, null);
     }
 
-    /**
-     * 世界记忆视图：可按半径与种类过滤；records 会随游玩一直变长，只要个别节（places）的调用方按 sections 点名取那一节，
-     * 不让整包顶到单回包上限；不点名就三节都出。记录太多时近的先列到单次回包装得下为止，其余按种类报数。
-     *
-     * @param self         角色此刻的位置，用来按远近排序；还没看清自己时为 null，按记录先后排
-     * @param sections     只出哪几节（places / regions / records）；null 出全部三节
-     */
+    /** 兼容不传网络存货快照的调用：默认四节都出（network_stock 为空数组）。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
             ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections) {
+        return of(memory, self, dimension, radius, kindFilter, containerOrigin, notes, sections, List.of());
+    }
+
+    /**
+     * 世界记忆视图：可按半径与种类过滤；records 与 network_stock 会随游玩变长，只要个别节的调用方按 sections 点名取那一节，
+     * 不点名就四节都出。记录或网络存货太多时按优先级装到单次回包装得下为止，其余折算成计数汇报。
+     *
+     * @param self               角色此刻的位置，用来按远近排序；还没看清自己时为 null，按记录先后排
+     * @param sections           只出哪几节（places / regions / records / network_stock）；null 出全部四节
+     * @param rememberedNetworks 最近五分钟内点开终端记下的 ME 网络存货快照
+     */
+    public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
+            Integer radius, MemoryKind kindFilter,
+            ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections,
+            List<NetworkStorage.RememberedNetwork> rememberedNetworks) {
         JsonObject json = new JsonObject();
         if (serves(sections, "places")) json.add("places", places(memory.places(), self, dimension));
         if (serves(sections, "regions")) json.add("regions", regions(memory.regions()));
@@ -155,13 +165,24 @@ public final class WorldMemoryView {
             }
         }
 
-        int usedChars = COMPACT.toJson(json).length() + 256;
+        int baseChars = COMPACT.toJson(json).length() + 256;
+        JsonArray networkStock = null;
+        int networkFieldChars = 0;
+        if (serves(sections, "network_stock")) {
+            int recordsReserve = reserveForRecords(filtered, self, dimension, containerOrigin);
+            int networkBudget = Math.max(1024, MAX_VIEW_CHARS - baseChars - recordsReserve - 64);
+            networkStock = NetworkStockView.render(rememberedNetworks, self, dimension, radius, networkBudget, notes);
+            networkFieldChars = "\"network_stock\":".length() + COMPACT.toJson(networkStock).length() + 2;
+        }
+
+        int recordsLimit = MAX_VIEW_CHARS - networkFieldChars;
+        int usedChars = baseChars;
         JsonArray list = new JsonArray();
         Map<String, Integer> notListed = new LinkedHashMap<>();
         for (MemoryRecord entry : filtered) {
             JsonObject rendered = record(entry, self, dimension, containerOrigin);
             int itemChars = COMPACT.toJson(rendered).length() + 2;
-            if (notListed.isEmpty() && usedChars + itemChars <= MAX_VIEW_CHARS) {
+            if (notListed.isEmpty() && usedChars + itemChars <= recordsLimit) {
                 list.add(rendered);
                 usedChars += itemChars;
             } else {
@@ -180,7 +201,23 @@ public final class WorldMemoryView {
                         + " 条；只读记住的地点请用 observe(what=\"places\")，要看其余记录可传 radius 或 kind 收窄");
             }
         }
+        if (networkStock != null) {
+            json.add("network_stock", networkStock);
+        }
         return json;
+    }
+
+    // 同时输出 records 与 network_stock 时，为近处的容器与产地记录最多预留一半预算，避免超长网络存货挤空全部 records。
+    private static int reserveForRecords(List<MemoryRecord> filtered, SceneSelf self, String dimension,
+            ContainerOrigin containerOrigin) {
+        if (filtered.isEmpty()) return 0;
+        int cap = MAX_VIEW_CHARS / 2;
+        int total = 64;
+        for (MemoryRecord entry : filtered) {
+            total += COMPACT.toJson(record(entry, self, dimension, containerOrigin)).length() + 2;
+            if (total >= cap) return cap;
+        }
+        return total;
     }
 
     /** 这一节这回出不出：没点名任何节（null）就三节都出。 */
@@ -287,7 +324,7 @@ public final class WorldMemoryView {
         return item;
     }
 
-    private static boolean sameDimension(WorldPosition position, String currentDimension) {
+    static boolean sameDimension(WorldPosition position, String currentDimension) {
         return position.dimension() == null || currentDimension == null
                 || position.dimension().equals(currentDimension);
     }

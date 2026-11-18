@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.PictureLook;
 import org.maiwithu.maicraft.behavior.reminder.Reminder;
@@ -113,6 +114,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<List<String>> modFeatures;
     /** 本世界最近一次挖掘动作的连锁统计；还没挖过方块时为 null。 */
     private final Supplier<ChainMiningLedger.Summary> lastChainMining;
+    /** 最近五分钟内点开终端记下的 ME 网络存货快照；没有时为空列表。 */
+    private final Supplier<List<NetworkStorage.RememberedNetwork>> rememberedNetworks;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -204,11 +207,29 @@ public final class ObserveTool implements McpTool {
                        Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks,
                        Supplier<List<String>> modFeatures,
                        Supplier<ChainMiningLedger.Summary> lastChainMining) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, pictures,
+                protection, carriedBackpacks, modFeatures, lastChainMining, List::of);
+    }
+
+    /**
+     * @param rememberedNetworks 最近五分钟内角色点开终端记下的 ME 网络存货快照；没有时给空列表
+     */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity,
+                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
+                       Supplier<Protection> protection,
+                       Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks,
+                       Supplier<List<String>> modFeatures,
+                       Supplier<ChainMiningLedger.Summary> lastChainMining,
+                       Supplier<List<NetworkStorage.RememberedNetwork>> rememberedNetworks) {
         this.pictures = Objects.requireNonNull(pictures, "pictures");
         this.protection = protection;
         this.carriedBackpacks = Objects.requireNonNull(carriedBackpacks, "carriedBackpacks");
         this.modFeatures = Objects.requireNonNull(modFeatures, "modFeatures");
         this.lastChainMining = Objects.requireNonNull(lastChainMining, "lastChainMining");
+        this.rememberedNetworks = Objects.requireNonNull(rememberedNetworks, "rememberedNetworks");
         this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
@@ -268,8 +289,8 @@ public final class ObserveTool implements McpTool {
     }
 
     /**
-     * world_memory 的分节取用：要哪几节（places / regions / records），不给或给了空数组都按三节全要看。
-     * 只配 world_memory 用；点的节名必须是这三节之一。
+     * world_memory 的分节取用：要哪几节（places / regions / records / network_stock），不给时默认四节都给。
+     * 只配 world_memory 用；点的节名必须是这四节之一。
      */
     private static Set<String> sections(JsonObject arguments, String what, RequestCheck check) {
         if (!arguments.has("sections")) return null;
@@ -279,14 +300,14 @@ public final class ObserveTool implements McpTool {
         }
         JsonArray asked = arguments.getAsJsonArray("sections");
         if (asked == null || asked.isEmpty()) {
-            check.error("sections", "sections 要是节名的数组：places、regions、records；不给就是三节都要", null);
+            check.error("sections", "sections 要是节名的数组：places、regions、records、network_stock；不给就是四节都要", null);
             return null;
         }
         Set<String> parsed = new LinkedHashSet<>();
         for (int index = 0; index < asked.size(); index++) {
             String section = asked.get(index).isJsonPrimitive() ? asked.get(index).getAsString() : null;
             if (section == null || !SECTIONS.contains(section)) {
-                check.error("sections", "sections 里第 " + index + " 项不是节名：places、regions、records 之一", null);
+                check.error("sections", "sections 里第 " + index + " 项不是节名：places、regions、records、network_stock 之一", null);
                 return null;
             }
             parsed.add(section);
@@ -307,8 +328,8 @@ public final class ObserveTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
-    /** world_memory 的三节名字：sections 参数只认这几个。 */
-    private static final Set<String> SECTIONS = Set.of("places", "regions", "records");
+    /** world_memory 的四节名字：sections 参数只认这几个。 */
+    private static final Set<String> SECTIONS = Set.of("places", "regions", "records", "network_stock");
 
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
     private JsonObject view(String what, String id, boolean grid, Integer radius, MemoryKind kindFilter,
@@ -335,7 +356,7 @@ public final class ObserveTool implements McpTool {
             case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard).orElse(null);
             case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
-                    radius, kindFilter, recordOrigin, notes::add, sections);
+                    radius, kindFilter, recordOrigin, notes::add, sections, rememberedNetworks.get());
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid,
                     DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin));
