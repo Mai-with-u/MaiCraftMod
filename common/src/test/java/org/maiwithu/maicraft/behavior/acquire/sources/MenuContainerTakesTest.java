@@ -474,6 +474,90 @@ class MenuContainerTakesTest {
     }
 
     @Test
+    void 按取货单整箱搬_搬空并交结算() {
+        // 取货单不点名：箱里有什么搬什么；结算写出实际搬进背包的各物品件数，箱里不剩。
+        FakeBox box = new FakeBox();
+        box.box.set(2, new ItemStack(Items.DIRT, 64));
+        box.box.set(5, new ItemStack(Items.STICK, 12));
+        Action take = takes(box).take(boxAt(),
+                new ContainerTakeOrder(List.of(), 0), Permissions.DEFAULT);
+
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
+        assertEquals(64, box.carried(new ItemStack(Items.DIRT)));
+        assertEquals(12, box.carried(new ItemStack(Items.STICK)));
+        assertTrue(box.closed);
+        TakeSettlement settlement = ((ReportsTakeSettlement) take).settlement();
+        assertEquals(2, settlement.taken().size());
+        assertEquals(64, settlement.taken().get("minecraft:dirt"));
+        assertEquals(12, settlement.taken().get("minecraft:stick"));
+        assertTrue(settlement.matchedAtOpen(), "开箱时箱里有东西");
+        assertTrue(!settlement.remainedInContainer(), "搬空了，箱里不剩");
+    }
+
+    @Test
+    void 按取货单点名几样_几样合用总件数线_到线就停() {
+        // 点名铁锭和煤、总共最多 6 件：铁锭先拿 6 件到线，煤一件不动，结算里只有铁锭。
+        FakeBox box = new FakeBox();
+        box.box.set(4, new ItemStack(Items.IRON_INGOT, 10));
+        box.box.set(9, new ItemStack(Items.COAL, 10));
+        Action take = takes(box).take(boxAt(),
+                new ContainerTakeOrder(List.of(WantedItem.ofItem("minecraft:iron_ingot"),
+                        WantedItem.ofItem("minecraft:coal")), 6), Permissions.DEFAULT);
+
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
+        assertEquals(6, box.carried(new ItemStack(Items.IRON_INGOT)));
+        assertEquals(0, box.carried(new ItemStack(Items.COAL)));
+        TakeSettlement settlement = ((ReportsTakeSettlement) take).settlement();
+        assertEquals(6, settlement.taken().get("minecraft:iron_ingot"));
+        assertTrue(!settlement.taken().containsKey("minecraft:coal"), "到线后煤一件不拿");
+        assertTrue(settlement.remainedInContainer(), "到线停手，箱里还剩没搬完的");
+    }
+
+    @Test
+    void 取货单点名的箱里没有_交结算说箱里本来就没有() {
+        FakeBox box = new FakeBox();
+        box.box.set(0, new ItemStack(Items.DIRT, 8));
+        Action take = takes(box).take(boxAt(),
+                new ContainerTakeOrder(List.of(WantedItem.ofItem("minecraft:gold_ingot")), 5),
+                Permissions.DEFAULT);
+
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
+        assertEquals(0, box.carried(new ItemStack(Items.GOLD_INGOT)));
+        assertTrue(box.closed, "一件没拿也照常关箱");
+        TakeSettlement settlement = ((ReportsTakeSettlement) take).settlement();
+        assertTrue(settlement.taken().isEmpty());
+        assertTrue(!settlement.matchedAtOpen(), "开箱时箱里没有要的");
+        assertTrue(!settlement.remainedInContainer());
+    }
+
+    @Test
+    void 背包放不下_结算如实说一件没搬进_箱里还剩着() {
+        // 背包 36 格全满：整箱搬一格都进不去，结算写出 matchedAtOpen 与 remainedInContainer，调用方据此报背包满。
+        FakeBox box = new FakeBox();
+        box.box.set(0, new ItemStack(Items.DIRT, 32));
+        for (int i = 0; i < 36; i++) box.player.set(i, new ItemStack(Items.GOLD_BLOCK, 64));
+        Action take = takes(box).take(boxAt(),
+                new ContainerTakeOrder(List.of(), 0), Permissions.DEFAULT);
+
+        assertInstanceOf(ActionStatus.Done.class, runToFinish(take));
+        assertEquals(0, box.carried(new ItemStack(Items.DIRT)));
+        TakeSettlement settlement = ((ReportsTakeSettlement) take).settlement();
+        assertTrue(settlement.taken().isEmpty());
+        assertTrue(settlement.matchedAtOpen());
+        assertTrue(settlement.remainedInContainer(), "箱里的东西一件没动");
+    }
+
+    private MenuContainerTakes takes(FakeBox box) {
+        WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
+        return new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
+                (at, permissions) -> new OpenAtOnce(box), at -> false);
+    }
+
+    private static KnownContainer boxAt() {
+        return new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest");
+    }
+
+    @Test
     void 界面还没点开就被问停不停_不炸也不当停不得() {
         // 控制循环每刻先问当前动作停不停再推进它：界面还没点开时手上还没有搬运的一笔，
         // 这一问要照常答"在做"，不能因为搬运执行还不存在就抛——一抛整刻推进被跳过，动作到不了终态。

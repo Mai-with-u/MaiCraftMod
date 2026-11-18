@@ -18,6 +18,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 
+import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
@@ -32,6 +33,7 @@ import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.game.world.ContainerFeeds;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -44,6 +46,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 
 /**
  * 开箱取货的生产实现：走到记得的箱子跟前、点开、认下界面，把这一趟要的几样东西搬进背包
@@ -61,7 +64,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
  * <p>请求带着绑到这只箱子上的饿急通报（饿急了弄口粮、这只箱子不是角色自己放的）时，只拿通报点名的那一样口粮、
  * 拿到刚好够吃回危险线的件数为止，关箱前把箱里确认少了几件报回去；界面中途没了、说不清少了几件的不报。
  */
-public final class MenuContainerTakes implements ContainerTakes {
+public final class MenuContainerTakes implements ContainerBatchTakes {
 
     /** 一次开箱取货的总期限（刻）；到点如实收场，不在一只箱子上耗死。 */
     private static final long GIVE_UP_TICKS = 20L * 30;
@@ -105,8 +108,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         }, othersNotice, rareLootNotice);
     }
 
-    /** 打开箱子的动作由调用方给：生产走靠近与右键点开，测试换成替身箱子。 */
-    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+    /** 打开箱子的动作由调用方给：生产走靠近与右键点开，替身接入（离线测试）换自己的打开动作。 */
+    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings) {
         this(tags, memory, contexts, openings, at -> {
             PlayerContext player = contexts.get();
@@ -114,20 +117,20 @@ public final class MenuContainerTakes implements ContainerTakes {
         }, OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
-    /** 供料判断也由调用方给：测试换成替身。 */
-    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+    /** 供料判断也由调用方给：替身接入时换成替身。 */
+    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine) {
         this(tags, memory, contexts, openings, feedsMachine, OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
-    /** 全参入口：测试可同时替掉打开动作、供料判断与通报器。 */
-    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+    /** 全参入口：替掉打开动作、供料判断与通报器的调用方（含离线测试）都用它。 */
+    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine,
             OthersThingsNotice othersNotice) {
         this(tags, memory, contexts, openings, feedsMachine, othersNotice, RareLootNotice.NONE);
     }
 
-    MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
+    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine,
             OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
         this.tags = Objects.requireNonNull(tags, "tags");
@@ -151,7 +154,12 @@ public final class MenuContainerTakes implements ContainerTakes {
     @Override
     public Optional<Action> take(KnownContainer container, List<ItemRequest> requests, Permissions permissions) {
         if (requests.isEmpty()) return Optional.empty();
-        return Optional.of(new TakeAction(container, List.copyOf(requests), permissions));
+        return Optional.of(new TakeAction(container, requests, permissions));
+    }
+
+    @Override
+    public Action take(KnownContainer container, ContainerTakeOrder order, Permissions permissions) {
+        return new TakeAction(container, order, permissions);
     }
 
     // 一格里放的东西的物品 ID；空格为空串。
@@ -160,13 +168,19 @@ public final class MenuContainerTakes implements ContainerTakes {
     }
 
     /** 开一次箱取几样的动作：点开 → 逐样搬 → 关上，跨刻推进；没能确认的点击经交回接缝原样交回。 */
-    private final class TakeAction implements Action, ReportsUnconfirmed {
+    private final class TakeAction implements Action, ReportsUnconfirmed, ReportsTakeSettlement {
 
         private final KnownContainer container;
-        /** 这一趟要拿的几样：每样带自己的匹配、缺口与留半限额。 */
-        private final List<ContainerWant> wants;
+        /** 这一趟要拿的几样：引擎路径按要货单逐条，整批搬按取货单；每样带自己的匹配与缺口。 */
+        private final List<MenuTakeRound.Want> wants;
         private final BlockPos at;
         private final MenuOpening opening;
+        /** 按取货单整批搬时是那张单子（总件数线在这里）；引擎按要货单搬时为 null。 */
+        private final ContainerTakeOrder order;
+        /** 描述里"拿什么"的那段：整批搬说"整箱"，引擎按要货单逐样列。 */
+        private final String wantedText;
+        /** 按取货单整批搬时收场要算结算账。 */
+        private final boolean batch;
         /** 认领到的界面：读数、点击与关闭都经它。 */
         private OpenedMenu menu;
         /** 界面认下来之后的一轮取货：逐样盘、记账、关箱都走它。 */
@@ -174,21 +188,57 @@ public final class MenuContainerTakes implements ContainerTakes {
         private int waited;
         /** 机器料箱只剩一半、一样没拿时的说明：关上界面后以它收场；别的情况为 null。 */
         private Problem held;
-        /** 开箱第一份读数里匹配本次请求的各物品件数与显示名，以及最新确认过的容器读数：收尾时据此合算一次开箱拿走了什么。 */
+        /** 点不开容器时的原因：打开动作失败时记下；点开过或还没试完时为 null。 */
+        private Problem openFailure;
+        /** 收场结算：实际搬进了什么、箱里本来有没有要的、还剩没搬完的没有；没算出来前按没有算。 */
+        private TakeSettlement settlement = TakeSettlement.none();
+        /** 开箱第一份读数里匹配本次请求的各物品件数与显示名、角色背包起点，以及最新确认过的容器读数：
+         * 收尾时据此合算一次开箱拿走了什么。 */
         private Map<String, Integer> initialMatchedCounts;
         private final Map<String, String> matchedNames = new HashMap<>();
+        private Map<String, Integer> initialPlayerCounts;
+        /** 开箱那一刻背包主格的各物品件数（按物品 ID）：界面半途没了时按它的差额兜底结算。 */
+        private Map<String, Integer> backpackAtOpen;
+        private int totalMatchedAtOpen;
         private List<RareLootNotice.SeenPrecious> initialPrecious;
         private Set<String> previouslySeenInContainer;
         private MenuContent.Reading latestReading;
         private boolean othersReported;
         private boolean rareLootReported;
 
+        /** 按要货单取货：引擎挑好的路，逐条要货单盘缺口。 */
         TakeAction(KnownContainer container, List<ItemRequest> requests, Permissions permissions) {
             this.container = container;
             this.at = container.cell();
-            List<ContainerWant> wants = new ArrayList<>();
-            for (ItemRequest request : requests) wants.add(new ContainerWant(request));
-            this.wants = List.copyOf(wants);
+            List<MenuTakeRound.Want> built = new ArrayList<>();
+            StringBuilder wanted = new StringBuilder();
+            for (ItemRequest request : requests) {
+                if (!wanted.isEmpty()) wanted.append("、");
+                wanted.append(request.wanted().describe());
+                built.add(new ContainerWant(request));
+            }
+            this.wants = List.copyOf(built);
+            this.batch = false;
+            this.wantedText = wanted.toString();
+            this.order = null;
+            // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
+            this.opening = openings.apply(at, permissions);
+        }
+
+        /** 按取货单整批搬：整箱或点名的几样合用一条总件数线，收场算结算账。 */
+        TakeAction(KnownContainer container, ContainerTakeOrder order, Permissions permissions) {
+            this.container = container;
+            this.at = container.cell();
+            List<MenuTakeRound.Want> built = new ArrayList<>();
+            if (order.items().isEmpty()) {
+                built.add(new BatchWant(null));
+            } else {
+                for (WantedItem wanted : order.items()) built.add(new BatchWant(wanted));
+            }
+            this.wants = List.copyOf(built);
+            this.batch = true;
+            this.wantedText = order.describe();
+            this.order = order;
             // 走过去能动多少地形按这次任务的许可来，不另开一套默认档。
             this.opening = openings.apply(at, permissions);
         }
@@ -209,8 +259,12 @@ public final class MenuContainerTakes implements ContainerTakes {
         // 点开：走不到、点不开、界面认不出或一直没同步，都把打开动作的原因原样交回，引擎换路。
         private ActionStatus open(TickContext tick) {
             ActionStatus status = opening.tick(tick);
+            if (status instanceof ActionStatus.Failed failed) {
+                openFailure = failed.problem();
+            }
             if (!(status instanceof ActionStatus.Done)) return status;
             menu = opening.opened().orElseThrow();
+            snapshotBackpackAtOpen();
             round = new MenuTakeRound(menu, List.copyOf(wants), new RoundEndings());
             return ActionStatus.progressed();
         }
@@ -277,7 +331,7 @@ public final class MenuContainerTakes implements ContainerTakes {
             opening.close();
             if (round != null) {
                 round.close(true);
-                reportRareLoot();
+                if (!batch) reportRareLoot();
                 reportOthersTook();
             }
         }
@@ -288,46 +342,59 @@ public final class MenuContainerTakes implements ContainerTakes {
         }
 
         @Override
+        public TakeSettlement settlement() {
+            return settlement;
+        }
+
+        @Override
+        public Optional<Problem> openFailure() {
+            return Optional.ofNullable(openFailure);
+        }
+
+        @Override
         public String describe() {
-            StringBuilder what = new StringBuilder();
-            for (ContainerWant want : wants) {
-                if (!what.isEmpty()) what.append("、");
-                what.append(want.request().wanted().describe());
-            }
+            StringBuilder what = new StringBuilder(wantedText);
             // 是机器料箱就说一句留了多少：结果里看得出为什么没拿够。
-            for (ContainerWant want : wants) {
-                if (!want.limited()) continue;
-                what.append("（这是给机器供料的箱子，").append(want.request().wanted().describe())
-                        .append(" 最满时 ").append(want.fullest()).append(" 件，至少留 ")
-                        .append((want.fullest() + 1) / 2).append(" 件给机器）");
+            for (MenuTakeRound.Want want : wants) {
+                if (!(want instanceof ContainerWant limited) || !limited.limited()) continue;
+                what.append("（这是给机器供料的箱子，").append(limited.request().wanted().describe())
+                        .append(" 最满时 ").append(limited.fullest()).append(" 件，至少留 ")
+                        .append((limited.fullest() + 1) / 2).append(" 件给机器）");
                 break;
             }
             return "从" + container.name() + "拿" + what;
         }
 
-        /** 一轮取货的收场：关箱前记箱子内容；关上后手里留着半的缘由还在且一样没拿到，就如实失败。 */
+        /** 一轮取货的收场：关箱前记箱子内容；按要货单搬的关上后手里留着半的缘由还在且一样没拿到就如实失败，整批搬的算结算账。 */
         private final class RoundEndings implements MenuTakeRound.Endings {
 
             @Override
             public void rememberBeforeClose(Optional<MenuContent.Reading> lastReading) {
                 lastReading.ifPresent(reading -> latestReading = reading);
                 // 先在把这次开箱内容写进世界记忆前通报新看到的稀罕战利品，按上回记忆去重。
-                reportRareLoot();
+                if (!batch) reportRareLoot();
                 lastReading.ifPresent(MenuContainerTakes.TakeAction.this::rememberContents);
                 // 从不是自己放的箱子按饿急通报拿的：关箱前按箱里确认少了几件报回去，由发起的一方发事件告诉宿主。
-                lastReading.ifPresent(reading -> wants.forEach(want -> want.reportTaken(reading)));
+                if (!batch) {
+                    lastReading.ifPresent(reading -> wants.forEach(want -> {
+                        if (want instanceof ContainerWant reported) reported.reportTaken(reading);
+                    }));
+                }
                 // 普通取货动了别人放的容器时，一次开箱合发一条 others_things_touched；饿急通报走原有事件不重发。
                 reportOthersTook();
+                // 整批搬的关箱前按收场读数算结算账，调用方从结算接口读。
+                if (batch) lastReading.ifPresent(MenuContainerTakes.TakeAction.this::settle);
             }
 
             @Override
             public ActionStatus finishAfterClosed(boolean tookAnything) {
-                return finish(tookAnything);
+                return batch ? ActionStatus.done() : finish(tookAnything);
             }
 
-            // 界面中途没了：搬走多少由引擎清点，照常收场。
+            // 界面中途没了：引擎搬的搬走多少由引擎清点；整批搬的按背包差额兜底结算，照常收场。
             @Override
             public ActionStatus finishAfterMenuGone(boolean tookAnything) {
+                if (batch) settleFromBackpackFallback();
                 return ActionStatus.done();
             }
 
@@ -436,18 +503,128 @@ public final class MenuContainerTakes implements ContainerTakes {
             }
         }
 
-        // 第一份读数来时记下容器里匹配本次请求的各物品初始总数、稀罕物品与上回记忆，后面按关箱读数的差核实拿走了几件。
+        // 第一份读数来时记下容器里匹配本次请求的各物品初始总数、角色背包起点、稀罕物品与上回记忆，
+        // 后面按关箱读数的差核实拿走了几件、箱里还剩没搬完的没有。
         private void recordInitialMatched(MenuContent.Reading reading) {
             if (initialMatchedCounts != null) return;
             initialMatchedCounts = new LinkedHashMap<>();
+            initialPlayerCounts = new HashMap<>();
             for (SlotSnapshot snapshot : reading.containerSnapshots()) {
                 if (snapshot.isEmpty() || !matchesAnyWant(snapshot)) continue;
                 String itemId = itemIdOf(snapshot);
                 initialMatchedCounts.merge(itemId, snapshot.count(), Integer::sum);
                 matchedNames.putIfAbsent(itemId, snapshot.stack().getHoverName().getString());
+                initialPlayerCounts.put(itemId, countInSnapshots(reading.playerSnapshots(), itemId));
             }
+            totalMatchedAtOpen = initialMatchedCounts.values().stream().mapToInt(Integer::intValue).sum();
             previouslySeenInContainer = rareLootNotice.snapshotPreviouslySeen(currentPosition());
             initialPrecious = RareLootNotice.collectInitial(reading.containerSnapshots());
+        }
+
+        // 开箱那一刻记下背包主格的各物品件数：界面半途没了时按它的差额兜底结算；这趟搬货只会进背包主格。
+        private void snapshotBackpackAtOpen() {
+            PlayerContext current = contexts.get();
+            if (current == null) return;
+            backpackAtOpen = plainCounts(CarriedItems.byItem(current.backpack(), null));
+        }
+
+        // 关箱前按收场读数结算：这一趟实际搬进背包什么各几件（按角色背包那侧的差算），箱里还剩没搬完的没有。
+        private void settle(MenuContent.Reading reading) {
+            Map<String, Integer> taken = new LinkedHashMap<>();
+            for (String itemId : initialMatchedCounts.keySet()) {
+                int gained = countInSnapshots(reading.playerSnapshots(), itemId)
+                        - initialPlayerCounts.getOrDefault(itemId, 0);
+                if (gained > 0) taken.put(itemId, gained);
+            }
+            settlement = new TakeSettlement(taken, totalMatchedAtOpen > 0, matchedInContainer(reading) > 0);
+        }
+
+        // 界面半途没了拿不到关箱读数：按开箱前后背包主格的差额兜底结算，
+        // 剩没剩按搬到的总件数与开箱时的总数比（搬到的少就是还有剩的）。
+        private void settleFromBackpackFallback() {
+            Map<String, Integer> taken = new LinkedHashMap<>();
+            int totalTaken = 0;
+            if (backpackAtOpen != null) {
+                PlayerContext current = contexts.get();
+                Map<String, Integer> now = plainCounts(CarriedItems.byItem(current.backpack(), null));
+                for (String itemId : initialMatchedCounts.keySet()) {
+                    int gained = now.getOrDefault(itemId, 0) - backpackAtOpen.getOrDefault(itemId, 0);
+                    if (gained > 0) {
+                        taken.put(itemId, gained);
+                        totalTaken += gained;
+                    }
+                }
+            }
+            settlement = new TakeSettlement(taken, totalMatchedAtOpen > 0, totalTaken < totalMatchedAtOpen);
+        }
+
+        // 容器那一侧装着匹配过的那些物品的总件数（按物品 ID 认，药水合并算一种）；关箱时还剩没有按它判断。
+        private int matchedInContainer(MenuContent.Reading reading) {
+            int sum = 0;
+            for (String itemId : initialMatchedCounts.keySet()) {
+                sum += countInSnapshots(reading.containerSnapshots(), itemId);
+            }
+            return sum;
+        }
+
+        private static int countInSnapshots(List<SlotSnapshot> snapshots, String itemId) {
+            int sum = 0;
+            for (SlotSnapshot snapshot : snapshots) {
+                if (!snapshot.isEmpty() && itemIdOf(snapshot).equals(itemId)) {
+                    sum += snapshot.count();
+                }
+            }
+            return sum;
+        }
+
+        // 清点按键是带种类的写法，结算的账按物品 ID 记：药水几种合并在一个物品名下，与匹配过的键一致。
+        private static Map<String, Integer> plainCounts(Map<String, Integer> writtenCounts) {
+            Map<String, Integer> plain = new HashMap<>();
+            writtenCounts.forEach((written, count) -> plain.merge(StackKey.parse(written).itemId(), count, Integer::sum));
+            return plain;
+        }
+
+        /** 取货单里的一样：整箱搬时只有"箱里的东西"这一样，点名的每样一条；几样合用取货单的总件数线。 */
+        private final class BatchWant implements MenuTakeRound.Want {
+
+            /** 点名的这样；整箱搬时为 null，所有非空格都算。 */
+            private final WantedItem wanted;
+
+            BatchWant(WantedItem wanted) {
+                this.wanted = wanted;
+            }
+
+            @Override
+            public String label() {
+                return "从" + container.name() + "拿" + (wanted == null ? "整箱" : wanted.describe());
+            }
+
+            @Override
+            public Predicate<SlotSnapshot> matcher() {
+                return snapshot -> !snapshot.isEmpty()
+                        && (wanted == null || wanted.matches(snapshot.key(), tags.tagsOf(itemIdOf(snapshot))));
+            }
+
+            @Override
+            public void firstReading(MenuContent.Reading reading) {
+                recordInitialMatched(reading);
+                latestReading = reading;
+            }
+
+            // 这一刻还差几件：箱里现存的与总件数线的余量取小——几样合起来拿够 maxCount 就停，
+            // 不大于零（箱里这样没了或线上余量用完）就放下这一样。
+            @Override
+            public int stillNeeded(MenuContent.Reading reading) {
+                latestReading = reading;
+                int budgetLeft = order.maxCount() <= 0 ? Integer.MAX_VALUE
+                        : Math.max(0, order.maxCount() - (totalMatchedAtOpen - matchedInContainer(reading)));
+                return Math.min(matchedTotal(reading, matcher()), budgetLeft);
+            }
+
+            @Override
+            public boolean settleAfterDiverge() {
+                return false;
+            }
         }
 
         private void reportRareLoot() {
@@ -474,8 +651,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         }
 
         private boolean matchesAnyWant(SlotSnapshot snapshot) {
-            for (ContainerWant want : wants) {
-                if (matches(snapshot, want.request())) return true;
+            for (MenuTakeRound.Want want : wants) {
+                if (want.matcher().test(snapshot)) return true;
             }
             return false;
         }
@@ -484,8 +661,8 @@ public final class MenuContainerTakes implements ContainerTakes {
         private void reportOthersTook() {
             if (othersReported || initialMatchedCounts == null || latestReading == null) return;
             othersReported = true;
-            for (ContainerWant want : wants) {
-                if (want.request().foodReport().bound()) return;
+            for (MenuTakeRound.Want want : wants) {
+                if (want instanceof ContainerWant reported && reported.request().foodReport().bound()) return;
             }
             Map<String, Integer> remaining = new HashMap<>();
             for (SlotSnapshot snapshot : latestReading.containerSnapshots()) {
