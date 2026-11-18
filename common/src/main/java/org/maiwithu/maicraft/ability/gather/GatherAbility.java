@@ -10,12 +10,12 @@ import java.util.Set;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.engine.OffhandContents;
+import org.maiwithu.maicraft.behavior.acquire.engine.PickedUpItems;
 import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 import org.maiwithu.maicraft.behavior.acquire.field.ReplantsCrops;
 import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
-import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -189,14 +189,9 @@ public final class GatherAbility implements AbilityModule {
         return "采集 " + id + (found.block() ? " 处的方块" : " 的掉落物");
     }
 
-    // 目标物品此刻在背包主格里的件数：原版自动拾取吸走的东西从这里确认。
-    // 只数主背包，与采集任务的拾取确认同一把尺。
+    // 目标物品此刻在背包主格里的件数：原版自动拾取吸走的东西从这里确认，与采集任务的拾取确认同一把尺。
     private int countCarried(String itemId) {
-        int count = 0;
-        for (BackpackStack stack : backpack.stacks()) {
-            if (stack.itemId().equals(itemId)) count += stack.count();
-        }
-        return count;
+        return PickedUpItems.countOf(backpack, itemId);
     }
 
     // 坐标目标：y 可以省略，找这一柱列的顶面；整列没加载就说不清，不瞎猜高度。

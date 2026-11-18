@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.gather;
 
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +15,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
+import org.maiwithu.maicraft.behavior.acquire.engine.PickedUpItems;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.TellsToolUse;
@@ -417,29 +417,13 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         return "（有机会掉 " + String.join("、", parts) + "，没掉是常态）";
     }
 
-    /** 动手以来背包里每样东西多了几件。 */
+    /** 动手以来捡到的：原版拾取只进背包主格，主背包比起开工时的差就是捡到的。 */
     private Map<String, Integer> gainedSinceBaseline() {
-        Map<String, Integer> now = countByItem();
-        Map<String, Integer> gained = new LinkedHashMap<>();
-        for (var entry : now.entrySet()) {
-            int before = baseline.getOrDefault(entry.getKey(), 0);
-            if (entry.getValue() > before) {
-                gained.put(entry.getKey(), entry.getValue() - before);
-            }
-        }
-        return gained;
+        return PickedUpItems.gainedSince(baseline, backpack);
     }
 
     private void snapshotBaseline() {
-        baseline = countByItem();
-    }
-
-    private Map<String, Integer> countByItem() {
-        Map<String, Integer> counts = new HashMap<>();
-        for (var stack : backpack.stacks()) {
-            counts.merge(stack.itemId(), stack.count(), Integer::sum);
-        }
-        return counts;
+        baseline = PickedUpItems.byItem(backpack);
     }
 
     private String gainedText(Map<String, Integer> gained) {

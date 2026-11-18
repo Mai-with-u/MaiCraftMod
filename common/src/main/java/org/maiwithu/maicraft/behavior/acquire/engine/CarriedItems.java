@@ -12,7 +12,8 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 
 /**
  * 身上清点：主背包加副手里，有多少件是这次要的东西。
- * "身上有多少"这一条游戏事实全仓只有这一处数法，引擎重新清点与各能力看身上够不够都用它。
+ * "身上有多少"这一问全仓只有这一处数法，引擎重新清点与各能力看身上够不够都用它；
+ * 追捡掉落物核验"这一趟捡到了什么"是另一种问法（只数背包主格的新增），见 {@link PickedUpItems}。
  */
 public final class CarriedItems {
 
@@ -92,7 +93,4 @@ public final class CarriedItems {
                 && requirements.sufficient(offhand.heldInOffhand().get().itemId(), blockType);
     }
 
-    private static int matchingCount(BackpackStack stack, ItemRequest request, ReadsItemTags tags) {
-        return request.wanted().matches(stack.itemId(), tags.tagsOf(stack.itemId())) ? stack.count() : 0;
-    }
 }

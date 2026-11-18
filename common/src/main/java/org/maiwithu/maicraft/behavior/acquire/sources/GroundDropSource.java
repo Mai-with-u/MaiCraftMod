@@ -15,6 +15,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 
+import org.maiwithu.maicraft.behavior.acquire.engine.PickedUpItems;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
@@ -25,7 +26,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.UnreachablePlaces;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -187,13 +187,8 @@ public final class GroundDropSource implements ItemSource {
     }
 
     private int carriedWanted(ItemRequest request) {
-        int total = 0;
-        for (BackpackStack stack : backpack.stacks()) {
-            if (request.wanted().matches(stack, tags.tagsOf(stack.itemId()))) {
-                total += stack.count();
-            }
-        }
-        return total;
+        // 追捡地上掉落物的核验只看背包主格：原版拾取只把东西放进主背包，副手不吃拾取物。
+        return PickedUpItems.matching(backpack, request.wanted(), tags);
     }
 
     private static int searchRadius(SourceContext context) {
