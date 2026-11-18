@@ -119,6 +119,11 @@ public final class ControlLoop {
         this(needs, TaskEventSink.NONE);
     }
 
+    /** 按登记顺序列出控制循环里的生存需求（末尾是插一下的排队）：总装用它核对清单登记的顺序没接错。 */
+    public List<SurvivalNeed> needs() {
+        return needs;
+    }
+
     /**
      * @param events 角色死亡这类循环自身的处境变化从这里告诉宿主；测试没接事件流时用空实现。
      */

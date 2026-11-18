@@ -10,9 +10,17 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.approach.UnreachableFromHere;
+import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.ModRangedWeapons;
 import org.maiwithu.maicraft.behavior.combat.SparPartner;
+import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
+import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
+import org.maiwithu.maicraft.behavior.landing.FallRescues;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.LookBackNeed;
+import org.maiwithu.maicraft.behavior.perception.bodylanguage.PokesFelt;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
+import org.maiwithu.maicraft.behavior.survival.hunger.EatsCarriedFood;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
@@ -20,8 +28,8 @@ import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
-import org.maiwithu.maicraft.behavior.permission.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
@@ -45,6 +53,7 @@ import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.InputDriver;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerControlBoundary;
+import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.serverlink.LinkTransport;
 import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
@@ -56,6 +65,9 @@ import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.ability.timer.Timers;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.interrupt.ControlLoop;
+import org.maiwithu.maicraft.kernel.interrupt.DeathDecisionHost;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -99,6 +111,12 @@ final class OfflineCatalog {
 
     /** 离线角色的玩家编号。 */
     private static final String SELF_ID = "00000000-0000-0000-0000-000000000000";
+
+    /** 只读亮度替身：永远"读不到"。能力清单照常登记，真量光在实机验收。 */
+    private static final ReadsLightLevels NO_LIGHT = new ReadsLightLevels() {
+        @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
+        @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
+    };
 
     private OfflineCatalog() {}
 
@@ -146,11 +164,7 @@ final class OfflineCatalog {
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(),
                         LiveCarryReads.toolRequirements(nobody), stack -> 0),
                 new WorldReads(new Scene(memory, facilities), memory, new BlockScanService(), facilities,
-                        // 只读亮度离线给"读不到"的替身：能力清单照常登记，真量光在实机验收。
-                        new ReadsLightLevels() {
-                            @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
-                            @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
-                        },
+                        NO_LIGHT,
                         new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE, GeneratedTerrain.NONE,
                         // 营地地面坑的扫描读端离线给"哪都没有营地"的空壳：填坑能力照常登记。
                         new ClientCampPitSight(Campground.NOWHERE, pos -> false)),
@@ -188,5 +202,43 @@ final class OfflineCatalog {
                 new ReservedItems(LiveCarryReads.itemTags(), Map::of),
                 new DropConfirmations(),
                 config, new SparPartner());
+    }
+
+    /**
+     * 离线的控制循环：生存需求按生产走的同一个清单（SurvivalNeedCatalog）装配，替身按"读不到现场"回答。
+     * 总装测试拿它核对每项需求的登记顺序没接错、循环推进不依赖真实客户端；
+     * 没有主任务、读不到角色时各需求都按不急处理，控制循环只推进主任务。
+     */
+    static ControlLoop controlLoop(Path tempDir) {
+        Supplier<PlayerContext> nobody = () -> null;
+        WorldMemory memory = new WorldMemory(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY);
+        // 这个世界的保护判断：换气挖开头顶、插火把挑位置都问它；离线认不出归属，按没有归属回答。
+        Protection protection = new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory, SELF_ID);
+        // 饿了挑吃的、数口粮都按游戏的食物组件认：读不到当刻角色时各需求按不急处理。
+        ReadsFoodValues foods = PlayerViews.foods(nobody);
+        // 走到与寻路同一个内件：自卫退开、跑回去捡都从这里走。
+        BaritoneInternals walks = new BaritoneInternals(ItemsToKeep.NOTHING, DigToolRule.HELD);
+        // 要留的东西照生产走同一道：预留（离线读不到身上件数）加上正要用的。
+        ItemsToKeep kept = new ReservedItems(LiveCarryReads.itemTags(), Map::of)
+                .plus(new ItemsInUse(LiveCarryReads.itemTags()));
+        // 战斗感观与远程武器照生产的形状拼：联动的远程武器离线一份没有。
+        ModRangedWeapons ranged = new ModRangedWeapons(List::of, foods);
+        CombatSenses senses = new LiveCombatSenses(new CombatMemory(), foods, ranged, () -> protection);
+        return SurvivalNeedCatalog.controlLoop(
+                // 任务事件离线没人听；角色死亡这类循环自身的处境变化也没有挂载方。
+                (kind, message) -> { }, DeathDecisionHost.NONE,
+                new SurvivalHands(new Interactions(null), () -> null, new ClientMovesToMainhand(nobody)),
+                new SurvivalBattle(senses, walks, ranged,
+                        new ClientDropPickup(nobody, walks, new DropConfirmations()),
+                        () -> memory, uuid -> false),
+                new SurvivalReads(foods, NO_LIGHT, () -> protection,
+                        () -> Permissions.DEFAULT.changeBlocks()),
+                // 吃随身食物：读不到角色时挑不出吃的，这项需求按不急处理。
+                new EatsCarriedFood(PlayerViews.backpack(nobody), foods,
+                        new ClientMovesToMainhand(nobody), NO_HOLD, kept),
+                FallRescues.withBrakes(List::of), List::of,
+                kept, new SurvivalWiring(), new FollowLighting(),
+                // 被拍了回头看：离线没有人拍，读端按没人拍过回答。
+                new LookBackNeed(PokesFelt.later(() -> null)));
     }
 }

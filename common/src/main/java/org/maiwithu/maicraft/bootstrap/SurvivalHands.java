@@ -7,17 +7,13 @@ import java.util.function.Supplier;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
-import org.maiwithu.maicraft.game.interaction.InteractionSender;
-import org.maiwithu.maicraft.game.menu.MenuActions;
 
 /**
- * 生存需求动手的几条路：交互提交、容器界面操作、交互动作入口、挖一格的供给与换手——
+ * 生存需求动手的几条路：交互动作入口、挖一格的供给与换手——
  * 被埋挖顶、出岩浆换手喝药、举盾退开、插火把都从这里出手。
  * 新加一条生存需求出手的路，加在这里并传入所在组即可。
  */
 record SurvivalHands(
-        InteractionSender interactionSender,
-        MenuActions menuActions,
         Interactions interactions,
         /** 挖一格的动作供给：被埋挖顶与换气挖顶共用生存需求那套原生挖掘，每次要挖一格开一份。 */
         Supplier<BlockBreaking> digging,
@@ -25,8 +21,6 @@ record SurvivalHands(
         ClientMovesToMainhand hands) {
 
     SurvivalHands {
-        Objects.requireNonNull(interactionSender, "interactionSender");
-        Objects.requireNonNull(menuActions, "menuActions");
         Objects.requireNonNull(interactions, "interactions");
         Objects.requireNonNull(digging, "digging");
         Objects.requireNonNull(hands, "hands");

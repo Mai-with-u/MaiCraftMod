@@ -86,8 +86,8 @@ class AssemblyTest {
     @Test
     void assignedGoalAdvancesThroughControlLoopEachTick() {
         var registry = AbilityCatalog.create(OfflineCatalog.deps(tempDir));
-        // 手上没有生存需求（替身清单为空），控制循环只推进主任务。
-        ControlLoop controlLoop = new ControlLoop(List.of());
+        // 控制循环照生产走同一个生存需求清单：替身读不到现场，各需求都按不急处理，循环只推进主任务。
+        ControlLoop controlLoop = OfflineCatalog.controlLoop(tempDir);
         // 下达经目标运行表：LLM 用 execute 派的活走同一条路，目标成为控制循环的主任务。
         // 列出挂着的计时：一刻就做完的真实能力。生产里 execute 把不占身体的能力当场做完，放进 sequence 时才由控制循环推进；
         // 这里借它把目标运行表、任务工厂与控制循环这条推进路径完整走一遍。
@@ -120,6 +120,18 @@ class AssemblyTest {
         assertNotNull(finished, "列出计时在几刻内就该走完");
         assertEquals(TaskResult.Status.DONE, finished.status(),
                 "列出计时的结算要如实写清：" + finished.summary());
+    }
+
+    @Test
+    void survivalNeedsAssembledInUrgencyOrder() {
+        // 控制循环的生存需求清单照生产走 SurvivalNeedCatalog 同一条装配：
+        // 必须立刻处理的先登记，同样急时先插进来；顺序接错了，被埋挖顶、出岩浆这些立刻的急事
+        // 就会排在吃饭、太暗这些找空当的事后面。
+        List<String> names = OfflineCatalog.controlLoop(tempDir).needs().stream()
+                .map(need -> need.getClass().getSimpleName()).toList();
+        assertEquals(List.of("DigOutNeed", "BreathNeed", "FallNeed", "BurningNeed", "SelfDefenseNeed", "HungerNeed",
+                "DarknessNeed", "NightfallNeed", "EdgeProximityNeed", "LostItemsNeed", "LookBackNeed", "CutIns"), names,
+                "生存需求要按急迫程度登记：立刻的在前，插一下的排队在末尾");
     }
 
     @Test
