@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.inventory.containers;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.UnaryOperator;
 
 import net.minecraft.core.BlockPos;
 
@@ -27,12 +28,24 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>机器里已经有的够几件就少投几件的（按机器储罐或格子里现成的扣），由构造方给 {@link TopUp}：
  * 界面一打开、第一次要搬之前问一次要扣掉几件，扣完不用投就算做完。
+ *
+ * <p>投料前后要就地记一笔的（投之前机器格里原有什么、确认放进去了、一件都没放进时补现场），
+ * 由构造方给 {@link Hooks}。
  */
-public final class MenuFeed implements Action {
+public final class MenuFeed implements Action, FeedReport {
 
     /** 界面开着、第一次要搬之前问一次：少投几件，原因写进 notes。 */
     public interface TopUp {
         int skip(int asked, List<String> notes);
+    }
+
+    /** 投料前后就地记账的时机：首次推进前记一笔、确认至少放进一件并做成时记一笔、一件没放进失败时补现场。 */
+    public record Hooks(Runnable onStart, Runnable onDelivered, UnaryOperator<Problem> onFailed) {
+        public Hooks {
+            Objects.requireNonNull(onStart, "onStart");
+            Objects.requireNonNull(onDelivered, "onDelivered");
+            Objects.requireNonNull(onFailed, "onFailed");
+        }
     }
 
     private final String itemId;
@@ -43,6 +56,10 @@ public final class MenuFeed implements Action {
     /** 投之前要扣掉机器里已有的；不用扣为 null。 */
     private final TopUp topUp;
     private boolean toppedUp;
+    /** 投料前后就地记账的时机；不用记账为 null。 */
+    private final Hooks hooks;
+    private boolean started;
+    private boolean deliveredNoted;
 
     /**
      * @param machine     机器叫什么，给描述与说明用，例如"富集仓"
@@ -56,7 +73,13 @@ public final class MenuFeed implements Action {
     /** @param topUp 界面打开后先扣掉机器里已有的几件；不用扣给 null */
     public MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
             Permissions permissions, TopUp topUp) {
-        this(machine, at, blockTypeId, itemId, count, permissions, topUp,
+        this(services, machine, at, blockTypeId, itemId, count, permissions, topUp, null);
+    }
+
+    /** @param hooks 投料前后就地记账的时机；不用记账给 null */
+    public MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
+            Permissions permissions, TopUp topUp, Hooks hooks) {
+        this(machine, at, blockTypeId, itemId, count, permissions, topUp, hooks,
                 (cell, allowed) -> {
                     Objects.requireNonNull(services, "services");
                     return new ClientMenuOpening(cell, allowed, services.menuLayouts(), services.approach(),
@@ -67,11 +90,12 @@ public final class MenuFeed implements Action {
 
     // 包内测试可注入替身界面打开动作，离线核对按标签投料与瞬间吃料记账。
     MenuFeed(String machine, BlockPos at, String blockTypeId, String itemId, int count,
-            Permissions permissions, TopUp topUp, StoresInContainer.OpensContainer opens) {
+            Permissions permissions, TopUp topUp, Hooks hooks, StoresInContainer.OpensContainer opens) {
         Objects.requireNonNull(opens, "opens");
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         this.asked = count;
         this.topUp = topUp;
+        this.hooks = hooks;
         StoresInContainer.Ledger ledger = new StoresInContainer.Ledger() {
             // 搬第一笔前界面已经开着、储罐也同步过来了：这时问一次机器里已有多少，扣掉够数的几件。
             @Override public int left(String id) {
@@ -111,18 +135,36 @@ public final class MenuFeed implements Action {
     // 搬完确认件数：一件没放进去按失败，带上点开、放不下的经过；放进去的少于要的写一句为什么。
     // 机器里已有的够了、扣完一件都不用投的，不算失败。
     @Override public ActionStatus tick(TickContext context) {
+        // 首次推进先记投料前的现场（机器格里原有什么），再开始点开与搬运。
+        if (hooks != null && !started) {
+            started = true;
+            hooks.onStart().run();
+        }
         ActionStatus status = storing.tick(context);
+        if (status instanceof ActionStatus.Failed failed) {
+            return failedWithNotes(failed.problem());
+        }
         if (!(status instanceof ActionStatus.Done)) return status;
+        // 确认至少放进一件并做成了才记"放进去了"，重推到的完成不算第二笔。
+        if (hooks != null && !deliveredNoted) {
+            deliveredNoted = true;
+            if (stored > 0) hooks.onDelivered().run();
+        }
         if (asked == 0) return status;
         if (stored == 0) {
             String seen = notes.isEmpty() ? "" : "：" + String.join("；", notes);
-            return ActionStatus.failed(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            return failedWithNotes(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "界面里一件 " + itemId + " 都没放进去" + seen));
         }
         if (stored < asked) {
             notes.add("界面里放进去 " + stored + " 件 " + itemId + "，要的是 " + asked + " 件：收它的格满了，或身上不够");
         }
         return status;
+    }
+
+    // 失败先经记账口补机器槽内的现场实情，再交回给调用方。
+    private ActionStatus failedWithNotes(Problem problem) {
+        return ActionStatus.failed(hooks == null ? problem : hooks.onFailed().apply(problem));
     }
 
     /** 确认放进界面的件数；给调用方交投料实情用。 */

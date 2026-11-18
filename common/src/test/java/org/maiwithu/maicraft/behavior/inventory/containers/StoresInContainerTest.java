@@ -78,7 +78,7 @@ class StoresInContainerTest {
         ContainerTransferTest.FakeTransferMenu menu = new ContainerTransferTest.FakeTransferMenu(false);
         menu.player.set(0, new ItemStack(Items.GOLD_INGOT, 4));
         MenuFeed feed = new MenuFeed("压印器", AT, "ae2:inscriber", "#c:ingots/gold", 4,
-                Permissions.DEFAULT, null, (cell, allowed) -> instantOpen(menu));
+                Permissions.DEFAULT, null, null, (cell, allowed) -> instantOpen(menu));
 
         ActionStatus last = ActionStatus.running();
         for (int i = 0; i < 30 && !(last instanceof ActionStatus.Done); i++) {
@@ -96,7 +96,7 @@ class StoresInContainerTest {
         ContainerTransferTest.FakeTransferMenu menu = new ContainerTransferTest.FakeTransferMenu(true);
         menu.player.set(0, new ItemStack(Items.COAL, 5));
         MenuFeed feed = new MenuFeed("冶金灌注机", AT, "mekanism:metallurgic_infuser", "minecraft:coal", 1,
-                Permissions.DEFAULT, null, (cell, allowed) -> instantOpen(menu));
+                Permissions.DEFAULT, null, null, (cell, allowed) -> instantOpen(menu));
 
         ActionStatus last = ActionStatus.running();
         for (int i = 0; i < 40 && !(last instanceof ActionStatus.Done) && !(last instanceof ActionStatus.Failed); i++) {

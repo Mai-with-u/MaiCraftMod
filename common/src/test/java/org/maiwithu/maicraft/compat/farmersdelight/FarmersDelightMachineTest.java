@@ -31,7 +31,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.inventory.containers.CompatMenuFeed;
+import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -142,7 +142,7 @@ class FarmersDelightMachineTest {
     @Test
     void 投料收餐都给点开界面的动作() {
         assertTrue(type().feed(AT, new FeedPlan.Entry("farmersdelight:raw_pasta", 3, false), Permissions.DEFAULT).orElseThrow()
-                instanceof CompatMenuFeed, "投料走点开界面放槽");
+                instanceof MenuFeed, "投料走点开界面放槽");
         assertTrue(type().take(AT, "farmersdelight:vegetable_soup", 1, Permissions.DEFAULT).orElseThrow()
                 instanceof MenuOutputLook, "收餐是点开界面把餐搬进背包");
     }

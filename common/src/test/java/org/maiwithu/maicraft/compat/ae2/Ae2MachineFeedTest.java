@@ -52,7 +52,7 @@ import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.inventory.containers.CompatMenuFeed;
+import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.GearSlotName;
@@ -156,7 +156,7 @@ class Ae2MachineFeedTest {
     @Test
     void 压印器给经界面的投料动作_不收料的设备照旧给空() {
         assertTrue(typeOf("ae2:inscriber").feed(AT, new FeedPlan.Entry(INGOT, 4, false), Permissions.DEFAULT)
-                .orElseThrow() instanceof CompatMenuFeed, "压印器的投料走点开界面放槽");
+                .orElseThrow() instanceof MenuFeed, "压印器的投料走点开界面放槽");
         assertTrue(typeOf("ae2:charger").feed(AT, new FeedPlan.Entry(INGOT, 1, false), Permissions.DEFAULT).isEmpty(),
                 "充能器这类没接投料方法的设备不给动作");
     }

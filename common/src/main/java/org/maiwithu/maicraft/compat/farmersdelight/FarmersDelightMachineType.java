@@ -24,7 +24,6 @@ import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.inventory.containers.CompatMenuFeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -90,10 +89,9 @@ final class FarmersDelightMachineType implements MachineType, MachineFeeding {
     @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
 
     // 投料：点开厨锅的界面把食材搬进去（整堆快速移动，锅自己把它放进收它的格）。
-
     @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
-        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, kind.id(), item.item(),
-                item.count(), permissions, null)));
+        return Optional.of(new MenuFeed(services, kind.name(), at, kind.id(), item.item(),
+                item.count(), permissions, null));
     }
 
     // 出口：做好的餐在餐品显示格与成品输出格里，随方块实体同步，站外面读得到。

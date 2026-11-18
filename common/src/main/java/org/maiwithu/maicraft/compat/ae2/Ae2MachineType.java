@@ -44,7 +44,6 @@ import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.behavior.inventory.containers.CompatMenuFeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -252,12 +251,11 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         if (!isInscriber()) return Optional.empty();
         BlockPos pos = at.immutable();
         Set<String> platesBefore = new LinkedHashSet<>();
-        MenuFeed inner = new MenuFeed(services, kind.name(), pos, kind.id(), item.item(), item.count(),
-                permissions, null);
-        return Optional.of(new CompatMenuFeed(inner,
-                () -> compat.inscriberInputs(level(), pos).ifPresent(slots -> platesBefore.addAll(slots.plates())),
-                () -> recordPlacedPlate(pos, item, platesBefore),
-                problem -> enrichFeedFailure(pos, item.item(), problem)));
+        return Optional.of(new MenuFeed(services, kind.name(), pos, kind.id(), item.item(), item.count(),
+                permissions, null, new MenuFeed.Hooks(
+                        () -> compat.inscriberInputs(level(), pos).ifPresent(slots -> platesBefore.addAll(slots.plates())),
+                        () -> recordPlacedPlate(pos, item, platesBefore),
+                        problem -> enrichFeedFailure(pos, item.item(), problem))));
     }
 
     // 这一下投完后哪些模板算"自己放进机器的"：计划标明要收回的直接记下；别的照投前投后工作格的差算。

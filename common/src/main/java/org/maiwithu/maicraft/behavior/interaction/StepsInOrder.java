@@ -13,8 +13,8 @@ import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 几步按顺序做的一个动作：上一步做完才建下一步（下一步要按那一刻的现场建，例如点完第一根轴再看手里的东西），
- * 哪一步失败整个动作就按它的问题失败，后面的不做。装传送带"拿传送带 → 点第一根轴 → 点第二根轴"就是这样。
+ * 几步按顺序做的一个动作：上一步做完才建下一步（下一步要按那一刻的现场建，例如放好第一段再看下一段接在哪），
+ * 哪一步失败整个动作就按它的问题失败，后面的不做。铺铁轨"拿铁轨 → 放第一段 → 接着放下一格"就是这样。
  */
 public final class StepsInOrder implements Action {
 
