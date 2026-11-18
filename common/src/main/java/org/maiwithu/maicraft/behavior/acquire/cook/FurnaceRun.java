@@ -136,7 +136,7 @@ final class FurnaceRun implements Action {
     private boolean inputLoaded;
     private boolean fuelTidied;
     private boolean inputTidied;
-    /** 燃料槽里占着自己上次烧剩的空桶时已经试过收进背包，防止收不进时死循环反复点。 */
+    /** 燃料槽里占着需清出的空铁桶或本趟残物时已经试过收进背包，防止收不进时死循环反复点。 */
     private boolean clearFuelAttempted;
     /** 收场的原因（缺料、缺燃料、炉子正忙、背包满了）；一件没收到时按它失败。 */
     private Problem ending;
@@ -256,8 +256,8 @@ final class FurnaceRun implements Action {
         // 燃料槽不空时要再核对里面物品还能不能烧（burnTicks > 0）：岩浆烧完留下的空铁桶占在槽里不算有燃料。
         boolean fueled = FurnaceFuel.usable(litNow, fuelId, fuel.isEmpty() ? 0 : burnTicksOf(fuelId));
         if (!litNow && !fuel.isEmpty() && !fueled) {
-            // 炉火已灭且燃料槽被不可燃物占住：自己上次放岩浆桶留的空桶就收回背包，别人的残物不乱动、直接换炉子。
-            if (!clearFuelAttempted && FurnaceFuel.ownResidue(fuelPlaced, fuelId)) {
+            // 炉火已灭且燃料槽被不可燃物占住：本趟残物或冷炉遗留空铁桶收进背包，别的陌生残物不乱动、直接换炉子。
+            if (!clearFuelAttempted && FurnaceFuel.removableResidue(fuelPlaced, fuelId)) {
                 clearFuelAttempted = true;
                 return clearFuelSlot(open, fuel);
             }
@@ -457,7 +457,7 @@ final class FurnaceRun implements Action {
         SlotSnapshot fuel = open.containerSnapshots().get(FUEL);
         SlotSnapshot input = open.containerSnapshots().get(INPUT);
         int index = -1;
-        if (!fuelTidied && fuelPlaced != null && !fuel.isEmpty() && itemId(fuel.stack()).equals(fuelPlaced)) {
+        if (!fuelTidied && !fuel.isEmpty() && FurnaceFuel.ownResidue(fuelPlaced, itemId(fuel.stack()))) {
             index = FUEL;
             fuelTidied = true;
         } else if (!inputTidied && inputLoaded && !input.isEmpty() && isIngredient(input.stack())) {
@@ -729,7 +729,7 @@ final class FurnaceRun implements Action {
         return ActionStatus.failed(failure);
     }
 
-    // 把自己上次用岩浆桶烧完留下的空桶整堆快速移动回背包，腾出燃料槽继续添料。
+    // 把冷炉燃料槽里占位的空铁桶或本趟残物整堆快速移动回背包，腾出燃料槽继续添燃料。
     private ActionStatus clearFuelSlot(MenuContent.Reading open, SlotSnapshot fuel) {
         int slotId = open.containerSlotIds().get(FUEL);
         run.begin(new TransferRun.Move(List.of(new MenuClick(slotId, true, 0, false)),

@@ -67,13 +67,22 @@ class FurnaceFuelPickTest {
     }
 
     @Test
-    void emptyBucketInUnlitFurnaceDoesNotCountAsUsableFuel() {
+    void emptyBucketInUnlitFurnaceDoesNotCountAsUsableFuelAndColdBucketResidueCanBeCleared() {
         // 炉火熄灭时，燃料槽里占着的空铁桶燃烧时间为 0，不算还有燃料；炉子仍亮着时照常算在烧。
         assertEquals(false, FurnaceFuel.usable(false, "minecraft:bucket", 0));
         assertTrue(FurnaceFuel.usable(true, "minecraft:bucket", 0));
         assertTrue(FurnaceFuel.usable(false, "minecraft:coal", 1600));
+
+        // 收工整理只认本趟放进去的燃料或本趟岩浆桶烧剩的空铁桶，不把机内原本就有的收走。
+        assertTrue(FurnaceFuel.ownResidue("minecraft:coal", "minecraft:coal"));
         assertTrue(FurnaceFuel.ownResidue("minecraft:lava_bucket", "minecraft:bucket"));
         assertEquals(false, FurnaceFuel.ownResidue("minecraft:coal", "minecraft:bucket"));
         assertEquals(false, FurnaceFuel.ownResidue(null, "minecraft:bucket"));
+
+        // 冷炉无外人原料产物时，早先遗留的空铁桶允许清出腾槽，陌生不可燃物仍不乱动。
+        assertTrue(FurnaceFuel.removableResidue(null, "minecraft:bucket"));
+        assertTrue(FurnaceFuel.removableResidue("minecraft:coal", "minecraft:bucket"));
+        assertEquals(false, FurnaceFuel.removableResidue(null, "minecraft:cobblestone"));
+        assertEquals(false, FurnaceFuel.removableResidue("minecraft:coal", "minecraft:cobblestone"));
     }
 }

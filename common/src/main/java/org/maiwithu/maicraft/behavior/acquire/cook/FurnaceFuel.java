@@ -64,14 +64,24 @@ final class FurnaceFuel {
     }
 
     /**
-     * 燃料槽里的不可燃残物是不是角色自己放进去留下的。
+     * 燃料槽里的剩余物是不是角色本趟自己放进去留下的（含剩余燃料与岩浆桶烧完留下的空铁桶）。
      *
-     * <p>岩浆桶烧完留下的是空铁桶：那是角色自己放的，该收回背包腾出槽位；别人留下的残物不乱动，换一台炉子。
+     * <p>收工整理时只收回本趟自己放进去的燃料或岩浆烧剩的空铁桶；炉子里原有的燃料与别人的残物不拿走。
      */
     static boolean ownResidue(String fuelPlaced, String currentFuelId) {
         if (fuelPlaced == null || currentFuelId == null || currentFuelId.isEmpty()) return false;
         return currentFuelId.equals(fuelPlaced)
                 || ("minecraft:lava_bucket".equals(fuelPlaced) && "minecraft:bucket".equals(currentFuelId));
+    }
+
+    /**
+     * 炉火已灭、投入口与产出格已确认没有别人的东西时，燃料槽里的不可燃残物能不能收走腾位。
+     *
+     * <p>除了角色本趟放进去留下的不可燃物，早先烧完岩浆遗留在冷炉燃料槽里的空铁桶也一并清出，
+     * 免得营地里唯一的炉子被空铁桶堵死；别的陌生不可燃物品仍不乱动，换下一台炉子。
+     */
+    static boolean removableResidue(String fuelPlaced, String currentFuelId) {
+        return ownResidue(fuelPlaced, currentFuelId) || "minecraft:bucket".equals(currentFuelId);
     }
 
     /** 向上取整的除法：不算得准不会少备一件。 */
