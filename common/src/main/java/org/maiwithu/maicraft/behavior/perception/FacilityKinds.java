@@ -74,6 +74,11 @@ public final class FacilityKinds {
         return !tags.blocksIn(LOOTR_CONTAINER_TAG).isEmpty();
     }
 
+    /** 是原版已知的工作设施方块 ID（工作台、熔炉、高炉、烟熏炉、铁砧、酿造台等）：按区域整理容器时跳过这类加工台子。 */
+    public static boolean isWorkstationId(String blockType) {
+        return blockType != null && WORKSTATIONS.contains(blockType);
+    }
+
     /** 是工作设施：原版 ID 表里的，或挂着铁砧、工作台、熔炉标签的。 */
     public boolean isWorkstation(String blockType) {
         if (WORKSTATIONS.contains(blockType)) {
