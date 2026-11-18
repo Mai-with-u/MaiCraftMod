@@ -7,7 +7,6 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.LiquidBlock;
@@ -156,7 +155,7 @@ public final class AimAndInteract implements Action {
             if (++aimTicks < turnBudget) {
                 return ActionStatus.running();
             }
-            alignLookTo(player, scene.eyePosition(), aimPoint);
+            player.input().alignLookToward(scene.eyePosition(), aimPoint, player.clientTick());
         }
         if (liveRay) {
             HitResult hit = scene.sightRay();
@@ -219,16 +218,6 @@ public final class AimAndInteract implements Action {
         }
         var entity = ((InteractionTarget.EntityTarget) target).entity();
         return scene.entityWithinDirectReach(entity) ? scene.visibleEntityPoint(entity) : null;
-    }
-
-    // 满平滑预算后把剩余微小角差贴齐目标方向以保证发包朝向准确，同时保留上一刻镜头角维持渲染插值连续。
-    private static void alignLookTo(PlayerContext player, Vec3 eye, Vec3 point) {
-        Vec3 delta = point.subtract(eye);
-        if (delta.lengthSqr() < 1.0e-8) return;
-        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
-        float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
-        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
-        player.input().alignLook(yaw, pitch, player.clientTick());
     }
 
     // 走真实射线路径时转到位却点到了别的：重新找瞄准点再试；次数用完就是站位问题。

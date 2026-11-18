@@ -12,7 +12,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.Direction;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
@@ -308,7 +307,7 @@ public final class BlockDigger {
                 if (++aimTicks < turnBudget) {
                     return DigResult.PROGRESSING;
                 }
-                alignLookTo(context, hit.getLocation());
+                playerInput.alignLookToward(player.getEyePosition(), hit.getLocation(), context.clientTick());
             }
             if (!preparation.test(hit)) return DigResult.PROGRESSING;
             PendingInteraction started = sender.startBreaking(context, hit, BREAK_TIMEOUT_TICKS);
@@ -597,15 +596,6 @@ public final class BlockDigger {
         destroyingItem = null;
         aimTicks = 0;
         turnBudget = PlayerInput.TURN_MIN_TICKS;
-    }
-
-    private void alignLookTo(PlayerContext context, Vec3 target) {
-        Vec3 delta = target.subtract(player.getEyePosition());
-        if (delta.lengthSqr() < 1.0e-8) return;
-        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
-        float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
-        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
-        playerInput.alignLook(yaw, pitch, context.clientTick());
     }
 
     // 真实可见面被草叶或矿脉凸角挡住、或角色停在容差带内时，在服务端放行距离内按目标格与面直接构造合法挖掘命中。

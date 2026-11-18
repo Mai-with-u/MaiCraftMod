@@ -104,6 +104,19 @@ public interface PlayerInput {
     }
 
     /**
+     * 按世界坐标算出朝向角后做收尾对齐：右键、挖掘两条流水线在平滑预算用尽而镜头还差一点时，
+     * 都用这一份把剩余微小角差贴齐目标方向，保证发包朝向准确又不动渲染插值。
+     */
+    default void alignLookToward(Vec3 eye, Vec3 point, long requestTick) {
+        Vec3 delta = point.subtract(eye);
+        if (delta.lengthSqr() < 1.0e-8) return;
+        double horizontal = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        float yaw = (float) (Mth.atan2(delta.z, delta.x) * (double) Mth.RAD_TO_DEG) - 90.0f;
+        float pitch = (float) -(Mth.atan2(delta.y, horizontal) * (double) Mth.RAD_TO_DEG);
+        alignLook(yaw, pitch, requestTick);
+    }
+
+    /**
      * 多刻借用准星时按正常转头速度转向目标：只登记方向，由镜头平滑推进逐帧到位。
      * 随行补光要靠真实射线点击，不能像紧急自救那样瞬转瞬回，否则角色会看起来在闪现。
      */
