@@ -51,7 +51,12 @@ final class LineRoutes {
             MachineType type = services.claiming(state.get());
             if (type == null) continue;
             for (ExchangePoint point : type.exchangePoints(state.get(), cell)) {
-                if (point.side() != null && point.medium() == materials.medium()) {
+                if (point.side() == null) continue;
+                // 接某种网的线按网种类对面（这面自报接的是哪种网），接物理介质的线按介质对面。
+                boolean matches = materials.network() != null
+                        ? point.network() != null && point.network().id().equals(materials.network().id())
+                        : point.medium() == materials.medium();
+                if (matches) {
                     faces.add(new Face(cell, point.side(), point.flow()));
                 }
             }

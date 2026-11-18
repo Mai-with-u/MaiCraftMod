@@ -15,8 +15,18 @@ import net.minecraft.world.level.block.state.BlockState;
  */
 public interface LineMaterials {
 
-    /** 线接的是哪种进出口：要接的机器与来源都按这种进出口找能接线的面（转动、能量、ME……）。 */
-    ExchangePoint.Medium medium();
+    /**
+     * 线接的是哪种介质的面：接物理介质的线（应力轴、能量线、管道）给介质，要接的机器与来源都按它找能接线的面；
+     * 接某张网的线（ME 线缆）不答介质，network 说明接哪种网。
+     */
+    default ExchangePoint.Medium medium() {
+        return null;
+    }
+
+    /** 线接的不是物理介质而是某张网时是哪种网，由那种网的读取器自报；接物理介质的线给 null。 */
+    default NetworkKind network() {
+        return null;
+    }
 
     /** 沿 axis 走的一格线材；不分方向的三个轴给同一种。 */
     BlockState straight(Direction.Axis axis);

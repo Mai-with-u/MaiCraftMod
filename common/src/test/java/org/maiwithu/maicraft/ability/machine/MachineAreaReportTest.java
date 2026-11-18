@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -52,7 +53,7 @@ class MachineAreaReportTest {
         MachineTestDoubles.FakeMachineType drive = scene.type("test:drive", MachineRole.STORAGE, Blocks.FURNACE);
         scene.type("test:cable", MachineRole.CABLE, Blocks.IRON_BARS);
         drive.portsAt = cell -> List.of(
-                new ExchangePoint(cell, Direction.UP, ExchangePoint.Medium.ME, ExchangePoint.Flow.BOTH, "这一面能接线缆"),
+                new ExchangePoint(cell, Direction.UP, null, new NetworkKind("me", "ME 网络"), ExchangePoint.Flow.BOTH, "这一面能接线缆"),
                 new ExchangePoint(cell, Direction.NORTH, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.INPUT,
                         "侧面配置：物品 input"));
         MachineTestDoubles.FakeNetworkReader me = scene.reader("me");

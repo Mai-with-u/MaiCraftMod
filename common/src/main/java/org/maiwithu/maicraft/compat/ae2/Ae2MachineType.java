@@ -111,7 +111,7 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         List<ExchangePoint> points = new ArrayList<>();
         for (Direction side : Direction.values()) {
             if (cell.isPresent() && cell.get().cableBus() && cell.get().parts().containsKey(side)) continue;
-            points.add(new ExchangePoint(at, side, ExchangePoint.Medium.ME, ExchangePoint.Flow.BOTH,
+            points.add(new ExchangePoint(at, side, null, MeNetworkReader.KIND, ExchangePoint.Flow.BOTH,
                     cell.map(found -> found.links().contains(side)).orElse(false) ? "这一面连着线缆" : "这一面能接线缆"));
         }
         return points;
@@ -142,8 +142,11 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     // 频道：挂在网上又占频道的设备算 1 个；控制器给频道（每个控制器面 32 个，审阅里按 32 估），线缆不占。
     @Override public Optional<NetworkLoad> load(BlockState state) {
         if (!kind.onGrid() || kind.role() == MachineRole.CABLE) return Optional.empty();
-        if (kind.role() == MachineRole.NETWORK_CORE) return Optional.of(new NetworkLoad("me", 0, 32, "频道"));
-        return Optional.of(new NetworkLoad("me", 1, 0, "频道"));
+        // 网络种类按 ME 网读取器自报的那一种，不写死字面量。
+        if (kind.role() == MachineRole.NETWORK_CORE) {
+            return Optional.of(new NetworkLoad(MeNetworkReader.KIND.id(), 0, 32, "频道"));
+        }
+        return Optional.of(new NetworkLoad(MeNetworkReader.KIND.id(), 1, 0, "频道"));
     }
 
     @Override public Optional<String> installationProblem(Installation installation) {

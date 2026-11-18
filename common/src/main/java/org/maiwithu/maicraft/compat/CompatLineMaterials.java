@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 
 /**
  * 联动模组交来的接线线材，登记表给它包的一层：读模组方块、读已有连接时碰到接口对不上就收住，
@@ -29,6 +30,8 @@ final class CompatLineMaterials implements LineMaterials {
     }
 
     @Override public ExchangePoint.Medium medium() { return materials.medium(); }
+
+    @Override public NetworkKind network() { return materials.network(); }
 
     @Override public BlockState straight(Direction.Axis axis) { return materials.straight(axis); }
 

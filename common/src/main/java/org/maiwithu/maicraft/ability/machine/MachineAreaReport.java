@@ -249,7 +249,7 @@ final class MachineAreaReport {
         for (BlockPos cell : device.cells) {
             for (ExchangePoint point : site.pointsAt(cell)) {
                 if (isProcessingSpot(point, cell)) continue;
-                boolean byNetwork = point.medium() == ExchangePoint.Medium.ME
+                boolean byNetwork = point.network() != null
                         || point.medium() == ExchangePoint.Medium.ROTATION;
                 if (networked && byNetwork) continue;
                 ports.add(point);

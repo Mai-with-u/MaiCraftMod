@@ -13,6 +13,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
+import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 
 /**
  * ME 网的接线线材：福鲁伊克斯玻璃线缆（不带颜色，和任何颜色的线缆都连），不分方向、六面都接，拐弯也是它。
@@ -27,8 +28,9 @@ final class MeLines implements LineMaterials {
     MeLines() {
     }
 
-    @Override public ExchangePoint.Medium medium() {
-        return ExchangePoint.Medium.ME;
+    // ME 线缆接的不是物理介质：按 ME 网读取器自报的种类对面。
+    @Override public NetworkKind network() {
+        return MeNetworkReader.KIND;
     }
 
     @Override public BlockState straight(Direction.Axis axis) {
