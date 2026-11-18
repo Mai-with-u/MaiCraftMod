@@ -2,7 +2,6 @@
 package org.maiwithu.maicraft.ability.machine;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -21,6 +20,7 @@ import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.TargetText;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
@@ -105,11 +105,12 @@ final class MachineConnectModule implements AbilityModule {
                 }
                 sourceNetworkId = Optional.of(net.full());
             } else {
-                source = parseSource(rawSource);
+                // 非网络编号时与别的带来源位置的能力共用同一份目标文本解析（here、观察编号、坐标、地标名）。
+                source = TargetText.parse(rawSource);
                 if (source.isEmpty()) {
                     return new StepDecision.Finish(TaskResult.failed("source 写法不对",
                             Problem.of(Problem.Kind.INVALID_PARAMETER,
-                                    "source 要是观察编号（b3）、坐标 [x,y,z]、名字，或网络编号（如 kinetic:...）",
+                                    "source 要是观察编号（b3）、坐标 [x,y,z]、名字、here，或网络编号（如 kinetic:...）",
                                     "和 target 同一种写法，也可直接传 machine_inspect 的 networks[].id；不给就在 radius 内找")));
                 }
             }
@@ -146,30 +147,6 @@ final class MachineConnectModule implements AbilityModule {
             return Optional.empty();
         }
         return Optional.of(new ParsedNetworkId(prefix, trimmed.substring(sep + 1).trim(), trimmed));
-    }
-
-    /** source 的三种写法：观察编号、坐标、名字；都不是给空。 */
-    private Optional<Target> parseSource(String text) {
-        String trimmed = text.trim();
-        if (trimmed.matches("(?i)[bme]\\d+")) {
-            return Optional.of(new Target.Seen(trimmed.toLowerCase(Locale.ROOT)));
-        }
-        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-            String[] parts = trimmed.substring(1, trimmed.length() - 1).split(",");
-            if (parts.length == 3) {
-                try {
-                    return Optional.of(new Target.Position(Integer.parseInt(parts[0].trim()),
-                            Integer.parseInt(parts[1].trim()), Integer.parseInt(parts[2].trim()), null));
-                } catch (NumberFormatException notCoordinates) {
-                    return Optional.empty();
-                }
-            }
-            return Optional.empty();
-        }
-        if (!trimmed.isEmpty()) {
-            return Optional.of(new Target.Landmark(trimmed));
-        }
-        return Optional.empty();
     }
 
     @Override public void registerTasks(TaskFactories factories) {
