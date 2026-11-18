@@ -27,6 +27,7 @@ import net.minecraft.world.item.Items;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -154,9 +155,9 @@ class Ae2MachineFeedTest {
 
     @Test
     void 压印器给经界面的投料动作_不收料的设备照旧给空() {
-        assertTrue(typeOf("ae2:inscriber").feed(AT, INGOT, 4, Permissions.DEFAULT).orElseThrow()
-                instanceof CompatMenuFeed, "压印器的投料走点开界面放槽");
-        assertTrue(typeOf("ae2:charger").feed(AT, INGOT, 1, Permissions.DEFAULT).isEmpty(),
+        assertTrue(typeOf("ae2:inscriber").feed(AT, new FeedPlan.Entry(INGOT, 4, false), Permissions.DEFAULT)
+                .orElseThrow() instanceof CompatMenuFeed, "压印器的投料走点开界面放槽");
+        assertTrue(typeOf("ae2:charger").feed(AT, new FeedPlan.Entry(INGOT, 1, false), Permissions.DEFAULT).isEmpty(),
                 "充能器这类没接投料方法的设备不给动作");
     }
 
@@ -250,33 +251,35 @@ class Ae2MachineFeedTest {
     void 压印模式的不消耗模板跑多批也只投一张_机内已有匹配模板时投零张_压制模式照常乘批数() {
         Map<BlockPos, Ae2Inscribers.Inputs> slots = new HashMap<>();
         slots.put(AT, new Ae2Inscribers.Inputs("", "", ""));
-        Ae2MachineType inscriber = inscriberWithInputs(slots);
-        assertTrue(inscriber.feedsCatalysts());
 
-        // 空压印器做 4 批印制硅：EMI（模板在 inputs）与 JEI（模板在 catalysts）都只要 1 张硅压印模板、4 份硅，且模板排在硅前面。
+        // 空压印器做 4 批印制硅：EMI（模板在 inputs）与 JEI（模板在 catalysts）的计划都是
+        // 1 张硅压印模板、4 份 #c:silicon，模板排在硅前面，且模板标明收产物时一并收回。
         ShownRecipe emi = siliconPrintEmiRecipe();
-        assertEquals(1L, inscriber.feedCount(AT, emi, emi.inputs().get(0), 4, false));
-        assertEquals(4L, inscriber.feedCount(AT, emi, emi.inputs().get(1), 4, false));
-        assertTrue(inscriber.feedsFirst(emi, emi.inputs().get(0)));
-
+        FeedPlan emiPlan = inscriberWithInputs(slots).plan(AT, emi, 4, Permissions.DEFAULT);
+        assertEquals(List.of(new FeedPlan.Entry("ae2:silicon_press", 1, true),
+                new FeedPlan.Entry("#c:silicon", 4, false)), emiPlan.entries());
+        assertTrue(emiPlan.conflict().isEmpty(), emiPlan.conflict().toString());
+        // JEI 把硅写成具体物品（没有标签）：计划照它的写法给，模板照旧排在前、标明收回。
         ShownRecipe jei = siliconPrintJeiRecipe();
-        assertEquals(1L, inscriber.feedCount(AT, jei, jei.catalysts().get(0), 4, true));
-        assertEquals(4L, inscriber.feedCount(AT, jei, jei.inputs().get(0), 4, false));
+        assertEquals(List.of(new FeedPlan.Entry("ae2:silicon_press", 1, true),
+                new FeedPlan.Entry("ae2:silicon", 4, false)),
+                inscriberWithInputs(slots).plan(AT, jei, 4, Permissions.DEFAULT).entries());
 
-        // 机内顶格或底格原本就放着硅压印模板时，不再索要第 2 张（返回 0），且无槽位冲突。
+        // 机内顶格或底格原本就放着硅压印模板时，不再索要第 2 张，说明里写明不用再放，且无槽位冲突。
         slots.put(AT, new Ae2Inscribers.Inputs("", "ae2:silicon_press", ""));
-        assertEquals(0L, inscriber.feedCount(AT, emi, emi.inputs().get(0), 4, false));
-        assertEquals(0L, inscriber.feedCount(AT, jei, jei.catalysts().get(0), 4, true));
-        assertTrue(inscriber.whyCannotFeed(AT, "#c:silicon").isEmpty());
+        FeedPlan withTemplate = inscriberWithInputs(slots).plan(AT, emi, 4, Permissions.DEFAULT);
+        assertEquals(List.of(new FeedPlan.Entry("#c:silicon", 4, false)), withTemplate.entries());
+        assertTrue(withTemplate.notes().stream().anyMatch(note -> note.contains("ae2:silicon_press")
+                && note.contains("不用再放")), withTemplate.notes().toString());
+        assertTrue(withTemplate.conflict().isEmpty());
 
         // 压制处理器（mode=press）三格都是消耗品，跑 4 批时三样全要 4 件，且顶、底印制板排在红石前。
         slots.put(AT, new Ae2Inscribers.Inputs("", "", ""));
         ShownRecipe press = logicProcessorRecipe();
-        assertEquals(4L, inscriber.feedCount(AT, press, press.inputs().get(0), 4, false));
-        assertEquals(4L, inscriber.feedCount(AT, press, press.inputs().get(1), 4, false));
-        assertEquals(4L, inscriber.feedCount(AT, press, press.inputs().get(2), 4, false));
-        assertTrue(inscriber.feedsFirst(press, press.inputs().get(0)));
-        assertTrue(inscriber.feedsFirst(press, press.inputs().get(2)));
+        FeedPlan pressPlan = inscriberWithInputs(slots).plan(AT, press, 4, Permissions.DEFAULT);
+        assertEquals(List.of(new FeedPlan.Entry("ae2:printed_logic_processor", 4, false),
+                new FeedPlan.Entry("ae2:printed_silicon", 4, false),
+                new FeedPlan.Entry("minecraft:redstone", 4, false)), pressPlan.entries());
     }
 
     @Test
@@ -286,15 +289,16 @@ class Ae2MachineFeedTest {
         Ae2MachineType inscriber = inscriberWithInputs(slots);
         ShownRecipe siliconPrint = siliconPrintEmiRecipe();
 
-        // 压印器顶格正占着逻辑压印模板，要做印制硅时冲突拦截直接点名占用物品。
-        inscriber.feedCount(AT, siliconPrint, siliconPrint.inputs().get(1), 2, false);
-        String why = inscriber.whyCannotFeed(AT, "#c:silicon").orElseThrow();
+        // 压印器顶格正占着逻辑压印模板，要做印制硅时计划直接给冲突与腾空动作，点名占用物品。
+        FeedPlan blocked = inscriber.plan(AT, siliconPrint, 2, Permissions.DEFAULT);
+        String why = blocked.conflict().orElseThrow();
         assertTrue(why.contains("ae2:logic_processor_press") && why.contains("不兼容"), why);
+        assertTrue(blocked.clearing().isPresent(), "有冲突就给腾空动作");
 
         // 机内原有硅压印模板（非本会话放进）时，take 走普通 MenuOutputLook，不动原有模板。
         slots.put(AT, new Ae2Inscribers.Inputs("ae2:silicon_press", "", ""));
         Ae2MachineType withPreexisting = inscriberWithInputs(slots);
-        assertEquals(0L, withPreexisting.feedCount(AT, siliconPrint, siliconPrint.inputs().get(0), 2, false));
+        assertTrue(inscriberWithInputs(slots).plan(AT, siliconPrint, 2, Permissions.DEFAULT).conflict().isEmpty());
         assertInstanceOf(MenuOutputLook.class,
                 withPreexisting.take(AT, "ae2:printed_silicon", 2, Permissions.DEFAULT).orElseThrow());
 
@@ -403,7 +407,7 @@ class Ae2MachineFeedTest {
         Ae2MachineType inscriber = new Ae2MachineType(kind, compat, stub, offlineServices(),
                 Ae2Compat.blocksOf(kind.blocks()), (pos, perms) -> immediateOpening(menu));
 
-        Action clear = inscriber.clearConflicts(AT, recipe, 2, Permissions.DEFAULT).orElseThrow();
+        Action clear = inscriber.plan(AT, recipe, 2, Permissions.DEFAULT).clearing().orElseThrow();
         ActionStatus status = ActionStatus.running();
         for (int i = 0; i < 40 && !(status instanceof ActionStatus.Done); i++) {
             status = clear.tick(TickContext.of(i, null));

@@ -6,7 +6,9 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
@@ -30,8 +32,8 @@ final class CompatMachineFeeding implements MachineFeeding {
         this.feeding = feeding;
     }
 
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return act(() -> feeding.feed(at, itemId, count, permissions));
+    @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
+        return act(() -> feeding.feed(at, item, permissions));
     }
 
     // 停用或接口对不上时不编现场摆法原因，交回空。
@@ -56,27 +58,10 @@ final class CompatMachineFeeding implements MachineFeeding {
         return ask(() -> feeding.ingredientFeed(at, ingredient, amount), Optional.empty());
     }
 
-    @Override public boolean feedsCatalysts() {
-        return ask(feeding::feedsCatalysts, false);
-    }
-
-    @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
-        return ask(() -> feeding.feedsFirst(recipe, ingredient), false);
-    }
-
-    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches) {
-        return ask(() -> feeding.feedCount(at, recipe, ingredient, batches), ingredient.amount() * batches);
-    }
-
-    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
-            boolean fromCatalysts) {
-        return ask(() -> feeding.feedCount(at, recipe, ingredient, batches, fromCatalysts),
-                ingredient.amount() * batches);
-    }
-
-    @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
-            Permissions permissions) {
-        return act(() -> feeding.clearConflicts(at, recipe, batches, permissions));
+    // 停用或接口对不上时按标准的按配方投料给一份计划：冲突与腾空动作都为空，投料动作给不出。
+    @Override public FeedPlan plan(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
+        return ask(() -> feeding.plan(at, recipe, batches, permissions),
+                MachineFeeding.standard(null, at, recipe, batches));
     }
 
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。

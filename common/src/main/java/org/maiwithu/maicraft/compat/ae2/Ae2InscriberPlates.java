@@ -16,7 +16,10 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
@@ -195,6 +198,65 @@ final class Ae2InscriberPlates {
         return ingredient.tag() == null
                 && !ingredient.options().isEmpty()
                 && ingredient.options().stream().allMatch(stack -> INSCRIBER_ID.equals(stack.id()));
+    }
+
+    /** 这条配方在这台压印器上怎么投，一次算清的结论：投料顺序、说明与机内冲突。 */
+    record MachinePlan(List<FeedPlan.Entry> entries, List<String> notes, Optional<String> conflict) {
+    }
+
+    /**
+     * 一次解析这条配方在这台压印器怎么投：不消耗的压印模板（查看器列在催化剂栏或压印模式的顶底格）
+     * 排在中间主料之前、做几批都只投 1 张，机内已有匹配模板的跳过并留一句说明；机内占着不兼容物的给冲突说明。
+     * 只看配方定义与同步过来的四个工作格，不碰现场。
+     */
+    static MachinePlan plan(ShownRecipe recipe, int batches, Optional<Ae2Inscribers.Slots> currentSlots) {
+        Optional<Ae2Inscribers.Inputs> slots = currentSlots.map(Ae2Inscribers.Slots::toInputs);
+        List<FeedPlan.Entry> first = new ArrayList<>();
+        List<FeedPlan.Entry> main = new ArrayList<>();
+        List<String> notes = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (ShownIngredient catalyst : recipe.catalysts()) {
+            Optional<WantedItem> wanted = MachineFeeding.wantedItemOf(catalyst);
+            // 工作站图标（这一格写的就是压印器自己）不是投料，跳过。
+            if (wanted.isEmpty() || wanted.get().specifier().equals(INSCRIBER_ID)) continue;
+            seen.add(wanted.get().specifier());
+            long count = feedCount(recipe, catalyst, batches, true, slots);
+            if (count <= 0) {
+                notes.add("机器里已有匹配的 " + wanted.get().specifier() + "，不用再放");
+                continue;
+            }
+            first.add(new FeedPlan.Entry(wanted.get().specifier(),
+                    (int) Math.min(Integer.MAX_VALUE, count),
+                    isNonConsumedPlate(recipe, catalyst, true)));
+        }
+        for (ShownIngredient ingredient : recipe.inputs()) {
+            Optional<WantedItem> wanted = MachineFeeding.wantedItemOf(ingredient);
+            if (wanted.isEmpty()) {
+                notes.add("配方还要机器自己要的东西（" + MachineFeeding.describe(ingredient)
+                        + "），带不进机器，做不做得看机器里还有没有");
+                continue;
+            }
+            String specifier = wanted.get().specifier();
+            if (seen.contains(specifier)) continue;
+            long count = feedCount(recipe, ingredient, batches, false, slots);
+            if (count <= 0) {
+                notes.add("机器里已有匹配的 " + specifier + "，不用再放");
+                continue;
+            }
+            FeedPlan.Entry entry = new FeedPlan.Entry(specifier, (int) Math.min(Integer.MAX_VALUE, count),
+                    isNonConsumedPlate(recipe, ingredient, false));
+            if (isTopOrBottom(recipe, ingredient)) {
+                first.add(entry);
+            } else {
+                main.add(entry);
+            }
+        }
+        List<FeedPlan.Entry> entries = new ArrayList<>(first.size() + main.size());
+        entries.addAll(first);
+        entries.addAll(main);
+        Optional<String> conflict = currentSlots
+                .flatMap(slots2 -> conflict(recipe, batches, slots2));
+        return new MachinePlan(List.copyOf(entries), List.copyOf(notes), conflict);
     }
 
     private static boolean slotFits(String actualItemId, SlotRule rule, ShownRecipe recipe) {

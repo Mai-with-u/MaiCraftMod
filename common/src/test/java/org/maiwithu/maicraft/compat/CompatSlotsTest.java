@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
@@ -132,7 +133,8 @@ class CompatSlotsTest {
         MachineState state = press.state(AT);
         assertEquals(MachineState.Activity.UNKNOWN, state.activity());
         assertTrue(state.note().contains("机械动力的联动已停用"), state.note());
-        assertTrue(press.feeding().orElseThrow().feed(AT, "minecraft:iron_ingot", 1, Permissions.DEFAULT).isEmpty());
+        assertTrue(press.feeding().orElseThrow()
+                .feed(AT, new FeedPlan.Entry("minecraft:iron_ingot", 1, false), Permissions.DEFAULT).isEmpty());
         assertEquals("create:mechanical_press", press.id(), "名字这类登记时就定下的照常回答");
     }
 
@@ -144,7 +146,7 @@ class CompatSlotsTest {
             }
         };
         Action feeding = load(module).machineTypes(NO_SERVICES).getFirst().feeding().orElseThrow()
-                .feed(AT, "minecraft:iron_ingot", 1, Permissions.DEFAULT).orElseThrow();
+                .feed(AT, new FeedPlan.Entry("minecraft:iron_ingot", 1, false), Permissions.DEFAULT).orElseThrow();
         breakModule(module);
         ActionStatus status = feeding.tick(null);
         Problem problem = assertInstanceOf(ActionStatus.Failed.class, status).problem();
@@ -253,7 +255,7 @@ class CompatSlotsTest {
         @Override public MachineState state(BlockPos at) {
             return new MachineState(MachineState.Activity.RUNNING, 64.0, null, List.of(), Map.of(), "");
         }
-        @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
+        @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
             return Optional.of(new Action() {
                 @Override public ActionStatus tick(TickContext context) {
                     return ActionStatus.done();

@@ -11,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
@@ -71,9 +72,11 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     /** 选中的配方与要做的批数；只开机时没有。 */
     private ShownRecipe recipe;
     private int batches;
-    /** 备料与投料各一条队，按配方的顺序从前往后走。 */
-    private final Deque<MachineRunDetails.Fed> toGather = new ArrayDeque<>();
-    private final Deque<MachineRunDetails.Fed> toFeed = new ArrayDeque<>();
+    /** 备料与投料各一条队，按投料计划给的顺序从前往后走。 */
+    private final Deque<FeedPlan.Entry> toGather = new ArrayDeque<>();
+    private final Deque<FeedPlan.Entry> toFeed = new ArrayDeque<>();
+    /** 选中的配方在这台机器上怎么投：每格几件、谁先投、机内冲突，一次解析成的计划值。 */
+    private FeedPlan plan;
     /** 投进去的账与过程中值得知道的事。 */
     private final List<MachineRunDetails.Fed> fed = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
@@ -180,7 +183,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             }
             fuelRun = true;
             notes.add(describeMachine() + "烧的燃料：" + fuel.note());
-            toGather.add(new MachineRunDetails.Fed(input.item(), input.count()));
+            toGather.add(new FeedPlan.Entry(input.item(), input.count(), false));
             return Next.go(Phase.GATHER, "把 " + input.item() + " 当燃料投进" + describeMachine()
                     + "，先备 " + input.count() + " 件");
         }
@@ -207,14 +210,16 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         }
         batches = MachineIngredients.batchesNeeded(recipe, input.item(), input.count());
         recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
-        // 压印器等机器若槽内占着早先遗留的异种模板、半成品或异种输出，先开窗取回角色背包腾空冲突槽位再算备料与投料。
-        Optional<Action> clearing = feeding == null ? Optional.empty()
-                : feeding.clearConflicts(cell, recipe, batches, input.permissions());
-        if (clearing.isPresent()) {
-            prepared = clearing.get();
+        // 这条配方在这台机器怎么投，一次解析成计划：每格几件、谁先投、机内冲突。
+        plan = feeding == null ? MachineFeeding.standard(null, cell, recipe, batches)
+                : feeding.plan(cell, recipe, batches, input.permissions());
+        // 压印器等机器若槽内占着早先遗留的异种模板、半成品或异种输出，先按计划里的腾空动作
+        // 开窗取回角色背包，腾空后重算计划再备料投料。
+        if (plan.clearing().isPresent()) {
+            prepared = plan.clearing().get();
             return Next.go(Phase.CLEAR, "先取出" + describeMachine() + "里占着的不兼容物品");
         }
-        return queueIngredientsAndContinue();
+        return queueIngredients();
     }
 
     // 冲突占槽物取回背包后刷新出口基线，再按腾空后的槽位计算实际还缺的原料与模板。
@@ -225,15 +230,23 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 watch.baseline = menuExit ? 0 : outputCount(input.item());
                 notes.add("开工前先从" + describeMachine() + "取出了占槽的不兼容物品");
                 recordProgress("已腾空" + describeMachine() + "里的冲突槽位");
-                yield queueIngredientsAndContinue();
+                // 腾空后槽位变了：重算计划，还缺的原料与模板按腾空后的槽位算。
+                plan = feeding == null ? MachineFeeding.standard(null, cell, recipe, batches)
+                        : feeding.plan(cell, recipe, batches, input.permissions());
+                yield queueIngredients();
             }
             case ActionStatus.Failed failed -> Next.fail(failed.problem());
         };
     }
 
-    private Next<Phase> queueIngredientsAndContinue() {
-        toGather.addAll(MachineIngredients.queue(feeding, type.id(), cell, recipe, batches, notes));
-        // 现场机器朝向不对、缺少配套台位或机内仍占着无法清出的冲突物品时，备料前直接如实说明，不白跑一趟拿料。
+    private Next<Phase> queueIngredients() {
+        toGather.addAll(plan.entries());
+        notes.addAll(plan.notes());
+        // 机内仍占着与这条配方不兼容的物品（腾空过但没腾干净）：备料前直接如实说明，不白跑一趟拿料。
+        if (plan.conflict().isPresent()) {
+            return Next.fail(cannotFeedProblem(plan.conflict().get()));
+        }
+        // 现场机器朝向不对、缺少配套台位这类摆法原因，备料前如实说明，不白跑一趟拿料。
         String probe = toGather.isEmpty() ? input.item() : toGather.peek().item();
         if (probe != null && feeding != null) {
             Optional<String> blocked = feeding.whyCannotFeed(cell, probe);
@@ -290,10 +303,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             };
         }
         while (!toGather.isEmpty()) {
-            MachineRunDetails.Fed next = toGather.peek();
+            FeedPlan.Entry next = toGather.peek();
             WantedItem wanted = new WantedItem(next.item());
             int reserved = toFeed.stream().filter(queued -> queued.item().equals(next.item()))
-                    .mapToInt(MachineRunDetails.Fed::count).sum();
+                    .mapToInt(FeedPlan.Entry::count).sum();
             int available = Math.max(0, services.world().carriedCount(wanted) - reserved);
             int missing = next.count() - available;
             if (missing <= 0) {
@@ -325,13 +338,13 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 case ActionStatus.Failed failed -> stop(failed.problem());
             };
         }
-        MachineRunDetails.Fed next = toFeed.peek();
+        FeedPlan.Entry next = toFeed.peek();
         if (next == null) {
             return Next.go(Phase.SWITCH, "投料完了，开机");
         }
         // 这种机器根本没有投料本事（管道、线缆格）：与给不出投法一样按"投不了"如实收场。
         Optional<Action> offering = feeding == null ? Optional.empty()
-                : feeding.feed(cell, next.item(), next.count(), input.permissions());
+                : feeding.feed(cell, next, input.permissions());
         return offering
                 .map(action -> {
                     prepared = action;
@@ -355,7 +368,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
 
     // 一样料投完记账：投法交得出实情（扔进去的）按进去的件数记，没进去的在哪写进说明；
     // 一下就整份放好的（手持右键放上置物台）按要投的件数记。没进去的不重投，交给 LLM 看说明再定。
-    private MachineRunDetails.Fed settleFeed(MachineRunDetails.Fed asked) {
+    private MachineRunDetails.Fed settleFeed(FeedPlan.Entry asked) {
         int count = feedReporting == null ? asked.count() : feedReporting.delivered();
         if (feedReporting != null) {
             notes.addAll(feedReporting.notes());

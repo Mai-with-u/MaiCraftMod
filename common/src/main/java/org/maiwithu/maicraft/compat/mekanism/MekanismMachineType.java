@@ -18,6 +18,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
@@ -179,21 +180,21 @@ final class MekanismMachineType implements MachineType, MachineFeeding, MachineS
 
     // 投料：走过去点开机器的界面，把料从背包搬进去，机器自己把它放进收它的格；发电机的燃料也这样投进燃料格。
     // 能量立方、管道、太阳能这类不加工也不烧燃料的不收料。
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
+    @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
         ClientLevel level = level();
         boolean takesFeed = kind.role() == MachineRole.PROCESSING || kind.fuel().kind() == FuelUse.Kind.FUEL;
         if (level == null || !takesFeed) return Optional.empty();
         String blockId = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
         // 投的是这次定下的换料：界面打开后先读机器储罐，已有的够几件就少投几件。
-        ChemicalConversions.Plan conversion = conversionFeeds.remove(new ConversionAt(at.immutable(), itemId));
+        ChemicalConversions.Plan conversion = conversionFeeds.remove(new ConversionAt(at.immutable(), item.item()));
         MenuFeed.TopUp topUp = conversion == null ? null : (asked, notes) -> {
             ChemicalConversions.Deduction deduction = ChemicalConversions.deduct(conversion.chemicalId(),
                     conversion.perItem(), asked, compat.openMachineChemicals(at));
             if (!deduction.note().isEmpty()) notes.add(deduction.note());
             return deduction.skip();
         };
-        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, blockId, itemId, count,
-                permissions, topUp)));
+        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, blockId, item.item(),
+                item.count(), permissions, topUp)));
     }
 
     // 配方要的化学品（灌注物这类）背包带不进去：加工机器从附加格吃物品再换成它。按化学品转化配方挑一样能换的，

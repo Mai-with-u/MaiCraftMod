@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
@@ -92,18 +93,24 @@ class MachineRunTaskTest {
     void 投料前机内有冲突占槽物_先自动开窗取回腾空再备料投料() {
         Rig rig = new Rig();
         rig.machineRunsAtFullSpeed();
-        // 模拟压印器槽内原本占着上一轮遗留物：未清理前 whyCannotFeed 拦住，clearConflicts 跑完后槽位腾空放行。
+        // 模拟压印器槽内原本占着上一轮遗留物：没腾空前计划带着冲突说明与腾空动作，
+        // 腾空动作跑完后槽位空了，重算的计划不再拦。
         boolean[] occupied = {true};
-        rig.type.cannotFeedWhy = item -> occupied[0] ? Optional.of("槽内占着旧模板") : Optional.empty();
-        rig.type.clearConflictsAction = new MachineTestDoubles.Scripted(1, () -> {
-            occupied[0] = false;
-            rig.world.carried.put(INGOT, 1);
-        });
+        boolean[] cleared = {false};
+        rig.type.planScript = (recipe, batches) -> occupied[0]
+                ? new FeedPlan(List.of(new FeedPlan.Entry(INGOT, batches, false)), List.of(),
+                        Optional.of("压印器里还放着 minecraft:old_press，与这次要做的配方不兼容"),
+                        Optional.of(new MachineTestDoubles.Scripted(1, () -> {
+                            occupied[0] = false;
+                            cleared[0] = true;
+                            rig.world.carried.put(INGOT, 1);
+                        })))
+                : null;
 
         TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
                 Permissions.DEFAULT));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
-        assertEquals(List.of("clear-conflicts"), rig.type.touched, "选定配方后先执行冲突槽清理动作");
+        assertTrue(cleared[0], "选定配方后先执行冲突槽清理动作");
         assertEquals(1, rig.needs.requests.get(0).count(), "从机器取回身上的 1 件原料直接计入已有，只补差额 1 件");
         MachineRunDetails details = (MachineRunDetails) result.details();
         assertTrue(details.notes().stream().anyMatch(note -> note.contains("取出了占槽的不兼容物品")),
@@ -535,8 +542,9 @@ class MachineRunTaskTest {
         // 机内还没有模板：做 4 批也只备 1 张硅压印模板、4 份 #c:silicon，且模板排在主料前先备先投。
         Rig emptyRig = new Rig();
         emptyRig.viewer.putMaking(PLATE, List.of(recipe));
-        emptyRig.type.feedsCatalysts = true;
-        emptyRig.type.customFeedCount = (ingredient, batches) -> ingredient.equals(pressPlate) ? 1L : batches;
+        emptyRig.type.planScript = (planned, batches) -> new FeedPlan(List.of(
+                new FeedPlan.Entry("ae2:silicon_press", 1, true),
+                new FeedPlan.Entry("#c:silicon", batches, false)), List.of(), Optional.empty(), Optional.empty());
         emptyRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
         emptyRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> emptyRig.type.output.put(PLATE, 4)));
         emptyRig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
@@ -550,11 +558,12 @@ class MachineRunTaskTest {
         assertEquals(4, emptyRig.needs.requests.get(1).count(), "消耗料照乘 4 批");
         assertEquals(List.of("ae2:silicon_press", "#c:silicon"), emptyRig.type.fedItems, "模板先投，主料后投");
 
-        // 机内已有匹配模板（feedCount 返回 0）：直接跳过模板备料与投料，notes 留说明。
+        // 机内已有匹配模板：计划里没有模板这项、只投主料，说明写明不用再放。
         Rig loadedRig = new Rig();
         loadedRig.viewer.putMaking(PLATE, List.of(recipe));
-        loadedRig.type.feedsCatalysts = true;
-        loadedRig.type.customFeedCount = (ingredient, batches) -> ingredient.equals(pressPlate) ? 0L : batches;
+        loadedRig.type.planScript = (planned, batches) -> new FeedPlan(
+                List.of(new FeedPlan.Entry("#c:silicon", batches, false)),
+                List.of("机器里已有匹配的 ae2:silicon_press，不用再放"), Optional.empty(), Optional.empty());
         loadedRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> loadedRig.type.output.put(PLATE, 4)));
         loadedRig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
 

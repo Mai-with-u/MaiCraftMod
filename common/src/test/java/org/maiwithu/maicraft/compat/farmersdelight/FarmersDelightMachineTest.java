@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -140,7 +141,7 @@ class FarmersDelightMachineTest {
 
     @Test
     void 投料收餐都给点开界面的动作() {
-        assertTrue(type().feed(AT, "farmersdelight:raw_pasta", 3, Permissions.DEFAULT).orElseThrow()
+        assertTrue(type().feed(AT, new FeedPlan.Entry("farmersdelight:raw_pasta", 3, false), Permissions.DEFAULT).orElseThrow()
                 instanceof CompatMenuFeed, "投料走点开界面放槽");
         assertTrue(type().take(AT, "farmersdelight:vegetable_soup", 1, Permissions.DEFAULT).orElseThrow()
                 instanceof MenuOutputLook, "收餐是点开界面把餐搬进背包");

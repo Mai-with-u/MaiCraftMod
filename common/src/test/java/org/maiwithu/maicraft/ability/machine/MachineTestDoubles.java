@@ -9,17 +9,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.function.ToLongBiFunction;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
@@ -27,6 +28,7 @@ import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
@@ -218,13 +220,8 @@ final class MachineTestDoubles {
         final List<String> fedItems = new ArrayList<>();
         /** 现场摆法接不了投料时的原因说明；默认为空，按机器本身不收这种料处理。 */
         Function<String, Optional<String>> cannotFeedWhy = itemId -> Optional.empty();
-        /** 是否把配方查看器的催化剂也纳入投料队列（如压印器模板）。 */
-        boolean feedsCatalysts;
-        /** 哪些原料要排在普通主料前面先放。 */
-        Predicate<ShownIngredient> feedsFirst = ingredient -> false;
-        /** 自定义每格原料的投料件数计算；为 null 时走默认乘批数。 */
-        ToLongBiFunction<ShownIngredient, Integer> customFeedCount;
-        Action clearConflictsAction;
+        /** 选配方时这台机器怎么投：测试直接摆整份计划；没摆走标准的按配方投料（乘批数、按配方顺序）。 */
+        BiFunction<ShownRecipe, Integer, FeedPlan> planScript;
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -355,22 +352,19 @@ final class MachineTestDoubles {
             return effect == null ? Optional.empty() : Optional.of(new Scripted(1, effect));
         }
 
-        @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-            fedItems.add(itemId);
+        // 计划：测试摆了脚本按脚本给，没摆按标准的按配方投料算一份（乘批数、按配方顺序）。
+        @Override public FeedPlan plan(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
+            FeedPlan scripted = planScript != null ? planScript.apply(recipe, batches) : null;
+            return scripted != null ? scripted : MachineFeeding.super.plan(at, recipe, batches, permissions);
+        }
+
+        @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
+            fedItems.add(item.item());
             return Optional.ofNullable(feedActions.poll());
         }
 
         @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
             return cannotFeedWhy.apply(itemId);
-        }
-
-        @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
-                Permissions permissions) {
-            if (clearConflictsAction == null) return Optional.empty();
-            touched.add("clear-conflicts");
-            Action action = clearConflictsAction;
-            clearConflictsAction = null;
-            return Optional.of(action);
         }
 
         @Override public boolean outputVisible(BlockPos at) {
@@ -404,20 +398,6 @@ final class MachineTestDoubles {
             return ingredientFeed.apply(ingredient);
         }
 
-        @Override public boolean feedsCatalysts() {
-            return feedsCatalysts;
-        }
-
-        @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
-            return feedsFirst.test(ingredient);
-        }
-
-        @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
-                boolean fromCatalysts) {
-            return customFeedCount != null
-                    ? customFeedCount.applyAsLong(ingredient, batches)
-                    : ingredient.amount() * batches;
-        }
     }
 
     /** 网络读取器替身：成员表与汇总按测试摆的给。 */

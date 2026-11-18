@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
@@ -67,10 +68,6 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     private final Map<BlockPos, List<String>> patternsSeen = new HashMap<>();
     /** 本会话由角色自己放进各台压印器、收产物时应一并收回背包的不消耗压印模板；机内原有的不进此表。 */
     private final Map<BlockPos, Set<String>> placedPlates = new HashMap<>();
-    /** 选配方算投料量时确认本趟要新放进压印器的不消耗模板规格。 */
-    private final Map<BlockPos, Set<String>> plannedPlates = new HashMap<>();
-    /** 对照当前选中配方与客户端同步到的压印器四个工作格发现的槽位冲突说明。 */
-    private final Map<BlockPos, String> slotConflicts = new HashMap<>();
     private final BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings;
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
@@ -232,78 +229,39 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return outputs;
     }
 
-    // 压印器的不消耗压印模板在部分查看器里列为催化剂，但必须放进模板格才能开工；顶、底格物料一律排在中间输入格之前先放。
-    @Override public boolean feedsCatalysts() {
-        return isInscriber();
-    }
-
-    @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
-        return isInscriber() && Ae2InscriberPlates.isTopOrBottom(recipe, ingredient);
-    }
-
-    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
-            boolean fromCatalysts) {
-        if (!isInscriber()) return ingredient.amount() * batches;
+    // 这条配方在这台压印器怎么投，读一次四个工作格、一次算清：每格几件、模板先投、机内冲突与腾空动作。
+    @Override public FeedPlan plan(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
+        if (!isInscriber()) return MachineFeeding.super.plan(at, recipe, batches, permissions);
         BlockPos pos = at.immutable();
         Optional<Ae2Inscribers.Slots> fourSlots = compat.inscriberSlots(level(), pos);
-        Optional<Ae2Inscribers.Inputs> slots = fourSlots.map(Ae2Inscribers.Slots::toInputs);
-        fourSlots.flatMap(current -> Ae2InscriberPlates.conflict(recipe, batches, current))
-                .ifPresentOrElse(why -> slotConflicts.put(pos, why), () -> slotConflicts.remove(pos));
-        long count = Ae2InscriberPlates.feedCount(recipe, ingredient, batches, fromCatalysts, slots);
-        if (count > 0 && Ae2InscriberPlates.isNonConsumedPlate(recipe, ingredient, fromCatalysts)) {
-            Ae2InscriberPlates.specifierOf(ingredient)
-                    .ifPresent(spec -> plannedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(spec));
-        }
-        return count;
+        Ae2InscriberPlates.MachinePlan computed = Ae2InscriberPlates.plan(recipe, batches, fourSlots);
+        // 有冲突才给腾空动作：打开界面把占槽的不兼容物取回背包；腾空后重算计划，冲突自然消失。
+        Optional<Action> clearing = computed.conflict().isEmpty() ? Optional.empty()
+                : Optional.of(new Ae2InscriberClear(recipe, batches, menuOpenings.apply(pos, permissions),
+                        placedPlates.get(pos)));
+        return new FeedPlan(computed.entries(), computed.notes(), computed.conflict(), clearing);
     }
 
-    @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
-            Permissions permissions) {
-        if (!isInscriber()) return Optional.empty();
-        BlockPos pos = at.immutable();
-        Optional<Ae2Inscribers.Slots> current = compat.inscriberSlots(level(), pos);
-        if (current.isEmpty() || Ae2InscriberPlates.conflictingSlotIndices(recipe, batches, current.get()).isEmpty()) {
-            return Optional.empty();
-        }
-        slotConflicts.remove(pos);
-        return Optional.of(new Ae2InscriberClear(recipe, batches, menuOpenings.apply(pos, permissions),
-                placedPlates.get(pos)));
-    }
-
-    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
-        if (!isInscriber()) return Optional.empty();
-        String conflict = slotConflicts.get(at);
-        if (conflict == null) return Optional.empty();
-        // 再核对一次此刻压印器四个工作格是不是已经被清出腾空了，空了就放行。
-        boolean cleared = compat.inscriberSlots(level(), at)
-                .map(slots -> slots.occupiedIds().isEmpty())
-                .orElse(false);
-        if (cleared) {
-            slotConflicts.remove(at);
-            return Optional.empty();
-        }
-        return Optional.of(conflict);
-    }
-
-    // 投料：压印器放好料自己压，料从界面放进对应工作格；自己新放进的不消耗模板记下来供收产物时收回，
+    // 投料：压印器放好料自己压，料从界面放进对应工作格；计划里标明要收回的（本趟新放的不消耗模板）
+    // 与投完新出现的不消耗模板都记进"自己放进机器的"，收产物时一并收回。
     // 真因机内占着别的物品放不进时在报错里把槽内占用物点名说清。线缆格、样板供应器这类不收料，照旧给空。
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
+    @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
         if (!isInscriber()) return Optional.empty();
         BlockPos pos = at.immutable();
         Set<String> platesBefore = new LinkedHashSet<>();
-        MenuFeed inner = new MenuFeed(services, kind.name(), pos, kind.id(), itemId, count, permissions, null);
+        MenuFeed inner = new MenuFeed(services, kind.name(), pos, kind.id(), item.item(), item.count(),
+                permissions, null);
         return Optional.of(new CompatMenuFeed(inner,
                 () -> compat.inscriberInputs(level(), pos).ifPresent(slots -> platesBefore.addAll(slots.plates())),
-                () -> recordPlacedPlate(pos, itemId, platesBefore),
-                problem -> enrichFeedFailure(pos, itemId, problem)));
+                () -> recordPlacedPlate(pos, item, platesBefore),
+                problem -> enrichFeedFailure(pos, item.item(), problem)));
     }
 
-    private void recordPlacedPlate(BlockPos pos, String itemId, Set<String> platesBefore) {
-        Set<String> planned = plannedPlates.get(pos);
-        boolean plannedPlate = planned != null && planned.remove(itemId);
-        if (planned != null && planned.isEmpty()) plannedPlates.remove(pos);
-        if (plannedPlate || (Ae2InscriberPlates.isPressItemId(itemId) && !platesBefore.contains(itemId))) {
-            placedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(itemId);
+    // 这一下投完后哪些模板算"自己放进机器的"：计划标明要收回的直接记下；别的照投前投后工作格的差算。
+    private void recordPlacedPlate(BlockPos pos, FeedPlan.Entry item, Set<String> platesBefore) {
+        if (item.collectBack()
+                || Ae2InscriberPlates.isPressItemId(item.item()) && !platesBefore.contains(item.item())) {
+            placedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(item.item());
             return;
         }
         compat.inscriberInputs(level(), pos).ifPresent(after -> {

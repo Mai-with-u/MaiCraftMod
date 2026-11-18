@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
+import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
@@ -196,10 +197,11 @@ final class CreateMachineType implements MachineType, MachineFeeding, MachineSet
         return values.change(level, at, key, value, permissions);
     }
 
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
+    @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
         ClientLevel level = level();
         if (level == null) return Optional.empty();
-        return stations.feed(kind.work(), level, level.getBlockState(at), at, itemId, count, permissions);
+        return stations.feed(kind.work(), level, level.getBlockState(at), at, item.item(), item.count(),
+                permissions);
     }
 
     // 锯齿没朝上、加工处漏放了置物台或工作盆这类现场摆法原因交给机器运行说明白，不误报成机器不收这种料。
