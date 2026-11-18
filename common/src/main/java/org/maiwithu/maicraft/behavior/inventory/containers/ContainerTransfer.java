@@ -8,8 +8,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
-import net.minecraft.core.registries.BuiltInRegistries;
-
 import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MoveConfirmation;
@@ -17,6 +15,7 @@ import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.menu.TransferPlan;
 import org.maiwithu.maicraft.behavior.menu.TransferRun;
+import org.maiwithu.maicraft.game.world.ItemMatch;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -126,8 +125,7 @@ final class ContainerTransfer implements Action {
             current = new Move(itemId, total(reading.playerSnapshots(), itemId),
                     total(reading.containerSnapshots(), itemId));
             run.begin(new TransferRun.Move(clicks.get(),
-                    new TransferRun.Check.IntoContainer(
-                            snapshot -> !snapshot.isEmpty() && idOf(snapshot).equals(itemId)),
+                    new TransferRun.Check.IntoContainer(snapshot -> matches(snapshot, itemId)),
                     "往容器里搬 " + itemId));
             return run.tickAction(this::onSettled);
         }
@@ -263,7 +261,7 @@ final class ContainerTransfer implements Action {
         int whole = -1;
         for (int i = 0; i < snapshots.size(); i++) {
             SlotSnapshot snapshot = snapshots.get(i);
-            if (snapshot.isEmpty() || !idOf(snapshot).equals(itemId)) continue;
+            if (!matches(snapshot, itemId)) continue;
             if (first < 0) first = i;
             if (snapshot.count() <= left && (whole < 0 || snapshot.count() > snapshots.get(whole).count())) whole = i;
         }
@@ -273,13 +271,14 @@ final class ContainerTransfer implements Action {
     private static int total(List<SlotSnapshot> snapshots, String itemId) {
         int sum = 0;
         for (SlotSnapshot snapshot : snapshots) {
-            if (!snapshot.isEmpty() && idOf(snapshot).equals(itemId)) sum += snapshot.count();
+            if (matches(snapshot, itemId)) sum += snapshot.count();
         }
         return sum;
     }
 
-    private static String idOf(SlotSnapshot snapshot) {
-        return BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString();
+    // 同时支持具体物品 ID 与配方 #标签（如 #c:silicon），让带界面的机器按标签投料时也能挑格并核对两侧件数。
+    private static boolean matches(SlotSnapshot snapshot, String itemOrTag) {
+        return !snapshot.isEmpty() && ItemMatch.matches(snapshot.stack(), itemOrTag);
     }
 
     // 光标上拿着东西的那一下停不得：撒手会把东西掉在界面外的流程里。

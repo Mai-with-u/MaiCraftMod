@@ -56,7 +56,19 @@ public final class MenuFeed implements Action {
     /** @param topUp 界面打开后先扣掉机器里已有的几件；不用扣给 null */
     public MenuFeed(PlayerServices services, String machine, BlockPos at, String blockTypeId, String itemId, int count,
             Permissions permissions, TopUp topUp) {
+        this(machine, at, blockTypeId, itemId, count, permissions, topUp,
+                (cell, allowed) -> {
+                    Objects.requireNonNull(services, "services");
+                    return new ClientMenuOpening(cell, allowed, services.menuLayouts(), services.approach(),
+                            services.interactions(), services.context());
+                });
         Objects.requireNonNull(services, "services");
+    }
+
+    // 包内测试可注入替身界面打开动作，离线核对按标签投料与瞬间吃料记账。
+    MenuFeed(String machine, BlockPos at, String blockTypeId, String itemId, int count,
+            Permissions permissions, TopUp topUp, StoresInContainer.OpensContainer opens) {
+        Objects.requireNonNull(opens, "opens");
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         this.asked = count;
         this.topUp = topUp;
@@ -75,6 +87,12 @@ public final class MenuFeed implements Action {
                 stored += amount;
             }
 
+            @Override public void passedThrough(String id, int amount, String fact) {
+                // 快速加工格在点击瞬间就把物品吃掉或转成灌注物时，物品已离开背包进入机器，计入已投件数并留说明。
+                stored += amount;
+                notes.add(fact);
+            }
+
             @Override public void unconfirmed(String fact) {
                 notes.add(fact);
             }
@@ -84,9 +102,7 @@ public final class MenuFeed implements Action {
             }
         };
         // 点开机器界面和点开箱子是同一个动作：走到够得着、看得见的地方右键，认领界面并等内容同步。
-        StoresInContainer.Parts parts = new StoresInContainer.Parts((cell, allowed) -> new ClientMenuOpening(cell,
-                allowed, services.menuLayouts(), services.approach(), services.interactions(), services.context()),
-                null);
+        StoresInContainer.Parts parts = new StoresInContainer.Parts(opens, null);
         this.storing = new StoresInContainer(new KnownContainer(machine,
                 WorldPosition.here(at.getX(), at.getY(), at.getZ()), blockTypeId), List.of(itemId), ledger,
                 permissions, parts);
