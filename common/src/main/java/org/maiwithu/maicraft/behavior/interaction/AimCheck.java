@@ -79,8 +79,9 @@ public final class AimCheck {
         return entityHit.getEntity() == target || entityHit.getEntity().isPassengerOfSameVehicle(target);
     }
 
-    /** 射线命中者的简短描述，给换位重试的现场说明用。 */
+    /** 射线命中者的简短描述，给换位重试的现场说明用；现场还没打出射线时按没指到东西说。 */
     public static String describeHit(HitResult hit) {
+        if (hit == null) return "空气";
         return switch (hit) {
             case BlockHitResult blockHit -> "方块 " + blockHit.getBlockPos().toShortString();
             case EntityHitResult entityHit -> "实体（编号 " + entityHit.getEntity().getId() + "）";

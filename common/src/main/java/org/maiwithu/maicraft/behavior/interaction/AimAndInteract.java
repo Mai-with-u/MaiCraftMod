@@ -4,10 +4,12 @@ package org.maiwithu.maicraft.behavior.interaction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -34,7 +36,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 还不行就是站位问题）；提交前冻结现场（目标格状态、射线命中者），经角色的交互提交入口交出本刻的
  * 一次交互，然后逐刻确认：连续几刻稳定才算数，客户端预测的回滚排除在外。
  * 结论分生效、没生效、出乎预料、没能确认四种；任务结束收尾时，没等到确认的提交按不确定交还，
- * 任何退出路径都不会漏。站位与靠近不归这里管：需要换位时用"到不了"的问题表达，
+ * 任何退出路径都不会漏。除了右键手势，这个动作也能替模组发一次它自己的包（模组把
+ * "对着生物按某个键"做成客户端拦按键、自己发包时用）：转向并核对准星真的落在它身上、
+ * 现场门槛放行（眼前没开别的界面）才经交互提交入口发那一下，之后照同一套确认收尾。
+ * 站位与靠近不归这里管：需要换位时用"到不了"的问题表达，
  * 由调用方换站位后重新做这个动作。
  */
 public final class AimAndInteract implements Action {
@@ -57,6 +62,8 @@ public final class AimAndInteract implements Action {
     public static final int TURN_MAX_TICKS = PlayerInput.TURN_MAX_TICKS;
     /** 走物品真实射线的交互（桶、水上放船）准星点到了别处时，最多重新瞄几次。 */
     private static final int MAX_AIM_ATTEMPTS = 2;
+    /** 提交前门槛（眼前没开别的界面）一直不满足时的耐心（刻）；超过就按时机不对收场，不无限等。 */
+    static final int SUBMIT_GATE_PATIENCE_TICKS = 40;
 
     /** 动作内部的进度：转头与核对命中 → 等游戏确认。 */
     private enum Stage { AIMING, CONFIRMING }
@@ -67,6 +74,15 @@ public final class AimAndInteract implements Action {
     private final InteractionConfirmation confirmation;
     private final int confirmTicks;
     private final Function<PlayerContext, FirstPersonScene> scenes;
+    /** 替模组发的一次性提交的说明与那一下；都为 null 时按右键手势提交。 */
+    private final String protocolOperation;
+    private final Runnable protocolSubmission;
+    /** 一次性提交的现场门槛（眼前没开别的界面才发）；为 null 时不设门槛。 */
+    private final BooleanSupplier readyToSubmit;
+    /** 门槛不满足时最多等几刻。 */
+    private final int gatePatience;
+    /** 门槛已经等了几刻。 */
+    private int gateWaited;
     /** 这一次镜头转向的世界坐标点；重新瞄准时清空，按当时的位置重新找。 */
     private Vec3 aimPoint;
     /** 直发包路径规划好的合法方块命中；准星被前景杂物挡住时直接交它发包。 */
@@ -102,6 +118,32 @@ public final class AimAndInteract implements Action {
     public AimAndInteract(InteractionTarget target, Gesture gesture, InteractionHand hand,
                           InteractionConfirmation confirmation, Function<PlayerContext, FirstPersonScene> scenes,
                           int confirmTicks) {
+        this(target, gesture, hand, confirmation, scenes, confirmTicks, null, null, null, 0);
+    }
+
+    /**
+     * 对准一只生物，替模组发一次它自己的包（模组把"对着生物按某个键"做成客户端拦按键、自己发包时用）：
+     * 转头看着它、准星确实落在它身上、门槛放行（眼前没开别的界面）才发那一下；对不准如实失败、不提交，
+     * 确认按给的条件逐刻等。站位由调用方先走好。
+     *
+     * @param operation    在做什么，写进提交记录与失败原因，例如"打开女仆的对话框"
+     * @param submission   发那一个包；只在对准后的这一刻调用一次
+     * @param readyToSubmit 提交前的现场门槛；不满足时等它放行
+     * @param scenes       从当刻角色上下文取第一人称现场；离线测试用替身回答
+     */
+    static AimAndInteract modProtocol(Entity entity, String operation, Runnable submission,
+                                      InteractionConfirmation confirmation, int confirmTicks,
+                                      BooleanSupplier readyToSubmit,
+                                      Function<PlayerContext, FirstPersonScene> scenes) {
+        return new AimAndInteract(new InteractionTarget.EntityTarget(entity), Gesture.USE,
+                InteractionHand.MAIN_HAND, confirmation, scenes, confirmTicks,
+                operation, submission, readyToSubmit, SUBMIT_GATE_PATIENCE_TICKS);
+    }
+
+    private AimAndInteract(InteractionTarget target, Gesture gesture, InteractionHand hand,
+                           InteractionConfirmation confirmation, Function<PlayerContext, FirstPersonScene> scenes,
+                           int confirmTicks, String protocolOperation, Runnable protocolSubmission,
+                           BooleanSupplier readyToSubmit, int gatePatience) {
         this.confirmTicks = confirmTicks;
         if (gesture == Gesture.USE_HELD_ITEM && !(target instanceof InteractionTarget.BlockTarget)) {
             throw new IllegalArgumentException("朝目标使用手里的物品只能对着一格方块");
@@ -111,6 +153,10 @@ public final class AimAndInteract implements Action {
         this.target = Objects.requireNonNull(target, "target");
         this.confirmation = Objects.requireNonNull(confirmation, "confirmation");
         this.scenes = Objects.requireNonNull(scenes, "scenes");
+        this.protocolOperation = protocolOperation;
+        this.protocolSubmission = protocolSubmission;
+        this.readyToSubmit = readyToSubmit;
+        this.gatePatience = gatePatience;
     }
 
     /** 做完之后的结论与现场；动作还没结束时没有结论。 */
@@ -138,7 +184,7 @@ public final class AimAndInteract implements Action {
             return ActionStatus.failed(new Problem(Problem.Kind.TARGET_GONE,
                     target.describe() + "已经不在了，还没出手", null));
         }
-        boolean liveRay = requiresLiveRay(scene);
+        boolean liveRay = !isProtocolSubmission() && requiresLiveRay(scene);
         if (aimPoint == null) {
             aimPoint = liveRay ? planLiveRayAim(scene) : planDirectAim(scene);
             if (aimPoint == null) {
@@ -172,9 +218,37 @@ public final class AimAndInteract implements Action {
                     : plannedBlockHit;
             return submit(player, scene, toSend);
         }
+        // 替模组发的一次性提交：读的是真实准星，准星必须真的落在它身上才发；点在别处不硬发，等转准或换站位。
+        if (isProtocolSubmission()) {
+            if (!hitsTarget(scene, live)) return reaimOrGiveUp(live);
+            // 门槛没放行（眼前开着别的界面）时等它关上；一直开着就按时机不对收场，不抢在界面前面发包。
+            if (!readyToSubmit.getAsBoolean()) {
+                if (++gateWaited > gatePatience) {
+                    return ActionStatus.failed(new Problem(Problem.Kind.WRONG_TIME,
+                            "眼前一直开着界面，" + protocolOperation + "没做", null));
+                }
+                return ActionStatus.running();
+            }
+            return submitProtocol(player);
+        }
         HitResult entityHit = hitsTarget(scene, live) ? live
                 : new EntityHitResult(((InteractionTarget.EntityTarget) target).entity(), aimPoint);
         return submit(player, scene, entityHit);
+    }
+
+    /** 是不是替模组发一次性提交：这种提交不走右键手势，瞄准与门槛核对按自己的规则走。 */
+    private boolean isProtocolSubmission() {
+        return protocolSubmission != null;
+    }
+
+    // 替模组发那一个包：本刻交互机会刚被占、或上一下还在等确认时提交入口交回 null，下一刻原样再发，不算提交过。
+    private ActionStatus submitProtocol(PlayerContext player) {
+        PendingInteraction submitted = player.interactionSender().submitControlProtocol(
+                player, protocolOperation, protocolSubmission, confirmation, confirmTicks);
+        if (submitted == null) return ActionStatus.running();
+        pending = submitted;
+        stage = Stage.CONFIRMING;
+        return ActionStatus.progressed();
     }
 
     // 桶舀水倒水、朝目标格使用手持物品（水上放船、装水瓶）与点液体格：服务端按玩家真实射线结算，必须守住真实射线核对。

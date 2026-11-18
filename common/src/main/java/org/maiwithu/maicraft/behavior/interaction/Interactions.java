@@ -118,7 +118,8 @@ public final class Interactions {
      */
     public Action aimAtEntityThenSubmit(Entity target, String doing, Runnable submission,
             InteractionConfirmation confirmation, int confirmTicks) {
-        return AimAtEntityThenSubmit.toward(target, doing, submission, confirmation, confirmTicks, new UseKeyPress());
+        return AimAndInteract.modProtocol(target, doing, submission, confirmation, confirmTicks,
+                new UseKeyPress()::worldInFront, FirstPersonScene::of);
     }
 
     /**

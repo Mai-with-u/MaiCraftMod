@@ -587,4 +587,102 @@ class AimAndInteractTest {
         passenger.setPos(2.0, 64.0, 2.0);
         return passenger;
     }
+
+    // ---- 替模组发一次性提交：转到位、准星落在它身上、门槛放行才发那一下 ----
+
+    /** 推进模组协议动作直到提交或结束（转头替身要几刻才让替身视线对准目标）；返回最后一刻的状态。 */
+    private static ActionStatus runProtocolUntil(AimAndInteract action, InteractionTestFakes.FakeContext context,
+                                                 ScriptedInteractionSender sender, int ticks) {
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < ticks; i++) {
+            status = action.tick(context.asTickContext());
+            context.advance();
+            if (status instanceof ActionStatus.Failed || status instanceof ActionStatus.Done) break;
+            if (!sender.submissions.isEmpty()) break;
+        }
+        return status;
+    }
+
+    @Test
+    void aModProtocolSubmissionWaitsForTheCrosshairAndGateBeforeSending() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity maid = fakeBoat();
+        scene.ray = new EntityHitResult(maid, maid.getBoundingBox().getCenter());
+        AimAndInteract action = AimAndInteract.modProtocol(maid, "打开她的对话框", () -> { },
+                c -> InteractionConfirmation.Verdict.PENDING, 40, () -> true, player -> scene);
+        ActionStatus submitted = runProtocolUntil(action, context, sender, 20);
+        assertTrue(submitted instanceof ActionStatus.Running running && running.progressed(), "提交本刻算真实进展");
+        assertEquals(1, sender.submissions.size());
+        assertEquals(PendingInteraction.Kind.MOD_PROTOCOL, sender.submissions.getFirst().kind(),
+                "模组的一次性提交走控制协议入口，不是右键实体的原生入口");
+        assertEquals("打开她的对话框", sender.controlOperations.getFirst());
+        sender.nextStatus = PendingInteraction.Status.CONFIRMED_APPLIED;
+        context.advance();
+        assertTrue(action.tick(context.asTickContext()) instanceof ActionStatus.Done);
+        assertEquals(InteractionVerdict.APPLIED, action.result().verdict());
+    }
+
+    @Test
+    void aModProtocolThatNeverLandsOnTheTargetFailsUnreachableWithoutSending() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity maid = fakeBoat();
+        // 准星一直落不到它身上（射线什么都没指到）：不硬发，报"到不了"，让人换站位。
+        ActionStatus status = runProtocolUntil(
+                AimAndInteract.modProtocol(maid, "打开她的对话框", () -> { },
+                        c -> InteractionConfirmation.Verdict.PENDING, 40, () -> true, player -> scene),
+                context, sender, 60);
+        assertEquals("UNREACHABLE", failedKind(status));
+        assertTrue(sender.submissions.isEmpty());
+    }
+
+    @Test
+    void aModProtocolHeldBackByTheGateFailsWrongTimeWithoutSending() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity maid = fakeBoat();
+        scene.ray = new EntityHitResult(maid, maid.getBoundingBox().getCenter());
+        // 准星对准了但眼前一直开着界面：等门槛放行，一直不开就按时机不对收场，不抢在界面前面发包。
+        ActionStatus status = runProtocolUntil(
+                AimAndInteract.modProtocol(maid, "打开她的对话框", () -> { },
+                        c -> InteractionConfirmation.Verdict.PENDING, 40, () -> false, player -> scene),
+                context, sender, 120);
+        assertEquals("WRONG_TIME", failedKind(status));
+        assertTrue(sender.submissions.isEmpty());
+    }
+
+    @Test
+    void aModProtocolRefusalReportsNotAppliedThroughTheSharedVerdicts() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity maid = fakeBoat();
+        scene.ray = new EntityHitResult(maid, maid.getBoundingBox().getCenter());
+        AimAndInteract action = AimAndInteract.modProtocol(maid, "打开她的对话框", () -> { },
+                c -> InteractionConfirmation.Verdict.PENDING, 40, () -> true, player -> scene);
+        runProtocolUntil(action, context, sender, 20);
+        sender.nextStatus = PendingInteraction.Status.CONFIRMED_NOT_APPLIED;
+        ActionStatus status = action.tick(context.asTickContext());
+        assertEquals("REFUSED_BY_GAME", failedKind(status));
+        assertEquals(InteractionVerdict.NOT_APPLIED, action.result().verdict());
+    }
+
+    @Test
+    void aVanishedTargetStopsTheModProtocolBeforeAiming() {
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        Entity maid = fakeBoat();
+        maid.discard();
+        ActionStatus status = runProtocolUntil(
+                AimAndInteract.modProtocol(maid, "打开她的对话框", () -> { },
+                        c -> InteractionConfirmation.Verdict.PENDING, 40, () -> true, player -> scene),
+                context, sender, 10);
+        assertEquals("TARGET_GONE", failedKind(status));
+        assertTrue(sender.submissions.isEmpty());
+    }
 }
