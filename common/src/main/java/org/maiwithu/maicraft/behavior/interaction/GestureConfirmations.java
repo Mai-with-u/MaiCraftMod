@@ -10,32 +10,18 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
-import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * 按手势取确认条件：手上是什么、效果落在哪，决定这次右键怎样算生效。
  *
  * <p>确认条件本身由游戏接口层的工厂提供（手上物品变了、方块变过了、界面开了、火出现了），
  * 这里按 {@link ItemUseAim} 的结论把它们组合起来：一种证据可能被客户端预测掩盖，
- * 几种证据有一项成立就算生效，都还等着才继续等。
+ * 几种证据有一项成立就算生效，都还等着才继续等。组合与「过期即没生效」也用游戏接口层
+ * 的同一份工厂，不在这里另写一份。
  */
 public final class GestureConfirmations {
 
     private GestureConfirmations() {}
-
-    /** 几项证据有一项成立就算生效；全部实现都还在等时才算没到。 */
-    public static InteractionConfirmation anyOf(InteractionConfirmation... parts) {
-        List<InteractionConfirmation> checks = List.of(parts);
-        return context -> {
-            boolean allDiverged = true;
-            for (InteractionConfirmation check : checks) {
-                InteractionConfirmation.Verdict verdict = check.observe(context);
-                if (verdict == InteractionConfirmation.Verdict.APPLIED) return verdict;
-                if (verdict != InteractionConfirmation.Verdict.DIVERGED) allDiverged = false;
-            }
-            return allDiverged ? InteractionConfirmation.Verdict.DIVERGED : InteractionConfirmation.Verdict.PENDING;
-        };
-    }
 
     /**
      * 按手势结论取确认条件。
@@ -70,18 +56,7 @@ public final class GestureConfirmations {
         boolean placement = confirmation == ItemUseAim.Confirmation.OWN_USE_TAKES_EFFECT
                 || confirmation == ItemUseAim.Confirmation.TARGET_OR_HAND_CHANGES;
         InteractionConfirmation combined = checks.size() == 1
-                ? checks.getFirst() : anyOf(checks.toArray(new InteractionConfirmation[0]));
-        return placement ? expiresAsNotApplied(combined) : combined;
-    }
-
-    /** 给组合好的确认条件挂上「过期即没生效」的断定；其余核对原样转达。 */
-    private static InteractionConfirmation expiresAsNotApplied(InteractionConfirmation check) {
-        return new InteractionConfirmation() {
-            @Override public InteractionConfirmation.Verdict observe(PlayerContext context) { return check.observe(context); }
-            @Override public int stableTicksRequired() { return check.stableTicksRequired(); }
-            @Override public boolean requiresBlockAcknowledgement() { return check.requiresBlockAcknowledgement(); }
-            @Override public InteractionConfirmation.Verdict observeAcknowledged(PlayerContext context) { return check.observeAcknowledged(context); }
-            @Override public boolean expiryMeansNotApplied() { return true; }
-        };
+                ? checks.getFirst() : InteractionConfirmation.anyOf(checks.toArray(new InteractionConfirmation[0]));
+        return placement ? InteractionConfirmation.expiresAsNotApplied(combined) : combined;
     }
 }

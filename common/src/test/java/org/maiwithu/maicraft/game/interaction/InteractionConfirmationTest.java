@@ -62,6 +62,17 @@ class InteractionConfirmationTest {
     }
 
     @Test
+    void expiresAsNotAppliedFlagsTheExpiryAndForwardsTheChecks() {
+        // 挂上「过期即没生效」后观察结论原样转达，稳定刻数等其余核对也不变。
+        InteractionConfirmation evidence = InteractionConfirmation.serverObservedEntity(
+                c -> InteractionConfirmation.Verdict.APPLIED);
+        InteractionConfirmation wrapped = InteractionConfirmation.expiresAsNotApplied(evidence);
+        assertEquals(InteractionConfirmation.Verdict.APPLIED, wrapped.observe(null));
+        assertEquals(1, wrapped.stableTicksRequired(), "转达被包条件自己的稳定刻数");
+        assertTrue(wrapped.expiryMeansNotApplied(), "确认窗等到过期而证据一样都没出现时按没生效收场");
+    }
+
+    @Test
     void serverObservedEntitySkipsTheDwell() {
         InteractionConfirmation evidence = c -> InteractionConfirmation.Verdict.APPLIED;
         assertEquals(2, evidence.stableTicksRequired(), "普通观察默认要连续两刻稳定");

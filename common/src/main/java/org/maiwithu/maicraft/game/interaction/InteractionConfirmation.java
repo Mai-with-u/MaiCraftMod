@@ -194,8 +194,11 @@ public interface InteractionConfirmation {
         return attackScale < 0.9f ? Verdict.APPLIED : Verdict.PENDING;
     }
 
+    /**
+     * 几项证据有一项成立就算生效的组合：任一条件确认就通过，还有条件在等就继续等；
+     * 全部都给出终态时，有条件明确说没生效就按没生效收场（明确的否定证据不再拖到超期），否则按不一致。
+     */
     public static InteractionConfirmation anyOf(InteractionConfirmation... confirmations) {
-        // 任一条件匹配就通过；没有匹配但还有等待项就继续等，全部结束后再综合未生效或不一致。
         InteractionConfirmation[] frozen = Arrays.copyOf(confirmations, confirmations.length);
         if (frozen.length == 0) throw new IllegalArgumentException("至少要给一条确认条件");
         return context -> {
@@ -209,6 +212,21 @@ public interface InteractionConfirmation {
             }
             if (pending) return Verdict.PENDING;
             return notApplied ? Verdict.NOT_APPLIED : Verdict.DIVERGED;
+        };
+    }
+
+    /**
+     * 给组合好的确认条件挂上「过期即没生效」的断定：确认窗到期而生效证据一样都没出现时，
+     * 按没生效收场而不是「没能确认」。其余核对（稳定刻数、放置的预测校正等待、回话转达）原样转达；
+     * 放置类手势的证据全靠客户端预测与服务端同步，一个窗口过去一样都没变就能如实断定没生效。
+     */
+    public static InteractionConfirmation expiresAsNotApplied(InteractionConfirmation check) {
+        return new InteractionConfirmation() {
+            @Override public Verdict observe(PlayerContext context) { return check.observe(context); }
+            @Override public int stableTicksRequired() { return check.stableTicksRequired(); }
+            @Override public boolean requiresBlockAcknowledgement() { return check.requiresBlockAcknowledgement(); }
+            @Override public Verdict observeAcknowledged(PlayerContext context) { return check.observeAcknowledged(context); }
+            @Override public boolean expiryMeansNotApplied() { return true; }
         };
     }
 
