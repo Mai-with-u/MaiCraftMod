@@ -295,18 +295,13 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
             return want.wanted().matches(snapshot.key(), tags.tagsOf(itemIdOf(snapshot)));
         }
 
-        // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读。
-        // 界面中途没了时没有读数可记，取东西时按旧记忆找，件数以到场再开为准。
+        // 去关之前把这只箱子此刻有什么记进世界记忆：位置带维度，种类按现场的方块读，
+        // 读不到现场时按容器已知的位置与方块记。界面中途没了时没有读数可记，取东西时按旧记忆找，件数以到场再开为准。
         private void rememberContents(MenuContent.Reading reading) {
-            PlayerContext current = contexts.get();
-            ClientLevel level = current == null ? null : current.level();
-            if (level == null) return;
             // 药水连种类一起记：下回点名要抗火药水时认得出是这只箱子。
             Map<String, Integer> contents = reading.containerContents();
-            WorldPosition position = new WorldPosition(at.getX(), at.getY(), at.getZ(),
-                    level.dimension().location().toString());
-            String blockType = BuiltInRegistries.BLOCK.getKey(level.getBlockState(at).getBlock()).toString();
-            memory.rememberContainerOpened(position, blockType, List.copyOf(contents.keySet()), Instant.now());
+            memory.rememberContainerOpened(currentPosition(), currentBlockType(),
+                    List.copyOf(contents.keySet()), Instant.now());
         }
 
         // 光标上拿着东西的那几下停不得：半途撒手会把拆出来的尾数交给关界面的流程，先等它放进背包。

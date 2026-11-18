@@ -26,6 +26,8 @@ import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.acquire.sources.ContainerBatchTakes;
+import org.maiwithu.maicraft.behavior.acquire.sources.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
@@ -459,6 +461,18 @@ class DepositSourceTaskTest {
                 openedPositions.add(pos);
                 return new ImmediateOpening(chests.get(pos));
             }, memory, notice);
+            // 来源取货走真的行为层开箱搬货：打开动作换成这里那只替身箱子，别的（取货一轮、结算、通报）都是真的。
+            ContainerBatchTakes takes = new MenuContainerTakes(
+                    itemId -> itemId.equals(OAK_LOG) ? Set.of("minecraft:logs") : Set.of(),
+                    memory, () -> null,
+                    (at, permissions) -> {
+                        opens++;
+                        WorldPosition pos = WorldPosition.here(at.getX(), at.getY(), at.getZ());
+                        openedPositions.add(pos);
+                        return new ImmediateOpening(chests.get(pos));
+                    },
+                    at -> false,
+                    notice);
             DepositSeams.ClearsOffhand offhandSeam = new DepositSeams.ClearsOffhand() {
                 @Override public Optional<BackpackStack> held() {
                     return offhand.isEmpty() ? Optional.empty() : Optional.of(toBackpackStack(offhand));
@@ -481,7 +495,7 @@ class DepositSourceTaskTest {
             return new DepositServices(
                     spots, storing, places, null,
                     itemId -> itemId.equals(OAK_LOG) ? Set.of("minecraft:logs") : Set.of(),
-                    () -> Optional.ofNullable(network), offhandSeam, ItemsToKeep.NOTHING, null);
+                    () -> Optional.ofNullable(network), offhandSeam, ItemsToKeep.NOTHING, null, takes);
         }
 
         private OthersThingsNotice buildOthersNotice() {

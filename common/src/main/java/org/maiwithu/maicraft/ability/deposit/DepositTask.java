@@ -199,11 +199,13 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         if (budget <= 0) {
             return finishSourceDone();
         }
+        if (services.takes() == null) {
+            return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED, "开箱取货的接缝没有接上，从来源容器取不了货", null));
+        }
         ContainerChooser.Candidate candidate = currentSource.entry().candidate();
         taking = new SourceContainerTake(
                 new KnownContainer(candidate.name(), candidate.at(), candidate.blockTypeId()),
-                input.itemIds(), budget, input.permissions(), currentSource.parts(),
-                services.tags(), backpack, records());
+                input.itemIds(), budget, services.takes(), input.permissions(), records());
         return goWith(Phase.SOURCE_TAKE, taking, "走过去从来源" + sourceName() + "取货");
     }
 

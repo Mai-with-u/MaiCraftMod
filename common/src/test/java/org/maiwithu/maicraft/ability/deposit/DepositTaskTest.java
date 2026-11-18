@@ -608,7 +608,7 @@ class DepositTaskTest {
                 opens++;
                 return new FakeOpening(chests.get(WorldPosition.here(at.getX(), at.getY(), at.getZ())));
             }, null), places, null, itemId -> itemId.equals("minecraft:oak_log") ? Set.of("minecraft:logs") : Set.of(),
-                    () -> Optional.ofNullable(network), offhandClearing(), ItemsToKeep.NOTHING, creatureStorage());
+                    () -> Optional.ofNullable(network), offhandClearing(), ItemsToKeep.NOTHING, creatureStorage(), null);
             DepositTask task = new DepositTask(input, services, backpack());
             task.start(tick());
             return task;
