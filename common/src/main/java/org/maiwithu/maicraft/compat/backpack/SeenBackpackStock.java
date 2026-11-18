@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.backpack;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -11,27 +9,25 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 
+import org.maiwithu.maicraft.behavior.worldmemory.SeenStock;
+
 /**
  * 上次开包读到的存货与剩余空位：角色开过一次随身背包（无论取东西还是腾地方往里存），
- * 就记下那一刻主存储里各有多少东西、还剩几格通用空槽。
+ * 就记下那一刻主存储里各有多少东西、还剩几格通用空槽。时效与按包记账用行为层的 {@link SeenStock}；
+ * 这里只把开包读到的格子数喂进去，再把按包分记与几只包合起来看的读法留在联动这一侧。
  *
  * <p>下次拿东西问价、腾格子算空间、或者看自身观察时都读同一本账；包里的东西会变，
- * 记下的数五分钟内算数，取放时以打开看到的现场为准，隔久了就当没看过。
- * 身上不止一只包时按结构化栏位定位分开记，只在这次进世界期间有效，不存盘。
+ * 记下的数只当线索，取放时以打开看到的现场为准。身上不止一只包时按结构化栏位定位分开记。
  */
 public final class SeenBackpackStock {
 
-    /** 记下的开包读数多久内还算数。包里的东西会变，五分钟前看到的只能当大概；类别：玩家常识。 */
-    public static final Duration FRESH_FOR = Duration.ofMinutes(5);
-
     /** 每只随身背包（按栏位、分组与槽位定位）上次开包的读数。 */
-    private final Map<BackpackSlot.Location, Sighting> sightings = new HashMap<>();
+    private final SeenStock<BackpackSlot.Location> seen = new SeenStock<>();
 
     /** 开包读到了这只包主存储的内容与剩余空槽数后记一笔，盖掉这只包以前的记录。 */
     public void saw(BackpackSlot.Location location, Map<String, Integer> stacksByItem, int freeSlots, Instant when) {
         Objects.requireNonNull(location, "location");
-        sightings.put(location, new Sighting(
-                Map.copyOf(new LinkedHashMap<>(stacksByItem)), Math.max(0, freeSlots), true, when));
+        seen.saw(location, toLongs(stacksByItem), freeSlots, when);
     }
 
     /** 原版主背包格号的便捷记法（空槽数不计）：单测直接按主背包格号喂读数时用。 */
@@ -42,19 +38,15 @@ public final class SeenBackpackStock {
     /** 记下这只包带着无限格升级等读不出常理主存储的情况：五分钟内不再拿它算空槽反复去开。 */
     public void markUnreadable(BackpackSlot.Location location, Instant when) {
         Objects.requireNonNull(location, "location");
-        sightings.put(location, new Sighting(Map.of(), 0, false, when));
+        seen.sawUnreadable(location, when);
     }
 
-    /** 单只包在五分钟内的记录；没看过或已过期给空。 */
+    /** 单只包五分钟内的记录；没看过或已过期给空。 */
     public Optional<Sighting> freshOf(BackpackSlot.Location location, Instant now) {
-        Sighting sighting = sightings.get(location);
-        if (sighting == null || isExpired(sighting, now)) {
-            return Optional.empty();
-        }
-        return Optional.of(sighting);
+        return seen.fresh(location, now).map(SeenBackpackStock::sightingOf);
     }
 
-    /** 五分钟内看过的全部可读背包加起来的存货；一只都没看过或都过了 {@link #FRESH_FOR} 给空。 */
+    /** 五分钟内看过的全部可读背包加起来的存货；一只都没看过或都过了时效给空。 */
     public Optional<Sighting> fresh(Instant now) {
         return freshIn(null, now);
     }
@@ -65,15 +57,16 @@ public final class SeenBackpackStock {
         return freshIn(present, now);
     }
 
+    // 几只包的读数合起来：件数相加、空位相加，看到的时刻取最早的一笔（越久越只能当大概）。
     private Optional<Sighting> freshIn(Set<BackpackSlot.Location> present, Instant now) {
         Map<String, Integer> total = new LinkedHashMap<>();
         int totalFree = 0;
         Instant oldest = null;
-        for (Map.Entry<BackpackSlot.Location, Sighting> entry : sightings.entrySet()) {
+        for (Map.Entry<BackpackSlot.Location, SeenStock.Sighting> entry : seen.freshAll(now).entrySet()) {
             if (present != null && !present.contains(entry.getKey())) continue;
-            Sighting sighting = entry.getValue();
-            if (!sighting.readable() || isExpired(sighting, now)) continue;
-            sighting.stacksByItem().forEach((itemId, count) -> total.merge(itemId, count, Integer::sum));
+            SeenStock.Sighting sighting = entry.getValue();
+            if (!sighting.readable()) continue;
+            sighting.stacksByItem().forEach((itemId, count) -> total.merge(itemId, count.intValue(), Integer::sum));
             totalFree += sighting.freeSlots();
             oldest = oldest == null || sighting.seenAt().isBefore(oldest) ? sighting.seenAt() : oldest;
         }
@@ -93,16 +86,16 @@ public final class SeenBackpackStock {
 
     private int freshCountIn(Set<BackpackSlot.Location> present, Instant now) {
         int count = 0;
-        for (Map.Entry<BackpackSlot.Location, Sighting> entry : sightings.entrySet()) {
+        for (Map.Entry<BackpackSlot.Location, SeenStock.Sighting> entry : seen.freshAll(now).entrySet()) {
             if (present != null && !present.contains(entry.getKey())) continue;
-            if (!isExpired(entry.getValue(), now)) count++;
+            count++;
         }
         return count;
     }
 
     /** 开包中途界面丢了、读数没记成：清掉这只包的旧数，别照着过时旧数不去看。 */
     public void forget(BackpackSlot.Location location) {
-        sightings.remove(location);
+        seen.forget(location);
     }
 
     /** 原版主背包格号的清除便捷入口。 */
@@ -110,8 +103,17 @@ public final class SeenBackpackStock {
         forget(BackpackSlot.Location.mainSlot(mainSlot));
     }
 
-    private static boolean isExpired(Sighting sighting, Instant now) {
-        return sighting.seenAt().plus(FRESH_FOR).isBefore(now);
+    // 行为层按 long 记件数，开包读到的件数本来就是 int：交回调用方时换回去。
+    private static Sighting sightingOf(SeenStock.Sighting sighting) {
+        Map<String, Integer> stacks = new LinkedHashMap<>();
+        sighting.stacksByItem().forEach((itemId, count) -> stacks.put(itemId, count.intValue()));
+        return new Sighting(stacks, sighting.freeSlots(), sighting.readable(), sighting.seenAt());
+    }
+
+    private static Map<String, Long> toLongs(Map<String, Integer> stacksByItem) {
+        Map<String, Long> longs = new LinkedHashMap<>();
+        stacksByItem.forEach((itemId, count) -> longs.put(itemId, count == null ? 0L : count.longValue()));
+        return longs;
     }
 
     /**
@@ -138,11 +140,8 @@ public final class SeenBackpackStock {
 
         /** 想要的东西包里有几件：wanted 按物品 ID 回答算不算想要的（标签由调用方查好）。 */
         public int count(Predicate<String> wanted) {
-            int total = 0;
-            for (Map.Entry<String, Integer> entry : stacksByItem.entrySet()) {
-                if (wanted.test(entry.getKey())) total += entry.getValue();
-            }
-            return total;
+            long total = SeenStock.count(stacksByItem, wanted);
+            return total > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) total;
         }
     }
 }
