@@ -19,16 +19,33 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Inscribers;
  */
 public final class AppliedEnergisticsInscribers implements Ae2Inscribers {
 
-    /** 压印器内部库存里输出格的格号：0 顶模板、1 底模板、2 输入、3 输出。类别：游戏事实（InscriberBlockEntity 的合并库存）。 */
+    /** 压印器内部库存四个工作格的格号：0 顶模板、1 底模板、2 输入、3 输出。类别：游戏事实（InscriberBlockEntity 的合并库存）。 */
+    private static final int TOP_SLOT = 0;
+    private static final int BOTTOM_SLOT = 1;
+    private static final int INPUT_SLOT = 2;
     private static final int OUTPUT_SLOT = 3;
 
     @Override public Optional<List<MachineState.Shown>> output(ClientLevel level, BlockPos at) {
-        if (level.getBlockEntity(at) instanceof InscriberBlockEntity inscriber) {
+        if (level != null && level.getBlockEntity(at) instanceof InscriberBlockEntity inscriber) {
             ItemStack output = inscriber.getInternalInventory().getStackInSlot(OUTPUT_SLOT);
             if (output.isEmpty()) return Optional.of(List.of());
-            String itemId = BuiltInRegistries.ITEM.getKey(output.getItem()).toString();
-            return Optional.of(List.of(new MachineState.Shown(itemId, output.getCount())));
+            return Optional.of(List.of(new MachineState.Shown(idOf(output), output.getCount())));
         }
         return Optional.empty();
+    }
+
+    @Override public Optional<Inputs> inputs(ClientLevel level, BlockPos at) {
+        if (level != null && level.getBlockEntity(at) instanceof InscriberBlockEntity inscriber) {
+            var inv = inscriber.getInternalInventory();
+            return Optional.of(new Inputs(
+                    idOf(inv.getStackInSlot(TOP_SLOT)),
+                    idOf(inv.getStackInSlot(BOTTOM_SLOT)),
+                    idOf(inv.getStackInSlot(INPUT_SLOT))));
+        }
+        return Optional.empty();
+    }
+
+    private static String idOf(ItemStack stack) {
+        return stack == null || stack.isEmpty() ? "" : BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
 }

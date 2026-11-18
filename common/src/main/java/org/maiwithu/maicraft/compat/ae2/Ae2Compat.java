@@ -150,6 +150,11 @@ public final class Ae2Compat extends CompatModule {
         return call("读压印器的输出槽", () -> inscribers.output(level, at));
     }
 
+    /** 一格压印器的前三个投入工作格（顶模板、底模板、中间输入）；见 {@link Ae2Inscribers#inputs}。 */
+    public Optional<Ae2Inscribers.Inputs> inscriberInputs(ClientLevel level, BlockPos at) {
+        return call("读压印器的投入格", () -> inscribers.inputs(level, at));
+    }
+
     /** 是不是 AE2 的部件；见 {@link Ae2Grid#partItem}。 */
     public boolean partItem(String itemId) {
         return call("认 AE2 部件", () -> grid.partItem(itemId));

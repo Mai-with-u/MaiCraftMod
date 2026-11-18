@@ -33,10 +33,13 @@ import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
+import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.CompatMenuFeed;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
@@ -54,6 +57,12 @@ final class Ae2MachineType implements MachineType {
     private final MeCables cables;
     /** 每台样板供应器上次打开界面时样板格里样板的产出：样板格只在开着界面时同步。 */
     private final Map<BlockPos, List<String>> patternsSeen = new HashMap<>();
+    /** 本会话由角色自己放进各台压印器、收产物时应一并收回背包的不消耗压印模板；机内原有的不进此表。 */
+    private final Map<BlockPos, Set<String>> placedPlates = new HashMap<>();
+    /** 选配方算投料量时确认本趟要新放进压印器的不消耗模板规格。 */
+    private final Map<BlockPos, Set<String>> plannedPlates = new HashMap<>();
+    /** 对照当前选中配方与客户端同步到的压印器前三个工作格发现的槽位冲突说明。 */
+    private final Map<BlockPos, String> slotConflicts = new HashMap<>();
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks) {
@@ -199,12 +208,84 @@ final class Ae2MachineType implements MachineType {
         return outputs;
     }
 
-    // 投料：压印器放好料自己压，料从界面放进中间输入格（槽位只收能与当前模板凑成配方的，放不进的写进实情）；
-    // 线缆格、样板供应器这类不收料，照旧给空。压印器是单方块设备，编号就是方块注册 ID。
+    // 压印器的不消耗压印模板在部分查看器里列为催化剂，但必须放进模板格才能开工；顶、底格物料一律排在中间输入格之前先放。
+    @Override public boolean feedsCatalysts() {
+        return isInscriber();
+    }
+
+    @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
+        return isInscriber() && Ae2InscriberPlates.isTopOrBottom(recipe, ingredient);
+    }
+
+    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
+            boolean fromCatalysts) {
+        if (!isInscriber()) return ingredient.amount() * batches;
+        BlockPos pos = at.immutable();
+        Optional<Ae2Inscribers.Inputs> slots = compat.inscriberInputs(level(), pos);
+        slots.flatMap(current -> Ae2InscriberPlates.conflict(recipe, current))
+                .ifPresentOrElse(why -> slotConflicts.put(pos, why), () -> slotConflicts.remove(pos));
+        long count = Ae2InscriberPlates.feedCount(recipe, ingredient, batches, fromCatalysts, slots);
+        if (count > 0 && Ae2InscriberPlates.isNonConsumedPlate(recipe, ingredient, fromCatalysts)) {
+            Ae2InscriberPlates.specifierOf(ingredient)
+                    .ifPresent(spec -> plannedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(spec));
+        }
+        return count;
+    }
+
+    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+        if (!isInscriber()) return Optional.empty();
+        String conflict = slotConflicts.get(at);
+        if (conflict == null) return Optional.empty();
+        // 再核对一次此刻压印器工作格是不是已经被清出腾空了，空了就放行。
+        boolean cleared = compat.inscriberInputs(level(), at)
+                .map(slots -> slots.occupied().isEmpty())
+                .orElse(false);
+        if (cleared) {
+            slotConflicts.remove(at);
+            return Optional.empty();
+        }
+        return Optional.of(conflict);
+    }
+
+    // 投料：压印器放好料自己压，料从界面放进对应工作格；自己新放进的不消耗模板记下来供收产物时收回，
+    // 真因机内占着别的物品放不进时在报错里把槽内占用物点名说清。线缆格、样板供应器这类不收料，照旧给空。
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
         if (!isInscriber()) return Optional.empty();
-        return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, kind.id(), itemId, count,
-                permissions, null)));
+        BlockPos pos = at.immutable();
+        Set<String> platesBefore = new LinkedHashSet<>();
+        MenuFeed inner = new MenuFeed(services, kind.name(), pos, kind.id(), itemId, count, permissions, null);
+        return Optional.of(new CompatMenuFeed(inner,
+                () -> compat.inscriberInputs(level(), pos).ifPresent(slots -> platesBefore.addAll(slots.plates())),
+                () -> recordPlacedPlate(pos, itemId, platesBefore),
+                problem -> enrichFeedFailure(pos, itemId, problem)));
+    }
+
+    private void recordPlacedPlate(BlockPos pos, String itemId, Set<String> platesBefore) {
+        Set<String> planned = plannedPlates.get(pos);
+        boolean plannedPlate = planned != null && planned.remove(itemId);
+        if (planned != null && planned.isEmpty()) plannedPlates.remove(pos);
+        if (plannedPlate || (Ae2InscriberPlates.isPressItemId(itemId) && !platesBefore.contains(itemId))) {
+            placedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(itemId);
+            return;
+        }
+        compat.inscriberInputs(level(), pos).ifPresent(after -> {
+            for (String plate : after.plates()) {
+                if (!platesBefore.contains(plate) && Ae2InscriberPlates.isPressItemId(plate)) {
+                    placedPlates.computeIfAbsent(pos, key -> new LinkedHashSet<>()).add(plate);
+                }
+            }
+        });
+    }
+
+    private Problem enrichFeedFailure(BlockPos pos, String itemId, Problem problem) {
+        List<String> occupied = compat.inscriberInputs(level(), pos)
+                .map(Ae2Inscribers.Inputs::occupied)
+                .orElse(List.of());
+        if (occupied.isEmpty()) return problem;
+        return Problem.of(problem.kind(),
+                "压印器里还放着 " + String.join("、", occupied) + "，与这次要投的 " + itemId + " 不兼容（"
+                        + problem.message() + "）",
+                "先用 use 打开压印器取出里面占着的物品再试");
     }
 
     // 出口：压印器的产物格随方块实体同步，站在外面读得到。
@@ -214,13 +295,16 @@ final class Ae2MachineType implements MachineType {
         return compat.inscriberOutput(level, at).orElse(List.of());
     }
 
-    // 收产物：点开压印器的界面把产物搬进背包，看完关上；不是压印器给空。
+    // 收产物：点开压印器的界面把产物搬进背包；若本会话由我们放进了压印模板，顺手一并收回背包（机内原本就有的模板不动）。
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
         if (!isInscriber()) return Optional.empty();
-        return Optional.of(new MenuOutputLook(itemId, true,
-                new ClientMenuOpening(at, permissions, services.menuLayouts(), services.approach(),
-                        services.interactions(), services.context()),
-                services.context()));
+        ClientMenuOpening opening = new ClientMenuOpening(at, permissions, services.menuLayouts(), services.approach(),
+                services.interactions(), services.context());
+        Set<String> own = placedPlates.get(at);
+        if (own == null || own.isEmpty()) {
+            return Optional.of(new MenuOutputLook(itemId, true, opening, services.context()));
+        }
+        return Optional.of(new Ae2InscriberTake(itemId, own, opening, services.context()));
     }
 
     private boolean isCableBus() {
