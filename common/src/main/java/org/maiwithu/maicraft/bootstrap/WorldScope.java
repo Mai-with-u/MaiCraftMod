@@ -49,6 +49,7 @@ import org.maiwithu.maicraft.behavior.permission.RegionsSnapshot;
 import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.ClientCaveOpeningSight;
+import org.maiwithu.maicraft.behavior.perception.ClientRareSightingWatch;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.perception.ClientEntitySight;
 import org.maiwithu.maicraft.behavior.perception.SceneSelf;
@@ -161,6 +162,8 @@ public final class WorldScope {
     private final ClientCaveOpeningSight openingSight = new ClientCaveOpeningSight();
     /** 营地地面坑的读端：每两秒扫一轮营地内的地面竖坑与爆炸弹坑，填坑能力也复用同一份。 */
     private final ClientCampPitSight campPitSight;
+    /** 看见罕见目标的读端：每刻看有没有 Boss 进入前方视野，每半秒看有没有天然稀有矿脉进入视野，去重后发事件。 */
+    private final ClientRareSightingWatch rareSightings;
     /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
     private final List<ModSight> modSights;
     /** 模组的东西在角色周围多大范围里看（格）。 */
@@ -258,6 +261,7 @@ public final class WorldScope {
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, events);
         RareLootNotice rareLootNotice = new RareLootNotice(protection, kinds::isNaturalLootContainer, memory, events);
+        this.rareSightings = new ClientRareSightingWatch(blockScans, scene.seen(), ownership, memory, events);
         this.dimension = minecraft.level.dimension().location().toString();
         installNavigationProtection();
         // 原版硬碰撞实体（船、运输船、潜影贝）与联动模组的移动结构一并交给寻路：静态挡路绕开走，正在动的先等它过去。
@@ -428,6 +432,8 @@ public final class WorldScope {
         // 目标在推进时，LLM 排好的后几步点的还是开头看到的编号：到期时先看东西还在不在，还在就留着；
         // 没有目标在推进时到期就失效。
         scene.expire(gameTick, goalUnderway ? entry -> scene.seen().stillThere(current.level(), entry) : null);
+        // 实体观察编号刚刷新完，核对眼前视野有没有新撞见的 Boss 或露出来的天然稀有矿脉。
+        rareSightings.tick(current, gameTick, when);
         othersNotice.flushDue(gameTick);
     }
 

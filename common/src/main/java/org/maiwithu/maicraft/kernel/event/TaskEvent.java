@@ -123,7 +123,12 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 打开战利品容器（natural_loot 或 no_record）看到稀罕贵重物品（precious）时发出的里程碑事件：
          * 同一只容器同一样东西按世界记忆上回看到的内容去重只报一次，开出了什么与拿走几件在附带的 rare_loot 里。
          */
-        RARE_LOOT_FOUND
+        RARE_LOOT_FOUND,
+        /**
+         * 在眼前视野里亲眼看见罕见目标（Boss 级强敌或露在外面的天然稀有矿脉）：
+         * 同一只 Boss 或同一处矿脉去重只报一次，是什么、几块、在哪在消息与附带的 rare_sighting 里。
+         */
+        RARE_SIGHTING
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

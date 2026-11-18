@@ -184,7 +184,8 @@
     "others_food_taken",
     "player_body_language",
     "others_things_touched",
-    "rare_loot_found"
+    "rare_loot_found",
+    "rare_sighting"
   ],
   "chat_kinds": [
     "player",

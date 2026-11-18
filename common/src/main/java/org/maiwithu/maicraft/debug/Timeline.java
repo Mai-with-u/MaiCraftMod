@@ -114,8 +114,8 @@ final class Timeline {
             case PLAYER_BODY_LANGUAGE -> PanelColor.WAITING;
             case STEP_FINISHED, TEMPORARY_TASK_FINISHED, DEATH_RECOVERY_APPLIED -> PanelColor.MINOR;
             case DISCOVERED -> PanelColor.MINOR;
-            // 打开战利品箱看到稀罕贵重物是值得播报的里程碑，用成功色点亮
-            case RARE_LOOT_FOUND -> PanelColor.GOOD;
+            // 打开战利品箱看到稀罕贵重物、眼前看见 Boss 或稀有矿脉都是值得播报的高光发现，用成功色点亮
+            case RARE_LOOT_FOUND, RARE_SIGHTING -> PanelColor.GOOD;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {
                 case DONE -> PanelColor.GOOD;
                 case PARTIAL -> PanelColor.WAITING;
