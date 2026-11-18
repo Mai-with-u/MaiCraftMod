@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat;
+package org.maiwithu.maicraft.behavior.interaction;
 
 import java.util.ArrayDeque;
 import java.util.Deque;

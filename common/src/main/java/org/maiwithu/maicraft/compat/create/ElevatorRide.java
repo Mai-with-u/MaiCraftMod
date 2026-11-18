@@ -24,7 +24,7 @@ import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.navigation.util.SpotScan;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

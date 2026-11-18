@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat;
+package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.List;
 import java.util.Objects;
 import java.util.function.UnaryOperator;
 
-import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.behavior.inventory.containers.FeedReport;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;

@@ -16,8 +16,8 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.compat.HandThenClick;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.HandThenClick;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

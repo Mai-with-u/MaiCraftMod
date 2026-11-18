@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 import org.maiwithu.maicraft.game.menu.MenuConfirmation;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

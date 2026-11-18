@@ -4,7 +4,7 @@ package org.maiwithu.maicraft.compat;
 import java.util.List;
 import java.util.Objects;
 
-import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.behavior.inventory.containers.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
 import org.maiwithu.maicraft.kernel.result.Change;

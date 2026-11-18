@@ -20,7 +20,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
+import org.maiwithu.maicraft.behavior.inventory.containers.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.inventory.hands.SplitsToHand;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -32,8 +32,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.compat.HandThenClick;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.HandThenClick;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 
 /**
  * 机械动力里"放东西的地方"怎么用：置物台手持东西右键顶面放上去手上那一叠（原有的先收回背包），投料时手上先只留要投的件数，空手右键顶面收回；

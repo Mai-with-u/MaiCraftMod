@@ -22,7 +22,7 @@ import org.maiwithu.maicraft.behavior.navigation.StraightWalk;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.travel.modes.GetsOffVehicle;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

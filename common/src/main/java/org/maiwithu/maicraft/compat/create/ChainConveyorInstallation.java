@@ -28,8 +28,8 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.compat.HandThenClick;
-import org.maiwithu.maicraft.compat.StepsInOrder;
+import org.maiwithu.maicraft.behavior.interaction.HandThenClick;
+import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
 
 /**
  * 链条输送机之间的一条链：两台链条输送机，手持锁链先右键一台、再右键另一台；

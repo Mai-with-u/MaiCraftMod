@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.ability.machine.spi;
+package org.maiwithu.maicraft.behavior.inventory.containers;
 
 import java.util.List;
 
