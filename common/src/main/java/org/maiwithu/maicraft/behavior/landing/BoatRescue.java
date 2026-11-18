@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 用船接住一掉：把船拿到手上 → 够得着时把船放到落点（服务器那边真出现了这条船才算）→ 对准船坐上去
@@ -206,7 +207,7 @@ public final class BoatRescue implements CatchesFall {
         if (player.onGround()) look(context, player, aim, false);
         else lookDown(context, player);
         Vec3 eye = player.getEyePosition();
-        if (eye.distanceTo(plan.spawn()) > player.blockInteractionRange()) return;
+        if (eye.distanceTo(plan.spawn()) > InteractionRange.blockReach(player)) return;
         if (!BoatSpace.placeable(context.level(), context.level()::isLoaded, eye, plan.spawn())) {
             fail("放船的那一面被挡住了或放不下了");
             return;
@@ -262,7 +263,7 @@ public final class BoatRescue implements CatchesFall {
         }
         if (!stable(context, player, boat)) return;
         Vec3 eye = player.getEyePosition();
-        double reach = player.entityInteractionRange();
+        double reach = InteractionRange.entityReach(player);
         boolean outOfReach = boat.getBoundingBox().distanceToSqr(eye) > reach * reach;
         boolean belowAlready = boat.getBoundingBox().clip(eye, eye.add(0, -reach, 0)).isPresent();
         if (plan.airborne() && (outOfReach || belowAlready)) lookDown(context, player);
@@ -400,7 +401,7 @@ public final class BoatRescue implements CatchesFall {
     private int remainingActionTicks(LocalPlayer player) {
         double y = player.getY();
         double velocity = player.getDeltaMovement().y;
-        double target = plan.spawn().y + player.blockInteractionRange() - player.getEyeHeight();
+        double target = plan.spawn().y + InteractionRange.blockReach(player) - player.getEyeHeight();
         double gravity = player.getAttributeValue(Attributes.GRAVITY);
         for (int ticks = 0; ticks < 200; ticks++) {
             if (y <= target) return ticks;
@@ -428,7 +429,7 @@ public final class BoatRescue implements CatchesFall {
         double flat = Math.hypot(delta.x, delta.z);
         float yaw = flat < .001 ? player.getYRot() : (float) (Math.toDegrees(Math.atan2(delta.z, delta.x)) - 90);
         float pitch = (float) -Math.toDegrees(Math.atan2(delta.y, flat));
-        if (urgent || !player.onGround() && delta.length() <= player.blockInteractionRange()) {
+        if (urgent || !player.onGround() && delta.length() <= InteractionRange.blockReach(player)) {
             context.input().requestImmediateLook(yaw, pitch, context.clientTick());
         } else {
             context.input().requestLook(yaw, pitch, context.clientTick());
@@ -436,7 +437,7 @@ public final class BoatRescue implements CatchesFall {
     }
 
     private void lookDown(PlayerContext context, LocalPlayer player) {
-        if (player.getEyePosition().y - plan.spawn().y <= player.blockInteractionRange()) {
+        if (player.getEyePosition().y - plan.spawn().y <= InteractionRange.blockReach(player)) {
             context.input().requestImmediateLook(player.getYRot(), 90, context.clientTick());
         } else {
             context.input().requestLook(player.getYRot(), 90, context.clientTick());

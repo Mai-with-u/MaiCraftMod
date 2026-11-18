@@ -19,6 +19,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 走上前成为这辆载具的乘客：先走到伸手够得着它，再对准它右键，以角色真成了这辆（同一只实体）的乘客为准，
@@ -97,7 +98,7 @@ public final class BoardsVehicle implements Action {
     private static ReadsBoarding liveReads(Entity vehicle, Predicate<Entity> freeSeat) {
         return context -> {
             LocalPlayer me = context.player().localPlayer();
-            double reach = me.entityInteractionRange() - 0.5;
+            double reach = InteractionRange.entityReach(me) - 0.5;
             return new Sighting(me.getVehicle() == vehicle, vehicle.isRemoved(),
                     freeSeat == null || freeSeat.test(vehicle),
                     vehicle.getBoundingBox().distanceToSqr(me.getEyePosition()) <= reach * reach,

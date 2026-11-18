@@ -17,6 +17,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.world.BoatSize;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 船落地这时候能怎么用：身上带着哪种普通船、附近有哪些停着的空船、够得着方块与实体的距离、身体多大。
@@ -48,8 +49,8 @@ public record BoatOptions(BlockPos source, Vec3 eye, double blockReach, double e
                 boats.add(new Seen(boat.getUUID(), boat.position(), boat.getBoundingBox(), boat.getYRot()));
             }
         }
-        return new BoatOptions(player.blockPosition(), player.getEyePosition(), player.blockInteractionRange(),
-                player.entityInteractionRange(), player.getBbWidth(), player.getBbHeight(), carried(player), boats);
+        return new BoatOptions(player.blockPosition(), player.getEyePosition(), InteractionRange.blockReach(player),
+                InteractionRange.entityReach(player), player.getBbWidth(), player.getBbHeight(), carried(player), boats);
     }
 
     /** 身上（背包与副手）带着的第一种普通船。 */

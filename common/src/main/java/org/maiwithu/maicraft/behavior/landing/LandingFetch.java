@@ -11,6 +11,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 在空中现取落地料：推进一次取物动作，并卡住两个截止——取物本身最多二百四十刻，
@@ -71,7 +72,7 @@ public final class LandingFetch implements Action {
         if (support == null || context.level() == null) return Integer.MAX_VALUE;
         double surface = support.getY() + AirSteering.supportHeight(context.level(), support);
         if (!Double.isFinite(surface)) surface = support.getY() + 1;
-        double reach = player.blockInteractionRange();
+        double reach = InteractionRange.blockReach(player);
         double actionHeight = surface + Math.max(0, Math.sqrt(Math.max(0, reach * reach - .5)) - player.getEyeHeight());
         double y = player.getY();
         double velocity = player.getDeltaMovement().y;

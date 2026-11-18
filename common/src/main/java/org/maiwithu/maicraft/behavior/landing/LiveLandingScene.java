@@ -9,6 +9,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.player.FallDamage;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 真实游戏里的落地救援现场：全部读自当前本地玩家与世界，不做任何判断。
@@ -27,7 +28,7 @@ public final class LiveLandingScene implements LandingScene {
     }
 
     @Override public double blockReach() {
-        return player.blockInteractionRange();
+        return InteractionRange.blockReach(player);
     }
 
     @Override public double placementHeight(LandingPlan plan) {
@@ -74,7 +75,7 @@ public final class LiveLandingScene implements LandingScene {
     // 沿视线的射线：从眼睛伸到触及距离尽头，按方块外形找第一格；放船那一下把液体也算成命中。
     private BlockHitResult clip(ClipContext.Fluid fluids) {
         Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getViewVector(1).scale(player.blockInteractionRange()));
+        Vec3 end = eye.add(player.getViewVector(1).scale(InteractionRange.blockReach(player)));
         return player.level().clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE, fluids, player));
     }
 }

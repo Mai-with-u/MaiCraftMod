@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 坐一段矿车：备车 → 走到起点轨道旁 → 放车（或直接用轨道旁停着的空车）→ 起点是通电的动力铁轨就坐上去等它自己走，
@@ -178,7 +179,7 @@ final class MinecartRide implements TravelLeg {
         }
         BlockPos target = cart != null ? cart.blockPosition() : startCell;
         boolean closeEnough = cart != null
-                ? player.getEyePosition().distanceTo(cart.getBoundingBox().getCenter()) <= player.entityInteractionRange()
+                ? player.getEyePosition().distanceTo(cart.getBoundingBox().getCenter()) <= InteractionRange.entityReach(player)
                 : player.blockPosition().distSqr(startCell) <= 3 * 3;
         if (closeEnough) return next(cart != null ? Step.BOARD : Step.PLACE);
         dropCurrent();

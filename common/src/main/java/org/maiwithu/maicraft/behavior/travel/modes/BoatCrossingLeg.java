@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.travel.modes.WaterCrossing;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 划一段船：备船（身上有船换到主手，岸边停着的船直接走过去用）→ 走到岸边能放船的站位 →
@@ -269,10 +270,10 @@ final class BoatCrossingLeg implements TravelLeg {
         Vec3 aim = BoatLaunchSpots.launchAim(plan.launchFeet(), plan.launchWater(), surfaceHeight(plan.launchWater()));
         look(live, aim, false);
         Vec3 eye = player.getEyePosition();
-        if (eye.distanceTo(aim) > player.blockInteractionRange()) return ActionStatus.running();
+        if (eye.distanceTo(aim) > InteractionRange.blockReach(player)) return ActionStatus.running();
         // 准星得正落在那格水面上：没对准下一刻接着转，不出手。
         var hit = live.level().clip(new ClipContext(eye, eye.add(player.getViewVector(1)
-                .scale(player.blockInteractionRange())), ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, player));
+                .scale(InteractionRange.blockReach(player))), ClipContext.Block.OUTLINE, ClipContext.Fluid.ANY, player));
         if (hit.getType() != HitResult.Type.BLOCK || !hit.getBlockPos().equals(plan.launchWater())) {
             return ActionStatus.running();
         }

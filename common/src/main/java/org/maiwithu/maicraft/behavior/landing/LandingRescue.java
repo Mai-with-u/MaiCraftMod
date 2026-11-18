@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.game.player.NetworkDelay;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.game.world.BucketWater;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 一次落地救援：拿好东西 → 离地 → 掉到够得着时对准、只放一次 → 等游戏确认放下了 → 落地站稳 →
@@ -344,7 +345,7 @@ public final class LandingRescue implements CatchesFall {
             pitch = 90;
         }
         boolean urgent = !submitted && airborne && ready
-                && eye.y - plan.placementHeight(context.level()) <= player.blockInteractionRange();
+                && eye.y - plan.placementHeight(context.level()) <= InteractionRange.blockReach(player);
         if (urgent) context.input().requestImmediateLook(yaw, pitch, context.clientTick());
         else context.input().requestLook(yaw, pitch, context.clientTick());
     }
@@ -542,14 +543,14 @@ public final class LandingRescue implements CatchesFall {
 
     BlockHitResult trace(PlayerContext context, LocalPlayer player, boolean pickup) {
         Vec3 eye = player.getEyePosition();
-        Vec3 end = eye.add(player.getViewVector(1).scale(player.blockInteractionRange()));
+        Vec3 end = eye.add(player.getViewVector(1).scale(InteractionRange.blockReach(player)));
         return context.level().clip(new ClipContext(eye, end, ClipContext.Block.OUTLINE,
                 pickup ? ClipContext.Fluid.SOURCE_ONLY : ClipContext.Fluid.NONE, player));
     }
 
     // 离必须出手还有几刻：脚下离落点那一面还高出够得着的距离时，按重力往下推。
     private int remainingActionTicks(PlayerContext context, LocalPlayer player) {
-        double reach = player.blockInteractionRange();
+        double reach = InteractionRange.blockReach(player);
         double actionHeight = plan.aimPoint().y + Math.max(0, Math.sqrt(Math.max(0, reach * reach - 0.5))
                 - player.getEyeHeight());
         double y = player.getY();

@@ -24,6 +24,7 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BoatSize;
 import org.maiwithu.maicraft.game.world.BucketWater;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 船落地要的空间判断：船放在落点哪一点、放下去会不会卡住、准星看不看得到、坐上去身体有没有地方、
@@ -152,7 +153,7 @@ final class BoatSpace {
     static boolean aimedAt(PlayerContext context, Boat boat) {
         LocalPlayer player = context.localPlayer();
         Vec3 eye = player.getEyePosition();
-        Vec3 reach = player.getViewVector(1).scale(player.entityInteractionRange());
+        Vec3 reach = player.getViewVector(1).scale(InteractionRange.entityReach(player));
         var hit = ProjectileUtil.getEntityHitResult(player, eye, eye.add(reach),
                 player.getBoundingBox().expandTowards(reach).inflate(1),
                 entity -> !entity.isSpectator() && entity.isPickable(), reach.lengthSqr());

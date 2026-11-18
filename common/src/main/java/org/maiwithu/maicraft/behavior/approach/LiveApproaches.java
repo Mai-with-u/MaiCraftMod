@@ -111,8 +111,8 @@ public final class LiveApproaches implements BringsPlayerClose {
             return new ReachRules(4.5, 3.0, BED_DISTANCE, 1.62, padding);
         }
         var player = current.localPlayer();
-        double blockRange = player.blockInteractionRange();
-        double entityRange = player.entityInteractionRange();
+        double blockRange = InteractionRange.blockReach(player);
+        double entityRange = InteractionRange.entityReach(player);
         return new ReachRules(blockRange, entityRange, BED_DISTANCE, player.getEyeHeight(), padding);
     }
 

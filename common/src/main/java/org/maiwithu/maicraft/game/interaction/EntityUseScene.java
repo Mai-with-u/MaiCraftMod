@@ -9,6 +9,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.vehicle.Boat;
 
 import org.maiwithu.maicraft.game.mixin.BoatOutOfControlTicksAccessor;
+import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 右键实体提交那一刻的手势现场：潜行按着没有、眼睛到目标碰撞箱多远、实体交互距离多大、目标身上有没有乘客、
@@ -27,7 +28,7 @@ record EntityUseScene(boolean sneakHeld, double eyeDistance, double interactionR
         Float boatSubmergedTicks = target instanceof Boat boat && boat instanceof BoatOutOfControlTicksAccessor ticks
                 ? ticks.maicraft$outOfControlTicks()
                 : null;
-        return new EntityUseScene(player.isShiftKeyDown(), eyeDistance, player.entityInteractionRange(),
+        return new EntityUseScene(player.isShiftKeyDown(), eyeDistance, InteractionRange.entityReach(player),
                 !target.getPassengers().isEmpty(), boatSubmergedTicks);
     }
 
