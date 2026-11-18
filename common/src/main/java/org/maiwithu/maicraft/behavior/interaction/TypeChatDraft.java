@@ -39,6 +39,7 @@ public final class TypeChatDraft implements Action {
 
     private final ChatDraftScreen drafts;
     private final String message;
+    private final long boxWaitLimitTicks;
     /** 各完整可见字符在原话里的结束边界：草稿按它切，组合表情不会被拆开。 */
     private final List<Integer> characterEnds;
     private Stage stage = Stage.OPEN_BOX;
@@ -48,17 +49,35 @@ public final class TypeChatDraft implements Action {
     private long nextAt;
     /** 框被占着已经等了多少刻。 */
     private long waited;
+    /** 是否因聊天框一直被别的界面占着、等满上限而停下。 */
+    private boolean refusedBecauseOccupied;
 
     /**
      * @param drafts  聊天草稿的接缝
      * @param message 要打的整句话；空话进不来这里，发话的参数校验会拦下
      */
     public TypeChatDraft(ChatDraftScreen drafts, String message) {
+        this(drafts, message, BOX_WAIT_LIMIT_TICKS);
+    }
+
+    /**
+     * @param drafts            聊天草稿的接缝
+     * @param message           要打的整句话
+     * @param boxWaitLimitTicks 聊天框被别的界面占着时最多等多少刻；公屏聊天只需短暂等待即可退回直发
+     */
+    public TypeChatDraft(ChatDraftScreen drafts, String message, long boxWaitLimitTicks) {
         this.drafts = Objects.requireNonNull(drafts, "drafts");
         this.message = Objects.requireNonNull(message, "message");
         if (message.isEmpty()) throw new IllegalArgumentException("要打的话不能为空");
+        if (boxWaitLimitTicks < 1) throw new IllegalArgumentException("等聊天框让出的上限至少为 1 刻");
+        this.boxWaitLimitTicks = boxWaitLimitTicks;
         this.characterEnds = VISIBLE_CHARACTER.matcher(message).results()
                 .map(MatchResult::end).toList();
+    }
+
+    /** 动作失败是否因为聊天框一直被别的界面占着。 */
+    public boolean boxOccupied() {
+        return refusedBecauseOccupied;
     }
 
     @Override
@@ -79,7 +98,8 @@ public final class TypeChatDraft implements Action {
             return ActionStatus.progressed();
         }
         waited++;
-        if (waited >= BOX_WAIT_LIMIT_TICKS) {
+        if (waited >= boxWaitLimitTicks) {
+            refusedBecauseOccupied = true;
             return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                     "聊天框被别的界面占着，草稿打不进去",
                     "等占着界面的东西关掉或收场之后再试"));

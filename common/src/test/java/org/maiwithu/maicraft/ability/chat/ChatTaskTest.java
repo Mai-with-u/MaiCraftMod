@@ -288,17 +288,49 @@ class ChatTaskTest {
     }
 
     @Test
-    void occupiedBoxEndsAsRefusedInsteadOfSending() {
-        // 框被别的界面占着等不到：按游戏的真实拒绝收场，话不交出去。
+    void occupiedBoxSkipsTypingAndSendsDirectly() {
+        // 聊天框被别的界面（如残留容器界面、配方查看器）占着：等满半秒仍没让出时，跳过逐字打草稿直接发出并等回显，不再丢弃整句话。
         StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
         StubDrafts drafts = new StubDrafts();
         drafts.occupied = true;
+        echo.echo("在吗");
 
-        TaskResult result = runToFinish(new ChatTask("在吗", sender, new StubEcho(), drafts), new TestTick());
+        TaskResult result = runToFinish(new ChatTask("在吗", sender, echo, drafts), new TestTick());
 
-        assertEquals(TaskResult.Status.FAILED, result.status());
-        assertTrue(sender.sent.isEmpty(), "框没让出来，话不会交出去");
-        assertTrue(result.problem().message().contains("聊天框被别的界面占着"), result.problem().message());
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of("在吗"), sender.sent, "框被占着时直接通过聊天通道发出一次");
+        assertTrue(drafts.shown.isEmpty(), "不抢占当前开着的别的界面");
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertTrue(details.submitted());
+        assertFalse(details.typed(), "跳过逐字打草稿直发时标 typed=false");
+    }
+
+    @Test
+    void midTypingStolenBoxFallsBackToDirectSendOnce() {
+        // 打字打到一半聊天框被别的界面顶掉且一直占着：等满半秒后把整句直接发出一次，既不丢话也不发半句。
+        StubSender sender = new StubSender();
+        StubEcho echo = new StubEcho();
+        StubDrafts drafts = new StubDrafts();
+        TestTick tick = new TestTick();
+        echo.echo("大家好啊");
+        ChatTask task = new ChatTask("大家好啊", sender, echo, drafts);
+        task.start(tick);
+        for (int i = 0; i < 6 && !drafts.current().equals("大"); i++) {
+            task.tick(tick);
+            tick.advance();
+        }
+        assertEquals("大", drafts.current());
+        drafts.stealBox();
+        drafts.occupied = true;
+
+        TaskResult result = runToFinish(task, tick);
+
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertEquals(List.of("大家好啊"), sender.sent, "整句话只发出一次");
+        ChatTask.ChatDetails details = (ChatTask.ChatDetails) result.details();
+        assertTrue(details.submitted());
+        assertFalse(details.typed());
     }
 
     @Test

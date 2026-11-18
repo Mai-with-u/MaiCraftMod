@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -31,7 +32,10 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     /** 提交后等回显多久：超过就按没能确认收场。 */
     private static final long CONFIRM_TICKS = 20L * 5;
 
-    // 卡住判定是"多久没有真实进展"，不是"最多做多久"：等框最长 60 刻、等回显最长 100 刻，
+    /** 屏幕上开着别的界面（残留容器界面、配方查看器等）时最多等半秒让位，仍占着就跳过打草稿直接发出。 */
+    static final long OCCUPIED_SCREEN_WAIT_TICKS = 10L;
+
+    // 卡住判定是"多久没有真实进展"，不是"最多做多久"：等框最长 10 刻、等回显最长 100 刻，
     // 打字每 2 刻就报一次进展，所以 120 刻没有进展才算卡住，轮得到等回显的自己收场。
     private static final long STUCK_AFTER_TICKS = CONFIRM_TICKS + 20L;
 
@@ -39,6 +43,7 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     private final SendsChatMessage sender;
     private final ReadsChatEcho echo;
     private final ChatDraftScreen drafts;
+    private TypeChatDraft typingDraft;
 
     /** 提交那一刻的游戏刻；算等回显等了多久用。 */
     private long sentTick;
@@ -100,19 +105,42 @@ public final class ChatTask extends PhasedTask<ChatTask.Phase> {
     @Override
     protected Action enter(Phase phase) {
         // 打字要一段一段推进，是动作；提交与等回显都是一刻内的小事，不需要动作。
-        return phase == Phase.TYPING ? new TypeChatDraft(drafts, message) : null;
+        if (phase != Phase.TYPING) {
+            typingDraft = null;
+            return null;
+        }
+        typingDraft = new TypeChatDraft(drafts, message, OCCUPIED_SCREEN_WAIT_TICKS);
+        return typingDraft;
     }
 
     @Override
     protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
-            case TYPING -> runActionThen(context, () -> {
-                typed = true;
-                recordProgress("草稿打完了");
-                return Next.go(Phase.SEND, "整句打进聊天框了，提交");
-            });
+            case TYPING -> tickTyping(context);
             case SEND -> tickSend(context);
             case CONFIRM -> tickConfirm(context);
+        };
+    }
+
+    // 聊天框空着就逐字打完再提交；若屏幕上一直开着残留容器或配方界面让不出聊天框，
+    // 等满半秒后跳过逐字打草稿，直接走聊天通道发出并等回显，不再丢掉整句话。
+    private Next<Phase> tickTyping(TickContext context) {
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> {
+                typed = true;
+                recordProgress("草稿打完了");
+                yield Next.go(Phase.SEND, "整句打进聊天框了，提交");
+            }
+            case ActionStatus.Failed failed -> {
+                if (typingDraft != null && typingDraft.boxOccupied()) {
+                    typed = false;
+                    recordAttempt("打开聊天框逐字打字", "聊天框被别的界面占着，跳过逐字打草稿改直接发送");
+                    recordProgress("聊天框被别的界面占着，改直接发送");
+                    yield Next.go(Phase.SEND, "聊天框被别的界面占着，不逐字打，直接提交");
+                }
+                yield Next.fail(failed.problem());
+            }
         };
     }
 
