@@ -71,7 +71,6 @@ import org.maiwithu.maicraft.behavior.survival.hunger.EatsCarriedFood;
 import org.maiwithu.maicraft.behavior.combat.LiveCombatSenses;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.interaction.BlockBreaking;
-import org.maiwithu.maicraft.behavior.survival.breath.LiveCeilingDigs;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.interaction.DefaultInteractionSender;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
@@ -478,21 +477,25 @@ public final class Bootstrap {
             Supplier<BlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools);
             // 被拍了回头看：看肢体动作的那一份在伤害包接好时才建，用的时候再取。
             lookBack = new LookBackNeed(PokesFelt.later(() -> nonverbal));
-            controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions, interactionSender, menuActions, interactions,
-                    combatSenses, walksOnFoot, foodMoves, foods, new LiveCeilingDigs(diggings, protection), diggings,
-                    survivalWiring, kept, protection, followLighting, lightLevels, hands, ranged,
+            controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions,
+                    new SurvivalHands(interactionSender, menuActions, interactions, diggings, hands),
+                    new SurvivalBattle(combatSenses, walksOnFoot, ranged,
+                            // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
+                            new ClientDropPickup(now, walksOnFoot, dropConfirmations),
+                            () -> worldScope[0] == null ? null : worldScope[0].memory(),
+                            // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
+                            uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString())),
+                    new SurvivalReads(foods, lightLevels, protection,
+                            // 岩浆里垫不垫落脚看主目标许可的方块档位；手上没有目标时按默认许可。
+                            () -> goals == null ? Permissions.DEFAULT.changeBlocks()
+                                    : goals.mainGoal().map(run -> run.goal().permissions().changeBlocks())
+                                            .orElse(Permissions.DEFAULT.changeBlocks())),
+                    foodMoves,
                     // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
                     // 身上没带货时从随身无线终端现取一件（AE2）。
                     FallRescues.withBrakes(() -> compat.fallBrakes()),
                     () -> compat.landingMaterials(),
-                    // 自家人按进世界时读的实例配置认；还没进世界时谁都不算。
-                    uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString()),
-                    // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
-                    new ClientDropPickup(now, walksOnFoot, dropConfirmations), () -> worldScope[0] == null ? null : worldScope[0].memory(),
-                    // 岩浆里垫不垫落脚看主目标许可的方块档位；手上没有目标时按默认许可。
-                    () -> goals == null ? Permissions.DEFAULT.changeBlocks()
-                            : goals.mainGoal().map(run -> run.goal().permissions().changeBlocks())
-                                    .orElse(Permissions.DEFAULT.changeBlocks()), lookBack);
+                    kept, survivalWiring, followLighting, lookBack);
         }
 
         /**
