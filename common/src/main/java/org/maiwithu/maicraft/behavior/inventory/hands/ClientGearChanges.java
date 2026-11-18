@@ -151,20 +151,25 @@ public final class ClientGearChanges implements GearChanges {
         }
 
         /**
-         * 这件东西在不在身上：按本类拿到的背包来源逐格找，不经 {@link ClientMovesToMainhand}。
+         * 这件东西在不在可取用的背包与副手里：只查快捷栏与主背包（0..35）及副手（40），不把穿在护甲格（36..39）上的算进来。
          *
-         * <p>换手那条路认的是角色的实时背包，这里认的是同一个背包但走的是本类注入的那一份，
-         * 两边在实机上是一回事，判定却要一致：不在身上时说"穿不上"，别走到穿戴那一步才失败。
+         * <p>若某件装备仅穿在身上护甲格而背包与副手都没有，往主手或别的栏位拿它时换手动作给不出，
+         * 这里如实答不在背包里并报缺少物品，不误当成已在手上直接报完成。
          */
         private boolean carriedByInventory() {
             PlayerContext player = contexts.get();
             Inventory inventory = player == null ? null : inventories.apply(player);
             if (inventory == null) return false;
-            if (ItemMatch.matches(inventory.getItem(inventory.selected), itemId)) return true;
-            for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+            int size = inventory.getContainerSize();
+            if (inventory.selected >= 0 && inventory.selected <= 8 && inventory.selected < size
+                    && ItemMatch.matches(inventory.getItem(inventory.selected), itemId)) {
+                return true;
+            }
+            int mainLimit = Math.min(35, size - 1);
+            for (int slot = 0; slot <= mainLimit; slot++) {
                 if (ItemMatch.matches(inventory.getItem(slot), itemId)) return true;
             }
-            return false;
+            return size > 40 && ItemMatch.matches(inventory.getItem(40), itemId);
         }
 
         @Override
@@ -214,7 +219,7 @@ public final class ClientGearChanges implements GearChanges {
                 }
                 return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
                         ? ActionStatus.done()
-                        : fail("穿上 " + slot.paramName() + " 没能确认：" + menuPending.detail());
+                        : fail("穿上 " + slot.displayName() + " 没能确认：" + menuPending.detail());
             }
             if (menuPending == null) {
                 if (!actions.ensureVisible(player)) return ActionStatus.running();
@@ -223,7 +228,7 @@ public final class ClientGearChanges implements GearChanges {
                 int hotbar = inventory.selected;
                 ItemStack targetBefore = inventory.getItem(hotbar).copy();
                 if (targetBefore.isEmpty()) {
-                    return fail("主手上没有 " + itemId + "，放不进 " + slot.paramName());
+                    return fail("主手上没有 " + itemId + "，放不进 " + slot.displayName());
                 }
                 int menuSlot = slot.armorScreenSlot();
                 menuPending = actions.click(player, menuSlot, hotbar, ClickType.SWAP,
@@ -322,7 +327,7 @@ public final class ClientGearChanges implements GearChanges {
 
         @Override
         public String describe() {
-            return "把 " + itemId + " 穿上 " + slot.paramName();
+            return "把 " + itemId + " 穿上 " + slot.displayName();
         }
     }
 
@@ -412,7 +417,7 @@ public final class ClientGearChanges implements GearChanges {
             }
             return menuPending.status() == PendingMenuAction.Status.CONFIRMED_APPLIED
                     ? ActionStatus.done()
-                    : fail("取下 " + slot.paramName() + " 没能确认（背包可能放不下）：" + menuPending.detail());
+                    : fail("取下 " + slot.displayName() + " 没能确认（背包可能放不下）：" + menuPending.detail());
         }
 
         // 确认条件：护甲格空了才算这一下搬出去了。
@@ -435,7 +440,7 @@ public final class ClientGearChanges implements GearChanges {
 
         @Override
         public String describe() {
-            return "取下 " + slot.paramName() + " 的装备";
+            return "取下 " + slot.displayName() + " 的装备";
         }
     }
 

@@ -180,16 +180,29 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
         return player == null ? NOT_CARRIED : findInInventory(player.getInventory(), itemId);
     }
 
-    /** 在角色背包里按具体物品 ID 或 #标签 找可用格子：优先主手选中格，其次主背包与副手，不认盔甲栏（交外层区分）。 */
+    /**
+     * 在角色背包里按具体物品 ID 或 #标签 找所在格：先看当前选中的快捷栏格，再扫快捷栏与主背包（0..35），
+     * 接着看副手（40），最后才看护甲格（36..39）——既保留 {@link #carried} 覆盖全身（含副手与护甲）的语义，
+     * 又防止穿在身上的护甲遮蔽副手或背包里真正能换到主手的那件。
+     */
     static int findInInventory(Inventory inventory, String itemOrTag) {
         if (inventory == null || itemOrTag == null || itemOrTag.isEmpty()) return NOT_CARRIED;
+        int size = inventory.getContainerSize();
         int selected = inventory.selected;
-        if (selected >= 0 && selected < inventory.getContainerSize()
+        if (selected >= 0 && selected <= 8 && selected < size
                 && matchesItemOrTag(inventory.getItem(selected), itemOrTag)) {
             return ALREADY_SELECTED;
         }
-        for (int slot = 0; slot < inventory.getContainerSize(); slot++) {
+        int mainLimit = Math.min(LAST_MAIN_SLOT, size - 1);
+        for (int slot = 0; slot <= mainLimit; slot++) {
             if (slot == selected) continue;
+            if (matchesItemOrTag(inventory.getItem(slot), itemOrTag)) return slot;
+        }
+        if (size > 40 && matchesItemOrTag(inventory.getItem(40), itemOrTag)) {
+            return 40;
+        }
+        int armorLimit = Math.min(39, size - 1);
+        for (int slot = 36; slot <= armorLimit; slot++) {
             if (matchesItemOrTag(inventory.getItem(slot), itemOrTag)) return slot;
         }
         return NOT_CARRIED;

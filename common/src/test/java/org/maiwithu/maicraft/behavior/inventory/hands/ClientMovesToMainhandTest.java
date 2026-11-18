@@ -19,6 +19,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 
@@ -36,6 +37,10 @@ class ClientMovesToMainhandTest {
     static void bootstrapRegistries() {
         SharedConstants.tryDetectVersion();
         Bootstrap.bootStrap();
+    }
+
+    @BeforeEach
+    void bindBoatTags() {
         BuiltInRegistries.ITEM.bindTags(Map.of(BOATS,
                 List.of(holder(Items.OAK_BOAT), holder(Items.SPRUCE_BOAT))));
     }
@@ -97,5 +102,21 @@ class ClientMovesToMainhandTest {
         inventory.setItem(0, new ItemStack(Items.SPRUCE_BOAT));
         assertEquals(ClientMovesToMainhand.ALREADY_SELECTED,
                 ClientMovesToMainhand.findInInventory(inventory, "#minecraft:boats"));
+    }
+
+    @Test
+    void findInInventoryPrefersOffhandOverWornArmorWhileStillReportingArmorWhenAlone() {
+        // 脚上护甲格（36）穿着铁靴且副手（40）拿着另一双铁靴时，优先命中副手以便换到主手；
+        // 只穿在护甲格里时仍返回护甲格号，供全身持有检查认出。
+        Inventory inventory = new Inventory(null);
+        inventory.selected = 0;
+        inventory.armor.set(0, new ItemStack(Items.IRON_BOOTS));
+        assertEquals(36, ClientMovesToMainhand.findInInventory(inventory, "minecraft:iron_boots"));
+
+        inventory.offhand.set(0, new ItemStack(Items.IRON_BOOTS));
+        assertEquals(40, ClientMovesToMainhand.findInInventory(inventory, "minecraft:iron_boots"));
+
+        inventory.setItem(15, new ItemStack(Items.IRON_BOOTS));
+        assertEquals(15, ClientMovesToMainhand.findInInventory(inventory, "minecraft:iron_boots"));
     }
 }

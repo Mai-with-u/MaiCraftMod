@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.inventory.hands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -184,6 +185,48 @@ class ClientGearChangesTest {
         menus.confirmClose("背包界面已关上");
         current.set(context(menus, 52));
         assertInstanceOf(ActionStatus.Done.class, action.tick(TickContext.of(52, current.get())));
+    }
+
+    @Test
+    void wearingToMainhandWhenItemOnlyWornInArmorSlotFailsWithNeedItem() {
+        // 铁靴仅穿在脚上护甲格（36）、快捷栏主背包与副手都没有时，往主手拿它直接报 NEED_ITEM，不误判为已完成。
+        Inventory inventory = new Inventory(null);
+        inventory.selected = 0;
+        inventory.armor.set(0, new ItemStack(Items.IRON_BOOTS));
+        OffhandMenus menus = new OffhandMenus(inventory);
+        AtomicReference<PlayerContext> current = new AtomicReference<>(context(menus, 60));
+        ClientGearChanges gear = gearChanges(current, inventory);
+
+        Action action = gear.wear("minecraft:iron_boots", GearSlotName.MAINHAND).orElseThrow();
+        ActionStatus.Failed failed = assertInstanceOf(
+                ActionStatus.Failed.class, action.tick(TickContext.of(60, current.get())));
+        assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
+    }
+
+    @Test
+    void menuWearAndTakeOffFailuresReportChineseSlotDisplayName() {
+        // 界面穿卸失败与动作描述统一使用中文栏位名（身上、头上），不再漏出英文参数名。
+        Inventory inventory = new Inventory(null);
+        inventory.selected = 2;
+        inventory.setItem(2, new ItemStack(Items.CHEST));
+        OffhandMenus menus = new OffhandMenus(inventory);
+        AtomicReference<PlayerContext> current = new AtomicReference<>(context(menus, 70));
+        ClientGearChanges gear = gearChanges(current, inventory);
+
+        Action wear = gear.wear("minecraft:chest", GearSlotName.CHEST).orElseThrow();
+        assertTrue(wear.describe().contains("身上"), wear.describe());
+        assertInstanceOf(ActionStatus.Running.class, wear.tick(TickContext.of(70, current.get())));
+        menus.failActive(PendingMenuAction.Status.UNCERTAIN, "未收到确认");
+        current.set(context(menus, 71));
+        assertInstanceOf(ActionStatus.Running.class, wear.tick(TickContext.of(71, current.get())));
+        menus.confirmClose("已关上");
+        current.set(context(menus, 72));
+        ActionStatus.Failed wearFailed = assertInstanceOf(
+                ActionStatus.Failed.class, wear.tick(TickContext.of(72, current.get())));
+        assertTrue(wearFailed.problem().message().contains("穿上 身上"), wearFailed.problem().message());
+
+        Action takeOff = gear.takeOff(GearSlotName.HEAD).orElseThrow();
+        assertTrue(takeOff.describe().contains("头上"), takeOff.describe());
     }
 
     private static ClientGearChanges gearChanges(AtomicReference<PlayerContext> contexts, Inventory inventory) {
