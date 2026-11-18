@@ -100,6 +100,7 @@ import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
 import org.maiwithu.maicraft.behavior.inventory.StoredReservations;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.world.OnlinePlayers;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.storage.LegacyWorldKeys;
@@ -543,6 +544,15 @@ public final class WorldScope {
             packs.addAll(backpack.carried());
         }
         return List.copyOf(packs);
+    }
+
+    /** 最近五分钟内角色点开终端记下的各物流网络存货快照（已加载区块中被拆掉的固定终端已在读取时剔除）。 */
+    public List<NetworkStorage.RememberedNetwork> rememberedNetworks() {
+        List<NetworkStorage.RememberedNetwork> remembered = new ArrayList<>();
+        for (NetworkStorage network : worldAbilities.networks()) {
+            remembered.addAll(network.rememberedNetworks());
+        }
+        return List.copyOf(remembered);
     }
 
     /** 当前世界真正就绪可用的模组能力代号（按字母排）。 */

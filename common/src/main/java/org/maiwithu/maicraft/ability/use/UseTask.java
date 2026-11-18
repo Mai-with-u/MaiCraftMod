@@ -324,7 +324,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     // 靠近：方块按格子、实体按它此刻的包围盒；实体已经不在了就是目标没了。
     // 写告示牌时目标带上"只站正面那一侧"，站位候选由站位判断按它筛，不再站到背面去写。
     private Next<Phase> approach() {
-        Optional<ApproachTarget> shape = services.world().approachTarget(target, input.writesText());
+        Optional<ApproachTarget> shape = services.world().approachTarget(target, input.writesText(), input.sneak());
         if (shape.isEmpty()) {
             return stop(Problem.of(Problem.Kind.TARGET_GONE, target.describe() + " 已经不在了", "重新 observe"));
         }
@@ -345,7 +345,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             recordAttempt("靠近目标", "走到了，手上的东西被换掉了，先把 " + input.item() + " 换回手上");
             return prepareHand();
         }
-        return switch (services.interactions().build(target, input.writesText())) {
+        return switch (services.interactions().build(target, input.writesText(), input.sneak())) {
             case UseSeams.Built.CannotAim cannot -> aimFailed(cannot.problem());
             case UseSeams.Built.ClearAbove blocked -> clearAbove(blocked);
             case UseSeams.Built.Ready ready -> {
@@ -493,8 +493,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             writing = new WriteSign(editor.get(), input.textLines());
             return goWith(Phase.WRITE, writing, "编辑界面开了，开始写字");
         }
+        BlockPos clickedCell = target != null && !target.isEntity() ? target.cell() : null;
+        Direction clickedFace = target != null && !target.isEntity() ? target.face() : null;
         Optional<UseSeams.MenuLook> look = services.menus() == null ? Optional.empty()
-                : services.menus().opened(interaction.menuBefore());
+                : services.menus().opened(interaction.menuBefore(), clickedCell, clickedFace);
         if (look.isPresent()) {
             looking = look.get();
             return goWith(Phase.LOOK, looking, "点开了界面，看看里面有什么");
@@ -514,11 +516,24 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         return collectOrNext();
     }
 
-    // 看完界面：列得出内容就记下（方块容器记进世界记忆）；列不出、关不上都如实记一笔接着走。
+    // 看完界面：终端界面直接记录真实网络状态与存货（不写假空箱子进世界记忆）；普通容器列得出内容就记进世界记忆。
     private Next<Phase> look(TickContext context) {
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) {
             return Next.stay();
+        }
+        if (looking.isNetworkTerminal()) {
+            Optional<String> terminalSummary = looking.networkTerminalSummary();
+            if (terminalSummary.isPresent()) {
+                openedMenu = terminalSummary.get();
+                recordProgress("看清了点开的终端网络存货");
+            } else {
+                recordAttempt("列出点开的界面", "终端界面开了，网络存货一直没同步过来");
+            }
+            if (status instanceof ActionStatus.Failed failed) {
+                recordAttempt("关上界面", failed.problem().message());
+            }
+            return collectOrNext();
         }
         Optional<Map<String, Integer>> contents = looking.contents();
         if (contents.isPresent()) {

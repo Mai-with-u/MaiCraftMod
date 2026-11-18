@@ -31,9 +31,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.StackKey;
 
@@ -43,9 +45,15 @@ import org.maiwithu.maicraft.game.player.StackKey;
 final class LiveUseWorld implements UseSeams.ReadsWorld {
 
     private final Supplier<PlayerContext> context;
+    private final Supplier<Optional<NetworkStorage>> networkStorage;
 
     LiveUseWorld(Supplier<PlayerContext> context) {
+        this(context, Optional::empty);
+    }
+
+    LiveUseWorld(Supplier<PlayerContext> context, Supplier<Optional<NetworkStorage>> networkStorage) {
         this.context = Objects.requireNonNull(context, "context");
+        this.networkStorage = Objects.requireNonNull(networkStorage, "networkStorage");
     }
 
     @Override public String dimension() {
@@ -207,12 +215,25 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     // 对船、矿车、马这类载具右键就是骑上去：站位候选声明允许湿脚，水边的船才登得上去；
     // 村民、动物这些别的实体照旧只要干位，湿脚只放给成为载具的乘客这一种用法。
     @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign) {
+        return approachTarget(target, writesSign, false);
+    }
+
+    @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign, boolean sneak) {
         if (target.isEntity()) {
             return entityById(target.entityId()).map(entity ->
                     rideableVehicle(entity) ? ApproachTarget.ofVehicle(entity.getBoundingBox())
                             : ApproachTarget.ofEntity(entity.getBoundingBox()));
         }
         if (!writesSign) {
+            // 空手且不潜行点方块时，若该格装着 ME 终端面板，够不够得着与看不看得见都按面板框判，免得走到只见线缆不见面板的站位。
+            if (!sneak && heldItem().isEmpty()) {
+                Optional<AABB> panel = networkStorage.get()
+                        .flatMap(storage -> storage.terminalPanelAt(target.cell(), target.face()))
+                        .filter(box -> new AABB(target.cell()).intersects(box));
+                if (panel.isPresent()) {
+                    return Optional.of(ApproachTarget.ofBlockPart(target.cell(), panel.get()));
+                }
+            }
             // 指定了点哪一面：站位按方块外形上朝这一面的表面看不看得见挑。
             ApproachTarget base = target.face() != null
                     ? ApproachTarget.ofBlockFace(target.cell(), target.face())

@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
@@ -130,6 +131,11 @@ final class UseSeams {
          */
         Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign);
 
+        /** 同上，带上本次是否潜行右键：空手且不潜行点线缆格上的终端时，站位按终端面板框判。 */
+        default Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign, boolean sneak) {
+            return approachTarget(target, writesSign);
+        }
+
         /** 流体格的三种样子。 */
         enum Fluid { NONE, SOURCE, FLOWING }
 
@@ -160,6 +166,11 @@ final class UseSeams {
      */
     interface BuildsInteraction {
         Built build(ResolvedTarget target, boolean writesSign);
+
+        /** 同上，带上本次是否潜行右键：空手且不潜行点线缆格上的终端时，右键对准终端面板框而不是线缆芯。 */
+        default Built build(ResolvedTarget target, boolean writesSign, boolean sneak) {
+            return build(target, writesSign);
+        }
     }
 
     /** 组装的结论。 */
@@ -300,6 +311,11 @@ final class UseSeams {
     interface LooksInMenus {
         /** 出手后点开了新界面（编号和出手前不同）时给看界面的动作；没点开界面给空。 */
         Optional<MenuLook> opened(int menuBefore);
+
+        /** 同上，附上本次点击的方块格与面，用于认领线缆格某面上的终端界面。 */
+        default Optional<MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace) {
+            return opened(menuBefore);
+        }
     }
 
     /** 看一次界面的动作：做完后给出界面里有什么。 */
@@ -315,6 +331,16 @@ final class UseSeams {
         /** 点开的界面是不是不在已支持的容器布局里（例如未专门联动的模组厨锅界面）。 */
         default boolean unrecognizedLayout() {
             return false;
+        }
+
+        /** 点开的是不是物流网络终端界面（不是普通箱子容器，不写进世界记忆容器表）。 */
+        default boolean isNetworkTerminal() {
+            return false;
+        }
+
+        /** 点开的是物流网络终端界面时，同步完成后给出的真实网络状态与存货摘要；超时未同步完时为空。 */
+        default Optional<String> networkTerminalSummary() {
+            return Optional.empty();
         }
     }
 }

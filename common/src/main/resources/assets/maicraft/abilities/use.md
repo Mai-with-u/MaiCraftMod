@@ -4,7 +4,7 @@
 
 - `applied_times`：确认生效了几次。某一次没有效果就停下，做成了几次就写几次。
 - `used_on`：这一下对着什么用的：`air`（没给 `target` 或只给 `target=here` 且不带 `face`、也没给 `block`/`entity`，对着空气用手上的东西）、`block`、`entity`。魂符、刷怪蛋、骨粉这类东西必须对着地面方块或生物（`e#`）用：放在脚下地面上可以直接传 `target=here` 并配 `face=up`，对指定方块用给那一格（`b#` 或坐标，放顶面配 `face=up`）；对着空气用不会生效。
-- `opened`：打开过的界面，里面有什么（按物品合并）。看完就关上了。点开的是方块容器时，另带 `whose`（容器是谁的：`natural_loot` / `self` / `player` / `no_record` / `unknown`）、`last_modified_by`（仅 `whose=player` 时有）与 `opened_by_self`（这一次点开之前世界记忆里有没有打开过它的记录）。
+- `opened`：打开过的界面，里面有什么（按物品合并）。看完就关上了。点开的是方块容器时，另带 `whose`（容器是谁的：`natural_loot` / `self` / `player` / `no_record` / `unknown`）、`last_modified_by`（仅 `whose=player` 时有）与 `opened_by_self`（这一次点开之前世界记忆里有没有打开过它的记录）。空手且不潜行点装着应用能源2 ME 终端面板的线缆方块（`ae2:cable_bus`）时会自动对准终端面板打开（同格装有多台终端可用 `face` 指明哪一面），点开固定 ME 终端或手持无线终端打开界面后，`opened` 直接列出网络连接状态、各物品件数、总种类数与可下单合成样板，并同步记进 `observe(what="world_memory")` 的 `network_stock`（不作为普通箱子记入容器表）。
 - `sign_text`：告示牌上实际写下的字，逐行。超宽的行游戏会截掉，没写上去的部分在 `remaining` 里。
 - `riding`：骑上的东西。目标本来就是正骑着的坐骑时，直接完成。
 - `game_messages`：生效的那几下前后，聊天栏收到的服务端系统消息原话（模组、插件的提示，也可能是别人进出服务器）。不按文字猜和这一下有没有关系，要不要当回事你来判断。

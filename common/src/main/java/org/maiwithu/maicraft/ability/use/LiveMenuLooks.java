@@ -8,8 +8,11 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
@@ -17,6 +20,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -34,23 +38,61 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
 
     private final Supplier<PlayerContext> context;
     private final MenuLayouts layouts;
+    private final Supplier<Optional<NetworkStorage>> networkStorage;
 
     /** @param layouts 认得出哪些界面：原版加上联动模组证明过的 */
     LiveMenuLooks(Supplier<PlayerContext> context, MenuLayouts layouts) {
+        this(context, layouts, Optional::empty);
+    }
+
+    LiveMenuLooks(Supplier<PlayerContext> context, MenuLayouts layouts,
+            Supplier<Optional<NetworkStorage>> networkStorage) {
         this.context = Objects.requireNonNull(context, "context");
         this.layouts = Objects.requireNonNull(layouts, "layouts");
+        this.networkStorage = Objects.requireNonNull(networkStorage, "networkStorage");
     }
 
     @Override
     public Optional<UseSeams.MenuLook> opened(int menuBefore) {
+        return opened(menuBefore, null, null);
+    }
+
+    @Override
+    public Optional<UseSeams.MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace) {
         PlayerContext current = context.get();
         LocalPlayer player = current == null ? null : current.localPlayer();
         if (player == null || player.containerMenu == player.inventoryMenu
                 || player.containerMenu.containerId == menuBefore) {
             return Optional.empty();
         }
+        // 优先让网络存储认领 ME 终端界面（线缆面板终端或随身无线终端）：读真实网络存货，不当成空箱子写世界记忆。
+        Optional<NetworkStorage.TerminalLook> terminalLook = networkStorage.get()
+                .flatMap(storage -> storage.openTerminalLook(clickedCell, clickedFace));
+        if (terminalLook.isPresent()) {
+            return Optional.of(new TerminalLookView(terminalLook.get()));
+        }
         ClientMenuChannel channel = ClientMenuChannel.claimCurrent(context);
         return channel == null ? Optional.empty() : Optional.of(new Look(channel, new ClientMenuContent(context, layouts)));
+    }
+
+    /** 把联动交来的终端界面查看器适配为 {@code use} 的界面查看接缝。 */
+    private static final class TerminalLookView implements UseSeams.MenuLook {
+        private final NetworkStorage.TerminalLook delegate;
+
+        TerminalLookView(NetworkStorage.TerminalLook delegate) {
+            this.delegate = Objects.requireNonNull(delegate, "delegate");
+        }
+
+        @Override public Optional<Map<String, Integer>> contents() { return Optional.empty(); }
+        @Override public boolean isNetworkTerminal() { return true; }
+        @Override public Optional<String> networkTerminalSummary() { return delegate.summary(); }
+        @Override public ActionStatus tick(TickContext tick) { return delegate.tick(tick); }
+        @Override public Interruptibility interruptibility() { return delegate.interruptibility(); }
+        @Override public void pause() { delegate.pause(); }
+        @Override public boolean stopSafely() { return delegate.stopSafely(); }
+        @Override public boolean stoppedSafely() { return delegate.stoppedSafely(); }
+        @Override public void close() { delegate.close(); }
+        @Override public String describe() { return delegate.describe(); }
     }
 
     /** 看一次界面：等同步 → 列内容 → 关上。 */

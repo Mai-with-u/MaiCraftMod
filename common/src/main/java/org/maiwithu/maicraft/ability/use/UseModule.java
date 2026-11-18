@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.inventory.drops.ClientDropPickup;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
@@ -135,9 +136,22 @@ public final class UseModule implements AbilityModule {
             Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
             FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings,
             OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
+        return live(context, interactions, close, toMainhand, needs, scene, scans, refusals, walks, confirmations,
+                memory, protection, creatures, space, facilities, sneak, layouts, diggings, othersNotice,
+                rareLootNotice, Optional::empty);
+    }
+
+    /** 生产完整入口：同时接入网络存储，使空手点线缆终端自动对准面板并直接读取网络存货。 */
+    public static UseModule live(Supplier<PlayerContext> context, Interactions interactions, BringsPlayerClose close,
+            ClientMovesToMainhand toMainhand, ItemNeeds needs, Supplier<Scene> scene, BlockScanService scans,
+            ClientGameRefusals refusals, WalkTo walks, DropConfirmations confirmations, WorldMemory memory,
+            Supplier<Protection> protection, ReadsCreatureSituation creatures, InventorySpace space,
+            FacilityKinds facilities, HoldsSneak sneak, MenuLayouts layouts, Supplier<BlockBreaking> diggings,
+            OthersThingsNotice othersNotice, RareLootNotice rareLootNotice,
+            Supplier<Optional<NetworkStorage>> networkStorage) {
         return new UseModule(new UseServices(
-                new LiveUseWorld(context),
-                new LiveUseInteractions(interactions, sneak, context),
+                new LiveUseWorld(context, networkStorage),
+                new LiveUseInteractions(interactions, sneak, context, networkStorage),
                 close,
                 new LiveHandPreparation(toMainhand, context),
                 needs,
@@ -159,7 +173,7 @@ public final class UseModule implements AbilityModule {
                 new MenuSignEditors(),
                 new ClientDropPickup(context, walks, confirmations),
                 new LiveUseTravel(walks),
-                new LiveMenuLooks(context, layouts),
+                new LiveMenuLooks(context, layouts, networkStorage),
                 memory,
                 new LiveOthersThings(context, protection, creatures, othersNotice, rareLootNotice),
                 space,

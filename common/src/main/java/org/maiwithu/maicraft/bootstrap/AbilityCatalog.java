@@ -244,9 +244,8 @@ public final class AbilityCatalog {
         Shared shared = sharedOf(deps);
 
         // 用东西：读世界、组装交互、靠近、备手、去拿缺的东西、观察编号、附近搜索、动作栏提示语、
-        // 走到没加载的坐标、捡掉出的东西、看点开的界面都接上了。
-        registry.register(useModule(deps, shared.space(), shared.bringClose(), shared.toMainhand(), shared.innerNeeds(),
-                shared.refusals()));
+        // 走到没加载的坐标、捡掉出的东西、看点开的界面与网络终端都接上了。
+        registry.register(useModule(deps, shared));
 
         // 进食：把食物换到主手走背包界面的原生搬运；手上不是食物时能换手了。
         registry.register(eatModule(deps, shared));
@@ -295,7 +294,7 @@ public final class AbilityCatalog {
 
         registerStandalone(registry, deps, shared, construction);
         return new ModFeatures.WorldAbilities(shared.carriedBackpacks(), shared.breakAccelerators(),
-                shared.chainMining());
+                shared.chainMining(), shared.networks());
     }
 
     /**
@@ -738,16 +737,16 @@ public final class AbilityCatalog {
                 deps.items().itemTags(), deps.items().itemRegistry());
     }
 
-    /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份。 */
-    private static UseModule useModule(Deps deps, InventorySpace space, LiveApproaches bringsClose,
-            ClientMovesToMainhand toMainhand, ItemNeeds needs, ClientGameRefusals refusals) {
+    /** 用东西能力的一份：游戏拒绝读端看动作栏与服务端确认流，与睡觉能力共用一份；线缆终端面板对准与终端存货查看接联动网络存储。 */
+    private static UseModule useModule(Deps deps, Shared shared) {
         // 要空手却腾不出格子时，用和拿东西同一份背包空间先腾一格。
-        return UseModule.live(deps.character().context(), deps.hands().interactions(), bringsClose, toMainhand, needs,
-                deps.world()::scene, deps.world().blockScans(), refusals, deps.travel().walks(),
-                deps.dropConfirmations(), deps.world().memory(), deps.guards()::protection,
-                deps.guards().creatures(), space, deps.world().facilities(),
+        return UseModule.live(deps.character().context(), deps.hands().interactions(), shared.bringClose(),
+                shared.toMainhand(), shared.innerNeeds(), deps.world()::scene, deps.world().blockScans(),
+                shared.refusals(), deps.travel().walks(), deps.dropConfirmations(), deps.world().memory(),
+                deps.guards()::protection, deps.guards().creatures(), shared.space(), deps.world().facilities(),
                 new LiveHoldsSneak(deps.hands().inputs(), deps.character().context()), deps.compat().menuLayouts(),
-                deps.hands().digging(), deps.guards().othersNotice(), deps.guards().rareLootNotice());
+                deps.hands().digging(), deps.guards().othersNotice(), deps.guards().rareLootNotice(),
+                () -> shared.networks().stream().findFirst());
     }
 
     /**

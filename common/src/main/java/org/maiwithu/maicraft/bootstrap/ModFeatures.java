@@ -8,6 +8,7 @@ import java.util.Map;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 
 /**
@@ -28,7 +29,14 @@ public final class ModFeatures {
     /** 进世界登记全部能力时顺带交回给世界现场复用的实例。 */
     record WorldAbilities(List<CarriedBackpack> carriedBackpacks,
             List<BreakAccelerator> breakAccelerators,
-            ChainMiningLedger chainMining) {}
+            ChainMiningLedger chainMining,
+            List<NetworkStorage> networks) {
+        WorldAbilities(List<CarriedBackpack> carriedBackpacks,
+                List<BreakAccelerator> breakAccelerators,
+                ChainMiningLedger chainMining) {
+            this(carriedBackpacks, breakAccelerators, chainMining, List.of());
+        }
+    }
 
     private ModFeatures() {}
 

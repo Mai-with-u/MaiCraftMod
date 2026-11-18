@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
@@ -35,6 +36,7 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SneakingUse;
 import org.maiwithu.maicraft.behavior.interaction.SustainedUse;
+import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.interaction.EntityUseConfirmation;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -57,18 +59,29 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
     private final Interactions interactions;
     private final HoldsSneak sneak;
     private final Supplier<PlayerContext> context;
+    private final Supplier<Optional<NetworkStorage>> networkStorage;
 
     LiveUseInteractions(Interactions interactions, Supplier<PlayerContext> context) {
-        this(interactions, null, context);
+        this(interactions, null, context, Optional::empty);
     }
 
     LiveUseInteractions(Interactions interactions, HoldsSneak sneak, Supplier<PlayerContext> context) {
+        this(interactions, sneak, context, Optional::empty);
+    }
+
+    LiveUseInteractions(Interactions interactions, HoldsSneak sneak, Supplier<PlayerContext> context,
+            Supplier<Optional<NetworkStorage>> networkStorage) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.sneak = sneak;
         this.context = Objects.requireNonNull(context, "context");
+        this.networkStorage = Objects.requireNonNull(networkStorage, "networkStorage");
     }
 
     @Override public UseSeams.Built build(ResolvedTarget target, boolean writesSign) {
+        return build(target, writesSign, false);
+    }
+
+    @Override public UseSeams.Built build(ResolvedTarget target, boolean writesSign, boolean sneakUse) {
         PlayerContext current = context.get();
         if (current == null || current.localPlayer() == null || current.level() == null) {
             return new UseSeams.Built.CannotAim(Problem.of(Problem.Kind.WRONG_TIME, "这一刻掌握不到角色，出不了手", null));
@@ -94,7 +107,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         if (target.isEntity()) {
             return onEntity(current.level(), player, target, held, gesture, menuBefore);
         }
-        return onBlock(current.level(), player, target, writesSign, handBefore, held, gesture, menuBefore);
+        return onBlock(current.level(), player, target, writesSign, sneakUse, handBefore, held, gesture, menuBefore);
     }
 
     // 对实体用：按编号找回当刻的它；算不算生效问全仓那一份右键生物的确认（手上变了、点开了界面、骑上去了、
@@ -113,7 +126,8 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
 
     // 对方块用：写字只认编辑界面打开；其余按手势定点哪一格、效果落在哪一格、怎样算生效。
     private UseSeams.Built onBlock(ClientLevel level, LocalPlayer player, ResolvedTarget target, boolean writesSign,
-            ItemStack handBefore, UseSeams.ReadsWorld.Held held, ItemUseAim.Gesture gesture, int menuBefore) {
+            boolean sneakUse, ItemStack handBefore, UseSeams.ReadsWorld.Held held, ItemUseAim.Gesture gesture,
+            int menuBefore) {
         BlockPos cell = target.cell();
         // 客户端世界的 hasChunkAt 永远答“加载着”，没加载的格读出来是空气、地表落在世界最底层；按区块真加载没加载判。
         if (!level.isLoaded(cell)) {
@@ -143,6 +157,15 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         ItemUseAim.Aim aim = planned.get();
         var confirmation = GestureConfirmations.forGesture(aim.confirmation(), aim.effectCell(),
                 InteractionHand.MAIN_HAND, handBefore, level.getBlockState(aim.clickCell()), menuBefore);
+        // 空手且不潜行点向装有 ME 终端面板的线缆格时，直接对准终端面板碰撞箱右键，避免命中线缆芯打不开界面。
+        if (held == null && !sneakUse && aim.clickCell().equals(cell)) {
+            Optional<AABB> panel = networkStorage.get()
+                    .flatMap(storage -> storage.terminalPanelAt(cell, target.face()));
+            if (panel.isPresent()) {
+                AimAndInteract use = interactions.useBlockPart(cell, panel.get(), confirmation);
+                return new UseSeams.Built.Ready(use, use::result, gesture, null, menuBefore, aim.effectCell());
+            }
+        }
         // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
         boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
         // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
