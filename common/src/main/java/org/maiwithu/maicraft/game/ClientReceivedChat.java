@@ -81,7 +81,8 @@ public final class ClientReceivedChat {
         boolean online = listed != null && listed.equals(name);
         // 别人用 /msg 对角色说的话是"收到的私聊"这种消息类型；自己发出的私聊回显按发言人是自己滤掉。
         boolean isPrivate = chatType != null && chatType.chatType().is(ChatType.MSG_COMMAND_INCOMING);
-        String text = withClickCommands(content != null ? content : line);
+        // 展示正文保留原样（有签名取原话、无签名取整行），点击可执行命令只从原话段提取，不扫外层名字装饰。
+        String text = withClickCommands((content != null ? content : line).getString(), read);
         return ReceivedChat.fromPlayer(text, senderId, name, online, isPrivate, self)
                 .map(chat -> chat.with(mentions, key));
     }
@@ -170,9 +171,13 @@ public final class ClientReceivedChat {
 
     // 从聊天组件及其子组件、翻译参数里递归收集点击可执行的命令，让 Ess 传送按钮等富文本指令进纯文本仍可见。
     private static String withClickCommands(Component root) {
-        String text = root.getString();
+        return withClickCommands(root.getString(), root);
+    }
+
+    // 按给定的展示正文与点击来源组件拼装：外层玩家名字装饰不参与命令收集，正文已写出命令时不重复附。
+    private static String withClickCommands(String text, Component clickSource) {
         List<String> commands = new ArrayList<>();
-        collectClickCommands(root, commands);
+        collectClickCommands(clickSource, commands);
         if (commands.isEmpty()) return text;
         List<String> missing = new ArrayList<>();
         for (String command : commands) {
@@ -183,11 +188,11 @@ public final class ClientReceivedChat {
         return missing.isEmpty() ? text : text + "（可点击执行: " + String.join(" / ", missing) + "）";
     }
 
+    // 只收点击后真正执行的命令（RUN_COMMAND）：原版给每位玩家显示名默认挂的 /tell 填框建议（SUGGEST_COMMAND）不是可执行按钮。
     private static void collectClickCommands(Component node, List<String> out) {
         if (node == null) return;
         ClickEvent click = node.getStyle().getClickEvent();
-        if (click != null && (click.getAction() == ClickEvent.Action.RUN_COMMAND
-                || click.getAction() == ClickEvent.Action.SUGGEST_COMMAND)) {
+        if (click != null && click.getAction() == ClickEvent.Action.RUN_COMMAND) {
             String value = click.getValue().strip();
             if (!value.isEmpty() && !out.contains(value)) {
                 out.add(value);

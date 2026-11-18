@@ -256,4 +256,44 @@ class ClientReceivedChatTest {
         ReceivedChat dupChat = ClientReceivedChat.system(alreadyVisible, false, SELF, "Steve", ONLINE).orElseThrow();
         assertEquals("请输入 /tpaccept 接受 [接受]", dupChat.text());
     }
+
+    @Test
+    void playerNameTellSuggestionNeverAppendsWhileRunCommandButtonsInBodyStillDo() {
+        // 原版给每位玩家显示名默认挂上 /tell 填框建议：无论有签名、无签名整行还是改过外框格式，都不能当可执行按钮拼到句末。
+        Component decoratedAlex = Component.literal("Alex")
+                .withStyle(style -> style.withClickEvent(
+                        new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, "/tell Alex ")));
+        ChatType.Bound under = chatUnder(decoratedAlex);
+        Component said = Component.literal("你好");
+
+        ReceivedChat signed = ClientReceivedChat.player(under.decorate(said), said, ALEX, "Alex", under,
+                SELF, "Steve", ALEX_LISTED).orElseThrow();
+        assertEquals("你好", signed.text());
+
+        ReceivedChat unsignedDecorated = ClientReceivedChat.player(under.decorate(said), null, null, null, under,
+                SELF, "Steve", ALEX_LISTED).orElseThrow();
+        assertEquals("<Alex> 你好", unsignedDecorated.text());
+
+        Component customLine = Component.empty().append("<").append(decoratedAlex).append("> 你好");
+        ReceivedChat unsignedCustom = ClientReceivedChat.player(customLine, null, null, null, under,
+                SELF, "Steve", ALEX_LISTED).orElseThrow();
+        assertEquals("<Alex> 你好", unsignedCustom.text());
+
+        // 外层发言人名字纵使被插件挂了 RUN_COMMAND，无签名标准格式也只扫原话内容；原话里的 [接受] 按钮则照常附带命令。
+        Component clickableSender = Component.literal("Alex")
+                .withStyle(style -> style.withClickEvent(
+                        new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/profile Alex")));
+        ChatType.Bound underClickable = chatUnder(clickableSender);
+        Component acceptBtn = Component.literal("[接受]")
+                .withStyle(style -> style.withClickEvent(
+                        new ClickEvent(ClickEvent.Action.RUN_COMMAND, "/tpaccept")));
+        ReceivedChat plainWords = ClientReceivedChat.player(underClickable.decorate(said), null, null, null,
+                underClickable, SELF, "Steve", ALEX_LISTED).orElseThrow();
+        assertEquals("<Alex> 你好", plainWords.text());
+
+        Component inviteWords = Component.literal("点这里传过来 ").append(acceptBtn);
+        ReceivedChat invite = ClientReceivedChat.player(underClickable.decorate(inviteWords), null, null, null,
+                underClickable, SELF, "Steve", ALEX_LISTED).orElseThrow();
+        assertEquals("<Alex> 点这里传过来 [接受]（可点击执行: /tpaccept）", invite.text());
+    }
 }
