@@ -5,7 +5,9 @@ import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.function.Supplier;
 
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.LightLayer;
 
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -20,6 +22,24 @@ public final class ClientLightLevels implements ReadsLightLevels {
 
     public ClientLightLevels(Supplier<PlayerContext> contexts) {
         this.contexts = Objects.requireNonNull(contexts, "contexts");
+    }
+
+    /**
+     * 一格方块露出来的那几面挨着的格（不是整块挡光的方块）里最亮的那一格亮度（0..15）：
+     * 方块光与按当前天色折减后的天空光取大，火把、岩浆、发光方块照到的都算。看洞壁与矿脉看不看得清共用。
+     */
+    public static int exposedFaceLight(ClientLevel level, BlockPos block) {
+        if (level == null || block == null || !level.isLoaded(block)) {
+            return 0;
+        }
+        int light = 0;
+        for (Direction face : Direction.values()) {
+            BlockPos beside = block.relative(face);
+            if (!level.getBlockState(beside).isSolidRender(level, beside)) {
+                light = Math.max(light, level.getMaxLocalRawBrightness(beside));
+            }
+        }
+        return light;
     }
 
     @Override public OptionalInt blockLight(BlockPos pos) {

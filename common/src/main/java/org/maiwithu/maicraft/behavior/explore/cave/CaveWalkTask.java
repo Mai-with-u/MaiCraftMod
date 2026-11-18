@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.perception.CaveOpenings;
+import org.maiwithu.maicraft.behavior.perception.OreVeins;
+import org.maiwithu.maicraft.behavior.perception.SeeingInTheDark;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryOrigin;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.behavior.explore.cave;
+package org.maiwithu.maicraft.behavior.perception;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

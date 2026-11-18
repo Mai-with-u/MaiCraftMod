@@ -14,7 +14,6 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
@@ -29,6 +28,7 @@ import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.perception.ClientCaveOpeningSight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.BlockScanService;
+import org.maiwithu.maicraft.game.world.ClientLightLevels;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.game.world.ScanTargets;
 import org.maiwithu.maicraft.game.world.TargetIndex;
@@ -156,22 +156,10 @@ public final class ClientCaveWorld implements CaveWorld {
             }
             Block block = level.getBlockState(hit).getBlock();
             seen.add(new Sighting(BuiltInRegistries.BLOCK.getKey(block).toString(), hit,
-                    ores.contains(block), block == Blocks.LAVA, interests.contains(block), lightAround(level, hit)));
+                    ores.contains(block), block == Blocks.LAVA, interests.contains(block),
+                    ClientLightLevels.exposedFaceLight(level, hit)));
         }
         return seen;
-    }
-
-    // 这一块有多亮：露出来的那几面挨着的格（不是整块挡光的方块）里最亮的那一格，方块光与天空光取大，
-    // 夜里天空光按天色减。火把、岩浆、发光方块照到的都算。
-    private static int lightAround(ClientLevel level, BlockPos block) {
-        int light = 0;
-        for (Direction face : Direction.values()) {
-            BlockPos beside = block.relative(face);
-            if (!level.getBlockState(beside).isSolidRender(level, beside)) {
-                light = Math.max(light, level.getMaxLocalRawBrightness(beside));
-            }
-        }
-        return light;
     }
 
     // 查索引：先登记，只要露在外面的，半径换成区块圈数。
