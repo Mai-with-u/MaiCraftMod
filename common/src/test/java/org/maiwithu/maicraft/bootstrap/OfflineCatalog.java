@@ -8,14 +8,20 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.item.ItemStack;
+import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
+import org.maiwithu.maicraft.behavior.approach.UnreachableFromHere;
 import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.lighting.FollowLighting;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
+import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.RareLootNotice;
+import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemsInUse;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.ReservedItems;
@@ -44,6 +50,7 @@ import org.maiwithu.maicraft.game.serverlink.ServerLinkSession;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.world.KeepInventoryRule;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
@@ -144,23 +151,31 @@ final class OfflineCatalog {
                             @Override public OptionalInt blockLight(BlockPos pos) { return OptionalInt.empty(); }
                             @Override public OptionalInt skyLight(BlockPos pos) { return OptionalInt.empty(); }
                         },
-                        new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE, GeneratedTerrain.NONE),
+                        new UnloadedWorld(), new KeepInventoryRule(), NonverbalExchange.NONE, GeneratedTerrain.NONE,
+                        // 营地地面坑的扫描读端离线给"哪都没有营地"的空壳：填坑能力照常登记。
+                        new ClientCampPitSight(Campground.NOWHERE, pos -> false)),
                 new LiveCombatSenses(new CombatMemory(), itemId -> Optional.empty()),
                 new Hands(new Interactions(null), NO_HOLD, () -> null, new InputDriver(new PlayerControlBoundary()),
                         new LiveDigToolRule(ItemsToKeep.NOTHING, blockId -> true)),
                 new Travel(new BaritoneInternals(ItemsToKeep.NOTHING, DigToolRule.HELD),
                         new BaritoneInternals(ItemsToKeep.NOTHING, DigToolRule.HELD), new ClientTravelWorldView(nobody),
-                        progress -> { }),
+                        progress -> { },
+                        // 离线没有目标运行表：靠近什么都不记。
+                        UnreachableFromHere.none()),
                 new Guards(
                         new Protection((dimension, x, y, z) -> Optional.empty(), memory, memory,
                                 SELF_ID),
-                        (ReadsCreatureSituation) entityId -> Optional.empty()),
+                        (ReadsCreatureSituation) entityId -> Optional.empty(),
+                        // 离线没有自家人，动别人东西的通报与稀罕战利品通报都给空实现。
+                        TrustedPlayers.NOBODY, OthersThingsNotice.NONE, RareLootNotice.NONE),
                 new Channels(new ChatChannel(nobody), () -> 0,
                         // 任务事件离线没人听，能力照常登记、参数照常校验。
                         (kind, message) -> { },
                         // 计时到点的事件同样没人听。
                         new Timers(TaskEventSink.NONE),
-                        session),
+                        session,
+                        // 聊天栏收不到东西：交互前后的服务端回音读不到。
+                        new ChatEventLog()),
                 new Stores(new DocumentStore(tempDir.resolve("state.sqlite")), WORLD_KEY,
                         tempDir.resolve("config")),
                 CompatRegistry.empty(),

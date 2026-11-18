@@ -27,20 +27,4 @@ record Guards(
         othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
         rareLootNotice = rareLootNotice == null ? RareLootNotice.NONE : rareLootNotice;
     }
-
-    /** 没配稀罕战利品通报器时：离线测试用空实现。 */
-    Guards(Protection protection, ReadsCreatureSituation creatures, TrustedPlayers trusted,
-            OthersThingsNotice othersNotice) {
-        this(protection, creatures, trusted, othersNotice, RareLootNotice.NONE);
-    }
-
-    /** 没配动别人东西的通报器时：离线测试用空实现。 */
-    Guards(Protection protection, ReadsCreatureSituation creatures, TrustedPlayers trusted) {
-        this(protection, creatures, trusted, OthersThingsNotice.NONE, RareLootNotice.NONE);
-    }
-
-    /** 没配自家人时：驯服的生物只分"你的"与"别人的"。 */
-    Guards(Protection protection, ReadsCreatureSituation creatures) {
-        this(protection, creatures, TrustedPlayers.NOBODY, OthersThingsNotice.NONE, RareLootNotice.NONE);
-    }
 }

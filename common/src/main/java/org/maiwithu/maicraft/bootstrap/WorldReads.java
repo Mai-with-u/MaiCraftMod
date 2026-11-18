@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.bootstrap;
 
 import java.util.Objects;
 
-import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.lighting.LightingWorld;
 import org.maiwithu.maicraft.behavior.perception.ClientCampPitSight;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
@@ -36,13 +35,6 @@ record WorldReads(
         GeneratedTerrain generatedTerrain,
         /** 营地地面坑的客户端扫描读端：场景刷新与填坑能力共用同一份。 */
         ClientCampPitSight campPits) {
-
-    WorldReads(Scene scene, WorldMemory memory, BlockScanService blockScans, FacilityKinds facilities,
-               ReadsLightLevels lightLevels, LightingWorld lightingWorld, KeepInventoryRule keepInventory,
-               NonverbalExchange nonverbal, GeneratedTerrain generatedTerrain) {
-        this(scene, memory, blockScans, facilities, lightLevels, lightingWorld, keepInventory, nonverbal,
-                generatedTerrain, new ClientCampPitSight(Campground.NOWHERE, pos -> false));
-    }
 
     WorldReads {
         Objects.requireNonNull(scene, "scene");

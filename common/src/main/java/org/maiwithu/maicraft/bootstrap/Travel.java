@@ -21,12 +21,6 @@ record Travel(
         TravelProgressListener travelProgress,
         UnreachableFromHere unreachable) {
 
-    /** 没有目标运行表的清单（离线）：靠近什么都不记。 */
-    Travel(WalkTo walks, BaritoneInternals walkInternals, TravelWorldView travelWorld,
-           TravelProgressListener travelProgress) {
-        this(walks, walkInternals, travelWorld, travelProgress, UnreachableFromHere.none());
-    }
-
     Travel {
         Objects.requireNonNull(walks, "walks");
         Objects.requireNonNull(walkInternals, "walkInternals");

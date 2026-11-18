@@ -32,10 +32,4 @@ record Channels(
         Objects.requireNonNull(session, "session");
         Objects.requireNonNull(chatEvents, "chatEvents");
     }
-
-    /** 离线清单用：聊天栏收不到东西，给一份空的。 */
-    Channels(ChatChannel chat, LongSupplier clientTicks, TaskEventSink events, Timers timers,
-            ServerLinkSession session) {
-        this(chat, clientTicks, events, timers, session, new ChatEventLog());
-    }
 }
