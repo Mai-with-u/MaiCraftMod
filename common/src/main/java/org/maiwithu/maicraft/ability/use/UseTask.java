@@ -588,9 +588,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         });
     }
 
-    // 世界记忆按物品记"里面有什么"（取东西时按它找箱子），件数以到场再开为准。
+    // 世界记忆按物品记"里面有什么"（取东西时按它找箱子），件数以到场再开为准；
+    // 压印器、样板供应器等机器虽能打开界面看槽位，但不是通用储物箱，不写进容器表以免存取东西误把它当箱子。
     private void rememberContainer(List<String> itemIds) {
         if (services.memory() == null || target == null || target.isEntity()) return;
+        if (services.facilities() != null && !services.facilities().isContainer(target.typeId())) return;
         BlockPos cell = target.cell();
         services.memory().rememberContainerOpened(new WorldPosition(cell.getX(), cell.getY(), cell.getZ(),
                 services.world().dimension()), target.typeId(), itemIds, Instant.now());
@@ -635,7 +637,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                     : "：点开了不认识的界面，看不出里面有什么、也不确认会不会做出东西，已关上界面";
             return Next.done(TaskResult.done(describeTarget() + note + tail));
         }
-        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + tail));
+        // 点开了容器、压印器或终端界面读到内容时，直接并入一句话结果，不再把开窗所见藏在细节字段里。
+        String openedNote = openedMenu == null || openedMenu.isBlank() ? "" : "（里面有：" + openedMenu + "）";
+        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + openedNote + tail));
     }
 
     // 开关门、活板门、栅栏门：收场时按现场写明门现在开着还是关着，点两下回到原样也看得出来；别的方块不加。

@@ -96,6 +96,11 @@ public final class Ae2Compat extends CompatModule {
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
                     seen, Instant::now);
         });
+        // 只在拿东西提取侧开放从附近已见压印器工作格取回占槽物品，不把压印器标成通用容器以免存东西往里塞杂物。
+        registry.itemSource(this, services -> {
+            this.services = services;
+            return new Ae2InscriberSource(this, services);
+        });
         // 腾地方、整理背包时：身上的无线终端连着网络就把东西存进网络，不往地上扔。
         registry.networkStorage(this, services -> {
             this.services = services;
@@ -153,6 +158,16 @@ public final class Ae2Compat extends CompatModule {
     /** 一格压印器的前三个投入工作格（顶模板、底模板、中间输入）；见 {@link Ae2Inscribers#inputs}。 */
     public Optional<Ae2Inscribers.Inputs> inscriberInputs(ClientLevel level, BlockPos at) {
         return call("读压印器的投入格", () -> inscribers.inputs(level, at));
+    }
+
+    /** 一格压印器客户端同步到的全部四个工作格（顶、底、中间、输出）物品与数量；见 {@link Ae2Inscribers#slots}。 */
+    public Optional<Ae2Inscribers.Slots> inscriberSlots(ClientLevel level, BlockPos at) {
+        return call("读压印器的四个工作格", () -> inscribers.slots(level, at));
+    }
+
+    /** 读写端直接提供的附近压印器位置（供测试替身注入）；见 {@link Ae2Inscribers#near}。 */
+    public List<BlockPos> inscribersNear(ClientLevel level, BlockPos center, int radius) {
+        return call("找附近的压印器", () -> inscribers.near(level, center, radius));
     }
 
     /** 是不是 AE2 的部件；见 {@link Ae2Grid#partItem}。 */

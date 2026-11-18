@@ -42,7 +42,9 @@ public final class ContainerTakePlan {
             SlotSnapshot snapshot = container.get(i);
             if (snapshot.isEmpty() || !wanted.test(snapshot)) continue;
             int slotId = reading.containerSlotIds().get(i);
-            if (snapshot.count() <= needed) {
+            int cursorMax = Math.max(1, snapshot.stack().getMaxStackSize());
+            // 超叠槽位单次快速移动在模组里最多只搬 cursorMax 件，只有非超叠且整堆都用得上时才走整格快速移动。
+            if (snapshot.count() <= cursorMax && snapshot.count() <= needed) {
                 // 背包那一侧一件都放不下（没空格、同种的堆也满了）：点了也纹丝不动，还会被记成"没能确认"，
                 // 不点，交回去让引擎先腾地方。
                 if (roomyPlayerSlot(reading.playerSnapshots(), snapshot, 1) < 0) return Optional.empty();
@@ -50,16 +52,17 @@ public final class ContainerTakePlan {
                 return Optional.of(new Move(slotId, snapshot.count(),
                         List.of(new MenuClick(slotId, true, 0, false))));
             }
-            // 只要这格的一部分：按二分堆拿到光标上，放进背包侧放得下的一格。
-            int targetIndex = roomyPlayerSlot(reading.playerSnapshots(), snapshot, needed);
+            // 只要这格的一部分，或是超叠槽需要按光标与背包单格上限分轮搬：先搬满一轮，结清后下一轮接着搬。
+            int roundAmount = Math.min(needed, cursorMax);
+            int targetIndex = roomyPlayerSlot(reading.playerSnapshots(), snapshot, roundAmount);
             if (targetIndex < 0) return Optional.empty();
-            return Optional.of(new Move(slotId, needed,
-                    exactClicks(slotId, reading.playerSlotIds().get(targetIndex), snapshot, needed)));
+            return Optional.of(new Move(slotId, roundAmount,
+                    exactClicks(slotId, reading.playerSlotIds().get(targetIndex), snapshot, roundAmount)));
         }
         return Optional.empty();
     }
 
-    // 尾数搬运的点击序列：与搬运计划同一个拆法，点法共用 MenuClicks.exact。
+    // 尾数搬运的点击序列：源格件数与光标单次上限拆开计算，点法共用 MenuClicks.exact。
     private static List<MenuClick> exactClicks(int sourceSlotId, int targetSlotId, SlotSnapshot source, int amount) {
         return MenuClicks.exact(sourceSlotId, targetSlotId, source, amount);
     }

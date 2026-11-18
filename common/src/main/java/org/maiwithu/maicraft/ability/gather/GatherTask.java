@@ -9,6 +9,11 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
@@ -23,6 +28,7 @@ import org.maiwithu.maicraft.behavior.interaction.HitsItemFrames;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.player.BackpackView;
+import org.maiwithu.maicraft.game.world.ItemMatch;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -87,6 +93,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private Action digAction;
     /** 打展示框之前框里放着的东西（物品 ID）：结算时说清打出来的是什么。 */
     private String frameItem;
+    /** 拾取阶段子动作是否确认完成（点名实体拾取时靠它排除顺脚吸起无关杂物的假完成）。 */
+    private boolean dropPickupConfirmed;
+    /** 拾取阶段子动作报告的失败原因；没有为 null。 */
+    private Problem dropPickupProblem;
 
     GatherTask(GatherSpot spot, ApproachesTargets approaches, DigsBlocks digs, ReadsToolRequirements tools,
             ReadsSpot world, ReplantsCrops replants, PicksUpDrops drops, PermissionCheck permission,
@@ -133,10 +143,20 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     @Override protected Next<Phase> tick(Phase phase, TickContext context) {
         return switch (phase) {
             case WALK -> runActionThen(context, () -> {
-                // 展示框：到了先看框里有没有东西再打；掉落物目标：走到了就把附近地上的东西捡起来（出手前没有"原来就在"的那一批）。
+                // 展示框：到了先看框里有没有东西再打；掉落物目标：走近途中已把预期物品吸进包就直接结算，
+                // 否则有目标实体编号就只追捡那一件实体，不扫脚边无关杂物。
                 if (spot.frame()) return judgeFrame();
-                return spot.drop() ? goWith(Phase.PICK_UP, drops.pickUpNewSince(Set.of()), "是掉落物，走过去捡")
-                        : Next.go(Phase.JUDGE, "到跟前了，先看清是什么");
+                if (spot.drop()) {
+                    if (spot.expectedItem() != null
+                            && gainedMatchesExpected(gainedSinceBaseline(), spot.expectedItem())) {
+                        return settle();
+                    }
+                    Action pick = spot.dropEntityId() >= 0
+                            ? drops.pickUpOne(spot.dropEntityId())
+                            : drops.pickUpNewSince(Set.of());
+                    return goWith(Phase.PICK_UP, pick, "是掉落物，走过去捡目标那一件");
+                }
+                return Next.go(Phase.JUDGE, "到跟前了，先看清是什么");
             });
             case JUDGE -> judge();
             case DIG -> digDone(context);
@@ -261,7 +281,9 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     private Next<Phase> pickedUp(TickContext context) {
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
+        dropPickupConfirmed = status instanceof ActionStatus.Done;
         if (status instanceof ActionStatus.Failed failed) {
+            dropPickupProblem = failed.problem();
             recordAttempt("捡起掉出的东西", failed.problem().message());
         }
         if (matureCrop && replants != null) {
@@ -293,6 +315,16 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         for (var entry : gained.entrySet()) {
             recordChange(Change.of(Change.Kind.ITEM_GAINED, entry.getKey(), entry.getValue()));
         }
+        if (spot.drop() && !spot.frame()) {
+            return settleDropTarget(gained);
+        }
+        // 方块采集显式指定了非概率掉落的预期物品时，顺脚吸起无关杂物不算拿到预期产物。
+        if (!spot.frame() && spot.expectedItem() != null && expectedChanceDrop().isEmpty()
+                && !gainedMatchesExpected(gained, spot.expectedItem())) {
+            String unrelated = gained.isEmpty() ? "" : "（顺路吸起了 " + gainedText(gained) + "，并非目标掉落）";
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM,
+                    spot.expectedItem() + " 没进背包：采开了但没拿到目标掉落物" + unrelated));
+        }
         if (!gained.isEmpty()) {
             return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                     "采集完成：" + gainedText(gained) + " 进了背包" + missedChance(gained)).details(details()).build());
@@ -313,6 +345,48 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         }
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                 "采集完成：没有东西掉落入包，按现场如实记录").details(details()).build());
+    }
+
+    // 点名捡地上掉落物的核验：必须确认目标掉落物实体已拾起或预期物品确实进包，顺脚吸起无关杂物绝不判完成。
+    private Next<Phase> settleDropTarget(Map<String, Integer> gained) {
+        if (spot.expectedItem() != null) {
+            if (gainedMatchesExpected(gained, spot.expectedItem())) {
+                return Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                        "采集完成：" + gainedText(gained) + " 进了背包").details(details()).build());
+            }
+            String unrelated = gained.isEmpty()
+                    ? "：目标掉落物没捡到（可能掉在够不着的地方或已被收走）"
+                    : "（顺路吸起了 " + gainedText(gained) + "，但目标掉落物没捡到）";
+            return Next.fail(Problem.of(Problem.Kind.NEED_ITEM, spot.expectedItem() + " 没进背包" + unrelated));
+        }
+        if (spot.dropEntityId() >= 0 && !dropPickupConfirmed) {
+            Problem cause = dropPickupProblem != null ? dropPickupProblem
+                    : Problem.of(Problem.Kind.TARGET_GONE, "点名的掉落物没捡到（可能已被收走或够不着）");
+            return Next.fail(cause);
+        }
+        if (gained.isEmpty()) {
+            return Next.fail(dropPickupProblem != null ? dropPickupProblem
+                    : Problem.of(Problem.Kind.TARGET_GONE, "点名的掉落物没进背包（可能已被收走或够不着）"));
+        }
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                "采集完成：" + gainedText(gained) + " 进了背包").details(details()).build());
+    }
+
+    private static boolean gainedMatchesExpected(Map<String, Integer> gained, String expected) {
+        if (expected == null || gained.isEmpty()) return false;
+        if (!expected.startsWith("#")) {
+            return gained.getOrDefault(expected, 0) > 0;
+        }
+        for (Map.Entry<String, Integer> entry : gained.entrySet()) {
+            if (entry.getValue() <= 0) continue;
+            ResourceLocation key = ResourceLocation.tryParse(entry.getKey());
+            Optional<Item> item = key == null ? Optional.empty() : BuiltInRegistries.ITEM.getOptional(key);
+            if (item.isPresent() && item.get() != Items.AIR
+                    && ItemMatch.matches(new ItemStack(item.get()), expected)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override protected ResultDetails details() {

@@ -21,4 +21,11 @@ public interface PicksUpDrops {
      * 一件都没冒出来就直接做完；捡不到的如实失败。
      */
     Action pickUpNewSince(Set<Integer> before);
+
+    /**
+     * 走过去只捡指定游戏实体编号的那一件掉落物，无关的脚边杂物不碰；那一件没进本玩家背包就如实失败。
+     */
+    default Action pickUpOne(int entityId) {
+        return pickUpNewSince(Set.of());
+    }
 }

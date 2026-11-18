@@ -219,12 +219,15 @@ class GatherAbilityTest {
 
     @Test
     void 还在地上的掉落物照常走拾取不因身上有同类货提前收场() {
-        // 掉落物还在地上：就算包里早有同类物品，也照常走过去让原版结算拾取，不冒充目标达成。
+        // 掉落物还在地上：就算包里早有同类物品，也照常走过去让原版结算拾取，不冒充目标达成；
+        // 同时保留目标掉落物的实体编号与物品 ID 交给采集任务核验。
         var seen = new FakeSeen(Map.of("e5", new GatherAbility.SeesTargets.SeenTarget(
-                WorldPosition.here(2, 64, 3), false, true, -1)));
+                WorldPosition.here(2, 64, 3), false, true, -1, true, "minecraft:charcoal", 77)));
         StepDecision.Run run = assertInstanceOf(StepDecision.Run.class,
                 decideSeen("e5", null, seen, backpackWith("minecraft:charcoal", "9")));
-        assertInstanceOf(GatherSpot.class, run.input());
+        GatherSpot spot = assertInstanceOf(GatherSpot.class, run.input());
+        assertEquals(77, spot.dropEntityId(), "保留目标掉落物的游戏实体编号");
+        assertEquals("minecraft:charcoal", spot.expectedItem(), "未传 item 时沿用观察到的掉落物物品 ID");
     }
 
     @Test

@@ -100,6 +100,15 @@ public final class GoalCompiler {
         return new Compiled(NavGoal.nearGround(c, radius), LongSets.emptySet());
     }
 
+    /**
+     * 用于走近拾取地面掉落物：原版拾取盒往下只探 0.625 格，站在比掉落物高一格的台阶唇沿吸不到，
+     * 因此要求终点脚底进入实际可拾取高度（不高于掉落物所在格，可同高或低一格）；没有保护格。
+     */
+    public static Compiled pickup(BlockPos center, double radius) {
+        BlockPos c = center.immutable();
+        return new Compiled(NavGoal.nearPickup(c, radius), LongSets.emptySet());
+    }
+
     /** 替代 {@code resolveBlockGoal}：目标为空地时将其作为站位；目标已被占据时则走到方块旁，不消耗该方块。 */
     public static Compiled block(Level level, BlockPos cell) {
         return block(BlockPassability.canWalkThrough(level, cell), cell);

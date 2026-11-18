@@ -11,7 +11,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.world.DropConfirmations;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 
@@ -125,6 +127,18 @@ class ClientDropPickupTest {
     void 东西在脚下一格的浅坑里_站边上吸不着() {
         // 纵向不在拾取盒里：站着干等不会自己吸进来，得想别的办法够到它。
         assertFalse(ClientDropPickup.withinPickupReach(PX, FEET_Y, PZ, 10.5, 63.2, 10.5));
+    }
+
+    @Test
+    void 掉落物在低一格台阶时_拾取导航目标拒绝站在上层唇沿原地判到达() {
+        // 掉落物落在 (10, 63, 10) 台阶面（y=63.125），角色站在上层 (10, 64, 10) 够不着拾取盒：
+        // 拾取导航目标对上层唇沿 (10, 64, 10) 返回未到达，走下台阶到 (10, 63, 10) 才算到达。
+        BlockPos dropCell = new BlockPos(10, 63, 10);
+        GoalCompiler.Compiled compiled = ClientDropPickup.pickupWalkGoal(dropCell, false, 64.0, 63.125);
+        assertFalse(compiled.goal().isAt(new BlockPos(10, 64, 10)), "站在高一格台阶唇沿吸不着，不能判到达");
+        assertFalse(compiled.goal().isAt(new BlockPos(9, 64, 10)), "紧邻的高一格台阶唇沿同样不能判到达");
+        assertTrue(compiled.goal().isAt(new BlockPos(10, 63, 10)), "走下台阶进入同层拾取高度后判到达");
+        assertTrue(compiled.goal().isAt(new BlockPos(9, 63, 10)), "同层水平一格以内判到达");
     }
 
     @Test

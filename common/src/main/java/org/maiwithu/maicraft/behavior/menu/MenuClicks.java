@@ -15,12 +15,13 @@ public final class MenuClicks {
 
     /**
      * 从 sourceSlotId 往 targetSlotId 搬 amount 件的点击序列；source 是源格现在的样子。
-     * amount 与整堆相等时直接整堆放过去，少一件都不行就逐件放。
+     * 源格装有堆叠升级时当前数量可能超过物品自身的堆叠上限，因此把源格当前数量与鼠标光标单次可抓上限分开传入计划。
      */
     public static List<MenuClick> exact(int sourceSlotId, int targetSlotId, SlotSnapshot source, int amount) {
         List<MenuClick> clicks = new ArrayList<>();
-        for (TransferPlan.Step step : TransferPlan.exactAmount(source.count(), amount,
-                source.stack().getMaxStackSize()).steps()) {
+        // 光标单次最多只能抓起物品自身的最大堆叠数（圆石 64、工具 1），与超叠源格里的当前件数分开计算。
+        int cursorMax = Math.max(1, source.stack().getMaxStackSize());
+        for (TransferPlan.Step step : TransferPlan.exactAmount(source.count(), amount, cursorMax).steps()) {
             boolean onSource = step.where() == TransferPlan.Where.SOURCE;
             int slotId = onSource ? sourceSlotId : targetSlotId;
             clicks.add(switch (step.kind()) {

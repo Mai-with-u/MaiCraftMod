@@ -72,23 +72,43 @@ final class DepositSources {
         };
     }
 
-    /** 点名的那一格没有普通容器、却装着可用的 ME 终端：按存进它连着的网络处理。 */
+    /**
+     * 点名的那一格没有普通存储容器、却在同一格装着可用的 ME 终端或面板部件时，才按存进它连着的网络处理；
+     * 若目标格是压印器、熔炉等非容器方块，严禁跨格静默劫持到紧挨着的隔壁 ME 终端。
+     */
     static boolean terminalInsteadOfContainer(Place place, DepositServices services, Permissions permissions) {
         if (!(place instanceof Place.Cell cell) || services.spots().at(cell.at()).isPresent()) {
             return false;
         }
         return services.network().get()
-                .map(storage -> storage.reachable(cellSearch(cell.at(), permissions)))
+                .map(storage -> storage.reachable(exactCellSearch(cell.at(), permissions)))
                 .orElse(false);
     }
 
+    /** 未写 {@code into="network"} 却点名具体坐标时，只认目标坐标本格上的终端部件（半径 0），不跨格搜隔壁。 */
+    static NetworkStorage.TerminalSearch exactCellSearch(WorldPosition at, Permissions permissions) {
+        return NetworkStorage.TerminalSearch.around(cellOf(at), 0, permissions);
+    }
+
+    /** 显式写了 {@code into="network"} 并给位置时，认那一格及紧贴一圈的终端。 */
     static NetworkStorage.TerminalSearch cellSearch(WorldPosition at, Permissions permissions) {
         return NetworkStorage.TerminalSearch.around(cellOf(at), 1, permissions);
     }
 
+    /** 点名的坐标既不是存储容器也不是终端部件时，点名说清目标方块不是存储容器并提示存网络改用 {@code into="network"}。 */
+    static Problem nonContainerTargetProblem(WorldPosition at, DepositServices services) {
+        String coords = "（" + at.x() + ", " + at.y() + ", " + at.z() + "）";
+        Optional<String> blockId = services.places() == null ? Optional.empty() : services.places().blockIdAt(at);
+        String message = blockId
+                .map(id -> coords + "处的 " + id + " 不是存储容器（那里没有容器）；要存进 ME 网络请改用 into=\"network\"")
+                .orElseGet(() -> coords + "那里没有容器（目标方块不是存储容器；要存进 ME 网络请改用 into=\"network\"）");
+        return Problem.of(Problem.Kind.NOT_FOUND, message,
+                "改指箱子、木桶等存储容器，或加上 into=\"network\" 存进 ME 网络");
+    }
+
     /**
      * 给了 {@code source} 时的开工前置防呆校验：
-     * 拦截找不到的位置、区域来源配区域自动挑箱子（会在同一片箱子之间来回倒腾），以及同一个容器既当来源又当存放处。
+     * 拦截找不到的位置、点名非容器目标方块、区域来源配区域自动挑箱子（会在同一片箱子之间来回倒腾），以及同一个容器既当来源又当存放处。
      */
     static Optional<Problem> validateUpfront(Place sourcePlace, Place targetPlace, boolean intoNetwork,
             DepositServices services, Permissions permissions) {
@@ -98,6 +118,10 @@ final class DepositSources {
         boolean goesToNetwork = intoNetwork || terminalInsteadOfContainer(targetPlace, services, permissions);
         if (targetPlace instanceof Place.Missing missing) {
             return Optional.of(Problem.of(Problem.Kind.NOT_FOUND, missing.why(), null));
+        }
+        if (!goesToNetwork && targetPlace instanceof Place.Cell targetCell
+                && services.spots().at(targetCell.at()).isEmpty()) {
+            return Optional.of(nonContainerTargetProblem(targetCell.at(), services));
         }
         if (sourcePlace instanceof Place.Area && !goesToNetwork
                 && !(targetPlace instanceof Place.Cell || targetPlace instanceof Place.Creature)) {

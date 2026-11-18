@@ -19,6 +19,8 @@ public record AcquireVia(String name, String description) {
 
     /** 身上已有的（主背包与副手；装了随身背包模组，包里的也算身上的仓库）。 */
     public static final AcquireVia CARRIED = new AcquireVia("carried", "身上已有的（主背包、副手与随身背包）");
+    /** 附近地面上看得见的掉落物，直接走过去捡进背包。 */
+    public static final AcquireVia PICKUP = new AcquireVia("pickup", "走近捡起附近地面上看得见的掉落物");
     /** 记得的箱子、现场看到的容器。 */
     public static final AcquireVia CONTAINER = new AcquireVia("container", "记得的箱子、现场看到的容器");
     /** 工作台上做出来（含石切台）。 */

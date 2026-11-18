@@ -5,7 +5,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
@@ -17,7 +16,6 @@ import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -52,10 +50,10 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
 
     /**
-     * 认机器 → 选工序 →（出口在界面里的先看一眼）→ 备料 → 投料 → 开机 → 等产物 → 收产物；
+     * 认机器 → 选工序 →（有冲突占槽物的先腾空）→（出口在界面里的先看一眼）→ 备料 → 投料 → 开机 → 等产物 → 收产物；
      * 机器自己从头做到尾的（蓝图桌、蓝图加农炮）认完直接交给它。
      */
-    enum Phase { RESOLVE, RECIPE, PEEK, GATHER, FEED, SWITCH, WAIT, COLLECT, FULL }
+    enum Phase { RESOLVE, RECIPE, CLEAR, PEEK, GATHER, FEED, SWITCH, WAIT, COLLECT, FULL }
 
     /** 等产物时多久看一眼出口。 */
     private static final int POLL_INTERVAL_TICKS = 20;
@@ -117,6 +115,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return switch (phase) {
             case RESOLVE -> resolve(context);
             case RECIPE -> pickRecipe(context);
+            case CLEAR -> clearConflicts(context);
             case PEEK -> peek(context);
             case GATHER -> gather(context);
             case FEED -> feed(context);
@@ -202,8 +201,33 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             notes.add("查到 " + atMachine.size() + " 条都能在这台机器上做，用了第一条（" + recipe.category() + "）");
         }
         batches = MachineIngredients.batchesNeeded(recipe, input.item(), input.count());
+        recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
+        // 压印器等机器若槽内占着早先遗留的异种模板、半成品或异种输出，先开窗取回角色背包腾空冲突槽位再算备料与投料。
+        Optional<Action> clearing = type.clearConflicts(cell, recipe, batches, input.permissions());
+        if (clearing.isPresent()) {
+            prepared = clearing.get();
+            return Next.go(Phase.CLEAR, "先取出" + describeMachine() + "里占着的不兼容物品");
+        }
+        return queueIngredientsAndContinue();
+    }
+
+    // 冲突占槽物取回背包后刷新出口基线，再按腾空后的槽位计算实际还缺的原料与模板。
+    private Next<Phase> clearConflicts(TickContext context) {
+        return switch (runAction(context)) {
+            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Done done -> {
+                watch.baseline = menuExit ? 0 : outputCount(input.item());
+                notes.add("开工前先从" + describeMachine() + "取出了占槽的不兼容物品");
+                recordProgress("已腾空" + describeMachine() + "里的冲突槽位");
+                yield queueIngredientsAndContinue();
+            }
+            case ActionStatus.Failed failed -> Next.fail(failed.problem());
+        };
+    }
+
+    private Next<Phase> queueIngredientsAndContinue() {
         toGather.addAll(MachineIngredients.queue(type, cell, recipe, batches, notes));
-        // 现场机器朝向不对、缺少配套台位或机内占着冲突物品时，备料前直接如实说明，不白跑一趟拿料。
+        // 现场机器朝向不对、缺少配套台位或机内仍占着无法清出的冲突物品时，备料前直接如实说明，不白跑一趟拿料。
         String probe = toGather.isEmpty() ? input.item() : toGather.peek().item();
         if (probe != null) {
             Optional<String> blocked = type.whyCannotFeed(cell, probe);
@@ -211,7 +235,6 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 return Next.fail(cannotFeedProblem(blocked.get()));
             }
         }
-        recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
         if (menuExit) {
             peeking = services.interactions().lookIntoMenu(cell, input.item(), false, input.permissions())
                     .orElse(null);
@@ -633,43 +656,12 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return type.name();
     }
 
-    // 机器读数的一句话：在干什么、转速、进度，读不到的把原因带上。
     private String describeState(MachineState state) {
-        String activity = state.activity().name().toLowerCase(Locale.ROOT);
-        StringBuilder line = new StringBuilder(activity);
-        if (state.speed() != null) {
-            line.append("，转速 ").append(state.speed());
-        }
-        if (state.progress() != null) {
-            line.append("，进度 ").append(Math.round(state.progress() * 100)).append("%");
-        }
-        if (!state.note().isEmpty()) {
-            line.append("（").append(state.note()).append("）");
-        }
-        return line.toString();
+        return MachineRunSummaries.describeState(state);
     }
 
-    // 结束时把机器挂着的网络读数带上：转速 0、过载、没电这些一眼能对上原因。
     private String describeNetworks() {
-        StringBuilder line = new StringBuilder();
-        for (NetworkReader reader : services.networkReaders()) {
-            Optional<String> id = reader.membership(cell);
-            if (id.isEmpty()) {
-                continue;
-            }
-            var summary = reader.summary(id.get());
-            line.append(line.isEmpty() ? "；网络：" : "，").append(reader.kind().id());
-            if (!summary.readable()) {
-                line.append("读不到（").append(summary.note()).append("）");
-                continue;
-            }
-            List<String> readings = new ArrayList<>();
-            summary.readings().forEach((name, value) -> readings.add(name + "=" + value));
-            if (!readings.isEmpty()) {
-                line.append("（").append(String.join("，", readings)).append("）");
-            }
-        }
-        return line.toString();
+        return MachineRunSummaries.describeNetworks(services.networkReaders(), cell);
     }
 
     private BlockState worldState() {
@@ -711,6 +703,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return switch (value) {
             case RESOLVE -> "认机器";
             case RECIPE -> "选工序";
+            case CLEAR -> "腾空机器冲突槽位";
             case PEEK -> "开工前看一眼出口";
             case GATHER -> "备料";
             case FEED -> "投料";

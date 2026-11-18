@@ -287,6 +287,10 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         if (input.network() || DepositSources.terminalInsteadOfContainer(place, services, input.permissions())) {
             return toNetwork(place);
         }
+        // 显式点名了具体方块坐标、且该格既不是存储容器也不是终端部件时，直接报错指出不是存储容器，不跨格转投隔壁终端。
+        if (place instanceof Place.Cell cell && services.spots().at(cell.at()).isEmpty()) {
+            return Next.fail(DepositSources.nonContainerTargetProblem(cell.at(), services));
+        }
         Optional<ContainerChooser.Pick> pick = pick(place);
         if (pick.isEmpty()) {
             recordProgress("正在扫附近 " + input.radius() + " 格内的容器");
@@ -388,7 +392,9 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
                         "去掉 into=network 就存进它身上"));
             }
             case Place.Cell cell -> {
-                terminalSearch = DepositSources.cellSearch(cell.at(), input.permissions());
+                terminalSearch = input.network()
+                        ? DepositSources.cellSearch(cell.at(), input.permissions())
+                        : DepositSources.exactCellSearch(cell.at(), input.permissions());
                 searchedAt = "（" + cell.at().x() + ", " + cell.at().y() + ", " + cell.at().z() + "）";
             }
             case Place.Area area when input.target() == null || input.target() instanceof Target.Here ->

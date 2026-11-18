@@ -540,10 +540,25 @@ class UseTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status());
         UseDetails details = (UseDetails) result.details();
         assertEquals("minecraft:apple ×3", details.opened());
+        assertTrue(result.summary().contains("确认生效了 1 次（里面有：minecraft:apple ×3）"), result.summary());
         assertEquals("unknown", details.whose());
         assertEquals(false, details.openedBySelf());
         assertEquals(null, details.lastModifiedBy(), "归属没问到就不带字段，替身没实现 lastModifiedBy");
         assertTrue(rig.menus.look.closed);
+    }
+
+    @Test
+    void 点开压印器等非容器机器界面_一句话摘要透出槽内物品且不污染容器记忆() {
+        Rig rig = new Rig();
+        rig.memory = new WorldMemory(new DocumentStore(temp.resolve("state-inscriber")), "world-1");
+        rig.world.blocks.put(LEVER, "ae2:inscriber");
+        rig.interactions.applied("压印器界面开了");
+        rig.menus.look = new FakeLook(Map.of("ae2:silicon_press", 1));
+
+        TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status());
+        assertTrue(result.summary().contains("确认生效了 1 次（里面有：ae2:silicon_press ×1）"), result.summary());
+        assertTrue(rig.memory.allRecords().isEmpty(), "压印器不是储物箱，不写进世界记忆容器表");
     }
 
     @Test

@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,17 +28,24 @@ import net.minecraft.world.item.Items;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
+import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
-import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
@@ -51,6 +59,7 @@ import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.game.world.BlockScanService;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -320,6 +329,151 @@ class Ae2MachineFeedTest {
         assertTrue(ownPlates.isEmpty(), "收回后待回收记录清零");
     }
 
+    @Test
+    void 压印器状态透出顶底中间输出全部四槽物品与数量() {
+        Ae2Inscribers.Slots synced = new Ae2Inscribers.Slots(
+                new MachineState.Shown("ae2:silicon_press", 1),
+                null,
+                new MachineState.Shown("ae2:silicon", 4),
+                new MachineState.Shown("ae2:printed_silicon", 2));
+        Ae2Inscribers stub = new Ae2Inscribers() {
+            @Override public Optional<List<MachineState.Shown>> output(ClientLevel level, BlockPos at) {
+                return Optional.of(List.of(new MachineState.Shown("ae2:printed_silicon", 2)));
+            }
+            @Override public Optional<Slots> slots(ClientLevel level, BlockPos at) {
+                return at.equals(AT) ? Optional.of(synced) : Optional.empty();
+            }
+        };
+        Ae2MachineCatalog.Kind kind = Ae2MachineCatalog.kinds().stream()
+                .filter(candidate -> candidate.id().equals("ae2:inscriber")).findFirst().orElseThrow();
+        Ae2Compat compat = new Ae2Compat(NO_TERMINALS, NO_MENU, new NoGrid(), Ae2Patterns.NONE,
+                Ae2Transforms.NONE, stub);
+        Ae2MachineType inscriber = new Ae2MachineType(kind, compat, stub, offlineServices(),
+                Ae2Compat.blocksOf(kind.blocks()));
+
+        MachineState state = inscriber.state(AT);
+        assertEquals(3, state.shown().size(), "非空的顶模板、中间输入、输出三格全部写入 shown");
+        assertEquals("ae2:silicon_press ×1", state.readings().get("top_slot"));
+        assertEquals("empty", state.readings().get("bottom_slot"));
+        assertEquals("ae2:silicon ×4", state.readings().get("input_slot"));
+        assertEquals("ae2:printed_silicon ×2", state.readings().get("output_slot"));
+    }
+
+    @Test
+    void 投料前自动清理顶底中间输出冲突占槽物_保留兼容模板与升级卡不动() {
+        // 用原版注册物品构造一条压印配方：底格或顶格需要铁锭模板，中间格需要红石，产出金锭。
+        String json = """
+                {"type":"ae2:inscriber","mode":"inscribe",
+                 "ingredients":{"top":{"item":"minecraft:iron_ingot"},"middle":{"item":"minecraft:redstone"}},
+                 "result":{"id":"minecraft:gold_ingot","count":1}}
+                """;
+        ShownRecipe recipe = new ShownRecipe("test:inscriber/gold", "ae2:inscriber", "压印器",
+                List.of(ShownStack.item("ae2:inscriber", "压印器", 1)),
+                List.of(ShownIngredient.of(ShownStack.item("minecraft:iron_ingot", "铁模板", 1)),
+                        ShownIngredient.of(ShownStack.item("minecraft:redstone", "红石", 1))),
+                List.of(),
+                List.of(ShownStack.item("minecraft:gold_ingot", "印制金", 1)),
+                JsonParser.parseString(json).getAsJsonObject());
+
+        // 现场菜单：0 顶格占着异种模板（铜锭），1 底格放着匹配的铁锭模板，2 中间格占着残留半成品（煤炭），
+        // 3 输出格占着异种旧产物（绿宝石），4 升级格插着加速卡（钻石代指）。
+        FakeInscriberMenu menu = new FakeInscriberMenu();
+        menu.container.set(0, new ItemStack(Items.COPPER_INGOT, 1));
+        menu.container.set(1, new ItemStack(Items.IRON_INGOT, 1));
+        menu.container.set(2, new ItemStack(Items.COAL, 3));
+        menu.container.set(3, new ItemStack(Items.EMERALD, 2));
+        menu.container.set(4, new ItemStack(Items.DIAMOND, 4));
+
+        Ae2Inscribers stub = new Ae2Inscribers() {
+            @Override public Optional<List<MachineState.Shown>> output(ClientLevel level, BlockPos at) {
+                return Optional.of(List.of());
+            }
+            @Override public Optional<Slots> slots(ClientLevel level, BlockPos at) {
+                return Optional.of(new Slots(
+                        new MachineState.Shown("minecraft:copper_ingot", 1),
+                        new MachineState.Shown("minecraft:iron_ingot", 1),
+                        new MachineState.Shown("minecraft:coal", 3),
+                        new MachineState.Shown("minecraft:emerald", 2)));
+            }
+        };
+        Ae2MachineCatalog.Kind kind = Ae2MachineCatalog.kinds().stream()
+                .filter(candidate -> candidate.id().equals("ae2:inscriber")).findFirst().orElseThrow();
+        Ae2Compat compat = new Ae2Compat(NO_TERMINALS, NO_MENU, new NoGrid(), Ae2Patterns.NONE,
+                Ae2Transforms.NONE, stub);
+        Ae2MachineType inscriber = new Ae2MachineType(kind, compat, stub, offlineServices(),
+                Ae2Compat.blocksOf(kind.blocks()), (pos, perms) -> immediateOpening(menu));
+
+        Action clear = inscriber.clearConflicts(AT, recipe, 2, Permissions.DEFAULT).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Done); i++) {
+            status = clear.tick(TickContext.of(i, null));
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertTrue(menu.closed, "清理完毕后自动关上压印器界面");
+        assertTrue(menu.container.get(0).isEmpty(), "冲突的顶格异种模板已取回背包");
+        assertEquals(1, menu.container.get(1).getCount(), "底格兼容的铁模板原封保留供本趟复用");
+        assertTrue(menu.container.get(2).isEmpty(), "中间格残留半成品已取回背包");
+        assertTrue(menu.container.get(3).isEmpty(), "输出格异种阻塞产物已取回背包");
+        assertEquals(4, menu.container.get(4).getCount(), "第 4 格升级卡槽纹丝不动");
+    }
+
+    @Test
+    void 单取通路从附近压印器槽位取出指定物品回背包_且压印器不标为通用储物容器() {
+        FacilityKinds kinds = new FacilityKinds(FakeBlockTags.vanilla());
+        assertFalse(kinds.isContainer("ae2:inscriber"), "压印器绝不能标成通用容器，防止存东西把杂物塞进去");
+
+        FakeInscriberMenu menu = new FakeInscriberMenu();
+        menu.container.set(0, new ItemStack(Items.IRON_INGOT, 1));
+        menu.container.set(4, new ItemStack(Items.DIAMOND, 4));
+        Ae2Inscribers stub = new Ae2Inscribers() {
+            @Override public Optional<List<MachineState.Shown>> output(ClientLevel level, BlockPos at) {
+                return Optional.of(List.of());
+            }
+            @Override public Optional<Slots> slots(ClientLevel level, BlockPos at) {
+                return at.equals(AT)
+                        ? Optional.of(new Slots(new MachineState.Shown("minecraft:iron_ingot", 1), null, null, null))
+                        : Optional.empty();
+            }
+            @Override public List<BlockPos> near(ClientLevel level, BlockPos center, int radius) {
+                return List.of(AT);
+            }
+        };
+        Ae2Compat compat = new Ae2Compat(NO_TERMINALS, NO_MENU, new NoGrid(), Ae2Patterns.NONE,
+                Ae2Transforms.NONE, stub);
+        Ae2InscriberSource source = new Ae2InscriberSource(compat, offlineServices(),
+                (pos, perms) -> immediateOpening(menu));
+        assertEquals(AcquireVia.CONTAINER, source.via());
+
+        ItemRequest wantPlate = new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 1, "取回压印模板");
+        SourceContext ctx = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(wantPlate, ctx));
+        assertEquals(1, offer.obtainableCount());
+
+        Action take = source.begin(wantPlate, offer, ctx).orElseThrow();
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Done); i++) {
+            status = take.tick(TickContext.of(i, null));
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertTrue(menu.container.get(0).isEmpty(), "指定占槽物品已从压印器取出进角色背包");
+        assertTrue(menu.player.stream().anyMatch(stack -> stack.is(Items.IRON_INGOT) && stack.getCount() == 1));
+        assertEquals(4, menu.container.get(4).getCount(), "升级卡槽不受影响");
+    }
+
+    private static MenuOpening immediateOpening(FakeInscriberMenu menu) {
+        return new MenuOpening() {
+            private boolean opened;
+            @Override public ActionStatus tick(TickContext context) {
+                opened = true;
+                return ActionStatus.done();
+            }
+            @Override public Optional<OpenedMenu> opened() {
+                return opened ? Optional.of(menu) : Optional.empty();
+            }
+            @Override public String describe() { return "打开测试压印器界面"; }
+        };
+    }
+
     /** 模拟压印器 8 格容器侧（0 顶、1 底、2 中间、3 输出、4..7 升级）与 36 格角色背包的快速移动界面。 */
     private static final class FakeInscriberMenu implements OpenedMenu {
         final List<ItemStack> container = new ArrayList<>();
@@ -344,27 +498,41 @@ class Ae2MachineFeedTest {
         private static final MenuSlots SLOTS = new MenuSlots() {
             @Override public String menuTypeId() { return "ae2:inscriber"; }
             @Override public int slotCount() { return 44; }
-            @Override public boolean playerBacked(int slot) { return slot >= 8; }
-            @Override public int playerInventoryIndex(int slot) { return slot - 8; }
+            @Override public boolean playerBacked(int slot) { return slot >= 4 && slot < 40; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 4; }
         };
 
         @Override public Optional<MenuContent.Reading> reading() {
             if (closed) return Optional.empty();
-            List<Integer> cIds = new ArrayList<>();
-            List<SlotSnapshot> cSnaps = new ArrayList<>();
-            for (int i = 0; i < container.size(); i++) {
-                cIds.add(i);
-                cSnaps.add(container.get(i).isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(container.get(i)));
-            }
             List<Integer> pIds = new ArrayList<>();
             List<Integer> pIdx = new ArrayList<>();
             List<SlotSnapshot> pSnaps = new ArrayList<>();
             for (int i = 0; i < player.size(); i++) {
-                pIds.add(8 + i);
+                pIds.add(4 + i);
                 pIdx.add(i);
                 pSnaps.add(player.get(i).isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(player.get(i)));
             }
+            // 经真实 Ae2InscriberLayout 将实机 [0..3 升级, 40..43 工作] 重排为 [40..43 工作, 0..3 升级]。
+            var layout = assertInstanceOf(MenuLayout.Supported.class,
+                    new Ae2InscriberLayout().classify(SLOTS, pIds, List.of(0, 1, 2, 3, 40, 41, 42, 43)));
+            List<Integer> cIds = layout.containerSlots();
+            List<SlotSnapshot> cSnaps = new ArrayList<>(cIds.size());
+            for (int rawSlotId : cIds) {
+                ItemStack stack = stackAtRawSlot(rawSlotId);
+                cSnaps.add(stack.isEmpty() ? SlotSnapshot.empty() : SlotSnapshot.of(stack));
+            }
             return Optional.of(new MenuContent.Reading(channel, SLOTS, cIds, pIds, pIdx, cSnaps, pSnaps));
+        }
+
+        private int logicalContainerIndex(int rawSlotId) {
+            if (rawSlotId >= 40 && rawSlotId < 44) return rawSlotId - 40;
+            if (rawSlotId >= 0 && rawSlotId < 4) return rawSlotId + 4;
+            return -1;
+        }
+
+        private ItemStack stackAtRawSlot(int rawSlotId) {
+            int idx = logicalContainerIndex(rawSlotId);
+            return idx < 0 ? ItemStack.EMPTY : container.get(idx);
         }
 
         @Override public boolean busy() { return false; }
@@ -372,13 +540,14 @@ class Ae2MachineFeedTest {
         @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
 
         @Override public boolean quickMove(int slotId) {
-            if (slotId >= 8) return true;
-            ItemStack moving = container.get(slotId);
+            int idx = logicalContainerIndex(slotId);
+            if (idx < 0) return true;
+            ItemStack moving = container.get(idx);
             if (moving.isEmpty()) return true;
             for (int i = 0; i < player.size(); i++) {
                 if (player.get(i).isEmpty()) {
                     player.set(i, moving.copy());
-                    container.set(slotId, ItemStack.EMPTY);
+                    container.set(idx, ItemStack.EMPTY);
                     return true;
                 }
             }

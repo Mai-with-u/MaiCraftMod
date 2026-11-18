@@ -190,6 +190,11 @@ public final class CompatMachineType implements MachineType {
         return ask(() -> type.feedCount(at, recipe, ingredient, batches, fromCatalysts), ingredient.amount() * batches);
     }
 
+    @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
+            Permissions permissions) {
+        return act(() -> type.clearConflicts(at, recipe, batches, permissions));
+    }
+
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
     private <T> T ask(Supplier<T> read, T whenUnavailable) {
         if (!module.active()) return whenUnavailable;

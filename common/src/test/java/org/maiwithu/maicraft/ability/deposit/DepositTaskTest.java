@@ -238,6 +238,27 @@ class DepositTaskTest {
     }
 
     @Test
+    void 点名压印器等非容器方块紧挨着终端_禁止跨格劫持进网络并明确报错() {
+        // 目标坐标显式指向 (7, 64, 7) 的压印器，隔壁 (8, 64, 7) 线缆上装着 ME 终端：
+        // into="container" 时严禁跨格静默把物品塞进隔壁 ME 网络，直接报错指出目标不是存储容器并提示 into="network"。
+        Rig rig = new Rig();
+        rig.carry(DIRT, 32);
+        rig.blocks.put(WorldPosition.here(7, 64, 7), "ae2:inscriber");
+        FakeNetwork network = new FakeNetwork(rig);
+        network.terminals.add(new BlockPos(8, 64, 7));
+        rig.network = network;
+
+        TaskResult result = rig.run(rig.input(new Target.Position(7, 64, 7, null), List.of(DIRT), null));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(network.used.isEmpty(), "严禁跨格转投隔壁 ME 终端");
+        assertEquals(32, rig.carried(DIRT), "背包里的东西原封不动");
+        assertTrue(result.problem().message().contains("ae2:inscriber"), result.problem().message());
+        assertTrue(result.problem().message().contains("不是存储容器"), result.problem().message());
+        assertTrue(result.problem().message().contains("into=\"network\""), result.problem().message());
+    }
+
+    @Test
     void 存进网络_身上没带附近也没有终端_如实说() {
         Rig rig = new Rig();
         rig.carry(DIRT, 32);
@@ -513,6 +534,7 @@ class DepositTaskTest {
         /** 角色背包的 36 格，槽位号 0–35。 */
         final List<ItemStack> player = new ArrayList<>();
         final Map<WorldPosition, FakeChest> chests = new HashMap<>();
+        final Map<WorldPosition, String> blocks = new HashMap<>();
         int opens;
         /** 点名得到的生物身上的储物：观察编号 → 储物替身；实体编号按登记先后从 100 起。 */
         final Map<String, FakeChest> creatures = new LinkedHashMap<>();
@@ -577,6 +599,9 @@ class DepositTaskTest {
             DepositSeams.FindsPlaces places = new DepositSeams.FindsPlaces() {
                 @Override public Optional<WorldPosition> seen(String seenId) { return Optional.empty(); }
                 @Override public Optional<WorldPosition> landmark(String name) { return Optional.empty(); }
+                @Override public Optional<String> blockIdAt(WorldPosition at) {
+                    return Optional.ofNullable(blocks.get(at));
+                }
                 @Override public BlockPos feet() { return BlockPos.ZERO; }
             };
             DepositServices services = new DepositServices(spots, new StoresInContainer.Parts((at, permissions) -> {

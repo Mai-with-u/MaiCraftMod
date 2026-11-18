@@ -89,6 +89,28 @@ class MachineRunTaskTest {
     }
 
     @Test
+    void 投料前机内有冲突占槽物_先自动开窗取回腾空再备料投料() {
+        Rig rig = new Rig();
+        rig.machineRunsAtFullSpeed();
+        // 模拟压印器槽内原本占着上一轮遗留物：未清理前 whyCannotFeed 拦住，clearConflicts 跑完后槽位腾空放行。
+        boolean[] occupied = {true};
+        rig.type.cannotFeedWhy = item -> occupied[0] ? Optional.of("槽内占着旧模板") : Optional.empty();
+        rig.type.clearConflictsAction = new MachineTestDoubles.Scripted(1, () -> {
+            occupied[0] = false;
+            rig.world.carried.put(INGOT, 1);
+        });
+
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("clear-conflicts"), rig.type.touched, "选定配方后先执行冲突槽清理动作");
+        assertEquals(1, rig.needs.requests.get(0).count(), "从机器取回身上的 1 件原料直接计入已有，只补差额 1 件");
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("取出了占槽的不兼容物品")),
+                details.notes().toString());
+    }
+
+    @Test
     void 机器停着_走近右键拨一次再等() {
         Rig rig = new Rig();
         rig.type.state = () -> new MachineState(MachineState.Activity.OFFLINE, null, null, List.of(),

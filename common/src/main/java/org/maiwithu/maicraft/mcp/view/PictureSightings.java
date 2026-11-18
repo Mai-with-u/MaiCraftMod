@@ -50,11 +50,13 @@ public final class PictureSightings {
             // 不看场景里按眼睛算的 visible：第三人称时镜头在身后，看不看得见以镜头为准，下面按镜头重新算视线；不可交互技术实体同样不标上画面。
             Optional<Entity> live = scene.seen().entityIn(level, entity.id()).filter(ClientEntitySight::observable);
             if (live.isEmpty()) continue;
-            // 先试身子中间，挡住了再试头顶：有一点看得见就标在那一点。
+            // 先试身子中间，挡住了再试头顶；贴地掉落物若前两点被低台阶唇沿挡住，按悬浮可见区补判一次锚点。
             Vec3 center = live.get().getBoundingBox().getCenter();
             Vec3 head = live.get().getEyePosition();
+            Vec3 hover = new Vec3(center.x, live.get().getBoundingBox().minY + 0.6, center.z);
             Vec3 anchor = ObservationVisibility.pointFrom(self, origin, center) ? center
-                    : ObservationVisibility.pointFrom(self, origin, head) ? head : null;
+                    : ObservationVisibility.pointFrom(self, origin, head) ? head
+                    : ObservationVisibility.entityFrom(self, origin, live.get()) ? hover : null;
             if (anchor == null) continue;
             boolean player = "minecraft:player".equals(entity.type());
             PictureLabels.Rank rank = player ? PictureLabels.Rank.PLAYER

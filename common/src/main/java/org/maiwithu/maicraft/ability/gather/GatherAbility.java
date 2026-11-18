@@ -94,11 +94,12 @@ public final class GatherAbility implements AbilityModule {
          * @param itemFrame      是展示框时它的游戏实体编号，不是为 -1
          * @param registeredDrop 登记时它是一只掉落物：这会儿活体与场景都核对不到时，采集靠它把
          *                       "多半已被捡走"与"根本不是掉落物"分开说
-         * @param droppedItem    登记时这只掉落物装的物品注册 ID；非掉落物或说不出为 null。
-         *                       目标物品已被原版自动拾取吸进背包时，靠它去背包里确认
+         * @param droppedItem    登记或现场这只掉落物装的物品注册 ID；非掉落物或说不出为 null。
+         *                       目标物品已被原版自动拾取吸进背包、或进任务后核验没有误捡杂物时，都靠它确认
+         * @param dropEntityId   是现场地上掉落物时它的游戏实体编号，采集任务靠它精确追捡这一件；不是或未知为 -1
          */
         record SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame,
-                boolean registeredDrop, String droppedItem) {
+                boolean registeredDrop, String droppedItem, int dropEntityId) {
 
             SeenTarget(WorldPosition at, boolean block) {
                 this(at, block, !block, -1);
@@ -109,7 +110,12 @@ public final class GatherAbility implements AbilityModule {
             }
 
             SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame) {
-                this(at, block, drop, itemFrame, false, null);
+                this(at, block, drop, itemFrame, false, null, -1);
+            }
+
+            SeenTarget(WorldPosition at, boolean block, boolean drop, int itemFrame,
+                    boolean registeredDrop, String droppedItem) {
+                this(at, block, drop, itemFrame, registeredDrop, droppedItem, -1);
             }
         }
     }
@@ -157,9 +163,14 @@ public final class GatherAbility implements AbilityModule {
                 }
                 return invalid("观察编号 " + seenId.id() + " 不是可挖的方块，也不是地上的掉落物或展示框，不能用 gather 采集");
             }
+            // 点名地上掉落物时保留目标游戏实体编号，并在未显式传 item 参数时带上掉落物自身的物品 ID，
+            // 让采集任务精确追捡该实体并核对目标物品入包，防止顺脚吸起无关杂物就误报完成。
+            String resolvedExpected = expectedItem != null ? expectedItem
+                    : (found.drop() ? found.droppedItem() : null);
+            int dropEntityId = found.drop() ? found.dropEntityId() : -1;
             return new StepDecision.Run(new GatherSpot(found.at(), found.drop(),
-                    null, expectedItem, goal.permissions(), true, describe(seenId.id(), found),
-                    found.itemFrame(), goal.digTool()));
+                    null, resolvedExpected, goal.permissions(), true, describe(seenId.id(), found),
+                    found.itemFrame(), goal.digTool(), dropEntityId));
         }
         if (target instanceof Target.Position position) {
             Optional<GatherSpot> resolved = resolvePosition(position, params, expectedItem, goal.permissions(),

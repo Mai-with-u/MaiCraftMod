@@ -218,6 +218,7 @@ final class MachineTestDoubles {
         Predicate<ShownIngredient> feedsFirst = ingredient -> false;
         /** 自定义每格原料的投料件数计算；为 null 时走默认乘批数。 */
         ToLongBiFunction<ShownIngredient, Integer> customFeedCount;
+        Action clearConflictsAction;
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -346,6 +347,15 @@ final class MachineTestDoubles {
 
         @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
             return cannotFeedWhy.apply(itemId);
+        }
+
+        @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
+                Permissions permissions) {
+            if (clearConflictsAction == null) return Optional.empty();
+            touched.add("clear-conflicts");
+            Action action = clearConflictsAction;
+            clearConflictsAction = null;
+            return Optional.of(action);
         }
 
         @Override public boolean outputVisible(BlockPos at) {

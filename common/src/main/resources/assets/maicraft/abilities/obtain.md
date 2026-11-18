@@ -15,7 +15,7 @@
 角色会像真人一样盘算：
 
 1. 先看身上（主背包与副手）够不够，够了直接完成，一个动作都不用做；
-2. 不够就问遍各个来源——记得的箱子和眼前看到的箱子、游戏里真实的配方（合成、烧炼、石切台）、
+2. 不够就问遍各个来源——附近地面上看得见的掉落物（`via=pickup`，直接走过去捡）、记得的箱子和眼前看到的箱子、游戏里真实的配方（合成、烧炼、石切台）、
    96 格内成熟的庄稼（村庄的田也算）、看得见的能挖出它的方块（埋在石头里看不见的不算，不透视；石头和知道生成高度的矿例外，见下）、
    附近能做买卖的村民、打掉会掉出它的动物或生物——挑总代价最低的路动手（现做时身上每缺一件原料，
    代价多算 32 格路：缺料多的做法排在现成的来路后面，野外自己那张床先拆回来，不先去打三只羊做一张）；
@@ -123,7 +123,7 @@
 - `status`：`done` 拿够了；`partial` 拿到了一部分（`remaining` 写还差几件），装好炉先走了也是 `partial`；`failed` 一件都没拿到。
 - `changes`：这次实际拿到的数量（`item_gained`）。做合成、烧炼过程中消耗和挖掉的东西也照实记。
 - 要的是标签（一类东西）时，`summary` 括号里写拿到的是哪几样、各几个；吃的各补多少、带什么效果，看 `observe` 看自己时 `inventory` 里那一项的 `food`。
-- `details.obtained_via`：东西实际从哪些途径拿到的（craft / smelt / smith / brew / fill / container / mine / harvest / trade / hunt / reclaim / carried，装了 AE2 还有 ae2、ae2_transform，装了机械动力还有 sandpaper、item_application、toolbox、stock_ticker），
+- `details.obtained_via`：东西实际从哪些途径拿到的（pickup / craft / smelt / smith / brew / fill / container / mine / harvest / trade / hunt / reclaim / carried，装了 AE2 还有 ae2、ae2_transform，装了机械动力还有 sandpaper、item_application、toolbox、stock_ticker），
   按拿到先后排。`count` 是这次再多拿几件，身上原有的不算这次拿到的。
 - `details.left_cooking`：装好炉先走了时每台炉子一项——`x`/`y`/`z`/`dimension` 炉子在哪，`block` 什么炉，`item` 烧出来的东西，
   `ingredient` 原料，`loaded` 投入口里还在烧几件，`ready_in_seconds` 约几秒烧好，`ingredients_in_backpack` 背包里还有几件这种原料没装，
@@ -145,7 +145,7 @@
 | `potion` | | 要哪种药水：药水种类 ID（`minecraft:fire_resistance`、延长的 `minecraft:long_fire_resistance`、加强的 `minecraft:strong_healing`、水瓶 `minecraft:water`）。配 `item` 写 `minecraft:potion` / `minecraft:splash_potion` / `minecraft:lingering_potion`，不给 `item` 当普通药水瓶；`items` 每项也能带 `potion`。点名了种类时身上只数这一种（水瓶不算抗火药水），箱子按记下的种类找、开箱按种类挑；记得箱子里有药水却没记下是哪种的，走过去打开看了再拿。ME 网络、村民和别的联动来源这次认不出种类，点名了种类不从那里拿。结果 `changes` 里药水写成 `minecraft:potion[potion=minecraft:fire_resistance]` |
 | `count` | | 再多拿几件，默认 1；不设上限，做不完如实 partial。填了 `items` 时不填 |
 | `items` | | 一次要几样：每项 `{"item": 物品 ID 或 # 标签, "count": 这次再多拿几件}`（药水另加 `"potion"`），最多 16 项；同一样写两次合并成一项、件数相加。与 `item`、`count`、`drops_from` 互斥（掉落线索只认一样东西） |
-| `via` | | `craft` / `smelt` / `smith` / `brew` / `container` / `mine` / `harvest` / `trade`，联动模组接入的途径装了才有，以参数表列的为准；不给按代价自己挑 |
+| `via` | | `pickup` / `container` / `craft` / `smelt` / `smith` / `brew` / `mine` / `harvest` / `trade` / `hunt` / `fill` / `reclaim`，联动模组接入的途径装了才有，以参数表列的为准；不给按代价自己挑 |
 | `radius` | | 容器与采掘的搜索范围（格），给了就冻结在范围内，上限 64 |
 | `max_distance` | | 愿意为此走多远（格）；太远的来源不参与 |
 | `prefer` | | 倾向用的材料（物品 ID 或 `#` 标签的列表）：几种做法都行时用到它们的排前面（例如做木板时 `["minecraft:spruce_log"]`），备料时沿配方链往下传；只影响先后，不禁用别的做法 |

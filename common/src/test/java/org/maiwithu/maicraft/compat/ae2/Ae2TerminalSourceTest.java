@@ -23,6 +23,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -136,9 +137,63 @@ class Ae2TerminalSourceTest {
                 registry.menuLayouts().classify(terminalSlots("ae2:pattern_access_terminal", 0)));
 
         List<ItemSource> sources = registry.itemSources(offlineServices());
-        assertEquals(1, sources.size());
+        assertEquals(2, sources.size());
         assertEquals("ae2", sources.getFirst().via().name());
         assertEquals("ME 终端", sources.getFirst().describe());
+        assertEquals("container", sources.get(1).via().name());
+        assertEquals("附近的压印器", sources.get(1).describe());
+    }
+
+    @Test
+    void 附近压印器工作格占着半成品或模板时_单取来源可按容器途径报价() {
+        BlockPos inscriberPos = new BlockPos(2, 64, 1);
+        Ae2Inscribers inscribers = new Ae2Inscribers() {
+            @Override public Optional<List<MachineState.Shown>> output(ClientLevel level, BlockPos at) {
+                return Optional.empty();
+            }
+            @Override public List<BlockPos> near(ClientLevel level, BlockPos center, int radius) {
+                return List.of(inscriberPos);
+            }
+            @Override public Optional<Slots> slots(ClientLevel level, BlockPos at) {
+                if (!inscriberPos.equals(at)) return Optional.empty();
+                return Optional.of(new Slots(
+                        new MachineState.Shown("ae2:silicon_press", 1),
+                        null,
+                        new MachineState.Shown("ae2:printed_silicon", 3),
+                        new MachineState.Shown("ae2:logic_processor", 1)));
+            }
+        };
+        Ae2Compat compatWithInscriber = new Ae2Compat(new Ae2Terminals() {
+            @Override public List<Ae2Terminals.Terminal> near(ClientLevel level, BlockPos center, int radius) {
+                return List.of();
+            }
+            @Override public boolean stillThere(ClientLevel level, BlockPos block, Direction side) { return false; }
+        }, new Ae2TerminalMenu() {
+            @Override public boolean belongsTo(AbstractContainerMenu menu, ClientLevel level, BlockPos block,
+                    Direction side) { return false; }
+            @Override public Optional<Boolean> linked(AbstractContainerMenu menu) { return Optional.empty(); }
+            @Override public Optional<List<StockEntry>> stock(AbstractContainerMenu menu) { return Optional.empty(); }
+            @Override public void takeStack(AbstractContainerMenu menu, long serial) {}
+            @Override public void takeOne(AbstractContainerMenu menu, long serial) {}
+            @Override public void putBack(AbstractContainerMenu menu) {}
+        }, new NoGrid(), Ae2Patterns.NONE, Ae2Transforms.NONE, inscribers);
+        Ae2InscriberSource source = new Ae2InscriberSource(compatWithInscriber, offlineServices(),
+                (at, permissions) -> null);
+        SourceContext context = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT);
+
+        // 中间输入格占着 3 个硅压印板，obtain 要 2 个时按压印器工作格直接给出 2 个的提取报价。
+        SourceQuote.Offer printedOffer = assertInstanceOf(SourceQuote.Offer.class,
+                source.quote(new ItemRequest(WantedItem.ofItem("ae2:printed_silicon"), 2, "取回半成品"), context));
+        assertEquals(2, printedOffer.obtainableCount());
+
+        // 顶槽占着的硅压印模板也能按需单取回背包。
+        SourceQuote.Offer pressOffer = assertInstanceOf(SourceQuote.Offer.class,
+                source.quote(new ItemRequest(WantedItem.ofItem("ae2:silicon_press"), 1, "取回模板"), context));
+        assertEquals(1, pressOffer.obtainableCount());
+
+        // 压印器里没有的物品如实回答不可用。
+        assertInstanceOf(SourceQuote.Unavailable.class,
+                source.quote(new ItemRequest(WantedItem.ofItem("minecraft:diamond"), 1, "找钻石"), context));
     }
 
     @Test

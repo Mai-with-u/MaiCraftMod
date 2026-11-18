@@ -19,19 +19,25 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param describeText 给日志与面板的一句话，例如"采集 b7 的方块"
  * @param itemFrame    点名的是展示框时它的游戏实体编号：打一下把里面的东西打出来再捡；不是展示框为 -1
  * @param digTool      目标里点名的挖方块工具：挖的时候只用那一件，身上没有就直接失败；null 按每格代价自动挑
+ * @param dropEntityId 点名的是地上掉落物时它的游戏实体编号：只追捡这一件并确认入包；未绑定实体编号为 -1
  */
 record GatherSpot(WorldPosition at, boolean drop, String declaredType,
         String expectedItem, Permissions permissions, boolean named, String describeText, int itemFrame,
-        DigTool digTool) implements TaskInput {
+        DigTool digTool, int dropEntityId) implements TaskInput {
 
     GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
             boolean named, String describeText) {
-        this(at, drop, declaredType, expectedItem, permissions, named, describeText, -1, null);
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, -1, null, -1);
     }
 
     GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
             boolean named, String describeText, int itemFrame) {
-        this(at, drop, declaredType, expectedItem, permissions, named, describeText, itemFrame, null);
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, itemFrame, null, -1);
+    }
+
+    GatherSpot(WorldPosition at, boolean drop, String declaredType, String expectedItem, Permissions permissions,
+            boolean named, String describeText, int itemFrame, DigTool digTool) {
+        this(at, drop, declaredType, expectedItem, permissions, named, describeText, itemFrame, digTool, -1);
     }
 
     GatherSpot {

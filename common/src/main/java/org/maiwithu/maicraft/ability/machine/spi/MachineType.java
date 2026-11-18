@@ -257,4 +257,12 @@ public interface MachineType {
             boolean fromCatalysts) {
         return ingredient.amount() * batches;
     }
+
+    /**
+     * 选好配方后、备料与投料前，若机器工作格或输出格里占着与本次目标配方不兼容的遗留模板、半成品或异种产物，
+     * 返回打开机器界面把冲突物品取回角色背包的自愈动作；机内没有冲突物或无需清理时给空。
+     */
+    default Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
+        return Optional.empty();
+    }
 }

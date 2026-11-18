@@ -76,46 +76,58 @@ public final class TransferPlan {
      *
      * <p>数量等于源格件数（整格拿走）也走这份计划：源格只有一件、要搬的也是这一件时，
      * 拿半堆恰好拿空源格、整份放进目标格，与「整堆够用整堆拿」是同一件事，不再拦下。
+     * 源格装了精妙背包堆叠升级这类超叠槽位时（例如单格 128 个圆石、光标上限 64，或单格叠着多把石镐、光标上限 1），
+     * 源格当前件数允许大于光标单次可抓上限，计划按光标单次上限分轮抓取，多拿的尾数照常退回原本就装得下的源格。
      *
-     * @param sourceCount    动手前源格里的件数
-     * @param amount         要搬的件数，不超过源格里的件数（更多时搬不了，超出源格装着的东西）
-     * @param sourceCapacity 源格的容量（这种物品一格最多堆多少），退回多拿的件数时不得超过
+     * @param sourceCount 动手前源格里的件数
+     * @param amount      要搬的件数，不超过源格里的件数（更多时搬不了，超出源格装着的东西）
+     * @param cursorMax   鼠标光标单次可抓上限（物品自身的 {@code getMaxStackSize()}，圆石为 64、工具为 1）
      */
-    public static TransferPlan exactAmount(int sourceCount, int amount, int sourceCapacity) {
+    public static TransferPlan exactAmount(int sourceCount, int amount, int cursorMax) {
         if (sourceCount < 1 || amount < 1 || amount > sourceCount) {
             throw new IllegalArgumentException(
                     "尾数搬运要求 1 ≤ 数量 ≤ 源格件数：源格 " + sourceCount + " 件，要搬 " + amount + " 件");
         }
-        if (sourceCapacity < sourceCount) {
-            throw new IllegalArgumentException("源格容量 " + sourceCapacity + " 装不下现有 " + sourceCount + " 件");
+        if (cursorMax < 1) {
+            throw new IllegalArgumentException("鼠标光标单次可抓上限至少为 1：" + cursorMax);
         }
         List<Step> steps = new ArrayList<>();
         int source = sourceCount;
         int cursor = 0;
         int deposited = 0;
-        // 反复拿半堆、放整份，直到目标格收满；每次拿半堆都让源格严格变少，循环必然结束。
+        // 反复从源格抓到光标、放进目标格，直到目标收到足额件数：
+        // 源格是超叠槽位且剩余待搬件数不少于一整轮光标上限时，先左键按光标上限抓满一轮整份放下；
+        // 其余情形按原版右键抓半堆（受光标单次上限封顶），每次抓取都让源格严格变少，循环必然结束。
         while (deposited < amount) {
-            int taken = (source + 1) / 2;
+            int remaining = amount - deposited;
+            int fullCursor = Math.min(cursorMax, source);
+            final Kind takeKind;
+            final int taken;
+            if (source > cursorMax && fullCursor <= remaining) {
+                takeKind = Kind.TAKE_ALL;
+                taken = fullCursor;
+            } else {
+                takeKind = Kind.TAKE_HALF;
+                // 精妙背包超叠槽空手点右键时先按物品最大堆叠截断到光标上限，再折半向上取整（如 128 圆石点右键实抓 32 个）。
+                taken = (fullCursor + 1) / 2;
+            }
             cursor = taken;
             source -= taken;
-            steps.add(new Step(Where.SOURCE, Kind.TAKE_HALF, taken, "拿走半堆"));
-            int remaining = amount - deposited;
+            steps.add(new Step(Where.SOURCE, takeKind, taken,
+                    takeKind == Kind.TAKE_ALL ? "按光标上限抓满一轮" : "拿走半堆"));
             if (cursor <= remaining) {
                 // 手里这堆用得上：整份放进目标格。
                 deposited += cursor;
                 steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, cursor, "整份放进目标格"));
                 cursor = 0;
             } else {
-                // 拿多了：先一个一个放，放够要的量，再把手里剩的一个一个退回源格。
+                // 拿多了：先一个一个放，放够要的量，再把手里剩的一个一个退回原本就装得下的源格。
                 while (deposited < amount) {
                     cursor -= 1;
                     deposited += 1;
                     steps.add(new Step(Where.TARGET, Kind.GIVE_ONE, 1, "放一个"));
                 }
                 while (cursor > 0) {
-                    if (source + 1 > sourceCapacity) {
-                        throw new IllegalArgumentException("多拿的件数退不回源格，容量不够");
-                    }
                     cursor -= 1;
                     source += 1;
                     steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ONE, 1, "退回源格一个"));

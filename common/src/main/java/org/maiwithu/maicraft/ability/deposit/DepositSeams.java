@@ -70,6 +70,11 @@ final class DepositSeams {
             return List.of();
         }
 
+        /** 指定坐标此刻已加载的非空气方块注册 ID；未加载、跨维度或空气时给空，用来在误把机器当容器时点名说清。 */
+        default Optional<String> blockIdAt(WorldPosition at) {
+            return Optional.empty();
+        }
+
         /** 角色脚下那一格；不在世界里为 null。 */
         BlockPos feet();
     }

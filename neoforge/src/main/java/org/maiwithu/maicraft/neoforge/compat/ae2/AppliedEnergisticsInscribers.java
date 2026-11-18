@@ -35,14 +35,24 @@ public final class AppliedEnergisticsInscribers implements Ae2Inscribers {
     }
 
     @Override public Optional<Inputs> inputs(ClientLevel level, BlockPos at) {
+        return slots(level, at).map(Slots::toInputs);
+    }
+
+    @Override public Optional<Slots> slots(ClientLevel level, BlockPos at) {
         if (level != null && level.getBlockEntity(at) instanceof InscriberBlockEntity inscriber) {
+            // 压印器内部库存的四格工作槽随网络流完整同步到客户端，直接按格号读取当前物品与件数。
             var inv = inscriber.getInternalInventory();
-            return Optional.of(new Inputs(
-                    idOf(inv.getStackInSlot(TOP_SLOT)),
-                    idOf(inv.getStackInSlot(BOTTOM_SLOT)),
-                    idOf(inv.getStackInSlot(INPUT_SLOT))));
+            return Optional.of(new Slots(
+                    shownOf(inv.getStackInSlot(TOP_SLOT)),
+                    shownOf(inv.getStackInSlot(BOTTOM_SLOT)),
+                    shownOf(inv.getStackInSlot(INPUT_SLOT)),
+                    shownOf(inv.getStackInSlot(OUTPUT_SLOT))));
         }
         return Optional.empty();
+    }
+
+    private static MachineState.Shown shownOf(ItemStack stack) {
+        return stack == null || stack.isEmpty() ? null : new MachineState.Shown(idOf(stack), stack.getCount());
     }
 
     private static String idOf(ItemStack stack) {

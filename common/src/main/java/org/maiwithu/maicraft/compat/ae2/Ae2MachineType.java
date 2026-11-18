@@ -11,6 +11,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import java.util.function.BiFunction;
+
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -32,6 +34,7 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
+import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
@@ -61,17 +64,26 @@ final class Ae2MachineType implements MachineType {
     private final Map<BlockPos, Set<String>> placedPlates = new HashMap<>();
     /** 选配方算投料量时确认本趟要新放进压印器的不消耗模板规格。 */
     private final Map<BlockPos, Set<String>> plannedPlates = new HashMap<>();
-    /** 对照当前选中配方与客户端同步到的压印器前三个工作格发现的槽位冲突说明。 */
+    /** 对照当前选中配方与客户端同步到的压印器四个工作格发现的槽位冲突说明。 */
     private final Map<BlockPos, String> slotConflicts = new HashMap<>();
+    private final BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings;
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks) {
+        this(kind, compat, inscribers, services, blocks,
+                (at, permissions) -> new ClientMenuOpening(at, permissions, services.menuLayouts(),
+                        services.approach(), services.interactions(), services.context()));
+    }
+
+    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+            Set<Block> blocks, BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.compat = Objects.requireNonNull(compat, "compat");
         this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
         this.services = Objects.requireNonNull(services, "services");
         this.blocks = Set.copyOf(blocks);
         this.cables = new MeCables(compat, services);
+        this.menuOpenings = Objects.requireNonNull(menuOpenings, "menuOpenings");
     }
 
     @Override public String id() { return kind.id(); }
@@ -105,6 +117,13 @@ final class Ae2MachineType implements MachineType {
 
     @Override public MachineState state(BlockPos at) {
         ClientLevel level = level();
+        if (isInscriber()) {
+            Optional<Ae2Inscribers.Slots> inscriberSlots = compat.inscriberSlots(level, at);
+            if (inscriberSlots.isPresent()) {
+                Optional<Ae2Grid.GridCell> gridCell = level == null ? Optional.empty() : compat.gridCell(level, at);
+                return Ae2Readings.inscriberState(inscriberSlots.get(), gridCell);
+            }
+        }
         if (level == null) return MachineState.unknown("角色现在不在世界里，读不到设备");
         Optional<Ae2Grid.GridCell> cell = compat.gridCell(level, at);
         if (cell.isEmpty()) return MachineState.unknown("这一格读不到 ME 设备（没加载，或已经不是 AE2 的设备）");
@@ -221,8 +240,9 @@ final class Ae2MachineType implements MachineType {
             boolean fromCatalysts) {
         if (!isInscriber()) return ingredient.amount() * batches;
         BlockPos pos = at.immutable();
-        Optional<Ae2Inscribers.Inputs> slots = compat.inscriberInputs(level(), pos);
-        slots.flatMap(current -> Ae2InscriberPlates.conflict(recipe, current))
+        Optional<Ae2Inscribers.Slots> fourSlots = compat.inscriberSlots(level(), pos);
+        Optional<Ae2Inscribers.Inputs> slots = fourSlots.map(Ae2Inscribers.Slots::toInputs);
+        fourSlots.flatMap(current -> Ae2InscriberPlates.conflict(recipe, batches, current))
                 .ifPresentOrElse(why -> slotConflicts.put(pos, why), () -> slotConflicts.remove(pos));
         long count = Ae2InscriberPlates.feedCount(recipe, ingredient, batches, fromCatalysts, slots);
         if (count > 0 && Ae2InscriberPlates.isNonConsumedPlate(recipe, ingredient, fromCatalysts)) {
@@ -232,13 +252,26 @@ final class Ae2MachineType implements MachineType {
         return count;
     }
 
+    @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
+            Permissions permissions) {
+        if (!isInscriber()) return Optional.empty();
+        BlockPos pos = at.immutable();
+        Optional<Ae2Inscribers.Slots> current = compat.inscriberSlots(level(), pos);
+        if (current.isEmpty() || Ae2InscriberPlates.conflictingSlotIndices(recipe, batches, current.get()).isEmpty()) {
+            return Optional.empty();
+        }
+        slotConflicts.remove(pos);
+        return Optional.of(new Ae2InscriberClear(recipe, batches, menuOpenings.apply(pos, permissions),
+                placedPlates.get(pos)));
+    }
+
     @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
         if (!isInscriber()) return Optional.empty();
         String conflict = slotConflicts.get(at);
         if (conflict == null) return Optional.empty();
-        // 再核对一次此刻压印器工作格是不是已经被清出腾空了，空了就放行。
-        boolean cleared = compat.inscriberInputs(level(), at)
-                .map(slots -> slots.occupied().isEmpty())
+        // 再核对一次此刻压印器四个工作格是不是已经被清出腾空了，空了就放行。
+        boolean cleared = compat.inscriberSlots(level(), at)
+                .map(slots -> slots.occupiedIds().isEmpty())
                 .orElse(false);
         if (cleared) {
             slotConflicts.remove(at);
@@ -278,14 +311,14 @@ final class Ae2MachineType implements MachineType {
     }
 
     private Problem enrichFeedFailure(BlockPos pos, String itemId, Problem problem) {
-        List<String> occupied = compat.inscriberInputs(level(), pos)
-                .map(Ae2Inscribers.Inputs::occupied)
+        List<String> occupied = compat.inscriberSlots(level(), pos)
+                .map(Ae2Inscribers.Slots::occupiedIds)
                 .orElse(List.of());
         if (occupied.isEmpty()) return problem;
         return Problem.of(problem.kind(),
                 "压印器里还放着 " + String.join("、", occupied) + "，与这次要投的 " + itemId + " 不兼容（"
                         + problem.message() + "）",
-                "先用 use 打开压印器取出里面占着的物品再试");
+                "腾出背包空位后再运行 machine_run（会自动取出冲突占槽物），或用 obtain 按物品名从压印器取出占着的物品");
     }
 
     // 出口：压印器的产物格随方块实体同步，站在外面读得到。
@@ -295,11 +328,10 @@ final class Ae2MachineType implements MachineType {
         return compat.inscriberOutput(level, at).orElse(List.of());
     }
 
-    // 收产物：点开压印器的界面把产物搬进背包；若本会话由我们放进了压印模板，顺手一并收回背包（机内原本就有的模板不动）。
+        // 收产物：点开压印器的界面把产物搬进背包；若本会话由我们放进了压印模板，顺手一并收回背包（机内原本就有的模板不动）。
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
         if (!isInscriber()) return Optional.empty();
-        ClientMenuOpening opening = new ClientMenuOpening(at, permissions, services.menuLayouts(), services.approach(),
-                services.interactions(), services.context());
+        MenuOpening opening = menuOpenings.apply(at, permissions);
         Set<String> own = placedPlates.get(at);
         if (own == null || own.isEmpty()) {
             return Optional.of(new MenuOutputLook(itemId, true, opening, services.context()));
@@ -345,6 +377,29 @@ final class Ae2MachineType implements MachineType {
             boolean known = cell.powered().isPresent() || cell.active().isPresent();
             return new MachineState(known ? MachineState.Activity.RUNNING : MachineState.Activity.UNKNOWN, null, null,
                     List.of(), readings, known ? "" : "这种设备读不出有没有电");
+        }
+
+        // 压印器的四个工作格（顶模板、底模板、中间输入、输出）客户端已同步，完整写入 shown 与四槽读数供看机器直接查看。
+        static MachineState inscriberState(Ae2Inscribers.Slots slots, Optional<Ae2Grid.GridCell> gridCell) {
+            Map<String, Object> readings = new LinkedHashMap<>();
+            readings.put("top_slot", formatSlot(slots.top()));
+            readings.put("bottom_slot", formatSlot(slots.bottom()));
+            readings.put("input_slot", formatSlot(slots.middle()));
+            readings.put("output_slot", formatSlot(slots.output()));
+            List<MachineState.Shown> shown = slots.allShown();
+            if (gridCell.isPresent() && gridCell.get().powered().map(powered -> !powered).orElse(false)) {
+                return new MachineState(MachineState.Activity.OFFLINE, null, null, shown, readings, "没电");
+            }
+            boolean poweredKnown = gridCell.flatMap(Ae2Grid.GridCell::powered).orElse(false);
+            MachineState.Activity activity = poweredKnown
+                    ? (slots.middle() != null ? MachineState.Activity.RUNNING : MachineState.Activity.IDLE)
+                    : MachineState.Activity.UNKNOWN;
+            String note = poweredKnown ? "" : "四个工作格已同步读出；内部存电与当前压印进度客户端不同步";
+            return new MachineState(activity, null, null, shown, readings, note);
+        }
+
+        private static String formatSlot(MachineState.Shown slot) {
+            return slot == null ? "empty" : slot.itemId() + " ×" + slot.count();
         }
 
         // 各面的部件按 AE2 画出来的亮法换成运行状态：有电有频道在干活，有电没频道停着，没电离线；按六个方向的固定顺序列。

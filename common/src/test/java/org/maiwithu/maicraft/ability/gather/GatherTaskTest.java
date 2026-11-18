@@ -425,6 +425,51 @@ class GatherTaskTest {
     }
 
     @Test
+    void 点名捡地上掉落物_顺脚只吸起无关杂物时严禁误判完成() {
+        FakeBackpack backpack = new FakeBackpack();
+        int[] targetedEntity = {-1};
+        // 走近途中脚边顺手吸起了一块无关的深板岩圆石，而目标掉落物实体 88（铁锭）掉在够不着处没捡起来。
+        FakeActions actions = new FakeActions(backpack, null, 0) {
+            @Override public Action toward(BlockPos target, Permissions permissions, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        backpack.add("minecraft:cobbled_deepslate", 1);
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "走近目标掉落物";
+                    }
+                };
+            }
+
+            @Override public Action pickUpOne(int entityId) {
+                targetedEntity[0] = entityId;
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "那一件没捡到"));
+                    }
+
+                    @Override public String describe() {
+                        return "追捡目标掉落物";
+                    }
+                };
+            }
+        };
+        GatherSpot spot = new GatherSpot(AT, true, null, "minecraft:iron_ingot", PERMS, true,
+                "采集 e8 的掉落物", -1, null, 88);
+        GatherTask task = new GatherTask(spot, actions, actions, new NoToolsNeeded(),
+                new FakeWorld(null, false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+
+        assertEquals(88, targetedEntity[0], "按目标实体编号精确追捡");
+        assertEquals(TaskResult.Status.FAILED, result.status(), "只吸起无关杂物绝不能判完成");
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(result.problem().message().contains("minecraft:iron_ingot"), result.problem().message());
+        assertTrue(result.problem().message().contains("minecraft:cobbled_deepslate"), result.problem().message());
+    }
+
+    @Test
     void 起始数量为结算基准_背包原有的不算这次捡的() {
         FakeBackpack backpack = new FakeBackpack();
         backpack.add("minecraft:wheat", 5);

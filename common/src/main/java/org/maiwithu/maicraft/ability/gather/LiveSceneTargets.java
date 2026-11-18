@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.gather;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 
@@ -59,10 +60,14 @@ public final class LiveSceneTargets implements GatherAbility.SeesTargets {
                     return new SeenTarget(entry.position(), false, false, frame);
                 }
                 // 只有真正的掉落物实体才按掉落物走过去拾取；生物、载具、技术实体等非掉落物绝不标为 drop。
-                // 登记时的实体类型与装的物品一并带出：实体被移除后采集凭它们认出"这是个已被捡走的掉落物"。
+                // 同时保留目标掉落物的游戏实体编号与物品种类，供采集精确捡起这一件并核验目标物品到手。
                 boolean registeredDrop = DROPPED_ITEM_TYPE.equals(entry.entityType());
-                return new SeenTarget(entry.position(), false, isDroppedItem(current, id), -1,
-                        registeredDrop, registeredDrop ? entry.itemType() : null);
+                boolean drop = isDroppedItem(current, id);
+                int dropEntityId = drop ? current.seen().gameEntityOf(id).orElse(-1) : -1;
+                String droppedItem = liveDroppedItem(current, id)
+                        .orElse(registeredDrop ? entry.itemType() : null);
+                return new SeenTarget(entry.position(), false, drop, -1,
+                        registeredDrop, droppedItem, dropEntityId);
             }
             // 物理结构既不是单格可挖方块，也不是地上掉落物或展示框。
             return new SeenTarget(entry.position(), false, false, -1);
@@ -82,5 +87,16 @@ public final class LiveSceneTargets implements GatherAbility.SeesTargets {
         return current.sighting(id).stream()
                 .anyMatch(sighting -> sighting instanceof SceneEntity entity
                         && DROPPED_ITEM_TYPE.equals(entity.type()));
+    }
+
+    // 活体掉落物还在世界里时直接读它当前承载的物品 ID，保证与现场实体一致。
+    private Optional<String> liveDroppedItem(Scene current, String id) {
+        PlayerContext playerContext = context.get();
+        if (playerContext == null || playerContext.level() == null) {
+            return Optional.empty();
+        }
+        return current.seen().entityIn(playerContext.level(), id)
+                .filter(entity -> entity instanceof ItemEntity item && !item.getItem().isEmpty())
+                .map(entity -> BuiltInRegistries.ITEM.getKey(((ItemEntity) entity).getItem().getItem()).toString());
     }
 }

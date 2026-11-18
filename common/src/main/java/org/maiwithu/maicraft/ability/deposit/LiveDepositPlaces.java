@@ -6,7 +6,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.perception.Scene;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
@@ -42,6 +45,26 @@ final class LiveDepositPlaces implements DepositSeams.FindsPlaces {
     @Override public List<SceneSign> signs() {
         Scene current = scene.get();
         return current == null ? List.of() : current.signs();
+    }
+
+    @Override public Optional<String> blockIdAt(WorldPosition at) {
+        PlayerContext current = contexts.get();
+        ClientLevel level = current == null ? null : current.level();
+        if (level == null || at == null) {
+            return Optional.empty();
+        }
+        // 只读当前维度已加载格子的实心或设备方块，避免把空气或异维度坐标错报成具体方块。
+        String hereDim = level.dimension().location().toString();
+        if (at.dimension() != null && !at.dimension().equals(hereDim)) {
+            return Optional.empty();
+        }
+        BlockPos cell = new BlockPos(at.x(), at.y(), at.z());
+        if (!level.isLoaded(cell)) {
+            return Optional.empty();
+        }
+        BlockState state = level.getBlockState(cell);
+        return state.isAir() ? Optional.empty()
+                : Optional.of(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString());
     }
 
     @Override public BlockPos feet() {

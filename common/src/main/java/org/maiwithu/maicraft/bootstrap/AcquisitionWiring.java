@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.behavior.acquire.mining.ClientYieldScans;
 import org.maiwithu.maicraft.behavior.acquire.sources.ContainerSource;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsStairsDown;
 import org.maiwithu.maicraft.behavior.acquire.sources.FluidTransformSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.GroundDropSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HarvestSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.HuntSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.InWorldBlockTransform;
@@ -117,9 +118,16 @@ final class AcquisitionWiring {
                 drops, yieldScans, placer, dugPits);
         HarvestSource harvestSource = new HarvestSource(yieldScans, collects, permission,
                 new ClientCropReplanting(toMainhand, deps.hands().interactions(), deps.character().context()));
+        // 清点身上几件时连穿着的护甲一起数：锻造台上升级好穿回身上的那件照样算拿到了。
+        BackpackWithArmor carried = new BackpackWithArmor(deps.character().backpack(), deps.character().equipment());
+        // 附近看得见的地面掉落物排在身上之后、容器之前：脚边就有现成掉落物时直接走过去捡，不先翻箱子或现做。
+        GroundDropSource groundDropSource = new GroundDropSource(
+                GroundDropSource.clientScans(deps.character().context()),
+                deps.items().itemTags(), drops, carried);
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                containerSource, craftSource, strippingSource, smeltSource, smithSource, brewSource, miningSource, harvestSource,
+                groundDropSource, containerSource, craftSource, strippingSource, smeltSource, smithSource, brewSource,
+                miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
                 new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags())));
         sources.addAll(tradeAndHunt(deps, bringsClose, drops, innerNeeds, permission));
@@ -132,8 +140,6 @@ final class AcquisitionWiring {
         sources.addAll(deps.compat().itemSources(playerServices));
         List<BlockApplicationSource> applicationSources = addCompatTransforms(
                 sources, deps, playerServices, drops, stepsAside, innerNeeds, permission, blockTransforms);
-        // 清点身上几件时连穿着的护甲一起数：锻造台上升级好穿回身上的那件照样算拿到了。
-        BackpackWithArmor carried = new BackpackWithArmor(deps.character().backpack(), deps.character().equipment());
         // 来源装好一炉就走时，这一场拿东西当场收场：引擎、烧炼来源、obtain 看的是同一份留着烧的记录。
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 carried, deps.character().offhand(), deps.items().itemTags(),

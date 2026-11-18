@@ -123,6 +123,15 @@ public interface NavGoal {
         return new NearGround(pos, radius, verticalTolerance);
     }
 
+    /**
+     * 拾取地面掉落物的水平接近目标：要求脚位进入掉落物所在格水平 {@code radius} 范围内，
+     * 且脚底不高于掉落物所在格（允许与掉落物同高，或站在低一格处贴着高台吸取），
+     * 防止掉落物落在低一格台阶时角色站在上层唇沿就原地判定到达、空等超时。
+     */
+    static NavGoal nearPickup(BlockPos pos, double radius) {
+        return new NearGround(pos, radius, 1.0, 0.0);
+    }
+
     static NavGoal column(int x, int z, double radius) {
         return new Column(x, z, radius);
     }
@@ -414,24 +423,31 @@ public interface NavGoal {
     }
 
     /**
-     * 水平进入半径范围，并且与指定高度相差不超过允许值；它本身不读取地面支撑。
+     * 水平进入半径范围，并且高度差在允许的下探与上浮范围内；它本身不读取地面支撑。
      */
     final class NearGround implements NavGoal {
         public final BlockPos goal;
         public final double radius;
         public final double radiusSqr;
         public final double verticalTolerance;
+        public final double maxAbove;
 
         NearGround(BlockPos pos, double radius, double verticalTolerance) {
+            this(pos, radius, verticalTolerance, verticalTolerance);
+        }
+
+        NearGround(BlockPos pos, double radius, double maxBelow, double maxAbove) {
             this.goal = pos.immutable();
             this.radius = radius;
             this.radiusSqr = radius * radius;
-            this.verticalTolerance = verticalTolerance;
+            this.verticalTolerance = maxBelow;
+            this.maxAbove = maxAbove;
         }
 
         @Override public boolean isAt(BlockPos feet) {
             int dy = feet.getY() - goal.getY();
-            if (Math.abs((double) dy) > verticalTolerance) return false;
+            // 脚高于目标格时与 maxAbove 比较，脚低于目标格时与 verticalTolerance 比较。
+            if ((double) dy > maxAbove || (double) -dy > verticalTolerance) return false;
             double dx = feet.getX() - goal.getX();
             double dz = feet.getZ() - goal.getZ();
             return dx * dx + dz * dz <= radiusSqr;

@@ -172,10 +172,117 @@ class ContainerTakePlanTest {
         assertEquals(4, move.containerSlotId(), "金块那格不碰，从铁锭那格拿");
     }
 
-    // 按原版点击规矩把一笔点击在数字上走一遍，返回 {箱里剩的, 背包得到的, 光标}；
-    // 只模拟测试场景里出现的情形：背包目标格放得下要放的全部。
+    @Test
+    void 超叠一百二十八圆石拿八十个_分两轮按背包单格六十四上限搬入() {
+        // 精妙背包一格装着 128 个圆石（光标与背包单格上限均为 64），要拿 80 个：
+        // 第一轮先搬满背包第一格 64 个，第二轮从剩下的 64 个里拆 16 个放进背包第二格。
+        ItemStack superCobble = new ItemStack(Items.COBBLESTONE);
+        superCobble.setCount(128);
+        ItemStack[] player = new ItemStack[36];
+        ContainerTakePlan.Move first = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, superCobble), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.COBBLESTONE),
+                80).orElseThrow();
+        assertEquals(64, first.amount(), "第一轮按光标与背包单格上限搬 64 个");
+        int[] afterFirst = clickThrough(first, BOX_SLOT, PLAYER_SLOT, 128, 64);
+        assertEquals(64, afterFirst[0], "第一轮后超叠槽还剩 64 个圆石");
+        assertEquals(64, afterFirst[1], "背包第一格收满 64 个圆石");
+        assertEquals(0, afterFirst[2], "第一轮点完光标为空");
+
+        player[0] = new ItemStack(Items.COBBLESTONE, 64);
+        ItemStack remainingCobble = new ItemStack(Items.COBBLESTONE, afterFirst[0]);
+        ContainerTakePlan.Move second = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, remainingCobble), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.COBBLESTONE),
+                16).orElseThrow();
+        assertEquals(16, second.amount(), "第二轮搬剩下的 16 个");
+        int[] afterSecond = clickThrough(second, BOX_SLOT, PLAYER_SLOT + 1, 64, 64);
+        assertEquals(48, afterSecond[0], "两轮后源格剩 48 个圆石");
+        assertEquals(16, afterSecond[1], "背包第二格收到 16 个圆石");
+        assertEquals(0, afterSecond[2], "第二轮点完光标为空");
+    }
+
+    @Test
+    void 超叠一百二十八圆石整格取完一百二十八与取十六均不误发超额快移() {
+        // 精妙背包对超叠槽点一次快速移动最多只搬 64 个：要取满 128 个时第一轮按 64 精确搬运，第二轮剩 64 个再整格快移；
+        // 只取 16 个时右键按截断后半堆 32 抓取并退回 16 个，源格剩 112 个且光标为空。
+        ItemStack superCobble = new ItemStack(Items.COBBLESTONE);
+        superCobble.setCount(128);
+        ItemStack[] player = new ItemStack[36];
+        ContainerTakePlan.Move takeSixteen = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, superCobble), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.COBBLESTONE),
+                16).orElseThrow();
+        assertEquals(16, takeSixteen.amount());
+        int[] afterSixteen = clickThrough(takeSixteen, BOX_SLOT, PLAYER_SLOT, 128, 64);
+        assertEquals(112, afterSixteen[0], "128 圆石取 16 后源格剩 112 个");
+        assertEquals(16, afterSixteen[1], "背包收到 16 个圆石");
+        assertEquals(0, afterSixteen[2], "光标无残留");
+
+        ContainerTakePlan.Move roundOne = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, superCobble), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.COBBLESTONE),
+                128).orElseThrow();
+        assertEquals(64, roundOne.amount(), "超叠 128 取 128 第一轮只报 64 个，不发期望 128 的单次快移");
+        int[] afterRoundOne = clickThrough(roundOne, BOX_SLOT, PLAYER_SLOT, 128, 64);
+        assertEquals(64, afterRoundOne[0]);
+        assertEquals(64, afterRoundOne[1]);
+
+        player[0] = new ItemStack(Items.COBBLESTONE, 64);
+        ContainerTakePlan.Move roundTwo = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, new ItemStack(Items.COBBLESTONE, 64)), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.COBBLESTONE),
+                64).orElseThrow();
+        assertEquals(64, roundTwo.amount(), "第二轮源格已降至 64，整格快速移动收尾");
+        assertEquals(List.of(new MenuClick(BOX_SLOT, true, 0, false)), roundTwo.clicks());
+    }
+
+    @Test
+    void 超叠多把石镐拿两把与全取三把均按单把上限逐轮搬运() {
+        // 精妙背包一格叠着 3 把石镐（maxStackSize=1），全取 3 把：前两轮各按光标上限搬 1 把，最后剩 1 把走快速移动收尾。
+        ItemStack stackedPickaxes = new ItemStack(Items.STONE_PICKAXE);
+        stackedPickaxes.setCount(3);
+        ItemStack[] player = new ItemStack[36];
+        ContainerTakePlan.Move first = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, stackedPickaxes), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.STONE_PICKAXE),
+                3).orElseThrow();
+        assertEquals(1, first.amount(), "3 把石镐取 3 把时第一轮只搬 1 把，不发期望搬 3 把的快速移动");
+        int[] afterFirst = clickThrough(first, BOX_SLOT, PLAYER_SLOT, 3, 1);
+        assertEquals(2, afterFirst[0]);
+        assertEquals(1, afterFirst[1]);
+        assertEquals(0, afterFirst[2]);
+
+        player[0] = new ItemStack(Items.STONE_PICKAXE, 1);
+        ItemStack twoLeft = new ItemStack(Items.STONE_PICKAXE);
+        twoLeft.setCount(afterFirst[0]);
+        ContainerTakePlan.Move second = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, twoLeft), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.STONE_PICKAXE),
+                2).orElseThrow();
+        assertEquals(1, second.amount(), "还剩 2 把超叠石镐时第二轮仍按 1 把搬运");
+        int[] afterSecond = clickThrough(second, BOX_SLOT, PLAYER_SLOT + 1, 2, 1);
+        assertEquals(1, afterSecond[0]);
+        assertEquals(1, afterSecond[1]);
+        assertEquals(0, afterSecond[2]);
+
+        player[1] = new ItemStack(Items.STONE_PICKAXE, 1);
+        ContainerTakePlan.Move third = ContainerTakePlan.next(
+                reading(slots(27, BOX_SLOT, new ItemStack(Items.STONE_PICKAXE, 1)), player),
+                snapshot -> !snapshot.isEmpty() && snapshot.stack().is(Items.STONE_PICKAXE),
+                1).orElseThrow();
+        assertEquals(1, third.amount(), "最后只剩 1 把非超叠石镐时一笔快速移动收尾");
+        assertEquals(List.of(new MenuClick(BOX_SLOT, true, 0, false)), third.clicks());
+    }
+
+    // 按原版与超叠槽点击规矩把一笔点击在数字上走一遍，返回 {箱里剩的, 背包得到的, 光标}。
     private static int[] clickThrough(ContainerTakePlan.Move move, int sourceSlotId, int playerSlotId,
             int sourceCount) {
+        return clickThrough(move, sourceSlotId, playerSlotId, sourceCount, 64);
+    }
+
+    private static int[] clickThrough(ContainerTakePlan.Move move, int sourceSlotId, int playerSlotId,
+            int sourceCount, int cursorMax) {
         int source = sourceCount;
         int player = 0;
         int cursor = 0;
@@ -184,8 +291,10 @@ class ContainerTakePlanTest {
             boolean onSource = click.slotId() == sourceSlotId;
             boolean onPlayer = click.slotId() == playerSlotId;
             if (cursor == 0) {
-                // 空光标从箱格拿：左键整份，右键半堆。
-                int taken = click.button() == 0 ? source : (source + 1) / 2;
+                // 空光标从箱格拿：左键按光标上限抓整轮，右键先截断到光标上限再折半向上取整。
+                int taken = click.button() == 0
+                        ? Math.min(cursorMax, source)
+                        : (Math.min(cursorMax, source) + 1) / 2;
                 cursor = taken;
                 source -= taken;
             } else if (click.button() == 0) {

@@ -16,6 +16,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 
+import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
@@ -79,18 +80,90 @@ final class Ae2InscriberPlates {
      */
     static Optional<String> conflict(ShownRecipe recipe, Ae2Inscribers.Inputs slots) {
         if (slots == null || slots.occupied().isEmpty()) return Optional.empty();
+        Ae2Inscribers.Slots four = new Ae2Inscribers.Slots(
+                slots.top().isEmpty() ? null : new MachineState.Shown(slots.top(), 1),
+                slots.bottom().isEmpty() ? null : new MachineState.Shown(slots.bottom(), 1),
+                slots.middle().isEmpty() ? null : new MachineState.Shown(slots.middle(), 1),
+                null);
+        return conflict(recipe, 1, four);
+    }
+
+    /**
+     * 压印器全部四个工作格（0 顶、1 底、2 中间、3 输出）与当前目标配方及批数冲不冲突：
+     * 找出所有装着不兼容模板、残留半成品或阻塞输出格的槽位下标（0..3），供投料前自动开窗取回背包。
+     */
+    static List<Integer> conflictingSlotIndices(ShownRecipe recipe, int batches, Ae2Inscribers.Slots slots) {
+        if (slots == null || slots.allShown().isEmpty()) return List.of();
         Optional<ParsedRecipe> parsed = parse(recipe);
-        if (parsed.isEmpty()) return Optional.empty();
+        if (parsed.isEmpty()) return List.of();
         ParsedRecipe rules = parsed.get();
-        boolean platesFitDirect = slotFits(slots.top(), rules.top(), recipe)
-                && slotFits(slots.bottom(), rules.bottom(), recipe);
-        boolean platesFitFlipped = slotFits(slots.top(), rules.bottom(), recipe)
-                && slotFits(slots.bottom(), rules.top(), recipe);
-        boolean middleFits = slotFits(slots.middle(), rules.middle(), recipe);
-        if ((platesFitDirect || platesFitFlipped) && middleFits) {
-            return Optional.empty();
+        String topId = slots.top() == null ? "" : slots.top().itemId();
+        String bottomId = slots.bottom() == null ? "" : slots.bottom().itemId();
+        String middleId = slots.middle() == null ? "" : slots.middle().itemId();
+
+        List<Integer> directPlateConflicts = plateConflicts(topId, rules.top(), bottomId, rules.bottom(), recipe);
+        List<Integer> flippedPlateConflicts = plateConflicts(topId, rules.bottom(), bottomId, rules.top(), recipe);
+        // 压印器允许顶底模板上下对调：选需要取出的冲突格数更少的摆法，尽量保留机内已对得上的模板不动。
+        List<Integer> conflicts = new ArrayList<>(
+                directPlateConflicts.size() <= flippedPlateConflicts.size()
+                        ? directPlateConflicts : flippedPlateConflicts);
+        if (!middleId.isEmpty() && !slotFits(middleId, rules.middle(), recipe)) {
+            conflicts.add(2);
         }
-        return Optional.of("压印器里还放着 " + String.join("、", slots.occupied()) + "，与这次要投的料不兼容");
+        // 输出格若占着与本配方产物不同的旧物品，或已有同种产物加上本趟产量超过单格 64 上限，也会卡住压印器不开工。
+        if (slots.output() != null && outputBlocksRecipe(recipe, Math.max(1, batches), slots.output())) {
+            conflicts.add(3);
+        }
+        return List.copyOf(conflicts);
+    }
+
+    /** 压印器四个工作格存在与目标配方冲突的占用物时，点名冲突槽位里的物品给出中文说明。 */
+    static Optional<String> conflict(ShownRecipe recipe, int batches, Ae2Inscribers.Slots slots) {
+        List<Integer> indices = conflictingSlotIndices(recipe, batches, slots);
+        if (indices.isEmpty()) return Optional.empty();
+        List<String> blocking = new ArrayList<>(indices.size());
+        for (int index : indices) {
+            MachineState.Shown shown = slots.slot(index);
+            if (shown != null && !blocking.contains(shown.itemId())) {
+                blocking.add(shown.itemId());
+            }
+        }
+        return Optional.of("压印器里还放着 " + String.join("、", blocking) + "，与这次要做的配方不兼容");
+    }
+
+    private static List<Integer> plateConflicts(String topId, SlotRule topRule, String bottomId,
+            SlotRule bottomRule, ShownRecipe recipe) {
+        List<Integer> bad = new ArrayList<>(2);
+        if (!topId.isEmpty() && !slotFits(topId, topRule, recipe)) bad.add(0);
+        if (!bottomId.isEmpty() && !slotFits(bottomId, bottomRule, recipe)) bad.add(1);
+        return bad;
+    }
+
+    private static boolean outputBlocksRecipe(ShownRecipe recipe, int batches, MachineState.Shown currentOutput) {
+        Optional<ShownStack> expected = expectedItemResult(recipe);
+        if (expected.isEmpty()) return false;
+        if (!expected.get().id().equals(currentOutput.itemId())) {
+            return true;
+        }
+        long perBatch = Math.max(1L, expected.get().amount());
+        return currentOutput.count() + perBatch * batches > 64L;
+    }
+
+    private static Optional<ShownStack> expectedItemResult(ShownRecipe recipe) {
+        for (ShownStack out : recipe.outputs()) {
+            if (out.kind() == ShownStack.Kind.ITEM && !out.id().isEmpty()) {
+                return Optional.of(out);
+            }
+        }
+        JsonObject def = recipe.definition();
+        if (def != null && def.has("result") && def.get("result").isJsonObject()) {
+            JsonObject res = def.getAsJsonObject("result");
+            if (res.has("id") && res.get("id").isJsonPrimitive()) {
+                int count = res.has("count") && res.get("count").isJsonPrimitive() ? res.get("count").getAsInt() : 1;
+                return Optional.of(ShownStack.item(res.get("id").getAsString(), res.get("id").getAsString(), count));
+            }
+        }
+        return Optional.empty();
     }
 
     /** 物品 ID 本身是不是压印模板（未经过配方计数直接投料时的兜底识别）。 */

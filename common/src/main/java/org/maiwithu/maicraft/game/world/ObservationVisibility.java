@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.world;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.RenderType;
@@ -8,12 +11,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.HalfTransparentBlock;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.BooleanOp;
@@ -60,11 +65,63 @@ public final class ObservationVisibility {
         return false;
     }
 
+    /** 地面掉落物在所在格内悬浮旋转显示的最高采样高度偏移（不出本格 1 格净空，避开低 1 格台阶唇沿遮挡）。 */
+    static final double ITEM_HOVER_SAMPLE_HEIGHT = 0.85;
+
     public static boolean entity(LocalPlayer player, Entity target) {
-        // 生物头部或身体边缘露出即可观察；整只藏在墙后时仍不能先交付身份再让角色追过去。
-        return player != null && target != null && !target.isRemoved()
-                && (point(player, target.getEyePosition())
-                || box(player, player.getEyePosition(), target.getBoundingBox(), null));
+        return player != null && entityFrom(player, player.getEyePosition(), target);
+    }
+
+    /**
+     * 从指定起点（眼睛或第三人称镜头）判断实体是否可见：
+     * 生物头部或身体边缘露出即可观察；贴地 {@code 0.25} 高的 {@link ItemEntity} 在游戏里悬浮显示在本格下半至上半空间，
+     * 额外对所在格未被顶盖封死的上部悬浮区采样，避免隔 1 格台阶唇沿把脚边掉落物全部误判为遮挡。
+     */
+    public static boolean entityFrom(LocalPlayer player, Vec3 origin, Entity target) {
+        if (player == null || origin == null || target == null || target.isRemoved()) return false;
+        if (pointFrom(player, origin, target.getEyePosition())
+                || box(player, origin, target.getBoundingBox(), null)) {
+            return true;
+        }
+        if (target instanceof ItemEntity) {
+            double ceilingY = unoccludedHoverCeiling(player, target.getBoundingBox());
+            for (Vec3 sample : lowItemHoverSamples(target.getBoundingBox(), ceilingY)) {
+                if (ray(player, origin, sample, null)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 计算贴地掉落物在所在格净空内的悬浮采样点（纯函数）：
+     * 只在盒顶到无遮挡净空顶 {@code clearCeilingY} 之间取中段与上段采样点，头顶被半砖压住时不越过顶盖。
+     */
+    public static List<Vec3> lowItemHoverSamples(AABB box, double clearCeilingY) {
+        if (clearCeilingY <= box.maxY + 0.05) return List.of();
+        Vec3 center = box.getCenter();
+        double midY = (box.maxY + clearCeilingY) * 0.5;
+        double dx = Math.max(0, box.getXsize() * 0.5 - 0.001);
+        double dz = Math.max(0, box.getZsize() * 0.5 - 0.001);
+        List<Vec3> points = new ArrayList<>(6);
+        points.add(new Vec3(center.x, clearCeilingY, center.z));
+        points.add(new Vec3(center.x, midY, center.z));
+        points.add(new Vec3(center.x - dx, clearCeilingY, center.z));
+        points.add(new Vec3(center.x + dx, clearCeilingY, center.z));
+        points.add(new Vec3(center.x, clearCeilingY, center.z - dz));
+        points.add(new Vec3(center.x, clearCeilingY, center.z + dz));
+        return points;
+    }
+
+    // 探测掉落物盒顶往本格上部延伸时有没有被上半砖、活板门等遮挡体封盖，截断在封盖底面之下防止穿顶透视。
+    private static double unoccludedHoverCeiling(LocalPlayer player, AABB box) {
+        double maxSampleY = box.minY + ITEM_HOVER_SAMPLE_HEIGHT;
+        if (maxSampleY <= box.maxY) return box.maxY;
+        Vec3 center = box.getCenter();
+        Vec3 from = new Vec3(center.x, box.maxY + 0.001, center.z);
+        Vec3 to = new Vec3(center.x, maxSampleY, center.z);
+        var upHit = clipVisual(player, from, to);
+        if (upHit.getType() == HitResult.Type.MISS) return maxSampleY;
+        return Math.max(box.maxY, upHit.getLocation().y - 0.02);
     }
 
     public static boolean point(LocalPlayer player, Vec3 point) {
@@ -82,7 +139,13 @@ public final class ObservationVisibility {
                 (level, cell) -> level.isLoaded(cell) ? null : Boolean.FALSE, level -> Boolean.TRUE);
         if (!loaded) return false;
         // 看见目标与准星点中目标是两件事：观察使用原生视觉外形，挖掘/交互仍由各自的原生命中射线裁决。
-        var hit = player.level().clip(new ClipContext(eye, end,
+        var hit = clipVisual(player, eye, end);
+        return hit.getType() == HitResult.Type.MISS
+                || targetBlock != null && targetBlock.equals(hit.getBlockPos());
+    }
+
+    private static BlockHitResult clipVisual(LocalPlayer player, Vec3 start, Vec3 end) {
+        return player.level().clip(new ClipContext(start, end,
                 ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, player) {
             @Override public VoxelShape getBlockShape(BlockState state, BlockGetter level, BlockPos pos) {
                 VoxelShape visual = super.getBlockShape(state, level, pos);
@@ -96,7 +159,5 @@ public final class ObservationVisibility {
                 return visual == occlusion ? visual : Shapes.join(visual, occlusion, BooleanOp.AND);
             }
         });
-        return hit.getType() == HitResult.Type.MISS
-                || targetBlock != null && targetBlock.equals(hit.getBlockPos());
     }
 }

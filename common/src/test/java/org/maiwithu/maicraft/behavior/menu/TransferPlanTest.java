@@ -108,11 +108,90 @@ class TransferPlanTest {
     }
 
     @Test
-    void 数量超过源格件数仍被拒绝() {
+    void 超叠一百二十八圆石按光标上限六十四分轮搬运() {
+        // 精妙背包单格叠着 128 个圆石（光标单次上限 64），从中搬 80 个：
+        // 先按光标上限抓满 64 个放下，再从剩下的 64 个里拆出 16 个放下、退回多余件数，点完源格剩 48 个、光标为空。
+        int sourceCount = 128;
+        int amount = 80;
+        int cursorMax = 64;
+        TransferPlan plan = TransferPlan.exactAmount(sourceCount, amount, cursorMax);
+        assertFalse(plan.maySwapTarget());
+        int[] settled = simulate(plan, sourceCount, cursorMax);
+        assertEquals(48, settled[0], "源格剩下未取走的 48 个圆石");
+        assertEquals(80, settled[1], "目标收到足额 80 个圆石");
+        assertEquals(0, settled[2], "搬完后鼠标光标为空");
+    }
+
+    @Test
+    void 超叠一百二十八圆石取十六个_右键按截断后半堆三十二抓取并精确退回() {
+        // 精妙背包单格叠着 128 个圆石（光标上限 64），只取 16 个垫脚：
+        // 模组空手右键先截断到 64 再折半抓起 32 个，放进目标格 16 个后将剩余 16 个退回源格，不误发多余右键反抓悬空。
+        int sourceCount = 128;
+        int amount = 16;
+        int cursorMax = 64;
+        TransferPlan plan = TransferPlan.exactAmount(sourceCount, amount, cursorMax);
+        assertFalse(plan.maySwapTarget());
+        int[] settled = simulate(plan, sourceCount, cursorMax);
+        assertEquals(112, settled[0], "源格退回多余件数后剩 112 个圆石");
+        assertEquals(16, settled[1], "目标精确收到 16 个圆石");
+        assertEquals(0, settled[2], "搬完后鼠标光标为空，无反抓残留");
+    }
+
+    @Test
+    void 叠放多把石镐按光标上限一逐轮抓取() {
+        // 精妙背包单格叠放 3 把石镐（工具自身最大堆叠为 1，光标一次只能抓 1 把），从中取 2 把：
+        // 分两轮每次抓 1 把放进目标侧，不因源格数量大于 1 抛异常，最后源格剩 1 把、光标为空。
+        int sourceCount = 3;
+        int amount = 2;
+        int cursorMax = 1;
+        TransferPlan plan = TransferPlan.exactAmount(sourceCount, amount, cursorMax);
+        assertFalse(plan.maySwapTarget());
+        int[] settled = simulate(plan, sourceCount, cursorMax);
+        assertEquals(1, settled[0], "源格还剩 1 把石镐");
+        assertEquals(2, settled[1], "分两轮共搬出 2 把石镐");
+        assertEquals(0, settled[2], "搬完后鼠标光标为空");
+    }
+
+    @Test
+    void 数量超过源格件数或光标上限非法时仍被拒绝() {
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(0, 1, 64));
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 0, 64));
         assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(8, 9, 8));
-        assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 10, 32),
-                "源格装不回退件数时不给计划");
+        assertThrows(IllegalArgumentException.class, () -> TransferPlan.exactAmount(64, 10, 0),
+                "光标单次上限小于 1 时拒绝生成计划");
+    }
+
+    // 按超叠槽位与原版光标上限规则走完计划，核对每一步光标都不超过 cursorMax，返回 {源格剩余, 目标收到, 光标剩余}。
+    private static int[] simulate(TransferPlan plan, int sourceCount, int cursorMax) {
+        int source = sourceCount;
+        int deposited = 0;
+        int cursor = 0;
+        for (Step step : plan.steps()) {
+            switch (step.kind()) {
+                case TAKE_ALL -> {
+                    cursor = Math.min(cursorMax, source);
+                    source -= cursor;
+                }
+                case TAKE_HALF -> {
+                    cursor = (Math.min(cursorMax, source) + 1) / 2;
+                    source -= cursor;
+                }
+                case GIVE_ALL -> {
+                    deposited += cursor;
+                    cursor = 0;
+                }
+                case GIVE_ONE -> {
+                    cursor -= 1;
+                    deposited += 1;
+                }
+                case PUT_BACK_ONE -> {
+                    cursor -= 1;
+                    source += 1;
+                }
+                case QUICK_MOVE -> throw new IllegalStateException("尾数计划里不该出现快速移动");
+            }
+            assertTrue(cursor >= 0 && cursor <= cursorMax, "光标件数越界：" + cursor);
+        }
+        return new int[] {source, deposited, cursor};
     }
 }

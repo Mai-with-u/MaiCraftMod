@@ -37,7 +37,7 @@ public record NavGoalFingerprint(String kind, List<?> parameters) {
             return key("distance_band", g.focus.x, g.focus.y, g.focus.z, g.inner, g.outer);
         }
         if (goal instanceof NavGoal.NearGround g) {
-            return key("near_ground", g.goal.asLong(), g.radius, g.verticalTolerance);
+            return key("near_ground", g.goal.asLong(), g.radius, g.verticalTolerance, g.maxAbove);
         }
         if (goal instanceof NavGoal.Adjacent g) {
             return key("adjacent", g.goal.asLong());

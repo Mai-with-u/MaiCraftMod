@@ -71,8 +71,26 @@ public final class ClientDropPickup implements PicksUpDrops {
             double itemX, double itemY, double itemZ) {
         if (Math.abs(itemX - playerX) > PICKUP_HORIZONTAL_REACH) return false;
         if (Math.abs(itemZ - playerZ) > PICKUP_HORIZONTAL_REACH) return false;
+        return withinVerticalPickupReach(playerFeetY, itemY);
+    }
+
+    /** 角色此刻脚底高度与掉落物高度差是否处在原版拾取盒纵向范围内（下探 0.625 格、上探 2.425 格）。 */
+    static boolean withinVerticalPickupReach(double playerFeetY, double itemY) {
         return itemY >= playerFeetY - PICKUP_VERTICAL_REACH_BELOW
                 && itemY <= playerFeetY + PICKUP_VERTICAL_REACH_ABOVE;
+    }
+
+    /**
+     * 按角色脚底与掉落物的高度关系挑选拾取导航目标：
+     * 存在高度差够不着拾取盒（如掉落物在低一格台阶）或扒树叶进格时，强制要求脚底进入实际可拾取高度，驱动角色走下台阶拾起。
+     */
+    static GoalCompiler.Compiled pickupWalkGoal(BlockPos cell, boolean clearingLeaves,
+            double playerFeetY, double itemY) {
+        double radius = clearingLeaves ? 0.5 : PICKUP_REACH_BLOCKS;
+        if (clearingLeaves || !withinVerticalPickupReach(playerFeetY, itemY)) {
+            return GoalCompiler.pickup(cell, radius);
+        }
+        return GoalCompiler.near(cell, radius);
     }
 
     /** 动手后等新掉落物冒出来的耐心（刻）；过了还没有就是这一下没掉东西。 */
@@ -171,9 +189,10 @@ public final class ClientDropPickup implements PicksUpDrops {
     }
 
     /**
-     * 捡起指定的那一件（扔出去的末影之眼落下的那颗）：离得远一点也走过去，别的东西不碰；
+     * 捡起指定的那一件（扔出去的末影之眼落下的那颗，或点名要捡的地上掉落物）：离得远一点也走过去，别的东西不碰；
      * 那一件没捡到（走不过去、被别人捡走、消失了）如实失败，不把"走过去了"当成"捡到了"。
      */
+    @Override
     public Action pickUpOne(int entityId) {
         return new PickUp(Set.of(), entityId);
     }
@@ -211,6 +230,7 @@ public final class ClientDropPickup implements PicksUpDrops {
         private final Integer only;
         private Integer current;
         private BlockPos walkingTo;
+        private boolean pickupHeightLocked;
         private WalkRun walk;
         /** 这一件已经改成扒开树叶走进它那一格；走到旁边后又等了几刻。 */
         private boolean clearingLeaves;
@@ -352,15 +372,15 @@ public final class ClientDropPickup implements PicksUpDrops {
                 return ActionStatus.progressed();
             }
             BlockPos cell = drop.blockPosition();
-            if (walk == null || !cell.equals(walkingTo)) {
+            boolean needPickupHeight = clearingLeaves || !withinVerticalPickupReach(player.getY(), drop.getY());
+            // 先按水平接近走到台阶唇沿后，若因低一格高度差仍够不着拾取盒，立即切到要求脚底进入可拾取高度的目标走下台阶。
+            if (walk == null || !cell.equals(walkingTo) || (needPickupHeight && !pickupHeightLocked)) {
                 stopWalking();
                 walkingTo = cell;
+                pickupHeightLocked = needPickupHeight;
                 besideTicks = 0;
-                // 走到它旁边一格以内就够原版吸进包，不必站进那一格：挖进墙里的那一格头顶常是实心的，
-                // 站不进去会被当成走不过去，东西明明挨着却放弃不捡。
-                walk = clearingLeaves
-                        ? walks.start(GoalCompiler.near(cell, 0.5), TerrainPermit.NATURAL)
-                        : walks.start(GoalCompiler.near(cell, PICKUP_REACH_BLOCKS), TerrainPermit.WALK_ONLY);
+                GoalCompiler.Compiled goal = pickupWalkGoal(cell, clearingLeaves, player.getY(), drop.getY());
+                walk = walks.start(goal, clearingLeaves ? TerrainPermit.NATURAL : TerrainPermit.WALK_ONLY);
             }
             ActionStatus walked = walk.tick(tick);
             // 走到了旁边它还躺着、它那一格头顶是树叶：砍树掉下的原木常钻在云杉低垂的树冠底下，人站不进去也吸不到。
@@ -459,6 +479,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                 walk.close();
                 walk = null;
                 walkingTo = null;
+                pickupHeightLocked = false;
             }
         }
 
