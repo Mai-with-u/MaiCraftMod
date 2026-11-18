@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -356,6 +357,44 @@ class ItemAcquisitionTest {
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
         assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
         assertTrue(failed.problem().message().contains("记得的箱子"), "问题里要点名白跑的来源");
+    }
+
+    @Test
+    void 报价超出愿意走的距离_挡下并写进给不了的原因() {
+        ScriptedSource far = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子", 4, new AcquisitionCost(60, 4), null));
+        ActionStatus status = runToSettlement(engine(far).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "烧炼的燃料"), PERMISSIONS,
+                new ItemAcquisition.Scope(Set.of(), 50.0, null), null));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertTrue(failed.problem().message().contains("记得的箱子：在愿意走的 50 格之外"),
+                failed.problem().message());
+    }
+
+    @Test
+    void 报价写的来源名和自称不一样_做砸后按报价上的名字划掉() {
+        // 同一来源分好几路报价时报价上的名字与 describe 不同：做砸了按报价上的名字认划掉的，
+        // 下一轮照常问它价（没划到来源本身），但这份报价不再参与，也不再动手。
+        ScriptedSource mismatched = new ScriptedSource("记得的箱子", backpack)
+                .answer(new SourceQuote.Offer("记得的箱子（东头）", 2, new AcquisitionCost(5, 4), null))
+                .onBegin(ScriptedSource.Ending.FAIL);
+        ActionStatus status = runToSettlement(engine(mismatched).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "烧炼的燃料"), PERMISSIONS));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertTrue(failed.problem().message().contains("试过记得的箱子（东头）"), failed.problem().message());
+        assertEquals(2, mismatched.askedTimes(), "划掉的是报价上的名字，下一轮照样问它价");
+        assertEquals(1, mismatched.begunTimes(), "划掉的报价不再动手");
+    }
+
+    @Test
+    void 还没实现的来源_如实记进给不了的原因() {
+        ScriptedSource unsupported = new ScriptedSource("随身背包", backpack)
+                .answer(new SourceQuote.Unsupported("随身背包", "需要的模组没装"));
+        ActionStatus status = runToSettlement(engine(unsupported).need(
+                new ItemRequest(WantedItem.ofItem("minecraft:coal"), 2, "烧炼的燃料"), PERMISSIONS));
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertTrue(failed.problem().message().contains("随身背包：不支持（需要的模组没装）"),
+                failed.problem().message());
     }
 
     @Test

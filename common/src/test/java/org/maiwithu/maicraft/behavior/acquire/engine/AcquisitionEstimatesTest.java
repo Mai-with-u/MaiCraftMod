@@ -228,6 +228,27 @@ class AcquisitionEstimatesTest {
     }
 
     @Test
+    void 报价超出愿意走的距离_挡下并写进弄不到的原因() {
+        chest.offer(SWORD, (request, context) -> new SourceQuote.Offer("记得的箱子", 1,
+                new AcquisitionCost(60, 4), null), List.of());
+
+        GoalEstimate estimate = engine().estimate(List.of(want(SWORD, 1)), PERMISSIONS, maxDistance(50));
+
+        assertEquals(Effort.BLOCKED, estimate.effort());
+        assertTrue(estimate.how().contains("记得的箱子：在愿意走的 50 格之外"), estimate.how());
+    }
+
+    @Test
+    void 还没实现的来源_不算问过_不说它不支持() {
+        craft.offer(SWORD, (request, context) -> new SourceQuote.Unsupported("自己做", "需要的模组没装"), List.of());
+
+        GoalEstimate estimate = engine().estimate(want(SWORD, 1), PERMISSIONS);
+
+        assertEquals(Effort.BLOCKED, estimate.effort());
+        assertTrue(!estimate.how().contains("不支持"), "模组没装、还没实现的来源说出来只是噪音：" + estimate.how());
+    }
+
+    @Test
     void 一次要两样_外层取重的那档_秒数相加() {
         chest.offer(STICK, (request, context) -> new SourceQuote.Offer("记得的箱子", 4, new AcquisitionCost(3, 4), null),
                 List.of());
