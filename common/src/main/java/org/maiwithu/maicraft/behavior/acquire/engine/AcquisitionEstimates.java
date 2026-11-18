@@ -231,38 +231,36 @@ final class AcquisitionEstimates {
         private Part consult(ItemRequest request, ItemAcquisition.Scope scope, String what) {
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
                     scope.radiusBlocks(), scope.maxDistanceBlocks());
-            List<Planned> offers = new ArrayList<>();
-            List<String> approvals = new ArrayList<>();
-            List<String> refusals = new ArrayList<>();
-            List<String> looking = new ArrayList<>();
+            List<QuoteRound.Answered> answers = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (!scope.allows(source.via().name())) continue;
                 SourceQuote quote = quote(source, request, scope, context);
                 // 问满了价：这一样不再往下估，如实说没估完；它和它上面几层都是半截的，不记下来给别处用。
                 if (quote == null) return outOfQuotes(what);
-                switch (quote) {
-                    case SourceQuote.Offer offer -> {
-                        if (scope.maxDistanceBlocks() != null && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
-                            refusals.add(offer.source() + "：在愿意走的 " + blocks(scope.maxDistanceBlocks()) + " 格之外");
-                        } else {
-                            offers.add(new Planned(source, offer));
-                        }
-                    }
+                answers.add(new QuoteRound.Answered(source, quote));
+            }
+            QuoteRound.Sorted sorted = QuoteRound.sort(answers, request.count(), scope.maxDistanceBlocks(), Set.of());
+            List<String> approvals = new ArrayList<>();
+            List<String> refusals = new ArrayList<>();
+            List<String> looking = new ArrayList<>();
+            for (SourceQuote refusal : sorted.refusals()) {
+                switch (refusal) {
                     case SourceQuote.Unavailable unavailable -> refusals.add(unavailable.source() + "：" + unavailable.reason());
                     case SourceQuote.NeedsApproval approval -> approvals.add(approval.source() + "：要放开许可（"
                             + approval.problem().message() + "）");
                     // 模组没装、还没实现的来源不算问过，说出来只是噪音。
                     case SourceQuote.Unsupported unsupported -> { }
                     case SourceQuote.NotYet notYet -> looking.add(notYet.source() + "：" + notYet.reason());
+                    case SourceQuote.Offer offer -> { }
                 }
             }
             // 有来源还没看清现场：动手时引擎拿着别的报价也先等它看完再挑路，这时挑出来的未必是动手时走的那条，
             // 估算照实说还在看，由外面等一会儿再估。
             if (!looking.isEmpty()) return Part.unknown(what, "附近还没看完：" + String.join("；", looking), true);
             List<String> deadEnds = new ArrayList<>();
+            List<QuoteRound.Answered> remaining = new ArrayList<>(answers);
             while (true) {
-                List<Planned> plan = choose(offers, request.count());
-                if (plan.isEmpty()) {
+                if (sorted.candidates().isEmpty()) {
                     List<String> reasons = new ArrayList<>(approvals);
                     reasons.addAll(refusals);
                     reasons.addAll(deadEnds);
@@ -270,31 +268,26 @@ final class AcquisitionEstimates {
                     blockedWhy.putIfAbsent(what, why);
                     return Part.blocked(what, why);
                 }
-                List<Part> legs = legs(plan, request, context, what);
-                Part combined = combine(what, legs, covered(plan), request.count());
+                List<Part> legs = legs(sorted.candidates(), request, context, what);
+                Part combined = combine(what, legs, covered(sorted.candidates()), request.count());
                 if (combined.effort() != Effort.BLOCKED) return combined;
                 // 挑中的有一处走不通：像引擎做砸了一样划掉它，经过记下，再挑下一条。
-                for (int i = 0; i < plan.size(); i++) {
+                for (int i = 0; i < sorted.candidates().size(); i++) {
                     if (legs.get(i).effort() != Effort.BLOCKED) continue;
-                    offers.remove(plan.get(i));
+                    QuoteRound.Chosen failed = sorted.candidates().get(i);
+                    remaining.removeIf(answered -> answered.source() == failed.source()
+                            && answered.quote() == failed.offer());
                     deadEnds.add(legs.get(i).how());
                 }
+                sorted = QuoteRound.sort(remaining, request.count(), scope.maxDistanceBlocks(), Set.of());
             }
         }
 
-        // 挑法和引擎一样：只看报价本身，按总代价排、凑够件数。
-        private List<Planned> choose(List<Planned> offers, int count) {
-            List<SourceQuote.Offer> chosen = AcquisitionSelector.choose(offers.stream().map(Planned::offer).toList(), count);
-            return chosen.stream()
-                    .map(offer -> offers.stream().filter(planned -> planned.offer() == offer).findFirst().orElseThrow())
-                    .toList();
-        }
-
         // 每一处拿多少：数量明确的拿它报的那么多，最后一处（或数量说不准的）拿剩下的。
-        private List<Part> legs(List<Planned> plan, ItemRequest request, SourceContext context, String what) {
+        private List<Part> legs(List<QuoteRound.Chosen> plan, ItemRequest request, SourceContext context, String what) {
             List<Part> legs = new ArrayList<>();
             int remaining = request.count();
-            for (Planned planned : plan) {
+            for (QuoteRound.Chosen planned : plan) {
                 int portion = planned.offer().countUnknown() ? remaining
                         : Math.min(remaining, planned.offer().obtainableCount());
                 legs.add(leg(planned, request.just(Math.max(1, portion)), context, what));
@@ -304,7 +297,7 @@ final class AcquisitionEstimates {
         }
 
         // 一处来源这一段：要不要出门、走多远、几秒；现做的再往下估缺的原料，整段取最重的档位。
-        private Part leg(Planned planned, ItemRequest portion, SourceContext context, String what) {
+        private Part leg(QuoteRound.Chosen planned, ItemRequest portion, SourceContext context, String what) {
             SourceQuote.Offer offer = planned.offer();
             double distance = offer.cost().distanceBlocks();
             Effort own = offer.searching() ? Effort.SEARCH : GoalEstimate.byDistance(distance);
@@ -365,9 +358,9 @@ final class AcquisitionEstimates {
         }
 
         // 挑中的几处里数量明确的一共能给几件；有一处数量说不准就当够数（开了才知道）。
-        private int covered(List<Planned> plan) {
+        private int covered(List<QuoteRound.Chosen> plan) {
             int total = 0;
-            for (Planned planned : plan) {
+            for (QuoteRound.Chosen planned : plan) {
                 if (planned.offer().countUnknown()) return Integer.MAX_VALUE;
                 total += planned.offer().obtainableCount();
             }
@@ -385,13 +378,6 @@ final class AcquisitionEstimates {
         if (offer.risk() != null && !offer.risk().isBlank()) line.append("：").append(offer.risk());
         return line.toString();
     }
-
-    /** 距离给人看的写法：整数不带小数点。 */
-    private static String blocks(double distance) {
-        return distance == Math.floor(distance) ? String.valueOf((long) distance) : String.valueOf(distance);
-    }
-
-    private record Planned(ItemSource source, SourceQuote.Offer offer) {}
 
     /** 估过的是哪一样：同样的请求、同样的限定、做法不拿来当原料的同一段外层。 */
     private record Asked(ItemRequest request, ItemAcquisition.Scope scope, List<WantedItem> outerWanted) {}

@@ -254,11 +254,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         }
     }
 
-    /** 距离给人看的写法：整数不带小数点，例如 50 而不是 50.0。 */
-    private static String blocks(Double distance) {
-        return distance == Math.floor(distance) ? String.valueOf(distance.longValue()) : distance.toString();
-    }
-
     /** 来源备料时的内部需求：在一条链里时记账口从外层接过来。 */
     @Override public Action actionFor(ItemRequest request, Permissions permissions) {
         return actionFor(request, permissions, null);
@@ -366,7 +361,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         /** 这一场没拿到的经过，失败时定下；交给外层的就是它。 */
         private Shortage shortage;
         private Stage stage = Stage.CONSULT;
-        private List<Planned> plan = List.of();
+        private List<QuoteRound.Chosen> plan = List.of();
         private Action step;
         /** 正在腾地方的那个动作；没在腾为 null。 */
         private Action room;
@@ -490,9 +485,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             int stillNeeded = target - carried;
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
                     scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool).withUnreachable(unreachable());
-            List<Planned> offers = new ArrayList<>();
-            List<SourceQuote> refusals = new ArrayList<>();
-            boolean stillLooking = false;
+            List<QuoteRound.Answered> answers = new ArrayList<>();
             for (ItemSource source : sources) {
                 if (excluded.contains(source.describe())) continue;
                 if (!scope.allows(source.via().name())) {
@@ -500,45 +493,20 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     continue;
                 }
                 // 经问价那边问：这一轮里问了谁、花了多久记在账上，问得慢时说得出是哪个来源拖的。
-                switch (priceAsks.quote(source, request.just(stillNeeded), context)) {
-                    case SourceQuote.Offer offer -> {
-                        // 报价写的来源名和来源自称的不一样时（同一来源分好几路报价），也按报价上的名字认划掉的：
-                        // 不然做砸了划掉的名字对不上，又来问价、又去跑同一趟，原地转圈。划掉的来源必在
-                        // deadEnds 里有当时的经过，这里静默跳过不丢原因。
-                        if (excluded.contains(offer.source())) continue;
-                        if (scope.maxDistanceBlocks() != null
-                                && offer.cost().distanceBlocks() > scope.maxDistanceBlocks()) {
-                            refusals.add(new SourceQuote.Unavailable(offer.source(),
-                                    "在愿意走的 " + blocks(scope.maxDistanceBlocks()) + " 格之外"));
-                        } else {
-                            offers.add(new Planned(source, offer));
-                        }
-                    }
-                    case SourceQuote.Unavailable unavailable -> refusals.add(unavailable);
-                    case SourceQuote.NeedsApproval approval -> refusals.add(approval);
-                    case SourceQuote.Unsupported unsupported -> refusals.add(unsupported);
-                    case SourceQuote.NotYet notYet -> {
-                        refusals.add(notYet);
-                        stillLooking = true;
-                    }
-                }
+                answers.add(new QuoteRound.Answered(source, priceAsks.quote(source, request.just(stillNeeded), context)));
             }
+            QuoteRound.Sorted sorted = QuoteRound.sort(answers, stillNeeded, scope.maxDistanceBlocks(), excluded);
             // 有来源还没看清现场（视野扫描还在补新方块）：先等它看完再排做法。冷索引时看得见的来源
             // 要几秒才报得出价，拿着只有记忆来源的报价先定路，会为眼前的树绕去远处的深箱。
             // 等着看清现场算真实进展（和找东西等视野看稳一样）：这一段有上限，不记的话停滞闸短的任务
             // （用东西缺一件去拿，十秒没进展就判卡住）会在看清之前先把整件事掐掉。
-            if (stillLooking && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
+            if (sorted.stillLooking() && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
                 return ActionStatus.progressed();
             }
-            // 挑路只看报价本身；来源是谁在执行时用得上，一并记着。
-            plan = AcquisitionSelector.choose(offers.stream().map(Planned::offer).toList(), stillNeeded)
-                    .stream()
-                    .map(offer -> offers.stream().filter(planned -> planned.offer() == offer).findFirst()
-                            .orElseThrow())
-                    .toList();
+            plan = sorted.candidates();
             if (plan.isEmpty()) {
                 // 等满了还在看现场、或所有来源都给不了：按各自的理由如实收场。
-                return ActionStatus.failed(noWayProblem(refusals, carried));
+                return ActionStatus.failed(noWayProblem(sorted.refusals(), carried));
             }
             consultWaits = 0;
             stage = Stage.SPACE;
@@ -688,7 +656,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             boolean leaves = (outermost == null ? scope : outermost.scope).leavesLongCooking();
             SourceContext context = new SourceContext(position.currentPosition(), permissions, scope.radiusBlocks(),
                     scope.maxDistanceBlocks(), bookedRecords(), alsoWanted.remaining(), digTool, unreachable(), leaves);
-            Planned planned = plan.getFirst();
+            QuoteRound.Chosen planned = plan.getFirst();
             int stillNeeded = target - CarriedItems.matching(backpack, offhand, request, tags);
             Optional<Action> begun = planned.source()
                     .begin(request.just(Math.max(1, stillNeeded)), planned.offer(), context);
@@ -789,7 +757,4 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return outermost == null ? unreachable : outermost.unreachable;
         }
     }
-
-    /** 计划里的一项：报价连同报价的来源，执行时按它找动手的人。 */
-    private record Planned(ItemSource source, SourceQuote.Offer offer) {}
 }
