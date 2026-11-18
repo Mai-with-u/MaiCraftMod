@@ -1,17 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.engine;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 
-import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
-import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -24,13 +23,10 @@ import org.slf4j.LoggerFactory;
  * 并记下这一刻有没有来源还没看清现场（附近的方块还没扫完）。做法排先后、挑可以互换的原料都用它；
  * 不动手、不记事实、不改世界记忆。
  *
- * <p>估算期间同一样东西同一种问法只问一遍：估的时候游戏停着，答案不会变；做法排先后时同一样原料会被
- * 好几条做法、好几层问到，问价没答出来时还要再问一遍"是不是还没看完"，不记下来要把各来源问上好几轮。
- * 估算期间每问遍一次各来源还要从这次估算的额度里扣一次，扣完了不再问、答不出价，由估算说没估完。
- *
- * <p>动手拿东西时问一轮价也这样记，但只记这一轮：引擎问遍各来源挑路是在同一刻里同步算完的，这中间背包和世界都没动；
- * 下一刻背包和世界都可能变了，要重新问。这一轮不扣额度、不限遍数，挑法和不记时一样，只是少问重复的；
- * 问得慢时记一行日志，说清要的是什么、问了几次、几次用了记下的、哪个来源拖的。
+ * <p>问价记忆只有一份，按 {@code QuoteQuestion} 一种问法一条：估算期间、动手问价那一轮里问过的价记下来，
+ * 同一种问法不再把来源问第二遍。两个使用者各自带自己的用法：估算问遍来源要扣这次估算的额度、问满了答不出价；
+ * 动手问一轮价不扣额度、不限遍数，问得慢时记账写日志。问完（那次估算结束、那一轮问完）就忘掉——
+ * 下一刻背包和世界都可能变了，答案要重新问。
  */
 final class PriceAsks {
 
@@ -40,8 +36,8 @@ final class PriceAsks {
 
     private final List<ItemSource> sources;
     private final ReadsCharacterPosition position;
-    /** 估算期间、动手问价那一轮里问过的价；都不在时为 null，每次都问遍来源。 */
-    private Map<Question, Price> remembered;
+    /** 估算期间、动手问价那一轮里记下的价，一种问法一条；不在记账期间为 null，每次都问遍来源。 */
+    private Map<QuoteQuestion, SourceQuote> remembered;
     /** 正在做的那次估算的问价额度；不在估算里时为 null，不限遍数。 */
     private QuoteBudget budget;
     /** 动手问价那一轮的账：问了谁几次、各花多久、几次用了记下的；不在那一轮里时为 null，不记账。 */
@@ -60,13 +56,23 @@ final class PriceAsks {
     record Price(Optional<Double> cost, boolean looking) {}
 
     /**
-     * 一种问法：要什么、要几件、偏好与掉落线索、饿急通报、许可、算不算现做，以及做法不拿来当原料的那段外层。
-     * 用途只是说明，不影响报价。通报不一样，容器报的价就不一样（饿急了从别人的箱子只拿刚好够的），不能借用不带通报时记下的价；
-     * 那段外层不一样，做法里剔掉的就不一样，也不能借用。
+     * 一种问法的键：带上此刻做法不拿来当原料的那段外层。问一个来源一次价的键指名来源、带上限定；
+     * 问遍各来源的那一种不带这两样。
      */
-    private record Question(WantedItem wanted, int count, List<String> prefer, DropsFrom dropsFrom,
-                            StarvingFoodReport foodReport, Permissions permissions, boolean includeMaking,
-                            List<WantedItem> outerWanted) {}
+    QuoteQuestion questionOf(ItemSource source, ItemRequest request, Permissions permissions, boolean includeMaking,
+            ItemAcquisition.Scope scope) {
+        return QuoteQuestion.ofSource(source, request, permissions, includeMaking, scope, outerWanted.get());
+    }
+
+    /** 同一种问法记下的价；不在记账期间、或这种问法还没问过，为 null。 */
+    SourceQuote cached(QuoteQuestion question) {
+        return remembered == null ? null : remembered.get(question);
+    }
+
+    /** 记下一次问价：只在估算期间、动手问价那一轮里有效，那次估算或那一轮问完就忘。 */
+    void remember(QuoteQuestion question, SourceQuote quote) {
+        if (remembered != null) remembered.put(question, quote);
+    }
 
     /**
      * 一次估算期间：问过的价记下来，问遍各来源一次从这次估算的额度里扣一次；干完就忘掉、不再扣。
@@ -123,31 +129,45 @@ final class PriceAsks {
         }
     }
 
+    /** 问一个来源一次价，同一种问法先看记下的：记过就不把来源问第二遍，没记过的问完记下来。 */
+    private SourceQuote quoteRemembered(ItemSource source, QuoteQuestion question, ItemRequest request,
+            SourceContext context) {
+        SourceQuote known = cached(question);
+        if (known != null) return known;
+        SourceQuote fresh = quote(source, request, context);
+        remember(question, fresh);
+        return fresh;
+    }
+
     /**
      * 问一遍：不算现做时跳过合成、烧炼这类要动手做的来路；只有点名才做的途径（交易）照旧不参与。
      * 还在扫描的来源给不出报价：记下"还没看完"，让问的人分辨"真没有来路"与"只是还没看完"。
+     * 最省的总代价按记下的报价现算：一种问法各来源的价都记过时，不再把来源问第二遍也算得出一模一样的结果。
      */
     Price ask(ItemRequest request, Permissions permissions, boolean includeMaking) {
-        Question question = new Question(request.wanted(), request.count(), request.prefer(), request.dropsFrom(),
-                request.foodReport(), permissions, includeMaking, outerWanted.get());
-        // 估算期间、动手问价那一轮里问过同一种问法：直接用记下的，不算又问了一遍。
-        if (remembered != null) {
-            Price known = remembered.get(question);
-            if (known != null) {
-                if (tally != null) tally.recalled();
-                return known;
-            }
-        }
-        // 这次估算的额度用完了：不再问遍来源，答不出价；额度那边数下被拒，估算据此说没估完。
-        if (budget != null && !budget.takeIngredientAsk()) return new Price(Optional.empty(), false);
-        if (tally != null) tally.askedAround();
-        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
-        Optional<Double> cheapest = Optional.empty();
-        boolean looking = false;
+        List<ItemSource> participants = new ArrayList<>();
+        List<QuoteQuestion> questions = new ArrayList<>();
+        List<WantedItem> outer = outerWanted.get();
         for (ItemSource source : sources) {
             String via = source.via().name();
             if (!ItemAcquisition.Scope.ALL.allows(via) || (!includeMaking && AcquireVia.makes(via))) continue;
-            SourceQuote quote = quote(source, request, context);
+            participants.add(source);
+            questions.add(QuoteQuestion.ofSource(source, request, permissions, includeMaking, null, outer));
+        }
+        // 这种问法各来源的价都记过：直接用记下的算，不算又问了一遍。
+        boolean allKnown = remembered != null && questions.stream().allMatch(remembered::containsKey);
+        if (!allKnown) {
+            // 这次估算的额度用完了：不再问遍来源，答不出价；额度那边数下被拒，估算据此说没估完。
+            if (budget != null && !budget.takeIngredientAsk()) return new Price(Optional.empty(), false);
+            if (tally != null) tally.askedAround();
+        } else if (tally != null) {
+            tally.recalled();
+        }
+        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
+        Optional<Double> cheapest = Optional.empty();
+        boolean looking = false;
+        for (int i = 0; i < participants.size(); i++) {
+            SourceQuote quote = quoteRemembered(participants.get(i), questions.get(i), request, context);
             if (quote instanceof SourceQuote.Offer offer) {
                 double cost = offer.cost().total() + (offer.countUnknown() ? UNKNOWN_STOCK_BLOCKS : 0);
                 if (cheapest.isEmpty() || cost < cheapest.get()) cheapest = Optional.of(cost);
@@ -155,8 +175,6 @@ final class PriceAsks {
             // 还在扫描的来源给不出报价：记下"还没看完"，不把它当成真没有来路。
             if (quote instanceof SourceQuote.NotYet) looking = true;
         }
-        Price price = new Price(cheapest, looking);
-        if (remembered != null) remembered.put(question, price);
-        return price;
+        return new Price(cheapest, looking);
     }
 }

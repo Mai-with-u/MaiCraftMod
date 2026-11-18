@@ -135,8 +135,8 @@ final class AcquisitionEstimates {
         private final Permissions permissions;
         private final Deque<String> chain = new ArrayDeque<>();
         private final Map<String, String> blockedWhy = new LinkedHashMap<>();
-        private final Map<Asked, Recalled> recalled = new HashMap<>();
-        private final Map<Quoted, SourceQuote> quotes = new HashMap<>();
+        /** 估过的记在这里（问价本身的记忆在 PriceAsks 一份）：问价的键不带来源，一样东西一种问法一条。 */
+        private final Map<QuoteQuestion, Recalled> recalled = new HashMap<>();
         /** 正在估的每一样往下问到了哪些东西、最深几层：估完并进上一样，决定记下的结果别处能不能直接用。 */
         private final Deque<Trace> traces = new ArrayDeque<>();
         /** 这次估算的问价额度：问来源、排做法时问原料价都从这里扣。 */
@@ -163,7 +163,7 @@ final class AcquisitionEstimates {
                 return Part.unknown(what, "原料链超过 " + maxDepth + " 层", false);
             }
             // 原料链别处估过同样的东西：只要这回往下走不会碰到不同的转圈与限深，结果和重估一遍一样，直接用。
-            Asked asked = new Asked(request, scope, outerWanted.get());
+            QuoteQuestion asked = QuoteQuestion.ofSource(null, request, permissions, false, scope, outerWanted.get());
             Recalled earlier = recalled.get(asked);
             if (earlier != null && earlier.fits(chain, maxDepth)) {
                 if (caller != null) caller.absorb(earlier.reaches(), earlier.height(), earlier.depthCut(), false);
@@ -200,11 +200,11 @@ final class AcquisitionEstimates {
                     .toList());
         }
 
-        // 同一来源对同一请求只问一次价；没问过的要新问时先看还剩几次，问满了返回空。
+        // 同一来源对同一请求只问一次价（记在 PriceAsks 的一份记忆里）；没问过的要新问时先看还剩几次，问满了返回空。
         private SourceQuote quote(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
                 SourceContext context) {
-            Quoted asked = new Quoted(source, request, scope, outerWanted.get());
-            SourceQuote known = quotes.get(asked);
+            QuoteQuestion question = priceAsks.questionOf(source, request, context.permissions(), false, scope);
+            SourceQuote known = priceAsks.cached(question);
             if (known != null) return known;
             if (!budget.takeQuote()) return null;
             int refusedBefore = budget.refused();
@@ -217,7 +217,7 @@ final class AcquisitionEstimates {
             // 做法类来源报价时给每条候选做法问原料价，中途把额度问光了：这次报价是拿不全的原料价排的，
             // 不作数也不记下，跟问满了一样说没估完。
             if (budget.refused() != refusedBefore) return null;
-            quotes.put(asked, fresh);
+            priceAsks.remember(question, fresh);
             return fresh;
         }
 
@@ -378,16 +378,6 @@ final class AcquisitionEstimates {
         if (offer.risk() != null && !offer.risk().isBlank()) line.append("：").append(offer.risk());
         return line.toString();
     }
-
-    /** 估过的是哪一样：同样的请求、同样的限定、做法不拿来当原料的同一段外层。 */
-    private record Asked(ItemRequest request, ItemAcquisition.Scope scope, List<WantedItem> outerWanted) {}
-
-    /**
-     * 问过的是哪一次价：同一来源、同样的请求、同样的限定（限定决定问价时的半径与距离）、
-     * 做法不拿来当原料的同一段外层（它决定做法剔掉哪几种）。
-     */
-    private record Quoted(ItemSource source, ItemRequest request, ItemAcquisition.Scope scope,
-            List<WantedItem> outerWanted) {}
 
     /**
      * 估过一样东西记下的：结果，往下问到过的东西，当时链上已有的几样里被问到的，当时链有多长，往下最深几层，
