@@ -78,8 +78,10 @@ public final class ChildTaskRunner {
             child.start(context);
         } catch (RuntimeException exception) {
             // 启动就出错：按程序错误当场结算，调用方在 begin 之后看 finished() 拿结果，决定下一步。
+            // 结论句带上原因（异常类名与消息）：转述层只复述结论句，不带上它上层就只知道出错了、不知道为什么。
             LOG.warn("子任务启动失败：{}", child.describe(), exception);
-            settleWithProblem("子任务启动失败", internalError(exception));
+            Problem problem = internalError(exception);
+            settleWithProblem("子任务启动失败：" + problem.headline(), problem);
         }
     }
 
@@ -91,8 +93,10 @@ public final class ChildTaskRunner {
             tickResult = child.tick(context);
         } catch (RuntimeException exception) {
             // 子任务抛异常不连累父任务一起崩：转成 INTERNAL_ERROR 问题，已经发生的事照样交代。
+            // 结论句带上原因（异常类名与消息）：转述层只复述结论句，不带上它上层就只知道出错了、不知道为什么。
             LOG.warn("子任务推进时出错：{}", child.describe(), exception);
-            settleWithProblem("子任务推进时出错", internalError(exception));
+            Problem problem = internalError(exception);
+            settleWithProblem("子任务推进时出错：" + problem.headline(), problem);
             return TickResult.finished(result);
         }
         if (tickResult instanceof TickResult.Finished finished) {

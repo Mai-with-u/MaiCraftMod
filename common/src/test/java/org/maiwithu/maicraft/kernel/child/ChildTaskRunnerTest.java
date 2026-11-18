@@ -236,6 +236,8 @@ class ChildTaskRunnerTest {
         TaskResult result = runner.result();
         assertEquals(TaskResult.Status.FAILED, result.status());
         assertEquals(Problem.Kind.INTERNAL_ERROR, result.problem().kind());
+        assertTrue(result.summary().contains("没有登记对应的任务"),
+                "结论句要带上异常消息，只说启动失败上层不知道为什么：" + result.summary());
 
         // 推进到一半抛异常同样转成程序错误，父任务拿到的是明确的结算，不是异常。
         ScriptedChild brokenTick = new ScriptedChild(ScriptedChild.running());
@@ -245,6 +247,9 @@ class ChildTaskRunnerTest {
         TaskResult midResult = resultOf(midRun.tick(TICK));
         assertEquals(TaskResult.Status.FAILED, midResult.status());
         assertEquals(Problem.Kind.INTERNAL_ERROR, midResult.problem().kind());
+        assertTrue(midResult.summary().contains("ArithmeticException")
+                        && midResult.summary().contains("除数不能为零"),
+                "结论句要带上异常类名与消息，只说推进时出错上层不知道为什么：" + midResult.summary());
         assertEquals(1, brokenTick.closes, "异常收场也要给子任务一次收尾机会");
         assertTrue(midRun.finished());
     }
