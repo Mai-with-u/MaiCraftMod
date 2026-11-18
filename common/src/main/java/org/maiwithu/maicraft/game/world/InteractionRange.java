@@ -21,6 +21,12 @@ public final class InteractionRange {
     /** 协商了角色距离容差的新服务端给角色账号放行的总距离余量（格）。类别：游戏事实。 */
     public static final double CHARACTER_SERVER_PADDING = CharacterReachTolerance.CHARACTER_PADDING;
 
+    /** 原版属性默认的方块交互距离（格）：读不到属性的替身现场用它兜底。类别：游戏事实。 */
+    public static final double VANILLA_DEFAULT_BLOCK_REACH = 4.5;
+
+    /** 原版属性默认的实体交互距离（格）。类别：游戏事实。 */
+    public static final double VANILLA_DEFAULT_ENTITY_REACH = 3.0;
+
     /** 床的交互距离由服务端告诉客户端；这个接口就是读取它的出口。 */
     public interface ServerBedDistance {
         /** 角色与床之间允许的最大距离（格）。 */
@@ -53,5 +59,13 @@ public final class InteractionRange {
     /** 近战攻击实体的触及距离：原版生存模式为 3 格，同样读属性；别的玩家的也读得到（属性同步给周围的人）。 */
     public static double entityReach(Player player) {
         return player.getAttributeValue(Attributes.ENTITY_INTERACTION_RANGE);
+    }
+
+    /**
+     * 到站位后直发包的方块触及上限：方块交互距离加服务端放行余量。
+     * 右键的精确命中构造与挖掘的直发命中共用这一份，不各算各的。
+     */
+    public static double directBlockPacketReach(Player player, double serverPadding) {
+        return blockReach(player) + serverPadding;
     }
 }

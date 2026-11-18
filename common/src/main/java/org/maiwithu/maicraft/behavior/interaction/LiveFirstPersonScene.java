@@ -120,7 +120,7 @@ public final class LiveFirstPersonScene implements FirstPersonScene {
 
     @Override public DirectBlockAim directBlockAim(BlockPos target, Direction face, AABB part) {
         double visibleReach = InteractionRange.blockReach(player);
-        double maxReach = visibleReach + serverReachPadding;
+        double maxReach = InteractionRange.directBlockPacketReach(player, serverReachPadding);
         // 若真实可见面存在，镜头转向可见点，发包点夹进方块中心安全范围；被遮挡时构造直发命中。
         BlockHitResult visible = face != null ? visibleFaceHit(target, face)
                 : part != null ? visiblePartHit(target, part)

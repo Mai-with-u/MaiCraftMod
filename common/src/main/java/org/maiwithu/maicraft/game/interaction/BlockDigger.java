@@ -601,7 +601,7 @@ public final class BlockDigger {
     // 真实可见面被草叶或矿脉凸角挡住、或角色停在容差带内时，在服务端放行距离内按目标格与面直接构造合法挖掘命中。
     private BlockHitResult directBreakHit(BlockPos target) {
         double visibleReach = InteractionRange.blockReach(player);
-        double maxReach = visibleReach + sender.serverReachPadding();
+        double maxReach = InteractionRange.directBlockPacketReach(player, sender.serverReachPadding());
         return FirstPersonInteractionTargeting.directBlockHit(
                 player.level(), player, player.getEyePosition(), target,
                 visibleReach, maxReach, requiredFace, null, preferTopFace);

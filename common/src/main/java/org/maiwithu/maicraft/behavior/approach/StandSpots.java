@@ -300,6 +300,9 @@ public final class StandSpots {
         }
         Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + reach.eyeHeight(), feet.getZ() + 0.5);
         // 还没走过去：按格子中心估，方块与实体扣掉停步内缩余量，床距留出"停在格子哪一边都够得着"的余量。
+        // 够得着（距离尺）与看得见（射线尺）是两把各自的尺：距离尺只量眼睛到目标边缘的直线距离，
+        // 射线尺量沿视线真的能点中目标的可点面；一个站位要两把尺都过才收，只过距离尺的站位
+        // 可见的那一面可能在够不着的地方，出手时会报"被挡住"。
         String tooFar = reachFailure(target, reach, Vec3.atBottomCenterOf(feet), BED_CELL_SLACK, -stopSlack,
                 false, eye);
         if (tooFar != null) {
@@ -391,6 +394,11 @@ public final class StandSpots {
         };
     }
 
+    /**
+     * 够得着的距离尺：眼睛到目标包围盒最近点的直线距离与上限比。
+     * 与"看得见"的射线尺是两把各自的尺（射线尺在 {@code LiveApproachWorld.visibleFrom}，
+     * 沿视线真的点中目标才过）；这里的距离尺回答"服务端的距离判定放不放行"。
+     */
     private static boolean outOfReach(AABB bounds, Vec3 eye, double limit, boolean strictLess) {
         double distance = eye.distanceTo(nearestPoint(bounds, eye));
         return strictLess ? distance >= limit : distance > limit;

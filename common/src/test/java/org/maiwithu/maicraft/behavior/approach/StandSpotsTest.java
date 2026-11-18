@@ -133,6 +133,19 @@ class StandSpotsTest {
     }
 
     @Test
+    void 够得着与看得见是两把尺_各自一票都不过不收() {
+        // 距离尺先卡：交互距离缩到几乎为零、视线却通着（替身默认看得见），报的是"够不着"而不是"看不见"。
+        ReachRules 近视 = new ReachRules(0.3, 3.0, 3, 1.62);
+        StandSpots.Ranking 远但通视 = StandSpots.find(
+                ApproachTarget.ofBlock(new BlockPos(3, 64, 0)), 近视, world, walking, guarded);
+        assertEquals("够不着", failureAt(远但通视, new BlockPos(0, 64, 0)));
+        // 射线尺再卡：距离在交互距离内、视线被墙挡住，报的是"看不见"。
+        world.hidden = (eye, target) -> eye.x() < 1.5;
+        StandSpots.Ranking 近但被挡 = find(ApproachTarget.ofBlock(new BlockPos(3, 64, 0)));
+        assertEquals("看不见", failureAt(近但被挡, new BlockPos(0, 64, 0)));
+    }
+
+    @Test
     void 床按服务端距离分轴卡() {
         ApproachTarget bed = ApproachTarget.ofBed(new BlockPos(0, 60, 0));
         StandSpots.Ranking ranking = find(bed);

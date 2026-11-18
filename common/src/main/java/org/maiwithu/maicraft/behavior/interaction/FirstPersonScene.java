@@ -104,7 +104,8 @@ public interface FirstPersonScene {
             return new DirectBlockAim(visible.getLocation(),
                     FirstPersonInteractionTargeting.clampHitForPacket(visible, target));
         }
-        double maxReach = 4.5 + InteractionRange.VANILLA_SERVER_PADDING;
+        // 替身现场读不到玩家属性：按原版属性默认值算直发包上限，数值与真实现场同源。
+        double maxReach = InteractionRange.VANILLA_DEFAULT_BLOCK_REACH + InteractionRange.VANILLA_SERVER_PADDING;
         BlockHitResult constructed = FirstPersonInteractionTargeting.constructDirectHit(
                 eyePosition(), target, null, face, part, false, maxReach);
         return constructed == null ? null : new DirectBlockAim(constructed.getLocation(), constructed);
@@ -112,7 +113,7 @@ public interface FirstPersonScene {
 
     /** 实体是否在服务端放行的交互距离之内（含握手确认的角色距离容差）。 */
     default boolean entityWithinDirectReach(Entity entity) {
-        double maxReach = 3.0 + InteractionRange.VANILLA_SERVER_PADDING;
+        double maxReach = InteractionRange.VANILLA_DEFAULT_ENTITY_REACH + InteractionRange.VANILLA_SERVER_PADDING;
         return entity.getBoundingBox().distanceToSqr(eyePosition()) < maxReach * maxReach;
     }
 
