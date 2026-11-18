@@ -231,29 +231,20 @@ public final class WorldScope {
             InstanceConfig instanceConfig, Path configDirectory, CompatRegistry compat, SurvivalWiring survivalWiring,
             FollowLighting followLighting, ShowsPreview preview,
             ItemsInUse itemsInUse, ReservedItems reserved, DropConfirmations dropConfirmations, FurnaceFuels furnaceFuels) {
-        // 现场原料按组拆开用：各组里是什么、为什么归一组，看各自的类注释。
+        // 现场原料按组拆开用，只用一次的当场从组里取。
         BlockScanService blockScans = observation.blockScans();
-        SubtitleFeed subtitles = observation.subtitles();
-        ReadsLightLevels lightLevels = observation.lightLevels();
-        LightingWorld lightingWorld = observation.lightingWorld();
         Interactions interactions = interactionEntries.interactions();
-        UseKeyProjection useKeyProjection = interactionEntries.useKeyProjection();
         InteractionSender interactionSender = interactionEntries.interactionSender();
         MenuActions menuActions = interactionEntries.menuActions();
         LiveDigToolRule digTools = interactionEntries.digTools();
-        WalkTo walksOnFoot = walks.walksOnFoot();
-        BaritoneInternals walkInternals = walks.walkInternals();
-        UnreachableFromHere unreachable = walks.unreachable();
         TaskEventSink events = eventFeeds.events();
-        Timers timers = eventFeeds.timers();
-        ChatEventLog chatEvents = eventFeeds.chatEvents();
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
         this.compat = Objects.requireNonNull(compat, "compat");
         StateIdentity identity = new StateIdentity(save.key(), save.directory(),
                 save.directory().resolve(DocumentStore.FILE_NAME), "state");
         this.blockScans = Objects.requireNonNull(blockScans, "blockScans");
-        this.subtitles = Objects.requireNonNull(subtitles, "subtitles");
+        this.subtitles = Objects.requireNonNull(observation.subtitles(), "subtitles");
         // 世界记忆与目标运行存在同一个文档库里，按世界身份分开；目标读回时按能力清单的参数规格整理参数。
         DocumentStore documents = new DocumentStore(identity.databaseFile());
         // 旧版本按存档目录或服务器地址存的记忆：第一次用世界编号进这个世界时决定搬不搬，先于读记忆、读目标。
@@ -307,12 +298,15 @@ public final class WorldScope {
         this.worldAbilities = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
                 characterReads(now, suicideWayOut),
                 new ItemReads(LiveCarryReads.itemTags(), LiveCarryReads.itemRegistry(), new RegistryToolRequirements(), furnaceFuels),
-                new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain, campPitSight),
+                new WorldReads(scene, memory, blockScans, kinds, observation.lightLevels(), observation.lightingWorld(),
+                        keepInventory, nonverbal, generatedTerrain, campPitSight),
                 senses,
-                new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
-                new Travel(walksOnFoot, walkInternals, new ClientTravelWorldView(now), travelProgress, unreachable),
+                new Hands(interactions, interactionEntries.useKeyProjection(), diggings::get,
+                        new InputDriver(playerControl), digTools),
+                new Travel(walks.walksOnFoot(), walks.walkInternals(), new ClientTravelWorldView(now),
+                        travelProgress, walks.unreachable()),
                 new Guards(protection, creatures, trusted, othersNotice, rareLootNotice),
-                channels(minecraft, now, events, timers, session, chatEvents),
+                channels(minecraft, now, events, eventFeeds.timers(), session, eventFeeds.chatEvents()),
                 new Stores(documents, identity.key(), configDirectory),
                 compat, survivalWiring, followLighting, preview, itemsInUse, reserved, dropConfirmations, instanceConfig, sparPartner), abilities);
     }

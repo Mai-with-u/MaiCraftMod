@@ -124,7 +124,7 @@ class AssemblyTest {
 
     @Test
     void survivalNeedsAssembledInUrgencyOrder() {
-        // 控制循环的生存需求清单照生产走 SurvivalNeedCatalog 同一条装配：
+        // 控制循环的生存需求清单照生产走 SurvivalNeedCatalog 同一个入口创建：
         // 必须立刻处理的先登记，同样急时先插进来；顺序接错了，被埋挖顶、出岩浆这些立刻的急事
         // 就会排在吃饭、太暗这些找空当的事后面。
         List<String> names = OfflineCatalog.controlLoop(tempDir).needs().stream()

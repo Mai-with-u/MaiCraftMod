@@ -478,7 +478,7 @@ public final class Bootstrap {
             // 被拍了回头看：看肢体动作的那一份在伤害包接好时才建，用的时候再取。
             lookBack = new LookBackNeed(PokesFelt.later(() -> nonverbal));
             controlLoop = SurvivalNeedCatalog.controlLoop(taskEvents, deathDecisions,
-                    new SurvivalHands(interactionSender, menuActions, interactions, diggings, hands),
+                    new SurvivalHands(interactions, diggings, hands),
                     new SurvivalBattle(combatSenses, walksOnFoot, ranged,
                             // 回去捡尸体用和采集、打猎同一套捡掉落物；自卫撤离往当前世界记忆里记过的"家"那一侧跑。
                             new ClientDropPickup(now, walksOnFoot, dropConfirmations),
@@ -487,15 +487,11 @@ public final class Bootstrap {
                             uuid -> worldScope[0] != null && worldScope[0].trustedPlayers().includes(uuid.toString())),
                     new SurvivalReads(foods, lightLevels, protection,
                             // 岩浆里垫不垫落脚看主目标许可的方块档位；手上没有目标时按默认许可。
-                            () -> goals == null ? Permissions.DEFAULT.changeBlocks()
-                                    : goals.mainGoal().map(run -> run.goal().permissions().changeBlocks())
-                                            .orElse(Permissions.DEFAULT.changeBlocks())),
+                            () -> goals == null || goals.mainGoal().isEmpty() ? Permissions.DEFAULT.changeBlocks()
+                                    : goals.mainGoal().orElseThrow().goal().permissions().changeBlocks()),
                     foodMoves,
-                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停），刹不住再就地找落点放东西接住；
-                    // 身上没带货时从随身无线终端现取一件（AE2）。
-                    FallRescues.withBrakes(() -> compat.fallBrakes()),
-                    () -> compat.landingMaterials(),
-                    kept, survivalWiring, followLighting, lookBack);
+                    // 意外往下掉：先问联动的刹车（穿着有气的喷气背包开悬停）刹不住再就地接住；身上没带货时从随身无线终端现取一件（AE2）。
+                    FallRescues.withBrakes(() -> compat.fallBrakes()), () -> compat.landingMaterials(), kept, survivalWiring, followLighting, lookBack);
         }
 
         /**
@@ -616,8 +612,8 @@ public final class Bootstrap {
                         new WalkSources(walksOnFoot, walks, new UnreachableFromHere(this::mainGoalRun)),
                         // 事件出口、计时表与聊天事件流：目标处境与生存需求的事件都从这里出去。
                         new EventFeeds(ActionScopedEventSink.of(taskEvents, () -> goals), timers, chatEvents),
-                        combatSenses, NonverbalExchange.live(() -> nonverbal, lookBack), sparPartner,
-                        instanceConfig, loader.configDirectory(), compat, survivalWiring,
+                        combatSenses, NonverbalExchange.live(() -> nonverbal, lookBack), sparPartner, instanceConfig,
+                        loader.configDirectory(), compat, survivalWiring,
                         followLighting, blueprintOverlay, itemsInUse, reserved, dropConfirmations, furnaceFuels);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
