@@ -2,16 +2,29 @@
 package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
+import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -20,26 +33,55 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
- * 往 ME 网络里存东西的生产实现：挑一台终端（在身边时身上的无线终端优先，没带或点了地方就找装着的）→
+ * 往 ME 网络里存东西与查看终端存货的生产实现：挑一台终端（在身边时身上的无线终端优先，没带或点了地方就找装着的）→
  * 拿出无线终端右键打开，或走过去点在装着的终端面板上 → 核对是这台的界面、等连接状态同步过来
- * → 把要存的几样东西一样样存进网络 → 都存完才关上，不每样开关一次。
+ * → 把要存的几样东西一样样存进网络 → 存完刷新网络存货记忆再关上，不每样开关一次。
  *
- * <p>一次存东西的会话拆成两段协作：「打开与核对」与取货共用同一份 {@link TerminalSync}（只等连接状态），
- * 「逐样存」{@link StoreMoves} 自己管一格格快速移动、凑尾数与网络放不下时点回背包。
- * 每一下按背包加光标里那种东西的合计少了几件结算，少了几件才记"存进了网络"几件；没收下的照实点回背包，如实收场。
- * 没连上网络（超出访问点范围、没电）照抄界面上的原因收场并记下这台没连上，下次挑终端排后面；
- * 腾地方改走箱子或丢。认终端、开终端和取货是同一份（{@link NearbyTerminals}）。
+ * <p>同时把最近五分钟内点开终端看到的网络存货快照公开给世界记忆观察，并为 {@code use} 提供线缆格终端面板对准与
+ * 终端界面网络存货查看器，认终端、开终端和取货共用同一份（{@link NearbyTerminals}）。
  */
 public final class MenuNetworkStores implements NetworkStorage {
 
+    /** 核对一台记在记忆里的固定终端此刻在世界里还在不在：只在同维度且所在区块已加载时才能断定已被拆掉。 */
+    enum TerminalPresence { PRESENT, GONE_IN_LOADED_CHUNK, UNCHECKED }
+
+    @FunctionalInterface
+    interface LoadedTerminalCheck {
+        TerminalPresence check(String dimension, BlockPos block, Direction side);
+    }
+
     private final Ae2Compat compat;
+    private final PlayerServices services;
+    private final SeenNetworkStock seen;
+    private final Supplier<Instant> clock;
     /** 认终端、到终端跟前：和取货共用一套认法。 */
     private final NearbyTerminals terminals;
+    private final LoadedTerminalCheck terminalCheck;
 
     public MenuNetworkStores(Ae2Compat compat, PlayerServices services, SeenNetworkStock seen,
             Supplier<Instant> clock) {
+        this(compat, services, seen, clock, null);
+    }
+
+    MenuNetworkStores(Ae2Compat compat, PlayerServices services, SeenNetworkStock seen,
+            Supplier<Instant> clock, LoadedTerminalCheck customCheck) {
         this.compat = Objects.requireNonNull(compat, "compat");
+        this.services = Objects.requireNonNull(services, "services");
+        this.seen = Objects.requireNonNull(seen, "seen");
+        this.clock = Objects.requireNonNull(clock, "clock");
         this.terminals = new NearbyTerminals(compat, services, seen, clock);
+        this.terminalCheck = customCheck != null ? customCheck : this::checkInLoadedLevel;
+    }
+
+    private TerminalPresence checkInLoadedLevel(String dimension, BlockPos block, Direction side) {
+        PlayerContext player = services.context().get();
+        if (player == null || player.level() == null) return TerminalPresence.UNCHECKED;
+        ClientLevel level = player.level();
+        if (!level.dimension().location().toString().equals(dimension) || !level.isLoaded(block)) {
+            return TerminalPresence.UNCHECKED;
+        }
+        return compat.terminalStillThere(level, block, side)
+                ? TerminalPresence.PRESENT : TerminalPresence.GONE_IN_LOADED_CHUNK;
     }
 
     @Override public boolean reachable(TerminalSearch search) {
@@ -51,7 +93,132 @@ public final class MenuNetworkStores implements NetworkStorage {
         if (stacks.isEmpty()) return new TerminalPick.NotFound("没有要存的东西");
         Picked picked = pick(search);
         return picked.access() == null ? new TerminalPick.NotFound(picked.reason())
-                : new TerminalPick.Chosen(new Storing(picked.access(), stacks, purpose, records));
+                : new TerminalPick.Chosen(new Storing(new TerminalSession(picked.access(), compat), stacks,
+                        purpose, records));
+    }
+
+    // 供离线测试直接喂入带替身界面的 TerminalSession 验证完整存入与关界面前刷新记忆。
+    Action storingWithSession(TerminalSession session, List<BackpackStack> stacks, String purpose,
+            TaskRecords records) {
+        return new Storing(session, stacks, purpose, records);
+    }
+
+    @Override public List<RememberedNetwork> rememberedNetworks() {
+        Instant now = clock.get();
+        List<RememberedNetwork> result = new ArrayList<>();
+        seen.activeWireless(now).ifPresent(wireless -> {
+            SeenNetworkStock.Sighting sighting = wireless.sighting();
+            result.add(RememberedNetwork.wireless(wireless.terminalId(), sighting.linked(), sighting.complete(),
+                    sighting.storedByItem(), sighting.craftableItems(), sighting.seenAt()));
+        });
+        for (SeenNetworkStock.PlacedSighting placed : seen.activeSightings(now)) {
+            if (terminalCheck.check(placed.dimension(), placed.block(), placed.side())
+                    == TerminalPresence.GONE_IN_LOADED_CHUNK) {
+                // 所在区块已加载且这格这面的终端已被拆掉：当场从记忆中淘汰，未加载区块与跨维度保留不动。
+                seen.forget(placed.dimension(), placed.block(), placed.side());
+                continue;
+            }
+            SeenNetworkStock.Sighting sighting = placed.sighting();
+            BlockPos block = placed.block();
+            result.add(RememberedNetwork.placed(placed.terminalId(),
+                    new WorldPosition(block.getX(), block.getY(), block.getZ(), placed.dimension()),
+                    placed.side(), sighting.linked(), sighting.complete(), sighting.storedByItem(),
+                    sighting.craftableItems(), sighting.seenAt()));
+        }
+        return List.copyOf(result);
+    }
+
+    @Override public Optional<AABB> terminalPanelAt(BlockPos cell, Direction preferredSide) {
+        if (cell == null) return Optional.empty();
+        PlayerContext player = services.context().get();
+        if (player == null || player.level() == null || !player.level().isLoaded(cell)) {
+            return Optional.empty();
+        }
+        Vec3 eyePos = player.localPlayer() == null ? null : player.localPlayer().getEyePosition();
+        return choosePanelTerminal(compat.terminalsNear(player.level(), cell, 0), cell, preferredSide, eyePos)
+                .map(Ae2Terminals.Terminal::panel);
+    }
+
+    /**
+     * 从一格线缆上的终端列表里挑出要对准的那块面板：指定了 preferredSide 时匹配装在那一面的终端；
+     * 未指定时若同格装了多台终端，挑面板中心离角色眼睛最近的那一台。
+     */
+    static Optional<Ae2Terminals.Terminal> choosePanelTerminal(List<Ae2Terminals.Terminal> candidates,
+            BlockPos cell, Direction preferredSide, Vec3 eyePos) {
+        List<Ae2Terminals.Terminal> onCell = candidates.stream()
+                .filter(terminal -> terminal.block().equals(cell))
+                .toList();
+        if (onCell.isEmpty()) return Optional.empty();
+        if (preferredSide != null) {
+            return onCell.stream().filter(terminal -> terminal.side() == preferredSide).findFirst();
+        }
+        if (onCell.size() == 1 || eyePos == null) {
+            return Optional.of(onCell.getFirst());
+        }
+        return onCell.stream()
+                .min(Comparator.comparingDouble(terminal -> terminal.panel().getCenter().distanceToSqr(eyePos)));
+    }
+
+    @Override public Optional<TerminalLook> openTerminalLook(BlockPos clickedCell, Direction clickedFace) {
+        PlayerContext current = services.context().get();
+        if (current == null || current.localPlayer() == null || current.level() == null) {
+            return Optional.empty();
+        }
+        LocalPlayer player = current.localPlayer();
+        AbstractContainerMenu opened = player.containerMenu;
+        if (opened == null || opened == player.inventoryMenu) {
+            return Optional.empty();
+        }
+        if (compat.wirelessMenu(opened)) {
+            String wirelessId = resolveWirelessItemId(player);
+            ClientMenuChannel channel = ClientMenuChannel.claimCurrent(services.context());
+            return channel == null ? Optional.empty() : Optional.of(new TerminalMenuLook(
+                    channel, () -> currentRawMenu(), compat,
+                    (linked, stock, complete) -> seen.sawWireless(wirelessId, linked, stock, clock.get(), complete)));
+        }
+        ClientLevel level = current.level();
+        if (clickedCell == null || !level.isLoaded(clickedCell)) {
+            return Optional.empty();
+        }
+        Optional<Ae2Terminals.Terminal> matched = matchingPlacedTerminal(level, opened, clickedCell, clickedFace);
+        if (matched.isEmpty()) {
+            return Optional.empty();
+        }
+        String dimension = level.dimension().location().toString();
+        Ae2Terminals.Terminal terminal = matched.get();
+        ClientMenuChannel channel = ClientMenuChannel.claimCurrent(services.context());
+        return channel == null ? Optional.empty() : Optional.of(new TerminalMenuLook(
+                channel, () -> currentRawMenu(), compat,
+                (linked, stock, complete) -> seen.saw(dimension, terminal, linked, stock, clock.get(), complete)));
+    }
+
+    private Optional<Ae2Terminals.Terminal> matchingPlacedTerminal(ClientLevel level, AbstractContainerMenu raw,
+            BlockPos clickedCell, Direction clickedFace) {
+        List<Ae2Terminals.Terminal> belonging = compat.terminalsNear(level, clickedCell, 0).stream()
+                .filter(terminal -> terminal.block().equals(clickedCell))
+                .filter(terminal -> compat.menuBelongsTo(raw, level, terminal.block(), terminal.side()))
+                .toList();
+        if (belonging.isEmpty()) return Optional.empty();
+        if (clickedFace != null) {
+            Optional<Ae2Terminals.Terminal> onFace = belonging.stream()
+                    .filter(terminal -> terminal.side() == clickedFace)
+                    .findFirst();
+            if (onFace.isPresent()) return onFace;
+        }
+        return Optional.of(belonging.getFirst());
+    }
+
+    private String resolveWirelessItemId(LocalPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        if (!mainHand.isEmpty() && compat.wirelessTerminal(mainHand)) {
+            return BuiltInRegistries.ITEM.getKey(mainHand.getItem()).toString();
+        }
+        return compat.carriedWirelessTerminal(player).orElse(SeenNetworkStock.DEFAULT_WIRELESS_TERMINAL);
+    }
+
+    private AbstractContainerMenu currentRawMenu() {
+        PlayerContext current = services.context().get();
+        return current == null || current.localPlayer() == null ? null : current.localPlayer().containerMenu;
     }
 
     /** 挑终端的结果：挑到了 access 不为空；挑不到 reason 写明身上和附近各是什么情况。 */
@@ -82,7 +249,7 @@ public final class MenuNetworkStores implements NetworkStorage {
         return new Picked(terminals.placed(candidate.terminal(), dimension, search.permissions()), null);
     }
 
-    /** 存几堆进网络的会话：打开 → 等连上 → 一样样一格格快速移动 → 关上，跨刻推进。 */
+    /** 存几堆进网络的会话：打开 → 等连上 → 一样样一格格快速移动 → 刷新网络存货记忆再关上，跨刻推进。 */
     private final class Storing implements Action {
 
         /** 存东西会话的先后顺序。 */
@@ -103,8 +270,8 @@ public final class MenuNetworkStores implements NetworkStorage {
         /** 收场的原因：一件都没存进时按它失败；存进了就算做完。 */
         private Problem stopReason;
 
-        Storing(TerminalAccess access, List<BackpackStack> stacks, String purpose, TaskRecords records) {
-            this.session = new TerminalSession(access, compat);
+        Storing(TerminalSession session, List<BackpackStack> stacks, String purpose, TaskRecords records) {
+            this.session = Objects.requireNonNull(session, "session");
             this.sync = TerminalSync.waitingForLink(session);
             this.stacks = List.copyOf(stacks);
             this.purpose = purpose;
@@ -152,13 +319,27 @@ public final class MenuNetworkStores implements NetworkStorage {
             return stopNow(((TerminalTurn.WrapUp) turn).reason());
         }
 
-        // 关界面：打开者负责关闭；关不上照常收场。
+        // 关界面：发起关闭请求前趁原始菜单还开着，把刚存完后的网络存货记进记忆；关不上照常收场。
         private ActionStatus closeMenu(TickContext tick) {
-            if (closing == null) closing = session.menu().closing();
+            if (closing == null) {
+                rememberStockBeforeClose(tick.player());
+                closing = session.menu().closing();
+            }
             ActionStatus status = closing.tick(tick);
             if (status instanceof ActionStatus.Running) return status;
             stage = Stage.DONE;
             return result();
+        }
+
+        private void rememberStockBeforeClose(PlayerContext player) {
+            if (session.menu() == null || session.reading().isEmpty()) return;
+            AbstractContainerMenu raw = session.rawPage(player);
+            if (raw == null) return;
+            Optional<Boolean> linked = compat.networkLinked(raw);
+            Optional<List<Ae2TerminalMenu.StockEntry>> stock = compat.networkStock(raw);
+            if (linked.isPresent() && stock.isPresent()) {
+                session.access().remember(linked.get(), stock.get(), false);
+            }
         }
 
         // 收场：存进了就算做完；一件都没存进就按收场原因失败，腾地方改走别的路。

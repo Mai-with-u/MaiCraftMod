@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat;
 
-import java.util.Objects;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -35,6 +40,36 @@ public final class CompatNetworkStorage implements NetworkStorage {
                 new TerminalPick.NotFound(module.name() + " 的联动用不了，存不进网络"));
         return pick instanceof TerminalPick.Chosen chosen
                 ? new TerminalPick.Chosen(CompatAction.of(module, chosen.storing())) : pick;
+    }
+
+    // 读最近记下的网络存货快照：模组已停用或接口对不上时返回空表。
+    @Override public List<RememberedNetwork> rememberedNetworks() {
+        return ask(storage::rememberedNetworks, List.of());
+    }
+
+    // 找这一格装着的终端面板包围盒：停用或接口对不上时按没有面板处理，退回普通方块点击。
+    @Override public Optional<AABB> terminalPanelAt(BlockPos cell, Direction preferredSide) {
+        return ask(() -> storage.terminalPanelAt(cell, preferredSide), Optional.empty());
+    }
+
+    // 认领刚点开的终端界面并包装查看动作：推进中模组停用或报错时由包装层按不支持安全收尾。
+    @Override public Optional<TerminalLook> openTerminalLook(BlockPos clickedCell, Direction clickedFace) {
+        Optional<TerminalLook> opened = ask(() -> storage.openTerminalLook(clickedCell, clickedFace), Optional.empty());
+        return opened.map(look -> new Looking(module, look));
+    }
+
+    /** 终端界面查看动作的联动保护壳：动作结束后原样交出动作自己记下的网络摘要。 */
+    private static final class Looking extends CompatAction implements TerminalLook {
+        private final TerminalLook look;
+
+        Looking(CompatModule module, TerminalLook look) {
+            super(module, look);
+            this.look = look;
+        }
+
+        @Override public Optional<String> summary() {
+            return look.summary();
+        }
     }
 
     // 问一句：停用了或对不上时给"用不了"时的那个答案。

@@ -219,7 +219,7 @@ final class NearbyTerminals {
         }
 
         @Override public void remember(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, boolean complete) {
-            seen.sawWireless(linked, stock, clock.get(), complete);
+            seen.sawWireless(itemId, linked, stock, clock.get(), complete);
         }
     }
 }

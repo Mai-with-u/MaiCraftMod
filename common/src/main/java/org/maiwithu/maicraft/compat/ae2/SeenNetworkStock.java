@@ -3,14 +3,14 @@ package org.maiwithu.maicraft.compat.ae2;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.HashSet;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
@@ -29,10 +29,12 @@ public final class SeenNetworkStock {
 
     /** 记下的网络存货多久内还算数。AE 网络里的东西一直在变，五分钟前看到的只能当大概；类别：玩家常识。 */
     public static final Duration FRESH_FOR = Duration.ofMinutes(5);
+    /** 没单独指明是哪件无线终端物品时的默认物品注册 ID。 */
+    public static final String DEFAULT_WIRELESS_TERMINAL = "ae2:wireless_terminal";
 
-    private final Map<TerminalAt, Sighting> sightings = new HashMap<>();
+    private final Map<TerminalAt, PlacedSighting> sightings = new LinkedHashMap<>();
     /** 身上的无线终端上次打开时看到的样子：无线终端连的就是绑定的那张网，不分在哪儿打开。 */
-    private Sighting wireless;
+    private WirelessSighting wireless;
 
     /**
      * 点开一台终端、网络存货同步过来之后记一笔，盖掉这台终端以前的记录。
@@ -51,23 +53,52 @@ public final class SeenNetworkStock {
     /** @param complete 存货表已经同步齐（连着几刻不再变）；只看到第一包时为 false */
     public void saw(String dimension, Ae2Terminals.Terminal terminal, boolean linked,
             List<Ae2TerminalMenu.StockEntry> stock, Instant when, boolean complete) {
-        sightings.put(TerminalAt.of(dimension, terminal), sighting(linked, stock, when, complete));
+        TerminalAt key = TerminalAt.of(dimension, terminal);
+        sightings.put(key, new PlacedSighting(dimension, terminal.block(), terminal.side(), terminal.partId(),
+                sighting(linked, stock, when, complete)));
     }
 
     /** 打开身上的无线终端、存货同步过来之后记一笔，盖掉以前的记录。 */
     public void sawWireless(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when) {
-        sawWireless(linked, stock, when, true);
+        sawWireless(DEFAULT_WIRELESS_TERMINAL, linked, stock, when, true);
     }
 
     /** @param complete 存货表已经同步齐；只看到第一包时为 false */
     public void sawWireless(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when, boolean complete) {
-        wireless = sighting(linked, stock, when, complete);
+        sawWireless(DEFAULT_WIRELESS_TERMINAL, linked, stock, when, complete);
+    }
+
+    /** 记录指定物品 ID 的随身无线终端打开后看到的连接状态与网络存货。 */
+    public void sawWireless(String terminalId, boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when,
+            boolean complete) {
+        String resolvedId = terminalId == null || terminalId.isBlank() ? DEFAULT_WIRELESS_TERMINAL : terminalId;
+        wireless = new WirelessSighting(resolvedId, sighting(linked, stock, when, complete));
     }
 
     /** 身上的无线终端上次打开时的样子；没开过或已经过了 {@link #FRESH_FOR} 都给空。 */
     public Optional<Sighting> lastSeenWireless(Instant now) {
-        if (wireless == null || wireless.seenAt().plus(FRESH_FOR).isBefore(now)) return Optional.empty();
+        return activeWireless(now).map(WirelessSighting::sighting);
+    }
+
+    /** 身上的无线终端未过期的存货快照（含无线终端物品 ID）；没开过或过了 {@link #FRESH_FOR} 给空。 */
+    public Optional<WirelessSighting> activeWireless(Instant now) {
+        if (wireless == null || expired(wireless.sighting(), now)) return Optional.empty();
         return Optional.of(wireless);
+    }
+
+    /** 全部未过期的固定终端存货快照；超过 {@link #FRESH_FOR} 的旧记录不返回。 */
+    public List<PlacedSighting> activeSightings(Instant now) {
+        List<PlacedSighting> active = new ArrayList<>();
+        for (PlacedSighting entry : sightings.values()) {
+            if (!expired(entry.sighting(), now)) {
+                active.add(entry);
+            }
+        }
+        return List.copyOf(active);
+    }
+
+    private static boolean expired(Sighting sighting, Instant now) {
+        return sighting.seenAt().plus(FRESH_FOR).isBefore(now);
     }
 
     private static Sighting sighting(boolean linked, List<Ae2TerminalMenu.StockEntry> stock, Instant when,
@@ -89,16 +120,36 @@ public final class SeenNetworkStock {
 
     /** 这台终端上次看到的样子；没看过或已经过了 {@link #FRESH_FOR} 都给空。 */
     public Optional<Sighting> lastSeen(String dimension, Ae2Terminals.Terminal terminal, Instant now) {
-        Sighting sighting = sightings.get(TerminalAt.of(dimension, terminal));
-        if (sighting == null || sighting.seenAt().plus(FRESH_FOR).isBefore(now)) {
+        PlacedSighting placed = sightings.get(TerminalAt.of(dimension, terminal));
+        if (placed == null || expired(placed.sighting(), now)) {
             return Optional.empty();
         }
-        return Optional.of(sighting);
+        return Optional.of(placed.sighting());
     }
 
     /** 那一格那一面的终端不在了（被拆、换了别的部件）：忘掉它的记录，免得照着旧数去找。 */
     public void forget(String dimension, BlockPos block, Direction side) {
         sightings.remove(new TerminalAt(dimension, block.immutable(), side));
+    }
+
+    /** 装在线缆格某一面上的固定终端及其最近一次网络存货快照。 */
+    public record PlacedSighting(String dimension, BlockPos block, Direction side, String terminalId,
+            Sighting sighting) {
+        public PlacedSighting {
+            Objects.requireNonNull(dimension, "dimension");
+            block = Objects.requireNonNull(block, "block").immutable();
+            Objects.requireNonNull(side, "side");
+            Objects.requireNonNull(terminalId, "terminalId");
+            Objects.requireNonNull(sighting, "sighting");
+        }
+    }
+
+    /** 随身无线终端物品 ID 与其最近一次打开看到的网络存货快照。 */
+    public record WirelessSighting(String terminalId, Sighting sighting) {
+        public WirelessSighting {
+            Objects.requireNonNull(terminalId, "terminalId");
+            Objects.requireNonNull(sighting, "sighting");
+        }
     }
 
     /**
