@@ -25,6 +25,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- `deposit` 新增可选参数 `source`（写法与 `target` 相同）：支持把点名容器（`b#`、坐标、储物生物 `e#`）或地标与脚边区域内多只箱子、木桶、潜影盒里的东西分轮搬出并整理进 ME 网络（`into=network`）或点名的目标容器（跳过熔炉与酿造台等加工台子，支持配 `items` / `count` 只搬指定物品与件数，结果细节附 `taken_from`），全程保留角色原本随身带的工具、食物与建材不被误存。
 - `observe(what="world_memory")` 新增 `network_stock` 一节（支持 `sections=["network_stock"]`，不传 `sections` 时四节都出）：列出五分钟内点开固定 ME 终端或随身无线终端看到的网络存货快照（`terminal`、`wireless`、固定终端的 `position` 与 `side`、`linked`、`complete`、`item_types`、`total_items`、按件数从多到少的 `contents`、有样板时的 `craftable` 与 `recorded_at`），已加载区块中被拆掉的终端当场划掉，传 `radius` 时随身无线终端不受方块距离过滤排除，种类过多逼近回包上限时剩余部分折入 `items_not_listed` 不再触发 `too_large`。
 - 角色在前方视野里无遮挡撞见 Boss 级强敌（`#c:bosses` 标签实体，或末影龙、凋灵、监守者、远古守卫者）或看得清的天然稀有矿脉（钻石矿、绿宝石矿、远古残骸及高稀有度模组矿石，排除玩家放置方块并顺路记入世界记忆产地）时，`events` 的 `self` 流新增 `rare_sighting` 事件，在 `rare_sighting` 里写明 `category`、`target_id`、`name`、`seen_id`、`count` 与 `at`。
 - 装了农夫乐事时 `machine_run` 能用厨锅煮菜：走到跟前点开锅的界面把食材放进去，做好的餐收进背包；锅下方有没有热源写进机器读数（没有热源它不会开始煮，也不替角色去架火），汤类的餐要往锅的碗格放碗才会分装出来，这些都如实写进结果。之前对厨锅只会报"没有机器类型认领它"。

@@ -32,10 +32,14 @@ import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.Listing;
 import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.TargetText;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
 import org.maiwithu.maicraft.kernel.param.ParamType;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 
@@ -63,7 +67,11 @@ public final class DepositModule implements AbilityModule {
                             .doc("自己挑容器时的范围（格）").build(),
                     ParamSpec.of("into", ParamType.CHOICE).choices("container", "network").defaultValue("container")
                             .doc("存进哪里：container 箱子、木桶这类容器；network ME 网络"
-                                    + "（不给 target 先用身上的无线终端，没带走去附近的 ME 终端；给了 target 去那里的终端）").build()),
+                                    + "（不给 target 先用身上的无线终端，没带走去附近的 ME 终端；给了 target 去那里的终端）").build(),
+                    ParamSpec.of("source", ParamType.TEXT)
+                            .doc("从哪里搬出再存（写法与 target 相同）：点名一只容器（b#、[x,y,z]）或储物生物（e#），"
+                                    + "或给地标名、\"here\"、f# 把该处 radius 内箱子里的东西整理进 into=network 或点名的 target 容器；"
+                                    + "给了它只搬从里面取出来的东西，角色原本随身带的保留不动").build()),
             // 前面某一步确认过的位置（previous）还没有地方记，解析不了：不列进接受的目标，免得说接受却用不了。
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
@@ -100,16 +108,28 @@ public final class DepositModule implements AbilityModule {
         return spec;
     }
 
-    // 看这一步怎么走：参数已经校验过，直接交给任务；身上没有要存的东西任务开工时就完成。
+    // 看这一步怎么走：给了 source 时先核对写法，再交给任务；没有要存或要搬的东西时任务开工即完成。
     @Override public StepDecision decide(StepContext step) {
         var params = step.goal().params();
+        Target source = null;
+        if (params.has("source")) {
+            String rawSource = params.text("source");
+            Optional<Target> parsed = TargetText.parse(rawSource);
+            if (parsed.isEmpty()) {
+                return new StepDecision.Finish(TaskResult.failed("source 写法不对",
+                        Problem.of(Problem.Kind.INVALID_PARAMETER,
+                                "source 要是容器观察编号（b3）、储物生物编号（e2）、坐标 [x,y,z]、地标名，或 \"here\"：" + rawSource,
+                                "写法与 target 相同，例如 \"b5\"、\"[12,64,-8]\"、\"家\" 或 \"here\"")));
+            }
+            source = parsed.get();
+        }
         List<String> items = params.has("items")
                 ? params.list("items").stream().map(id -> id.toLowerCase(Locale.ROOT)).toList()
                 : List.of();
         Integer count = params.has("count") ? (int) params.integer("count") : null;
         long radius = params.has("radius") ? params.integer("radius") : 32;
         boolean network = params.has("into") && params.text("into").equals("network");
-        return new StepDecision.Run(new DepositInput(step.goal().target(), items, count, radius,
+        return new StepDecision.Run(new DepositInput(step.goal().target(), source, items, count, radius,
                 step.goal().permissions(), network));
     }
 

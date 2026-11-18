@@ -65,7 +65,7 @@ public final class ParamNames {
             Map.entry("settings", "要改成的设置（JSON 对象）：键是目标认的设置项（机器的、载具操纵表的、女仆的），值写字符串"),
             Map.entry("collect", "做完要不要把出口的东西拿进背包"),
             Map.entry("network", "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy"),
-            Map.entry("source", "接到哪：另一台机器或那张网里任一格的位置，写法与 target 相同"),
+            Map.entry("source", "来源位置（写法与 target 相同）：接网络时是另一台机器或那张网里任一格，整理搬运时是要搬出物品的来源容器或区域"),
             Map.entry("tier", "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石"),
             Map.entry("target", "探索目标：survey 自由跑图 / 群系 ID 或 # 标签 / platform 找平台 / surface 回露天"),
             Map.entry("direction", "扇形朝向：forward / backward / left / right / north / south / east / west；探索用，出发时按当时朝向固定"),
