@@ -607,14 +607,18 @@ public final class Bootstrap {
                 Optional<SaveIdentity> save = SaveIdentity.current(minecraft, session.capabilities());
                 if (save.isEmpty()) return;
                 UseKeyProjection useKeyProjection = new UseKeyHoldProjection(useKeyHold);
-                WorldScope scope = new WorldScope(minecraft, save.get(), playerControl, blockScans, session,
-                        subtitles, interactions, useKeyProjection, walksOnFoot, walks, combatSenses,
-                        abilities, interactionSender, menuActions, instanceConfig, furnaceFuels,
-                        compat, survivalWiring, loader.configDirectory(), blueprintOverlay, itemsInUse, reserved, digTools,
-                        dropConfirmations,
-                        ActionScopedEventSink.of(taskEvents, () -> goals), lightLevels, lightingWorld, followLighting, timers, chatEvents,
-                        new UnreachableFromHere(this::mainGoalRun), NonverbalExchange.live(() -> nonverbal, lookBack),
-                        sparPartner);
+                WorldScope scope = new WorldScope(minecraft, save.get(), playerControl, session, abilities,
+                        // 看世界与量光的读端原料：现场与登记物品读端都从这里拿。
+                        new ObservationSources(blockScans, subtitles, lightLevels, lightingWorld),
+                        // 出手的入口与挑工具：Hands 与生存需求共用的挖掘都从这里造。
+                        new InteractionEntries(interactions, useKeyProjection, interactionSender, menuActions, digTools),
+                        // 走到与寻路：靠近记得的"从这里到不了"共用同一份。
+                        new WalkSources(walksOnFoot, walks, new UnreachableFromHere(this::mainGoalRun)),
+                        // 事件出口、计时表与聊天事件流：目标处境与生存需求的事件都从这里出去。
+                        new EventFeeds(ActionScopedEventSink.of(taskEvents, () -> goals), timers, chatEvents),
+                        combatSenses, NonverbalExchange.live(() -> nonverbal, lookBack), sparPartner,
+                        instanceConfig, loader.configDirectory(), compat, survivalWiring,
+                        followLighting, blueprintOverlay, itemsInUse, reserved, dropConfirmations, furnaceFuels);
                 worldScope[0] = scope;
                 // 随行补光的会话设置回默认：开关与阈值不跨世界残留，仍暗的路线格作废。
                 followLighting.reset();

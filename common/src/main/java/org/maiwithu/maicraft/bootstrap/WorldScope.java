@@ -216,16 +216,37 @@ public final class WorldScope {
                 id -> OnlinePlayers.nameOrSomeoneOffline(playerControl.activeContext().orElse(null), id));
     }
 
-    /** @param save 握手认出的世界：现场只在认出世界之后才建，记忆按它分开存 */
-    public WorldScope(Minecraft minecraft, SaveIdentity save, PlayerControlBoundary playerControl, BlockScanService blockScans,
-            ServerLinkSession session, SubtitleFeed subtitles, Interactions interactions,
-            UseKeyProjection useKeyProjection, WalkTo walksOnFoot, BaritoneInternals walks, CombatSenses senses,
-            AbilityRegistry abilities, InteractionSender interactionSender, MenuActions menuActions,
-            InstanceConfig instanceConfig, FurnaceFuels furnaceFuels, CompatRegistry compat,
-            SurvivalWiring survivalWiring, Path configDirectory, ShowsPreview preview, ItemsInUse itemsInUse,
-            ReservedItems reserved, LiveDigToolRule digTools, DropConfirmations dropConfirmations, TaskEventSink events, ReadsLightLevels lightLevels,
-            LightingWorld lightingWorld, FollowLighting followLighting, Timers timers, ChatEventLog chatEvents,
-            UnreachableFromHere unreachable, NonverbalExchange nonverbal, SparPartner sparPartner) {
+    /**
+     * 现场只在认出世界之后才建，记忆按世界身份分开存。客户端本体、控制权边界、服务端会话与认出的世界
+     * 是现场从哪来的四样根本；看世界与量光、出手、走到、对外报事按组传入
+     * （{@link ObservationSources}、{@link InteractionEntries}、{@link WalkSources}、{@link EventFeeds}），
+     * 只会用一次的接缝单独传。
+     *
+     * @param save 握手认出的世界
+     */
+    public WorldScope(Minecraft minecraft, SaveIdentity save, PlayerControlBoundary playerControl, ServerLinkSession session,
+            AbilityRegistry abilities,
+            ObservationSources observation, InteractionEntries interactionEntries, WalkSources walks, EventFeeds eventFeeds,
+            CombatSenses senses, NonverbalExchange nonverbal, SparPartner sparPartner,
+            InstanceConfig instanceConfig, Path configDirectory, CompatRegistry compat, SurvivalWiring survivalWiring,
+            FollowLighting followLighting, ShowsPreview preview,
+            ItemsInUse itemsInUse, ReservedItems reserved, DropConfirmations dropConfirmations, FurnaceFuels furnaceFuels) {
+        // 现场原料按组拆开用：各组里是什么、为什么归一组，看各自的类注释。
+        BlockScanService blockScans = observation.blockScans();
+        SubtitleFeed subtitles = observation.subtitles();
+        ReadsLightLevels lightLevels = observation.lightLevels();
+        LightingWorld lightingWorld = observation.lightingWorld();
+        Interactions interactions = interactionEntries.interactions();
+        UseKeyProjection useKeyProjection = interactionEntries.useKeyProjection();
+        InteractionSender interactionSender = interactionEntries.interactionSender();
+        MenuActions menuActions = interactionEntries.menuActions();
+        LiveDigToolRule digTools = interactionEntries.digTools();
+        WalkTo walksOnFoot = walks.walksOnFoot();
+        BaritoneInternals walkInternals = walks.walkInternals();
+        UnreachableFromHere unreachable = walks.unreachable();
+        TaskEventSink events = eventFeeds.events();
+        Timers timers = eventFeeds.timers();
+        ChatEventLog chatEvents = eventFeeds.chatEvents();
         // 游戏接口层认出是哪个存档或服务器，内核的世界身份只拿编号与目录：世界记忆按世界编号存，删档同名重建不串档。
         this.world = Objects.requireNonNull(save, "save");
         this.compat = Objects.requireNonNull(compat, "compat");
@@ -289,7 +310,7 @@ public final class WorldScope {
                 new WorldReads(scene, memory, blockScans, kinds, lightLevels, lightingWorld, keepInventory, nonverbal, generatedTerrain, campPitSight),
                 senses,
                 new Hands(interactions, useKeyProjection, diggings::get, new InputDriver(playerControl), digTools),
-                new Travel(walksOnFoot, walks, new ClientTravelWorldView(now), travelProgress, unreachable),
+                new Travel(walksOnFoot, walkInternals, new ClientTravelWorldView(now), travelProgress, unreachable),
                 new Guards(protection, creatures, trusted, othersNotice, rareLootNotice),
                 channels(minecraft, now, events, timers, session, chatEvents),
                 new Stores(documents, identity.key(), configDirectory),
