@@ -18,12 +18,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
-import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -42,7 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 读回核对由机器能力做。组装前在世界里改；组装后在船上也改得了：存键表的那一包带地块坐标，服务器直接改那台的表、不核距离，
  * 走过去用结构上的靠近（坐在座位上够得着就坐着改）。别的（投料、出口、安装段、部件）它都没有。
  */
-final class TypewriterMachine implements MachineType {
+final class TypewriterMachine implements MachineType, MachineSettings {
 
     /** 不绑。 */
     static final String NONE = "none";
@@ -89,30 +88,6 @@ final class TypewriterMachine implements MachineType {
                 Map.of("有人接管着", lit), "");
     }
 
-    @Override public Optional<String> installationProblem(Installation installation) {
-        return Optional.empty();
-    }
-
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return Optional.empty();
-    }
-
-    @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean installed(Installation installation) {
-        return false;
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean mounted(PartCell part) {
-        return false;
-    }
-
     @Override public List<MachineSetting> settings(BlockPos at) {
         return settingsOf(null, at);
     }
@@ -121,6 +96,9 @@ final class TypewriterMachine implements MachineType {
     @Override public List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
         return settingsOf(structureId, at);
     }
+
+    // 无线红石打字机的本事只有设置项（绑键）；投料、出口、安装段、部件它都没有，不答那些问题。
+    @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
 
     // 每个能写名字的键一项：现在绑的频率，没绑写 none。读不到那一台（不是无线红石打字机、没加载）给空表。
     private List<MachineSetting> settingsOf(String structureId, BlockPos at) {
@@ -160,16 +138,8 @@ final class TypewriterMachine implements MachineType {
                 new StepsInOrder.Step("存键表", () -> new Bind(structureId, at, code, wanted)))));
     }
 
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
-    }
-
     @Override public List<MachineState.Shown> output(BlockPos at) {
         return List.of();
-    }
-
-    @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
     }
 
     /** "物品 + 物品" 拆成两格；写法不对为 null。 */

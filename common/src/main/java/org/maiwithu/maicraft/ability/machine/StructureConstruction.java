@@ -8,6 +8,7 @@ import java.util.Optional;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
@@ -95,7 +96,10 @@ final class StructureConstruction {
     /** 在结构上装这一段：问遍机器类型，肯在结构上装的第一家给的动作（只有胶这种发一包就成的）；都不肯为空。 */
     Optional<Action> install(List<MachineType> types, Installation installation, Permissions permissions) {
         for (MachineType type : types) {
-            Optional<Action> offered = type.installOnStructure(installation, permissions, on.worksite().close());
+            MachineInstallations installations = type.installations().orElse(null);
+            if (installations == null) continue;
+            Optional<Action> offered = installations.installOnStructure(installation, permissions,
+                    on.worksite().close());
             if (offered.isPresent()) return offered;
         }
         return Optional.empty();

@@ -10,7 +10,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
-import org.maiwithu.maicraft.ability.machine.spi.MachineType;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
@@ -38,18 +38,18 @@ final class MachineIngredients {
     }
 
     /** 把一条配方的催化剂（若机器要求投入）与输入排成备料与投料顺序，顺带把换料与跳过原因写进说明。 */
-    static List<MachineRunDetails.Fed> queue(MachineType type, BlockPos cell, ShownRecipe chosen, int batches,
-            List<String> notes) {
+    static List<MachineRunDetails.Fed> queue(MachineFeeding feeding, String machineId, BlockPos cell,
+            ShownRecipe chosen, int batches, List<String> notes) {
         List<MachineRunDetails.Fed> converted = new ArrayList<>();
         List<MachineRunDetails.Fed> firstItems = new ArrayList<>();
         List<MachineRunDetails.Fed> mainItems = new ArrayList<>();
         Set<String> seenCatalysts = new HashSet<>();
-        if (type.feedsCatalysts()) {
+        if (feeding != null && feeding.feedsCatalysts()) {
             for (ShownIngredient catalyst : chosen.catalysts()) {
                 Optional<WantedItem> wanted = wantedItemOf(catalyst);
-                if (wanted.isEmpty() || wanted.get().specifier().equals(type.id())) continue;
+                if (wanted.isEmpty() || wanted.get().specifier().equals(machineId)) continue;
                 seenCatalysts.add(wanted.get().specifier());
-                long count = type.feedCount(cell, chosen, catalyst, batches, true);
+                long count = feeding.feedCount(cell, chosen, catalyst, batches, true);
                 if (count <= 0) {
                     notes.add("机器里已有匹配的 " + wanted.get().specifier() + "，不用再放");
                     continue;
@@ -60,7 +60,8 @@ final class MachineIngredients {
         for (ShownIngredient ingredient : chosen.inputs()) {
             Optional<WantedItem> wanted = wantedItemOf(ingredient);
             if (wanted.isEmpty()) {
-                Optional<IngredientFeed> byItem = type.ingredientFeed(cell, ingredient, ingredient.amount() * batches);
+                Optional<IngredientFeed> byItem = feeding == null ? Optional.empty()
+                        : feeding.ingredientFeed(cell, ingredient, ingredient.amount() * batches);
                 if (byItem.isPresent()) {
                     notes.add(byItem.get().note());
                     converted.add(new MachineRunDetails.Fed(byItem.get().itemId(), byItem.get().count()));
@@ -72,13 +73,15 @@ final class MachineIngredients {
             }
             String specifier = wanted.get().specifier();
             if (seenCatalysts.contains(specifier)) continue;
-            long count = type.feedCount(cell, chosen, ingredient, batches, false);
+            long count = feeding == null
+                    ? ingredient.amount() * batches
+                    : feeding.feedCount(cell, chosen, ingredient, batches, false);
             if (count <= 0) {
                 notes.add("机器里已有匹配的 " + specifier + "，不用再放");
                 continue;
             }
             MachineRunDetails.Fed entry = new MachineRunDetails.Fed(specifier, clampCount(count));
-            if (type.feedsFirst(chosen, ingredient)) {
+            if (feeding != null && feeding.feedsFirst(chosen, ingredient)) {
                 firstItems.add(entry);
             } else {
                 mainItems.add(entry);

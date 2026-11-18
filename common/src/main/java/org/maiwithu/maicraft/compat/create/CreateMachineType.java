@@ -23,9 +23,11 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -40,7 +42,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * <p>读数都在当刻的客户端世界里读；角色不在世界里时状态如实说读不到。
  * 投料、取货、安装返回的动作和自带能力一样：走过去、换手、对准那一面右键、等游戏确认。
  */
-final class CreateMachineType implements MachineType {
+final class CreateMachineType implements MachineType, MachineFeeding, MachineSettings, MachineInstallations {
 
     private final CreateMachineCatalog.Kind kind;
     private final CreateCompat compat;
@@ -135,10 +137,6 @@ final class CreateMachineType implements MachineType {
         return installation.get().problem(wanted);
     }
 
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return Optional.of("机械动力的机器没有装在方块某一面上的部件");
-    }
-
     @Override public Optional<Action> install(Installation wanted, Permissions permissions) {
         if (installation.isEmpty() || !installation.get().kind().equals(wanted.kind())) return Optional.empty();
         return Optional.of(installation.get().install(wanted, permissions));
@@ -174,14 +172,6 @@ final class CreateMachineType implements MachineType {
         ClientLevel level = level();
         if (level == null || installation.isEmpty()) return Optional.empty();
         return installation.get().copy(level, cells);
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean mounted(PartCell part) {
-        return false;
     }
 
     // 能改的设置：方块上的设置框（过滤格、件数、数值、选项），机械手再加手里拿什么与模式。
@@ -248,6 +238,13 @@ final class CreateMachineType implements MachineType {
         return Optional.of(new SchematicannonRun(compat, services, at, request.file(), request.anchor(), request.rotation(),
                 request.maxSeconds(), permissions));
     }
+
+    // Create 的机器各有本事：传送带与链条输送机会装安装段，设置项与投料取货都在；部件它没有，不答那一问。
+    @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+
+    @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
+
+    @Override public Optional<MachineInstallations> installations() { return Optional.of(this); }
 
     private ClientLevel level() {
         PlayerContext current = services.context().get();

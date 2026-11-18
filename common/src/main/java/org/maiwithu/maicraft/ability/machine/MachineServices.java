@@ -87,7 +87,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
     /** 这段安装段现在是不是按要求装成了（按最终结构核对）：认它装好了的那一家；都不认为空。施工与整机比对共用。 */
     Optional<MachineType> installedBy(Installation installation) {
         for (MachineType type : machineTypes) {
-            if (type.installed(installation)) {
+            if (type.installations().isPresent() && type.installations().get().installed(installation)) {
                 return Optional.of(type);
             }
         }
@@ -97,7 +97,7 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
     /** 这个部件现在装在宿主那一面上了没有：有一家机器类型认就算。施工与整机比对共用。 */
     boolean mounted(PartCell part) {
         for (MachineType type : machineTypes) {
-            if (type.mounted(part)) {
+            if (type.parts().isPresent() && type.parts().get().mounted(part)) {
                 return true;
             }
         }
@@ -108,10 +108,10 @@ record MachineServices(Supplier<PlayerContext> context, MachineWorldView world, 
     String readBack(BlockPos at, String key) {
         BlockState state = world.stateAt(at).orElse(null);
         MachineType type = state == null ? null : claiming(state);
-        if (type == null) {
+        if (type == null || type.settings().isEmpty()) {
             return "";
         }
-        return type.settings(at).stream()
+        return type.settings().get().settings(at).stream()
                 .filter(setting -> setting.key().equals(key))
                 .map(setting -> setting.value() == null ? "" : setting.value())
                 .findFirst()

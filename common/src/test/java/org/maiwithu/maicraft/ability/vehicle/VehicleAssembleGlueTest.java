@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
@@ -201,7 +202,7 @@ class VehicleAssembleGlueTest {
     }
 
     /** 会粘胶的机器类型替身：问缺什么时答还没粘上的那几段；粘的动作一刻做完，sticks 为假时胶不出现。 */
-    private static final class Glue implements MachineType {
+    private static final class Glue implements MachineType, MachineInstallations {
         private final String kind;
         private final List<Installation> needed;
         private final boolean sticks;
@@ -230,6 +231,8 @@ class VehicleAssembleGlueTest {
             return preference;
         }
 
+        @Override public Optional<String> installationProblem(Installation installation) { return Optional.empty(); }
+
         @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
             asked.add(new HashSet<>(cells));
             if (!answers) return Optional.empty();
@@ -254,6 +257,8 @@ class VehicleAssembleGlueTest {
             return installedSegments.contains(installation);
         }
 
+        @Override public Optional<MachineInstallations> installations() { return Optional.of(this); }
+
         @Override public String id() { return kind; }
         @Override public String name() { return "胶"; }
         @Override public String modId() { return "test"; }
@@ -261,20 +266,6 @@ class VehicleAssembleGlueTest {
         @Override public MachineRole role() { return MachineRole.MOTION; }
         @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) { return List.of(); }
         @Override public MachineState state(BlockPos at) { return MachineState.unknown("替身"); }
-        @Override public Optional<String> installationProblem(Installation installation) { return Optional.empty(); }
-        @Override public Optional<String> partProblem(PartCell part, BlockState host) { return Optional.empty(); }
-        @Override public Optional<Action> mount(PartCell part, Permissions permissions) { return Optional.empty(); }
-        @Override public boolean mounted(PartCell part) { return false; }
-        @Override public List<MachineSetting> settings(BlockPos at) { return List.of(); }
-        @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-            return Optional.empty();
-        }
-        @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-            return Optional.empty();
-        }
         @Override public List<MachineState.Shown> output(BlockPos at) { return List.of(); }
-        @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
-            return Optional.empty();
-        }
     }
 }

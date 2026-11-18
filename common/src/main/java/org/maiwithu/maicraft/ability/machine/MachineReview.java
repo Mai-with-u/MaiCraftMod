@@ -17,6 +17,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
+import org.maiwithu.maicraft.ability.machine.spi.MachineParts;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
@@ -115,14 +117,21 @@ final class MachineReview {
                 continue;
             }
             List<String> refusals = new ArrayList<>();
+            int partReaders = 0;
             for (MachineType type : services.machineTypes()) {
-                Optional<String> problem = type.partProblem(
+                MachineParts parts = type.parts().orElse(null);
+                if (parts == null) continue;
+                partReaders++;
+                Optional<String> problem = parts.partProblem(
                         new PartCell(part.offset(), part.side(), part.itemId()), host.get());
                 if (problem.isEmpty()) {
                     refusals.clear();
                     break;
                 }
                 refusals.add(type.id() + "：" + problem.get());
+            }
+            if (partReaders == 0) {
+                refusals.add("这个实例没有登记会装部件的机器联动");
             }
             if (!refusals.isEmpty()) {
                 issues.add(new Issue(where(part.offset()), "没有机器类型肯把 " + part.itemId()
@@ -141,14 +150,21 @@ final class MachineReview {
             List<Issue> issues) {
         for (MachineBlueprint.Segment segment : blueprint.installations()) {
             List<String> refusals = new ArrayList<>();
+            int installationReaders = 0;
             for (MachineType type : services.machineTypes()) {
-                Optional<String> problem = type.installationProblem(
+                MachineInstallations installations = type.installations().orElse(null);
+                if (installations == null) continue;
+                installationReaders++;
+                Optional<String> problem = installations.installationProblem(
                         new Installation(segment.kind(), segment.offsets(), segment.roles()));
                 if (problem.isEmpty()) {
                     refusals.clear();
                     break;
                 }
                 refusals.add(type.id() + "：" + problem.get());
+            }
+            if (installationReaders == 0) {
+                refusals.add("这个实例没有登记会装安装段的机器联动");
             }
             if (!refusals.isEmpty()) {
                 boolean noneRegistered = services.machineTypes().isEmpty();

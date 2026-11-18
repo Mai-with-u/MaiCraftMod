@@ -14,6 +14,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
@@ -64,6 +65,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     private final MachineServices services;
     private final MachineTargets targets;
     private MachineType type;
+    /** 认出的机器收料出货的本事；这种机器不收料不出货时为 null（管道、线缆格这类不收料的东西）。 */
+    private MachineFeeding feeding;
     private BlockPos cell;
     /** 选中的配方与要做的批数；只开机时没有。 */
     private ShownRecipe recipe;
@@ -81,7 +84,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     /** 下一刻要推进的动作：上一刻按现场备好，进入阶段时交给基类。 */
     private Action prepared;
     /** 正在投的这一样料交得出实情时（扔进去这类不一定件件都进的投法）留着它，做完按实情记账。 */
-    private FeedReport feeding;
+    private FeedReport feedReporting;
     /** 机器自己从头做到尾的那一次（蓝图桌写蓝图、蓝图加农炮施工）；按配方做的为 null。 */
     private FullRun fullRun;
     /** 这次是往发电机这类烧燃料的机器里投燃料：item 就是燃料，投完就收场，不拨开关、不等产物。 */
@@ -138,6 +141,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     "目标那一格还没加载，动不了机器", "先走近一点再试"));
         }
         type = services.claiming(found.state());
+        feeding = type == null ? null : type.feeding().orElse(null);
         cell = found.cell();
         if (type == null) {
             return Next.fail(services.unclaimedHere(found.state(), "用机器做东西"));
@@ -149,8 +153,9 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         recordProgress("认出了" + describeMachine() + (menuExit ? "；出口在界面里，投料前点开看一眼原有几件"
                 : "；出口里现在有 " + watch.baseline + " 件" + (input.item() == null ? "" : " " + input.item())));
         // 蓝图桌写蓝图、蓝图加农炮照蓝图施工：不按配方投料，整段交给机器类型；给了蓝图却不是这种机器就当场说。
-        Optional<FullRun> whole = type.fullRun(cell, new RunRequest(input.item(), input.count(), input.file(),
-                input.anchor(), input.rotation(), input.maxSeconds()), input.permissions());
+        Optional<FullRun> whole = feeding == null ? Optional.empty()
+                : feeding.fullRun(cell, new RunRequest(input.item(), input.count(), input.file(),
+                        input.anchor(), input.rotation(), input.maxSeconds()), input.permissions());
         if (whole.isPresent()) {
             fullRun = whole.get();
             prepared = fullRun;
@@ -162,14 +167,14 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     "去掉 file、anchor 按配方做，或换成蓝图桌、蓝图加农炮"));
         }
         // 发电机这类烧燃料的：item 就是燃料，备齐直接投，不查配方；不吃料的发电机没有可投的格子，照实说不用投。
-        FuelUse fuel = type.fuelUse(cell);
+        FuelUse fuel = feeding == null ? FuelUse.RECIPE : feeding.fuelUse(cell);
         if (input.item() != null && fuel.kind() == FuelUse.Kind.NO_FUEL) {
             return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     describeMachine() + "不烧燃料、没有燃料格，不用投料：" + fuel.note(),
                     "不给 item 只看它的读数，或换一台烧燃料的发电机"));
         }
         if (input.item() != null && fuel.kind() == FuelUse.Kind.FUEL) {
-            Optional<String> blocked = type.whyCannotFeed(cell, input.item());
+            Optional<String> blocked = feeding.whyCannotFeed(cell, input.item());
             if (blocked.isPresent()) {
                 return Next.fail(cannotFeedProblem(blocked.get()));
             }
@@ -203,7 +208,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         batches = MachineIngredients.batchesNeeded(recipe, input.item(), input.count());
         recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
         // 压印器等机器若槽内占着早先遗留的异种模板、半成品或异种输出，先开窗取回角色背包腾空冲突槽位再算备料与投料。
-        Optional<Action> clearing = type.clearConflicts(cell, recipe, batches, input.permissions());
+        Optional<Action> clearing = feeding == null ? Optional.empty()
+                : feeding.clearConflicts(cell, recipe, batches, input.permissions());
         if (clearing.isPresent()) {
             prepared = clearing.get();
             return Next.go(Phase.CLEAR, "先取出" + describeMachine() + "里占着的不兼容物品");
@@ -226,11 +232,11 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     private Next<Phase> queueIngredientsAndContinue() {
-        toGather.addAll(MachineIngredients.queue(type, cell, recipe, batches, notes));
+        toGather.addAll(MachineIngredients.queue(feeding, type.id(), cell, recipe, batches, notes));
         // 现场机器朝向不对、缺少配套台位或机内仍占着无法清出的冲突物品时，备料前直接如实说明，不白跑一趟拿料。
         String probe = toGather.isEmpty() ? input.item() : toGather.peek().item();
-        if (probe != null) {
-            Optional<String> blocked = type.whyCannotFeed(cell, probe);
+        if (probe != null && feeding != null) {
+            Optional<String> blocked = feeding.whyCannotFeed(cell, probe);
             if (blocked.isPresent()) {
                 return Next.fail(cannotFeedProblem(blocked.get()));
             }
@@ -323,17 +329,24 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (next == null) {
             return Next.go(Phase.SWITCH, "投料完了，开机");
         }
-        return type.feed(cell, next.item(), next.count(), input.permissions())
+        // 这种机器根本没有投料本事（管道、线缆格）：与给不出投法一样按"投不了"如实收场。
+        Optional<Action> offering = feeding == null ? Optional.empty()
+                : feeding.feed(cell, next.item(), next.count(), input.permissions());
+        return offering
                 .map(action -> {
                     prepared = action;
-                    feeding = action instanceof FeedReport report ? report : null;
+                    feedReporting = action instanceof FeedReport report ? report : null;
                     return Next.go(Phase.FEED, "把 " + next.item() + " 投进" + describeMachine());
                 })
-                .orElseGet(() -> stop(type.whyCannotFeed(cell, next.item())
-                        .map(this::cannotFeedProblem)
-                        .orElseGet(() -> Problem.of(Problem.Kind.UNSUPPORTED,
-                                describeMachine() + "投不了 " + next.item() + "：联动认得这台机器，但还没接它的投料方法",
-                                "用 use 打开它的界面手动放料试试"))));
+                .orElseGet(() -> {
+                    Optional<String> blocked = feeding == null ? Optional.empty()
+                            : feeding.whyCannotFeed(cell, next.item());
+                    return stop(blocked
+                            .map(this::cannotFeedProblem)
+                            .orElseGet(() -> Problem.of(Problem.Kind.UNSUPPORTED,
+                                    describeMachine() + "投不了 " + next.item() + "：联动认得这台机器，但还没接它的投料方法",
+                                    "用 use 打开它的界面手动放料试试")));
+                });
     }
 
     private Problem cannotFeedProblem(String why) {
@@ -343,10 +356,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     // 一样料投完记账：投法交得出实情（扔进去的）按进去的件数记，没进去的在哪写进说明；
     // 一下就整份放好的（手持右键放上置物台）按要投的件数记。没进去的不重投，交给 LLM 看说明再定。
     private MachineRunDetails.Fed settleFeed(MachineRunDetails.Fed asked) {
-        int count = feeding == null ? asked.count() : feeding.delivered();
-        if (feeding != null) {
-            notes.addAll(feeding.notes());
-            feeding = null;
+        int count = feedReporting == null ? asked.count() : feedReporting.delivered();
+        if (feedReporting != null) {
+            notes.addAll(feedReporting.notes());
+            feedReporting = null;
         }
         MachineRunDetails.Fed settled = new MachineRunDetails.Fed(asked.item(), count);
         fed.add(settled);
@@ -512,7 +525,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         // 掉在地上的走过去一件件捡，别的照机器类型的拿法（置物台空手右键、石磨空手右键收产物格）。
         Optional<Action> taking = dropArea != null
                 ? services.interactions().pickUpFrom(dropArea, input.item()).map(look -> (Action) look)
-                : type.take(cell, input.item(), watch.produced, input.permissions());
+                : feeding == null ? Optional.empty()
+                : feeding.take(cell, input.item(), watch.produced, input.permissions());
         return taking
                 .map(action -> {
                     prepared = action;

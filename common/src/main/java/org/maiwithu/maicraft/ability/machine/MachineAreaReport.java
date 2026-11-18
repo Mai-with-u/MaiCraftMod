@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.ability.machine.MachineDetails.StateView;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
@@ -185,7 +186,10 @@ final class MachineAreaReport {
             });
         }
         site.types.forEach((cell, type) -> {
-            for (MountedPart part : type.mountedParts(cell)) devices.add(Device.ofPart(cell, part));
+            // 部件只有会装部件的机器类型才有（AE2 的线缆格）：没有这一本事的不单列。
+            type.parts().ifPresent(parts -> {
+                for (MountedPart part : parts.mountedParts(cell)) devices.add(Device.ofPart(cell, part));
+            });
         });
         // 同一格上方块设备排在部件前面，同一格的几个部件按六个方向的固定顺序。
         devices.sort(Comparator.comparing((Device device) -> device.cells.getFirst(), LOW_FIRST)
@@ -440,7 +444,9 @@ final class MachineAreaReport {
         Map<String, String> settings(BlockPos cell) {
             return settings.computeIfAbsent(cell, key -> {
                 Map<String, String> current = new LinkedHashMap<>();
-                for (MachineSetting setting : types.get(key).settings(key)) {
+                MachineSettings reads = types.get(key).settings().orElse(null);
+                if (reads == null) return Map.copyOf(current);
+                for (MachineSetting setting : reads.settings(key)) {
                     current.put(setting.key(), setting.value() == null ? "" : setting.value());
                 }
                 return Map.copyOf(current);

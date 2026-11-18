@@ -5,34 +5,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
-import org.maiwithu.maicraft.ability.machine.spi.Installation;
+
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
+import org.maiwithu.maicraft.ability.machine.spi.MachineParts;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
-import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
-import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
-import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
-import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
-import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
-import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
-import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.kernel.task.Action;
 
 /**
  * 联动模组交来的机器类型，登记表给它包的一层：模组停用后不再认领方块（机器能力就报"没有认得它的机器类型"），
- * 读状态如实说读不到，动作一律给不出；读写时碰到模组接口对不上也在这里收住，交出的动作同样包一层。
- * 名字、角色这些登记时就定下的静态信息照常回答。
+ * 读状态如实说读不到，动作一律给不出。名字、角色这些登记时就定下的静态信息照常回答。
+ *
+ * <p>机器类型自己报的几条本事（投料取货、设置项、安装段、部件）也各自包一层；
+ * 里面没有的本事照样给空，机器能力看不出来源是不是联动。
  */
 public final class CompatMachineType implements MachineType {
 
@@ -69,86 +64,8 @@ public final class CompatMachineType implements MachineType {
         }
     }
 
-    // 模组停用或接口对不上时不报部件：看机器照样列出线缆格，只是不再单列它上面的部件。
-    @Override public List<MountedPart> mountedParts(BlockPos at) {
-        return ask(() -> type.mountedParts(at), List.of());
-    }
-
     @Override public Optional<NetworkLoad> load(BlockState state) {
         return ask(() -> type.load(state), Optional.empty());
-    }
-
-    @Override public Optional<String> installationProblem(Installation installation) {
-        return ask(() -> type.installationProblem(installation), Optional.of(disabled()));
-    }
-
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return ask(() -> type.partProblem(part, host), Optional.of(disabled()));
-    }
-
-    @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-        return act(() -> type.install(installation, permissions));
-    }
-
-    @Override public Optional<Action> installOnStructure(Installation installation, Permissions permissions,
-            BringsPlayerClose reach) {
-        return act(() -> type.installOnStructure(installation, permissions, reach));
-    }
-
-    @Override public boolean installed(Installation installation) {
-        return ask(() -> type.installed(installation), false);
-    }
-
-    // 模组停用或对不上时说不管：组装载具照旧直接拉杆，结果里写明没查胶。
-    @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
-        return ask(() -> type.stickTogether(cells), Optional.<List<Installation>>empty());
-    }
-
-    @Override public int stickPreference() {
-        return ask(type::stickPreference, 0);
-    }
-
-    @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
-        return ask(() -> type.placedBy(installation), Optional.empty());
-    }
-
-    // 模组停用后不替它抄：交回空，机器能力照抄方块，抄出来的格照实写着建不回来。
-    @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
-        return ask(() -> type.copy(cells), Optional.empty());
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-        return act(() -> type.mount(part, permissions));
-    }
-
-    @Override public boolean mounted(PartCell part) {
-        return ask(() -> type.mounted(part), false);
-    }
-
-    @Override public List<MachineSetting> settings(BlockPos at) {
-        return ask(() -> type.settings(at), List.of());
-    }
-
-    @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-        return act(() -> type.change(at, key, value, permissions));
-    }
-
-    @Override public List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
-        return ask(() -> type.settingsOnStructure(structureId, at), List.of());
-    }
-
-    @Override public Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
-            Permissions permissions, BringsPlayerClose reach) {
-        return act(() -> type.changeOnStructure(structureId, at, key, value, permissions, reach));
-    }
-
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return act(() -> type.feed(at, itemId, count, permissions));
-    }
-
-    // 停用或接口对不上时不编现场摆法原因，交回空。
-    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
-        return ask(() -> type.whyCannotFeed(at, itemId), Optional.empty());
     }
 
     @Override public List<MachineState.Shown> output(BlockPos at) {
@@ -164,35 +81,26 @@ public final class CompatMachineType implements MachineType {
         return ask(() -> type.dropArea(at), Optional.empty());
     }
 
-    @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
-        return act(() -> type.take(at, itemId, count, permissions));
+    // 模组停用后不替它抄：交回空，机器能力照抄方块，抄出来的格照实写着建不回来。
+    @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
+        return ask(() -> type.copy(cells), Optional.empty());
     }
 
-    @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
-        return ask(() -> type.fullRun(at, request, permissions), Optional.<FullRun>empty())
-                .map(run -> CompatAction.fullRun(module, run));
+    // 本事各包各的：里面没有的本事给空，有的包一层再交出去。
+    @Override public Optional<MachineFeeding> feeding() {
+        return type.feeding().map(feeding -> new CompatMachineFeeding(module, feeding));
     }
 
-    @Override public boolean feedsCatalysts() {
-        return ask(type::feedsCatalysts, false);
+    @Override public Optional<MachineSettings> settings() {
+        return type.settings().map(settings -> new CompatMachineSettings(module, settings));
     }
 
-    @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
-        return ask(() -> type.feedsFirst(recipe, ingredient), false);
+    @Override public Optional<MachineInstallations> installations() {
+        return type.installations().map(installations -> new CompatMachineInstallations(module, installations));
     }
 
-    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches) {
-        return ask(() -> type.feedCount(at, recipe, ingredient, batches), ingredient.amount() * batches);
-    }
-
-    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
-            boolean fromCatalysts) {
-        return ask(() -> type.feedCount(at, recipe, ingredient, batches, fromCatalysts), ingredient.amount() * batches);
-    }
-
-    @Override public Optional<Action> clearConflicts(BlockPos at, ShownRecipe recipe, int batches,
-            Permissions permissions) {
-        return act(() -> type.clearConflicts(at, recipe, batches, permissions));
+    @Override public Optional<MachineParts> parts() {
+        return type.parts().map(parts -> new CompatMachineParts(module, parts));
     }
 
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
@@ -203,11 +111,6 @@ public final class CompatMachineType implements MachineType {
         } catch (ModApiMismatch broken) {
             return whenUnavailable;
         }
-    }
-
-    // 要一个动作：给出的动作包一层，推进到一半停用时如实按不支持收场。
-    private Optional<Action> act(Supplier<Optional<Action>> make) {
-        return ask(make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
     }
 
     private String disabled() {

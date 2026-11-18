@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.StructureWorksites;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -164,10 +165,11 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
                     + "，到不了要的 " + wanted));
         }
         recordProgress("「" + currentKey + "」读回 " + now + "，还要改成 " + wanted);
-        Optional<Action> changing = input.onStructure() == null
-                ? type.change(cell, currentKey, wanted, input.permissions())
-                : type.changeOnStructure(input.onStructure().structureId(), cell, currentKey, wanted, input.permissions(),
-                        input.onStructure().worksite().closeKeepingSeat());
+        Optional<Action> changing = configure() == null ? Optional.empty()
+                : input.onStructure() == null
+                ? configure().change(cell, currentKey, wanted, input.permissions())
+                : configure().changeOnStructure(input.onStructure().structureId(), cell, currentKey, wanted,
+                        input.permissions(), input.onStructure().worksite().closeKeepingSeat());
         return changing
                 .map(action -> {
                     prepared = action;
@@ -227,8 +229,14 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
 
     /** 这台机器此刻的设置项：结构上的按结构身份读地块里那一台。 */
     private List<MachineSetting> settingsNow() {
-        return input.onStructure() == null ? type.settings(cell)
-                : type.settingsOnStructure(input.onStructure().structureId(), cell);
+        if (configure() == null) return List.of();
+        return input.onStructure() == null ? configure().settings(cell)
+                : configure().settingsOnStructure(input.onStructure().structureId(), cell);
+    }
+
+    /** 这台机器的设置项本事；没有设置项的机器（厨锅这类）为 null，读改都按"没有这一项"走。 */
+    private MachineSettings configure() {
+        return type.settings().orElse(null);
     }
 
     /**
@@ -251,8 +259,9 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
             if (!worksite.blocks().loaded(at)) continue;
             BlockState state = worksite.blocks().state(at);
             MachineType claiming = state.isAir() ? null : services.claiming(state);
-            if (claiming == null) continue;
-            Set<String> keys = new HashSet<>(claiming.settingsOnStructure(on.structureId(), at).stream()
+            if (claiming == null || claiming.settings().isEmpty()) continue;
+            Set<String> keys = new HashSet<>(claiming.settings().get()
+                    .settingsOnStructure(on.structureId(), at).stream()
                     .map(MachineSetting::key).toList());
             if (keys.containsAll(input.settings().keySet())) found.add(at.immutable());
         }

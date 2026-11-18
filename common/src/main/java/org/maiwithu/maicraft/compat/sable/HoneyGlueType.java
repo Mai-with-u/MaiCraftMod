@@ -19,10 +19,9 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
-import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -42,7 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>粘一框：蜂蜜胶换到主手 → 走到框里最低处那块方块跟前（真人得站在附近点角、Ctrl 滚轮拉大）→ 发 Simulated 自己的那一包
  * → 等这块蜂蜜胶出现、框对得上才算。服务器只看手里有蜂蜜胶、每边不超过上限，扣一点耐久。
  */
-final class HoneyGlueType implements MachineType {
+final class HoneyGlueType implements MachineType, MachineInstallations {
 
     static final String KIND = "simulated:honey_glue";
     static final String ITEM = "simulated:honey_glue";
@@ -70,6 +69,12 @@ final class HoneyGlueType implements MachineType {
     @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) { return List.of(); }
 
     @Override public MachineState state(BlockPos at) { return MachineState.unknown("蜂蜜胶不是机器"); }
+
+    // 蜂蜜胶不出东西：没有出口。
+    @Override public List<MachineState.Shown> output(BlockPos at) { return List.of(); }
+
+    // 蜂蜜胶的本事只有安装段（粘框）；部件、设置项、投料它都没有，不答那些问题。
+    @Override public Optional<MachineInstallations> installations() { return Optional.of(this); }
 
     // 补胶时先问它：蜂蜜胶不粘机械动力的装置、框也没有角和连通的讲究，身上有就比强力胶省事也稳当。
     @Override public int stickPreference() { return 1; }
@@ -102,10 +107,6 @@ final class HoneyGlueType implements MachineType {
         return fits ? Optional.empty() : Optional.of("一块蜂蜜胶每边最多 " + HoneyGluePlan.MAX_SIZE + " 格");
     }
 
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return Optional.of("蜂蜜胶不是装在方块某一面上的部件");
-    }
-
     // 蜂蜜胶换到主手 → 走到框里最低处那块方块跟前 → 发包 → 等那块胶出现。
     @Override public Optional<Action> install(Installation installation, Permissions permissions) {
         return glue(installation, permissions, services.approach());
@@ -132,26 +133,6 @@ final class HoneyGlueType implements MachineType {
         ClientLevel level = current == null ? null : current.level();
         if (level == null || !KIND.equals(installation.kind()) || installation.cells().size() != 2) return false;
         return glued(level, boxOf(installation));
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) { return Optional.empty(); }
-
-    @Override public boolean mounted(PartCell part) { return false; }
-
-    @Override public List<MachineSetting> settings(BlockPos at) { return List.of(); }
-
-    @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public List<MachineState.Shown> output(BlockPos at) { return List.of(); }
-
-    @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
-        return Optional.empty();
     }
 
     // 主手已经是蜂蜜胶就不用换；身上没有了（耐久用完）如实说缺蜂蜜胶。

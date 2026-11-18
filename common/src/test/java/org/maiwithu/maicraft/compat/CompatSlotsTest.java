@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -131,7 +132,7 @@ class CompatSlotsTest {
         MachineState state = press.state(AT);
         assertEquals(MachineState.Activity.UNKNOWN, state.activity());
         assertTrue(state.note().contains("机械动力的联动已停用"), state.note());
-        assertTrue(press.feed(AT, "minecraft:iron_ingot", 1, Permissions.DEFAULT).isEmpty());
+        assertTrue(press.feeding().orElseThrow().feed(AT, "minecraft:iron_ingot", 1, Permissions.DEFAULT).isEmpty());
         assertEquals("create:mechanical_press", press.id(), "名字这类登记时就定下的照常回答");
     }
 
@@ -142,7 +143,7 @@ class CompatSlotsTest {
                 registry.machineType(this, services -> new Press());
             }
         };
-        Action feeding = load(module).machineTypes(NO_SERVICES).getFirst()
+        Action feeding = load(module).machineTypes(NO_SERVICES).getFirst().feeding().orElseThrow()
                 .feed(AT, "minecraft:iron_ingot", 1, Permissions.DEFAULT).orElseThrow();
         breakModule(module);
         ActionStatus status = feeding.tick(null);
@@ -241,7 +242,8 @@ class CompatSlotsTest {
     }
 
     /** 压机替身：什么都认领，投料给一个一刻就做完的动作。 */
-    private static class Press implements MachineType {
+    private static class Press implements MachineType, MachineFeeding {
+        @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
         @Override public String id() { return "create:mechanical_press"; }
         @Override public String name() { return "动力压机"; }
         @Override public String modId() { return "create"; }
@@ -250,18 +252,6 @@ class CompatSlotsTest {
         @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) { return List.of(); }
         @Override public MachineState state(BlockPos at) {
             return new MachineState(MachineState.Activity.RUNNING, 64.0, null, List.of(), Map.of(), "");
-        }
-        @Override public Optional<String> installationProblem(Installation installation) { return Optional.empty(); }
-        @Override public Optional<String> partProblem(PartCell part, BlockState host) { return Optional.empty(); }
-        @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-            return Optional.empty();
-        }
-        @Override public boolean installed(Installation installation) { return false; }
-        @Override public Optional<Action> mount(PartCell part, Permissions permissions) { return Optional.empty(); }
-        @Override public boolean mounted(PartCell part) { return false; }
-        @Override public List<MachineSetting> settings(BlockPos at) { return List.of(); }
-        @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-            return Optional.empty();
         }
         @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
             return Optional.of(new Action() {

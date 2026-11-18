@@ -20,12 +20,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
-import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
@@ -42,7 +42,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 管道（线缆、管道、导管）按连着的面给进出口，连着别的管道、机器的面是通的，空着的面能再接。
  * 运行状态只说看得见的：每一面的侧面配置（化学品、热也列出来，只读），机器内部的东西要打开界面看。
  */
-final class MekanismMachineType implements MachineType {
+final class MekanismMachineType implements MachineType, MachineFeeding, MachineSettings {
 
     private final MekanismMachineCatalog.Kind kind;
     private final MekanismCompat compat;
@@ -147,30 +147,6 @@ final class MekanismMachineType implements MachineType {
                 "出电的面看得见；在不在发电、存了多少电、燃料还剩多少要打开界面看");
     }
 
-    @Override public Optional<String> installationProblem(Installation installation) {
-        return Optional.of(kind.name() + "不装安装段");
-    }
-
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return Optional.of("Mekanism 的机器没有装在面上的部件");
-    }
-
-    @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean installed(Installation installation) {
-        return false;
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean mounted(PartCell part) {
-        return false;
-    }
-
     // 侧面配置随同步包下发，随时读得到；分拣器的规则与开关只在开着界面时同步，读的是上次打开时看见的。
     @Override public List<MachineSetting> settings(BlockPos at) {
         ClientLevel level = level();
@@ -191,6 +167,11 @@ final class MekanismMachineType implements MachineType {
         }
         return SideSettings.parse(key).map(parsed -> configurator.once(at, parsed, permissions));
     }
+
+    // Mekanism 的机器收料、有侧面配置这些设置项；安装段与部件它都没有，不答那些问题。
+    @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+
+    @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
 
     private boolean sorter() {
         return kind.id().equals(MekanismMachineCatalog.MOD_ID + ":logistical_sorter");

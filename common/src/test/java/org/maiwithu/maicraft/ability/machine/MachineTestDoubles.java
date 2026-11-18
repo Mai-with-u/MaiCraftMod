@@ -30,6 +30,10 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
+import org.maiwithu.maicraft.ability.machine.spi.MachineParts;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
@@ -150,8 +154,10 @@ final class MachineTestDoubles {
     record WorldCell(BlockPos pos, BlockState state, boolean hasBlockEntity) {
     }
 
-    /** 机器类型替身：认领给定的方块状态谓词；设置与动作按测试摆的脚本回答。 */
-    static final class FakeMachineType implements MachineType {
+    /** 机器类型替身：认领给定的方块状态谓词；设置与动作按测试摆的脚本回答。投料取货、设置项、安装段、部件四条本事它都有，按脚本回答。 */
+    static final class FakeMachineType implements MachineType, MachineFeeding, MachineSettings, MachineInstallations,
+            MachineParts {
+
         final String id;
         final String name;
         final MachineRole role;
@@ -246,6 +252,15 @@ final class MachineTestDoubles {
         @Override public MachineRole role() {
             return role;
         }
+
+        // 四条本事都在这个替身上，测试要的脚本字段就在替身类里，直接交自己。
+        @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+
+        @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
+
+        @Override public Optional<MachineInstallations> installations() { return Optional.of(this); }
+
+        @Override public Optional<MachineParts> parts() { return Optional.of(this); }
 
         @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) {
             return portsAt != null ? portsAt.apply(at) : ports;

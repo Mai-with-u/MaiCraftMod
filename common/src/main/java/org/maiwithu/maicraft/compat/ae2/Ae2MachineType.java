@@ -28,6 +28,10 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
+import org.maiwithu.maicraft.ability.machine.spi.MachineParts;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
@@ -50,7 +54,8 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 控制器什么状态、线缆格各面装着什么部件。线缆格还管两件 AE2 自己的装法：一段线缆（安装段，种类是线缆物品 ID）
  * 与线缆某一面上的部件。网络本身的频道、能量、存储由 ME 网络读取器经服务端读。
  */
-final class Ae2MachineType implements MachineType {
+final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettings, MachineInstallations,
+        MachineParts {
 
     private final Ae2MachineCatalog.Kind kind;
     private final Ae2Compat compat;
@@ -338,6 +343,15 @@ final class Ae2MachineType implements MachineType {
         }
         return Optional.of(new Ae2InscriberTake(itemId, own, opening, services.context()));
     }
+
+    // AE2 的设备各有本事：线缆格管安装段与部件，样板供应器有设置项，压印器收料出料；同一个类按种类答。
+    @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+
+    @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
+
+    @Override public Optional<MachineInstallations> installations() { return Optional.of(this); }
+
+    @Override public Optional<MachineParts> parts() { return Optional.of(this); }
 
     private boolean isCableBus() {
         return kind.id().equals(Ae2MachineCatalog.CABLE_BUS);

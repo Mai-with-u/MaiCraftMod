@@ -15,12 +15,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
-import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
-import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
-import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
@@ -35,7 +33,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 汤类的餐做出来还要锅里存着碗才分装到成品格。投料与取餐都点开它的界面（手持碗右键也能直接
  * 盛一份，那是玩家的取法，这里统一走界面）；上方能自动进料、下方能抽出成品，是漏斗类的接法。
  */
-final class FarmersDelightMachineType implements MachineType {
+final class FarmersDelightMachineType implements MachineType, MachineFeeding {
 
     private final FarmersDelightMachineCatalog.Kind kind;
     private final FarmersDelightCompat compat;
@@ -87,39 +85,11 @@ final class FarmersDelightMachineType implements MachineType {
                 Map.of("heated", "否"), "下方没有热源（篝火、炉子、烟熏炉这类），不会开始煮");
     }
 
-    @Override public Optional<String> installationProblem(Installation installation) {
-        return Optional.of(kind.name() + "不装安装段");
-    }
-
-    @Override public Optional<Action> install(Installation installation, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean installed(Installation installation) {
-        return false;
-    }
-
-    @Override public Optional<String> partProblem(PartCell part, BlockState host) {
-        return Optional.of(kind.name() + "上不装部件");
-    }
-
-    @Override public Optional<Action> mount(PartCell part, Permissions permissions) {
-        return Optional.empty();
-    }
-
-    @Override public boolean mounted(PartCell part) {
-        return false;
-    }
-
-    @Override public List<MachineSetting> settings(BlockPos at) {
-        return List.of();
-    }
-
-    @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
-        return Optional.empty();
-    }
+    // 厨锅的本事只有投料与取餐；安装段、部件、设置项它都没有，不答那些问题。
+    @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
 
     // 投料：点开厨锅的界面把食材搬进去（整堆快速移动，锅自己把它放进收它的格）。
+
     @Override public Optional<Action> feed(BlockPos at, String itemId, int count, Permissions permissions) {
         return Optional.of(new CompatMenuFeed(new MenuFeed(services, kind.name(), at, kind.id(), itemId, count,
                 permissions, null)));

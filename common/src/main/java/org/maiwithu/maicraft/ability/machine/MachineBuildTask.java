@@ -21,6 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineParts;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
@@ -253,7 +254,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         // 问遍机器类型，肯装的第一家给的动作直接用；都不肯就照实记下这一段没装成。结构上只有胶这种发一包就成的装得了。
         Optional<Action> offered = onStructure != null
                 ? onStructure.install(services.machineTypes(), installation, input.permissions())
-                : services.machineTypes().stream().map(type -> type.install(installation, input.permissions()))
+                : services.machineTypes().stream().map(type -> type.installations().orElse(null))
+                        .filter(installations -> installations != null)
+                        .map(installations -> installations.install(installation, input.permissions()))
                         .flatMap(Optional::stream).findFirst();
         if (offered.isPresent()) {
             prepared = offered.get();
@@ -313,10 +316,11 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
             return partFinished(Problem.of(Problem.Kind.UNREACHABLE, "宿主那一格还没加载"));
         }
         for (MachineType type : services.machineTypes()) {
-            if (type.partProblem(part, host.get()).isPresent()) {
+            MachineParts parts = type.parts().orElse(null);
+            if (parts == null || parts.partProblem(part, host.get()).isPresent()) {
                 continue;
             }
-            Optional<Action> willing = type.mount(part, input.permissions());
+            Optional<Action> willing = parts.mount(part, input.permissions());
             if (willing.isEmpty()) {
                 continue;
             }
@@ -667,7 +671,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     // 问遍机器类型，认这种安装段的第一家说这一段自己放了哪些格；都不认（模组停用了）就一格不拆，宁可留下也不拆错。
     private List<BlockPos> placedBy(Installation installation) {
         for (MachineType type : services.machineTypes()) {
-            Optional<List<BlockPos>> placed = type.placedBy(installation);
+            Optional<List<BlockPos>> placed = type.installations().orElse(null) == null
+                    ? Optional.empty() : type.installations().get().placedBy(installation);
             if (placed.isPresent()) return placed.get();
         }
         return List.of();

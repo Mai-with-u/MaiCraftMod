@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
+import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -35,8 +36,11 @@ final class AssemblyGlue {
     AssemblyGlue(ArchivedMachines archived, List<MachineType> machineTypes, Supplier<String> dimension) {
         this.archived = Objects.requireNonNull(archived, "archived");
         // 按先后排好：同一片几家都能粘时先问先后值大的（身上有蜂蜜胶就先用它），排序稳定，同样大的照登记顺序。
+        // 能粘的排前面，同几框几家都能粘时按自报的先后（蜂蜜胶比强力胶先）；不会装安装段的机器类型不参与。
         this.machineTypes = machineTypes.stream()
-                .sorted(Comparator.comparingInt(MachineType::stickPreference).reversed()).toList();
+                .filter(type -> type.installations().isPresent())
+                .sorted(Comparator.comparingInt((MachineType type) -> type.installations().get().stickPreference())
+                        .reversed()).toList();
         this.dimension = Objects.requireNonNull(dimension, "dimension");
     }
 
@@ -63,7 +67,7 @@ final class AssemblyGlue {
     /** 这些方块还缺的胶段：按先后问，第一家答得上的机器类型说了算；都答不上为空。 */
     Optional<List<Installation>> missing(Set<BlockPos> blocks) {
         for (MachineType type : machineTypes) {
-            Optional<List<Installation>> answer = type.stickTogether(blocks);
+            Optional<List<Installation>> answer = type.installations().get().stickTogether(blocks);
             if (answer.isPresent()) return answer;
         }
         return Optional.empty();
@@ -72,7 +76,7 @@ final class AssemblyGlue {
     /** 粘这一段的动作：肯装的第一家给的；都不肯为空。 */
     Optional<Action> install(Installation segment, Permissions permissions) {
         for (MachineType type : machineTypes) {
-            Optional<Action> offered = type.install(segment, permissions);
+            Optional<Action> offered = type.installations().get().install(segment, permissions);
             if (offered.isPresent()) return offered;
         }
         return Optional.empty();
@@ -80,7 +84,7 @@ final class AssemblyGlue {
 
     /** 这一段此刻粘上了没有：有一家机器类型认它装好了就算。 */
     boolean installed(Installation segment) {
-        return machineTypes.stream().anyMatch(type -> type.installed(segment));
+        return machineTypes.stream().anyMatch(type -> type.installations().get().installed(segment));
     }
 
     /** 一段胶的说法："simulated:honey_glue x, y, z 到 x, y, z"，前面写明是哪种胶。 */
