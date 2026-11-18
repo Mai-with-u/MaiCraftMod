@@ -15,7 +15,6 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.ability.machine.spi.FeedReport;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
-import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
@@ -25,9 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.menu.OutputLook;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
-import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
-import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -204,11 +201,12 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (atMachine.size() > 1) {
             notes.add("查到 " + atMachine.size() + " 条都能在这台机器上做，用了第一条（" + recipe.category() + "）");
         }
-        batches = batchesNeeded(recipe);
-        queueIngredients(recipe);
-        // 现场机器朝向不对（如水平放置的动力锯）或加工处还没摆置物台、工作盆时，备料前直接如实说明，不白跑一趟拿料。
-        if (!toGather.isEmpty()) {
-            Optional<String> blocked = type.whyCannotFeed(cell, toGather.peek().item());
+        batches = MachineIngredients.batchesNeeded(recipe, input.item(), input.count());
+        toGather.addAll(MachineIngredients.queue(type, cell, recipe, batches, notes));
+        // 现场机器朝向不对、缺少配套台位或机内占着冲突物品时，备料前直接如实说明，不白跑一趟拿料。
+        String probe = toGather.isEmpty() ? input.item() : toGather.peek().item();
+        if (probe != null) {
+            Optional<String> blocked = type.whyCannotFeed(cell, probe);
             if (blocked.isPresent()) {
                 return Next.fail(cannotFeedProblem(blocked.get()));
             }
@@ -227,7 +225,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
 
     private Next<Phase> afterPeek() {
         return Next.go(toGather.isEmpty() ? Phase.SWITCH : Phase.GATHER,
-                toGather.isEmpty() ? "配方的东西带不进机器，先开机试一次" : "备投料要的东西");
+                toGather.isEmpty() ? "不用再往机器里补料，去开机或等产物" : "备投料要的东西");
     }
 
     // 开工前看一眼界面里的出口：原有几件记成起点，回头看时只算新出的；看不成就说不清原有几件，照常开工。
@@ -245,34 +243,6 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 yield afterPeek();
             }
         };
-    }
-
-    // 配方原料按批次放大：物品的备料去拿。背包带不进去的化学品，机器能从附加格吃物品换的（灌注物从煤、红石换），
-    // 换成那样物品排在主料前面先投：储罐里先有了灌注物，主料一放进去就开工。换不了的流体与化学品写进结果。
-    private void queueIngredients(ShownRecipe chosen) {
-        List<MachineRunDetails.Fed> mainItems = new ArrayList<>();
-        for (ShownIngredient ingredient : chosen.inputs()) {
-            Optional<ShownStack> item = ingredient.options().stream()
-                    .filter(option -> option.kind() == ShownStack.Kind.ITEM).findFirst();
-            if (ingredient.tag() == null && item.isEmpty()) {
-                Optional<IngredientFeed> byItem = type.ingredientFeed(cell, ingredient, ingredient.amount() * batches);
-                if (byItem.isPresent()) {
-                    notes.add(byItem.get().note());
-                    toGather.add(new MachineRunDetails.Fed(byItem.get().itemId(), byItem.get().count()));
-                    continue;
-                }
-                notes.add("配方还要机器自己要的东西（" + describeIngredient(ingredient)
-                        + "），带不进机器，做不做得看机器里还有没有");
-                continue;
-            }
-            WantedItem wanted = ingredient.tag() != null
-                    ? WantedItem.ofTag(ingredient.tag())
-                    : WantedItem.ofItem(item.get().id());
-            long count = (long) ingredient.amount() * batches;
-            mainItems.add(new MachineRunDetails.Fed(wanted.specifier(),
-                    (int) Math.min(Integer.MAX_VALUE, count)));
-        }
-        toGather.addAll(mainItems);
     }
 
     // 备料：先扣掉角色随身已有的匹配原料（并刨去前面已排进投料队的同名份额），够数直接进投料队，差一点只去补差额。
@@ -657,23 +627,6 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 .filter(shown -> shown.itemId().equals(itemId))
                 .mapToInt(shown -> shown.count())
                 .sum();
-    }
-
-    private int batchesNeeded(ShownRecipe chosen) {
-        long perBatch = chosen.outputs().stream()
-                .filter(stack -> stack.kind() == ShownStack.Kind.ITEM && stack.id().equals(input.item()))
-                .mapToLong(ShownStack::amount).sum();
-        if (perBatch <= 0) {
-            return 1;
-        }
-        return (int) Math.min(Integer.MAX_VALUE, (input.count() + perBatch - 1) / perBatch);
-    }
-
-    private String describeIngredient(ShownIngredient ingredient) {
-        if (ingredient.tag() != null) {
-            return ingredient.tag();
-        }
-        return ingredient.options().stream().findFirst().map(ShownStack::id).orElse("未知的东西");
     }
 
     private String describeMachine() {

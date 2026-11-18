@@ -24,6 +24,8 @@ import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
+import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -169,6 +171,23 @@ public final class CompatMachineType implements MachineType {
     @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
         return ask(() -> type.fullRun(at, request, permissions), Optional.<FullRun>empty())
                 .map(run -> CompatAction.fullRun(module, run));
+    }
+
+    @Override public boolean feedsCatalysts() {
+        return ask(type::feedsCatalysts, false);
+    }
+
+    @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
+        return ask(() -> type.feedsFirst(recipe, ingredient), false);
+    }
+
+    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches) {
+        return ask(() -> type.feedCount(at, recipe, ingredient, batches), ingredient.amount() * batches);
+    }
+
+    @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
+            boolean fromCatalysts) {
+        return ask(() -> type.feedCount(at, recipe, ingredient, batches, fromCatalysts), ingredient.amount() * batches);
     }
 
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。

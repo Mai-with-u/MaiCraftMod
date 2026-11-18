@@ -500,6 +500,53 @@ class MachineRunTaskTest {
         assertEquals(9, ((MachineRunDetails) partialResult.details()).fed().getFirst().count(), "投料按配方全量 9 件投");
     }
 
+    @Test
+    void 压印器类不消耗催化剂跑多批只备一张并先投_机内已有模板时跳过备料与投料() {
+        ShownIngredient pressPlate = ShownIngredient.of(ShownStack.item("ae2:silicon_press", "硅压印模板", 1));
+        ShownIngredient silicon = new ShownIngredient("c:silicon",
+                List.of(ShownStack.item("ae2:silicon", "硅", 1)), 1);
+        ShownRecipe recipe = new ShownRecipe("ae2:inscriber/silicon_print", "ae2:inscriber", "压印器",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                List.of(silicon), List.of(pressPlate),
+                List.of(ShownStack.item(PLATE, "印制硅", 1)), null);
+
+        // 机内还没有模板：做 4 批也只备 1 张硅压印模板、4 份 #c:silicon，且模板排在主料前先备先投。
+        Rig emptyRig = new Rig();
+        emptyRig.viewer.putMaking(PLATE, List.of(recipe));
+        emptyRig.type.feedsCatalysts = true;
+        emptyRig.type.customFeedCount = (ingredient, batches) -> ingredient.equals(pressPlate) ? 1L : batches;
+        emptyRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
+        emptyRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> emptyRig.type.output.put(PLATE, 4)));
+        emptyRig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
+
+        TaskResult result = emptyRig.run(new MachineRunInput(positionOf(CELL), PLATE, 4, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("ae2:silicon_press", "#c:silicon"),
+                emptyRig.needs.requests.stream().map(req -> req.wanted().specifier()).toList());
+        assertEquals(1, emptyRig.needs.requests.get(0).count(), "4 批也只拿 1 张模板");
+        assertEquals(4, emptyRig.needs.requests.get(1).count(), "消耗料照乘 4 批");
+        assertEquals(List.of("ae2:silicon_press", "#c:silicon"), emptyRig.type.fedItems, "模板先投，主料后投");
+
+        // 机内已有匹配模板（feedCount 返回 0）：直接跳过模板备料与投料，notes 留说明。
+        Rig loadedRig = new Rig();
+        loadedRig.viewer.putMaking(PLATE, List.of(recipe));
+        loadedRig.type.feedsCatalysts = true;
+        loadedRig.type.customFeedCount = (ingredient, batches) -> ingredient.equals(pressPlate) ? 0L : batches;
+        loadedRig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> loadedRig.type.output.put(PLATE, 4)));
+        loadedRig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> {}));
+
+        TaskResult loadedResult = loadedRig.run(new MachineRunInput(positionOf(CELL), PLATE, 4, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, loadedResult.status(), loadedResult.summary());
+        assertEquals(List.of("#c:silicon"),
+                loadedRig.needs.requests.stream().map(req -> req.wanted().specifier()).toList());
+        assertEquals(List.of("#c:silicon"), loadedRig.type.fedItems);
+        MachineRunDetails details = (MachineRunDetails) loadedResult.details();
+        assertTrue(details.notes().stream().anyMatch(note -> note.contains("ae2:silicon_press") && note.contains("不用再放")),
+                details.notes().toString());
+    }
+
     /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */
     private static final class ReportedFeed implements Action, FeedReport {
         private final int delivered;

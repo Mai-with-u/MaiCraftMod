@@ -11,6 +11,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
+import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 
@@ -220,5 +221,40 @@ public interface MachineType {
      */
     default Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
         return Optional.empty();
+    }
+
+    /**
+     * 配方查看器列在 {@link ShownRecipe#catalysts()} 里的东西要不要作为投料放进这台机器：
+     * 大多数机器的催化剂只是工作站或加热方块图标，不用投进机器，默认 {@code false}；
+     * 压印器的不消耗压印模板被部分查看器列进催化剂，却真的要放进机器模板格，答 {@code true}。
+     */
+    default boolean feedsCatalysts() {
+        return false;
+    }
+
+    /**
+     * 这格原料在按配方投料时要不要排在普通主料前面先放：
+     * 压印器的中间输入格只有先放好顶、底模板或印制电路后才允许塞入主料，顶底格物料答 {@code true}。
+     */
+    default boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
+        return false;
+    }
+
+    /**
+     * 这台机器跑 {@code batches} 批这条配方时，这一格原料实际要从身上备齐并投进几件。
+     */
+    default long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches) {
+        return feedCount(at, recipe, ingredient, batches, false);
+    }
+
+    /**
+     * 这台机器跑 {@code batches} 批这条配方时，这一格原料（或需投入的催化剂）实际要从身上备齐并投进几件：
+     * 默认按配方单批用量乘批数；压印器对不消耗的压印模板不论做几批只投 1 张，机器里原本就放着匹配模板时投 0 张。
+     *
+     * @param fromCatalysts 这一格是不是来自 {@link ShownRecipe#catalysts()}
+     */
+    default long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
+            boolean fromCatalysts) {
+        return ingredient.amount() * batches;
     }
 }

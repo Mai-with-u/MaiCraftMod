@@ -13,6 +13,7 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.ToLongBiFunction;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -211,6 +212,12 @@ final class MachineTestDoubles {
         final List<String> fedItems = new ArrayList<>();
         /** 现场摆法接不了投料时的原因说明；默认为空，按机器本身不收这种料处理。 */
         Function<String, Optional<String>> cannotFeedWhy = itemId -> Optional.empty();
+        /** 是否把配方查看器的催化剂也纳入投料队列（如压印器模板）。 */
+        boolean feedsCatalysts;
+        /** 哪些原料要排在普通主料前面先放。 */
+        Predicate<ShownIngredient> feedsFirst = ingredient -> false;
+        /** 自定义每格原料的投料件数计算；为 null 时走默认乘批数。 */
+        ToLongBiFunction<ShownIngredient, Integer> customFeedCount;
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -370,6 +377,21 @@ final class MachineTestDoubles {
         @Override public Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
             ingredientAmounts.add(amount);
             return ingredientFeed.apply(ingredient);
+        }
+
+        @Override public boolean feedsCatalysts() {
+            return feedsCatalysts;
+        }
+
+        @Override public boolean feedsFirst(ShownRecipe recipe, ShownIngredient ingredient) {
+            return feedsFirst.test(ingredient);
+        }
+
+        @Override public long feedCount(BlockPos at, ShownRecipe recipe, ShownIngredient ingredient, int batches,
+                boolean fromCatalysts) {
+            return customFeedCount != null
+                    ? customFeedCount.applyAsLong(ingredient, batches)
+                    : ingredient.amount() * batches;
         }
     }
 
