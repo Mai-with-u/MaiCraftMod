@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -20,6 +21,11 @@ public interface Ae2Grid {
 
     /** 这一格的设备读数；不是 AE2 的网格设备、没加载给空。 */
     Optional<GridCell> cell(ClientLevel level, BlockPos at);
+
+    /** 一格 ME 驱动器客户端同步到的十槽存储元件与指示灯状态；不是驱动器或没加载给空。 */
+    default Optional<DriveSlots> driveSlots(ClientLevel level, BlockPos at) {
+        return Optional.empty();
+    }
 
     /** 这件物品是不是能装到线缆格某一面上的 AE2 部件（终端、总线、面板……）。 */
     boolean partItem(String itemId);
@@ -54,6 +60,23 @@ public interface Ae2Grid {
     record PartView(String itemId, boolean powered, boolean active) {
         public PartView {
             Objects.requireNonNull(itemId, "itemId");
+        }
+    }
+
+    /**
+     * ME 驱动器的一只元件槽读数（客户端同步到的真实画面）：槽号 0..9、元件物品 ID（空槽为 null）、
+     * 指示灯状态（absent / empty / not_empty / types_full / full）。
+     */
+    record DriveSlot(int slot, String itemId, String status) {
+        public DriveSlot {
+            Objects.requireNonNull(status, "status");
+        }
+    }
+
+    /** 一台 ME 驱动器客户端同步到的供电在线态与全部十个槽位。 */
+    record DriveSlots(boolean online, List<DriveSlot> slots) {
+        public DriveSlots {
+            slots = List.copyOf(slots);
         }
     }
 }

@@ -97,6 +97,13 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private boolean placedIntoUnrecognizedProcessor;
     private boolean openedUnrecognizedBlockMenu;
     private boolean consumedHeldInUse;
+    /** 出手前背包物品计数快照：用于识别潜行右键拆解或转化进背包的物品。 */
+    private Map<String, Integer> backpackBefore = Map.of();
+    /** 交互中拆解/转化进背包的产物描述；没有为 null。 */
+    private String disassembledSummary;
+    /** 打开已支持模组界面时尝试顺手放入的物品 ID 及结果。 */
+    private String menuInsertItem;
+    private UseSeams.MenuLook.Insertion menuInsertion = UseSeams.MenuLook.Insertion.NONE;
     private String riding;
     private List<String> signLines = List.of();
     /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
@@ -355,6 +362,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                     yield stop(Problem.of(Problem.Kind.UNSUPPORTED, "这里按不了潜行，潜行右键做不了", null));
                 }
                 interaction = ready;
+                backpackBefore = services.world().backpackCounts();
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
                 chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
                 dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
@@ -445,11 +453,19 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 if (!input.writesText()) {
                     appliedTimes++;
                     worldChangeNotice.run();
-                    if (UseChanges.consumedHeld(interaction.heldBefore(), services.world().heldItem().orElse(null))) {
+                    boolean handConsumed = UseChanges.consumedHeld(interaction.heldBefore(),
+                            services.world().heldItem().orElse(null));
+                    if (handConsumed) {
                         consumedHeldInUse = true;
+                        Map<String, Integer> gains = UseChanges.backpackGains(backpackBefore,
+                                services.world().backpackCounts(), interaction.heldBefore());
+                        if (!gains.isEmpty()) {
+                            disassembledSummary = interaction.heldBefore().itemId()
+                                    + " 未放进方块，拆解/转化成了 " + UseChanges.formatGains(gains);
+                        }
                     }
                     if (UseChanges.recordApplied(this::recordChange, services.world(), services.facilities(),
-                            target, interaction, result)) {
+                            target, interaction, result, backpackBefore)) {
                         placedIntoUnrecognizedProcessor = true;
                     }
                     rememberPlacedFacility();
@@ -495,11 +511,17 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         BlockPos clickedCell = target != null && !target.isEntity() ? target.cell() : null;
         Direction clickedFace = target != null && !target.isEntity() ? target.face() : null;
+        // 拿着指定物品不潜行点开非普通储物箱的模组界面（如 AE2 驱动器）且手中物品还在时，顺手尝试放进空槽。
+        String insertItem = input.item() != null && !input.sneak() && !consumedHeldInUse
+                && interaction.heldBefore() != null && target != null && !target.isEntity()
+                && (services.facilities() == null || !services.facilities().isContainer(target.typeId()))
+                ? interaction.heldBefore().itemId() : null;
+        menuInsertItem = insertItem;
         Optional<UseSeams.MenuLook> look = services.menus() == null ? Optional.empty()
-                : services.menus().opened(interaction.menuBefore(), clickedCell, clickedFace);
+                : services.menus().opened(interaction.menuBefore(), clickedCell, clickedFace, insertItem);
         if (look.isPresent()) {
             looking = look.get();
-            return goWith(Phase.LOOK, looking, "点开了界面，看看里面有什么");
+            return goWith(Phase.LOOK, looking, insertItem != null ? "点开了界面，尝试放入手中物品并查看内容" : "点开了界面，看看里面有什么");
         }
         return collectOrNext();
     }
@@ -561,6 +583,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 }
             }
             rememberContainer(List.copyOf(contents.get().keySet()));
+            menuInsertion = looking.insertion();
+            if (menuInsertion == UseSeams.MenuLook.Insertion.INSERTED && menuInsertItem != null) {
+                recordChange(new Change(Change.Kind.ITEM_STORED, menuInsertItem, 1,
+                        "放进了 " + describeTarget()));
+            }
             recordProgress("看清了点开的界面");
         } else {
             if (looking.unrecognizedLayout() && target != null && !target.isEntity()) {
@@ -637,8 +664,18 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                     : "：点开了不认识的界面，看不出里面有什么、也不确认会不会做出东西，已关上界面";
             return Next.done(TaskResult.done(describeTarget() + note + tail));
         }
-        // 点开了容器、压印器或终端界面读到内容时，直接并入一句话结果，不再把开窗所见藏在细节字段里。
+        // 点开了容器、压印器、驱动器或终端界面读到内容时，直接并入一句话结果，不再把开窗所见藏在细节字段里。
         String openedNote = openedMenu == null || openedMenu.isBlank() ? "" : "（里面有：" + openedMenu + "）";
+        if (disassembledSummary != null) {
+            return Next.done(TaskResult.done(describeTarget() + "：手上的 " + disassembledSummary + tail));
+        }
+        if (menuInsertion == UseSeams.MenuLook.Insertion.INSERTED && menuInsertItem != null) {
+            return Next.done(TaskResult.done(describeTarget() + "：已把 " + menuInsertItem + " 放进界面" + openedNote + tail));
+        }
+        if (menuInsertion == UseSeams.MenuLook.Insertion.REJECTED && menuInsertItem != null) {
+            return Next.done(TaskResult.done(describeTarget() + "：点开了界面，但手上的 " + menuInsertItem
+                    + " 没有放进去（槽位已满或界面不收此物品）" + openedNote + tail));
+        }
         return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + openedNote + tail));
     }
 

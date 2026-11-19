@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -42,8 +46,22 @@ final class UseChanges {
      */
     static boolean recordApplied(Consumer<Change> record, UseSeams.ReadsWorld world, FacilityKinds facilities,
             ResolvedTarget target, UseSeams.Built.Ready interaction, InteractionResult result) {
+        return recordApplied(record, world, facilities, target, interaction, result, Map.of());
+    }
+
+    /**
+     * 记下这一下确认生效后的变化，结合交互前背包快照识别物品拆解或转化（例如潜行右键把空存储元件拆成外壳与组件）：
+     * 若主手原物品消失但背包中出现了其他新增物品，说明发生的是拆解或转化而非塞进了加工容器，不误判放进去了。
+     */
+    static boolean recordApplied(Consumer<Change> record, UseSeams.ReadsWorld world, FacilityKinds facilities,
+            ResolvedTarget target, UseSeams.Built.Ready interaction, InteractionResult result,
+            Map<String, Integer> backpackBefore) {
         UseSeams.ReadsWorld.Held after = world.heldItem().orElse(null);
         boolean handConsumed = recordHandChange(record, interaction.heldBefore(), after);
+        Map<String, Integer> gained = handConsumed
+                ? backpackGains(backpackBefore, world.backpackCounts(), interaction.heldBefore())
+                : Map.of();
+        recordBackpackGains(record, gained, interaction.heldBefore(), after);
         if (target == null) {
             return false;
         }
@@ -65,15 +83,57 @@ final class UseChanges {
             record.accept(new Change(Change.Kind.BLOCK_PLACED, placed, 1, "落在 " + effect.toShortString() + onSelf));
             return false;
         }
-        // 效果就在目标本身：门开了、锄成了耕地、点着了营火，或把原料塞进了带方块实体的加工容器。
+        // 效果就在目标本身：若主手物品消失且背包新冒出其他物品，说明是拆解/转化进背包，不是塞进了加工容器。
         String now = world.blockId(target.cell()).orElse("未加载");
-        boolean placedIntoProcessor = handConsumed && now.equals(target.typeId())
+        boolean disassembled = handConsumed && !gained.isEmpty();
+        boolean placedIntoProcessor = handConsumed && !disassembled && now.equals(target.typeId())
                 && isUnknownProcessorBlock(world, facilities, target);
-        String note = placedIntoProcessor
-                ? "放进去了，不确认会不会做出东西"
-                : now.equals(target.typeId()) ? result.scene() : target.typeId() + " 变成了 " + now;
+        String note;
+        if (disassembled) {
+            note = "手上的 " + interaction.heldBefore().itemId() + " 未放进方块，而是拆解/转化成了背包里的 " + formatGains(gained);
+        } else if (placedIntoProcessor) {
+            note = "放进去了，不确认会不会做出东西";
+        } else {
+            note = now.equals(target.typeId()) ? result.scene() : target.typeId() + " 变成了 " + now;
+        }
         record.accept(new Change(Change.Kind.BLOCK_CHANGED, target.typeId(), 1, note));
         return placedIntoProcessor;
+    }
+
+    /** 比对交互前后背包统计，找出除原主手物品外新增加的其他物品及其增量。 */
+    static Map<String, Integer> backpackGains(Map<String, Integer> before, Map<String, Integer> after,
+            UseSeams.ReadsWorld.Held heldBefore) {
+        if (heldBefore == null || before == null || before.isEmpty() || after == null || after.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Integer> gains = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : after.entrySet()) {
+            String itemId = entry.getKey();
+            if (itemId.equals(heldBefore.itemId())) continue;
+            int delta = entry.getValue() - before.getOrDefault(itemId, 0);
+            if (delta > 0) gains.put(itemId, delta);
+        }
+        return Map.copyOf(gains);
+    }
+
+    static String formatGains(Map<String, Integer> gains) {
+        List<String> parts = new ArrayList<>(gains.size());
+        gains.forEach((itemId, count) -> parts.add(itemId + " ×" + count));
+        return String.join("、", parts);
+    }
+
+    // 把背包新增的拆解/转化产物逐项记进变化；主手直接换上的那 1 件已由 recordHandChange 记过，避免重复计数。
+    private static void recordBackpackGains(Consumer<Change> record, Map<String, Integer> gained,
+            UseSeams.ReadsWorld.Held before, UseSeams.ReadsWorld.Held after) {
+        if (gained.isEmpty()) return;
+        String handReplaced = before != null && after != null && !after.itemId().equals(before.itemId())
+                ? after.itemId() : null;
+        gained.forEach((itemId, count) -> {
+            int extra = itemId.equals(handReplaced) ? count - 1 : count;
+            if (extra > 0) {
+                record.accept(new Change(Change.Kind.ITEM_GAINED, itemId, extra, "拆解或转化进背包"));
+            }
+        });
     }
 
     static boolean consumedHeld(UseSeams.ReadsWorld.Held before, UseSeams.ReadsWorld.Held after) {

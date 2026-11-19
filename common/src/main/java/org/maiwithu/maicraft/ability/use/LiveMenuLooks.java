@@ -10,14 +10,21 @@ import java.util.function.Supplier;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuChannel;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
+import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
+import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuSession;
+import org.maiwithu.maicraft.behavior.menu.OpenScreen;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
+import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -59,6 +66,12 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
 
     @Override
     public Optional<UseSeams.MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace) {
+        return opened(menuBefore, clickedCell, clickedFace, null);
+    }
+
+    @Override
+    public Optional<UseSeams.MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace,
+            String insertItem) {
         PlayerContext current = context.get();
         LocalPlayer player = current == null ? null : current.localPlayer();
         if (player == null || player.containerMenu == player.inventoryMenu
@@ -72,7 +85,11 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
             return Optional.of(new TerminalLookView(terminalLook.get()));
         }
         ClientMenuChannel channel = ClientMenuChannel.claimCurrent(context);
-        return channel == null ? Optional.empty() : Optional.of(new Look(channel, new ClientMenuContent(context, layouts)));
+        if (channel == null) return Optional.empty();
+        ClientMenuContent menuContent = new ClientMenuContent(context, layouts);
+        OpenedMenu openedMenu = insertItem == null ? null : ClientOpenedMenu.claimCurrent(context, menuContent);
+        int selectedHotbar = player.getInventory().selected;
+        return Optional.of(new Look(channel, menuContent, openedMenu, insertItem, selectedHotbar));
     }
 
     /** 把联动交来的终端界面查看器适配为 {@code use} 的界面查看接缝。 */
@@ -95,27 +112,44 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
         @Override public String describe() { return delegate.describe(); }
     }
 
-    /** 看一次界面：等同步 → 列内容 → 关上。 */
-    private static final class Look implements UseSeams.MenuLook {
+    /** 看一次界面：等同步 → （若需要且是已支持模组界面，把手中指定物品放进空槽）→ 列内容 → 关上。 */
+    static final class Look implements UseSeams.MenuLook {
 
-        private enum Stage { WAIT_SYNC, CLOSE, DONE }
+        private enum Stage { WAIT_SYNC, INSERT_CLICK, INSERT_WAIT, CLOSE, DONE }
 
-        private final ClientMenuChannel channel;
+        /** 放进模组界面空槽后等槽位变化落定的宽限（刻）。 */
+        private static final int INSERT_SETTLE_TICKS = 10;
+
+        private final MenuChannel channel;
         private final MenuContent content;
+        private final OpenedMenu openedMenu;
+        private final String insertItem;
+        private final int selectedHotbar;
         private Stage stage = Stage.WAIT_SYNC;
         private int waited;
+        private int insertSlot = -1;
+        private int countBeforeInsert;
+        private int insertWaits;
+        private Insertion insertion = Insertion.NONE;
         private Map<String, Integer> contents;
         private List<RareLootNotice.SeenPrecious> preciousItems = List.of();
         private boolean unrecognized;
         private MenuSession session;
 
-        Look(ClientMenuChannel channel, MenuContent content) {
+        Look(MenuChannel channel, MenuContent content, OpenedMenu openedMenu, String insertItem, int selectedHotbar) {
             this.channel = channel;
             this.content = content;
+            this.openedMenu = openedMenu;
+            this.insertItem = insertItem;
+            this.selectedHotbar = selectedHotbar;
         }
 
         @Override public Optional<Map<String, Integer>> contents() {
             return Optional.ofNullable(contents);
+        }
+
+        @Override public Insertion insertion() {
+            return insertion;
         }
 
         @Override public List<RareLootNotice.SeenPrecious> preciousItems() {
@@ -129,12 +163,14 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
         @Override public ActionStatus tick(TickContext tick) {
             return switch (stage) {
                 case WAIT_SYNC -> waitSync();
+                case INSERT_CLICK -> insertClick();
+                case INSERT_WAIT -> insertWait();
                 case CLOSE -> closeMenu(tick);
                 case DONE -> ActionStatus.done();
             };
         }
 
-        // 同步完了就按物品合并列出来，同时抄下容器侧的稀罕贵重物品；布局本来就不认识时不用白等同步，直接去关并如实记下。
+        // 同步完了先判断是否需要顺手把手中物品放进已支持模组界面的空槽（如驱动器插入存储元件），再列内容并关上。
         private ActionStatus waitSync() {
             if (content.unrecognizedLayout()) {
                 unrecognized = true;
@@ -143,8 +179,11 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
             }
             Optional<MenuContent.Reading> reading = content.current();
             if (reading.isPresent()) {
-                contents = reading.get().containerContents();
-                preciousItems = RareLootNotice.collectInitial(reading.get().containerSnapshots());
+                MenuContent.Reading synced = reading.get();
+                if (shouldTryInsert(synced)) {
+                    return prepareInsert(synced);
+                }
+                captureReading(synced);
                 stage = Stage.CLOSE;
                 return ActionStatus.progressed();
             }
@@ -152,6 +191,101 @@ final class LiveMenuLooks implements UseSeams.LooksInMenus {
                 stage = Stage.CLOSE;
             }
             return ActionStatus.running();
+        }
+
+        private boolean shouldTryInsert(MenuContent.Reading reading) {
+            return insertItem != null && openedMenu != null
+                    && MenuLayout.kindOf(reading.slots().menuTypeId()) == OpenScreen.Kind.MOD;
+        }
+
+        // 挑出手中物品所在槽位准备快速移动进容器空槽；无空槽或物品不在背包里则如实标记拒收并仍列出界面明细。
+        private ActionStatus prepareInsert(MenuContent.Reading reading) {
+            boolean hasEmpty = reading.containerSnapshots().stream().anyMatch(SlotSnapshot::isEmpty);
+            int slotId = findPlayerSlot(reading, insertItem, selectedHotbar);
+            if (!hasEmpty || slotId < 0) {
+                insertion = Insertion.REJECTED;
+                captureReading(reading);
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
+            insertSlot = slotId;
+            countBeforeInsert = countInPlayer(reading, insertItem);
+            insertWaits = 0;
+            stage = Stage.INSERT_CLICK;
+            return ActionStatus.progressed();
+        }
+
+        // 发出一次快速移动：本刻发不出（界面刚刷新或无交互机会）则下一刻再试，超出宽限再按拒收收尾。
+        private ActionStatus insertClick() {
+            if (!channel.stillOpen()) {
+                stage = Stage.DONE;
+                return ActionStatus.done();
+            }
+            if (openedMenu.busy()) return ActionStatus.running();
+            if (openedMenu.quickMove(insertSlot)) {
+                stage = Stage.INSERT_WAIT;
+                insertWaits = 0;
+                return ActionStatus.progressed();
+            }
+            if (++insertWaits > SYNC_WAIT_TICKS) {
+                insertion = Insertion.REJECTED;
+                content.current().ifPresent(this::captureReading);
+                stage = Stage.CLOSE;
+            }
+            return ActionStatus.running();
+        }
+
+        // 等快速移动结清后按背包件数复核：件数减少即确认放进去了，刷新容器内容后关闭；未减少按槽满或拒收汇报。
+        private ActionStatus insertWait() {
+            if (!channel.stillOpen()) {
+                stage = Stage.DONE;
+                return ActionStatus.done();
+            }
+            if (openedMenu.busy()) return ActionStatus.running();
+            Optional<MenuContent.Reading> latest = content.current();
+            if (latest.isPresent() && countInPlayer(latest.get(), insertItem) < countBeforeInsert) {
+                insertion = Insertion.INSERTED;
+                captureReading(latest.get());
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
+            if (++insertWaits >= INSERT_SETTLE_TICKS) {
+                insertion = Insertion.REJECTED;
+                latest.ifPresent(this::captureReading);
+                stage = Stage.CLOSE;
+                return ActionStatus.progressed();
+            }
+            return ActionStatus.running();
+        }
+
+        private void captureReading(MenuContent.Reading reading) {
+            contents = reading.containerContents();
+            preciousItems = RareLootNotice.collectInitial(reading.containerSnapshots());
+        }
+
+        // 优先挑主手选中快捷栏格，其次挑背包里第一个匹配该物品 ID 的格。
+        private static int findPlayerSlot(MenuContent.Reading reading, String itemId, int selectedHotbar) {
+            int fallback = -1;
+            for (int i = 0; i < reading.playerSnapshots().size(); i++) {
+                SlotSnapshot snap = reading.playerSnapshots().get(i);
+                if (snap.isEmpty() || !idOf(snap).equals(itemId)) continue;
+                int slotId = reading.playerSlotIds().get(i);
+                if (reading.playerInventoryIndices().get(i) == selectedHotbar) return slotId;
+                if (fallback < 0) fallback = slotId;
+            }
+            return fallback;
+        }
+
+        private static int countInPlayer(MenuContent.Reading reading, String itemId) {
+            int total = 0;
+            for (SlotSnapshot snap : reading.playerSnapshots()) {
+                if (!snap.isEmpty() && idOf(snap).equals(itemId)) total += snap.count();
+            }
+            return total;
+        }
+
+        private static String idOf(SlotSnapshot snapshot) {
+            return BuiltInRegistries.ITEM.getKey(snapshot.stack().getItem()).toString();
         }
 
         // 关上：一份会话从头用到尾；界面先一步没了（玩家关掉、被顶掉）也算关上了。

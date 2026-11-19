@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.neoforge.compat.ae2;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.EnumSet;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -12,7 +15,9 @@ import appeng.api.networking.IInWorldGridNodeHost;
 import appeng.api.parts.IPart;
 import appeng.api.parts.IPartHost;
 import appeng.api.parts.IPartItem;
+import appeng.api.storage.cells.CellState;
 import appeng.block.networking.ControllerBlock;
+import appeng.blockentity.storage.DriveBlockEntity;
 import appeng.parts.networking.CablePart;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -40,13 +45,32 @@ public final class AppliedEnergisticsGrid implements Ae2Grid {
         if (entity instanceof IPartHost host) return Optional.of(cableBus(host));
         if (!(entity instanceof IInWorldGridNodeHost)) return Optional.empty();
         BlockState state = level.getBlockState(at);
+        // 驱动器通过 DriveBlockEntity#isPowered 同步在线供电态，不一定实现 IPowerChannelState；优先按真实接口读取。
         Optional<Boolean> powered = entity instanceof IPowerChannelState channel ? Optional.of(channel.isPowered())
+                : entity instanceof DriveBlockEntity drive ? Optional.of(drive.isPowered())
                 : poweredProperty(state);
         Optional<Boolean> active = entity instanceof IPowerChannelState channel ? Optional.of(channel.isActive())
                 : Optional.empty();
         Optional<String> controller = state.getBlock() instanceof ControllerBlock
                 ? Optional.of(state.getValue(ControllerBlock.CONTROLLER_STATE).getSerializedName()) : Optional.empty();
         return Optional.of(new GridCell(false, Optional.empty(), Set.of(), Map.of(), powered, active, controller));
+    }
+
+    // 读 ME 驱动器客户端已同步的十槽元件与指示灯状态：AE2 渲染器原本就靠 writeToStream/readFromStream 同步全十槽。
+    @Override public Optional<DriveSlots> driveSlots(ClientLevel level, BlockPos at) {
+        if (level == null || !level.isLoaded(at)) return Optional.empty();
+        BlockEntity entity = level.getBlockEntity(at);
+        if (!(entity instanceof DriveBlockEntity drive)) return Optional.empty();
+        int count = drive.getCellCount();
+        List<DriveSlot> slots = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            Item cellItem = drive.getCellItem(i);
+            String itemId = cellItem == null ? null : BuiltInRegistries.ITEM.getKey(cellItem).toString();
+            CellState status = drive.getCellStatus(i);
+            String statusName = status == null ? "absent" : status.name().toLowerCase(Locale.ROOT);
+            slots.add(new DriveSlot(i, itemId, statusName));
+        }
+        return Optional.of(new DriveSlots(drive.isPowered(), slots));
     }
 
     // 线缆格：中间线缆的物品与连着的面，各面部件的物品与电、频道状态。

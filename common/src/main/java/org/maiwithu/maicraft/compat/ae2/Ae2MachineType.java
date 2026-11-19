@@ -125,6 +125,13 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
                 return Ae2Readings.inscriberState(inscriberSlots.get(), gridCell);
             }
         }
+        if (isDrive()) {
+            // 驱动器客户端已同步全部十槽元件与指示灯状态，直接透出槽位明细与在线供电态，不再返回未知状态。
+            Optional<Ae2Grid.DriveSlots> driveSlots = compat.driveSlots(level, at);
+            if (driveSlots.isPresent()) {
+                return Ae2Readings.driveState(driveSlots.get());
+            }
+        }
         if (level == null) return MachineState.unknown("角色现在不在世界里，读不到设备");
         Optional<Ae2Grid.GridCell> cell = compat.gridCell(level, at);
         if (cell.isEmpty()) return MachineState.unknown("这一格读不到 ME 设备（没加载，或已经不是 AE2 的设备）");
@@ -320,6 +327,10 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return kind.id().equals("ae2:inscriber");
     }
 
+    private boolean isDrive() {
+        return kind.id().equals("ae2:drive");
+    }
+
     private ClientLevel level() {
         PlayerContext current = services.context().get();
         return current == null ? null : current.level();
@@ -373,6 +384,35 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
 
         private static String formatSlot(MachineState.Shown slot) {
             return slot == null ? "empty" : slot.itemId() + " ×" + slot.count();
+        }
+
+        // ME 驱动器十个槽位的元件 ID 与指示灯状态全部写入 shown 与 readings（slot_0..slot_9），方便看机器一次看全。
+        static MachineState driveState(Ae2Grid.DriveSlots drive) {
+            Map<String, Object> readings = new LinkedHashMap<>();
+            List<MachineState.Shown> shown = new ArrayList<>();
+            int installed = 0;
+            for (Ae2Grid.DriveSlot slot : drive.slots()) {
+                if (slot.itemId() != null) {
+                    installed++;
+                    readings.put("slot_" + slot.slot(), slot.itemId() + " (" + slot.status() + ")");
+                    shown.add(new MachineState.Shown(slot.itemId(), 1));
+                } else {
+                    readings.put("slot_" + slot.slot(), "empty");
+                }
+            }
+            int total = drive.slots().size();
+            readings.put("occupied_slots", installed);
+            readings.put("empty_slots", Math.max(0, total - installed));
+            readings.put("total_slots", total);
+            readings.put("online", drive.online());
+            if (!drive.online()) {
+                return new MachineState(MachineState.Activity.OFFLINE, null, null, shown, readings,
+                        "没电或未接入 ME 网（已装 " + installed + "/" + total + " 块存储元件）");
+            }
+            MachineState.Activity activity = installed > 0
+                    ? MachineState.Activity.RUNNING : MachineState.Activity.IDLE;
+            return new MachineState(activity, null, null, shown, readings,
+                    "已装 " + installed + "/" + total + " 块存储元件");
         }
 
         // 各面的部件按 AE2 画出来的亮法换成运行状态：有电有频道在干活，有电没频道停着，没电离线；按六个方向的固定顺序列。

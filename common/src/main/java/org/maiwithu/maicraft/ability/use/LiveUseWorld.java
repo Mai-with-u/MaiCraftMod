@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.use;
 
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
@@ -206,6 +208,24 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         ItemStack held = player.getMainHandItem();
         return held.isEmpty() ? Optional.empty()
                 : Optional.of(new Held(BuiltInRegistries.ITEM.getKey(held.getItem()).toString(), held.getCount()));
+    }
+
+    // 统计角色主背包与副手当前每样物品的总件数，用于交互前后比对拆解或转化出的新增物品。
+    @Override public Map<String, Integer> backpackCounts() {
+        LocalPlayer player = player();
+        if (player == null) return Map.of();
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (ItemStack stack : player.getInventory().items) {
+            if (!stack.isEmpty()) {
+                counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+            }
+        }
+        for (ItemStack stack : player.getInventory().offhand) {
+            if (!stack.isEmpty()) {
+                counts.merge(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString(), stack.getCount(), Integer::sum);
+            }
+        }
+        return Map.copyOf(counts);
     }
 
     // 实体会走动：靠近时取它这一刻的包围盒，不用落实目标时记下的位置。

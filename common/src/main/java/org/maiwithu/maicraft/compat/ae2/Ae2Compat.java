@@ -91,6 +91,8 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2AccessPointLayout());
         // 压印器的界面：四个工作格加四个升级格，投料取产物都经它。
         registry.menuLayout(this, new Ae2InscriberLayout());
+        // ME 驱动器的界面：十个存储元件槽，查看元件与插入新元件都经它。
+        registry.menuLayout(this, new Ae2DriveLayout());
         registry.itemSource(this, services -> {
             this.services = services;
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
@@ -148,6 +150,11 @@ public final class Ae2Compat extends CompatModule {
     /** 一格 ME 设备的读数；见 {@link Ae2Grid#cell}。 */
     public Optional<Ae2Grid.GridCell> gridCell(ClientLevel level, BlockPos at) {
         return call("读 ME 设备", () -> grid.cell(level, at));
+    }
+
+    /** 一格 ME 驱动器客户端同步到的十槽元件与指示灯状态；见 {@link Ae2Grid#driveSlots}。 */
+    public Optional<Ae2Grid.DriveSlots> driveSlots(ClientLevel level, BlockPos at) {
+        return call("读 ME 驱动器的十个槽位", () -> grid.driveSlots(level, at));
     }
 
     /** 一格压印器的输出槽；见 {@link Ae2Inscribers#output}。 */

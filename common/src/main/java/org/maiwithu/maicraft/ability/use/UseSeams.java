@@ -124,6 +124,11 @@ final class UseSeams {
         /** 角色主手上拿着什么；空手为空。 */
         Optional<Held> heldItem();
 
+        /** 角色身上（主背包加副手）各物品 ID 的合计件数；用于识别潜行右键拆解或转化出的新增物品。 */
+        default Map<String, Integer> backpackCounts() {
+            return Map.of();
+        }
+
         /**
          * 靠近目标的形态：方块用格子，实体用它此刻的包围盒；实体不在了为空。
          * writesSign 为真（写告示牌）时方块目标只站正面那一侧：从哪一面点就编辑哪一面，
@@ -316,12 +321,26 @@ final class UseSeams {
         default Optional<MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace) {
             return opened(menuBefore);
         }
+
+        /** 同上，额外传入希望顺手放进已支持模组界面的物品 ID（为 null 表示只查看内容、不放入）。 */
+        default Optional<MenuLook> opened(int menuBefore, BlockPos clickedCell, Direction clickedFace,
+                String insertItem) {
+            return opened(menuBefore, clickedCell, clickedFace);
+        }
     }
 
-    /** 看一次界面的动作：做完后给出界面里有什么。 */
+    /** 看一次界面的动作：做完后给出界面里有什么，以及有没有把手中物品顺手放进界面。 */
     interface MenuLook extends Action {
+        /** 顺手把手中物品放进已支持模组界面的结果：没尝试、放进去了、槽满或拒收。 */
+        enum Insertion { NONE, INSERTED, REJECTED }
+
         /** 界面里有什么：物品 ID 到件数，按界面里的先后；内容没同步完或界面认不出时为空。 */
         Optional<Map<String, Integer>> contents();
+
+        /** 这次点开界面时有没有把手中物品放进容器空槽。 */
+        default Insertion insertion() {
+            return Insertion.NONE;
+        }
 
         /** 容器那一侧看到的稀罕贵重物品（taken=0，只打开查看不取物）；测试替身默认为空。 */
         default List<RareLootNotice.SeenPrecious> preciousItems() {
