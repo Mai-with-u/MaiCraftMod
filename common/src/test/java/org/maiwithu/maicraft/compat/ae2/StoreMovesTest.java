@@ -18,6 +18,7 @@ import net.minecraft.world.item.Items;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -83,6 +84,8 @@ class StoreMovesTest {
         menu.player.set(slot, switch (itemId) {
             case "minecraft:iron_ingot" -> new ItemStack(Items.IRON_INGOT, count);
             case "minecraft:gold_ingot" -> new ItemStack(Items.GOLD_INGOT, count);
+            case "minecraft:diamond" -> new ItemStack(Items.DIAMOND, count);
+            case "minecraft:emerald" -> new ItemStack(Items.EMERALD, count);
             default -> throw new IllegalArgumentException("替身没安排这种东西：" + itemId);
         });
     }
@@ -167,5 +170,44 @@ class StoreMovesTest {
         Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 64, "minecraft:iron_ingot");
         menu.closed = true;
         assertInstanceOf(TerminalTurn.FinishNow.class, rig.moves().proceed(TICKS));
+    }
+
+    @Test
+    void 满盘连续两次快速移动无回包_提前止损并报告余下未存入件数() {
+        // 背包放 4 种物品，模拟 ME 存储元件 63 种类型已满后服务端对快速移动静默不回包（UNCERTAIN）：
+        // 连续两次 UNCERTAIN 且原格数量不变后立刻中止，不再点击第 3、4 样，并报出余下未存入件数。
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        putInBackpack(menu, 3, "minecraft:emerald", 10);
+        menu.jamMoves = Integer.MAX_VALUE;
+        menu.jamStatus = PendingMenuAction.Status.UNCERTAIN;
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond", "minecraft:emerald");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 60));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, wrapUp.reason().kind());
+        assertEquals(2, menu.quickMoveCalls, "连续 2 次无回包后应立即止损，不再逐格尝试剩余 2 种");
+        assertTrue(wrapUp.reason().message().contains("已满/类型上限拒收"), wrapUp.reason().message());
+        assertTrue(wrapUp.reason().message().contains("余下 40 件未存入"), wrapUp.reason().message());
+        assertEquals(0, rig.moves().stored());
+    }
+
+    @Test
+    void 偶发一次快速移动无回包后下一件成功_不误中断() {
+        // 只有第 1 种物品偶发 UNCERTAIN，随后第 2、3 种正常存入：
+        // 成功存入时应清零连续无回包计数，把后面两种全部存完。
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        menu.jamMoves = 1;
+        menu.jamStatus = PendingMenuAction.Status.UNCERTAIN;
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 60));
+        assertNull(wrapUp.reason(), "已有成功存入时不应误触发满盘止损");
+        assertEquals(20, rig.moves().stored(), "第 2、3 种共 20 件应全部存入");
+        assertEquals(3, menu.quickMoveCalls, "3 种物品都应各自尝试 1 次");
     }
 }

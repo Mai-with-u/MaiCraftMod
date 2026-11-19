@@ -22,6 +22,11 @@ public interface OpenedMenu {
     /** 上一下点击还在等游戏确认。 */
     boolean busy();
 
+    /** 最近一次提交的菜单操作已落定的终态；还没有操作或仍在等待确认时为空。 */
+    default Optional<PendingMenuAction.Status> lastActionStatus() {
+        return Optional.empty();
+    }
+
     /** 光标上是空的。 */
     boolean cursorEmpty();
 

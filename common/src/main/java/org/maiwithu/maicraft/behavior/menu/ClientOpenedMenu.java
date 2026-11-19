@@ -36,6 +36,8 @@ public final class ClientOpenedMenu implements OpenedMenu {
     private PageSwaps swaps = PageSwaps.NONE;
     /** 已经请游戏关过：之后服务端再换上来什么都不跟。 */
     private boolean closeAsked;
+    /** 最近一次经本界面发出的挂起菜单操作，用于调用方识别连续无回包超时（如满盘终端拒收）。 */
+    private PendingMenuAction lastAction;
 
     /**
      * 认领此刻已经开着的界面：界面由别人点开（工作站界面由到设施跟前点开的那一趟交出），
@@ -91,6 +93,10 @@ public final class ClientOpenedMenu implements OpenedMenu {
         return context == null || context.menuActions().hasPendingTransaction();
     }
 
+    @Override public Optional<PendingMenuAction.Status> lastActionStatus() {
+        return lastAction == null || !lastAction.terminal() ? Optional.empty() : Optional.of(lastAction.status());
+    }
+
     @Override public boolean cursorEmpty() {
         followSwap();
         return !channel.cursorCarrying();
@@ -106,7 +112,7 @@ public final class ClientOpenedMenu implements OpenedMenu {
         followSwap();
         PlayerContext context = contexts.get();
         if (!channel.readyForAction(context)) return false;
-        context.menuActions().click(context, slotId, 0, ClickType.QUICK_MOVE,
+        lastAction = context.menuActions().click(context, slotId, 0, ClickType.QUICK_MOVE,
                 ClientMenuChannel.clickedChanged(context, slotId), QUICK_MOVE_TIMEOUT_TICKS);
         return true;
     }

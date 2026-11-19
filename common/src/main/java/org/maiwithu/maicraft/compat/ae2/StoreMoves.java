@@ -12,6 +12,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
+import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -30,6 +31,8 @@ final class StoreMoves {
 
     /** 快速移动发出去后等背包同步过来的宽限（刻）；过了还没少就是网络放不下。 */
     private static final int SETTLE_TICKS = 10;
+    /** 连续多少次快速移动出现服务端静默无回包（UNCERTAIN）且零移入即判定满盘/类型上限，提前止损不再逐格干等。 */
+    static final int CONSECUTIVE_UNCERTAIN_LIMIT = 2;
 
     /** 凑尾数的一下普通点击：在哪一格、左键还是右键；takesToCursor 表示这一下把东西拿上了光标。 */
     private record TrimClick(int slotId, int button, boolean takesToCursor) {}
@@ -49,6 +52,10 @@ final class StoreMoves {
     private int storedThis;
     /** 确认存进网络的件数。 */
     private int stored;
+    /** 这一趟原本计划存入的总件数。 */
+    private final int totalPlanned;
+    /** 这一趟因背包里已缺少而未尝试存入的件数。 */
+    private int missingCount;
     /** 正在等结算的那一下：发之前背包加光标里这种东西的合计件数（没有在等的为 -1），与等了几刻。 */
     private int before = -1;
     private int quiet;
@@ -62,6 +69,10 @@ final class StoreMoves {
     private Problem heldProblem;
     /** 最近一样存不进的原因：样样都存不进时按它收场。 */
     private Problem lastProblem;
+    /** 当前等待结算的操作是否为快速移动；用于区分满盘静默拒收与普通凑尾数交回。 */
+    private boolean lastWasQuickMove;
+    /** 连续快速移动触发 UNCERTAIN 且一件未移入的次数：满盘 63 种类型上限时提前止损。 */
+    private int consecutiveUncertain;
 
     StoreMoves(TerminalSession session, TaskRecords records, String terminal, List<BackpackStack> stacks,
             String purpose) {
@@ -71,6 +82,9 @@ final class StoreMoves {
         this.stacks = List.copyOf(stacks);
         this.stack = this.stacks.getFirst();
         this.purpose = purpose;
+        int planned = 0;
+        for (BackpackStack entry : this.stacks) planned += entry.count();
+        this.totalPlanned = planned;
     }
 
     // 上一下少了几件就记账；没在等的话按还要存的量挑下一格：整格用得上就快速移动，
@@ -100,19 +114,23 @@ final class StoreMoves {
         }
         if (returning) return putLeftoversBack(session.menu(), onCursor);
         if (before >= 0) {
-            TerminalTurn settled = settleLastMove(onHand, onCursor);
+            TerminalTurn settled = settleLastMove(menu, onHand, onCursor);
             if (settled != null) return settled;
         }
         if (storedThis >= stack.count()) return nextKind(null);
         return switch (NetworkStorePlan.next(stack.count() - storedThis, slotCounts(snapshot))) {
-            case NetworkStorePlan.Done done -> nextKind(storedThis > 0 ? null
-                    : Problem.of(Problem.Kind.NEED_ITEM, "背包里已经没有 " + stack.itemId() + " 了", null));
+            case NetworkStorePlan.Done done -> {
+                missingCount += Math.max(0, stack.count() - storedThis);
+                yield nextKind(storedThis > 0 ? null
+                        : Problem.of(Problem.Kind.NEED_ITEM, "背包里已经没有 " + stack.itemId() + " 了", null));
+            }
             case NetworkStorePlan.QuickMove move -> {
                 // 本刻发不出去（上一下没结清、界面没画好、没有交互机会）就下一刻再点，不算点过。
                 if (!menu.quickMove(slotIdOf(snapshot, move.slotIndex()))) {
                     yield new TerminalTurn.Stay(ActionStatus.running());
                 }
                 before = onHand;
+                lastWasQuickMove = true;
                 quiet = 0;
                 yield new TerminalTurn.Stay(ActionStatus.progressed());
             }
@@ -126,6 +144,7 @@ final class StoreMoves {
                     trimming.add(new TrimClick(slotId, 1, false));
                 }
                 before = onHand;
+                lastWasQuickMove = false;
                 trimSourceSlot = slotId;
                 quiet = 0;
                 yield new TerminalTurn.Stay(ActionStatus.progressed());
@@ -135,10 +154,14 @@ final class StoreMoves {
 
     // 结算上一击：合计少了几件就是存进了网络几件，账与背包光标的变化一致；还没看出结果或到期限收场的，
     // 返回要推进的走向（返回 null 是结算完了，接着挑下一步）。
-    private TerminalTurn settleLastMove(int onHand, int onCursor) {
+    // 当快速移动连续多次触发 UNCERTAIN（服务端因磁盘已满或 63 种类型上限静默不回包）且零移入时提前止损，
+    // 避免对背包里余下所有新种类物品逐格白等 40 刻并刷屏告警。
+    private TerminalTurn settleLastMove(OpenedMenu menu, int onHand, int onCursor) {
         return switch (NetworkStoreSettlement.settle(before, onHand, onCursor)) {
             case NetworkStoreSettlement.Stored storedMove -> {
                 credit(storedMove.moved());
+                consecutiveUncertain = 0;
+                lastWasQuickMove = false;
                 before = -1;
                 yield null;
             }
@@ -146,6 +169,8 @@ final class StoreMoves {
                 // 期限到了光标还拿着没收完的：已经进了网络的照实记，剩下的点回背包再按放不下收场。
                 if (++quiet < SETTLE_TICKS) yield new TerminalTurn.Stay(ActionStatus.running());
                 if (held.moved() > 0) credit(held.moved());
+                consecutiveUncertain = 0;
+                lastWasQuickMove = false;
                 before = -1;
                 heldProblem = held.moved() > 0
                         ? Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "网络只收下了 " + stack.itemId()
@@ -156,13 +181,33 @@ final class StoreMoves {
                 yield new TerminalTurn.Stay(ActionStatus.progressed());
             }
             case NetworkStoreSettlement.Waiting waiting -> {
-                if (++quiet < SETTLE_TICKS) yield new TerminalTurn.Stay(ActionStatus.running());
-                // 背包和光标都没少：网络放不下（存储满了、不收这种东西），如实记一笔，接着存下一样。
+                boolean uncertainQuickMove = lastWasQuickMove
+                        && menu.lastActionStatus().map(status -> status == PendingMenuAction.Status.UNCERTAIN).orElse(false);
+                // 已确认服务端超时无响应（UNCERTAIN）时无需再空等 SETTLE_TICKS，直接结算并计入连续拒收次数。
+                if (!uncertainQuickMove && ++quiet < SETTLE_TICKS) {
+                    yield new TerminalTurn.Stay(ActionStatus.running());
+                }
                 before = -1;
+                lastWasQuickMove = false;
+                if (uncertainQuickMove && ++consecutiveUncertain >= CONSECUTIVE_UNCERTAIN_LIMIT) {
+                    int unstored = remainingUnstoredCount();
+                    Problem full = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                            "已满/类型上限拒收，余下 " + unstored + " 件未存入",
+                            "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存");
+                    records.attempt("把 " + stack.itemId() + " 存进 " + terminal + " 连着的网络", full.message());
+                    yield new TerminalTurn.WrapUp(full, false);
+                }
+                if (!uncertainQuickMove) consecutiveUncertain = 0;
+                // 背包和光标都没少：网络放不下（存储满了、不收这种东西），如实记一笔，接着存下一样。
                 yield nextKind(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         "网络放不下 " + stack.itemId() + "（存储满了或不收这种东西）", null));
             }
         };
+    }
+
+    // 统计本趟计划存入总量里，扣除已确认存入与背包原本缺少后，尚未存入网络的全部件数（含先前被拒收的堆）。
+    private int remainingUnstoredCount() {
+        return Math.max(0, totalPlanned - stored - missingCount);
     }
 
     // 把网络没收下的几件点回凑尾数的那一格：光标空了才按这一趟的实情收场，不让东西挂在光标上。

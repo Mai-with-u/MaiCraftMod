@@ -76,6 +76,12 @@ final class TerminalFlowFakes {
         int notReadyMoves;
         /** 点得出去但东西原地不动（网络放不下、服务端收下点击却没搬）。 */
         int jamMoves;
+        /** 阻塞时汇报给调用方的菜单动作结果状态（如 UNCERTAIN 模拟满盘无回包）。 */
+        PendingMenuAction.Status jamStatus;
+        /** 已发出的快速移动次数。 */
+        int quickMoveCalls;
+        /** 最近一次菜单动作的结算状态。 */
+        private PendingMenuAction.Status lastStatus;
         /** 发过的模组协议操作次数。 */
         int modActions;
         boolean closed;
@@ -140,6 +146,7 @@ final class TerminalFlowFakes {
         }
 
         @Override public boolean busy() { return false; }
+        @Override public Optional<PendingMenuAction.Status> lastActionStatus() { return Optional.ofNullable(lastStatus); }
         @Override public boolean cursorEmpty() { return cursor.isEmpty(); }
         @Override public SlotSnapshot cursor() { return snapshot(cursor); }
 
@@ -149,10 +156,13 @@ final class TerminalFlowFakes {
                 notReadyMoves--;
                 return false;
             }
+            quickMoveCalls++;
             if (jamMoves > 0) {
                 jamMoves--;
+                lastStatus = jamStatus;
                 return true;
             }
+            lastStatus = PendingMenuAction.Status.CONFIRMED_APPLIED;
             if (slotId < 27) {
                 ItemStack moving = network.get(slotId);
                 for (int i = 0; i < player.size(); i++) {
