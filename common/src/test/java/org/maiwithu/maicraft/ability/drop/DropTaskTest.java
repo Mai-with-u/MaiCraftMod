@@ -321,4 +321,26 @@ class DropTaskTest {
         assertEquals(List.of(30, 10), rig.sender.requestedCounts);
         assertTrue(done.unconfirmed().isEmpty(), "还没丢的不该算成没能确认");
     }
+
+    @Test
+    void 朝一格扔东西在观察期被打断_如实说明已丢出而非谎报没丢() {
+        // 复现 4K 元件按 Q 离手后进入 WATCH 阶段被上层取消：严禁谎报"还差 1 件没丢"。
+        List<String> watchingOnly = DropTask.tossRemaining("ae2:item_storage_cell_4k", 1, 1, 1, 0);
+        assertEquals(1, watchingOnly.size());
+        assertTrue(watchingOnly.getFirst().contains("已丢出 1 件"), watchingOnly.toString());
+        assertTrue(watchingOnly.getFirst().contains("观察落点时被打断"), watchingOnly.toString());
+        assertTrue(watchingOnly.stream().noneMatch(line -> line.contains("没丢")),
+                "已离手丢出进入观察期绝不能报成没丢：" + watchingOnly);
+
+        // 还没按 Q 丢出就被取消：照实汇报还差 1 件没丢。
+        List<String> notThrownYet = DropTask.tossRemaining("ae2:item_storage_cell_4k", 1, 0, 0, 0);
+        assertEquals(1, notThrownYet.size());
+        assertTrue(notThrownYet.getFirst().contains("还差 1 件"), notThrownYet.toString());
+
+        // 计划丢 3 件：已丢出 1 件正在观察落点、另 2 件还没按 Q 丢，两条分别交代清楚。
+        List<String> mixed = DropTask.tossRemaining("ae2:item_storage_cell_4k", 3, 1, 1, 0);
+        assertEquals(2, mixed.size());
+        assertTrue(mixed.get(0).contains("已丢出 1 件"), mixed.toString());
+        assertTrue(mixed.get(1).contains("还差 2 件"), mixed.toString());
+    }
 }

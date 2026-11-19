@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.drop;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -99,13 +100,33 @@ final class DropTask extends PhasedTask<DropTask.Phase> {
         return Next.done(TaskResult.builder(all ? TaskResult.Status.DONE : TaskResult.Status.PARTIAL, summary).build());
     }
 
-    // 还差几件：朝一格扔的按落上去的（被收走的加停在上面的）扣，随手丢的按丢出的扣。
+    // 还差几件：朝一格扔的区分"还没按 Q 丢出"与"已经丢出、观察落点时被打断（落点未确认）"，
+    // 严禁在 WATCH 观察期被取消时谎报"还差 N 件没丢"；随手丢的按丢出的扣。
     @Override protected List<String> remaining() {
-        int done = tossing != null ? tossing.delivered() + tossing.waiting()
-                : dropping == null ? 0 : dropping.dropped();
+        if (tossing != null) {
+            return tossRemaining(input.itemId(), input.count(), tossing.thrown(),
+                    tossing.watchingThrown(), tossing.unconfirmedThrows());
+        }
+        int done = dropping == null ? 0 : dropping.dropped();
         int left = input.count() - done;
         return left <= 0 ? List.of()
                 : List.of("还差 " + left + " 件" + input.itemId() + "没丢（身上只有这些，或丢的时候出了岔子）");
+    }
+
+    /**
+     * 朝一格扔东西中途取消或结束时的剩余说明（纯判断）：把已按 Q 离手但尚未观察完落点的件数单独写明，
+     * 避免把已经离手并可能被漏斗吸走的物品误报成"还没丢"。
+     */
+    static List<String> tossRemaining(String itemId, int requested, int thrown, int watching, int unconfirmedThrows) {
+        List<String> lines = new ArrayList<>();
+        if (watching > 0) {
+            lines.add("已丢出 " + watching + " 件 " + itemId + "，观察落点时被打断（落点未确认，可能已被接住或落在目标附近）");
+        }
+        int notThrown = Math.max(0, requested - thrown - unconfirmedThrows);
+        if (notThrown > 0) {
+            lines.add("还差 " + notThrown + " 件" + itemId + "没丢（身上只有这些，或丢的时候出了岔子）");
+        }
+        return lines;
     }
 
     // 身上（主背包加副手）现在实际有几件要丢的。

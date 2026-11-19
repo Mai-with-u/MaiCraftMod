@@ -102,6 +102,12 @@ public final class TossesOnto implements Action {
     private int waiting;
     private int missed;
     private int unclear;
+    /** 已确认按 Q 离手丢出的累计件数（在 throwing 结束即刻记账，不等 WATCH 落点观察结束）。 */
+    private int thrownCount;
+    /** 已完成落点观察结算的离手件数：thrown() 减去它就是正在观察落点、尚未结账的件数。 */
+    private int settledThrown;
+    /** 按 Q 提交却没等到离手确认的件数。 */
+    private int unconfirmedThrows;
     private final List<String> notes = new ArrayList<>();
 
     /**
@@ -132,6 +138,21 @@ public final class TossesOnto implements Action {
     /** 落到别处、并进地上旧堆、或丢没丢出去说不清的件数。 */
     public int notDelivered() {
         return missed + unclear;
+    }
+
+    /** 已经确认按 Q 离手丢出的总件数（包含正在观察落点还没结账的那一批）。 */
+    public int thrown() {
+        return stage == Stage.THROW && throwing != null ? thrownCount + throwing.thrown() : thrownCount;
+    }
+
+    /** 已经按 Q 离手、此刻正处在观察落点阶段尚未结账的件数。 */
+    public int watchingThrown() {
+        return Math.max(0, thrown() - settledThrown);
+    }
+
+    /** 按 Q 提交却没等到离手确认的件数。 */
+    public int unconfirmedThrows() {
+        return unconfirmedThrows;
     }
 
     /** 丢的过程中看见的事：每一堆落在哪、没丢完的原因。 */
@@ -248,9 +269,12 @@ public final class TossesOnto implements Action {
         player.input().halt(player.localPlayer());
         ActionStatus status = throwing.tick(context);
         if (status instanceof ActionStatus.Running) return status;
+        // 按 Q 确认离手后立即累加已丢出件数，防止随后在 WATCH 观察落点阶段被取消时误报成"还没丢"。
+        thrownCount += throwing.thrown();
         remaining -= throwing.thrown();
         if (throwing.unconfirmed() > 0) {
             unclear += throwing.unconfirmed();
+            unconfirmedThrows += throwing.unconfirmed();
             remaining -= throwing.unconfirmed();
             notes.add(throwing.unconfirmed() + " 件提交了丢出却没等到确认，说不清丢没丢出去");
         }
@@ -329,6 +353,7 @@ public final class TossesOnto implements Action {
             }
         }
         delivered += gone;
+        settledThrown += thisRound;
         if (seenCount < thisRound) {
             unclear += thisRound - seenCount;
             notes.add((thisRound - seenCount) + " 件丢出去了却没看见落在哪");
