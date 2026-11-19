@@ -45,6 +45,8 @@ final class GoalTestAbility implements AbilityModule {
     /** 替身任务：逐刻返回约定结局；被提前收尾时如实交代被取消；可以约定启动就出错。 */
     static final class ScriptedGoalTask implements Task, SurvivalNeedsOff, KeepsTempTaskFacts {
         private final TickResult ending;
+        /** 测试中途切成的下一刻结局（用于模拟跨多真实刻后回包到达）。 */
+        private TickResult nextEnding;
         /** 目标转交进来的临时任务结果，按先后。 */
         final List<TaskResult> keptFacts = new ArrayList<>();
         private final RuntimeException startError;
@@ -79,8 +81,13 @@ final class GoalTestAbility implements AbilityModule {
             if (startError != null) throw startError;
         }
 
+        /** 约定从下一刻起以指定结果完成任务（模拟跨真实游戏刻的网络回包到达）。 */
+        void finishNext(TaskResult result) {
+            this.nextEnding = TickResult.finished(result);
+        }
+
         @Override public TickResult tick(TickContext context) {
-            return ending;
+            return nextEnding != null ? nextEnding : ending;
         }
 
         @Override public void pause() {

@@ -614,4 +614,30 @@ class GoalRunTableTest {
         table.resume(id);
         assertEquals(id, ((GoalRunner) loop.currentTask()).run().id());
     }
+
+    @Test
+    void asideGoalWaitingAcrossRealTicksCompletesViaTickAsideInsteadOfCancelling() {
+        // 模拟机器查看等待 ME 整网汇总回包：需要跨越多个真实游戏刻才能拿到回包，runAside 不得在第 1 刻强杀取消。
+        table.enterWorld(new GoalRunnerTest.TestMemory(), store);
+        ability.shared().keepRunning("等网汇总");
+        ability.next(new StepDecision.Run(new GoalTestAbility.TestInput("等网汇总")));
+
+        GoalRun run = table.runAside(GOAL, new GoalTestTick(tick++));
+        assertEquals(GoalRunState.RUNNING, run.state(), "需要跨真实游戏刻等网回包的旁路目标不能在单刻内强行取消");
+
+        // 前两刻网络回包尚未到达，继续保持运行态。
+        table.tickAside(new GoalTestTick(tick++));
+        table.tickAside(new GoalTestTick(tick++));
+        assertEquals(GoalRunState.RUNNING, run.state());
+
+        // 第 3 真实游戏刻回包落盘，任务给出完成结果。
+        ability.shared().created.get("等网汇总").finishNext(TaskResult.done("读到 ME 整网汇总"));
+        ability.next(new StepDecision.Finish(TaskResult.done("读到 ME 整网汇总")));
+        table.tickAside(new GoalTestTick(tick++));
+        table.tickAside(new GoalTestTick(tick++));
+
+        assertEquals(GoalRunState.FINISHED, run.state());
+        assertEquals(TaskResult.Status.DONE, run.result().status());
+        assertEquals("读到 ME 整网汇总", run.result().summary());
+    }
 }

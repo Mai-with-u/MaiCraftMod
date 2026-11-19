@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.kernel.goal.DocumentGoalRunStore;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
+import org.maiwithu.maicraft.kernel.result.TaskResult;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -39,6 +40,12 @@ public final class ExecuteTool implements McpTool {
     static final long ESTIMATE_WAIT_MILLIS = 5_000;
     /** 等扫描时隔多久再估一次。 */
     static final long ESTIMATE_RETRY_MILLIS = 250;
+    /** 跨真实游戏刻执行的只读旁路目标（如机器查看等 ME 网汇总）最多等待多久（毫秒）。 */
+    static final long ASIDE_WAIT_MILLIS = 8_000;
+    /** 在 MCP 工作线程上轮询异步旁路目标终态的间隔（约 1 游戏刻，避免空转占满客户端线程）。 */
+    static final long ASIDE_POLL_MILLIS = 50;
+    /** 旁路目标在客户端线程上的一次状态采样：未落定时 finishedJson 为 null，已落定时已在客户端线程序列化完毕。 */
+    private record AsidePoll(long runId, JsonObject finishedJson) {}
 
     private final AbilityRegistry registry;
     private final GoalReader reader;
@@ -47,6 +54,8 @@ public final class ExecuteTool implements McpTool {
     private final GoalEstimates estimates;
     /** 只读能力出完报告告诉闲时看：报告指着世界里的地方（看的那片机器、读的那一栋），角色闲着时顺着看过去。 */
     private final LooksAfterReading looks;
+    private final long asideWaitMillis;
+    private final long asidePollMillis;
     private final Map<String, Goal> plans = new LinkedHashMap<>() {
         @Override protected boolean removeEldestEntry(Map.Entry<String, Goal> eldest) {
             return size() > KEPT_PLANS;
@@ -59,12 +68,19 @@ public final class ExecuteTool implements McpTool {
 
     /** @param looks 只读能力出完报告告诉闲时看；不演的给 {@link LooksAfterReading#NONE} */
     public ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks) {
+        this(registry, table, clientThread, looks, ASIDE_WAIT_MILLIS, ASIDE_POLL_MILLIS);
+    }
+
+    ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks,
+            long asideWaitMillis, long asidePollMillis) {
         this.looks = Objects.requireNonNull(looks, "looks");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.reader = new GoalReader(registry);
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
         this.estimates = new GoalEstimates(registry);
+        this.asideWaitMillis = Math.max(1L, asideWaitMillis);
+        this.asidePollMillis = Math.max(1L, asidePollMillis);
     }
 
     @Override public String name() {
@@ -122,17 +138,9 @@ public final class ExecuteTool implements McpTool {
 
     private JsonObject start(Goal goal, String requestKey, List<String> notes) {
         if (!controlsPlayer(goal)) {
-            // 只读分析、只改记忆：当场做完，不交给控制循环，手上的主任务照常进行。
-            GoalRun run = clientThread.call(context -> {
-                GoalRun aside = table.runAside(goal, context);
-                // 报告指着世界里的地方：角色闲着时从左到右扫过那片机器、那一栋，报告照旧当场返回。
-                if (aside.result() != null && aside.result().details() instanceof PointsAt points) {
-                    WhatWasRead pointed = WhatWasRead.pointedAt(points);
-                    if (pointed != null) looks.justRead(pointed);
-                }
-                return aside;
-            });
-            return ToolReply.ok(ResultJson.goalRun(run, null, null), notes, null);
+            // 只读分析、只改记忆：先当场起跑；立即可结的直接返回，需跨刻等网回包的在工作线程等真实游戏刻跑完再返回，
+            // 全程只在客户端线程读取和序列化 GoalRun，避免跨线程数据竞争。
+            return ToolReply.ok(runAsideUntilSettled(goal), notes, null);
         }
         String key = requestKey == null ? UUID.randomUUID().toString() : requestKey;
         GoalRunTable.Launch launch = clientThread.call(context -> table.launch(goal, key));
@@ -152,6 +160,85 @@ public final class ExecuteTool implements McpTool {
         wait.addProperty("goal_id", run.id());
         wait.addProperty("wait_ms", EventsTool.DEFAULT_WAIT_MS);
         return ToolReply.ok(data, notes, ToolReply.next(ToolCatalog.EVENTS, wait));
+    }
+
+    // 启动旁路只读目标并在需要跨真实游戏刻等网回包时于 MCP 工作线程轮询至落定：
+    // GoalRun 仅在客户端主线程读写与序列化；轮询期容忍瞬时 ClientThread.Busy；超时或线程被中断时在客户端线程
+    // 显式取消并移出旁路运行表后再取终态 JSON，杜绝残留孤儿任务或返回未完结半成品。
+    private JsonObject runAsideUntilSettled(Goal goal) {
+        AsidePoll first = clientThread.call(context -> snapshotAside(table.runAside(goal, context)));
+        if (first.finishedJson() != null) return first.finishedJson();
+        long runId = first.runId();
+        long deadline = System.currentTimeMillis() + asideWaitMillis;
+        boolean interrupted = false;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(asidePollMillis);
+            } catch (InterruptedException caught) {
+                interrupted = true;
+                break;
+            }
+            try {
+                AsidePoll polled = clientThread.call(context -> table.find(runId).map(this::snapshotAside).orElse(null));
+                if (polled == null) break;
+                if (polled.finishedJson() != null) return polled.finishedJson();
+            } catch (ClientThread.Busy transientBusy) {
+                // 客户端主线程瞬时繁忙：在截止时间前继续下一轮采样，不误中断正在等回包的旁路目标。
+            }
+        }
+        // 中断退出时先在清除中断位状态下把取消请求送到客户端线程，收尾完毕后再恢复当前线程中断标记。
+        try {
+            return cancelAsideOnClient(runId, goal.ability(),
+                    interrupted ? "等待只读目标结果时被中断" : "等待只读目标结果超时");
+        } finally {
+            if (interrupted) Thread.currentThread().interrupt();
+        }
+    }
+
+    // 在客户端主线程安全采样旁路目标：未完成时只带出编号，已完成时同步通知闲时看并当场序列化成不可变 JSON。
+    private AsidePoll snapshotAside(GoalRun run) {
+        if (run.unfinished()) return new AsidePoll(run.id(), null);
+        notifyLookIfFinished(run);
+        return new AsidePoll(run.id(), ResultJson.goalRun(run, null, null));
+    }
+
+    // 超时或中断后的客户端收尾：取消并移出仍在运行的旁路目标后序列化终态；若角色已离世界或短暂繁忙则兜底返回终态 JSON。
+    private JsonObject cancelAsideOnClient(long runId, String ability, String fallbackSummary) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+            try {
+                JsonObject settled = clientThread.call(context -> table.cancelAside(runId)
+                        .map(run -> {
+                            notifyLookIfFinished(run);
+                            return ResultJson.goalRun(run, null, null);
+                        })
+                        .orElse(null));
+                if (settled != null) return settled;
+                return cancelledFallbackJson(runId, ability, fallbackSummary);
+            } catch (ClientThread.Busy transientBusy) {
+                if (attempt == 2) return cancelledFallbackJson(runId, ability, fallbackSummary);
+            } catch (ClientThread.NotInWorld leftWorld) {
+                // 角色已离开世界，leaveWorld() 已统一取消并清空旁路任务表。
+                return cancelledFallbackJson(runId, ability, fallbackSummary);
+            }
+        }
+        return cancelledFallbackJson(runId, ability, fallbackSummary);
+    }
+
+    private static JsonObject cancelledFallbackJson(long runId, String ability, String summary) {
+        JsonObject json = new JsonObject();
+        json.addProperty("goal_id", runId);
+        json.addProperty("ability", ability);
+        json.addProperty("state", "finished");
+        json.add("result", ResultJson.result(TaskResult.cancelled(summary)));
+        return json;
+    }
+
+    // 报告指着世界里的地方：角色闲着时从左到右扫过那片机器、那一栋，报告照旧当场返回。
+    private void notifyLookIfFinished(GoalRun run) {
+        if (!run.unfinished() && run.result() != null && run.result().details() instanceof PointsAt points) {
+            WhatWasRead pointed = WhatWasRead.pointedAt(points);
+            if (pointed != null) looks.justRead(pointed);
+        }
     }
 
     // 估算在客户端线程上问价；dry_run 时附近还没扫完就隔一会儿再估，最多等 5 秒（在 MCP 请求线程上等，不卡游戏）。

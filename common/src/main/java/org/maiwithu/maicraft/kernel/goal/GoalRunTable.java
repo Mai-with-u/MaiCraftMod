@@ -42,8 +42,12 @@ public final class GoalRunTable {
     private static final Logger LOG = LoggerFactory.getLogger(GoalRunTable.class);
     static final int KEPT_FINISHED = 64;
     static final int KEPT_REQUEST_KEYS = 256;
-    /** 不控制角色的目标最多当场推进几刻：记地点、出报告都是一两刻的事。 */
-    static final int ASIDE_TICK_LIMIT = 20;
+    /** 不控制角色的目标当场最多同步推进几刻：记地点、计时器等立即可结，异步等网的随后交回真实游戏刻。 */
+    static final int ASIDE_SYNC_TICKS = 4;
+    /** 跨真实游戏刻异步推进的不控制角色目标（如机器查看等 ME 网汇总）最多允许推进几刻（6 秒）。 */
+    static final int ASIDE_REAL_TICK_LIMIT = 120;
+    /** 保留旧常量名供已有语义对照。 */
+    static final int ASIDE_TICK_LIMIT = ASIDE_REAL_TICK_LIMIT;
 
     private final AbilityRegistry registry;
     /** 死亡恢复决策：角色死后给 LLM 的选择，挂在这里，回答也先到这里。 */
@@ -70,6 +74,21 @@ public final class GoalRunTable {
     private long mainRunId = -1;
     /** 以插一下下达的目标编号：不替换主目标，不能暂停，离开世界时取消、不存成暂停。 */
     private final Set<Long> cutInIds = new HashSet<>();
+    /** 跨真实游戏刻异步推进的旁路目标（如等服务端回包的机器查看）：每游戏刻推进一次，不阻塞主任务。 */
+    private final List<AsideRun> asideRuns = new ArrayList<>();
+    /** 旁路目标编号集合：离开世界时直接按角色离开收尾，不存成暂停。 */
+    private final Set<Long> asideIds = new HashSet<>();
+
+    /** 一条正在跨真实游戏刻推进的旁路目标及剩余游戏刻预算。 */
+    private static final class AsideRun {
+        final GoalRunner runner;
+        int ticksLeft;
+
+        AsideRun(GoalRunner runner, int ticksLeft) {
+            this.runner = runner;
+            this.ticksLeft = ticksLeft;
+        }
+    }
 
     public GoalRunTable(AbilityRegistry registry, GoalRunStore store, RemembersPlaces remembers, ControlLoop loop,
                         PlayerControlHandover handover) {
@@ -149,8 +168,8 @@ public final class GoalRunTable {
         for (GoalRunner runner : runners.values()) {
             if (!runner.run().unfinished()) continue;
             try {
-                // 插一下几秒的事不跨世界：取消，不存成暂停等下次进世界恢复。
-                if (cutInIds.contains(runner.run().id())) {
+                // 插一下和旁路只读目标不跨世界：按角色离开收尾，不存成暂停等下次进世界恢复。
+                if (cutInIds.contains(runner.run().id()) || asideIds.contains(runner.run().id())) {
                     runner.close(CloseReason.PLAYER_GONE);
                     continue;
                 }
@@ -164,6 +183,8 @@ public final class GoalRunTable {
         runners.clear();
         requestKeys.clear();
         cutInIds.clear();
+        asideRuns.clear();
+        asideIds.clear();
         mainRunId = -1;
         deathRecovery.forget();
         places = detachedPlaceholder;
@@ -223,24 +244,92 @@ public final class GoalRunTable {
     }
 
     /**
-     * 不控制角色的目标（只读分析、只改记忆）：当场推进到结果，不交给控制循环，也不打断手上的主任务——
-     * 角色在盖房子时让它记住一个地点，房子照盖。这类能力的决定只该是直接给结果或记地点；
-     * 几刻之内还没有结果（例如提了问题），按取消收尾，不让它挂着没人推进。
+     * 不控制角色的目标（只读分析、只改记忆）：先当场同步推进几刻，计时器、记地点这类立即可结的目标
+     * 当场返回终态；若仍在运行（例如机器查看发包等服务端 ME 网汇总回包，必须交回渲染线程让网络收包），
+     * 则挂入异步旁路表由 {@link #tickAside(TickContext)} 随真实游戏刻逐刻推进，不强行在单刻内取消。
      */
     public GoalRun runAside(Goal goal, TickContext context) {
         GoalRunner runner = GoalRunner.launch(goal, registry, store, relay);
-        runners.put(runner.run().id(), runner);
+        long id = runner.run().id();
+        runners.put(id, runner);
+        asideIds.add(id);
         runner.start(context);
-        for (int i = 0; i < ASIDE_TICK_LIMIT && runner.run().state() == GoalRunState.RUNNING; i++) {
+        for (int i = 0; i < ASIDE_SYNC_TICKS && runner.run().state() == GoalRunState.RUNNING; i++) {
             if (runner.tick(context) instanceof TickResult.Finished) {
                 runner.close(CloseReason.FINISHED);
             }
         }
+        if (runner.run().state() == GoalRunState.RUNNING) {
+            asideRuns.add(new AsideRun(runner, ASIDE_REAL_TICK_LIMIT));
+            return runner.run();
+        }
         if (runner.run().unfinished()) {
             runner.close(CloseReason.CANCELLED);
         }
+        asideIds.remove(id);
         dropOldFinished();
         return runner.run();
+    }
+
+    /**
+     * 每真实游戏刻推进所有等待跨刻完成的不控制角色旁路目标（如等待服务端 ME 网汇总回包的机器查看）。
+     * 在客户端主线程每刻调用，不抢占角色控制权，也不受主任务或玩家接管影响。
+     */
+    public void tickAside(TickContext context) {
+        if (asideRuns.isEmpty()) return;
+        boolean finishedAny = false;
+        Iterator<AsideRun> iterator = asideRuns.iterator();
+        while (iterator.hasNext()) {
+            AsideRun entry = iterator.next();
+            GoalRunner runner = entry.runner;
+            if (!runner.run().unfinished()) {
+                asideIds.remove(runner.run().id());
+                iterator.remove();
+                finishedAny = true;
+                continue;
+            }
+            if (runner.run().state() != GoalRunState.RUNNING) {
+                runner.close(CloseReason.CANCELLED);
+                asideIds.remove(runner.run().id());
+                iterator.remove();
+                finishedAny = true;
+                continue;
+            }
+            if (runner.tick(context) instanceof TickResult.Finished) {
+                runner.close(CloseReason.FINISHED);
+                asideIds.remove(runner.run().id());
+                iterator.remove();
+                finishedAny = true;
+            } else if (--entry.ticksLeft <= 0 || runner.run().state() != GoalRunState.RUNNING) {
+                runner.close(CloseReason.CANCELLED);
+                asideIds.remove(runner.run().id());
+                iterator.remove();
+                finishedAny = true;
+            }
+        }
+        if (finishedAny) dropOldFinished();
+    }
+
+    /**
+     * 在客户端主线程取消指定异步旁路目标并将其从旁路轮询表移除，防止调用方超时或中断后残留孤儿任务。
+     * 若目标在取消前恰好已自然落定，直接返回其当前终态记录，不覆写既有结果。
+     */
+    public Optional<GoalRun> cancelAside(long id) {
+        boolean removed = false;
+        Iterator<AsideRun> iterator = asideRuns.iterator();
+        while (iterator.hasNext()) {
+            AsideRun entry = iterator.next();
+            if (entry.runner.run().id() != id) continue;
+            iterator.remove();
+            asideIds.remove(id);
+            removed = true;
+            if (entry.runner.run().unfinished()) {
+                entry.runner.close(CloseReason.CANCELLED);
+            }
+            break;
+        }
+        if (removed) dropOldFinished();
+        return find(id);
     }
 
     /** 这个目标此刻在做什么的一句话；已经结束时为空。
@@ -448,6 +537,8 @@ public final class GoalRunTable {
             loop.endMainTask(CloseReason.CANCELLED);
             mainRunId = -1;
         } else {
+            asideRuns.removeIf(entry -> entry.runner.run().id() == id);
+            asideIds.remove(id);
             runner.close(CloseReason.CANCELLED);
         }
     }

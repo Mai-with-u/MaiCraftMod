@@ -666,12 +666,6 @@ public final class Bootstrap {
             worldScope[0] = null;
         }
 
-        /**
-         * beginTick 与 endTick 之间要做的事：任务此刻发出的移动与转头指令，要等 endTick 统一写进角色。
-         * 世界扫描先整理感知场景；MCP 请求排进来的工作（下达、暂停、回答目标）在控制循环之前做完，
-         * 新下达的目标本刻就开始。自动化没有实际拿到控制权（例如 F8 已归还）时照样处理请求，
-         * 但不推进控制循环，生存需求不能去抢人类手上的角色。
-         */
         // 此刻主目标运行的编号：靠近记得的"从这里到不了"按它分开，换了目标就失效。
         private OptionalLong mainGoalRun() {
             return goals == null ? OptionalLong.empty()
@@ -683,28 +677,20 @@ public final class Bootstrap {
             return goals != null && goals.mainGoal().filter(run -> run.state() != GoalRunState.PAUSED).isPresent();
         }
 
+        // beginTick 与 endTick 之间：先扫描感知与收发任务队列，再在拿到控制权时推进控制循环并落盘本刻输入。
         private void tickInWorld(Minecraft minecraft, PlayerContext current) {
-            // 启动接管开关还欠着控制权时每刻请求一次；请求是幂等的，拿到为止。人按了 F8 就不再追着要。
-            if (startupAutomationPending && playerControl.input().humanTookOver()) {
-                startupAutomationPending = false;
-            }
+            // 启动接管开关还欠着控制权时每刻请求一次；人按了 F8 就不再追着要。
+            if (startupAutomationPending && playerControl.input().humanTookOver()) startupAutomationPending = false;
             if (startupAutomationPending) {
                 playerControl.requestAutomationControl(current.localPlayer());
-                if (playerControl.input().automationOwnsControls()) {
-                    startupAutomationPending = false;
-                }
+                if (playerControl.input().automationOwnsControls()) startupAutomationPending = false;
             }
             // 世界扫描：感知各读端读当刻的观察事实，整理进场景；顺序在控制循环之前。
             WorldScope scope = worldScope[0];
-            // 感知出错（世界记忆读不到、某个读端碰到没见过的方块实体）只跳过这一刻的观察，下一刻再看。
-            if (scope != null) {
-                tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime(), goalUnderway()));
-            }
+            if (scope != null) tickGuard.run("世界扫描", () -> scope.observe(current, minecraft.level.getGameTime(), goalUnderway()));
             long gameTick = minecraft.level.getGameTime();
             // 装备耐久的基准每刻扫一遍：打空事件到了才说得出坏的是哪一件。
-            if (equipmentConfirmations != null) {
-                tickGuard.run("装备耐久基准", () -> equipmentConfirmations.observe(current.localPlayer()));
-            }
+            if (equipmentConfirmations != null) tickGuard.run("装备耐久基准", () -> equipmentConfirmations.observe(current.localPlayer()));
             // 提醒每刻看一遍角色：人自己玩的时候也照样看，LLM 该知道的事不因控制权换手断掉。
             if (reminders != null) tickGuard.run("提醒", () -> reminders.tick(current));
             // 挨打的片段到点发、维度变了发、天黑天亮下雨雨停发：人自己玩的时候也照样发。
@@ -717,7 +703,10 @@ public final class Bootstrap {
             tickGuard.run("计时", () -> timers.tick(current));
             // 目标停滞每刻看一眼：太久没有任何事件、又没有终态的目标发一条提醒，受理方不用自己干等。
             if (publishingGoalRuns != null) tickGuard.run("目标停滞", publishingGoalRuns::tick);
-            clientWork.drain(new ClientTickContext(gameTick, current));
+            ClientTickContext tickContext = new ClientTickContext(gameTick, current);
+            clientWork.drain(tickContext);
+            // 每真实游戏刻推进跨刻等待的旁路只读目标（如等服务端 ME 网汇总的机器查看），不抢角色控制权。
+            if (goals != null) tickGuard.run("旁路目标", () -> goals.tickAside(tickContext));
             boolean owned = playerControl.input().automationOwnsControls();
             if (owned != automationOwned) {
                 // 控制权换手记一行：目标挂着不动时，先分清是没交给自动化，还是交了却没推进。
