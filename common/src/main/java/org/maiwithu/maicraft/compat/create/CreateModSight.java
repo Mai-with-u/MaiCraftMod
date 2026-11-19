@@ -12,12 +12,15 @@ import java.util.function.Consumer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -33,15 +36,17 @@ final class CreateModSight implements ModSight {
     }
 
     @Override public void sight(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
-        elevators(level, viewer, region, sink);
-        stations(level, region, sink);
-        trains(level, viewer, region, sink);
+        LocalPlayer local = viewer instanceof LocalPlayer client ? client : null;
+        elevators(level, viewer, local, region, sink);
+        stations(level, local, region, sink);
+        trains(level, viewer, local, region, sink);
     }
 
-    // 电梯：楼层表同步了才列楼层；最低一层的触点当编号的位置，轿厢上下动编号也不变。
-    private void elevators(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
+    // 电梯：楼层表同步了才列楼层；最低一层的触点当编号的位置，轿厢上下动编号也不变；隔墙看不见且没乘梯时不报。
+    private void elevators(ClientLevel level, Player viewer, LocalPlayer local, AABB region, Consumer<ModThing> sink) {
         for (CreateElevators.Elevator elevator : compat.elevators(level, viewer, region)) {
             if (elevator.floors().isEmpty()) continue;
+            if (local != null && !elevator.carriesPlayer() && !elevatorVisible(level, local, elevator)) continue;
             CreateElevators.Floor lowest = elevator.floors().getFirst();
             JsonObject summary = new JsonObject();
             elevator.floors().stream().filter(floor -> floor.contactY() == elevator.currentContactY()).findFirst()
@@ -69,10 +74,11 @@ final class CreateModSight implements ModSight {
         }
     }
 
-    // 车站：站名；车站方块给比较器的信号满格就是有车停在站里。
-    private void stations(ClientLevel level, AABB region, Consumer<ModThing> sink) {
+    // 车站：站名；车站方块给比较器的信号满格就是有车停在站里；隔墙看不见的车站不报进场景。
+    private void stations(ClientLevel level, LocalPlayer local, AABB region, Consumer<ModThing> sink) {
         for (CreateRailways.Station station : compat.stations(level)) {
             if (!region.contains(station.pos().getCenter()) || !level.isLoaded(station.pos())) continue;
+            if (local != null && !ObservationVisibility.block(local, station.pos())) continue;
             JsonObject summary = new JsonObject();
             summary.addProperty("name", station.name());
             summary.addProperty("train_present",
@@ -81,10 +87,11 @@ final class CreateModSight implements ModSight {
         }
     }
 
-    // 列车：一趟车只列离角色最近的那节车厢；车名、动没动、看得到几节、一共几个空座。
-    private void trains(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
+    // 列车：一趟车只列离角色最近的那节可见车厢；车名、动没动、看得到几节、一共几个空座；隔墙整列看不见时不报。
+    private void trains(ClientLevel level, Player viewer, LocalPlayer local, AABB region, Consumer<ModThing> sink) {
         Map<String, List<CreateRailways.Car>> byTrain = new LinkedHashMap<>();
         for (CreateRailways.Car car : compat.trainCars(level, viewer, region)) {
+            if (local != null && !car.carriesPlayer() && !carVisible(level, local, car)) continue;
             byTrain.computeIfAbsent(car.trainId(), id -> new ArrayList<>()).add(car);
         }
         byTrain.forEach((trainId, cars) -> {
@@ -100,6 +107,24 @@ final class CreateModSight implements ModSight {
             sink.accept(new ModThing("train", ModThing.Identity.ENTITY, Integer.toString(nearest.entityId()),
                     position(level, BlockPos.containing(nearest.box().getCenter())), summary, null));
         });
+    }
+
+    // 电梯可见判定：轿厢实体或任一楼层触点在 360° 视线内无遮挡即算看得见。
+    private static boolean elevatorVisible(ClientLevel level, LocalPlayer local, CreateElevators.Elevator elevator) {
+        Entity cabinEntity = level.getEntity(elevator.entityId());
+        if (cabinEntity != null && ObservationVisibility.entity(local, cabinEntity)) return true;
+        if (elevator.cabin() != null && ObservationVisibility.point(local, elevator.cabin().getCenter())) return true;
+        for (CreateElevators.Floor floor : elevator.floors()) {
+            if (ObservationVisibility.block(local, elevator.contact(floor))) return true;
+        }
+        return false;
+    }
+
+    // 列车车厢可见判定：优先按世界实体走 ObservationVisibility.entity，读不到实体时退回检测车厢中心点。
+    private static boolean carVisible(ClientLevel level, LocalPlayer local, CreateRailways.Car car) {
+        Entity entity = level.getEntity(car.entityId());
+        if (entity != null) return ObservationVisibility.entity(local, entity);
+        return car.box() != null && ObservationVisibility.point(local, car.box().getCenter());
     }
 
     private static WorldPosition position(ClientLevel level, BlockPos at) {

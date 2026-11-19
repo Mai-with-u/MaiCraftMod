@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
@@ -18,6 +19,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.game.EntityMentions;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -36,13 +38,17 @@ final class MaidSight implements ModSight {
 
     @Override public void sight(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
         String dimension = level.dimension().location().toString();
+        LocalPlayer local = viewer instanceof LocalPlayer client ? client : null;
         for (GomokuState board : compat.gomokuBoards(level, region)) {
             BlockPos center = board.center();
+            // 棋盘与女仆感知统一过世界可见尺，隔墙不再透视报进场景。
+            if (local != null && !ObservationVisibility.block(local, center)) continue;
             sink.accept(new ModThing("gomoku_board", ModThing.Identity.BLOCK, "",
                     new WorldPosition(center.getX(), center.getY(), center.getZ(), dimension), gomoku(board),
                     gomokuDetail(board)));
         }
         for (Entity entity : level.getEntities((Entity) null, region, found -> !found.isRemoved())) {
+            if (local != null && !ObservationVisibility.entity(local, entity)) continue;
             WorldPosition at = new WorldPosition(entity.getBlockX(), entity.getBlockY(), entity.getBlockZ(), dimension);
             if (compat.isMaid(entity)) {
                 MaidState state = compat.state(entity);

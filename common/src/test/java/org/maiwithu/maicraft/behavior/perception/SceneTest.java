@@ -222,29 +222,56 @@ class SceneTest {
     @Test
     void distantHarmlessEntitiesAreCountedByTypeWhileThreatsStayListed() {
         List<EntitySight.Observation> crowd = new ArrayList<>();
+        // 远处看得见的无害实体按种类进 distant_entities 计数。
         for (int i = 0; i < 30; i++) {
             crowd.add(new EntitySight.Observation(1000 + i, "minecraft:squid", null, null,
-                    WorldPosition.here(0, 50, -100 - i), false, false, false, null, Map.of()));
+                    WorldPosition.here(0, 50, -100 - i), true, false, false, null, Map.of()));
         }
         crowd.add(new EntitySight.Observation(2000, "minecraft:bat", null, null,
-                WorldPosition.here(60, 40, 0), false, false, false, null, Map.of()));
+                WorldPosition.here(60, 40, 0), true, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3000, "minecraft:skeleton", null, null,
                 WorldPosition.here(0, 64, -60), true, true, false, null, Map.of()));
-        // 脚下洞穴里看不见、没盯着角色的僵尸：只计数。
+        // 脚下洞穴里看不见、没盯着角色的僵尸，以及 10 格墙后看不见的熊猫：既不列出也不进远距计数，仅保编号。
         crowd.add(new EntitySight.Observation(3003, "minecraft:zombie", null, null,
                 WorldPosition.here(0, -30, 40), false, true, false, null, Map.of()));
+        crowd.add(new EntitySight.Observation(3004, "minecraft:panda", null, null,
+                WorldPosition.here(10, 63, 0), false, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3001, "minecraft:wolf", "小白", null,
                 WorldPosition.here(50, 64, 0), true, false, false, null, Map.of()));
         crowd.add(new EntitySight.Observation(3002, "minecraft:cow", null, null,
                 WorldPosition.here(5, 64, 0), true, false, false, null, Map.of()));
         scene.updateEntities(10, crowd);
-        assertEquals(35, scene.entities().size(), "场景自己的列表照样完整");
+        assertEquals(36, scene.entities().size(), "场景自己的列表照样完整以保住观察编号");
         List<String> listed = scene.listedEntities().stream().map(SceneEntity::type).toList();
         assertEquals(List.of("minecraft:skeleton", "minecraft:wolf", "minecraft:cow"), listed,
-                "远处看得见的敌对、有名字的照列，近处的照列");
-        assertEquals(Map.of("minecraft:squid", 30, "minecraft:bat", 1, "minecraft:zombie", 1), scene.distantCounts());
+                "远处看得见的敌对、有名字的与近处可见生物照列；墙后熊猫与地底僵尸全部禁止透视");
+        assertEquals(Map.of("minecraft:squid", 30, "minecraft:bat", 1), scene.distantCounts());
         assertEquals("minecraft:squid", scene.distantCounts().keySet().iterator().next(), "多的在前");
-        assertTrue(scene.summary().contains("32 格外另有 32 个"), scene.summary());
+        assertTrue(scene.summary().contains("32 格外另有 31 个"), scene.summary());
+    }
+
+    @Test
+    void occludedExceptionsKeepNonSneakingPlayerAndTargetingHostileOnly() {
+        scene.updateEntities(10, List.of(
+                new EntitySight.Observation(1, "minecraft:panda", null, null,
+                        WorldPosition.here(8, 64, 0), false, false, false, null, Map.of(), false, false),
+                new EntitySight.Observation(2, "minecraft:player", "甲", "u1",
+                        WorldPosition.here(12, 64, 0), false, false, false, null, Map.of(), false, false),
+                new EntitySight.Observation(3, "minecraft:player", "乙", "u2",
+                        WorldPosition.here(12, 64, 1), false, false, false, null, Map.of("蹲着", "是"), false, false),
+                new EntitySight.Observation(4, "minecraft:zombie", null, null,
+                        WorldPosition.here(6, 64, 0), false, true, true, null, Map.of(), false, false),
+                new EntitySight.Observation(5, "minecraft:cow", null, null,
+                        WorldPosition.here(4, 64, 0), true, false, false, null, Map.of(), false, false)));
+        List<String> listedNamesOrTypes = scene.listedEntities().stream()
+                .map(entity -> entity.name() != null ? entity.name() : entity.type())
+                .toList();
+        assertEquals(List.of("甲", "minecraft:zombie", "minecraft:cow"), listedNamesOrTypes,
+                "墙后熊猫与潜行玩家不透视；非潜行玩家、锁定我的敌对生物与看得见的牛保留");
+        assertTrue(scene.distantCounts().isEmpty(), "墙后不可见实体全部不进远距计数");
+        SceneEntity cow = scene.listedEntities().get(2);
+        assertTrue(cow.visible(), "牛在 360° 世界可见");
+        assertFalse(cow.inView(), "背对着的牛 inView 为假");
     }
 
     @Test

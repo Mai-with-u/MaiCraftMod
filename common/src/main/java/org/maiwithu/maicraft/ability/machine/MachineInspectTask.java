@@ -19,6 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -167,9 +168,14 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     }
 
     // 把这一轮读出的格子分拣：认领的记下来，没认领的按方块 ID 归并，未加载的记总数。
+    // 按半径盲扫角色周围未指定目标的机器时，应用世界可见尺过滤墙后机器；显式指定坐标、看档案或读现场不因遮挡拒收。
     private void absorb(ReadsMachineArea.Round round) {
         unloadedSoFar = round.unloadedCells();
+        boolean filterOccluded = blindAreaScan();
         for (ReadsMachineArea.Cell cell : round.cells()) {
+            if (filterOccluded && !services.world().blockVisible(cell.pos())) {
+                continue;
+            }
             MachineType claiming = services.claiming(cell.state());
             if (claiming != null) {
                 claimedStates.put(cell.pos(), cell.state());
@@ -183,6 +189,12 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
             unrecognized.computeIfAbsent(blockId, key -> new UnrecognizedAccumulator())
                     .add(cell.pos());
         }
+    }
+
+    // 是否属于按半径盲扫附近未指定具体坐标/编号的机器：这种发现扫描应遵守世界可见尺，避免透视墙后未知机器。
+    private boolean blindAreaScan() {
+        return input.archive() == null && !input.readSite()
+                && (input.target() == null || input.target() instanceof Target.Here);
     }
 
     // 交付：先问清每格挂在哪张网上，分组，再把整张网的读数问一遍（要问服务端的回答还在路上就等一会儿），

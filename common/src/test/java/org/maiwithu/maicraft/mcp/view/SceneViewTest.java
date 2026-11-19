@@ -54,18 +54,20 @@ class SceneViewTest {
     @Test
     void sceneJsonShapeIsPinned() {
         scene.updateEnvironment(new SceneEnvironment("黄昏", "晴", 7, "minecraft:plains"));
-        // 近处一只盯着角色的僵尸、一只羊；远处三只不相干的鱿鱼只计数。
+        // 近处一只眼前盯着角色的僵尸、一只背对着但无遮挡的羊；墙后熊猫过滤不透视；远处三只可见鱿鱼只计数。
         scene.updateEntities(10, List.of(
                 new EntitySight.Observation(1, "minecraft:zombie", null, null, WorldPosition.here(0, 65, -12),
-                        true, true, true, new EntitySight.Health(14, 20), Map.of()),
+                        true, true, true, new EntitySight.Health(14, 20), Map.of(), false, true),
                 new EntitySight.Observation(2, "minecraft:sheep", null, null, WorldPosition.here(9, 64, 0),
-                        true, false, false, null, Map.of()),
+                        true, false, false, null, Map.of(), false, false),
+                new EntitySight.Observation(3, "minecraft:panda", null, null, WorldPosition.here(10, 63, 0),
+                        false, false, false, null, Map.of(), false, false),
                 new EntitySight.Observation(11, "minecraft:squid", null, null, WorldPosition.here(0, 50, -60),
-                        false, false, false, null, Map.of()),
+                        true, false, false, null, Map.of(), false, true),
                 new EntitySight.Observation(12, "minecraft:squid", null, null, WorldPosition.here(0, 50, -70),
-                        false, false, false, null, Map.of()),
+                        true, false, false, null, Map.of(), false, true),
                 new EntitySight.Observation(13, "minecraft:squid", null, null, WorldPosition.here(0, 50, -80),
-                        false, false, false, null, Map.of())));
+                        true, false, false, null, Map.of(), false, true)));
         scene.updateSounds(10, List.of(new SubtitleEar.Event("苦力怕嘶嘶声", WorldPosition.here(2, 64, 2))));
         // 网格顶行三格树：聚成一片树林。
         scene.updateGrid(new OverheadGrid.View(new BlockPos(0, 64, -4), 1,
@@ -99,11 +101,14 @@ class SceneViewTest {
         assertEquals(12, zombie.get("distance").getAsInt());
         assertEquals(1, zombie.get("dy").getAsInt());
         assertTrue(zombie.get("visible").getAsBoolean());
+        assertTrue(zombie.get("in_view").getAsBoolean(), "屏幕前方可见生物 in_view 为 true");
         assertTrue(zombie.get("hostile").getAsBoolean());
         assertTrue(zombie.get("targeting_me").getAsBoolean());
         assertEquals(14.0, zombie.get("health").getAsDouble());
         assertEquals(20.0, zombie.get("max_health").getAsDouble());
         var sheep = entities.get(1).getAsJsonObject();
+        assertTrue(sheep.get("visible").getAsBoolean());
+        assertFalse(sheep.get("in_view").getAsBoolean(), "背对着但无遮挡的羊 in_view 为 false");
         assertFalse(sheep.has("health"), "没有血量快照的实体不写 health");
         assertFalse(sheep.has("name"), "没有名字的实体不写 name");
 

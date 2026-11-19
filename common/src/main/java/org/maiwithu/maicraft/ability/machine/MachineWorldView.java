@@ -22,6 +22,14 @@ interface MachineWorldView {
     Optional<BlockState> stateAt(BlockPos at);
 
     /**
+     * 角色从眼睛 360° 视线能否看见这一格方块（世界可见尺）：按半径盲扫附近未指定目标的机器时用它过滤墙后机器；
+     * 显式指定坐标查看或离线测试替身未覆写时默认可见。
+     */
+    default boolean blockVisible(BlockPos at) {
+        return true;
+    }
+
+    /**
      * 这一块地上此刻躺着几件 itemId：机器弹到地上的产物是看得见的掉落物，站在旁边就数得出来。
      * 不在世界里、那一块没加载给 0，等的是增长，读不到不会误报做好了。
      */

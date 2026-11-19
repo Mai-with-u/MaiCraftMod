@@ -20,6 +20,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.game.interaction.MeleeAim;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.game.world.EndermanGaze;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -143,13 +144,13 @@ public final class CombatStepping {
     /** 看末影人眼睛的范围（格）：原版 64 格内的末影人会因为对视发怒。 */
     private static final double GAZE_RANGE = EndermanGaze.RANGE;
 
-    // 不惹毛附近没惹毛的末影人的俯仰角：看得见它的眼睛的才算；戴着雕刻南瓜不会对视。
+    // 不惹毛附近没惹毛的末影人的俯仰角：统一按世界可见尺判断看得见它的眼睛的才算；戴着雕刻南瓜不会对视。
     private static float avertedPitch(LocalPlayer self, float yaw, float pitch) {
         List<EndermanGaze.Eyes> eyes = new ArrayList<>();
         for (EnderMan enderman : self.level().getEntitiesOfClass(EnderMan.class,
                 self.getBoundingBox().inflate(GAZE_RANGE), candidate -> candidate.isAlive() && !candidate.isCreepy())) {
             eyes.add(new EndermanGaze.Eyes(enderman.getX(), enderman.getEyeY(), enderman.getZ(),
-                    self.hasLineOfSight(enderman)));
+                    ObservationVisibility.entity(self, enderman)));
         }
         if (eyes.isEmpty()) return pitch;
         return EndermanGaze.avertedPitch(self.getEyePosition(), yaw, pitch, eyes,

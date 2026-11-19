@@ -106,7 +106,7 @@ public final class Scene {
                     updated.add(new SceneEntity(entity.id(), entity.type(), resolved, entity.uuid(),
                             entity.direction(), entity.compass(), entity.distance(), entity.dy(),
                             entity.visible(), entity.hostile(), entity.targetingMe(),
-                            entity.health(), entity.traits()));
+                            entity.health(), entity.traits(), entity.inView()));
                 } else {
                     updated.add(entity);
                 }
@@ -158,7 +158,7 @@ public final class Scene {
             next.add(new SceneEntity(id, sighting.type(), name, individualUuid(sighting),
                     direction, bearing.compass(), bearing.distance(), dy,
                     sighting.visible(), sighting.hostile(), sighting.targetingMe(),
-                    sighting.health(), sighting.traits()));
+                    sighting.health(), sighting.traits(), sighting.inView()));
         }
         replace(SceneEntity.class, next);
     }
@@ -518,17 +518,21 @@ public final class Scene {
     }
 
     /**
-     * observe 列出来的实体：盯着角色的、有名字的、玩家、看得见的敌对生物，不论远近都列；其他的只列三十二格以内。
-     * 远处不相干的蝙蝠、鱿鱼、掉落物，以及远处看不见的敌对生物只按种类计数（见 {@link #distantCounts}），要找哪一种用 find。
-     * 场景自己的实体列表仍然完整，战斗、跟随、找东西照常从里面认编号。
+     * observe 列出来的实体：盯着角色的敌对生物、非潜行玩家（原版名牌隔墙可见），以及此刻世界可见（无遮挡）的
+     * 有名字、敌对或三十二格以内实体；隔墙看不见的动物、地底蝙蝠和未开战怪物全部禁止透视列出。
+     * 场景自己的实体列表仍然完整，保留观察编号不被打断。
      */
     public List<SceneEntity> listedEntities() {
         return entities().stream().filter(Scene::listed).toList();
     }
 
-    /** 没列出来的远处实体：种类 → 只数，多的在前。 */
+    /** 没列出来的远处可见实体：种类 → 只数，多的在前；视线被遮挡的实体不计入，避免地下与墙后透视。 */
     public Map<String, Integer> distantCounts() {
-        return unlistedCounts(entities(), Scene::listed, SceneEntity::type);
+        List<SceneEntity> visibleUnlisted = entities().stream()
+                .filter(SceneEntity::visible)
+                .filter(entity -> !listed(entity))
+                .toList();
+        return unlistedCounts(visibleUnlisted, entity -> false, SceneEntity::type);
     }
 
     // 没列出来的部分按种类计数，多的在前：哪些算列出来由各路自己判，收拢只管数。
@@ -545,12 +549,14 @@ public final class Scene {
         return sorted;
     }
 
-    // 要逐只列出来的：盯着角色的、有主的、别的玩家、就在近处的，以及看得见的敌对生物。
-    // 远处看不见、也没盯着角色的敌对生物（脚下几十格洞穴里的僵尸骷髅）只计数：它们不影响眼下的决定，
-    // 山地出生点一眼就有七十只，逐只列会把一次观察撑到两万多字。
+    // 统一按世界可见尺裁剪：仅对"正在锁定/攻击我的敌对生物"与"非潜行玩家（原版名牌可见）"保留隔墙例外；
+    // 其余实体（包括 32 格以内的动物、怪物与潜行玩家）必须视线无遮挡才列出，彻底杜绝隔墙透视。
     private static boolean listed(SceneEntity entity) {
-        return entity.targetingMe() || entity.name() != null || PLAYER.equals(entity.type())
-                || entity.distance() <= LISTED_RADIUS || entity.hostile() && entity.visible();
+        if (entity.targetingMe()) return true;
+        if (PLAYER.equals(entity.type()) && !"是".equals(entity.traits().get("蹲着"))) return true;
+        if (!entity.visible()) return false;
+        return entity.name() != null || PLAYER.equals(entity.type())
+                || entity.distance() <= LISTED_RADIUS || entity.hostile();
     }
 
     /**

@@ -119,6 +119,7 @@ public final class SceneView {
         json.addProperty("distance", entity.distance());
         json.addProperty("dy", entity.dy());
         json.addProperty("visible", entity.visible());
+        json.addProperty("in_view", entity.inView());
         json.addProperty("hostile", entity.hostile());
         json.addProperty("targeting_me", entity.targetingMe());
         // 血量快照：活体生物才有，打不打得过、还要打几下都看它。

@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.LiveCarryReads;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.game.player.ClientBackpackView;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 
 /**
  * 机器现场视图的生产读端：角色在哪、一格是什么、地上躺着什么，都从当刻的角色上下文读。
@@ -45,6 +46,12 @@ final class LiveMachineWorld implements MachineWorldView {
             return Optional.empty();
         }
         return Optional.of(current.level().getBlockState(at));
+    }
+
+    // 按世界可见尺（360° 视线无方块遮挡）检查这一格方块是否可见，用于机器盲扫去透视。
+    @Override public boolean blockVisible(BlockPos at) {
+        PlayerContext current = context.get();
+        return current != null && current.localPlayer() != null && ObservationVisibility.block(current.localPlayer(), at);
     }
 
     // 数这一块地上要的那种掉落物：客户端看得见的掉落物实体就是玩家眼里躺着的东西，没加载的区块里一件也不算。

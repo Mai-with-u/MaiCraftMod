@@ -231,13 +231,13 @@ final class LiveDragonSight {
         return balls;
     }
 
-    // 末影人：眼睛在哪、惹没惹毛（发抖、在进攻）、我看不看得见它。
+    // 末影人：眼睛在哪、惹没惹毛（发抖、在进攻）、我看不看得见它（统一走世界可见尺）。
     private static List<DragonArena.Watcher> endermen(ClientLevel level, LocalPlayer self) {
         List<DragonArena.Watcher> watchers = new ArrayList<>();
         for (EnderMan enderman : level.getEntitiesOfClass(EnderMan.class, self.getBoundingBox().inflate(NEAR_RANGE),
                 EnderMan::isAlive)) {
             watchers.add(new DragonArena.Watcher(enderman.getId(), enderman.getX(), enderman.getEyeY(), enderman.getZ(),
-                    enderman.isCreepy() || enderman.isAggressive(), self.hasLineOfSight(enderman)));
+                    enderman.isCreepy() || enderman.isAggressive(), ObservationVisibility.entity(self, enderman)));
         }
         return watchers;
     }

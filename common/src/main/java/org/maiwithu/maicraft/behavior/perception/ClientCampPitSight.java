@@ -23,10 +23,12 @@ import net.minecraft.world.level.block.StairBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.WallBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.Campground;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -60,8 +62,19 @@ public final class ClientCampPitSight {
         }
         lastTick = gameTick;
         lastOrigin = origin.immutable();
-        cached = scanNow(current, origin, CampPits.SCAN_RADIUS, true);
+        // 场景感知里的营地坑受世界可见尺约束：隔着墙或地下遮挡看不见的坑不报进场景，填坑任务动手复核仍走 scanNow。
+        cached = scanNow(current, origin, CampPits.SCAN_RADIUS, true).stream()
+                .filter(pit -> pitVisible(player, pit))
+                .toList();
         return Optional.of(cached);
+    }
+
+    // 坑口中心空气格或坑口正下方凹格任一在角色 360° 视线内可见即算看得见这处地面坑，隔墙挡住则过滤。
+    private static boolean pitVisible(LocalPlayer player, CampPits.Pit pit) {
+        BlockPos rim = pit.center();
+        return ObservationVisibility.point(player, Vec3.atCenterOf(rim))
+                || ObservationVisibility.block(player, rim)
+                || ObservationVisibility.point(player, Vec3.atCenterOf(rim.below()));
     }
 
     /** 对给定中心与半径立刻扫一遍地面坑：填坑动作开工前与复核时调它。 */

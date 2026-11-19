@@ -46,6 +46,7 @@ import net.minecraft.world.level.material.PushReaction;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation.TamedBy;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
+import org.maiwithu.maicraft.game.world.FieldOfView;
 import org.maiwithu.maicraft.game.world.Hostility;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.LooksAt;
@@ -69,6 +70,9 @@ public final class ClientEntitySight implements EntitySight {
     /** 禁传送的动态装置实体（如机械动力的旋转装置、列车车厢、电梯轿厢）：虽不可直接准星选中，但属于在场动态装置，不得当技术标记过滤。 */
     private static final TagKey<EntityType<?>> TELEPORTING_NOT_SUPPORTED =
             TagKey.create(Registries.ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("c", "teleporting_not_supported"));
+
+    /** 屏幕前方视野判定的最大有效距离（格），与挨打片段、玩家视野查询共用同一口径。 */
+    private static final double ENTITY_VIEW_RANGE = 64.0;
 
     private final Supplier<PlayerContext> context;
     private final TrustedPlayers trusted;
@@ -102,6 +106,10 @@ public final class ClientEntitySight implements EntitySight {
             EntitySight.Health health = entity instanceof LivingEntity living
                     ? new EntitySight.Health(living.getHealth(), living.getMaxHealth())
                     : null;
+            // 世界可见（360° 无遮挡）与屏幕前方视野（前方视野锥且无遮挡）分开记录：先算一次视线遮挡，再叠加前方视角锥。
+            boolean visible = ObservationVisibility.entity(player, entity);
+            boolean inView = visible && FieldOfView.inFront(player.getEyePosition(), player.getViewVector(1.0f),
+                    entity.getBoundingBox(), ENTITY_VIEW_RANGE);
             found.add(new Observation(
                     entity.getId(),
                     BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString(),
@@ -109,13 +117,14 @@ public final class ClientEntitySight implements EntitySight {
                     entity.getStringUUID(),
                     WorldPosition.here((int) Math.floor(entity.getX()),
                             (int) Math.floor(entity.getY()), (int) Math.floor(entity.getZ())),
-                    ObservationVisibility.entity(player, entity),
+                    visible,
                     Hostility.hostileNow(entity),
                     targetsPlayer(entity, player),
                     health,
                     traits(entity, player, trusted),
                     // 谁驯服的都算有主：场景里带上它的 UUID，宿主才认得出主播身边的女仆、狗是哪一只。
-                    ClientCreatureSituations.tamedBy(entity, player, trusted) != TamedBy.NOBODY));
+                    ClientCreatureSituations.tamedBy(entity, player, trusted) != TamedBy.NOBODY,
+                    inView));
         }
         return found;
     }

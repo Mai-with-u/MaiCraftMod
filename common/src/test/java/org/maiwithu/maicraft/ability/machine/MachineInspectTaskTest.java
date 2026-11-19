@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
@@ -183,6 +184,27 @@ class MachineInspectTaskTest {
         assertTrue(result.summary().contains("1 格没对上"), result.summary());
     }
 
+    @Test
+    void 按半径盲扫过滤墙后机器_显式指坐标照常看() {
+        // 角色视野里看得到 (1, 64, 0) 的压机，看不到墙后 (3, 64, 0) 的压机：
+        // 盲扫附近时过滤墙后压机，显式指定坐标查看墙后压机时照常给出详情。
+        BlockPos visiblePress = new BlockPos(1, 64, 0);
+        BlockPos hiddenPress = new BlockPos(3, 64, 0);
+        Rig rig = new Rig(List.of(), pos -> !pos.equals(hiddenPress));
+        rig.area.offer(new ReadsMachineArea.Round(List.of(
+                new ReadsMachineArea.Cell(visiblePress, Blocks.FURNACE.defaultBlockState(), true),
+                new ReadsMachineArea.Cell(hiddenPress, Blocks.FURNACE.defaultBlockState(), true)), 0, true, false));
+        MachineDetails blind = run(rig, null);
+        assertEquals(1, blind.devices().size(), "按半径盲扫应过滤掉墙后不可见机器");
+        assertEquals(visiblePress, blind.devices().getFirst().at());
+
+        rig.area.offer(new ReadsMachineArea.Round(List.of(
+                new ReadsMachineArea.Cell(visiblePress, Blocks.FURNACE.defaultBlockState(), true),
+                new ReadsMachineArea.Cell(hiddenPress, Blocks.FURNACE.defaultBlockState(), true)), 0, true, false));
+        MachineDetails explicit = run(rig, positionOf(hiddenPress));
+        assertEquals(2, explicit.devices().size(), "显式传入坐标查看具体机器时不应因视线遮挡拒收");
+    }
+
     private static Target positionOf(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }
@@ -217,6 +239,10 @@ class MachineInspectTaskTest {
         }
 
         Rig(List<NetworkReader> networkReaders) {
+            this(networkReaders, pos -> true);
+        }
+
+        Rig(List<NetworkReader> networkReaders, Predicate<BlockPos> visibility) {
             RecipeLookup recipes = new RecipeLookup(List.of(), new GameRecipeTable(Optional::empty));
             services = new MachineServices(() -> null, new MachineWorldView() {
                 @Override public Optional<Spot> playerSpot() {
@@ -225,6 +251,10 @@ class MachineInspectTaskTest {
 
                 @Override public Optional<BlockState> stateAt(BlockPos at) {
                     return Optional.of(blocks.getOrDefault(at, Blocks.AIR.defaultBlockState()));
+                }
+
+                @Override public boolean blockVisible(BlockPos at) {
+                    return visibility.test(at);
                 }
             }, List.of(type), networkReaders, area, recipes, new MachineTestDoubles.FakeNeeds(),
                     new MachineTestDoubles.FakeClose(), new MachineTestDoubles.FakeClicks(),

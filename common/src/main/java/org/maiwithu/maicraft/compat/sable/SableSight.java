@@ -7,6 +7,7 @@ import java.util.function.Consumer;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.AABB;
@@ -14,6 +15,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
+import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
@@ -30,7 +32,12 @@ final class SableSight implements ModSight {
     }
 
     @Override public void sight(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
+        LocalPlayer local = viewer instanceof LocalPlayer client ? client : null;
         for (SableStructures.Structure structure : compat.structures(level, viewer, region)) {
+            // 物理结构未载着角色且整个世界包围盒都被墙挡住时，不再隔墙透视报进场景。
+            if (local != null && !structure.carriesPlayer() && !structureVisible(local, structure.worldBounds())) {
+                continue;
+            }
             StructureGeometry.Scan scan = compat.scan(level, structure);
             JsonObject summary = new JsonObject();
             if (!structure.name().isBlank()) summary.addProperty("name", structure.name());
@@ -62,5 +69,21 @@ final class SableSight implements ModSight {
                     (int) Math.floor(center.z), level.dimension().location().toString());
             sink.accept(new ModThing("structure", ModThing.Identity.STRUCTURE, structure.id(), at, summary, detail));
         }
+    }
+
+    // 物理结构世界可见判定：包围盒中心或任一内缩角点在 360° 视线内无遮挡即算看得见。
+    private static boolean structureVisible(LocalPlayer local, AABB bounds) {
+        if (bounds == null) return false;
+        if (ObservationVisibility.point(local, bounds.getCenter())) return true;
+        AABB inset = bounds.deflate(Math.min(0.05, bounds.getXsize() / 4),
+                Math.min(0.05, bounds.getYsize() / 4), Math.min(0.05, bounds.getZsize() / 4));
+        for (double x : new double[]{inset.minX, inset.maxX}) {
+            for (double y : new double[]{inset.minY, inset.maxY}) {
+                for (double z : new double[]{inset.minZ, inset.maxZ}) {
+                    if (ObservationVisibility.point(local, new Vec3(x, y, z))) return true;
+                }
+            }
+        }
+        return false;
     }
 }
