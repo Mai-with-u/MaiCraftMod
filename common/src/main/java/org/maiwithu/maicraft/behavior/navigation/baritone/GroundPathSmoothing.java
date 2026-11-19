@@ -58,8 +58,11 @@ public final class GroundPathSmoothing extends PathBase {
             if (limit < original.size() && !flat(original.get(limit))) limit--;
             int end = start;
             Vec3 a = null, b = null;
-            if (start >= preserveThrough && limit > start + 1) {
-                a = actualStart != null && first.getSrc().equals(anchor) ? actualStart : corridor.stance(first.getSrc());
+            // 踩在坑边格沿时路线起点可能落在邻格支撑上而脚位还在坑口上方：此时第 0 步禁止合并直线，
+            // 保留原生第一步先把角色带离坑边；否则合并出的直线段会在同刻按真实脚底坐标复核走廊失败而立刻自毁重算。
+            boolean startOffsetFromAnchor = start == 0 && anchor != null && !first.getSrc().equals(anchor);
+            if (!startOffsetFromAnchor && start >= preserveThrough && limit > start + 1) {
+                a = start == 0 && actualStart != null ? actualStart : corridor.stance(first.getSrc());
                 // 先试这段里最远的位置；不通就把尝试距离折半，控制这次检查的次数。
                 for (int candidate = limit - 1; candidate > start; candidate = start + (candidate - start) / 2) {
                     b = corridor.stance(original.get(candidate).getDest());

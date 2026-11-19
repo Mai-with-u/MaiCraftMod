@@ -18,6 +18,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
@@ -49,11 +50,13 @@ import org.slf4j.LoggerFactory;
  */
 final class PlacingWork extends ConstructionWork {
 
-    private enum Step { APPROACH, HOLD, CLICK, TURN_HOLD, TURN_CLICK }
+    private enum Step { APPROACH, HOLD, CLICK, TURN_HOLD, TURN_CLICK, RECLEAR }
 
     private static final Logger LOG = LoggerFactory.getLogger(PlacingWork.class);
     /** 同一面"到了却点不到"最多换几次站位。 */
     private static final int MAX_RESPOTS = 2;
+    /** 正常单格放砖前发现被非目标实心方块重占（如上方黑沙塌落）时，同一格最多退回重清几次。 */
+    private static final int MAX_RECLEAR_PER_CELL = 4;
 
     private final Permissions permissions;
     private final String purpose;
@@ -74,6 +77,9 @@ final class PlacingWork extends ConstructionWork {
     private final Set<BlockPos> poorSpots = new HashSet<>();
     /** 这一面为"点不到"换过几次站位。 */
     private int respots;
+    /** 放砖前发现被重占而退回重清的格及已重清次数：防止连续塌落死循环。 */
+    private final Map<BlockPos, Integer> reclearCounts = new HashMap<>();
+    private PlannedCell reclearing;
     private Step step;
     private ConstructionSeams.Clicks.Click click;
     private int materialBefore;
@@ -95,6 +101,7 @@ final class PlacingWork extends ConstructionWork {
 
     @Override protected ActionStatus advance(TickContext context) {
         now = context.gameTick();
+        if (reclearing != null) return afterReclear();
         if (attempt != null) {
             return switch (step) {
                 case APPROACH -> arrived();
@@ -102,6 +109,7 @@ final class PlacingWork extends ConstructionWork {
                 case CLICK -> settle();
                 case TURN_HOLD -> startTurn();
                 case TURN_CLICK -> settleTurn();
+                case RECLEAR -> afterReclear();
             };
         }
         return nextCell();
@@ -141,11 +149,16 @@ final class PlacingWork extends ConstructionWork {
                 continue;
             }
             // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
+            // 若是正常单格放砖前发现自己这一格被上方塌落重力方块（如黑沙、沙子）重新填实，直接退回重清该格，
+            // 不进入贴面候选轮询、不把原格传进 guarded 禁止补救开路，也不无脑永久放弃。
             BlockPos placeAt = site.placements().placeAt(cell, services.site());
             if (!placeAt.equals(cell.pos()) && occupied(placeAt)) {
                 site.exclude(cell.pos(), CellEnding.IMPOSSIBLE, Problem.Kind.NOT_POSSIBLE_HERE,
                         "要对着另一格放才落得到这里（动力辊这类会被下面的实心面抬高一格），那一格被占着");
                 continue;
+            }
+            if (!temporary && reoccupied(cell, placeAt)) {
+                return startReclear(cell);
             }
             List<PlacementAttempt.Candidate> candidates = reachableFirst(
                     PlacementAttempt.candidates(services.site(), cell, placeAt));
@@ -397,6 +410,46 @@ final class PlacingWork extends ConstructionWork {
         return !live.isAir() && !live.canBeReplaced();
     }
 
+    // 正常单格放砖前判断原格是不是又被非目标实心方块重占（例如清障后上方黑沙塌落填实）：
+    // 双层半砖、雪层这类正在叠加完成的同种进度态不算重占。
+    private boolean reoccupied(PlannedCell cell, BlockPos placeAt) {
+        if (!placeAt.equals(cell.pos()) || !occupied(placeAt)) return false;
+        return !PlacementPrediction.isProgress(cell, Blocks.AIR.defaultBlockState(), services.site().state(placeAt));
+    }
+
+    // 原格被塌落方块重占：先委托清障动作把该格清干净（不把原格放进 guarded 自锁），再排回队头继续砌筑。
+    private ActionStatus startReclear(PlannedCell cell) {
+        BlockPos pos = cell.pos().immutable();
+        int tried = reclearCounts.getOrDefault(pos, 0);
+        if (tried >= MAX_RECLEAR_PER_CELL) {
+            site.giveUp(pos, Problem.Kind.STUCK, "清完后一再被塌落方块重占，放不上去");
+            return nextCell();
+        }
+        if (services.digs() == null) {
+            site.giveUp(pos, Problem.Kind.UNSUPPORTED, "那一格又被别的方块占住，且挖掘没接上，清不了");
+            return nextCell();
+        }
+        reclearCounts.put(pos, tried + 1);
+        reclearing = cell;
+        step = Step.RECLEAR;
+        LOG.info("[施工] 放 {}：原格又被 {} 占住，先退回重清再放", pos.toShortString(),
+                BuiltInRegistries.BLOCK.getKey(services.site().state(pos).getBlock()));
+        begin(new ClearingWork(services, site, records, permissions, List.of(cell), null),
+                "重清被占住的 " + pos.toShortString());
+        return ActionStatus.progressed();
+    }
+
+    // 重清收尾：清净了就放回队头立刻重砌，同时作废周边因被实心黑沙挡住而记下的坏走近；仍被占就再清直到上限。
+    private ActionStatus afterReclear() {
+        PlannedCell target = reclearing;
+        reclearing = null;
+        if (!site.needsWork(target.pos())) return nextCell();
+        if (reoccupied(target, target.pos())) return startReclear(target);
+        blockPlaced(target.pos());
+        queue.addFirst(target);
+        return nextCell();
+    }
+
     // 临时方块只能垫在蓝图没声明的格上，而且许可与保护都放行。
     private boolean mayPlaceTemporary(BlockPos pos) {
         return !site.declared().contains(pos)
@@ -458,7 +511,13 @@ final class PlacingWork extends ConstructionWork {
     }
 
     // 到了：用原版的放置规则试算这一下会放成什么；不是要的样子就换一面。
+    // 走过来的途中上方重力方块又塌下来填实原格时，直接退回重清，不把贴面被封死当成"看不见"。
     private ActionStatus arrived() {
+        if (!attempt.temporary && reoccupied(attempt.cell, attempt.placeAt)) {
+            PlannedCell blocked = attempt.cell;
+            attempt = null;
+            return startReclear(blocked);
+        }
         PlacementAttempt.Candidate candidate = attempt.current();
         Optional<PlacementPrediction.Placement> predicted = services.placements().predict(attempt.cell, attempt.placeAt,
                 candidate.clicked(), candidate.face());
@@ -678,6 +737,11 @@ final class PlacingWork extends ConstructionWork {
     @Override protected ActionStatus failed(TickContext context, ActionStatus.Failed failure) {
         LOG.info("[施工] {} 失败：{}", describe(), failure.problem().message());
         records.attempt(describe(), failure.problem().message());
+        // 重清失败：清理动作内部已按真实原因记账或放弃，这里只清掉重清态后继续其余格子。
+        if (reclearing != null) {
+            reclearing = null;
+            return nextCell();
+        }
         // 扳手转到一半出了岔子：方块已经放下了，照现在的样子收下，差异交给整机比对。
         if (step == Step.TURN_HOLD || step == Step.TURN_CLICK) return finish();
         if (step == Step.HOLD) {

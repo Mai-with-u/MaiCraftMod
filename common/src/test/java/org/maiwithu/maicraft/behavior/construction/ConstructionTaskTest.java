@@ -8,6 +8,7 @@ import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.function.Predicate;
@@ -48,6 +49,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Task;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
@@ -206,7 +208,14 @@ class ConstructionTaskTest {
             }
             // 每一挖都当场失败：演收临时方块时走得到却拆不下来的块。
             if (digsFail) return Optional.of(new Failing("拆不动"));
-            return Optional.of(new Immediate(() -> world.put(target, AIR)));
+            return Optional.of(new Immediate(() -> {
+                List<BlockState> queue = refillAfterDig.get(target);
+                if (queue != null && !queue.isEmpty()) {
+                    world.put(target, queue.removeFirst());
+                } else {
+                    world.put(target, AIR);
+                }
+            }));
         }
 
         /** 为真时每一次挖都当场失败：只用于不用清障的场景，收临时方块收不下来。 */
@@ -214,6 +223,8 @@ class ConstructionTaskTest {
 
         /** 下一次挖交出的动作，只用一次；没给就一刻挖掉。用来演挖着不动的格。 */
         Action nextDig;
+        /** 某格被挖完后紧接着由上方重力方块塌落补进的队列：每次挖掉弹出一块填入原格。 */
+        final Map<BlockPos, List<BlockState>> refillAfterDig = new HashMap<>();
         // 连锁挖替身：模组那一批每一格清障都同意才整批挖掉，不然和普通地挖一样只挖触发格。
         @Override public boolean chains() { return chain != null; }
         @Override public Optional<Action> digChained(BlockPos trigger, Direction face, BreakAccelerator.ChainShape shape,
@@ -1118,5 +1129,140 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
         assertTrue(fake.clicks.isEmpty());
         assertEquals(1, details(result).cells().get("impossible"));
+    }
+
+    @Test
+    void 清完一格后掉进沙子重占_放砖前识别重占并重清后顺利放上() {
+        // 模拟黑沙山坡施工：清障挖掉原格沙子后上方沙子随即塌落填实原格，施工应连清干净再放上石砖。
+        Fake direct = new Fake().ground(63);
+        BlockPos cell = new BlockPos(0, 64, 0);
+        direct.carried.put("minecraft:stone_bricks", 1);
+        direct.world.put(cell, Blocks.SAND.defaultBlockState());
+        direct.refillAfterDig.put(cell, new ArrayList<>(List.of(Blocks.SAND.defaultBlockState())));
+        TaskResult result = run(direct, wall(Blocks.STONE_BRICKS.defaultBlockState(), cell));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(Blocks.STONE_BRICKS, direct.state(cell).getBlock(), "重清塌落沙子后石砖应顺利放上");
+        assertEquals(2, direct.digCalls, "第一次清障后沙子塌落重填原格，紧接着清掉塌落沙子共挖 2 次");
+        assertTrue(details(result).problems().isEmpty(), "不应把重占格永久放弃");
+    }
+
+    @Test
+    void 砌筑阶段原格被塌落沙子重占_退回重清后不自锁顺利放砖() {
+        // 跳过清障直接让砌筑面对一格已经被沙子重占的目标格：PlacingWork 不应轮询贴面或自锁，而是退回重清后放上石砖。
+        Fake fake = new Fake().ground(63);
+        BlockPos cell = new BlockPos(0, 64, 0);
+        fake.world.put(cell, Blocks.SAND.defaultBlockState());
+        fake.carried.put("minecraft:stone_bricks", 1);
+        Blueprint blueprint = wall(Blocks.STONE_BRICKS.defaultBlockState(), cell);
+        ConstructionSite site = new ConstructionSite(blueprint);
+        site.check(fake);
+        // 把结局手动置成清障已完成（MISSING），模拟清完之后、砌筑开始前上方黑沙掉进该格的竞态。
+        site.cleared(blueprint.cells().getFirst());
+        ConstructionServices services = fake.services();
+        PlacingWork work = new PlacingWork(services, site, new TaskRecords() {
+            @Override public void change(Change change) {}
+            @Override public void unconfirmed(Change change) {}
+            @Override public void attempt(String tried, String whatHappened) {}
+        }, Permissions.DEFAULT, "建墙", List.of(blueprint.cells().getFirst()));
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 40 && !(status instanceof ActionStatus.Done); i++) {
+            status = work.tick(new TickContext() {
+                @Override public long gameTick() { return 1; }
+                @Override public PlayerContext player() { return null; }
+            });
+        }
+        assertTrue(status instanceof ActionStatus.Done, "重清后砌筑应正常完成：" + status);
+        assertEquals(Blocks.STONE_BRICKS, fake.state(cell).getBlock(), "重清后应放上目标石砖");
+        assertEquals(1, fake.digCalls, "应触发一次重清");
+    }
+
+    @Test
+    void 单层上方沙子第2刻实体化第10刻落回原格_等满落定窗捕获重清后放砖() {
+        // 复现真实原版重力方块节奏：目标格 (0,64,0) 上方只有单层沙子 (0,65,0)；
+        // 挖断后第 2 刻上方沙子转为下落实体导致 (0,65,0) 瞬间变空气，直到第 10 刻才自由落体填回原格。
+        // ClearingWork 必须凭开挖前快照等满落定窗（不因上方变空气早退），捕获第 10 刻重填并重清后顺利放砖。
+        Fake fake = new Fake().ground(63);
+        BlockPos cell = new BlockPos(0, 64, 0);
+        BlockPos above = cell.above();
+        fake.world.put(cell, Blocks.DIRT.defaultBlockState());
+        fake.world.put(above, Blocks.SAND.defaultBlockState());
+        fake.carried.put("minecraft:stone_bricks", 1);
+        Task task = new ConstructionTask(new ConstructionInput(wall(Blocks.STONE_BRICKS.defaultBlockState(), cell),
+                Permissions.DEFAULT, "施工"), fake.services());
+
+        long dugTick = -1;
+        TaskResult finished = null;
+        for (long tick = 1; tick <= 200 && finished == null; tick++) {
+            // 模拟原版重力方块实体化与落地时序：第 2 刻上方变空气，第 10 刻原格被塌落沙子填实。
+            if (dugTick > 0 && tick == dugTick + 2) {
+                fake.world.put(above, AIR);
+            }
+            if (dugTick > 0 && tick == dugTick + 10) {
+                fake.world.put(cell, Blocks.SAND.defaultBlockState());
+            }
+            long now = tick;
+            TickResult step = task.tick(new TickContext() {
+                @Override public long gameTick() { return now; }
+                @Override public PlayerContext player() { return null; }
+            });
+            if (dugTick < 0 && fake.digCalls == 1 && fake.state(cell).isAir()) {
+                dugTick = tick;
+            }
+            if (step instanceof TickResult.Finished done) finished = done.result();
+        }
+        assertNotNull(finished, "应在 200 刻内完成施工");
+        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
+        assertEquals(2, fake.digCalls, "第 1 次挖泥土 + 第 10 刻捕获塌落单层沙子后重清共挖 2 次");
+        assertEquals(Blocks.STONE_BRICKS, fake.state(cell).getBlock(), "重清塌落沙子后石砖应顺利放上");
+        assertTrue(fake.state(above).isAir(), "上方单层沙子已落完清空");
+    }
+
+    @Test
+    void 挖断确认跨多刻期间单层沙子已实体化_仍凭开挖前快照等满落定窗重清() {
+        // 模拟挖掘确认耗时 3 刻：第 1 刻挖掉泥土，第 2 刻上方单层沙子即转为实体变成空气，第 3 刻挖掘动作才返回完成。
+        // 进入 settle() 时 pos.above() 已是空气，必须依靠开挖前快照进入落定窗，等到第 10 刻原格重填后继续清净。
+        Fake fake = new Fake().ground(63);
+        BlockPos cell = new BlockPos(0, 64, 0);
+        BlockPos above = cell.above();
+        fake.world.put(cell, Blocks.DIRT.defaultBlockState());
+        fake.world.put(above, Blocks.SAND.defaultBlockState());
+        fake.carried.put("minecraft:stone_bricks", 1);
+        long[] dugAt = {-1};
+        fake.nextDig = new Action() {
+            private int elapsed;
+
+            @Override public ActionStatus tick(TickContext context) {
+                elapsed++;
+                if (elapsed == 1) {
+                    fake.world.put(cell, AIR);
+                    dugAt[0] = context.gameTick();
+                }
+                return elapsed >= 3 ? ActionStatus.done() : ActionStatus.running();
+            }
+
+            @Override public String describe() { return "跨三刻挖断确认"; }
+        };
+        Task task = new ConstructionTask(new ConstructionInput(wall(Blocks.STONE_BRICKS.defaultBlockState(), cell),
+                Permissions.DEFAULT, "施工"), fake.services());
+
+        TaskResult finished = null;
+        for (long tick = 1; tick <= 200 && finished == null; tick++) {
+            if (dugAt[0] > 0 && tick == dugAt[0] + 2) {
+                fake.world.put(above, AIR);
+            }
+            if (dugAt[0] > 0 && tick == dugAt[0] + 10) {
+                fake.world.put(cell, Blocks.SAND.defaultBlockState());
+            }
+            long now = tick;
+            TickResult step = task.tick(new TickContext() {
+                @Override public long gameTick() { return now; }
+                @Override public PlayerContext player() { return null; }
+            });
+            if (step instanceof TickResult.Finished done) finished = done.result();
+        }
+        assertNotNull(finished, "应在 200 刻内完成施工");
+        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
+        assertEquals(2, fake.digCalls, "开挖前快照应触发等待并在第 10 刻捕获重填共挖 2 次");
+        assertEquals(Blocks.STONE_BRICKS, fake.state(cell).getBlock());
     }
 }

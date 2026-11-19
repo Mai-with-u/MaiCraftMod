@@ -13,6 +13,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
@@ -40,10 +41,14 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 final class ClearingWork extends ConstructionWork {
 
-    private enum Step { APPROACH, DIG, DISMANTLE }
+    private enum Step { APPROACH, DIG, DISMANTLE, SETTLE_FALL }
 
     /** 同一格"走不到跟前"最多换几次站位重新走近。 */
     private static final int MAX_RESPOTS = 2;
+    /** 挖掉下方方块后，若上方压着重力方块，最多等几刻确认它有没有塌下来重占原格（覆盖实体化调度+1格自由落体+同步）。 */
+    private static final int GRAVITY_SETTLE_TICKS = 12;
+    /** 同一格因为上方重力方块连环塌落最多连续重清几次，防止无限砂塔死循环。 */
+    private static final int MAX_GRAVITY_RECLEARS = 16;
 
     private final Permissions permissions;
     /** 目标里点名的挖方块工具：清障挖方块时只用那一件，身上没有就直接失败；null 自动挑。 */
@@ -64,6 +69,12 @@ final class ClearingWork extends ConstructionWork {
     private Direction chainFace;
     /** 挖到一半被自卫、吃饭这类事叫走过：人已离了跟前，回来先重新走近再挖。 */
     private boolean interrupted;
+    /** 挖完后等上方重力方块落定已过去几刻。 */
+    private int settleWaitTicks;
+    /** 开挖前正上方是否压着重力方块：单层沙子被挖后约第 2 刻转为下落实体、上方瞬间变空气，必须凭开挖前快照进入等待。 */
+    private boolean hadFallingAbove;
+    /** 这一格因上方重力方块塌落已经连续重清了几次。 */
+    private int gravityReclears;
 
     ClearingWork(ConstructionServices services, ConstructionSite site, TaskRecords records, Permissions permissions,
             List<PlannedCell> cells, DigTool digTool) {
@@ -87,6 +98,7 @@ final class ClearingWork extends ConstructionWork {
             }
             return clear();
         }
+        if (step == Step.SETTLE_FALL) return waitGravitySettle();
         return settle();
     }
 
@@ -99,6 +111,9 @@ final class ClearingWork extends ConstructionWork {
             if (centre != null) queue.remove(centre);
             cell = centre != null ? centre : queue.poll();
             respots = 0;
+            settleWaitTicks = 0;
+            hadFallingAbove = false;
+            gravityReclears = 0;
             BlockPos pos = cell.pos();
             if (!services.site().loaded(pos)) continue;
             before = services.site().state(pos);
@@ -166,10 +181,14 @@ final class ClearingWork extends ConstructionWork {
         }
     }
 
-    // 走到跟前后出手：先问模组工具认不认领，不认领就连锁挖这一格。
+    // 走到跟前后出手：先看这一格是不是已经空了（被打断前正好塌落完或清掉了），不空再问模组工具认不认领，否则连锁挖这一格。
     private ActionStatus clear() {
+        if (!services.site().loaded(cell.pos()) || services.site().state(cell.pos()).isAir()) {
+            return finishCell();
+        }
         Optional<Action> dismantling = dismantling();
         if (dismantling.isPresent()) {
+            hadFallingAbove = hasFallingAbove(cell.pos());
             step = Step.DISMANTLE;
             begin(dismantling.get(), "用工具拆下 " + cell.pos().toShortString());
             return ActionStatus.progressed();
@@ -196,9 +215,10 @@ final class ClearingWork extends ConstructionWork {
         return !state.isAir() && services.guards().allows(PermissionCheck.WorldAction.DIG_BLOCK, pos, blockId(state)).isEmpty();
     }
 
-    // 挖这一格：装了连锁挖就按命中面 3×3 连锁（整片都是要清的格才连）；挖之前记下四周还排着的格，挖完复查。
+    // 挖这一格：装了连锁挖就按命中面 3×3 连锁（整片都是要清的格才连）；挖之前记下四周还排着的格与上方是否压着重力方块，挖完复查。
     private ActionStatus dig() {
         around = queuedAround(cell.pos());
+        hadFallingAbove = hasFallingAbove(cell.pos());
         // 带上这一趟还要清几格：身上没有对路的工具时按它算现做一把划不划算，做了什么记进施工结果。
         Optional<Action> digging = services.digs().digChained(cell.pos(), chainFace,
                 BreakAccelerator.ChainShape.FACE_SQUARE, this::clearable,
@@ -258,6 +278,8 @@ final class ClearingWork extends ConstructionWork {
     }
 
     // 挖完或拆完按格复查：拆了方块还在就改用挖，不冒充清掉了；连锁顺带挖掉的格逐格结算、从队列里摘掉。
+    // 挖掉后如果原格立刻又被上方塌下来的重力方块（黑沙、沙子、沙砾）填实，或正上方压着重力方块即将塌落，
+    // 先等落定并把塌下来的方块一并清净，再把这一格标成已清，避免后续砌筑面对实心重占格反复碰壁。
     private ActionStatus settle() {
         if (step == Step.DISMANTLE && !services.site().state(cell.pos()).isAir()) {
             records.attempt("用工具拆下 " + cell.pos().toShortString(), "拆完方块还在，改用挖");
@@ -265,9 +287,72 @@ final class ClearingWork extends ConstructionWork {
         }
         records.change(new Change(Change.Kind.BLOCK_BROKEN, blockId(before), 1,
                 withOwner("清障 " + cell.pos().toShortString(), cell.pos())));
+        if (step == Step.DIG) settleChained();
+        ActionStatus followUp = checkGravityRefill();
+        if (followUp != null) return followUp;
+        return finishCell();
+    }
+
+    // 复检重力方块是否塌落重占原格：原格已被非目标实心方块重填则立即再挖；
+    // 开挖前或此刻正上方压着重力方块则进入等待窗，避免单层重力方块刚转为下落实体（上方瞬间变空气）时漏检。
+    private ActionStatus checkGravityRefill() {
+        BlockPos pos = cell.pos();
+        if (gravityReclears >= MAX_GRAVITY_RECLEARS || !services.site().loaded(pos)) return null;
+        BlockState live = services.site().state(pos);
+        if (!live.isAir() && !live.canBeReplaced() && !site.alreadyMatches(cell, services.site())) {
+            return reclearRefilled(pos, live);
+        }
+        if (hadFallingAbove || hasFallingAbove(pos)) {
+            hadFallingAbove = false;
+            step = Step.SETTLE_FALL;
+            settleWaitTicks = 0;
+            return ActionStatus.running();
+        }
+        return null;
+    }
+
+    // 上方重力方块失去支撑后等满落定窗：下落中途正上方会因转为下落实体而瞬间变空气，不能据此提前退出；
+    // 窗内一旦原格被实心重填立即转入重清，等满仍空才按清完收尾。
+    private ActionStatus waitGravitySettle() {
+        BlockPos pos = cell.pos();
+        if (!services.site().loaded(pos)) return finishCell();
+        BlockState live = services.site().state(pos);
+        if (!live.isAir() && !live.canBeReplaced() && !site.alreadyMatches(cell, services.site())) {
+            return reclearRefilled(pos, live);
+        }
+        if (++settleWaitTicks >= GRAVITY_SETTLE_TICKS) {
+            return finishCell();
+        }
+        return ActionStatus.running();
+    }
+
+    // 原格被上方塌落方块重新填实：复核可挖性与许可后继续挖掉，不把还没清干净的格标成完成。
+    private ActionStatus reclearRefilled(BlockPos pos, BlockState refilled) {
+        if (services.site().unbreakable(pos)) {
+            site.exclude(pos, CellEnding.IMPOSSIBLE, Problem.Kind.NOT_POSSIBLE_HERE, "挖不动（基岩或世界边界）");
+            cell = null;
+            return ActionStatus.progressed();
+        }
+        Optional<Problem> refused = services.guards().allows(PermissionCheck.WorldAction.DIG_BLOCK, pos, blockId(refilled));
+        if (refused.isPresent()) {
+            site.exclude(pos, CellEnding.PROTECTED, refused.get().kind(), refused.get().message());
+            cell = null;
+            return ActionStatus.progressed();
+        }
+        gravityReclears++;
+        before = refilled;
+        chainFace = null;
+        return dig();
+    }
+
+    private boolean hasFallingAbove(BlockPos pos) {
+        BlockPos above = pos.above();
+        return services.site().loaded(above) && services.site().state(above).getBlock() instanceof FallingBlock;
+    }
+
+    private ActionStatus finishCell() {
         site.cleared(cell);
         deferred.changed(cell.pos());
-        if (step == Step.DIG) settleChained();
         cell = null;
         return ActionStatus.progressed();
     }

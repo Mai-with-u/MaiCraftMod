@@ -55,6 +55,7 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.PlanningWorkProgress;
 import org.maiwithu.maicraft.behavior.navigation.baritone.PathPlannerPool;
 import org.maiwithu.maicraft.behavior.navigation.baritone.MovementStall;
 import org.maiwithu.maicraft.behavior.navigation.baritone.GroundPathSmoothing;
+import org.maiwithu.maicraft.behavior.navigation.baritone.PitEdgeSupport;
 
 
 
@@ -488,30 +489,11 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         BetterBlockPos feet = ctx.playerFeet();
         if (!MovementHelper.canWalkOn(ctx, feet.below())) {
             if (ctx.player().onGround()) {
-                double playerX = ctx.player().position().x;
-                double playerZ = ctx.player().position().z;
-                ArrayList<BetterBlockPos> closest = new ArrayList<>();
-                for (int dx = -1; dx <= 1; dx++) {
-                    for (int dz = -1; dz <= 1; dz++) {
-                        closest.add(new BetterBlockPos(feet.x + dx, feet.y, feet.z + dz));
-                    }
-                }
-                closest.sort(Comparator.comparingDouble(pos -> ((pos.x + 0.5D) - playerX) * ((pos.x + 0.5D) - playerX) + ((pos.z + 0.5D) - playerZ) * ((pos.z + 0.5D) - playerZ)));
-                for (int i = 0; i < 4; i++) {
-                    BetterBlockPos possibleSupport = closest.get(i);
-                    double xDist = Math.abs((possibleSupport.x + 0.5D) - playerX);
-                    double zDist = Math.abs((possibleSupport.z + 0.5D) - playerZ);
-                    if (xDist > 0.8 && zDist > 0.8) {
-                        // can't possibly be sneaking off of this one, we're too far away
-                        continue;
-                    }
-                    if (MovementHelper.canWalkOn(ctx, possibleSupport.below()) && MovementHelper.canWalkThrough(ctx, possibleSupport) && MovementHelper.canWalkThrough(ctx, possibleSupport.above())) {
-                        // this is plausible
-                        //logDebug("Faking path start assuming player is standing off the edge of a block");
-                        return possibleSupport;
-                    }
-                }
-
+                // 身体碰撞箱搭在坑边格沿时，按碰撞箱投影重合范围扫描全部八个邻格找出真实可行走支撑格。
+                return PitEdgeSupport.selectSupport(feet, ctx.player().position().x, ctx.player().position().z,
+                        ctx.player().getBbWidth(), possibleSupport -> MovementHelper.canWalkOn(ctx, possibleSupport.below())
+                                && MovementHelper.canWalkThrough(ctx, possibleSupport)
+                                && MovementHelper.canWalkThrough(ctx, possibleSupport.above()));
             } else {
                 // !onGround
                 // we're in the middle of a jump
@@ -606,7 +588,9 @@ public final class PathingBehavior extends Behavior implements IPathingBehavior,
         lastCalculationFailure = result.getFailure().orElse(null);
         if (current == null) {
             if (path.isPresent()) {
-                if (path.get().positions().contains(expectedSegmentStart)) {
+                // 算路期间角色在坑边格沿微动时，真实脚位与支撑起点可能互换；任一格落在新路线上都直接接上执行，不再白白作废重算。
+                if (path.get().positions().contains(expectedSegmentStart)
+                        || path.get().positions().contains(ctx.playerFeet())) {
                     current = new PathExecutor(this, GroundPathSmoothing.apply(baritone, path.get()));
                     resetEstimatedTicksToGoal(start);
                     queuePathEvent(PathEvent.CALC_FINISHED_NOW_EXECUTING);
