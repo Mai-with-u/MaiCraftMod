@@ -219,7 +219,10 @@ class CellTransferAndWirelessTest {
         AtomicInteger askedCount = new AtomicInteger();
         UUID reqId = UUID.randomUUID();
         JsonObject reply = new JsonObject();
-        reply.addProperty("boosters", 16);
+        reply.addProperty("found", true);
+        JsonObject nestedReadings = new JsonObject();
+        nestedReadings.addProperty("boosters", 16);
+        reply.add("readings", nestedReadings);
         ServerReads serverReads = new ServerReads() {
             @Override public boolean available(String operationId) {
                 return Ae2PartCache.DEVICE_OPERATION.equals(operationId);

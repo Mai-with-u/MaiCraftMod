@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.ae2.part;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -167,20 +168,78 @@ public final class Ae2PartCache {
         serverReads.ask(DEVICE_OPERATION, body).ifPresent(id -> entry.inFlightRequest = id);
     }
 
-    // 把服务端 ae2.device 的 JSON 字段翻译进设置缓存与额外读数表，兼容扁平字段与嵌套 settings 对象。
+    // 把服务端 ae2.device 的 JSON 字段翻译进设置缓存与额外读数表，同时兼容顶层扁平字段与嵌套 {settings, upgrades, readings} 结构。
     private static void mergeServerPayload(Entry entry, JsonObject payload, boolean overwriteSettings) {
+        boolean isInterface = isInterfacePayload(payload);
         if (payload.has("settings") && payload.get("settings").isJsonObject()) {
-            JsonObject settingsObj = payload.getAsJsonObject("settings");
-            for (Map.Entry<String, JsonElement> item : settingsObj.entrySet()) {
-                if (item.getValue().isJsonPrimitive()) {
-                    putSetting(entry, item.getKey(), item.getValue().getAsString(), overwriteSettings);
+            mergeSettingsObject(entry, payload.getAsJsonObject("settings"), overwriteSettings);
+        }
+        mergeArraysAndScalars(entry, payload, isInterface, overwriteSettings);
+        if (payload.has("readings") && payload.get("readings").isJsonObject()) {
+            mergeArraysAndScalars(entry, payload.getAsJsonObject("readings"), isInterface, overwriteSettings);
+        }
+    }
+
+    // 反向映射 AE2 IConfigManager.exportSettings() 的注册键名（redstone_controlled/redstone_emitter/place_block）。
+    private static void mergeSettingsObject(Entry entry, JsonObject settingsObj, boolean overwriteSettings) {
+        for (Map.Entry<String, JsonElement> item : settingsObj.entrySet()) {
+            if (!item.getValue().isJsonPrimitive()) continue;
+            String rawKey = item.getKey().toLowerCase(Locale.ROOT);
+            String rawVal = item.getValue().getAsString().toLowerCase(Locale.ROOT);
+            switch (rawKey) {
+                case "redstone_controlled", "redstone_emitter" ->
+                        putSetting(entry, "redstone_mode", rawVal, overwriteSettings);
+                case "place_block" -> {
+                    String mapped = rawVal.equals("yes") ? "block" : rawVal.equals("no") ? "drop" : rawVal;
+                    putSetting(entry, "place_mode", mapped, overwriteSettings);
                 }
+                default -> putSetting(entry, rawKey, rawVal, overwriteSettings);
             }
         }
-        mergeIndexedArray(entry, payload, "filters", "filter.", overwriteSettings);
-        mergeIndexedArray(entry, payload, "upgrades", "upgrade.", overwriteSettings);
-        mergeIndexedArray(entry, payload, "stock", "stock.", overwriteSettings);
-        mergeScalars(entry, payload, overwriteSettings);
+    }
+
+    private static void mergeArraysAndScalars(Entry entry, JsonObject source, boolean isInterface,
+                                              boolean overwriteSettings) {
+        mergeIndexedArray(entry, source, "filters", "filter.", overwriteSettings);
+        mergeIndexedArray(entry, source, "upgrades", "upgrade.", overwriteSettings);
+        mergeIndexedArray(entry, source, "stock", "stock.", overwriteSettings);
+        if (source.has("config_slots") && source.get("config_slots").isJsonObject()) {
+            mergeConfigSlotsObject(entry, source.getAsJsonObject("config_slots"), isInterface, overwriteSettings);
+        }
+        mergeScalars(entry, source, overwriteSettings);
+    }
+
+    // 服务端 readings.config_slots 形如 {"0": "minecraft:iron_ingot x16"}：ME 接口映射至 stock.N，其余映射至 filter.N。
+    private static void mergeConfigSlotsObject(Entry entry, JsonObject slotsObj, boolean isInterface,
+                                               boolean overwriteSettings) {
+        String prefix = isInterface ? "stock." : "filter.";
+        for (Map.Entry<String, JsonElement> item : slotsObj.entrySet()) {
+            if (!item.getValue().isJsonPrimitive()) continue;
+            String raw = item.getValue().getAsString().trim();
+            String formatted = formatServerConfigSlot(raw, isInterface);
+            putSetting(entry, prefix + item.getKey(), formatted, overwriteSettings);
+        }
+    }
+
+    private static String formatServerConfigSlot(String raw, boolean isInterface) {
+        if (raw.isEmpty() || raw.equalsIgnoreCase(Ae2PartKeys.EMPTY)) return Ae2PartKeys.EMPTY;
+        int sep = raw.lastIndexOf(" x");
+        if (sep > 0 && sep + 2 < raw.length()) {
+            String id = raw.substring(0, sep).trim();
+            String countText = raw.substring(sep + 2).trim();
+            if (!isInterface) return id;
+            return id + " " + countText;
+        }
+        return raw;
+    }
+
+    private static boolean isInterfacePayload(JsonObject payload) {
+        if (payload.has("block_id") && payload.get("block_id").isJsonPrimitive()
+                && "ae2:interface".equals(payload.get("block_id").getAsString())) {
+            return true;
+        }
+        return payload.has("part_id") && payload.get("part_id").isJsonPrimitive()
+                && "ae2:cable_interface".equals(payload.get("part_id").getAsString());
     }
 
     private static void mergeIndexedArray(Entry entry, JsonObject payload, String field, String prefix,
@@ -206,11 +265,7 @@ public final class Ae2PartCache {
             putSetting(entry, "reporting_value", value, overwriteSettings);
             entry.readings.put("reporting_value", payload.get("reporting_value").getAsLong());
         }
-        if (payload.has("is_output") && payload.get("is_output").isJsonPrimitive()) {
-            boolean isOutput = payload.get("is_output").getAsBoolean();
-            putSetting(entry, "p2p_role", isOutput ? "output" : "input", overwriteSettings);
-            entry.readings.put("p2p_is_output", isOutput);
-        }
+        mergeP2pScalars(entry, payload, overwriteSettings);
         if (payload.has("boosters") && payload.get("boosters").isJsonPrimitive()) {
             int boosters = payload.get("boosters").getAsInt();
             putSetting(entry, "boosters", Integer.toString(boosters), overwriteSettings);
@@ -222,21 +277,73 @@ public final class Ae2PartCache {
         if (payload.has("has_redstone_card") && payload.get("has_redstone_card").isJsonPrimitive()) {
             entry.readings.put("has_redstone_card", payload.get("has_redstone_card").getAsBoolean());
         }
-        if (payload.has("enchantments") && payload.get("enchantments").isJsonArray()) {
-            StringBuilder joined = new StringBuilder();
-            for (JsonElement element : payload.getAsJsonArray("enchantments")) {
+        if (payload.has("copy_mode") && payload.get("copy_mode").isJsonPrimitive()) {
+            String mode = payload.get("copy_mode").getAsString().toLowerCase(Locale.ROOT);
+            putSetting(entry, "copy_mode", mode, overwriteSettings);
+            entry.readings.put("copy_mode", mode);
+        }
+        if (payload.has("fuzzy_mode") && payload.get("fuzzy_mode").isJsonPrimitive()) {
+            String mode = payload.get("fuzzy_mode").getAsString().toLowerCase(Locale.ROOT);
+            putSetting(entry, "fuzzy_mode", mode, overwriteSettings);
+            entry.readings.put("fuzzy_mode", mode);
+        }
+        mergeEnchantments(entry, payload);
+        mergeCellItem(entry, payload, overwriteSettings);
+    }
+
+    private static void mergeP2pScalars(Entry entry, JsonObject payload, boolean overwriteSettings) {
+        Boolean isOutput = null;
+        if (payload.has("p2p_output") && payload.get("p2p_output").isJsonPrimitive()) {
+            isOutput = payload.get("p2p_output").getAsBoolean();
+        } else if (payload.has("is_output") && payload.get("is_output").isJsonPrimitive()) {
+            isOutput = payload.get("is_output").getAsBoolean();
+        } else if (payload.has("p2p_is_output") && payload.get("p2p_is_output").isJsonPrimitive()) {
+            isOutput = payload.get("p2p_is_output").getAsBoolean();
+        }
+        if (isOutput != null) {
+            putSetting(entry, "p2p_role", isOutput ? "output" : "input", overwriteSettings);
+            entry.readings.put("p2p_is_output", isOutput);
+        }
+        if (payload.has("p2p_frequency") && payload.get("p2p_frequency").isJsonPrimitive()) {
+            int freq = payload.get("p2p_frequency").getAsInt() & 0xFFFF;
+            entry.readings.put("p2p_frequency", freq);
+        }
+    }
+
+    // 破坏面板附魔同时兼容服务端对象格式 {"minecraft:silk_touch": 1} 与旧数组格式。
+    private static void mergeEnchantments(Entry entry, JsonObject payload) {
+        if (!payload.has("enchantments")) return;
+        JsonElement raw = payload.get("enchantments");
+        StringBuilder joined = new StringBuilder();
+        if (raw.isJsonObject()) {
+            for (Map.Entry<String, JsonElement> item : raw.getAsJsonObject().entrySet()) {
+                if (!item.getValue().isJsonPrimitive()) continue;
+                if (!joined.isEmpty()) joined.append(", ");
+                joined.append(item.getKey()).append(' ').append(item.getValue().getAsString());
+            }
+            entry.readings.put("enchantments", joined.isEmpty() ? "none" : joined.toString());
+        } else if (raw.isJsonArray()) {
+            for (JsonElement element : raw.getAsJsonArray()) {
                 if (!element.isJsonPrimitive()) continue;
                 if (!joined.isEmpty()) joined.append(", ");
                 joined.append(element.getAsString());
             }
             entry.readings.put("enchantments", joined.isEmpty() ? "none" : joined.toString());
         }
-        if (payload.has("cell") && payload.get("cell").isJsonPrimitive()) {
-            String cell = payload.get("cell").getAsString();
-            putSetting(entry, "cell", cell.isEmpty() || cell.equals(Ae2PartKeys.EMPTY) ? "out" : "in:" + cell,
-                    overwriteSettings);
-            entry.readings.put("cell", cell);
+    }
+
+    // 元件工作台元件槽同时兼容 readings.cell_item 与扁平 cell 字段。
+    private static void mergeCellItem(Entry entry, JsonObject payload, boolean overwriteSettings) {
+        String cell = null;
+        if (payload.has("cell_item") && payload.get("cell_item").isJsonPrimitive()) {
+            cell = payload.get("cell_item").getAsString();
+        } else if (payload.has("cell") && payload.get("cell").isJsonPrimitive()) {
+            cell = payload.get("cell").getAsString();
         }
+        if (cell == null) return;
+        boolean empty = cell.isEmpty() || cell.equalsIgnoreCase(Ae2PartKeys.EMPTY);
+        putSetting(entry, "cell", empty ? "out" : "in:" + cell, overwriteSettings);
+        entry.readings.put("cell", empty ? Ae2PartKeys.EMPTY : cell);
     }
 
     private static void putSetting(Entry entry, String key, String value, boolean overwrite) {

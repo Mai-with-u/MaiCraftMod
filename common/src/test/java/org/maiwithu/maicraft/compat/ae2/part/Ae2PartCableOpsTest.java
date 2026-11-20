@@ -155,6 +155,98 @@ class Ae2PartCableOpsTest {
     }
 
     @Test
+    void 服务端权威嵌套结构与键名反向映射全量对齐() {
+        Ae2PartCache cache = new Ae2PartCache();
+
+        // 1. 线缆 ME 接口：settings 键名反向映射 + readings.config_slots -> stock.N + upgrades 完整下标。
+        JsonObject ifaceReply = new JsonObject();
+        ifaceReply.addProperty("found", true);
+        ifaceReply.addProperty("kind", "cable_part");
+        ifaceReply.addProperty("part_id", "ae2:cable_interface");
+        JsonObject ifaceSettings = new JsonObject();
+        ifaceSettings.addProperty("fuzzy_mode", "PERCENT_75");
+        ifaceReply.add("settings", ifaceSettings);
+        JsonArray ifaceUpgrades = new JsonArray();
+        ifaceUpgrades.add("ae2:crafting_card");
+        ifaceReply.add("upgrades", ifaceUpgrades);
+        JsonObject ifaceReadings = new JsonObject();
+        ifaceReadings.addProperty("priority", 12);
+        JsonObject stockSlots = new JsonObject();
+        stockSlots.addProperty("0", "minecraft:iron_ingot x16");
+        ifaceReadings.add("config_slots", stockSlots);
+        ifaceReply.add("readings", ifaceReadings);
+        cache.acceptServerDevice(HOST, Direction.NORTH, ifaceReply);
+
+        Map<String, String> ifaceOut = cache.peekSettings(HOST, Direction.NORTH, ServerReads.NONE);
+        assertEquals("percent_75", ifaceOut.get("fuzzy_mode"));
+        assertEquals("12", ifaceOut.get("priority"));
+        assertEquals("minecraft:iron_ingot 16", ifaceOut.get("stock.0"));
+        assertEquals("ae2:crafting_card", ifaceOut.get("upgrade.0"));
+
+        // 2. 成型面板 + 发信器：place_block -> place_mode (yes->block / no->drop)，redstone_emitter -> redstone_mode，filter.N 去 x 后缀。
+        JsonObject planeReply = new JsonObject();
+        planeReply.addProperty("found", true);
+        planeReply.addProperty("kind", "cable_part");
+        planeReply.addProperty("part_id", "ae2:formation_plane");
+        JsonObject planeSettings = new JsonObject();
+        planeSettings.addProperty("place_block", "no");
+        planeSettings.addProperty("redstone_emitter", "low_signal");
+        planeReply.add("settings", planeSettings);
+        JsonObject planeReadings = new JsonObject();
+        JsonObject filterSlots = new JsonObject();
+        filterSlots.addProperty("0", "minecraft:cobblestone x1");
+        planeReadings.add("config_slots", filterSlots);
+        planeReply.add("readings", planeReadings);
+        cache.acceptServerDevice(HOST, Direction.EAST, planeReply);
+
+        Map<String, String> planeOut = cache.peekSettings(HOST, Direction.EAST, ServerReads.NONE);
+        assertEquals("drop", planeOut.get("place_mode"));
+        assertEquals("low_signal", planeOut.get("redstone_mode"));
+        assertEquals("minecraft:cobblestone", planeOut.get("filter.0"));
+
+        // 3. P2P（readings.p2p_output & p2p_frequency）、破坏面板（readings.enchantments 对象）与元件工作台（readings.cell_item & fuzzy_mode）。
+        JsonObject p2pReply = new JsonObject();
+        p2pReply.addProperty("found", true);
+        JsonObject p2pReadings = new JsonObject();
+        p2pReadings.addProperty("p2p_output", true);
+        p2pReadings.addProperty("p2p_frequency", 0xABCD);
+        p2pReply.add("readings", p2pReadings);
+        cache.acceptServerDevice(HOST, Direction.SOUTH, p2pReply);
+        assertEquals("output", cache.peekSettings(HOST, Direction.SOUTH, ServerReads.NONE).get("p2p_role"));
+        assertEquals(0xABCD, cache.readingsFor(HOST, Direction.SOUTH, ServerReads.NONE).get("p2p_frequency"));
+
+        JsonObject annReply = new JsonObject();
+        annReply.addProperty("found", true);
+        JsonObject annReadings = new JsonObject();
+        JsonObject enchObj = new JsonObject();
+        enchObj.addProperty("minecraft:silk_touch", 1);
+        annReadings.add("enchantments", enchObj);
+        annReply.add("readings", annReadings);
+        cache.acceptServerDevice(HOST, Direction.UP, annReply);
+        assertEquals("minecraft:silk_touch 1",
+                cache.readingsFor(HOST, Direction.UP, ServerReads.NONE).get("enchantments"));
+
+        JsonObject wbReply = new JsonObject();
+        wbReply.addProperty("found", true);
+        JsonObject wbReadings = new JsonObject();
+        wbReadings.addProperty("cell_item", "ae2:item_storage_cell_4k");
+        wbReadings.addProperty("copy_mode", "KEEP_ON_REMOVE");
+        wbReadings.addProperty("fuzzy_mode", "PERCENT_50");
+        wbReply.add("readings", wbReadings);
+        JsonArray wbUpgrades = new JsonArray();
+        wbUpgrades.add("");
+        wbUpgrades.add("ae2:fuzzy_card");
+        wbReply.add("upgrades", wbUpgrades);
+        cache.acceptServerDevice(HOST, null, wbReply);
+        Map<String, String> wbOut = cache.peekSettings(HOST, null, ServerReads.NONE);
+        assertEquals("in:ae2:item_storage_cell_4k", wbOut.get("cell"));
+        assertEquals("keep_on_remove", wbOut.get("copy_mode"));
+        assertEquals("percent_50", wbOut.get("fuzzy_mode"));
+        assertEquals("empty", wbOut.get("upgrade.0"));
+        assertEquals("ae2:fuzzy_card", wbOut.get("upgrade.1"));
+    }
+
+    @Test
     void 汇编入口暴露全部增补目录设备委托与合规语义布局规则() {
         List<Ae2MachineCatalog.Kind> merged = Ae2MachineCatalog.kinds(Ae2Parts.extraKinds());
         assertTrue(merged.stream().anyMatch(k -> k.id().equals("ae2:cell_workbench")));
