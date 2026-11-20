@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -40,18 +41,32 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
     private final Ae2Compat compat;
     private final Ae2PartControl control;
     private final Ae2PartCache cache;
+    private final Supplier<ServerReads> serverReads;
     private final BiFunction<ClientLevel, BlockPos, Optional<Ae2Grid.GridCell>> cellReader;
 
     public Ae2PartCableOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache) {
-        this(compat, control, cache, (level, pos) -> level == null ? Optional.empty() : compat.gridCell(level, pos));
+        this(compat, control, cache, () -> ServerReads.NONE);
+    }
+
+    public Ae2PartCableOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache,
+                           Supplier<ServerReads> serverReads) {
+        this(compat, control, cache, serverReads,
+                (level, pos) -> level == null ? Optional.empty() : compat.gridCell(level, pos));
     }
 
     /** 离线测试用构造：允许无真实 ClientLevel 时直接提供线缆格读数。 */
     Ae2PartCableOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache,
                     BiFunction<ClientLevel, BlockPos, Optional<Ae2Grid.GridCell>> cellReader) {
+        this(compat, control, cache, () -> ServerReads.NONE, cellReader);
+    }
+
+    Ae2PartCableOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache,
+                    Supplier<ServerReads> serverReads,
+                    BiFunction<ClientLevel, BlockPos, Optional<Ae2Grid.GridCell>> cellReader) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.control = Objects.requireNonNull(control, "control");
         this.cache = Objects.requireNonNull(cache, "cache");
+        this.serverReads = Objects.requireNonNull(serverReads, "serverReads");
         this.cellReader = Objects.requireNonNull(cellReader, "cellReader");
     }
 
@@ -64,6 +79,7 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
     @Override public Map<String, Object> extraReadings(BlockPos pos, ClientLevel level) {
         Optional<Ae2Grid.GridCell> cell = cellReader.apply(level, pos);
         if (cell.isEmpty() || !cell.get().cableBus()) return Map.of();
+        ServerReads reads = currentServerReads();
         Map<String, Object> readings = new LinkedHashMap<>();
         for (Direction side : Direction.values()) {
             Ae2Grid.PartView view = cell.get().parts().get(side);
@@ -71,9 +87,14 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
             Optional<Ae2PartKeys.PartKind> kind = Ae2PartKeys.partKindOf(view.itemId());
             if (kind.isEmpty()) continue;
             String pre = Ae2PartKeys.sideName(side) + ".";
-            addPartReadings(readings, pre, pos, side, kind.get(), level, ServerReads.NONE);
+            addPartReadings(readings, pre, pos, side, kind.get(), level, reads);
         }
         return readings;
+    }
+
+    private ServerReads currentServerReads() {
+        ServerReads reads = serverReads.get();
+        return reads == null ? ServerReads.NONE : reads;
     }
 
     @Override public Optional<MachineSettings> settings(BlockPos pos, PlayerServices services) {
@@ -411,7 +432,7 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
     private final class InterfaceBlockOps implements Ae2DeviceOps {
 
         @Override public Map<String, Object> extraReadings(BlockPos pos, ClientLevel level) {
-            Map<String, Object> cached = cache.readingsFor(pos, null, ServerReads.NONE);
+            Map<String, Object> cached = cache.readingsFor(pos, null, currentServerReads());
             return cached.containsKey("priority") ? Map.of("priority", cached.get("priority")) : Map.of();
         }
 

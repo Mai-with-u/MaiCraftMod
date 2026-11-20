@@ -21,6 +21,7 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -45,7 +46,7 @@ final class Ae2DirectPartAction implements Action {
         P2P_ROLE
     }
 
-    private enum Stage { CHECK, PREPARE_UNLOCK, UNLOCK, HAND, APPROACH, CLICK, SECOND_CLICK, DONE }
+    private enum Stage { CHECK, PREPARE_UNLOCK, APPROACH_UNLOCK, UNLOCK, HAND, APPROACH, CLICK, SECOND_CLICK, DONE }
 
     private final Ae2Compat compat;
     private final Ae2PartControl control;
@@ -64,6 +65,8 @@ final class Ae2DirectPartAction implements Action {
     private boolean needEmptyHand;
     private boolean sneakClick;
     private boolean needSecondFluidClick;
+    private int p2pFreqBefore;
+    private boolean p2pExpectNewFreq;
     private Problem problem;
 
     Ae2DirectPartAction(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache, PlayerServices services,
@@ -79,10 +82,29 @@ final class Ae2DirectPartAction implements Action {
         this.permissions = Objects.requireNonNull(permissions, "permissions");
     }
 
+    /** 离线测试用入口：预设已完成前置判定后的锁定监视器解锁路径，验证先空手再靠近部件盒再解锁的顺序。 */
+    static Ae2DirectPartAction forLockedUnlockTest(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache,
+                                                   PlayerServices services, BlockPos host, Direction side,
+                                                   AABB partBox, String wanted, String itemToHold,
+                                                   Permissions permissions) {
+        Ae2DirectPartAction action = new Ae2DirectPartAction(compat, control, cache, services, host, side,
+                Kind.MONITOR_DISPLAY, wanted, permissions);
+        action.partBox = partBox;
+        action.itemToHold = itemToHold;
+        action.stage = Stage.PREPARE_UNLOCK;
+        return action;
+    }
+
+    /** 离线测试用：读取当前阶段名，验证状态机流转顺序。 */
+    String stageName() {
+        return stage.name();
+    }
+
     @Override public ActionStatus tick(TickContext context) {
         return switch (stage) {
             case CHECK -> check();
             case PREPARE_UNLOCK -> prepareUnlock(context);
+            case APPROACH_UNLOCK -> approachForUnlock(context);
             case UNLOCK -> unlock(context);
             case HAND -> prepareHand(context);
             case APPROACH -> approach(context);
@@ -107,7 +129,7 @@ final class Ae2DirectPartAction implements Action {
             case MONITOR_LOCK -> planMonitorLock(level);
             case MONITOR_DISPLAY -> planMonitorDisplay(level, player.localPlayer());
             case P2P_ATTUNEMENT -> planP2pAttunement(level, player.localPlayer());
-            case P2P_ROLE -> planP2pRole(player.localPlayer());
+            case P2P_ROLE -> planP2pRole(level, player.localPlayer());
         };
     }
 
@@ -162,7 +184,7 @@ final class Ae2DirectPartAction implements Action {
     }
 
     /** P2P 配对主手内存卡前置判断结果（纯函数，离线可测）。 */
-    record P2pRolePlan(Problem problem, String itemToHold, boolean sneakClick) {
+    record P2pRolePlan(Problem problem, String itemToHold, boolean sneakClick, int freqBefore, boolean expectNewFreq) {
     }
 
     /** 监视器设置展示物前置判断结果（纯函数，离线可测）。 */
@@ -170,38 +192,61 @@ final class Ae2DirectPartAction implements Action {
                               boolean needSecondFluidClick) {
     }
 
-    // AE2 P2PTunnelPart.onUseItemOn 对 hand == OFF_HAND 直接返回 false，故严格要求主手持有内存卡。
-    private ActionStatus planP2pRole(LocalPlayer player) {
+    // AE2 P2PTunnelPart.onUseItemOn 对 hand == OFF_HAND 直接返回 false，故严格要求主手持有内存卡；
+    // 同时读取点击前通道频率与已知角色，规避同频覆盖静默忽略或旧频假确认。
+    private ActionStatus planP2pRole(ClientLevel level, LocalPlayer player) {
         ItemStack mainHand = player.getMainHandItem();
         ItemStack offHand = player.getOffhandItem();
         ItemStack invCard = findMemoryCardStackInMainInventory(player);
         String invCardId = invCard.isEmpty() ? null : idOf(invCard);
-        P2pRolePlan plan = decideP2pRole(control, wanted, mainHand, offHand, invCard, invCardId);
+        int freqBefore = control.readClientPart(level, host, side)
+                .filter(Ae2PartControl.ClientPartReading::hasP2p)
+                .map(Ae2PartControl.ClientPartReading::p2pFrequency)
+                .orElse(0);
+        boolean wasOutput = Boolean.TRUE.equals(
+                cache.readingsFor(host, side, ServerReads.NONE).get("p2p_is_output"));
+        P2pRolePlan plan = decideP2pRole(control, wanted, mainHand, offHand, invCard, invCardId, freqBefore, wasOutput);
         if (plan.problem() != null) return finish(plan.problem());
         itemToHold = plan.itemToHold();
         sneakClick = plan.sneakClick();
+        p2pFreqBefore = plan.freqBefore();
+        p2pExpectNewFreq = plan.expectNewFreq();
         stage = Stage.HAND;
         return ActionStatus.progressed();
     }
 
-    /** 纯函数判定 P2P 配对的前置条件：副手内存卡必报 NEED_ITEM，输出端要求内存卡已存 P2P 频率。 */
+    /** 纯函数判定 P2P 配对的前置条件：副手内存卡必报 NEED_ITEM，同频覆盖 output 明确拒绝，避免假确认。 */
     static P2pRolePlan decideP2pRole(Ae2PartControl control, String role, ItemStack mainHand, ItemStack offHand,
-                                     ItemStack invCard, String invCardId) {
+                                     ItemStack invCard, String invCardId, int freqBefore, boolean wasOutput) {
         boolean mainIsCard = control.isMemoryCard(mainHand);
         boolean offIsCard = control.isMemoryCard(offHand);
         if (!mainIsCard && (invCard == null || invCard.isEmpty())) {
             String message = offIsCard
                     ? "内存卡当前在副手；AE2 的 P2P 配对强制要求主手持有 " + Ae2PartKeys.MEMORY_CARD + "（副手会被直接忽略）"
                     : "需要主手持有 " + Ae2PartKeys.MEMORY_CARD + " 才能配对 P2P 通道";
-            return new P2pRolePlan(Problem.of(Problem.Kind.NEED_ITEM, message), null, false);
+            return new P2pRolePlan(Problem.of(Problem.Kind.NEED_ITEM, message), null, false, freqBefore, false);
         }
         ItemStack card = mainIsCard ? mainHand : invCard;
+        OptionalInt cardFreq = control.memoryCardP2pFrequency(card);
         boolean asOutput = "output".equals(role);
-        if (asOutput && (control.memoryCardP2pType(card).isEmpty() || control.memoryCardP2pFrequency(card).isEmpty())) {
-            return new P2pRolePlan(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                    "主手内存卡里还没有已绑定的 P2P 频率，请先对输入端设置 p2p_role=input 复制频率"), null, false);
+        if (asOutput) {
+            if (control.memoryCardP2pType(card).isEmpty() || cardFreq.isEmpty()) {
+                return new P2pRolePlan(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                        "主手内存卡里还没有已绑定的 P2P 频率，请先对输入端设置 p2p_role=input 复制频率"),
+                        null, false, freqBefore, false);
+            }
+            // AE2 P2PTunnelPart.importSettings 在 frequency == this.freq 时静默忽略，避免误把输入端覆盖失效。
+            if (freqBefore != 0 && freqBefore == cardFreq.getAsInt()) {
+                return new P2pRolePlan(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                        "该 P2P 通道当前已经处于同一频率（" + Ae2PartKeys.formatFrequency(freqBefore)
+                                + "），AE2 不允许同频覆盖为输出端（避免把输入端误改为输出）"),
+                        null, false, freqBefore, false);
+            }
+            return new P2pRolePlan(null, mainIsCard ? null : invCardId, false, freqBefore, false);
         }
-        return new P2pRolePlan(null, mainIsCard ? null : invCardId, !asOutput);
+        // input：原本为输出端且与内存卡同频时，AE2 服务端会重新分配新频率，确认时必须等到频率变化。
+        boolean expectNew = freqBefore != 0 && cardFreq.isPresent() && cardFreq.getAsInt() == freqBefore && wasOutput;
+        return new P2pRolePlan(null, mainIsCard ? null : invCardId, true, freqBefore, expectNew);
     }
 
     /** 纯函数判定监视器设置展示物的执行步骤（已匹配 / 先解锁 / 样本直接右键 / 流体容器二次右键）。 */
@@ -228,7 +273,7 @@ final class Ae2DirectPartAction implements Action {
                 "背包里没有用于设监视器展示的样本 " + wanted + "（或对应的流体容器）"), false, false, null, false);
     }
 
-    // 监视器已锁定时，先空手潜行右键解锁，再换样本设展示物。
+    // 监视器已锁定时，先空手 → 走到部件盒可达站位 → 潜行右键解锁，再换样本设展示物。
     private ActionStatus prepareUnlock(TickContext context) {
         if (step == null) {
             Optional<Action> empty = services.toMainhand().emptyMainhand();
@@ -236,6 +281,19 @@ final class Ae2DirectPartAction implements Action {
                 return finish(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "腾不出空手给监视器解锁"));
             }
             step = empty.get();
+        }
+        ActionStatus status = step.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        closeStep();
+        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
+        stage = Stage.APPROACH_UNLOCK;
+        return ActionStatus.progressed();
+    }
+
+    // 解锁右键前先走到能看见并够得着部件盒的位置，避免隔空或背对直接交互报 UNREACHABLE。
+    private ActionStatus approachForUnlock(TickContext context) {
+        if (step == null) {
+            step = services.approach().toward(ApproachTarget.ofBlockPart(host, partBox), permissions);
         }
         ActionStatus status = step.tick(context);
         if (status instanceof ActionStatus.Running) return status;
@@ -351,14 +409,28 @@ final class Ae2DirectPartAction implements Action {
         ItemStack mainHand = ctx.localPlayer().getMainHandItem();
         OptionalInt cardFreq = control.memoryCardP2pFrequency(mainHand);
         Optional<Ae2PartControl.ClientPartReading> part = control.readClientPart(ctx.level(), host, side);
+        if (part.isEmpty() || !part.get().hasP2p()) return InteractionConfirmation.Verdict.PENDING;
+        return verifyP2pRole(asOutput, p2pFreqBefore, p2pExpectNewFreq, part.get().p2pFrequency(), cardFreq);
+    }
+
+    /**
+     * 纯函数核对 P2P 配对点击是否已由服务端生效：
+     * output 要求通道频率更新为内存卡频率且异于点击前频率；
+     * input 在原为同频 output 时要求通道分配出新频率并与内存卡一致，杜绝未等回包就假确认。
+     */
+    static InteractionConfirmation.Verdict verifyP2pRole(boolean asOutput, int freqBefore, boolean expectNewFreq,
+                                                         int partFreq, OptionalInt cardFreq) {
+        if (partFreq == 0 || cardFreq.isEmpty()) return InteractionConfirmation.Verdict.PENDING;
+        int card = cardFreq.getAsInt();
         if (asOutput) {
-            return part.isPresent() && part.get().hasP2p() && cardFreq.isPresent()
-                    && part.get().p2pFrequency() == cardFreq.getAsInt()
+            return partFreq == card && partFreq != freqBefore
                     ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
         }
-        return part.isPresent() && part.get().hasP2p() && part.get().p2pFrequency() != 0
-                && cardFreq.isPresent() && cardFreq.getAsInt() == part.get().p2pFrequency()
-                ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
+        if (expectNewFreq) {
+            return partFreq != freqBefore && card == partFreq
+                    ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
+        }
+        return card == partFreq ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
     }
 
     private void recordSuccess() {
@@ -405,11 +477,6 @@ final class Ae2DirectPartAction implements Action {
             }
         }
         return Optional.empty();
-    }
-
-    private Optional<String> findMemoryCardInMainInventory(LocalPlayer player) {
-        ItemStack stack = findMemoryCardStackInMainInventory(player);
-        return stack.isEmpty() ? Optional.empty() : Optional.of(idOf(stack));
     }
 
     private ItemStack findMemoryCardStackInMainInventory(LocalPlayer player) {

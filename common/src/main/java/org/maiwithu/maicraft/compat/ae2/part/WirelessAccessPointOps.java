@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -42,10 +43,16 @@ public final class WirelessAccessPointOps implements Ae2DeviceOps {
 
     private final Ae2PartControl control;
     private final Ae2PartCache cache;
+    private final Supplier<ServerReads> serverReads;
 
     public WirelessAccessPointOps(Ae2PartControl control, Ae2PartCache cache) {
+        this(control, cache, () -> ServerReads.NONE);
+    }
+
+    public WirelessAccessPointOps(Ae2PartControl control, Ae2PartCache cache, Supplier<ServerReads> serverReads) {
         this.control = Objects.requireNonNull(control, "control");
         this.cache = Objects.requireNonNull(cache, "cache");
+        this.serverReads = Objects.requireNonNull(serverReads, "serverReads");
     }
 
     /** 按 AE2 精确公式计算装入 boosters 张无线增幅卡时的最大覆盖范围（格）：16 + boosters^1.5。 */
@@ -81,7 +88,8 @@ public final class WirelessAccessPointOps implements Ae2DeviceOps {
     }
 
     @Override public Map<String, Object> extraReadings(BlockPos pos, ClientLevel level) {
-        return readingsFor(pos, ServerReads.NONE);
+        ServerReads reads = serverReads.get();
+        return readingsFor(pos, reads == null ? ServerReads.NONE : reads);
     }
 
     @Override public Optional<MachineSettings> settings(BlockPos pos, PlayerServices services) {

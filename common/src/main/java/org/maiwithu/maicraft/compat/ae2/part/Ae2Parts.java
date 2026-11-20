@@ -6,12 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
 import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 import org.maiwithu.maicraft.compat.ae2.Ae2SemanticsLayout;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
 
 /**
  * 线缆部件全配置、元件工作台、ME IO 传输站与无线访问点补全的对外统一汇总入口。
@@ -26,19 +28,28 @@ public final class Ae2Parts {
     private final Map<String, Ae2DeviceOps> deviceOps;
 
     public Ae2Parts(Ae2Compat compat, Ae2PartControl control) {
-        this(compat, control, new Ae2PartCache());
+        this(compat, control, new Ae2PartCache(), () -> ServerReads.NONE);
+    }
+
+    public Ae2Parts(Ae2Compat compat, Ae2PartControl control, Supplier<ServerReads> serverReads) {
+        this(compat, control, new Ae2PartCache(), serverReads);
     }
 
     public Ae2Parts(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache) {
+        this(compat, control, cache, () -> ServerReads.NONE);
+    }
+
+    public Ae2Parts(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache, Supplier<ServerReads> serverReads) {
         Objects.requireNonNull(compat, "compat");
         Objects.requireNonNull(control, "control");
+        Objects.requireNonNull(serverReads, "serverReads");
         this.cache = Objects.requireNonNull(cache, "cache");
-        this.cableOps = new Ae2PartCableOps(compat, control, cache);
+        this.cableOps = new Ae2PartCableOps(compat, control, cache, serverReads);
         Map<String, Ae2DeviceOps> ops = new LinkedHashMap<>();
         ops.put("ae2:interface", cableOps.interfaceBlockOps());
-        ops.put("ae2:cell_workbench", new CellWorkbenchOps(compat, control, cache));
-        ops.put("ae2:io_port", new CellTransferOps(compat, control, cache));
-        ops.put("ae2:wireless_access_point", new WirelessAccessPointOps(control, cache));
+        ops.put("ae2:cell_workbench", new CellWorkbenchOps(compat, control, cache, serverReads));
+        ops.put("ae2:io_port", new CellTransferOps(compat, control, cache, serverReads));
+        ops.put("ae2:wireless_access_point", new WirelessAccessPointOps(control, cache, serverReads));
         this.deviceOps = Map.copyOf(ops);
     }
 

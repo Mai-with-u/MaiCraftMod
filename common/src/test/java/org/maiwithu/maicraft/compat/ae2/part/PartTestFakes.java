@@ -377,10 +377,15 @@ final class PartTestFakes {
                     playerSlots.put(slotId, cursor);
                     cursor = SlotSnapshot.empty();
                 } else if (prev.key().equals(cursor.key())) {
-                    ItemStack merged = prev.stack().copy();
-                    merged.setCount(prev.count() + cursor.count());
-                    playerSlots.put(slotId, SlotSnapshot.of(merged));
-                    cursor = SlotSnapshot.empty();
+                    int space = Math.max(0, 64 - prev.count());
+                    int move = Math.min(space, cursor.count());
+                    if (move > 0) {
+                        ItemStack merged = prev.stack().copy();
+                        merged.setCount(prev.count() + move);
+                        playerSlots.put(slotId, SlotSnapshot.of(merged));
+                        int remain = cursor.count() - move;
+                        cursor = remain <= 0 ? SlotSnapshot.empty() : snapshotOf(cursor.key(), remain);
+                    }
                 }
                 return true;
             }

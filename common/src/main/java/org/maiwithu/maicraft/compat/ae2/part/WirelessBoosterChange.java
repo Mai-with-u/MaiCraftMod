@@ -192,14 +192,39 @@ final class WirelessBoosterChange implements Action {
             waited = 0;
             return ActionStatus.progressed();
         }
-        // 光标里刚拿起了全部增幅卡：此时槽位已变 0，会进入 addBooster 分支放回 wanted 张，再把余下放回背包。
-        return ActionStatus.running();
+        // 若进入减卡分支时光标上已有残余物品，先回收到背包再继续，避免停在 running 死等。
+        stage = Stage.RETURN_CURSOR;
+        returnSlot = -1;
+        sent = false;
+        waited = 0;
+        return ActionStatus.progressed();
     }
 
+    // 把光标里剩余增幅卡放回背包：单格堆叠上限 64 满后光标若仍有余量，自动换下一空格分批放完。
     private ActionStatus returnCursor() {
         if (menu.busy()) return ActionStatus.running();
         if (menu.cursorEmpty()) {
+            Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
+            if (opt.isPresent() && currentBoosters(opt.get()) != wanted) {
+                stage = Stage.ADJUST;
+                sent = false;
+                waited = 0;
+                return ActionStatus.progressed();
+            }
             return completeWith(wanted);
+        }
+        int cursorCount = menu.cursor().count();
+        if (sent) {
+            if (cursorCount < lastCursorCount) {
+                // 上一次点击已把部分增幅卡补满该格，重置状态重新找下一格放剩余部分。
+                sent = false;
+                waited = 0;
+                returnSlot = -1;
+            } else if (++waited > WAIT_TICKS) {
+                return closeWith(Problem.of(Problem.Kind.STUCK, "把余下的无线增幅卡放回背包超时"));
+            } else {
+                return ActionStatus.running();
+            }
         }
         Optional<MenuContent.Reading> reading = menu.reading();
         if (reading.isEmpty()) return closeWith(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面被关掉了"));
@@ -207,16 +232,11 @@ final class WirelessBoosterChange implements Action {
         if (target < 0) {
             return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "背包已满，放不下取出的无线增幅卡"));
         }
-        if (!sent) {
-            if (!menu.click(target, 0)) return ActionStatus.running();
-            sent = true;
-            waited = 0;
-            return ActionStatus.progressed();
-        }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "把余下的无线增幅卡放回背包超时"));
-        }
-        return ActionStatus.running();
+        if (!menu.click(target, 0)) return ActionStatus.running();
+        lastCursorCount = cursorCount;
+        sent = true;
+        waited = 0;
+        return ActionStatus.progressed();
     }
 
     private ActionStatus completeWith(int boosters) {

@@ -8,6 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
@@ -22,6 +25,9 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
+import org.maiwithu.maicraft.game.serverlink.ClientRequest;
 import org.maiwithu.maicraft.game.serverlink.ServerReads;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -187,6 +193,63 @@ class CellTransferAndWirelessTest {
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, runToEnd(shortage));
         assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
         assertFalse(failed.problem().message().isBlank());
+    }
+
+    @Test
+    void 无线访问点减少增幅卡时背包原格溢出六十四会自动分两格放回() {
+        PartTestFakes.ScriptedSession session = new PartTestFakes.ScriptedSession(Ae2PartKeys.MENU_WIRELESS_ACCESS_POINT);
+        session.storageSlots.add(new Ae2PartControl.MenuSlotEntry(0, 0, true, "minecraft:redstone", 16));
+        session.wirelessBoosters = 16;
+        // 背包 100 格已有 60 张增幅卡，从访问点 16 张减到 6 张需取回 10 张：4 张补满 100 格至 64，剩余 6 张放进 101 格。
+        session.putPlayerItem(100, new ItemStack(Items.REDSTONE, 60));
+        Ae2PartCache cache = new Ae2PartCache();
+
+        WirelessBoosterChange shrink = new WirelessBoosterChange(session, cache, AT, 6, "minecraft:redstone",
+                () -> PartTestFakes.immediateOpening(session));
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(shrink));
+        assertEquals(6, session.wirelessBoosters);
+        assertTrue(session.cursorEmpty());
+        assertEquals(64, session.playerSlots.get(100).count());
+        assertEquals(6, session.playerSlots.get(101).count());
+        assertEquals(6, cache.syncedBoosters(AT, ServerReads.NONE).orElseThrow());
+    }
+
+    @Test
+    void 注入服务端读数源后首次查看额外读数自动触发设备查询并合并权威值() {
+        AtomicInteger askedCount = new AtomicInteger();
+        UUID reqId = UUID.randomUUID();
+        JsonObject reply = new JsonObject();
+        reply.addProperty("boosters", 16);
+        ServerReads serverReads = new ServerReads() {
+            @Override public boolean available(String operationId) {
+                return Ae2PartCache.DEVICE_OPERATION.equals(operationId);
+            }
+            @Override public Optional<UUID> ask(String operationId, JsonObject body) {
+                askedCount.incrementAndGet();
+                return Optional.of(reqId);
+            }
+            @Override public Optional<ClientRequest.Snapshot> answer(UUID request) {
+                if (!reqId.equals(request)) return Optional.empty();
+                return Optional.of(new ClientRequest.Snapshot(reqId, Ae2PartCache.DEVICE_OPERATION, 1, false,
+                        ClientRequest.Status.SUCCEEDED, ClientRequest.Effect.APPLIED, false,
+                        "ok", "", 10L, reply));
+            }
+        };
+
+        Ae2Compat compat = PartTestFakes.compat(PartTestFakes.cableGrid(AT, Map.of()), Ae2MenuSlots.NONE);
+        Ae2Parts parts = new Ae2Parts(compat, Ae2PartControl.NONE, () -> serverReads);
+        Ae2DeviceOps wirelessOps = parts.deviceOps().get("ae2:wireless_access_point");
+
+        // 第一次 extraReadings 发出异步 ae2.device 查询；第二次收到应答并直接返回精确范围与能耗。
+        Map<String, Object> first = wirelessOps.extraReadings(AT, null);
+        assertEquals(1, askedCount.get());
+        assertEquals(false, first.get("boosters_synced"));
+
+        Map<String, Object> second = wirelessOps.extraReadings(AT, null);
+        assertEquals(true, second.get("boosters_synced"));
+        assertEquals(16, second.get("boosters"));
+        assertEquals(80.0, (double) second.get("range"), 1e-6);
+        assertEquals(40.0, (double) second.get("power_drain"), 1e-6);
     }
 
     private static ActionStatus runToEnd(Action action) {

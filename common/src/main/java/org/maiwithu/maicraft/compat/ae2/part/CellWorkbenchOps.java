@@ -7,6 +7,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -37,16 +38,25 @@ public final class CellWorkbenchOps implements Ae2DeviceOps {
     private final Ae2Compat compat;
     private final Ae2PartControl control;
     private final Ae2PartCache cache;
+    private final Supplier<ServerReads> serverReads;
 
     public CellWorkbenchOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache) {
+        this(compat, control, cache, () -> ServerReads.NONE);
+    }
+
+    public CellWorkbenchOps(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache,
+                            Supplier<ServerReads> serverReads) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.control = Objects.requireNonNull(control, "control");
         this.cache = Objects.requireNonNull(cache, "cache");
+        this.serverReads = Objects.requireNonNull(serverReads, "serverReads");
     }
 
     @Override public Map<String, Object> extraReadings(BlockPos pos, ClientLevel level) {
-        Map<String, Object> readings = new LinkedHashMap<>(cache.readingsFor(pos, null, ServerReads.NONE));
-        Map<String, String> settings = cache.peekSettings(pos, null, ServerReads.NONE);
+        ServerReads reads = serverReads.get();
+        ServerReads active = reads == null ? ServerReads.NONE : reads;
+        Map<String, Object> readings = new LinkedHashMap<>(cache.readingsFor(pos, null, active));
+        Map<String, String> settings = cache.peekSettings(pos, null, active);
         if (settings.containsKey("copy_mode")) readings.put("copy_mode", settings.get("copy_mode"));
         if (settings.containsKey("fuzzy_mode")) readings.put("fuzzy_mode", settings.get("fuzzy_mode"));
         return readings;
