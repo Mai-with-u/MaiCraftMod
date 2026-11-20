@@ -37,8 +37,12 @@ import org.maiwithu.maicraft.behavior.acquire.field.LiveHuntMoves;
 import org.maiwithu.maicraft.behavior.acquire.field.LiveHunts;
 import org.maiwithu.maicraft.behavior.acquire.cook.ClientBrewingReads;
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.StationsLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.sources.BlockApplicationSource;
 import org.maiwithu.maicraft.behavior.acquire.sources.BrewingSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.ContainerStationSource;
+import org.maiwithu.maicraft.behavior.acquire.sources.LiveContainerStationOps;
+import org.maiwithu.maicraft.behavior.acquire.spi.CookingLeftBehind;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveTransformSites;
 import org.maiwithu.maicraft.behavior.acquire.cook.LiveWorkTools;
 import org.maiwithu.maicraft.behavior.acquire.cook.MenuRecipeRuns;
@@ -87,7 +91,9 @@ final class AcquisitionWiring {
             ClientCollectsBlocks collects, DigsBlocks digging, ChainMiningLedger chainMining, InventorySpace space,
             ContainerSource containerSource, ClientDropPickup drops, Optional<StepsAside> stepsAside) {
         RegistryRecipeReads recipeReads = new RegistryRecipeReads(deps.character().context(), deps.items().itemTags(), deps.items().furnaceFuels());
-        FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(timersOf(deps.channels().timers()));
+        FurnacesLeftCooking.SetsTimers timerHook = timersOf(deps.channels().timers());
+        FurnacesLeftCooking leftCooking = new FurnacesLeftCooking(timerHook);
+        StationsLeftCooking stationLeft = new StationsLeftCooking(timerHook);
         DugPits dugPits = new DugPits();
         MenuRecipeRuns recipeRuns = new MenuRecipeRuns(bringsClose, deps.hands().interactions(),
                 recipeReads, deps.world().memory(), deps.character().context(), leftCooking);
@@ -101,7 +107,9 @@ final class AcquisitionWiring {
                 deps.character().backpack(), deps.character().offhand(), deps.items().itemTags(), innerNeeds, placer, permission);
         InWorldBlockTransform.Seams blockTransforms = blockTransformSeams(deps, playerServices, placer, collects, drops);
         StrippingSource strippingSource = strippingSource(deps, innerNeeds, permission, blockTransforms);
-        // 烧炼来源认熔炉、高炉、烟熏炉三种：高炉、烟熏炉只用记得的现成的，没有照旧用熔炉。
+        // 烧炼来源：先登记通用箱式加工站（免燃料、报价显著优于原版熔炉），命中 exclude 时自然回落原版熔炉/高炉/烟熏炉。
+        ContainerStationSource stationSource = containerStationSource(
+                deps, playerServices, bringsClose, recipeReads, innerNeeds, stationLeft);
         RecipeSource smeltSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.SMELTING, WorkstationRecipe.Kind.BLASTING, WorkstationRecipe.Kind.SMOKING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
@@ -126,8 +134,8 @@ final class AcquisitionWiring {
                 deps.items().itemTags(), drops, carried);
         // 自带的来源在前，联动模组登记的在后：装了才有，停用后由登记表那一层回答不支持。
         List<ItemSource> sources = new ArrayList<>(List.of(
-                groundDropSource, containerSource, craftSource, strippingSource, smeltSource, smithSource, brewSource,
-                miningSource, harvestSource,
+                groundDropSource, containerSource, craftSource, strippingSource, stationSource, smeltSource, smithSource,
+                brewSource, miningSource, harvestSource,
                 // 眼前看不见树、但路过记得哪里有树林时，先走去记得的产地再砍：比一头扎进更远的记忆箱子近。
                 new RememberedWoodSites(deps.world().memory(), deps.travel().walks(), deps.items().itemTags())));
         sources.addAll(tradeAndHunt(deps, bringsClose, drops, innerNeeds, permission));
@@ -140,12 +148,27 @@ final class AcquisitionWiring {
         sources.addAll(deps.compat().itemSources(playerServices));
         List<BlockApplicationSource> applicationSources = addCompatTransforms(
                 sources, deps, playerServices, drops, stepsAside, innerNeeds, permission, blockTransforms);
-        // 来源装好一炉就走时，这一场拿东西当场收场：引擎、烧炼来源、obtain 看的是同一份留着烧的记录。
+        // 熔炉装炉就走与箱式加工站投料离开共用引擎的留场收场通道，任意一方留场都立刻干净收场不换路重烧。
+        CookingLeftBehind combinedLeft = CookingLeftBehind.combine(leftCooking, stationLeft);
         ItemAcquisition acquisition = new ItemAcquisition(sources,
                 carried, deps.character().offhand(), deps.items().itemTags(),
-                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH, leftCooking);
+                deps.character().position(), Optional.of(space), ItemAcquisition.DEFAULT_MAX_DEPTH, combinedLeft);
+        attachWatches(deps, acquisition, innerNeeds, leftCooking, stationSource, craftSource, strippingSource,
+                smeltSource, smithSource, miningSource, applicationSources);
+        // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
+        // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
+        return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
+                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking, dugPits, chainMining, stationLeft);
+    }
+
+    /** 引擎建好后挂回内需入口、防外层目标被当料吃掉的链条观察，以及饥饿找食和垫脚避让。 */
+    private static void attachWatches(AbilityCatalog.Deps deps, ItemAcquisition acquisition,
+            DeferredInnerNeeds innerNeeds, FurnacesLeftCooking leftCooking, ContainerStationSource stationSource,
+            RecipeSource craftSource, StrippingSource strippingSource, RecipeSource smeltSource,
+            RecipeSource smithSource, MiningSource miningSource, List<BlockApplicationSource> applicationSources) {
         innerNeeds.attach(acquisition);
         smeltSource.watchLeftCooking(leftCooking);
+        stationSource.watchChain(acquisition::outerWanted);
         // 备料不把外层正要的当原料用掉（不把做好的合金压成块），外层只看到最近一次备工具为止（为斧头可用身上的原木）。
         craftSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
         strippingSource.watchChain(acquisition::inProgress, acquisition::outerWanted);
@@ -158,10 +181,18 @@ final class AcquisitionWiring {
         deps.survivalWiring().attachFood(acquisition);
         // 拿东西途中走路垫脚，不把正在拿的东西垫掉：引擎此刻在推进的那一串就是正要用的。
         deps.itemsInUse().watch(acquisition::inProgress);
-        // via 的可选值就是这些来源自报的途径：来源列表变了，能力说明里的参数表跟着变。
-        // 掉落线索里的方块与实体都在游戏内置注册表里，不进世界也分得出、挑得出相近的名字。
-        return new ObtainAbility(acquisition, viasOf(sources), deps.items().itemRegistry(), carried, deps.character().offhand(),
-                deps.items().itemTags(), ClientRegisteredIds.builtIn(), leftCooking, dugPits, chainMining);
+    }
+
+    /** 创建通用箱式加工站来源：复用容器原生开箱、存放与取货通道，并接入世界保护判断与在跑账本。 */
+    private static ContainerStationSource containerStationSource(AbilityCatalog.Deps deps, PlayerServices playerServices,
+            LiveApproaches bringsClose, RegistryRecipeReads recipeReads, DeferredInnerNeeds innerNeeds,
+            StationsLeftCooking stationLeft) {
+        LiveContainerStationOps ops = new LiveContainerStationOps(bringsClose, deps.hands().interactions(),
+                deps.items().itemTags(), deps.world().memory(), deps.character().context(),
+                playerServices.menuLayouts(), deps.guards().othersNotice());
+        return new ContainerStationSource(recipeReads, deps.world().memory(), deps.character().backpack(),
+                deps.character().offhand(), deps.items().itemTags(), innerNeeds, deps.guards().protection(),
+                ops, stationLeft);
     }
 
     /** 创建采掘来源：挂上营地地面避让、往下挖台阶入口与平地竖坑收工回填及坑位记账。 */

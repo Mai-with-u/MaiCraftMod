@@ -11,6 +11,8 @@ import java.util.stream.Collectors;
 
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.LeftStationBatch;
+import org.maiwithu.maicraft.behavior.acquire.cook.StationsLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
@@ -61,6 +63,9 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     /** 装炉就走留下的那几台：开场记下回数，收场时挑出这一场留下的。 */
     private final FurnacesLeftCooking leftCooking;
     private int leftMark;
+    /** 箱式加工站投料离开留下的那几批：开场记下回数，收场时按 PARTIAL 干净交代。 */
+    private final StationsLeftCooking leftStations;
+    private int leftStationsMark;
     /** 采掘在地面挖出的坑位账本：开场记下游标，收场时挑出这一场留下的坑。 */
     private final DugPits dugPits;
     private int pitsMark;
@@ -74,24 +79,35 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags) {
         this(input, acquisition, backpack, offhand, tags,
-                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), new ChainMiningLedger());
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), new ChainMiningLedger(),
+                new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking) {
-        this(input, acquisition, backpack, offhand, tags, leftCooking, new DugPits(), new ChainMiningLedger());
+        this(input, acquisition, backpack, offhand, tags, leftCooking, new DugPits(), new ChainMiningLedger(),
+                new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits) {
-        this(input, acquisition, backpack, offhand, tags, leftCooking, dugPits, new ChainMiningLedger());
+        this(input, acquisition, backpack, offhand, tags, leftCooking, dugPits, new ChainMiningLedger(),
+                new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
             OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits,
             ChainMiningLedger chainLedger) {
+        this(input, acquisition, backpack, offhand, tags, leftCooking, dugPits, chainLedger,
+                new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
+    }
+
+    ObtainTask(ObtainItems input, StartsAcquisition acquisition, BackpackView backpack,
+            OffhandContents offhand, ReadsItemTags tags, FurnacesLeftCooking leftCooking, DugPits dugPits,
+            ChainMiningLedger chainLedger, StationsLeftCooking leftStations) {
         super("拿东西", Phase.COUNT, new ProgressTracker(STUCK_AFTER_TICKS, MAX_TICKS));
         this.leftCooking = leftCooking;
+        this.leftStations = leftStations;
         this.dugPits = dugPits;
         this.chainLedger = chainLedger;
         this.input = input;
@@ -120,6 +136,7 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     // 先逐样记下身上原有几件：这次拿到几件按它算，原有的不算这次拿到的。
     private Next<Phase> countPhase() {
         leftMark = leftCooking.timesLeft();
+        leftStationsMark = leftStations.timesLeft();
         pitsMark = dugPits.mark();
         chainMark = chainLedger.mark();
         int total = 0;
@@ -163,8 +180,15 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
             }
         }
         List<LeftCooking> left = failure == null ? List.of() : leftCooking.since(leftMark);
+        List<LeftStationBatch> stationBatches = failure == null ? List.of() : leftStations.since(leftStationsMark);
+        if (!left.isEmpty() && !stationBatches.isEmpty()) {
+            return settleLeftBoth(left, stationBatches, parts, missing, failure);
+        }
         if (!left.isEmpty()) {
             return settleLeftCooking(left, parts, missing, failure);
+        }
+        if (!stationBatches.isEmpty()) {
+            return settleLeftStations(stationBatches, parts, missing, failure);
         }
         if (failure == null) {
             String got = parts.isEmpty()
@@ -204,7 +228,55 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
                         got + "；" + where + "，约 " + minutes + " 分钟后回来取")
                 .problem(problem)
                 .remaining(List.copyOf(missing))
-                .details(buildDetails(left))
+                .details(buildDetails(left, null))
+                .build());
+    }
+
+    // 箱式加工站投料离开：原料已在加工站里运转，即使尚未出货也按 PARTIAL 收场并给出计时编号与取货提示。
+    private Next<Phase> settleLeftStations(List<LeftStationBatch> batches, List<String> parts, List<String> missing,
+            Problem failure) {
+        long seconds = batches.stream().mapToLong(LeftStationBatch::readyInSeconds).min().orElse(20L);
+        String got = parts.isEmpty() ? "还没拿到" : "部分拿到：经 " + viaText() + " 拿到 " + String.join("、", parts);
+        String where = batches.size() == 1
+                ? "已投进加工站「" + batches.getFirst().stationName() + "」烧炼"
+                : batches.size() + " 批留在箱式加工站里烧炼";
+        Problem problem = failure.kind() != Problem.Kind.WRONG_TIME ? failure
+                : Problem.of(Problem.Kind.WRONG_TIME,
+                        "已投料进加工站先去干别的：" + batches.stream().map(LeftStationBatch::sentence)
+                                .collect(Collectors.joining("；")),
+                        batches.stream().map(LeftStationBatch::suggestion).collect(Collectors.joining("；")));
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                        got + "；" + where + "，约 " + seconds + " 秒后回来取")
+                .problem(problem)
+                .remaining(List.copyOf(missing))
+                .details(buildDetails(null, batches))
+                .build());
+    }
+
+    // 多物品同时留有原版熔炉与箱式加工站批次时，合并结算并完整保留 left_cooking 与 left_stations 及其计时编号。
+    private Next<Phase> settleLeftBoth(List<LeftCooking> left, List<LeftStationBatch> batches,
+            List<String> parts, List<String> missing, Problem failure) {
+        String got = parts.isEmpty() ? "还没拿到" : "部分拿到：经 " + viaText() + " 拿到 " + String.join("、", parts);
+        String furnaceWhere = left.size() == 1 ? "一炉留在" + left.getFirst().kind().displayName() + "里烧"
+                : left.size() + " 炉留在炉子里烧";
+        String stationWhere = batches.size() == 1
+                ? "一批留在加工站「" + batches.getFirst().stationName() + "」烧炼"
+                : batches.size() + " 批留在箱式加工站里烧炼";
+        List<String> sentences = new ArrayList<>();
+        left.forEach(item -> sentences.add(item.sentence()));
+        batches.forEach(item -> sentences.add(item.sentence()));
+        List<String> suggestions = new ArrayList<>();
+        left.forEach(item -> suggestions.add(item.suggestion()));
+        batches.forEach(item -> suggestions.add(item.suggestion()));
+        Problem problem = failure.kind() != Problem.Kind.WRONG_TIME ? failure
+                : Problem.of(Problem.Kind.WRONG_TIME,
+                        "留着烧炼先去干别的：" + String.join("；", sentences),
+                        String.join("；", suggestions));
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
+                        got + "；" + furnaceWhere + "，另有" + stationWhere)
+                .problem(problem)
+                .remaining(List.copyOf(missing))
+                .details(buildDetails(left, batches))
                 .build());
     }
 
@@ -230,18 +302,20 @@ final class ObtainTask extends PhasedTask<ObtainTask.Phase> {
     }
 
     @Override protected ResultDetails details() {
-        return buildDetails(null);
+        return buildDetails(null, null);
     }
 
-    private ObtainedVia buildDetails(List<LeftCooking> left) {
+    private ObtainedVia buildDetails(List<LeftCooking> left, List<LeftStationBatch> stationBatches) {
         List<ObtainedVia.LeftFurnace> furnaces = left == null ? null
                 : left.stream().map(ObtainedVia.LeftFurnace::of).toList();
+        List<ObtainedVia.LeftStation> stations = stationBatches == null ? null
+                : stationBatches.stream().map(ObtainedVia.LeftStation::of).toList();
         List<ObtainedVia.Pit> pits = dugPits.since(pitsMark).stream().map(ObtainedVia.Pit::of).toList();
         if (!chainSettled) {
             chainSettled = true;
             settledChainMining = chainLedger.completeSince(chainMark).orElse(null);
         }
-        return new ObtainedVia(List.copyOf(obtainedVia), furnaces, pits, settledChainMining);
+        return new ObtainedVia(List.copyOf(obtainedVia), furnaces, stations, pits, settledChainMining);
     }
 
     // 要的是一类（标签）时说清拿到的是哪几样：要"能吃的"拿回来面包还是生牛肉，下一步怎么吃、要不要烤不一样。

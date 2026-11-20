@@ -15,6 +15,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.StationsLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
 import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.field.DropsFrom;
@@ -72,6 +73,8 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
     private final ReadsRegisteredIds registeredIds;
     /** 装炉就走留下的那几台：obtain 收场时挑出这一场留下的，写进结果。 */
     private final FurnacesLeftCooking leftCooking;
+    /** 箱式加工站投料离开留下的那几批：obtain 收场时按 PARTIAL 写进结果。 */
+    private final StationsLeftCooking leftStations;
     /** 采掘在地面留下的深坑或台阶入口账本：obtain 收场时挑出这一场留下的写进 details.pits。 */
     private final DugPits dugPits;
     /** 挖掘方块的连锁统计账本：本次动过挖掘时汇总写进 details.chain_mining。 */
@@ -84,7 +87,8 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
     public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds) {
         this(acquisition, vias, registry, backpack, offhand, tags, registeredIds,
-                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), new ChainMiningLedger());
+                new FurnacesLeftCooking(FurnacesLeftCooking.SetsTimers.NONE), new DugPits(), new ChainMiningLedger(),
+                new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     /** 同上，再接上装炉就走留下的那几台：和烧炉子的动作、拿东西的引擎记的是同一份。 */
@@ -92,7 +96,7 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds,
             FurnacesLeftCooking leftCooking) {
         this(acquisition, vias, registry, backpack, offhand, tags, registeredIds, leftCooking, new DugPits(),
-                new ChainMiningLedger());
+                new ChainMiningLedger(), new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     /** 同上，再接上采掘在地面留下的坑位账本。 */
@@ -100,14 +104,24 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds,
             FurnacesLeftCooking leftCooking, DugPits dugPits) {
         this(acquisition, vias, registry, backpack, offhand, tags, registeredIds, leftCooking, dugPits,
-                new ChainMiningLedger());
+                new ChainMiningLedger(), new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
     }
 
     /** 同上，再接上世界级挖掘连锁统计账本。 */
     public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
             BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds,
             FurnacesLeftCooking leftCooking, DugPits dugPits, ChainMiningLedger chainLedger) {
+        this(acquisition, vias, registry, backpack, offhand, tags, registeredIds, leftCooking, dugPits,
+                chainLedger, new StationsLeftCooking(FurnacesLeftCooking.SetsTimers.NONE));
+    }
+
+    /** 同上，再接上箱式加工站投料离开留下的在跑账本。 */
+    public ObtainAbility(StartsAcquisition acquisition, List<AcquireVia> vias, ReadsItemRegistry registry,
+            BackpackView backpack, OffhandContents offhand, ReadsItemTags tags, ReadsRegisteredIds registeredIds,
+            FurnacesLeftCooking leftCooking, DugPits dugPits, ChainMiningLedger chainLedger,
+            StationsLeftCooking leftStations) {
         this.leftCooking = Objects.requireNonNull(leftCooking, "leftCooking");
+        this.leftStations = Objects.requireNonNull(leftStations, "leftStations");
         this.dugPits = Objects.requireNonNull(dugPits, "dugPits");
         this.chainLedger = Objects.requireNonNull(chainLedger, "chainLedger");
         this.acquisition = acquisition;
@@ -322,8 +336,8 @@ public final class ObtainAbility implements AbilityModule, EstimatesGoal {
     }
 
     @Override public void registerTasks(TaskFactories factories) {
-        factories.register(ObtainItems.class, input ->
-                new ObtainTask(input, acquisition, backpack, offhand, tags, leftCooking, dugPits, chainLedger));
+        factories.register(ObtainItems.class, input -> new ObtainTask(input, acquisition, backpack, offhand, tags,
+                leftCooking, dugPits, chainLedger, leftStations));
     }
 
     /** 每条途径一句说明，写进参数表：craft 工作台上做出来（含石切台）；smelt 熔炉里烧出来…… */
