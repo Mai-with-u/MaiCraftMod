@@ -11,6 +11,7 @@ import java.util.Optional;
 
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
@@ -192,36 +193,62 @@ final class ItemSettingsTask extends PhasedTask<ItemSettingsTask.Phase> {
         return settle(editProblem);
     }
 
-    // 主手那件是不是已经读得出要的每一项（同时把本地角色交给实现，便于核对背包产出）。
+    // 主手那件是不是已经读得出要的每一项（同时把本地角色交给实现，便于核对背包产出或主手耗尽碎裂后的结果）。
     private boolean heldMatches() {
         PlayerContext current = services.context().get();
         if (current == null || current.localPlayer() == null) return false;
         LocalPlayer self = current.localPlayer();
-        ItemStack held = self.getMainHandItem();
-        if (!idOf(held).equals(input.item())) return false;
-        return input.settings().entrySet().stream()
-                .allMatch(entry -> settings.holds(held, self, entry.getKey(), entry.getValue()));
+        return heldMatches(input.item(), self.getMainHandItem(), self, settings, input.settings());
     }
 
     private Next<Phase> settle(Problem problem) {
         PlayerContext current = services.context().get();
         LocalPlayer self = current == null ? null : current.localPlayer();
         ItemStack held = self == null ? ItemStack.EMPTY : self.getMainHandItem();
-        Map<String, String> after = idOf(held).equals(input.item()) ? asMap(settings.settings(held)) : Map.of();
-        List<String> wrong = new ArrayList<>();
-        boolean inHand = idOf(held).equals(input.item());
-        input.settings().forEach((key, value) -> {
-            String now = after.getOrDefault(key, "");
-            applied.add(new MachineConfigureDetails.Applied(key, before.get(key), now));
-            if (!inHand || !settings.holds(held, self, key, value)) wrong.add(key + " 读回 " + now);
-        });
-        if (wrong.isEmpty()) {
-            recordChange(new Change(Change.Kind.OTHER, input.item(), 1, "改了设置：原来第 " + changed + " 格那件，现在在主手"));
+        Readback result = evaluateReadback(input.item(), held, self, self != null, settings, before, input.settings());
+        applied.addAll(result.applied());
+        if (result.wrong().isEmpty()) {
+            recordChange(new Change(Change.Kind.OTHER, input.item(), 1, result.changeNote(changed)));
             return Next.done(TaskResult.done(input.item() + " 的 " + input.settings().size() + " 项设置都改好了"));
         }
         Problem why = problem != null ? problem
-                : Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "关上界面后读回对不上：" + String.join("；", wrong));
+                : Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "关上界面后读回对不上：" + String.join("；", result.wrong()));
         return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, input.item() + " 的设置没改全").problem(why).build());
+    }
+
+    /** 关窗读回核对结论：目标物品是否仍在主手、逐项读回记录、未对上的项与变更说明。 */
+    record Readback(boolean inHand, List<MachineConfigureDetails.Applied> applied, List<String> wrong) {
+        String changeNote(int changedSlot) {
+            return inHand
+                    ? "改了设置：原来第 " + changedSlot + " 格那件，现在在主手"
+                    : "改了设置：原来第 " + changedSlot + " 格那件，操作中已消耗完";
+        }
+    }
+
+    // 核对主手物品与角色背包是否满足全部目标项：物品留在主手，或最后一点耐久碎裂使主手变空时交给设置实现核对；
+    // 若主手已换成别种物品则直接拒认，避免把无关物品当成目标。
+    static boolean heldMatches(String targetItemId, ItemStack held, Player self, ItemSettings itemSettings,
+            Map<String, String> wanted) {
+        boolean inHand = idOf(held).equals(targetItemId);
+        if (!inHand && !held.isEmpty()) return false;
+        return wanted.entrySet().stream()
+                .allMatch(entry -> itemSettings.holds(held, self, entry.getKey(), entry.getValue()));
+    }
+
+    // 结算关窗后的读回结果：仅在角色在线且主手仍是目标物品或因消耗变空时，交给物品设置逐项核对。
+    static Readback evaluateReadback(String targetItemId, ItemStack held, Player self, boolean playerPresent,
+            ItemSettings itemSettings, Map<String, String> beforeValues, Map<String, String> wanted) {
+        boolean inHand = idOf(held).equals(targetItemId);
+        boolean canCheck = playerPresent && (inHand || held.isEmpty());
+        Map<String, String> after = inHand ? asMap(itemSettings.settings(held)) : Map.of();
+        List<MachineConfigureDetails.Applied> recorded = new ArrayList<>();
+        List<String> wrong = new ArrayList<>();
+        wanted.forEach((key, value) -> {
+            String now = after.getOrDefault(key, "");
+            recorded.add(new MachineConfigureDetails.Applied(key, beforeValues.get(key), now));
+            if (!canCheck || !itemSettings.holds(held, self, key, value)) wrong.add(key + " 读回 " + now);
+        });
+        return new Readback(inHand, List.copyOf(recorded), List.copyOf(wrong));
     }
 
     private ItemSettings settingsFor(ItemStack stack) {
