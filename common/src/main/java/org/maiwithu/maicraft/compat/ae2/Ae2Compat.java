@@ -48,6 +48,7 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Patterns patterns;
     private final Ae2Transforms transforms;
     private final Ae2Inscribers inscribers;
+    private final Ae2MenuSlots menuSlots;
     /** 进世界时物品来源建好，落地补料也用这一份；没进世界时为空。 */
     private volatile PlayerServices services;
     /**
@@ -72,8 +73,14 @@ public final class Ae2Compat extends CompatModule {
         this(terminals, menus, grid, patterns, transforms, Ae2Inscribers.NONE);
     }
 
+    /** 没有界面语义读写端时：压印器退回固定 8 槽判定，通用语义查槽与发包为空实现。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
             Ae2Transforms transforms, Ae2Inscribers inscribers) {
+        this(terminals, menus, grid, patterns, transforms, inscribers, Ae2MenuSlots.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
+            Ae2Transforms transforms, Ae2Inscribers inscribers, Ae2MenuSlots menuSlots) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
@@ -81,6 +88,7 @@ public final class Ae2Compat extends CompatModule {
         this.patterns = Objects.requireNonNull(patterns, "patterns");
         this.transforms = Objects.requireNonNull(transforms, "transforms");
         this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
+        this.menuSlots = Objects.requireNonNull(menuSlots, "menuSlots");
     }
 
     @Override public void contribute(CompatRegistry registry) {
@@ -89,8 +97,8 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
         // 无线访问点的界面：只认绑定格与产出格，放进终端、取回绑定副本都在这两格。
         registry.menuLayout(this, new Ae2AccessPointLayout());
-        // 压印器的界面：四个工作格加四个升级格，投料取产物都经它。
-        registry.menuLayout(this, new Ae2InscriberLayout());
+        // 压印器的界面：优先按槽位语义识别四个工作格加四个升级格，携带网络工具箱时不受额外 9 槽干扰。
+        registry.menuLayout(this, new Ae2InscriberLayout(this));
         // ME 驱动器的界面：十个存储元件槽，查看元件与插入新元件都经它。
         registry.menuLayout(this, new Ae2DriveLayout());
         // 陨石箱的界面：三十六个存储槽加角色背包，开箱取放与查看都经它。
@@ -337,5 +345,65 @@ public final class Ae2Compat extends CompatModule {
     /** 一件样板主要产出的物品；见 {@link Ae2Patterns#patternOutput}。 */
     public Optional<String> patternOutput(ItemStack stack, ClientLevel level) {
         return call("解样板", () -> patterns.patternOutput(stack, level));
+    }
+
+    /** 当前角色打开的界面是不是 AE2 菜单；见 {@link Ae2MenuSlots#isAe2MenuOpen}。 */
+    public boolean ae2MenuOpen() {
+        return call("检查 AE2 界面有没有打开", menuSlots::isAe2MenuOpen);
+    }
+
+    /** 当前打开的 AE2 菜单里某种槽位语义对应的槽位编号；见 {@link Ae2MenuSlots#slotsOf}。 */
+    public List<Integer> menuSlotsOf(String semanticId) {
+        return call("按语义查 AE2 界面槽位", () -> menuSlots.slotsOf(semanticId));
+    }
+
+    /** 发送 AE2 配置按钮包；见 {@link Ae2MenuSlots#sendConfigButton}。 */
+    public boolean sendConfigButton(String settingName, boolean backwards) {
+        return call("切换 AE2 界面配置", () -> menuSlots.sendConfigButton(settingName, backwards));
+    }
+
+    /** 给 AE2 幽灵过滤槽设过滤物品；见 {@link Ae2MenuSlots#sendSetFilter}。 */
+    public boolean sendSetFilter(int slotIndex, ItemStack stack) {
+        return call("设置 AE2 过滤槽", () -> menuSlots.sendSetFilter(slotIndex, stack));
+    }
+
+    /** 向当前打开的 AE2 菜单发送无参界面动作；见 {@link Ae2MenuSlots#sendNoArgAction}。 */
+    public boolean sendMenuAction(String actionName) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendNoArgAction(actionName));
+    }
+
+    /** 向当前打开的 AE2 菜单发送整数参数的界面动作；见 {@link Ae2MenuSlots#sendIntAction}。 */
+    public boolean sendMenuIntAction(String actionName, int value) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendIntAction(actionName, value));
+    }
+
+    /** 向当前打开的 AE2 菜单发送长整型参数的界面动作；见 {@link Ae2MenuSlots#sendLongAction}。 */
+    public boolean sendMenuLongAction(String actionName, long value) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendLongAction(actionName, value));
+    }
+
+    /** 向当前打开的 AE2 菜单发送布尔参数的界面动作；见 {@link Ae2MenuSlots#sendBooleanAction}。 */
+    public boolean sendMenuBooleanAction(String actionName, boolean value) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendBooleanAction(actionName, value));
+    }
+
+    /** 向当前打开的 AE2 菜单发送字符串参数的界面动作；见 {@link Ae2MenuSlots#sendStringAction}。 */
+    public boolean sendMenuStringAction(String actionName, String value) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendStringAction(actionName, value));
+    }
+
+    /** 向当前打开的 AE2 菜单发送 JSON 载荷的界面动作；见 {@link Ae2MenuSlots#sendRawJsonAction}。 */
+    public boolean sendMenuJsonAction(String actionName, String jsonPayload) {
+        return call("发送 AE2 界面动作", () -> menuSlots.sendRawJsonAction(actionName, jsonPayload));
+    }
+
+    /** 切换到指定注册 ID 的 AE2 子界面；见 {@link Ae2MenuSlots#openSubMenu}。 */
+    public boolean openSubMenu(String menuTypeId) {
+        return call("打开 AE2 子界面", () -> menuSlots.openSubMenu(menuTypeId));
+    }
+
+    /** 从当前 AE2 子界面返回上一级主界面；见 {@link Ae2MenuSlots#returnToParentMenu}。 */
+    public boolean returnToParentMenu() {
+        return call("返回 AE2 上一级界面", menuSlots::returnToParentMenu);
     }
 }

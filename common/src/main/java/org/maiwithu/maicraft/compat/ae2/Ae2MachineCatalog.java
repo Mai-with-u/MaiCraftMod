@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
@@ -10,7 +13,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
  * 应用能源2里认得的设备：每一种的编号、中文名、在 ME 网里干什么、由哪几种方块组成、挂不挂在 ME 网上。
  * 编号就是主方块的注册 ID。压印器、充能器这类不接 ME 网的单机也列进来，看机器时认得出是什么。
  */
-final class Ae2MachineCatalog {
+public final class Ae2MachineCatalog {
 
     /**
      * 一种设备。
@@ -21,8 +24,8 @@ final class Ae2MachineCatalog {
      * @param onGrid 挂不挂在 ME 网上（能接线缆、占频道、读得到网络汇总）
      * @param blocks 由哪几种方块组成（注册 ID）
      */
-    record Kind(String id, String name, MachineRole role, boolean onGrid, List<String> blocks) {
-        Kind {
+    public record Kind(String id, String name, MachineRole role, boolean onGrid, List<String> blocks) {
+        public Kind {
             Objects.requireNonNull(id, "id");
             Objects.requireNonNull(name, "name");
             Objects.requireNonNull(role, "role");
@@ -31,13 +34,13 @@ final class Ae2MachineCatalog {
     }
 
     /** 线缆格（中间线缆、六面装部件）的方块 ID：装部件、接线缆都认它。 */
-    static final String CABLE_BUS = "ae2:cable_bus";
+    public static final String CABLE_BUS = "ae2:cable_bus";
 
     private Ae2MachineCatalog() {
     }
 
-    /** 认得的全部设备。 */
-    static List<Kind> kinds() {
+    /** 认得的全部基础设备。 */
+    public static List<Kind> kinds() {
         return List.of(
                 kind("controller", "ME 控制器", MachineRole.NETWORK_CORE, true),
                 kind("cable_bus", "ME 线缆与部件", MachineRole.CABLE, true),
@@ -60,6 +63,23 @@ final class Ae2MachineCatalog {
                 kind("inscriber", "压印器", MachineRole.PROCESSING, false),
                 kind("charger", "充能器", MachineRole.PROCESSING, false),
                 kind("condenser", "物质聚合器", MachineRole.PROCESSING, false));
+    }
+
+    /** 在基础设备目录之上按编号合并增补设备（同编号时以后加的覆盖，保持声明顺序）。 */
+    public static List<Kind> kinds(List<Kind> extra) {
+        if (extra == null || extra.isEmpty()) return kinds();
+        Map<String, Kind> merged = new LinkedHashMap<>();
+        for (Kind base : kinds()) merged.put(base.id(), base);
+        for (Kind added : extra) {
+            Objects.requireNonNull(added, "added");
+            merged.put(added.id(), added);
+        }
+        return List.copyOf(new ArrayList<>(merged.values()));
+    }
+
+    /** 按 ae2 命名空间简写构造一种设备声明，供各子包增补设备种类时复用。 */
+    public static Kind of(String shortId, String name, MachineRole role, boolean onGrid, String... shortBlocks) {
+        return kind(shortId, name, role, onGrid, shortBlocks);
     }
 
     private static Kind kind(String id, String name, MachineRole role, boolean onGrid, String... blocks) {

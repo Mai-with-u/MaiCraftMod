@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
+import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
@@ -58,5 +60,50 @@ class Ae2InscriberLayoutTest {
                 new Ae2InscriberLayout().classify(inscriberSlots(4, 0), range(4, 39), range(0, 3)));
         assertInstanceOf(MenuLayout.Unsupported.class,
                 new Ae2InscriberLayout().classify(inscriberSlots(8, 0), range(8, 43), range(0, 7)));
+    }
+
+    @Test
+    void 携带网络工具箱多出九个工具箱槽时仍按语义精准识别四工作格与四升级格() {
+        // 实机携带 ae2:network_tool 时：0..8 TOOLBOX，9..12 UPGRADE，13..48 角色背包，49..52 四个工作格。
+        Map<String, List<Integer>> semantics = Map.of(
+                "TOOLBOX", range(0, 8),
+                "UPGRADE", List.of(9, 10, 11, 12),
+                "INSCRIBER_PLATE_TOP", List.of(49),
+                "INSCRIBER_PLATE_BOTTOM", List.of(50),
+                "MACHINE_INPUT", List.of(51),
+                "MACHINE_OUTPUT", List.of(52));
+        Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
+            @Override public boolean isAe2MenuOpen() { return true; }
+            @Override public List<Integer> slotsOf(String semanticId) {
+                return semantics.getOrDefault(semanticId, List.of());
+            }
+            @Override public boolean sendConfigButton(String settingName, boolean backwards) { return false; }
+            @Override public boolean sendSetFilter(int slotIndex, ItemStack stack) { return false; }
+            @Override public boolean sendNoArgAction(String actionName) { return false; }
+            @Override public boolean sendIntAction(String actionName, int value) { return false; }
+            @Override public boolean sendLongAction(String actionName, long value) { return false; }
+            @Override public boolean sendBooleanAction(String actionName, boolean value) { return false; }
+            @Override public boolean sendStringAction(String actionName, String value) { return false; }
+            @Override public boolean sendRawJsonAction(String actionName, String jsonPayload) { return false; }
+            @Override public boolean openSubMenu(String menuTypeId) { return false; }
+            @Override public boolean returnToParentMenu() { return false; }
+        };
+        List<Integer> otherWithToolbox = new ArrayList<>();
+        otherWithToolbox.addAll(range(0, 12));
+        otherWithToolbox.addAll(range(49, 52));
+        MenuSlots withToolbox = new MenuSlots() {
+            @Override public String menuTypeId() { return "ae2:inscriber"; }
+            @Override public int slotCount() { return 53; }
+            @Override public boolean playerBacked(int slot) { return slot >= 13 && slot <= 48; }
+            @Override public int playerInventoryIndex(int slot) { return slot - 13; }
+        };
+
+        MenuLayout.Layout layout = new Ae2InscriberLayout(menuSlots).classify(
+                withToolbox, range(13, 48), otherWithToolbox);
+        MenuLayout.Supported supported = assertInstanceOf(MenuLayout.Supported.class, layout);
+        assertEquals(List.of(49, 50, 51, 52, 9, 10, 11, 12), supported.containerSlots(),
+                "携带网络工具箱时排除 9 个 TOOLBOX 槽，仍按顶/底/中/出 + 4 升级槽顺序映射");
+        assertEquals(8, supported.machineSlots().size());
+        assertEquals(36, supported.playerSlots().size());
     }
 }

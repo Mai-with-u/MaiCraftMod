@@ -24,6 +24,9 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
+import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
+import org.maiwithu.maicraft.ability.machine.spi.FullRun;
+import org.maiwithu.maicraft.ability.machine.spi.IngredientFeed;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
@@ -37,6 +40,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkLoad;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -68,16 +72,30 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     /** 本会话由角色自己放进各台压印器、收产物时应一并收回背包的不消耗压印模板；机内原有的不进此表。 */
     private final Map<BlockPos, Set<String>> placedPlates = new HashMap<>();
     private final BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings;
+    /** 按设备编号路由进来的扩展操作委托（无扩展时为 null，走默认基础实现）。 */
+    private final Ae2DeviceOps ops;
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks) {
+        this(kind, compat, inscribers, services, blocks, Map.of());
+    }
+
+    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+            Set<Block> blocks, Map<String, Ae2DeviceOps> deviceOps) {
         this(kind, compat, inscribers, services, blocks,
                 (at, permissions) -> new ClientMenuOpening(at, permissions, services.menuLayouts(),
-                        services.approach(), services.interactions(), services.context()));
+                        services.approach(), services.interactions(), services.context()),
+                deviceOps);
     }
 
     Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks, BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings) {
+        this(kind, compat, inscribers, services, blocks, menuOpenings, Map.of());
+    }
+
+    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+            Set<Block> blocks, BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings,
+            Map<String, Ae2DeviceOps> deviceOps) {
         this.kind = Objects.requireNonNull(kind, "kind");
         this.compat = Objects.requireNonNull(compat, "compat");
         this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
@@ -85,6 +103,7 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         this.blocks = Set.copyOf(blocks);
         this.cables = new MeCables(compat, services);
         this.menuOpenings = Objects.requireNonNull(menuOpenings, "menuOpenings");
+        this.ops = deviceOps == null ? null : deviceOps.get(kind.id());
     }
 
     @Override public String id() { return kind.id(); }
@@ -118,6 +137,24 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
 
     @Override public MachineState state(BlockPos at) {
         ClientLevel level = level();
+        if (ops != null) {
+            Optional<MachineState> custom = ops.state(at, level);
+            if (custom.isPresent()) return custom.get();
+        }
+        MachineState base = baseState(at, level);
+        if (ops == null) return base;
+        // 各设备子包可仅补充额外读数或表面展示物，和通用 ME 网格状态合并后一起透出。
+        Map<String, Object> extraReadings = ops.extraReadings(at, level);
+        List<MachineState.Shown> extraShown = ops.extraShown(at, level);
+        if (extraReadings.isEmpty() && extraShown.isEmpty()) return base;
+        Map<String, Object> readings = new LinkedHashMap<>(base.readings());
+        readings.putAll(extraReadings);
+        List<MachineState.Shown> shown = new ArrayList<>(base.shown());
+        shown.addAll(extraShown);
+        return new MachineState(base.activity(), base.speed(), base.progress(), shown, readings, base.note());
+    }
+
+    private MachineState baseState(BlockPos at, ClientLevel level) {
         if (isInscriber()) {
             Optional<Ae2Inscribers.Slots> inscriberSlots = compat.inscriberSlots(level, at);
             if (inscriberSlots.isPresent()) {
@@ -156,6 +193,8 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     }
 
     @Override public Optional<String> installationProblem(Installation installation) {
+        Optional<MachineInstallations> custom = customInstallations();
+        if (custom.isPresent()) return custom.get().installationProblem(installation);
         if (!isCableBus()) return Optional.of(kind.name() + "不装安装段");
         return cables.problem(installation);
     }
@@ -166,11 +205,15 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     }
 
     @Override public Optional<Action> install(Installation installation, Permissions permissions) {
+        Optional<MachineInstallations> custom = customInstallations();
+        if (custom.isPresent()) return custom.get().install(installation, permissions);
         if (!isCableBus() || !compat.cableItem(installation.kind())) return Optional.empty();
         return Optional.of(cables.lay(installation, permissions));
     }
 
     @Override public boolean installed(Installation installation) {
+        Optional<MachineInstallations> custom = customInstallations();
+        if (custom.isPresent()) return custom.get().installed(installation);
         ClientLevel level = level();
         return level != null && isCableBus() && compat.cableItem(installation.kind())
                 && cables.installed(level, installation);
@@ -178,6 +221,8 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
 
     // ME 线缆是这一段一格格接上的：拆整台时跟着拆。
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
+        Optional<MachineInstallations> custom = customInstallations();
+        if (custom.isPresent()) return custom.get().placedBy(installation);
         if (!isCableBus() || !compat.cableItem(installation.kind())) return Optional.empty();
         return Optional.of(installation.cells());
     }
@@ -204,14 +249,20 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return level != null && isCableBus() && cables.mounted(level, part);
     }
 
-    // 样板供应器里放哪些样板：身上带着的与上次打开界面时看见的都列出来；别的设备没有可改的设置。
+    // 样板供应器里放哪些样板，以及各设备子包挂入的设置项一起列出。
     @Override public List<MachineSetting> settings(BlockPos at) {
-        if (!isPatternProvider()) return List.of();
-        return PatternSettings.of(Optional.ofNullable(patternsSeen.get(at)), carriedPatterns());
+        List<MachineSetting> merged = new ArrayList<>();
+        if (isPatternProvider()) {
+            merged.addAll(PatternSettings.of(Optional.ofNullable(patternsSeen.get(at)), carriedPatterns()));
+        }
+        customSettings(at).ifPresent(delegate -> merged.addAll(delegate.settings(at)));
+        return List.copyOf(merged);
     }
 
-    // 改一项：pattern.产出物品 写 in 放进去、out 拿回背包，开界面快速移动那张样板；别的键不认。
+    // 改一项：优先交给设备委托处理；未接手时由样板供应器的 pattern.* 兜底。
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
+        Optional<Action> delegated = customSettings(at).flatMap(delegate -> delegate.change(at, key, value, permissions));
+        if (delegated.isPresent()) return delegated;
         if (!isPatternProvider()) return Optional.empty();
         Optional<String> output = PatternSettings.outputOf(key);
         if (output.isEmpty() || !(value.equals(PatternSettings.IN) || value.equals(PatternSettings.OUT))) {
@@ -219,6 +270,14 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         }
         return Optional.of(new PatternChange(compat, services, at, output.get(), value.equals(PatternSettings.IN),
                 permissions, patternsSeen));
+    }
+
+    // 线缆格等宿主格某一面部件的设置项：优先读设备委托直接给出的按面配置，没有再转问委托的 MachineSettings。
+    @Override public List<MachineSetting> partSettings(BlockPos host, Direction side) {
+        if (ops == null) return List.of();
+        List<MachineSetting> direct = ops.partSettings(host, side, services);
+        if (!direct.isEmpty()) return direct;
+        return customSettings(host).map(delegate -> delegate.partSettings(host, side)).orElse(List.of());
     }
 
     private boolean isPatternProvider() {
@@ -238,8 +297,10 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return outputs;
     }
 
-    // 这条配方在这台压印器怎么投，读一次四个工作格、一次算清：每格几件、模板先投、机内冲突与腾空动作。
+    // 这条配方在这台机器怎么投：有设备委托先走委托；压印器读一次四个工作格、一次算清。
     @Override public FeedPlan plan(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
+        Optional<MachineFeeding> delegated = customFeeding(at);
+        if (delegated.isPresent()) return delegated.get().plan(at, recipe, batches, permissions);
         if (!isInscriber()) return MachineFeeding.super.plan(at, recipe, batches, permissions);
         BlockPos pos = at.immutable();
         Optional<Ae2Inscribers.Slots> fourSlots = compat.inscriberSlots(level(), pos);
@@ -251,10 +312,10 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return new FeedPlan(computed.entries(), computed.notes(), computed.conflict(), clearing);
     }
 
-    // 投料：压印器放好料自己压，料从界面放进对应工作格；计划里标明要收回的（本趟新放的不消耗模板）
-    // 与投完新出现的不消耗模板都记进"自己放进机器的"，收产物时一并收回。
-    // 真因机内占着别的物品放不进时在报错里把槽内占用物点名说清。线缆格、样板供应器这类不收料，照旧给空。
+    // 投料：有设备委托先走委托；压印器放好料自己压，料从界面放进对应工作格；不收料的设备给空。
     @Override public Optional<Action> feed(BlockPos at, FeedPlan.Entry item, Permissions permissions) {
+        Optional<MachineFeeding> delegated = customFeeding(at);
+        if (delegated.isPresent()) return delegated.get().feed(at, item, permissions);
         if (!isInscriber()) return Optional.empty();
         BlockPos pos = at.immutable();
         Set<String> platesBefore = new LinkedHashSet<>();
@@ -263,6 +324,22 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
                         () -> compat.inscriberInputs(level(), pos).ifPresent(slots -> platesBefore.addAll(slots.plates())),
                         () -> recordPlacedPlate(pos, item, platesBefore),
                         problem -> enrichFeedFailure(pos, item.item(), problem))));
+    }
+
+    @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
+        return customFeeding(at).flatMap(delegate -> delegate.whyCannotFeed(at, itemId));
+    }
+
+    @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
+        return customFeeding(at).flatMap(delegate -> delegate.fullRun(at, request, permissions));
+    }
+
+    @Override public FuelUse fuelUse(BlockPos at) {
+        return customFeeding(at).map(delegate -> delegate.fuelUse(at)).orElse(FuelUse.RECIPE);
+    }
+
+    @Override public Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
+        return customFeeding(at).flatMap(delegate -> delegate.ingredientFeed(at, ingredient, amount));
     }
 
     // 这一下投完后哪些模板算"自己放进机器的"：计划标明要收回的直接记下；别的照投前投后工作格的差算。
@@ -292,15 +369,21 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
                 "腾出背包空位后再运行 machine_run（会自动取出冲突占槽物），或用 obtain 按物品名从压印器取出占着的物品");
     }
 
-    // 出口：压印器的产物格随方块实体同步，站在外面读得到。
+    // 出口：有设备委托且给出了出口展示物先走委托；压印器的产物格随方块实体同步，站在外面读得到。
     @Override public List<MachineState.Shown> output(BlockPos at) {
         ClientLevel level = level();
+        if (ops != null) {
+            List<MachineState.Shown> custom = ops.output(at, level);
+            if (!custom.isEmpty()) return custom;
+        }
         if (level == null || !isInscriber()) return List.of();
         return compat.inscriberOutput(level, at).orElse(List.of());
     }
 
-        // 收产物：点开压印器的界面把产物搬进背包；若本会话由我们放进了压印模板，顺手一并收回背包（机内原本就有的模板不动）。
+    // 收产物：有设备委托先走委托；压印器点开界面把产物搬进背包，若本会话自己放了压印模板一并收回。
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
+        Optional<MachineFeeding> delegated = customFeeding(at);
+        if (delegated.isPresent()) return delegated.get().take(at, itemId, count, permissions);
         if (!isInscriber()) return Optional.empty();
         MenuOpening opening = menuOpenings.apply(at, permissions);
         Set<String> own = placedPlates.get(at);
@@ -308,6 +391,18 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
             return Optional.of(new MenuOutputLook(itemId, true, opening, services.context()));
         }
         return Optional.of(new Ae2InscriberTake(itemId, own, opening, services.context()));
+    }
+
+    private Optional<MachineFeeding> customFeeding(BlockPos at) {
+        return ops == null ? Optional.empty() : ops.feeding(at, services);
+    }
+
+    private Optional<MachineSettings> customSettings(BlockPos at) {
+        return ops == null ? Optional.empty() : ops.settings(at, services);
+    }
+
+    private Optional<MachineInstallations> customInstallations() {
+        return ops == null ? Optional.empty() : ops.installations(services);
     }
 
     // AE2 的设备各有本事：线缆格管安装段与部件，样板供应器有设置项，压印器收料出料；同一个类按种类答。
