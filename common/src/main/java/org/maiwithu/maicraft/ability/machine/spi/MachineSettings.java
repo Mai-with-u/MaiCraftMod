@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
@@ -37,5 +38,13 @@ public interface MachineSettings {
     default Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
             Permissions permissions, BringsPlayerClose reach) {
         return Optional.empty();
+    }
+
+    /**
+     * 宿主格某一面装着的部件（例如 AE2 线缆部件）的设置项与现值；没有设置项或读不到时给空列表。
+     * 查看机器在拼部件设备时按面单独读取，非空才写入该部件的设置视图。
+     */
+    default List<MachineSetting> partSettings(BlockPos host, Direction side) {
+        return List.of();
     }
 }

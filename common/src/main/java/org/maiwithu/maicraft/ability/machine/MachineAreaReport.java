@@ -206,9 +206,13 @@ final class MachineAreaReport {
     private DeviceView view(Device device, Site site) {
         List<String> on = new ArrayList<>(networksOf(device, site));
         if (device.part != null) {
-            return new DeviceView(device.id, device.part.itemId(), PART, null, null, null, device.cells.getFirst(),
+            BlockPos host = device.cells.getFirst();
+            // 部件若有按面暴露的设置项，直接填入该部件设备的 settings；为空时保持 null，避免改动已有无设置部件的输出形状。
+            Map<String, String> partSettings = site.partSettings(host, device.part.side());
+            return new DeviceView(device.id, device.part.itemId(), PART, null, null, null, host,
                     device.part.side(), on, site.archiveOf(device.cells),
-                    StateView.of(device.part.state(), device.part.state().readings()), null, null);
+                    StateView.of(device.part.state(), device.part.state().readings()), null, null,
+                    partSettings.isEmpty() ? null : partSettings, null);
         }
         Map<StateView, List<BlockPos>> byState = new LinkedHashMap<>();
         Map<Map<String, String>, List<BlockPos>> bySettings = new LinkedHashMap<>();
@@ -451,6 +455,20 @@ final class MachineAreaReport {
                 }
                 return Map.copyOf(current);
             });
+        }
+
+        /** 宿主格某一面部件的设置项与现值；宿主没有设置本事或该面部件没有设置项时给空表。 */
+        Map<String, String> partSettings(BlockPos host, Direction side) {
+            MachineType hostType = types.get(host);
+            MachineSettings reads = hostType == null ? null : hostType.settings().orElse(null);
+            if (reads == null) return Map.of();
+            List<MachineSetting> found = reads.partSettings(host, side);
+            if (found.isEmpty()) return Map.of();
+            Map<String, String> current = new LinkedHashMap<>();
+            for (MachineSetting setting : found) {
+                current.put(setting.key(), setting.value() == null ? "" : setting.value());
+            }
+            return Map.copyOf(current);
         }
 
         /** 有格落在所看档案里时给档案名。 */

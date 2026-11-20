@@ -29,6 +29,26 @@ public interface RangedWeapon {
     List<Shot> possibleShots(ItemStack weapon, Player player);
 
     /**
+     * 这件武器的弹药是不是装在武器自身内部（例如 AE2 物质炮内置存储，不消耗背包格里的物品）。
+     * 内部装弹的武器不会把弹药换进副手，发射确认也不看背包弹药计数减少。
+     */
+    default boolean usesInternalAmmo() {
+        return false;
+    }
+
+    /**
+     * 核对这一发有没有真的打出去：内部装弹且无原版冷却的武器覆盖此方法，比对扣扳机前后的主手武器状态
+     * （例如内部弹药计数或剩余电量减少）来确认；默认返回 false，交由射击动作按冷却或背包弹药减少确认。
+     *
+     * @param before 扣扳机前主手武器堆叠的快照
+     * @param after  当前主手武器堆叠
+     * @param player 当前本地角色
+     */
+    default boolean shotFired(ItemStack before, ItemStack after, Player player) {
+        return false;
+    }
+
+    /**
      * 一发的事实。
      *
      * @param ammoItem      打出去的弹药物品 ID

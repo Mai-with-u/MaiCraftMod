@@ -16,6 +16,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 
@@ -167,6 +168,8 @@ final class MachineTestDoubles {
         /** 设置项与现值：键 → 值；按格不一时用 settingsAt。 */
         final Map<String, String> settingValues = new LinkedHashMap<>();
         Function<BlockPos, Map<String, String>> settingsAt;
+        /** 宿主格某一面部件的设置项；默认没有。 */
+        BiFunction<BlockPos, Direction, List<MachineSetting>> partSettingsAt;
         /** 改设置时执行的动作：测试用它把读回的值真的改掉或让它打转。 */
         final Map<String, Runnable> onChange = new HashMap<>();
         /** 改设置时交出的动作；没给按 onChange 一刻做完。用来演"正对着机器切换、等游戏确认"。 */
@@ -323,6 +326,10 @@ final class MachineTestDoubles {
             source.forEach((key, value) -> out.add(
                     new MachineSetting(key, value, List.of(), key + " 的说明")));
             return out;
+        }
+
+        @Override public List<MachineSetting> partSettings(BlockPos host, Direction side) {
+            return partSettingsAt != null ? partSettingsAt.apply(host, side) : List.of();
         }
 
         @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {

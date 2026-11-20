@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -37,6 +38,10 @@ public final class CompatItemSettings implements ItemSettings {
 
     @Override public boolean holds(ItemStack stack, String key, String wanted) {
         return ask(() -> settings.holds(stack, key, wanted), false);
+    }
+
+    @Override public boolean holds(ItemStack stack, Player player, String key, String wanted) {
+        return ask(() -> settings.holds(stack, player, key, wanted), false);
     }
 
     @Override public Optional<Action> change(int inventorySlot, Map<String, String> wanted, Permissions permissions) {

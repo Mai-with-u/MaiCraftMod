@@ -97,17 +97,27 @@ public final class ArrowAim {
         // 目标按看到的移动（这一刻比上一刻挪了多少）往前走，不猜它转弯、起跳和被击退：
         // 别的玩家的速度服务端不同步过来，读速度对跑动的玩家总是零，箭落在他身后。
         Vec3 targetMotion = ObservedMotion.of(target);
+        boolean instantRay = isInstantRay(physics, speed, maxRange);
         List<Vec3> candidates = new ArrayList<>();
-        dragAwareCandidates(candidates, start, box, targetMotion, speed, physics);
-        for (Vec3 point : samples(box.move(targetMotion.scale(Math.min(30, start.distanceTo(box.getCenter()) / speed))))) {
-            add(candidates, lowArc(start, point, speed, physics.gravity()));
+        if (instantRay) {
+            // 零重力无阻力的瞬发射线武器（例如 AE2 物质炮）：直接对目标当前碰撞箱取直线候选，不加重力抬角。
+            for (Vec3 point : samples(box)) {
+                add(candidates, point.subtract(start));
+            }
+        } else {
+            dragAwareCandidates(candidates, start, box, targetMotion, speed, physics);
+            for (Vec3 point : samples(box.move(targetMotion.scale(Math.min(30, start.distanceTo(box.getCenter()) / speed))))) {
+                add(candidates, lowArc(start, point, speed, physics.gravity()));
+            }
         }
         candidates.sort(Comparator.comparingDouble(direction -> angleDegrees(look, direction)));
         Aim best = null;
         double bestScore = Double.MAX_VALUE;
         Vec3 eye = shooter.getEyePosition();
         for (Vec3 direction : candidates) {
-            Flight hit = fly(level, shooter, target, targetMotion, start, direction.scale(speed).add(shooterMotion), physics);
+            Flight hit = instantRay
+                    ? flyRay(level, shooter, target, start, direction, maxRange)
+                    : fly(level, shooter, target, targetMotion, start, direction.scale(speed).add(shooterMotion), physics);
             if (hit == null) continue;
             // 打得中的方向里，偏好离身体中心近、少转头、飞得快的。
             double score = hit.offCenter + angleDegrees(look, direction) * 0.03 + hit.ticks * 0.01;
@@ -117,6 +127,11 @@ public final class ArrowAim {
             }
         }
         return Optional.ofNullable(best);
+    }
+
+    /** 零重力、无阻力且单刻射程覆盖整个瞄准上限的武器按瞬发直线射线判弹道。 */
+    static boolean isInstantRay(Physics physics, double speed, double maxRange) {
+        return physics.gravity() <= EPS && Math.abs(physics.drag() - 1.0) <= EPS && speed >= maxRange;
     }
 
     /** 两个方向的夹角（度）；有一个是零向量时给最大值。 */
@@ -161,8 +176,17 @@ public final class ArrowAim {
         double gravity = physics.gravityBeforeDrag() ? physics.gravity() * drag : physics.gravity();
         double decay = Math.pow(drag, ticks);
         double resistance = drag - 1.0;
+        if (Math.abs(resistance) < EPS) {
+            // 无空气阻力（drag=1，含零重力直线弹道）：按匀加速直线公式倒推，不除以零。
+            double horizontal = 1.0 / (speed * ticks);
+            double fall = gravity <= EPS ? 0.0 : gravity * Math.max(0.0, ticks - 1.0) / (2.0 * speed);
+            Vec3 direction = new Vec3((target.x - start.x) * horizontal, (target.y - start.y) * horizontal + fall,
+                    (target.z - start.z) * horizontal);
+            return Double.isFinite(direction.x) && Double.isFinite(direction.y) && Double.isFinite(direction.z)
+                    ? direction : null;
+        }
         double distanceTerm = decay - 1.0;
-        if (Math.abs(distanceTerm) < EPS || Math.abs(resistance) < EPS) return null;
+        if (Math.abs(distanceTerm) < EPS) return null;
         double horizontal = resistance / (speed * distanceTerm);
         double fall = gravity * (decay - drag * ticks + ticks - 1.0) / (speed * resistance * distanceTerm);
         Vec3 direction = new Vec3((target.x - start.x) * horizontal, (target.y - start.y) * horizontal + fall,
@@ -204,6 +228,24 @@ public final class ArrowAim {
     }
 
     private record Flight(double ticks, double offCenter) {}
+
+    // 瞬发射线检测：沿单一线段从枪口射出，核对先命中目标而非墙或其他实体（按当前碰撞箱，不做未来一刻外推）。
+    private static Flight flyRay(Level level, Entity shooter, Entity target, Vec3 start, Vec3 direction,
+            double maxRange) {
+        Vec3 end = start.add(direction.scale(maxRange));
+        AABB body = target.getBoundingBox();
+        Optional<Vec3> onTarget = body.inflate(HIT_INFLATE).clip(start, end);
+        if (onTarget.isEmpty()) return null;
+        double toTarget = onTarget.get().distanceToSqr(start);
+        BlockHitResult wall = level.clip(new ClipContext(start, end, ClipContext.Block.COLLIDER,
+                ClipContext.Fluid.NONE, shooter));
+        double toWall = wall.getType() == HitResult.Type.MISS ? Double.MAX_VALUE : wall.getLocation().distanceToSqr(start);
+        double toOther = otherEntity(shooter, target, start, end);
+        if (toTarget <= toWall + EPS && toTarget <= toOther + EPS) {
+            return new Flight(0.0, distanceToSegment(body.getCenter(), start, end));
+        }
+        return null;
+    }
 
     // 逐刻飞：这一小段先碰到目标就算中；先碰到方块或别的生物就不要这个方向。
     private static Flight fly(Level level, Entity shooter, Entity target, Vec3 targetMotion, Vec3 start, Vec3 velocity,

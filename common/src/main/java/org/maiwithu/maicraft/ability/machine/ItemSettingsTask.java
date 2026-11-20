@@ -158,7 +158,8 @@ final class ItemSettingsTask extends PhasedTask<ItemSettingsTask.Phase> {
         }
         Map<String, String> pending = new LinkedHashMap<>();
         input.settings().forEach((key, value) -> {
-            if (!settings.holds(target, key, value)) pending.put(key, value);
+            // 传入本地角色：允许需要核对背包产出的物品（如切割刀刻名）一起确认。
+            if (!settings.holds(target, self, key, value)) pending.put(key, value);
         });
         if (pending.isEmpty()) {
             input.settings().forEach((key, value) -> applied.add(new MachineConfigureDetails.Applied(key, value, value)));
@@ -191,25 +192,28 @@ final class ItemSettingsTask extends PhasedTask<ItemSettingsTask.Phase> {
         return settle(editProblem);
     }
 
-    // 主手那件是不是已经读得出要的每一项。
+    // 主手那件是不是已经读得出要的每一项（同时把本地角色交给实现，便于核对背包产出）。
     private boolean heldMatches() {
         PlayerContext current = services.context().get();
         if (current == null || current.localPlayer() == null) return false;
-        ItemStack held = current.localPlayer().getMainHandItem();
+        LocalPlayer self = current.localPlayer();
+        ItemStack held = self.getMainHandItem();
         if (!idOf(held).equals(input.item())) return false;
-        return input.settings().entrySet().stream().allMatch(entry -> settings.holds(held, entry.getKey(), entry.getValue()));
+        return input.settings().entrySet().stream()
+                .allMatch(entry -> settings.holds(held, self, entry.getKey(), entry.getValue()));
     }
 
     private Next<Phase> settle(Problem problem) {
         PlayerContext current = services.context().get();
-        ItemStack held = current == null || current.localPlayer() == null ? ItemStack.EMPTY : current.localPlayer().getMainHandItem();
+        LocalPlayer self = current == null ? null : current.localPlayer();
+        ItemStack held = self == null ? ItemStack.EMPTY : self.getMainHandItem();
         Map<String, String> after = idOf(held).equals(input.item()) ? asMap(settings.settings(held)) : Map.of();
         List<String> wrong = new ArrayList<>();
         boolean inHand = idOf(held).equals(input.item());
         input.settings().forEach((key, value) -> {
             String now = after.getOrDefault(key, "");
             applied.add(new MachineConfigureDetails.Applied(key, before.get(key), now));
-            if (!inHand || !settings.holds(held, key, value)) wrong.add(key + " 读回 " + now);
+            if (!inHand || !settings.holds(held, self, key, value)) wrong.add(key + " 读回 " + now);
         });
         if (wrong.isEmpty()) {
             recordChange(new Change(Change.Kind.OTHER, input.item(), 1, "改了设置：原来第 " + changed + " 格那件，现在在主手"));

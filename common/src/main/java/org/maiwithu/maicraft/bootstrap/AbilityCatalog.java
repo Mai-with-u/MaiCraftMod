@@ -11,6 +11,7 @@ import java.util.function.Supplier;
 import java.util.random.RandomGenerator;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
+import org.maiwithu.maicraft.behavior.inventory.CombinedCarriedBackpacks;
 import org.maiwithu.maicraft.behavior.acquire.mining.DigsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.mining.ToolFirstDigging;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
@@ -363,13 +364,13 @@ public final class AbilityCatalog {
         // 随身背包的接缝留给随身背包的联动模组。身上带着连着网络的无线终端（AE2）时先存进网络：联动模组登记的第一个网络存储。
         List<NetworkStorage> networks = deps.compat().networkStorages(playerServices);
         List<CarriedBackpack> carriedBackpacks = deps.compat().carriedBackpacks(playerServices);
-        // 腾背包时要留的东西（预留的、正要用的）留够件数不挪；随身背包接联动登记的第一只实现。
+        // 腾背包时要留的东西（预留的、正要用的）留够件数不挪；随身背包合并全部已登记的随身容器，按顺序尝试存放。
         StandingContainers standingContainers = new StandingContainers(deps.world().memory(),
                 StandingContainers.ReadsCells.fromPlayer(deps.character().context()),
                 deps.world().facilities()::isContainer);
         InventorySpace space = new InventorySpace(deps.kept(), deps.character().backpack(),
                 Optional.of(new ClientStackMerger(deps.character().context())),
-                carriedBackpacks.stream().findFirst(),
+                CombinedCarriedBackpacks.of(carriedBackpacks),
                 Optional.of(new RememberedContainers(standingContainers, deps.character().position(),
                         deps.guards().protection())),
                 Optional.of(storing),

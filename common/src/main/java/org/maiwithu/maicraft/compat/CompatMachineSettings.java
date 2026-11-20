@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
@@ -42,6 +43,10 @@ final class CompatMachineSettings implements MachineSettings {
     @Override public Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
             Permissions permissions, BringsPlayerClose reach) {
         return act(() -> settings.changeOnStructure(structureId, at, key, value, permissions, reach));
+    }
+
+    @Override public List<MachineSetting> partSettings(BlockPos host, Direction side) {
+        return ask(() -> settings.partSettings(host, side), List.of());
     }
 
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。

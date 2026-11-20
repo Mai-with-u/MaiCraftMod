@@ -36,6 +36,14 @@ public final class CompatRangedWeapon implements RangedWeapon {
         return ask(() -> weapon.possibleShots(stack, player), List.of());
     }
 
+    @Override public boolean usesInternalAmmo() {
+        return ask(weapon::usesInternalAmmo, false);
+    }
+
+    @Override public boolean shotFired(ItemStack before, ItemStack after, Player player) {
+        return ask(() -> weapon.shotFired(before, after, player), false);
+    }
+
     // 问一句：停用了或对不上时给"不认"的那个答案。
     private <T> T ask(Supplier<T> read, T whenUnavailable) {
         if (!module.active()) return whenUnavailable;

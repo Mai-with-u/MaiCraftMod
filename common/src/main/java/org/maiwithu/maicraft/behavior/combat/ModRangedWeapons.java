@@ -80,6 +80,8 @@ public final class ModRangedWeapons {
             if (next.isPresent() && usable(next.get(), distance)) {
                 return Optional.of(new Ready(rule, weapon, slot, next.get(), null));
             }
+            // 内部装弹的武器无法靠把弹药换进副手来切弹，不走副手换弹分支。
+            if (rule.usesInternalAmmo()) continue;
             for (RangedWeapon.Shot other : rule.possibleShots(stack, self)) {
                 if (usable(other, distance)) return Optional.of(new Ready(rule, weapon, slot, other, other.ammoItem()));
             }

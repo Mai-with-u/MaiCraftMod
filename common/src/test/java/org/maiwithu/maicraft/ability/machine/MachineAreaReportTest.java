@@ -26,6 +26,7 @@ import org.maiwithu.maicraft.ability.machine.MachineDetails.DeviceView;
 import org.maiwithu.maicraft.ability.machine.MachineDetails.NetworkView;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MachineType;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
@@ -259,6 +260,32 @@ class MachineAreaReportTest {
         assertEquals(2, crafterView.settingGroups().size());
         assertEquals(Map.of("crafter.slot", "minecraft:iron_ingot"), crafterView.settingGroups().get(0).settings());
         assertEquals(Map.of("crafter.slot", "empty"), crafterView.settingGroups().get(1).settings());
+    }
+
+    @Test
+    void 线缆部件有按面配置时填入设备设置_没有按面配置时保持为空() {
+        Scene scene = new Scene();
+        MachineTestDoubles.FakeMachineType cable = scene.type("test:cable", MachineRole.CABLE, Blocks.IRON_BARS);
+        MachineState online = new MachineState(MachineState.Activity.RUNNING, null, null, List.of(), Map.of(), "");
+        cable.parts = at -> at.equals(ORIGIN) ? List.of(
+                new MountedPart(Direction.NORTH, "test:export_bus", online),
+                new MountedPart(Direction.SOUTH, "test:terminal", online)) : List.of();
+        cable.partSettingsAt = (host, side) -> side == Direction.NORTH
+                ? List.of(
+                        new MachineSetting("redstone_mode", "ignore", List.of("ignore", "high"), "红石控制"),
+                        new MachineSetting("filter.0", "minecraft:iron_ingot", List.of(), "过滤槽 0"))
+                : List.of();
+        scene.put(ORIGIN, Blocks.IRON_BARS);
+
+        MachineAreaReport.Result result = scene.report();
+        DeviceView exportBus = result.devices().stream()
+                .filter(device -> device.type().equals("test:export_bus")).findFirst().orElseThrow();
+        DeviceView terminal = result.devices().stream()
+                .filter(device -> device.type().equals("test:terminal")).findFirst().orElseThrow();
+
+        assertEquals(Map.of("redstone_mode", "ignore", "filter.0", "minecraft:iron_ingot"), exportBus.settings(),
+                "有按面配置的部件在查看报告里直接展示 settings");
+        assertNull(terminal.settings(), "没有按面配置的部件保持 settings 为 null");
     }
 
     /** 一片离线现场：几种机器类型、认领的格、每格挂的网、读取器与世界里别的格。 */

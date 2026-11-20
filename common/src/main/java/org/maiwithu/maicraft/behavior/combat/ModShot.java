@@ -9,6 +9,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.HumanoidArm;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
 
@@ -138,15 +139,29 @@ final class ModShot implements Action {
             return ActionStatus.progressed();
         }
         String ammo = shot.get().ammoItem();
-        int before = carried(self, ammo);
+        int before = ready.rule().usesInternalAmmo() ? 0 : carried(self, ammo);
+        ItemStack weaponBefore = weapon.copy();
         PendingInteraction submitted = player.interactionSender().useItem(player, InteractionHand.MAIN_HAND,
-                c -> carried(c.localPlayer(), ammo) < before || c.localPlayer().getCooldowns().isOnCooldown(weapon.getItem())
+                c -> confirmedShot(ready.rule(), ammo, before, weaponBefore, c.localPlayer())
                         ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING, CONFIRM_TICKS);
         // 提交入口这一刻不收：扳机下一刻再扣，瞄准的账都还在。
         if (submitted == null) return ActionStatus.progressed();
         pending = submitted;
         stage = Stage.FIRING;
         return ActionStatus.progressed();
+    }
+
+    /**
+     * 核对这一发有没有真的打出去：优先让武器规则比对扣扳机前后的主手堆叠（适配内部装弹且无原版冷却的武器），
+     * 否则看原版是否进入冷却；背包供弹的武器再看背包里该弹药是否减少。
+     */
+    static boolean confirmedShot(RangedWeapon rule, String ammoItem, int carriedBefore, ItemStack weaponBefore,
+            Player self) {
+        if (self == null) return false;
+        ItemStack currentWeapon = self.getMainHandItem();
+        if (rule.shotFired(weaponBefore, currentWeapon, self)) return true;
+        if (!weaponBefore.isEmpty() && self.getCooldowns().isOnCooldown(weaponBefore.getItem())) return true;
+        return !rule.usesInternalAmmo() && carried(self, ammoItem) < carriedBefore;
     }
 
     private ActionStatus settle() {
@@ -181,7 +196,7 @@ final class ModShot implements Action {
         return eye.add(local.xRot(pitch).yRot(yaw));
     }
 
-    private static int carried(LocalPlayer self, String itemId) {
+    private static int carried(Player self, String itemId) {
         int total = 0;
         for (ItemStack stack : self.getInventory().items) if (idOf(stack).equals(itemId)) total += stack.getCount();
         if (idOf(self.getOffhandItem()).equals(itemId)) total += self.getOffhandItem().getCount();

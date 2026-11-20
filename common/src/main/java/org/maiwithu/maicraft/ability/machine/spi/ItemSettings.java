@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -29,6 +30,14 @@ public interface ItemSettings {
      */
     default boolean holds(ItemStack stack, String key, String wanted) {
         return settings(stack).stream().anyMatch(setting -> setting.key().equals(key) && setting.value().equals(wanted));
+    }
+
+    /**
+     * 结合本地角色核对 key 这一项是不是已经达成 wanted（例如石英切割刀刻名后需查看背包里是否产出对应名字的模板）；
+     * 默认只看物品自身，转调 {@link #holds(ItemStack, String, String)}。
+     */
+    default boolean holds(ItemStack stack, Player player, String key, String wanted) {
+        return holds(stack, key, wanted);
     }
 
     /**
