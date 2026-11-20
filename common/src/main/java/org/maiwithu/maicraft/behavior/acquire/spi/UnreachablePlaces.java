@@ -21,17 +21,23 @@ public final class UnreachablePlaces {
     /** 来源跳过了走不到的地方、别的也给不了时的那句：引擎不把它当成一条原因，统一在最外层说一次。 */
     public static final String SKIPPED = "记得的那几只这次走不到跟前，不再去问";
 
-    /** 一处走不到的地方：怎么称呼、第一次为什么走不到、问到过它的东西。 */
-    private record Place(String label, String why, Set<String> asked) {}
+    /** 一处跳过的地方：怎么称呼、是走不到还是界面不支持、第一次的原因、问到过它的东西。 */
+    private record Place(String label, String status, String why, Set<String> asked) {}
 
     private final Map<String, Place> places = new LinkedHashMap<>();
 
     /** 记下：去 at 拿 asking 时走不到跟前。第一次记经过；再记只多一样问到它的东西。 */
     public void note(WorldPosition at, String label, String asking, String why) {
-        places.computeIfAbsent(key(at), unused -> new Place(label, why, new LinkedHashSet<>())).asked().add(asking);
+        places.computeIfAbsent(key(at), unused -> new Place(label, "走不到", why, new LinkedHashSet<>())).asked().add(asking);
     }
 
-    /** 要 asking 时这一处跳不跳过：记着走不到就跳过，并算它又被问到一次。 */
+    /** 记下：去 at 拿 asking 时打开的容器界面认不出布局（不支持）。本次递归备料不再重复去点它。 */
+    public void noteUnsupported(WorldPosition at, String label, String asking, String why) {
+        places.computeIfAbsent(key(at), unused -> new Place(label, "界面不支持", why, new LinkedHashSet<>()))
+                .asked().add(asking);
+    }
+
+    /** 要 asking 时这一处跳不跳过：记着走不到或界面不支持就跳过，并算它又被问到一次。 */
     public boolean skips(WorldPosition at, String asking) {
         Place place = places.get(key(at));
         if (place == null) return false;
@@ -39,7 +45,7 @@ public final class UnreachablePlaces {
         return true;
     }
 
-    /** 记了几处：引擎比一比一步前后，知道这一步是不是败在走不到跟前。 */
+    /** 记了几处：引擎比一比一步前后，知道这一步是不是败在走不到跟前或界面不支持。 */
     public int size() {
         return places.size();
     }
@@ -48,7 +54,7 @@ public final class UnreachablePlaces {
     public List<String> lines() {
         List<String> lines = new ArrayList<>();
         for (Place place : places.values()) {
-            lines.add(place.label() + " 走不到（问了 " + place.asked().size() + " 种东西）：" + place.why());
+            lines.add(place.label() + " " + place.status() + "（问了 " + place.asked().size() + " 种东西）：" + place.why());
         }
         return lines;
     }

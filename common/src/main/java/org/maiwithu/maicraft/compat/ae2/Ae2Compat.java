@@ -93,6 +93,8 @@ public final class Ae2Compat extends CompatModule {
         registry.menuLayout(this, new Ae2InscriberLayout());
         // ME 驱动器的界面：十个存储元件槽，查看元件与插入新元件都经它。
         registry.menuLayout(this, new Ae2DriveLayout());
+        // 陨石箱的界面：三十六个存储槽加角色背包，开箱取放与查看都经它。
+        registry.menuLayout(this, new Ae2SkyChestLayout());
         registry.itemSource(this, services -> {
             this.services = services;
             return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),

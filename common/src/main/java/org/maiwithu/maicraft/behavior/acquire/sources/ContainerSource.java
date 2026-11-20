@@ -59,6 +59,8 @@ public final class ContainerSource implements ItemSource {
     private final Protection protection;
     private final ContainerTakes takes;
     private final Predicate<String> naturalLoot;
+    /** 会话级不支持界面负缓存：按位置与方块种类记下打开后认不出布局的模组容器，跨多次取货与递归备料绝不重复无效点击。 */
+    private final Map<String, String> unsupportedContainers = new LinkedHashMap<>();
 
     /** 生产与离线测试都用这一种：归属是谁放的这个事实由保护判断当场给。 */
     public ContainerSource(SpotsContainers spots, ReadsItemTags tags, Protection protection, ContainerTakes takes) {
@@ -116,6 +118,16 @@ public final class ContainerSource implements ItemSource {
         int considered = 0;
         UnreachablePlaces unreachable = context.unreachable();
         for (ContainerChooser.Candidate candidate : candidates) {
+            // 会话内已经证实认不出界面布局的容器：即使换了新一趟取货或进入递归备料，也不再重复走过去无效点击。
+            String unsupportedWhy = unsupportedContainers.get(unsupportedKey(candidate.at(), candidate.blockTypeId()));
+            if (unsupportedWhy != null) {
+                if (unreachable != null) {
+                    unreachable.noteUnsupported(candidate.at(), spotLabel(candidate.at()),
+                            request.wanted().describe(), unsupportedWhy);
+                }
+                skippedUnreachable = true;
+                continue;
+            }
             // 这一次里已经走不到跟前的箱子：不再去问，只记一笔又问到了它。
             if (unreachable != null && unreachable.skips(candidate.at(), request.wanted().describe())) {
                 skippedUnreachable = true;
@@ -261,10 +273,11 @@ public final class ContainerSource implements ItemSource {
             take = take.map(action -> new UnopenedProbe(action, container, request));
         }
         UnreachablePlaces unreachable = context.unreachable();
-        if (unreachable == null) return take;
         WorldPosition at = container.at();
-        String label = describe() + " " + at.x() + ", " + at.y() + ", " + at.z();
-        return take.map(action -> new NotesUnreachable(action, unreachable, at, label, request.wanted().describe()));
+        String label = spotLabel(at);
+        String unsupportedKey = unsupportedKey(at, container.blockTypeId());
+        return take.map(action -> new NotesUnreachable(action, unreachable, at, label,
+                request.wanted().describe(), unsupportedKey));
     }
 
     /** 没开过的箱子开完已经写进记忆却没有要的东西时，按单点落空交回，不把其余还没试的箱子一棍子划掉。 */
@@ -308,20 +321,45 @@ public final class ContainerSource implements ItemSource {
     }
 
     /**
-     * 开箱取货的动作套一层：靠近收场为到不了时，把这只箱子连同经过记进这一次的"走不到的地方"。
-     * 别的照原样转给里面那一个，没能确认的交互照旧交回。
+     * 开箱取货的动作套一层：靠近收场为到不了时记进这一次的"走不到的地方"；
+     * 点开后界面认不出布局（UNSUPPORTED）时同时记进会话级负缓存与这一次的跳过记录，
+     * 确保不认识的模组容器在同场递归备料与后续取货中都不再重复无效点击，且不误伤同场里其他正常箱子。
      */
-    private record NotesUnreachable(Action take, UnreachablePlaces unreachable, WorldPosition at, String label,
-            String asking) implements Action, ReportsUnconfirmed, FailedOnlyAtSpots {
+    private final class NotesUnreachable implements Action, ReportsUnconfirmed, FailedOnlyAtSpots {
+        private final Action take;
+        private final UnreachablePlaces unreachable;
+        private final WorldPosition at;
+        private final String label;
+        private final String asking;
+        private final String unsupportedKey;
+        private boolean unsupportedSpot;
+
+        NotesUnreachable(Action take, UnreachablePlaces unreachable, WorldPosition at, String label,
+                String asking, String unsupportedKey) {
+            this.take = take;
+            this.unreachable = unreachable;
+            this.at = at;
+            this.label = label;
+            this.asking = asking;
+            this.unsupportedKey = unsupportedKey;
+        }
 
         @Override public boolean onlyThoseSpotsFailed() {
-            return take instanceof FailedOnlyAtSpots spots && spots.onlyThoseSpotsFailed();
+            return unsupportedSpot || (take instanceof FailedOnlyAtSpots spots && spots.onlyThoseSpotsFailed());
         }
 
         @Override public ActionStatus tick(TickContext context) {
             ActionStatus status = take.tick(context);
-            if (status instanceof ActionStatus.Failed failed && failed.problem().kind() == Problem.Kind.UNREACHABLE) {
-                unreachable.note(at, label, asking, failed.problem().message());
+            if (status instanceof ActionStatus.Failed failed) {
+                if (failed.problem().kind() == Problem.Kind.UNREACHABLE && unreachable != null) {
+                    unreachable.note(at, label, asking, failed.problem().message());
+                } else if (failed.problem().kind() == Problem.Kind.UNSUPPORTED) {
+                    unsupportedSpot = true;
+                    unsupportedContainers.putIfAbsent(unsupportedKey, failed.problem().message());
+                    if (unreachable != null) {
+                        unreachable.noteUnsupported(at, label, asking, failed.problem().message());
+                    }
+                }
             }
             return status;
         }
@@ -337,6 +375,17 @@ public final class ContainerSource implements ItemSource {
         @Override public Interruptibility interruptibility() { return take.interruptibility(); }
         @Override public Interruptibility interruptibility(TickContext context) { return take.interruptibility(context); }
         @Override public String describe() { return take.describe(); }
+    }
+
+    private String spotLabel(WorldPosition at) {
+        return describe() + " " + at.x() + ", " + at.y() + ", " + at.z();
+    }
+
+    // 会话级不支持负缓存键：绑定坐标、维度与方块类型 ID，原地拆换为普通箱子后自动解除跳过。
+    private static String unsupportedKey(WorldPosition at, String blockTypeId) {
+        String dim = at.dimension() == null ? "" : at.dimension();
+        String type = blockTypeId == null ? "" : blockTypeId;
+        return dim + "@" + at.x() + "," + at.y() + "," + at.z() + "#" + type;
     }
 
     /**

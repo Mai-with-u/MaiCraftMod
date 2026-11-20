@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.FakeTags;
 import org.maiwithu.maicraft.behavior.acquire.StubTick;
+import org.maiwithu.maicraft.behavior.acquire.spi.FailedOnlyAtSpots;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
@@ -112,5 +113,71 @@ class ContainerSourceUnreachableTest {
         assertInstanceOf(ActionStatus.Failed.class,
                 source.begin(wanted("minecraft:coal"), offer, plain).orElseThrow().tick(new StubTick(1)));
         assertInstanceOf(SourceQuote.Offer.class, source.quote(wanted("minecraft:stick"), plain));
+    }
+
+    @Test
+    void unsupportedContainerIsCachedAcrossRunsAndSkippedInRecursiveAcquire() {
+        int[] clicks = {0};
+        String[] blockType = {"somemod:mystery_chest"};
+        SpotsContainers spots = new SpotsContainers() {
+            private ContainerChooser.Candidate candidate() {
+                return new ContainerChooser.Candidate("mystery（10, 64, 5）", blockType[0],
+                        CHEST_AT, null, true, 5, false, true, ContainerChooser.Lid.CLEAR, false);
+            }
+
+            @Override public List<ContainerChooser.Candidate> around(BlockPos center, int radius) {
+                return List.of(candidate());
+            }
+
+            @Override public boolean scanComplete() {
+                return true;
+            }
+
+            @Override public Optional<ContainerChooser.Candidate> at(WorldPosition position) {
+                return Optional.of(candidate());
+            }
+        };
+        ContainerSource source = new ContainerSource(spots, new FakeTags(), NOBODY_OWNS, (container, wants, permissions) ->
+                Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        clicks[0]++;
+                        return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
+                                "这种界面认不出两侧怎么分，一格都不点", null));
+                    }
+
+                    @Override public String describe() {
+                        return "开箱取货";
+                    }
+                }));
+
+        // 第一趟取货遇到不认识的模组箱子：点一次返回 UNSUPPORTED，且标记为仅该点失败不连坐其余箱子。
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, source.quote(wanted("minecraft:coal"), context));
+        Action take = source.begin(wanted("minecraft:coal"), offer, context).orElseThrow();
+        assertInstanceOf(ActionStatus.Failed.class, take.tick(new StubTick(1)));
+        assertTrue(take instanceof FailedOnlyAtSpots spotOnly && spotOnly.onlyThoseSpotsFailed());
+        assertEquals(1, clicks[0]);
+
+        // 同场递归备料再问下一样原料：直接跳过，记录为界面不支持而非走不到。
+        SourceQuote.Unavailable skippedInSameRun = assertInstanceOf(SourceQuote.Unavailable.class,
+                source.quote(wanted("minecraft:stick"), context));
+        assertEquals(UnreachablePlaces.SKIPPED, skippedInSameRun.reason());
+        assertTrue(places.lines().getFirst().contains("界面不支持"), places.lines().toString());
+        assertTrue(places.lines().getFirst().contains("问了 2 种东西"), places.lines().toString());
+
+        // 换一份全新的 UnreachablePlaces（模拟下一次 Run）：会话级负缓存仍生效，绝不再报价点击同一只模组箱子。
+        UnreachablePlaces nextRunPlaces = new UnreachablePlaces();
+        SourceContext nextRun = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT)
+                .withUnreachable(nextRunPlaces);
+        SourceQuote.Unavailable skippedAcrossRun = assertInstanceOf(SourceQuote.Unavailable.class,
+                source.quote(wanted("minecraft:iron_ingot"), nextRun));
+        assertEquals(UnreachablePlaces.SKIPPED, skippedAcrossRun.reason());
+        assertEquals(1, clicks[0], "跨 Run 会话级负缓存命中时绝不重复点击");
+        assertTrue(nextRunPlaces.lines().getFirst().contains("界面不支持"), nextRunPlaces.lines().toString());
+
+        // 若该位置原地被拆换为普通箱子（方块类型变了），新一趟取货中会话级负缓存自动解除，恢复正常报价。
+        blockType[0] = "minecraft:chest";
+        SourceContext replacedRun = SourceContext.unscoped(WorldPosition.here(0, 64, 0), Permissions.DEFAULT)
+                .withUnreachable(new UnreachablePlaces());
+        assertInstanceOf(SourceQuote.Offer.class, source.quote(wanted("minecraft:iron_ingot"), replacedRun));
     }
 }

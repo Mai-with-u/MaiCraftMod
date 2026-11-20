@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.compat.ae2;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -18,6 +19,9 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.phys.AABB;
 
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.menu.MenuLayout;
+import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
+import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.ModApiMismatch;
 import org.maiwithu.maicraft.compat.CompatModule;
@@ -121,6 +125,38 @@ class Ae2CompatTest {
 
         CompatRegistry older = CompatRegistry.load(List.of(supported), loaderWith("19.2.16"));
         assertTrue(older.modules().isEmpty());
+    }
+
+    @Test
+    void 陨石箱布局证明识别36格存储与36格角色背包() {
+        SupportedMod<CompatModule> supported = new SupportedMod<>(Ae2Compat.MOD_ID, "应用能源2",
+                new VerifiedVersions("19.2.17", "19.3"),
+                () -> new Ae2Compat(ONE_TERMINAL, new RecordingMenu(), new NoGrid()));
+        CompatRegistry registry = CompatRegistry.load(List.of(supported), loaderWith("19.2.17"));
+        MenuLayouts layouts = registry.menuLayouts();
+
+        // 36 格存储 + 36 格角色背包的陨石箱菜单应被识别为 Supported，容器侧 0..35，角色侧 36..71。
+        MenuLayout.Supported ok = assertInstanceOf(MenuLayout.Supported.class,
+                layouts.classify(skyChestSlots(36, 36)));
+        assertEquals(36, ok.containerSlots().size());
+        assertEquals(36, ok.playerSlots().size());
+        assertEquals(0, ok.containerSlots().getFirst());
+        assertEquals(35, ok.containerSlots().getLast());
+        assertTrue(ok.machineSlots().isEmpty());
+
+        // 容器侧不是 36 格或缺少角色背包侧时，不冒充认得出布局。
+        assertInstanceOf(MenuLayout.Unsupported.class, layouts.classify(skyChestSlots(27, 36)));
+        assertInstanceOf(MenuLayout.Unsupported.class, layouts.classify(skyChestSlots(36, 0)));
+    }
+
+    /** 陨石箱界面的槽位替身：前 storageSlots 格为存储槽，随后 playerSlots 格为角色背包。 */
+    private static MenuSlots skyChestSlots(int storageSlots, int playerSlots) {
+        return new MenuSlots() {
+            @Override public String menuTypeId() { return Ae2SkyChestLayout.SKY_CHEST_MENU; }
+            @Override public int slotCount() { return storageSlots + playerSlots; }
+            @Override public boolean playerBacked(int slot) { return slot >= storageSlots; }
+            @Override public int playerInventoryIndex(int slot) { return slot - storageSlots; }
+        };
     }
 
     /** 只装了 AE2、版本给定的加载器环境替身。 */
