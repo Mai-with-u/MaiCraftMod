@@ -5,6 +5,8 @@ import java.util.List;
 
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsDeviceServerReads;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsDeviceServerReadsExtras;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGridReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateTrainScheduleReads;
 import org.maiwithu.maicraft.neoforge.compat.mekanism.MekanismNetworkServerReads;
@@ -28,9 +30,11 @@ public final class ServerCompatCatalog {
     /** 清单里支持的全部模组：每行创建一个服务端联动入口。 */
     public static List<SupportedMod<ServerCompatModule>> mods() {
         return List.of(
-                // 应用能源2：ME 网络的控制器、频道、能量、存储总量只在服务端的网格服务里，经只读操作 ae2.network 回答。
+                // 应用能源2：ME 网络汇总与扩展明细经 ae2.network 回答，单台设备与线缆部件的权威状态经 ae2.device 回答。
                 new SupportedMod<>(Ae2ServerCompat.MOD_ID, "应用能源2", new VerifiedVersions("19.2.17", "19.3"),
-                        () -> new Ae2ServerCompat(new AppliedEnergisticsGridReads())),
+                        () -> new Ae2ServerCompat(new AppliedEnergisticsGridReads(),
+                                new AppliedEnergisticsDeviceServerReadsExtras(),
+                                new AppliedEnergisticsDeviceServerReads())),
                 // 机械动力：列车时刻表只在服务端，没装铁路导航时坐火车经只读操作 create.trains 查哪趟车去哪。
                 new SupportedMod<>(CreateServerCompat.MOD_ID, "机械动力", new VerifiedVersions("6.0.11", "6.1"),
                         () -> new CreateServerCompat(new CreateTrainScheduleReads())),

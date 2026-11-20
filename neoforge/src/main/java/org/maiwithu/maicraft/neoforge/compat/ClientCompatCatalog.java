@@ -23,12 +23,16 @@ import org.maiwithu.maicraft.compat.mekanism.MekanismCompat;
 import org.maiwithu.maicraft.compat.ponder.PonderCompat;
 import org.maiwithu.maicraft.compat.touhoulittlemaid.TouhouLittleMaidCompat;
 import org.maiwithu.maicraft.compat.ultimine.UltimineCompat;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsAdvanced;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGrid;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsInscribers;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsMachines;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsMenuSlots;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsParts;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsPatterns;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
+import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTools;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTransforms;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackMenus;
@@ -85,7 +89,9 @@ public final class ClientCompatCatalog {
                         () -> new Ae2Compat(new AppliedEnergisticsTerminals(), new AppliedEnergisticsTerminalMenu(),
                                 new AppliedEnergisticsGrid(), new AppliedEnergisticsPatterns(),
                                 new AppliedEnergisticsTransforms(), new AppliedEnergisticsInscribers(),
-                                new AppliedEnergisticsMenuSlots())),
+                                new AppliedEnergisticsMenuSlots(), new AppliedEnergisticsMachines(),
+                                new AppliedEnergisticsParts(), new AppliedEnergisticsTools(),
+                                new AppliedEnergisticsAdvanced())),
                 // 思索（Ponder）：随 Create 6.0.11 装的 1.0.82；装了 1.0.83 及以上不登记，实测通过后再放宽
                 // （读旁白要用它的几个非公开字段，换了版本可能改名）。
                 new SupportedMod<>(PonderCompat.MOD_ID, "思索（Ponder）", new VerifiedVersions("1.0.82", "1.0.83"),

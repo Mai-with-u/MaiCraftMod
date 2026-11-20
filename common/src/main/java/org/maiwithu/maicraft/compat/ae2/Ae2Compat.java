@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -21,9 +22,26 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
+import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
+import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.ae2.advanced.Ae2Advanced;
+import org.maiwithu.maicraft.compat.ae2.advanced.Ae2AdvancedReads;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2Machines;
+import org.maiwithu.maicraft.compat.ae2.part.Ae2PartControl;
+import org.maiwithu.maicraft.compat.ae2.tool.Ae2ToolReads;
+import org.maiwithu.maicraft.compat.ae2.tool.Ae2Tools;
+import org.maiwithu.maicraft.compat.ae2.tool.NetworkToolboxSource;
+import org.maiwithu.maicraft.compat.ae2.tool.PortableCellSource;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.serverlink.ServerReads;
+import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
 /**
  * 应用能源2（AE2）的联动入口。角色从附近的 ME 终端取网络里已有的东西，要经这里碰模组：
@@ -49,7 +67,12 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2Transforms transforms;
     private final Ae2Inscribers inscribers;
     private final Ae2MenuSlots menuSlots;
-    /** 进世界时物品来源建好，落地补料也用这一份；没进世界时为空。 */
+    private final Ae2MachineReads machineReads;
+    private final Ae2PartControl partControl;
+    private final Ae2ToolReads toolReads;
+    private final Ae2AdvancedReads advancedReads;
+    private final Ae2DeviceOpsRouter router;
+    /** 进世界时记下当前世界的玩家行为服务，供落地补料、服务端只读通道与放置转正规则实时取用；没进世界时为空。 */
     private volatile PlayerServices services;
     /**
      * 上次在各台终端、身上无线终端里看到的网络存货与连没连上：取货报价、存东西挑终端、落地补料记的是同一份，
@@ -79,8 +102,17 @@ public final class Ae2Compat extends CompatModule {
         this(terminals, menus, grid, patterns, transforms, inscribers, Ae2MenuSlots.NONE);
     }
 
+    /** 没有工作方块、线缆部件、手持工具与高级机制读写端时，默认回落各自空实现。 */
     public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
             Ae2Transforms transforms, Ae2Inscribers inscribers, Ae2MenuSlots menuSlots) {
+        this(terminals, menus, grid, patterns, transforms, inscribers, menuSlots,
+                Ae2MachineReads.NONE, Ae2PartControl.NONE, Ae2ToolReads.NONE, Ae2AdvancedReads.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
+            Ae2Transforms transforms, Ae2Inscribers inscribers, Ae2MenuSlots menuSlots,
+            Ae2MachineReads machineReads, Ae2PartControl partControl, Ae2ToolReads toolReads,
+            Ae2AdvancedReads advancedReads) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
@@ -89,47 +121,102 @@ public final class Ae2Compat extends CompatModule {
         this.transforms = Objects.requireNonNull(transforms, "transforms");
         this.inscribers = Objects.requireNonNull(inscribers, "inscribers");
         this.menuSlots = Objects.requireNonNull(menuSlots, "menuSlots");
+        this.machineReads = Objects.requireNonNull(machineReads, "machineReads");
+        this.partControl = Objects.requireNonNull(partControl, "partControl");
+        this.toolReads = Objects.requireNonNull(toolReads, "toolReads");
+        this.advancedReads = Objects.requireNonNull(advancedReads, "advancedReads");
+        this.router = new Ae2DeviceOpsRouter(this, this.machineReads, this.partControl, this.advancedReads);
     }
 
     @Override public void contribute(CompatRegistry registry) {
+        Ae2Machines machines = new Ae2Machines(this, machineReads);
+        Ae2Tools tools = new Ae2Tools(this, toolReads);
+        contributeLayouts(registry, machines, tools);
+        contributeSourcesAndStorage(registry, machines, tools);
+        contributeMachinesAndNetwork(registry, machines);
+        contributeToolsAndKnowledge(registry, machines, tools);
+    }
+
+    // 登记既有 6 份专属布局证明与四路子模块汇总后的 21 个通用语义布局规则，彼此零碰撞。
+    private void contributeLayouts(CompatRegistry registry, Ae2Machines machines, Ae2Tools tools) {
         registry.menuLayout(this, new Ae2TerminalLayout());
-        // 样板供应器的界面：只认放样板的那几格，放进、拿出样板都经它。
         registry.menuLayout(this, new Ae2PatternProviderLayout(this));
-        // 无线访问点的界面：只认绑定格与产出格，放进终端、取回绑定副本都在这两格。
         registry.menuLayout(this, new Ae2AccessPointLayout());
-        // 压印器的界面：优先按槽位语义识别四个工作格加四个升级格，携带网络工具箱时不受额外 9 槽干扰。
         registry.menuLayout(this, new Ae2InscriberLayout(this));
-        // ME 驱动器的界面：十个存储元件槽，查看元件与插入新元件都经它。
         registry.menuLayout(this, new Ae2DriveLayout());
-        // 陨石箱的界面：三十六个存储槽加角色背包，开箱取放与查看都经它。
         registry.menuLayout(this, new Ae2SkyChestLayout());
-        registry.itemSource(this, services -> {
-            this.services = services;
-            return new Ae2TerminalSource(this, services, new MenuTerminalTakes(this, services, seen, Instant::now),
-                    seen, Instant::now);
-        });
-        // 只在拿东西提取侧开放从附近已见压印器工作格取回占槽物品，不把压印器标成通用容器以免存东西往里塞杂物。
-        registry.itemSource(this, services -> {
-            this.services = services;
-            return new Ae2InscriberSource(this, services);
-        });
-        // 腾地方、整理背包时：身上的无线终端连着网络就把东西存进网络，不往地上扔。
-        registry.networkStorage(this, services -> {
-            this.services = services;
-            return new MenuNetworkStores(this, services, seen, Instant::now);
-        });
-        // 意外坠落、身上没带落地料时：拿出随身无线终端，从网络里现取一桶水。
+        registry.menuLayout(this, new Ae2SemanticsLayout(this, Ae2DeviceOpsRouter.allLayoutRules(machines, tools)));
+    }
+
+    // 登记终端取货、压印器取占槽物、合成终端手搓、便携元件与工具箱、奇点爆炸转化、网络存储、随身背包与落地补料。
+    private void contributeSourcesAndStorage(CompatRegistry registry, Ae2Machines machines, Ae2Tools tools) {
+        registry.itemSource(this, services -> new Ae2TerminalSource(this, remember(services),
+                new MenuTerminalTakes(this, services, seen, Instant::now), seen, Instant::now));
+        registry.itemSource(this, services -> new Ae2InscriberSource(this, remember(services)));
+        registry.itemSource(this, services -> firstOf(machines.itemSources(remember(services))));
+        registry.itemSource(this, services -> new PortableCellSource(this, toolReads, remember(services)));
+        registry.itemSource(this, services -> new NetworkToolboxSource(this, toolReads, remember(services)));
+        registry.itemSource(this, services -> firstOf(Ae2Advanced.itemSources(advancedReads, remember(services))));
+        registry.carriedBackpack(this, services -> tools.carriedBackpacks(remember(services)).getFirst());
+        registry.networkStorage(this, services -> new MenuNetworkStores(this, remember(services), seen, Instant::now));
         registry.landingMaterial(this, new Ae2LandingMaterials(this, this::services));
-        // 机器这一半：每种 ME 设备、ME 网络读取器（汇总经服务端只读操作问），线缆格还管接线缆与装部件。
-        for (Ae2MachineCatalog.Kind kind : Ae2MachineCatalog.kinds()) {
-            registry.machineType(this, services -> new Ae2MachineType(kind, this, inscribers, services,
-                    blocksOf(kind.blocks())));
-        }
-        registry.networkReader(this, services -> new MeNetworkReader(this, services));
-        registry.serverRead(this, NETWORK_OPERATION, 1);
-        registry.knowledgeSource(this, new Ae2MachineKnowledge());
-        // 拿东西：往水里扔料让它变（福鲁伊克斯水晶），配方从 AE2 读，扔料、等、捡由玩家行为层做。
         registry.fluidTransforms(this, new Ae2FluidTransforms(this));
+    }
+
+    // 登记全部 25 种 AE2 设备（共享本世界设备委托表与线缆格双路部件委托）、ME 网络读取器及两项服务端只读操作。
+    private void contributeMachinesAndNetwork(CompatRegistry registry, Ae2Machines machines) {
+        for (Ae2MachineCatalog.Kind kind : Ae2DeviceOpsRouter.allKinds(machines)) {
+            registry.machineType(this, services -> new Ae2MachineType(kind, this, inscribers, remember(services),
+                    blocksOf(kind.blocks()), router.deviceOpsFor(services)));
+        }
+        registry.networkReader(this, services -> new MeNetworkReader(this, remember(services)));
+        registry.serverRead(this, NETWORK_OPERATION, 1);
+        registry.serverRead(this, Ae2Advanced.DEVICE_OPERATION, Ae2Advanced.DEVICE_OPERATION_VERSION);
+    }
+
+    // 登记拆解工具、放置转正规则（含随身石英扳手上下文）、手持工具设置、物质炮、陨石罗盘感知与知识来源。
+    private void contributeToolsAndKnowledge(CompatRegistry registry, Ae2Machines machines, Ae2Tools tools) {
+        for (Function<PlayerServices, DismantleTool> factory : tools.dismantleTools()) {
+            registry.dismantleTool(this, services -> factory.apply(remember(services)));
+        }
+        for (PlacementRules rule : machines.placementRules()) {
+            registry.placementRules(this, rule);
+        }
+        for (PlacementRules rule : tools.placementRules(this::playerContext)) {
+            registry.placementRules(this, rule);
+        }
+        registry.itemSettings(this, services -> Ae2DeviceOpsRouter.composeItemSettings(
+                tools.itemSettings(remember(services))));
+        for (RangedWeapon weapon : tools.rangedWeapons()) {
+            registry.rangedWeapon(this, weapon);
+        }
+        for (ModSight sight : tools.modSights()) {
+            registry.modSight(this, sight);
+        }
+        registry.knowledgeSource(this, new Ae2MachineKnowledge());
+        for (KnowledgeSource source : tools.knowledgeSources()) {
+            registry.knowledgeSource(this, source);
+        }
+    }
+
+    private PlayerServices remember(PlayerServices current) {
+        this.services = current;
+        return current;
+    }
+
+    private PlayerContext playerContext() {
+        PlayerServices current = services;
+        return current == null ? null : current.context().get();
+    }
+
+    /** 当前世界的服务端只读通道；尚未进入世界时回落为空实现。 */
+    ServerReads serverReads() {
+        PlayerServices current = services;
+        return current == null ? ServerReads.NONE : current.serverReads();
+    }
+
+    private static ItemSource firstOf(List<ItemSource> sources) {
+        return sources.getFirst();
     }
 
     /** 这个世界里泡在流体里的转化配方；见 {@link Ae2Transforms#fluidRecipes}。 */
