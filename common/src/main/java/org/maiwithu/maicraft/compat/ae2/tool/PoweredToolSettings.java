@@ -136,15 +136,9 @@ public final class PoweredToolSettings implements ItemSettings {
         return List.copyOf(out);
     }
 
-    // 优先展示首个有效伤害弹药，否则展示首条已装物品（如彩弹）以便提醒用户。
+    // 如实展示下一发实际会射出的首条非空弹药（若首位为彩弹则明确暴露彩弹与 0 伤，与 AE2 fireCannon 顺序一致）。
     private static Ae2ToolReads.CannonAmmoEntry pickDisplayedAmmo(Ae2ToolReads.MatterCannonSnapshot cannon) {
-        for (Ae2ToolReads.CannonAmmoEntry entry : cannon.ammoEntries()) {
-            if (MatterCannonWeapon.isLethalAmmo(entry)) return entry;
-        }
-        for (Ae2ToolReads.CannonAmmoEntry entry : cannon.ammoEntries()) {
-            if (entry.count() > 0L) return entry;
-        }
-        return null;
+        return MatterCannonWeapon.firstNonEmptyEntry(cannon).orElse(null);
     }
 
     private Ae2ToolReads.EnergyReading readEnergyOrZero(ItemStack stack) {

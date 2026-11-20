@@ -1,12 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.compat.ae2.tool;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.function.Predicate;
 
 import net.minecraft.world.entity.player.Player;
@@ -85,43 +82,48 @@ public final class MatterCannonWeapon implements RangedWeapon {
         return ammoAfter < ammoBefore;
     }
 
-    /** 从物质炮快照中选出首条有效伤害弹药并构造直线瞬发 Shot（纯函数，严格排除彩弹与低电状态）。 */
+    /**
+     * 按 AE2 MatterCannonItem.fireCannon 真实取弹顺序选出下一发弹药（纯函数）：
+     * 游戏固定发射存储表里的第一条非空物品，绝不会跳过排在首位的彩弹或无权重杂物去打后面的铁粒；
+     * 因此仅当电量 ≥ 1600 AE 且首条非空条目为有效致死弹药时才返回直线瞬发 Shot，否则返回空避免战斗空耗电打彩弹。
+     */
     static Optional<Shot> firstLethalShot(Ae2ToolReads.MatterCannonSnapshot snapshot) {
         if (snapshot == null || snapshot.currentEnergy() < ENERGY_PER_SHOT) return Optional.empty();
+        return firstNonEmptyEntry(snapshot)
+                .filter(MatterCannonWeapon::isLethalAmmo)
+                .map(MatterCannonWeapon::toShot);
+    }
+
+    /** 列出下一发实际可打出的有效伤害弹药（受 AE2 固定发射首条条目限制，首位非致死弹药时返回空）。 */
+    static List<Shot> allLethalShots(Ae2ToolReads.MatterCannonSnapshot snapshot) {
+        return firstLethalShot(snapshot).map(List::of).orElse(List.of());
+    }
+
+    /**
+     * 按 AE2 MatterCannonItem 真实取弹顺序与伤害公式估算下一发单发伤害（纯函数）：
+     * 仅看首条非空条目，首位为彩弹、无权重物品或电量不足时恒返回 0，否则返回 ceil(weight * shotPower / 20)。
+     */
+    public static int estimateDamage(Ae2ToolReads.MatterCannonSnapshot snapshot) {
+        if (snapshot == null || snapshot.currentEnergy() < ENERGY_PER_SHOT) return 0;
+        Optional<Ae2ToolReads.CannonAmmoEntry> firstOpt = firstNonEmptyEntry(snapshot);
+        if (firstOpt.isEmpty() || !isLethalAmmo(firstOpt.get())) return 0;
+        Ae2ToolReads.CannonAmmoEntry entry = firstOpt.get();
+        int maxPower = 1 + Math.max(0, snapshot.speedCards());
+        int byAmmo = (int) Math.min(Integer.MAX_VALUE, entry.count());
+        int byEnergy = (int) (snapshot.currentEnergy() / ENERGY_PER_SHOT);
+        int shotPower = Math.min(maxPower, Math.min(byAmmo, byEnergy));
+        if (shotPower <= 0) return 0;
+        return (int) Math.ceil((entry.weight() * shotPower) / 20.0);
+    }
+
+    static Optional<Ae2ToolReads.CannonAmmoEntry> firstNonEmptyEntry(Ae2ToolReads.MatterCannonSnapshot snapshot) {
+        if (snapshot == null) return Optional.empty();
         for (Ae2ToolReads.CannonAmmoEntry entry : snapshot.ammoEntries()) {
-            if (isLethalAmmo(entry)) {
-                return Optional.of(toShot(entry));
+            if (entry != null && entry.count() > 0L) {
+                return Optional.of(entry);
             }
         }
         return Optional.empty();
-    }
-
-    /** 列出物质炮快照中全部去重后的有效伤害弹药（纯函数）。 */
-    static List<Shot> allLethalShots(Ae2ToolReads.MatterCannonSnapshot snapshot) {
-        if (snapshot == null || snapshot.currentEnergy() < ENERGY_PER_SHOT) return List.of();
-        List<Shot> shots = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
-        for (Ae2ToolReads.CannonAmmoEntry entry : snapshot.ammoEntries()) {
-            if (isLethalAmmo(entry) && seen.add(entry.itemId())) {
-                shots.add(toShot(entry));
-            }
-        }
-        return List.copyOf(shots);
-    }
-
-    /** 按 AE2 MatterCannonItem 公式估算单发伤害（纯函数）：ceil(weight * shotPower / 20)，彩弹恒返回 0。 */
-    public static int estimateDamage(Ae2ToolReads.MatterCannonSnapshot snapshot) {
-        if (snapshot == null || snapshot.currentEnergy() < ENERGY_PER_SHOT) return 0;
-        for (Ae2ToolReads.CannonAmmoEntry entry : snapshot.ammoEntries()) {
-            if (!isLethalAmmo(entry)) continue;
-            int maxPower = 1 + Math.max(0, snapshot.speedCards());
-            int byAmmo = (int) Math.min(Integer.MAX_VALUE, entry.count());
-            int byEnergy = (int) (snapshot.currentEnergy() / ENERGY_PER_SHOT);
-            int shotPower = Math.min(maxPower, Math.min(byAmmo, byEnergy));
-            if (shotPower <= 0) return 0;
-            return (int) Math.ceil((entry.weight() * shotPower) / 20.0);
-        }
-        return 0;
     }
 
     static boolean isLethalAmmo(Ae2ToolReads.CannonAmmoEntry entry) {

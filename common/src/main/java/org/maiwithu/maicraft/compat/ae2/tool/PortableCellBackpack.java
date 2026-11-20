@@ -151,6 +151,7 @@ public final class PortableCellBackpack implements CarriedBackpack {
         private PendingInteraction opening;
         private OpenedMenu menu;
         private Action closing;
+        private int unsneakTicks;
         private int openWaited;
         private int syncWaited;
         private int beforeCount = -1;
@@ -202,14 +203,17 @@ public final class PortableCellBackpack implements CarriedBackpack {
             return ActionStatus.progressed();
         }
 
-        // 绝不潜行右键便携元件：若角色正处于潜行状态，先松开潜行再普通右键打开 ae2:portable_item_cell。
+        // 绝不潜行右键便携元件：连续至少 2 刻确认解除潜行且保持静止，确保服务端已同步非潜行态，
+        // 防止空便携元件被 AE2 disassembleDrive 当场拆解。
         private ActionStatus openWithoutSneak(TickContext tick, PlayerContext player) {
             LocalPlayer self = player.localPlayer();
-            if (self.isShiftKeyDown()) {
-                player.input().applyMovement(PlayerInput.Movement.STOPPED, tick.gameTick());
-                return ActionStatus.running();
-            }
             if (opening == null) {
+                boolean sneaking = self.isShiftKeyDown();
+                if (!PortableCellCatalog.isUnsneakStable(sneaking, unsneakTicks)) {
+                    unsneakTicks = PortableCellCatalog.advanceUnsneakTicks(sneaking, unsneakTicks);
+                    player.input().applyMovement(PlayerInput.Movement.STOPPED, tick.gameTick());
+                    return ActionStatus.running();
+                }
                 Optional<Ae2ToolReads.PortableCellSnapshot> fresh = compat.call("复查便携元件电量",
                         () -> reads.readPortableCell(self.getMainHandItem()));
                 if (fresh.isPresent() && fresh.get().currentEnergy() <= 0.0) {
@@ -235,6 +239,8 @@ public final class PortableCellBackpack implements CarriedBackpack {
             AbstractContainerMenu raw = self.containerMenu;
             boolean expected = compat.call("核对便携物品元件界面", () -> reads.isPortableCellMenu(raw, false));
             if (!expected) {
+                // 误开非目标界面时先关闭再失败/换候选，防止错误界面滞留屏幕卡住后续动作。
+                PortableCellCatalog.closeUnexpectedMenu(self);
                 return nextOrFail("打开的不是物品便携存储元件界面");
             }
             menu = ClientOpenedMenu.claimCurrent(services.context(),
@@ -338,6 +344,7 @@ public final class PortableCellBackpack implements CarriedBackpack {
             currentCell = candidates.poll();
             opening = null;
             handStep = null;
+            unsneakTicks = 0;
             stage = Stage.HAND;
             return ActionStatus.progressed();
         }
@@ -348,6 +355,7 @@ public final class PortableCellBackpack implements CarriedBackpack {
                 currentCell = candidates.poll();
                 opening = null;
                 handStep = null;
+                unsneakTicks = 0;
                 stage = Stage.HAND;
                 return ActionStatus.progressed();
             }

@@ -201,6 +201,7 @@ public final class PortableCellSource implements ItemSource {
         private int beforeAction = -1;
         private boolean expectingCursor;
         private int bucketSourceSlot = -1;
+        private int unsneakTicks;
         private int openWaited;
         private int syncWaited;
         private int quietTicks;
@@ -251,14 +252,17 @@ public final class PortableCellSource implements ItemSource {
             return ActionStatus.progressed();
         }
 
-        // 严格保证不潜行右键打开便携存储元件，防止空元件触发 disassembleDrive 被拆解。
+        // 严格保证不潜行右键打开便携存储元件：连续至少 2 刻确认解除潜行且保持静止，确保服务端已同步非潜行态，
+        // 防止空元件触发 disassembleDrive 被拆解。
         private ActionStatus openWithoutSneak(TickContext tick, PlayerContext player) {
             LocalPlayer self = player.localPlayer();
-            if (self.isShiftKeyDown()) {
-                player.input().applyMovement(PlayerInput.Movement.STOPPED, tick.gameTick());
-                return ActionStatus.running();
-            }
             if (opening == null) {
+                boolean sneaking = self.isShiftKeyDown();
+                if (!PortableCellCatalog.isUnsneakStable(sneaking, unsneakTicks)) {
+                    unsneakTicks = PortableCellCatalog.advanceUnsneakTicks(sneaking, unsneakTicks);
+                    player.input().applyMovement(PlayerInput.Movement.STOPPED, tick.gameTick());
+                    return ActionStatus.running();
+                }
                 Optional<Ae2ToolReads.PortableCellSnapshot> fresh = compat.call("复查便携元件电量",
                         () -> reads.readPortableCell(self.getMainHandItem()));
                 if (fresh.isPresent() && fresh.get().currentEnergy() <= 0.0) {
@@ -285,6 +289,8 @@ public final class PortableCellSource implements ItemSource {
             boolean fluid = currentCell.snapshot().fluidCell();
             boolean expected = compat.call("核对便携存储元件界面", () -> reads.isPortableCellMenu(raw, fluid));
             if (!expected) {
+                // 误开非目标界面时先关闭再失败/换候选，防止错误界面滞留屏幕卡住后续动作。
+                PortableCellCatalog.closeUnexpectedMenu(self);
                 return nextCellOrFail("打开的不是预期的便携存储元件界面");
             }
             menu = ClientOpenedMenu.claimCurrent(services.context(),
@@ -464,6 +470,7 @@ public final class PortableCellSource implements ItemSource {
             currentCell = candidates.poll();
             opening = null;
             handStep = null;
+            unsneakTicks = 0;
             stage = Stage.HAND;
             return ActionStatus.progressed();
         }
@@ -474,6 +481,7 @@ public final class PortableCellSource implements ItemSource {
                 currentCell = candidates.poll();
                 opening = null;
                 handStep = null;
+                unsneakTicks = 0;
                 stage = Stage.HAND;
                 return ActionStatus.progressed();
             }

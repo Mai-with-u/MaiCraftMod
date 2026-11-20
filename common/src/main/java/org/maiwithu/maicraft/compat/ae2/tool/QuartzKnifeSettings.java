@@ -57,7 +57,31 @@ public final class QuartzKnifeSettings implements ItemSettings {
     private static final int SYNC_WAIT_TICKS = 40;
     private static final int OUTPUT_WAIT_TICKS = 30;
     private static final int RECOVER_WAIT_TICKS = 20;
+    static final int MAX_PICK_ATTEMPTS = 3;
     private static final long GIVE_UP_TICKS = 20L * 30;
+
+    /** 放置金属锭阶段的纯判断结论。 */
+    enum PlaceDecision { SEND_NAME, PLACE_ONE, RETRY_PICK, FAIL_PICK }
+
+    /** 取走命名压印模板阶段的纯判断结论（单次取货防连发）。 */
+    enum TakeDecision { DONE_RECOVER, SEND_QUICK_MOVE, WAIT_SYNC, TIMEOUT_NO_OUTPUT, TIMEOUT_UNSYNCED }
+
+    /** 判断放锭阶段下一步：光标已空时必须核实槽 0 真有金属锭才允许发 setName，空槽时回退重试拿起（带次数上限）。 */
+    static PlaceDecision decidePlaceStep(boolean cursorEmpty, boolean inputOccupied, int pickAttempts) {
+        if (!cursorEmpty) return PlaceDecision.PLACE_ONE;
+        if (inputOccupied) return PlaceDecision.SEND_NAME;
+        return pickAttempts < MAX_PICK_ATTEMPTS ? PlaceDecision.RETRY_PICK : PlaceDecision.FAIL_PICK;
+    }
+
+    /** 判断取模板阶段下一步：未发过取货且输出槽非空时仅发一次 quickMove，已发后绝不连发，只等背包同步或超时。 */
+    static TakeDecision decideTakeStep(boolean holdsPress, boolean takeSent, boolean outputOccupied, int waited) {
+        if (holdsPress) return TakeDecision.DONE_RECOVER;
+        if (!takeSent) {
+            if (outputOccupied) return TakeDecision.SEND_QUICK_MOVE;
+            return waited > OUTPUT_WAIT_TICKS ? TakeDecision.TIMEOUT_NO_OUTPUT : TakeDecision.WAIT_SYNC;
+        }
+        return waited > OUTPUT_WAIT_TICKS ? TakeDecision.TIMEOUT_UNSYNCED : TakeDecision.WAIT_SYNC;
+    }
 
     private final Ae2Compat compat;
     private final Ae2ToolReads reads;
@@ -156,6 +180,8 @@ public final class QuartzKnifeSettings implements ItemSettings {
         private int inputSlot = -1;
         private int outputSlot = -1;
         private int ingotPlayerSlot = -1;
+        private int pickAttempts;
+        private boolean takeSent;
         private int waited;
         private int totalTicks;
         private Problem failure;
@@ -257,6 +283,8 @@ public final class QuartzKnifeSettings implements ItemSettings {
             }
             AbstractContainerMenu raw = self.containerMenu;
             if (!compat.call("核对石英切割刀界面", () -> reads.isQuartzKnifeMenu(raw))) {
+                // 误开其他方块或物品界面时立即关窗，防止错误界面滞留屏幕卡住后续动作。
+                PortableCellCatalog.closeUnexpectedMenu(self);
                 failure = Problem.of(Problem.Kind.REFUSED_BY_GAME, "右键石英切割刀后未打开石英切割刀界面");
                 stage = Stage.DONE;
                 return ActionStatus.failed(failure);
@@ -317,23 +345,40 @@ public final class QuartzKnifeSettings implements ItemSettings {
             return ActionStatus.progressed();
         }
 
-        // 右键只往槽 0 放 1 个金属锭，避免整组金属锭留在槽 0 增加残留风险。
+        // 右键只往槽 0 放 1 个金属锭；若光标空着必须先核实槽 0 真有金属锭才发 setName，空槽时回退重试拿起。
         private ActionStatus placeOneIngot() {
+            Optional<MenuContent.Reading> readingOpt = menu.reading();
+            if (readingOpt.isEmpty()) return abortRecovering(Problem.of(Problem.Kind.TARGET_GONE, "石英切割刀界面中途关闭"));
             if (menu.busy()) return ActionStatus.running();
-            if (menu.cursorEmpty()) {
-                waited = 0;
-                stage = Stage.SEND_NAME;
-                return ActionStatus.progressed();
-            }
-            if (!menu.click(inputSlot, 1)) {
-                return failIfWaited("放入金属锭到石英切割刀输入槽失败");
-            }
-            waited = 0;
-            stage = Stage.RETURN_REST_INGOT;
-            return ActionStatus.progressed();
+            boolean inputOccupied = isContainerSlotOccupied(readingOpt.get(), inputSlot);
+            return switch (decidePlaceStep(menu.cursorEmpty(), inputOccupied, pickAttempts)) {
+                case SEND_NAME -> {
+                    waited = 0;
+                    stage = Stage.SEND_NAME;
+                    yield ActionStatus.progressed();
+                }
+                case RETRY_PICK -> {
+                    pickAttempts++;
+                    waited = 0;
+                    stage = Stage.PICK_INGOT;
+                    yield ActionStatus.progressed();
+                }
+                case FAIL_PICK -> abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                        "多次尝试未能把金属锭放入石英切割刀输入槽"));
+                case PLACE_ONE -> {
+                    if (!menu.click(inputSlot, 1)) {
+                        yield failIfWaited("放入金属锭到石英切割刀输入槽失败");
+                    }
+                    waited = 0;
+                    stage = Stage.RETURN_REST_INGOT;
+                    yield ActionStatus.progressed();
+                }
+            };
         }
 
         private ActionStatus returnRestIngots() {
+            Optional<MenuContent.Reading> readingOpt = menu.reading();
+            if (readingOpt.isEmpty()) return abortRecovering(Problem.of(Problem.Kind.TARGET_GONE, "石英切割刀界面中途关闭"));
             if (menu.busy()) return ActionStatus.running();
             if (!menu.cursorEmpty() && ingotPlayerSlot >= 0) {
                 if (!menu.click(ingotPlayerSlot, 0)) {
@@ -341,6 +386,15 @@ public final class QuartzKnifeSettings implements ItemSettings {
                 }
                 waited = 0;
                 return ActionStatus.progressed();
+            }
+            if (!isContainerSlotOccupied(readingOpt.get(), inputSlot)) {
+                if (pickAttempts < MAX_PICK_ATTEMPTS) {
+                    pickAttempts++;
+                    waited = 0;
+                    stage = Stage.PICK_INGOT;
+                    return ActionStatus.progressed();
+                }
+                return abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME, "金属锭未落入石英切割刀输入槽"));
             }
             waited = 0;
             stage = Stage.SEND_NAME;
@@ -356,13 +410,16 @@ public final class QuartzKnifeSettings implements ItemSettings {
             if (!sent) {
                 return abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME, "发送石英切割刀 setName 动作失败"));
             }
+            takeSent = false;
             waited = 0;
             stage = Stage.TAKE_OUTPUT;
             return ActionStatus.progressed();
         }
 
+        // 发一次 quickMove(outputSlot) 后置 takeSent=true 等待背包同步，即使输入槽有余锭也绝不连发重复刻模板。
         private ActionStatus takeNamedPress(LocalPlayer self) {
-            if (holds(ItemStack.EMPTY, self, KEY_ENGRAVE_NAME, wantedName)) {
+            boolean hasPress = holds(ItemStack.EMPTY, self, KEY_ENGRAVE_NAME, wantedName);
+            if (hasPress) {
                 waited = 0;
                 stage = Stage.RECOVER_INPUT;
                 return ActionStatus.progressed();
@@ -376,22 +433,35 @@ public final class QuartzKnifeSettings implements ItemSettings {
                 return ActionStatus.failed(failure);
             }
             if (menu.busy()) return ActionStatus.running();
-            if (isContainerSlotOccupied(readingOpt.get(), outputSlot)) {
-                if (menu.quickMove(outputSlot)) {
+            boolean outputOccupied = isContainerSlotOccupied(readingOpt.get(), outputSlot);
+            TakeDecision decision = decideTakeStep(false, takeSent, outputOccupied, waited + 1);
+            return switch (decision) {
+                case DONE_RECOVER -> {
                     waited = 0;
-                    return ActionStatus.progressed();
+                    stage = Stage.RECOVER_INPUT;
+                    yield ActionStatus.progressed();
                 }
-                if (++waited > OUTPUT_WAIT_TICKS) {
-                    return abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
-                            "未能从石英切割刀输出槽取走命名压印模板（背包可能已满）"));
+                case SEND_QUICK_MOVE -> {
+                    if (menu.quickMove(outputSlot)) {
+                        takeSent = true;
+                        waited = 0;
+                        yield ActionStatus.progressed();
+                    }
+                    if (++waited > OUTPUT_WAIT_TICKS) {
+                        yield abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                                "未能从石英切割刀输出槽取走命名压印模板（背包可能已满）"));
+                    }
+                    yield ActionStatus.running();
                 }
-                return ActionStatus.running();
-            }
-            if (++waited > OUTPUT_WAIT_TICKS) {
-                return abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                case WAIT_SYNC -> {
+                    waited++;
+                    yield ActionStatus.running();
+                }
+                case TIMEOUT_NO_OUTPUT -> abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                         "石英切割刀输出槽未出现名为 \"" + wantedName + "\" 的命名压印模板"));
-            }
-            return ActionStatus.running();
+                case TIMEOUT_UNSYNCED -> abortRecovering(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                        "已向石英切割刀输出槽发过一次取货，但背包未同步到名为 \"" + wantedName + "\" 的命名压印模板（背包可能已满）"));
+            };
         }
 
         // 关窗前防掉锭纪律：把槽 0 任何剩余金属锭全部快速移回背包，绝不交给 QuartzKnifeMenu.removed() 掉到地上。

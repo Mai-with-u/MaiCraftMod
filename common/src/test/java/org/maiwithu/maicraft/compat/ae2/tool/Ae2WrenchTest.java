@@ -8,11 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
@@ -130,5 +133,27 @@ class Ae2WrenchTest {
         assertTrue(rules.canRotateWith(new ItemStack(Items.STICK)));
         assertFalse(rules.canRotateWith(new ItemStack(Items.IRON_INGOT)));
         assertFalse(rules.canRotateWith(ItemStack.EMPTY));
+    }
+
+    @Test
+    void 只带下界石英扳手时转正规则返回下界扳手且绝不选网络工具() {
+        Function<String, Optional<Item>> lookup = id -> switch (id) {
+            case Ae2Wrench.CERTUS_WRENCH -> Optional.of(Items.QUARTZ);
+            case Ae2Wrench.NETHER_WRENCH -> Optional.of(Items.BLAZE_ROD);
+            case Ae2Wrench.NETWORK_TOOL -> Optional.of(Items.COMPASS);
+            default -> Optional.empty();
+        };
+
+        // 只携带下界石英扳手时，必须返回下界石英扳手，不能硬返回赛特斯石英扳手导致跳过转正。
+        assertEquals(Optional.of(Items.BLAZE_ROD),
+                Ae2WrenchPlacementRules.resolveQuartzWrench(Set.of(Ae2Wrench.NETHER_WRENCH), lookup));
+        // 同时携带两种或只带赛特斯时，优先返回赛特斯石英扳手。
+        assertEquals(Optional.of(Items.QUARTZ),
+                Ae2WrenchPlacementRules.resolveQuartzWrench(
+                        Set.of(Ae2Wrench.CERTUS_WRENCH, Ae2Wrench.NETHER_WRENCH), lookup));
+        // 只带网络工具或身上无扳手时，绝不返回网络工具，回退默认石英扳手。
+        assertEquals(Optional.of(Items.QUARTZ),
+                Ae2WrenchPlacementRules.resolveQuartzWrench(Set.of(Ae2Wrench.NETWORK_TOOL), lookup));
+        assertEquals(1, new Ae2Tools(ToolTestFakes.compat(), Ae2ToolReads.NONE).placementRules(() -> null).size());
     }
 }

@@ -50,13 +50,24 @@ class HandheldToolsAndMatterCannonTest {
         assertTrue(MatterCannonWeapon.firstLethalShot(lowPower).isEmpty());
         assertEquals(0, MatterCannonWeapon.estimateDamage(lowPower));
 
-        // 混合装填彩弹与金粒（带 1 张加速卡）：跳过彩弹选金粒，弹道直线瞬发，伤害 ceil(196.97 * 2 / 20) = 20。
-        Ae2ToolReads.MatterCannonSnapshot mixed = new Ae2ToolReads.MatterCannonSnapshot(
+        // AE2 MatterCannonItem.fireCannon 固定发射首位条目，不会跳过首位彩弹去打后面的金粒：
+        // 首位为彩弹 + 次位为金粒时，必须返回空 Shot 与 0 伤害，避免远程战斗空耗电打零伤彩弹。
+        Ae2ToolReads.MatterCannonSnapshot paintFirst = new Ae2ToolReads.MatterCannonSnapshot(
                 10000.0, 200000.0, 1,
                 List.of(
                         new Ae2ToolReads.CannonAmmoEntry("ae2:blue_paint_ball", 32, 0.0f, true),
                         new Ae2ToolReads.CannonAmmoEntry("minecraft:gold_nugget", 16, 196.97f, false)));
-        RangedWeapon.Shot shot = MatterCannonWeapon.firstLethalShot(mixed).orElseThrow();
+        assertTrue(MatterCannonWeapon.firstLethalShot(paintFirst).isEmpty(), "首位彩弹不得跳过发射次位金粒");
+        assertTrue(MatterCannonWeapon.allLethalShots(paintFirst).isEmpty());
+        assertEquals(0, MatterCannonWeapon.estimateDamage(paintFirst));
+
+        // 首位为金粒（带 1 张加速卡）+ 次位彩弹：下一发为金粒，弹道直线瞬发，伤害 ceil(196.97 * 2 / 20) = 20。
+        Ae2ToolReads.MatterCannonSnapshot goldFirst = new Ae2ToolReads.MatterCannonSnapshot(
+                10000.0, 200000.0, 1,
+                List.of(
+                        new Ae2ToolReads.CannonAmmoEntry("minecraft:gold_nugget", 16, 196.97f, false),
+                        new Ae2ToolReads.CannonAmmoEntry("ae2:blue_paint_ball", 32, 0.0f, true)));
+        RangedWeapon.Shot shot = MatterCannonWeapon.firstLethalShot(goldFirst).orElseThrow();
         assertEquals("minecraft:gold_nugget", shot.ammoItem());
         assertEquals(-1, shot.ammoSlot());
         assertEquals(0, shot.chargeTicks());
@@ -64,7 +75,7 @@ class HandheldToolsAndMatterCannonTest {
         assertEquals(0.0, shot.ballistics().gravity());
         assertEquals(1.0, shot.ballistics().drag());
         assertEquals(MatterCannonWeapon.RAY_RANGE, shot.ballistics().speed());
-        assertEquals(20, MatterCannonWeapon.estimateDamage(mixed));
+        assertEquals(20, MatterCannonWeapon.estimateDamage(goldFirst));
     }
 
     @Test

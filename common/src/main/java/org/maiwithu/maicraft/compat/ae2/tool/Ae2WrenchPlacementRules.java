@@ -10,12 +10,16 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.Function;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -23,6 +27,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.construction.ReadsBlocks;
 import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
  * AE2 石英扳手的方块转正规则：放下朝向不对的 AE2 设备方块，或需要调整样板供应器推送面（PUSH_DIRECTION）时，
@@ -36,16 +41,30 @@ public final class Ae2WrenchPlacementRules implements PlacementRules {
 
     private final Ae2Compat compat;
     private final Ae2ToolReads reads;
+    private final Supplier<PlayerContext> context;
+    private final Function<String, Optional<Item>> itemLookup;
     private final Optional<Item> customWrench;
 
     public Ae2WrenchPlacementRules(Ae2Compat compat, Ae2ToolReads reads) {
-        this(compat, reads, Optional.empty());
+        this(compat, reads, () -> null);
+    }
+
+    /** 带角色上下文供应器的构造：优先返回角色实际携带的赛特斯或下界石英扳手（避免只带下界扳手时误判缺扳手跳过转正）。 */
+    public Ae2WrenchPlacementRules(Ae2Compat compat, Ae2ToolReads reads, Supplier<PlayerContext> context) {
+        this(compat, reads, context, Ae2WrenchPlacementRules::lookupItem, Optional.empty());
     }
 
     /** 离线单测用构造：允许在未注册 AE2 物品的测试环境注入替身扳手物品。 */
     Ae2WrenchPlacementRules(Ae2Compat compat, Ae2ToolReads reads, Optional<Item> customWrench) {
+        this(compat, reads, () -> null, Ae2WrenchPlacementRules::lookupItem, customWrench);
+    }
+
+    Ae2WrenchPlacementRules(Ae2Compat compat, Ae2ToolReads reads, Supplier<PlayerContext> context,
+            Function<String, Optional<Item>> itemLookup, Optional<Item> customWrench) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.reads = Objects.requireNonNull(reads, "reads");
+        this.context = Objects.requireNonNull(context, "context");
+        this.itemLookup = Objects.requireNonNull(itemLookup, "itemLookup");
         this.customWrench = Objects.requireNonNull(customWrench, "customWrench");
     }
 
@@ -105,13 +124,44 @@ public final class Ae2WrenchPlacementRules implements PlacementRules {
         return Optional.empty();
     }
 
+    /**
+     * 按角色当前随身物品选出用于转正的石英扳手（纯函数）：
+     * 只带下界石英扳手时返回下界石英扳手，带赛特斯或两者都带时优先赛特斯石英扳手；
+     * 绝不返回 ae2:network_tool（网络工具在 AE2 中不能旋转方块）。
+     */
+    static Optional<Item> resolveQuartzWrench(Set<String> carriedItemIds,
+            Function<String, Optional<Item>> itemLookup) {
+        boolean hasCertus = carriedItemIds != null && carriedItemIds.contains(Ae2Wrench.CERTUS_WRENCH);
+        boolean hasNether = carriedItemIds != null && carriedItemIds.contains(Ae2Wrench.NETHER_WRENCH);
+        if (hasNether && !hasCertus) {
+            Optional<Item> nether = itemLookup.apply(Ae2Wrench.NETHER_WRENCH);
+            return nether.isPresent() ? nether : itemLookup.apply(Ae2Wrench.CERTUS_WRENCH);
+        }
+        Optional<Item> certus = itemLookup.apply(Ae2Wrench.CERTUS_WRENCH);
+        return certus.isPresent() ? certus : itemLookup.apply(Ae2Wrench.NETHER_WRENCH);
+    }
+
     private Optional<Item> resolveQuartzWrench() {
         if (customWrench.isPresent()) {
             String id = BuiltInRegistries.ITEM.getKey(customWrench.get()).toString();
             return Ae2Wrench.NETWORK_TOOL.equals(id) ? Optional.empty() : customWrench;
         }
-        Optional<Item> certus = lookupItem(Ae2Wrench.CERTUS_WRENCH);
-        return certus.isPresent() ? certus : lookupItem(Ae2Wrench.NETHER_WRENCH);
+        return resolveQuartzWrench(carriedItemIds(), itemLookup);
+    }
+
+    private Set<String> carriedItemIds() {
+        PlayerContext current = context.get();
+        LocalPlayer self = current == null ? null : current.localPlayer();
+        if (self == null) return Set.of();
+        Set<String> ids = new HashSet<>();
+        Inventory inventory = self.getInventory();
+        for (int slot = 0; slot < inventory.items.size(); slot++) {
+            ItemStack stack = inventory.items.get(slot);
+            if (!stack.isEmpty()) ids.add(BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+        }
+        ItemStack offhand = self.getOffhandItem();
+        if (!offhand.isEmpty()) ids.add(BuiltInRegistries.ITEM.getKey(offhand.getItem()).toString());
+        return ids;
     }
 
     private static Optional<Item> lookupItem(String id) {

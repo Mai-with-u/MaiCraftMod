@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.ability.machine.spi.ItemSettings;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
@@ -18,6 +19,7 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2SemanticsLayout;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
 /**
@@ -57,6 +59,11 @@ public final class Ae2Tools {
     /** 放置转正规则：仅石英扳手旋转方块与切换样板供应器推送方向（排除网络工具）。 */
     public List<PlacementRules> placementRules() {
         return List.of(new Ae2WrenchPlacementRules(compat, reads));
+    }
+
+    /** 放置转正规则（按角色随身扳手优先匹配赛特斯或下界石英扳手，供单点接线传入实时上下文）。 */
+    public List<PlacementRules> placementRules(Supplier<PlayerContext> context) {
+        return List.of(new Ae2WrenchPlacementRules(compat, reads, context));
     }
 
     /** 全部 AE2 手持物品设置：石英切割刀、陨石罗盘、内存卡、上色器、熵变仪/物质炮/充能法杖。 */

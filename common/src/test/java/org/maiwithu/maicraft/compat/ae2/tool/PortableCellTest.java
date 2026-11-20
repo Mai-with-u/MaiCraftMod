@@ -93,4 +93,28 @@ class PortableCellTest {
         assertEquals(0, backpack.freeSlots());
         assertTrue(backpack.carried().isEmpty());
     }
+
+    @Test
+    void 打开便携元件前须连续两刻稳定非潜行防空元件被拆解() {
+        int ticks = 0;
+        // 潜行状态始终归零且未就绪。
+        ticks = PortableCellCatalog.advanceUnsneakTicks(true, ticks);
+        assertEquals(0, ticks);
+        assertFalse(PortableCellCatalog.isUnsneakStable(true, ticks));
+
+        // 刚松开第 1 刻仍未达稳定阈值（等服务端同步解除潜行）。
+        ticks = PortableCellCatalog.advanceUnsneakTicks(false, ticks);
+        assertEquals(1, ticks);
+        assertFalse(PortableCellCatalog.isUnsneakStable(false, ticks));
+
+        // 连续第 2 刻非潜行后才允许普通右键打开界面。
+        ticks = PortableCellCatalog.advanceUnsneakTicks(false, ticks);
+        assertEquals(PortableCellCatalog.UNSNEAK_STABLE_TICKS, ticks);
+        assertTrue(PortableCellCatalog.isUnsneakStable(false, ticks));
+
+        // 途中若再次触发潜行，立即归零重新计时。
+        ticks = PortableCellCatalog.advanceUnsneakTicks(true, ticks);
+        assertEquals(0, ticks);
+        assertFalse(PortableCellCatalog.isUnsneakStable(false, ticks));
+    }
 }

@@ -209,6 +209,8 @@ public final class NetworkToolboxSource implements ItemSource {
             }
             AbstractContainerMenu raw = self.containerMenu;
             if (!compat.call("核对网络工具箱界面", () -> reads.isNetworkToolMenu(raw))) {
+                // 误开网络状态页或其他容器界面时立即关窗，避免滞留屏幕挡住后续交互。
+                PortableCellCatalog.closeUnexpectedMenu(self);
                 return nextOrFail("打开的不是网络工具升级卡箱界面");
             }
             menu = ClientOpenedMenu.claimCurrent(services.context(),
