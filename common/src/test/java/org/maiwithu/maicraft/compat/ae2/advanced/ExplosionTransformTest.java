@@ -144,5 +144,16 @@ class ExplosionTransformTest {
                 Map.of(8888L, 0), Map.of(8888L, 2)));
         assertTrue(ExplosionTransformPlan.confirmPickedPair(
                 Map.of(8888L, 2), Map.of(8888L, 3)).isEmpty());
+
+        // 点火前两样原料都必须确认丢出，缺一料一律拒绝点火防止烧毁奇点。
+        assertTrue(ExplosionTransformPlan.allReagentsThrown(
+                Map.of(ExplosionTransformPlan.SINGULARITY_ITEM, 1, ExplosionTransformPlan.ENDER_DUST_ITEM, 1),
+                ExplosionTransformPlan.ENDER_DUST_ITEM));
+        assertFalse(ExplosionTransformPlan.allReagentsThrown(
+                Map.of(ExplosionTransformPlan.SINGULARITY_ITEM, 1),
+                ExplosionTransformPlan.ENDER_DUST_ITEM));
+        assertFalse(ExplosionTransformPlan.allReagentsThrown(
+                Map.of(ExplosionTransformPlan.ENDER_PEARL_ITEM, 1),
+                ExplosionTransformPlan.ENDER_PEARL_ITEM));
     }
 }

@@ -38,6 +38,7 @@ import appeng.blockentity.spatial.SpatialIOPortBlockEntity;
 import appeng.blockentity.spatial.SpatialPylonBlockEntity;
 import appeng.blockentity.storage.IOPortBlockEntity;
 import appeng.core.AEConfig;
+import appeng.core.definitions.AEItems;
 import appeng.helpers.IConfigInvHost;
 import appeng.helpers.IPriorityHost;
 import appeng.helpers.InterfaceLogicHost;
@@ -49,9 +50,11 @@ import appeng.me.service.StatisticsService;
 import appeng.parts.automation.AbstractLevelEmitterPart;
 import appeng.parts.automation.AnnihilationPlanePart;
 import appeng.parts.p2p.P2PTunnelPart;
+import appeng.parts.storagebus.StorageBusPart;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.ItemEnchantments;
@@ -106,7 +109,7 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
             return Optional.of(readSpatialPylon(blockId, pylon));
         }
         if (entity instanceof SpatialIOPortBlockEntity spatial) {
-            return Optional.of(readSpatialTransfer(blockId, spatial));
+            return Optional.of(readSpatialTransfer(blockId, level, spatial));
         }
         if (entity instanceof SpatialAnchorBlockEntity anchor) {
             return Optional.of(readSpatialAnchor(blockId, anchor));
@@ -135,7 +138,14 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         }
         if (part instanceof P2PTunnelPart<?> tunnel) {
             readings.put("p2p_output", tunnel.isOutput());
-            readings.put("p2p_frequency", (int) tunnel.getFrequency());
+            // P2P 频率为 16 位无符号短整型，按无符号整数输出，避免 >= 0x8000 符号扩展为负数。
+            readings.put("p2p_frequency", Short.toUnsignedInt(tunnel.getFrequency()));
+        }
+        if (part instanceof StorageBusPart storageBus) {
+            Component connectedTo = storageBus.getConnectedToDescription();
+            if (connectedTo != null && !connectedTo.getString().isEmpty()) {
+                readings.put("connected_to", connectedTo.getString());
+            }
         }
         if (part instanceof AnnihilationPlanePart plane) {
             readings.put("enchantments", readEnchantments(plane.getEnchantments()));
@@ -242,6 +252,7 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         }
         Map<String, Object> readings = new LinkedHashMap<>();
         readings.put("active", transfer.isActive());
+        readings.put("has_redstone_card", transfer.getUpgrades().isInstalled(AEItems.REDSTONE_CARD));
         readings.put("input_cells", inputCells);
         readings.put("output_cells", outputCells);
         return new DeviceSnapshot("io_transfer", blockId, "", "",
@@ -275,7 +286,8 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         readings.put("formed", quantum.isFormed());
         readings.put("corner", quantum.isCorner());
         readings.put("powered", quantum.isPowered());
-        readings.put("has_singularity", center.hasQES() || frequency != 0L);
+        // 服务端 constructed 字节不含 hasSingularity 位，直接按中心链接仓槽 0 是否非空判定。
+        readings.put("has_singularity", !center.getInternalInventory().getStackInSlot(0).isEmpty());
         readings.put("frequency", frequency);
         readings.put("peer_connected", peerConnected);
         readings.put("peer_cross_dimension", peerCrossDimension);
@@ -303,11 +315,12 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         return new DeviceSnapshot("spatial_pylon", blockId, "", "", Map.of(), List.of(), readings);
     }
 
-    // 空间传输站：读区域尺寸、效率、电量、红石态及槽 0 / 槽 1 空间元件绑定状态。
-    private static DeviceSnapshot readSpatialTransfer(String blockId, SpatialIOPortBlockEntity spatial) {
+    // 空间传输站：纯只读查区域尺寸、效率、电量、邻格红石信号（绝不调 getRedstoneState 避免触发切换）及槽 0 / 槽 1 空间元件绑定。
+    private static DeviceSnapshot readSpatialTransfer(String blockId, ServerLevel level,
+                                                      SpatialIOPortBlockEntity spatial) {
         Map<String, Object> readings = new LinkedHashMap<>();
         readings.put("active", spatial.isActive());
-        readings.put("redstone_powered", spatial.getRedstoneState());
+        readings.put("redstone_powered", level.getBestNeighborSignal(spatial.getBlockPos()) != 0);
         InternalInventory inv = spatial.getInternalInventory();
         fillSpatialCellSlot(readings, "input", inv.size() > 0 ? inv.getStackInSlot(0) : ItemStack.EMPTY);
         fillSpatialCellSlot(readings, "output", inv.size() > 1 ? inv.getStackInSlot(1) : ItemStack.EMPTY);
@@ -454,13 +467,15 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         return out;
     }
 
+    // 按升级槽完整下标输出（空槽写空串），确保客户端按 upgrade.0..N 对齐，不因中间空槽错位。
     private static List<String> readUpgrades(Object target) {
         if (!(target instanceof IUpgradeableObject upgradeable)) return List.of();
         IUpgradeInventory inv = upgradeable.getUpgrades();
         if (inv == null) return List.of();
-        List<String> out = new ArrayList<>();
-        for (ItemStack stack : inv) {
-            if (!stack.isEmpty()) out.add(itemIdOf(stack));
+        List<String> out = new ArrayList<>(inv.size());
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack stack = inv.getStackInSlot(i);
+            out.add(stack.isEmpty() ? "" : itemIdOf(stack));
         }
         return out;
     }

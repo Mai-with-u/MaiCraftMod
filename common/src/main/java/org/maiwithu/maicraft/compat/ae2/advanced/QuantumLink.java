@@ -47,11 +47,15 @@ public final class QuantumLink implements Ae2DeviceOps {
     /** 取出缠绕奇点的设置值。 */
     public static final String VALUE_OUT = "out";
 
+    /** 本次会话中在打开 ae2:qnb 界面后观察到的中心槽位事实（frequency=0 表示频率未知，绝不用哨兵伪造合法频率）。 */
+    record SeenSlot(boolean hasSingularity, long frequency) {
+    }
+
     private final Ae2Compat compat;
     private final Ae2AdvancedReads reads;
     private final Ae2DeviceReadings serverReadings;
-    /** 本次会话中在打开 ae2:qnb 界面后读到的中心链接仓奇点频率（0 表示刚确认清空）。 */
-    private final Map<BlockPos, Long> seenFrequency = new HashMap<>();
+    /** 本次会话中在打开 ae2:qnb 界面后读到的中心链接仓槽位事实。 */
+    private final Map<BlockPos, SeenSlot> seenSlots = new HashMap<>();
 
     public QuantumLink(Ae2Compat compat, Ae2AdvancedReads reads, Ae2DeviceReadings serverReadings) {
         this.compat = Objects.requireNonNull(compat, "compat");
@@ -76,9 +80,10 @@ public final class QuantumLink implements Ae2DeviceOps {
                         p -> isBlock(level, p, QuantumRing.RING_BLOCK),
                         p -> isBlock(level, p, QuantumRing.LINK_BLOCK)))
                 : Optional.empty();
-        Long cached = seenFrequency.get(pos.immutable());
-        return Optional.of(QuantumRing.state(blockId, cell.get(), serverReply,
-                cached != null && cached != 0L ? Optional.of(cached) : Optional.empty(), review));
+        SeenSlot cached = seenSlots.get(pos.immutable());
+        Optional<Long> cachedFrequency = cached != null && cached.hasSingularity() && cached.frequency() != 0L
+                ? Optional.of(cached.frequency()) : Optional.empty();
+        return Optional.of(QuantumRing.state(blockId, cell.get(), serverReply, cachedFrequency, review));
     }
 
     @Override public Optional<MachineSettings> settings(BlockPos pos, PlayerServices services) {
@@ -122,9 +127,9 @@ public final class QuantumLink implements Ae2DeviceOps {
         }
 
         private String currentSettingValue(BlockPos at, Optional<Ae2AdvancedReads.QuantumCell> cell) {
-            Long cached = seenFrequency.get(at.immutable());
+            SeenSlot cached = seenSlots.get(at.immutable());
             if (cached != null) {
-                return cached != 0L ? VALUE_IN : VALUE_OUT;
+                return cached.hasSingularity() ? VALUE_IN : VALUE_OUT;
             }
             if (cell.isEmpty()) return "unknown";
             return cell.get().hasSingularity() ? VALUE_IN : VALUE_OUT;
@@ -225,7 +230,11 @@ public final class QuantumLink implements Ae2DeviceOps {
                         "背包里没有带有效频率的量子缠绕奇点（ae2:quantum_entangled_singularity）",
                         "先用 obtain（via=ae2_explosion_transform）炸出一对同频量子缠绕奇点"));
             }
-            if (!menu.quickMove(moveSlot)) return ActionStatus.running();
+            if (!menu.quickMove(moveSlot)) {
+                if (++waited <= SYNC_WAIT_TICKS) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK,
+                        (wantInside ? "放入" : "取出") + "量子缠绕奇点时界面一直无法发送搬运点击"));
+            }
             waited = 0;
             stage = Stage.WAIT;
             return ActionStatus.progressed();
@@ -290,11 +299,12 @@ public final class QuantumLink implements Ae2DeviceOps {
 
         private void recordSeenSlot(SlotSnapshot snap) {
             if (snap == null || snap.isEmpty()) {
-                seenFrequency.put(at, 0L);
+                seenSlots.put(at, new SeenSlot(false, 0L));
                 return;
             }
-            long freq = reads.entangledSingularityId(snap.stack()).orElse(1L);
-            seenFrequency.put(at, freq == 0L ? 1L : freq);
+            // 显式区分“已确认槽内有奇点”和“频率已知（非 0）”，绝不写入哨兵假频率。
+            long freq = reads.entangledSingularityId(snap.stack()).orElse(0L);
+            seenSlots.put(at, new SeenSlot(true, freq));
         }
 
         private ActionStatus closeWith(Problem reason) {

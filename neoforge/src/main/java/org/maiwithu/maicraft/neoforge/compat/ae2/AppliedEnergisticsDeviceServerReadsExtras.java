@@ -125,6 +125,8 @@ public final class AppliedEnergisticsDeviceServerReadsExtras implements Ae2Netwo
         for (Class<?> machineClass : grid.getMachineClasses()) {
             if (!PatternContainer.class.isAssignableFrom(machineClass)) continue;
             for (IGridNode node : grid.getMachineNodes(machineClass)) {
+                // 对齐 AE2 样板管理终端，仅统计在线且活跃的样板容器节点。
+                if (!node.isActive()) continue;
                 if (!(node.getOwner() instanceof PatternContainer container)) continue;
                 if (!container.isVisibleInTerminal()) continue;
                 PatternContainerGroup group = container.getTerminalGroup();

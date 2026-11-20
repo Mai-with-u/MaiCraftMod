@@ -302,6 +302,13 @@ public final class ExplosionTransformPlan {
         return Optional.empty();
     }
 
+    /** 核对引爆前奇点与末影珍珠/粉两样原料都已确认丢出，防止缺一料误引爆烧毁奇点。 */
+    public static boolean allReagentsThrown(Map<String, Integer> thrown, String enderItem) {
+        if (thrown == null || enderItem == null) return false;
+        return thrown.getOrDefault(SINGULARITY_ITEM, 0) >= 1
+                && thrown.getOrDefault(enderItem, 0) >= 1;
+    }
+
     private static Optional<Problem> checkCells(PermissionCheck check, Permissions permissions, BlockPos center,
                                                 String dimension, boolean breaksBlocks) {
         WorldPosition centerPos = new WorldPosition(center.getX(), center.getY(), center.getZ(), dimension);

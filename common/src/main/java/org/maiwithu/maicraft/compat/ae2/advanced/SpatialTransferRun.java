@@ -44,8 +44,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 final class SpatialTransferRun implements FullRun {
 
     private enum Stage {
-        CLEAR_HAND, OPEN_LOAD, PREPARE_SLOTS, WAIT_LOAD, CLOSE_LOAD,
-        LOCATE_SWITCH, APPROACH_SWITCH, RESET_LEVER, PULSE_GAP, TRIGGER_SWITCH,
+        CLEAR_HAND, OPEN_LOAD, PREPARE_SLOTS, WAIT_CLEAR_OUTPUT, WAIT_CLEAR_INPUT, WAIT_LOAD, CLOSE_LOAD,
+        LOCATE_SWITCH, APPROACH_SWITCH, WAIT_BUTTON_RESET, RESET_LEVER, PULSE_GAP, TRIGGER_SWITCH,
         WAIT_TRANSITION, OPEN_VERIFY, VERIFY_SLOT, WAIT_TAKE, CLOSE_VERIFY, FINISHED
     }
 
@@ -55,6 +55,8 @@ final class SpatialTransferRun implements FullRun {
     private static final int TRANSITION_WAIT_TICKS = 20;
     /** 拉杆先拉低再拉高之间留出的间隔刻数，确保服务端观察到低→高上升沿。F 游戏事实。 */
     private static final int LEVER_RESET_GAP_TICKS = 4;
+    /** 已按下的木/石按钮等待其自动弹起复位的刻数上限（木按钮最长 30 刻 + 缓冲）。F 游戏事实。 */
+    private static final int BUTTON_RESET_WAIT_TICKS = 50;
 
     private final BlockPos at;
     private final RunRequest request;
@@ -71,7 +73,7 @@ final class SpatialTransferRun implements FullRun {
     private int waited;
     private BlockPos switchPos;
     private boolean switchIsLever;
-    private boolean leverNeedsReset;
+    private boolean switchNeedsReset;
     private Ae2AdvancedReads.SpatialMenuStatus lastMenuStatus;
     private Ae2AdvancedReads.SpatialCellSpec loadedCellSpec;
     private int produced;
@@ -106,10 +108,13 @@ final class SpatialTransferRun implements FullRun {
             case CLEAR_HAND -> clearHand(context);
             case OPEN_LOAD -> openMenu(context, Stage.PREPARE_SLOTS);
             case PREPARE_SLOTS -> prepareSlots(player);
+            case WAIT_CLEAR_OUTPUT -> waitSlotCleared(player, "MACHINE_OUTPUT", 1, "腾空槽 1 残留元件");
+            case WAIT_CLEAR_INPUT -> waitSlotCleared(player, "MACHINE_INPUT", 0, "腾空槽 0 占槽物品");
             case WAIT_LOAD -> waitLoad(player);
             case CLOSE_LOAD -> closeMenu(context, problem == null ? Stage.LOCATE_SWITCH : Stage.FINISHED);
             case LOCATE_SWITCH -> locateSwitch(player.level());
             case APPROACH_SWITCH -> approachSwitch(context);
+            case WAIT_BUTTON_RESET -> waitButtonReset(player.level());
             case RESET_LEVER -> flipSwitch(context, Stage.PULSE_GAP);
             case PULSE_GAP -> waitTicks(LEVER_RESET_GAP_TICKS, Stage.TRIGGER_SWITCH);
             case TRIGGER_SWITCH -> flipSwitch(context, Stage.WAIT_TRANSITION);
@@ -166,9 +171,11 @@ final class SpatialTransferRun implements FullRun {
         }
         SlotSnapshot outSnap = snapshotFor(reading, outputSlot);
         if (outSnap != null && !outSnap.isEmpty()) {
-            if (!menu.quickMove(outputSlot)) return ActionStatus.running();
-            waited = 0;
-            return ActionStatus.progressed();
+            // 腾空槽 1：发一次快速移动后进等待确认，绝不每刻连发，发包受阻也纳入超时。
+            if (!menu.quickMove(outputSlot)) {
+                return waitQuickMoveOrFail(true, "腾空槽 1 残留元件时界面一直无法发送点击");
+            }
+            return enter(Stage.WAIT_CLEAR_OUTPUT);
         }
         SlotSnapshot inSnap = snapshotFor(reading, inputSlot);
         if (inSnap != null && !inSnap.isEmpty() && matchesWantedCell(inSnap)) {
@@ -176,10 +183,11 @@ final class SpatialTransferRun implements FullRun {
             return enter(Stage.CLOSE_LOAD);
         }
         if (inSnap != null && !inSnap.isEmpty()) {
-            // 槽 0 占着其他物品：先收回背包，下一刻再放目标元件。
-            if (!menu.quickMove(inputSlot)) return ActionStatus.running();
-            waited = 0;
-            return ActionStatus.progressed();
+            // 槽 0 占着其他物品：发一次快速移动收回背包后进等待确认。
+            if (!menu.quickMove(inputSlot)) {
+                return waitQuickMoveOrFail(true, "腾空槽 0 占槽物品时界面一直无法发送点击");
+            }
+            return enter(Stage.WAIT_CLEAR_INPUT);
         }
         int carriedCellSlot = findCarriedCellSlot(reading);
         if (carriedCellSlot < 0) {
@@ -187,8 +195,26 @@ final class SpatialTransferRun implements FullRun {
                     ? "空间存储元件（ae2:spatial_storage_cell_2 / 16 / 128）" : request.item();
             return closeLoadWith(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有 " + wanted));
         }
-        if (!menu.quickMove(carriedCellSlot)) return ActionStatus.running();
+        if (!menu.quickMove(carriedCellSlot)) {
+            return waitQuickMoveOrFail(true, "把空间元件放入槽 0 时界面一直无法发送点击");
+        }
         return enter(Stage.WAIT_LOAD);
+    }
+
+    // 等待槽 1 或槽 0 腾空回到背包；背包已满导致无法移出时超时收场。
+    private ActionStatus waitSlotCleared(PlayerContext player, String semantic, int fallbackIndex, String what) {
+        Optional<MenuContent.Reading> readingOpt = menu.reading();
+        if (readingOpt.isPresent()) {
+            captureMenuStatus(player);
+            MenuContent.Reading reading = readingOpt.get();
+            int slotId = slotBySemantic(reading, semantic, fallbackIndex);
+            SlotSnapshot snap = snapshotFor(reading, slotId);
+            if (snap == null || snap.isEmpty()) {
+                return enter(Stage.PREPARE_SLOTS);
+            }
+        }
+        if (++waited <= SYNC_WAIT_TICKS) return ActionStatus.running();
+        return closeLoadWith(Problem.of(Problem.Kind.STUCK, what + "后槽位一直未变空（可能是背包已满）"));
     }
 
     private ActionStatus waitLoad(PlayerContext player) {
@@ -207,25 +233,38 @@ final class SpatialTransferRun implements FullRun {
         return closeLoadWith(Problem.of(Problem.Kind.STUCK, "把空间元件放入槽 0 后一直没看到槽位变化"));
     }
 
-    // 扫描空间传输站 6 个相邻格寻找可用拉杆或按钮；没有开关时明确告知需外部红石上升沿，不伪造切换。
+    // 扫描空间传输站 6 个相邻格寻找可用拉杆或按钮：优先选未按下的按钮或拉杆，只有已按下的按钮时等其弹起复位再按。
     private ActionStatus locateSwitch(ClientLevel level) {
+        BlockPos pressedButtonFallback = null;
         for (Direction dir : Direction.values()) {
             BlockPos adj = at.relative(dir);
             if (!level.isLoaded(adj)) continue;
             BlockState state = level.getBlockState(adj);
+            boolean powered = state.hasProperty(BlockStateProperties.POWERED)
+                    && state.getValue(BlockStateProperties.POWERED);
             if (state.getBlock() instanceof LeverBlock) {
                 switchPos = adj.immutable();
                 switchIsLever = true;
-                leverNeedsReset = state.hasProperty(BlockStateProperties.POWERED)
-                        && state.getValue(BlockStateProperties.POWERED);
+                switchNeedsReset = powered;
                 return enter(Stage.APPROACH_SWITCH);
             }
             if (state.getBlock() instanceof ButtonBlock) {
-                switchPos = adj.immutable();
-                switchIsLever = false;
-                leverNeedsReset = false;
-                return enter(Stage.APPROACH_SWITCH);
+                if (!powered) {
+                    switchPos = adj.immutable();
+                    switchIsLever = false;
+                    switchNeedsReset = false;
+                    return enter(Stage.APPROACH_SWITCH);
+                }
+                if (pressedButtonFallback == null) {
+                    pressedButtonFallback = adj.immutable();
+                }
             }
+        }
+        if (pressedButtonFallback != null) {
+            switchPos = pressedButtonFallback;
+            switchIsLever = false;
+            switchNeedsReset = true;
+            return enter(Stage.APPROACH_SWITCH);
         }
         notes.add("已将空间存储元件放入槽 0（槽 1 为空），周围未发现拉杆或按钮；请对 "
                 + at.toShortString() + " 提供一次外部红石低→高上升沿脉冲触发空间互换");
@@ -241,7 +280,23 @@ final class SpatialTransferRun implements FullRun {
         current.close();
         current = null;
         if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        return enter(switchIsLever && leverNeedsReset ? Stage.RESET_LEVER : Stage.TRIGGER_SWITCH);
+        if (switchIsLever) {
+            return enter(switchNeedsReset ? Stage.RESET_LEVER : Stage.TRIGGER_SWITCH);
+        }
+        return enter(switchNeedsReset ? Stage.WAIT_BUTTON_RESET : Stage.TRIGGER_SWITCH);
+    }
+
+    // 按钮已经处于按下态时等待它自动弹起，确保下一次右键产生真正的低→高红石上升沿。
+    private ActionStatus waitButtonReset(ClientLevel level) {
+        BlockState state = level.getBlockState(switchPos);
+        boolean stillPowered = state.hasProperty(BlockStateProperties.POWERED)
+                && state.getValue(BlockStateProperties.POWERED);
+        if (!stillPowered) {
+            return enter(Stage.TRIGGER_SWITCH);
+        }
+        if (++waited <= BUTTON_RESET_WAIT_TICKS) return ActionStatus.running();
+        return finish(Problem.of(Problem.Kind.STUCK,
+                "相邻按钮在 " + switchPos.toShortString() + " 一直保持按下状态，无法产生新的红石上升沿"));
     }
 
     private ActionStatus flipSwitch(TickContext context, Stage next) {
@@ -278,7 +333,9 @@ final class SpatialTransferRun implements FullRun {
         SlotSnapshot outSnap = snapshotFor(reading, outputSlot);
         SlotSnapshot inSnap = snapshotFor(reading, inputSlot);
         if (outSnap != null && !outSnap.isEmpty()) {
-            if (!menu.quickMove(outputSlot)) return ActionStatus.running();
+            if (!menu.quickMove(outputSlot)) {
+                return waitQuickMoveOrFail(false, "从槽 1 取回已完成空间元件时界面一直无法发送点击");
+            }
             return enter(Stage.WAIT_TAKE);
         }
         // 游戏未把元件移到槽 1：绝不伪造成功，按实测读数如实回报原因。
@@ -362,6 +419,12 @@ final class SpatialTransferRun implements FullRun {
         return SpatialTransfer.SPATIAL_CELL_ITEMS.contains(id) || reads.spatialCell(snap.stack()).isPresent();
     }
 
+    private ActionStatus waitQuickMoveOrFail(boolean loadingPhase, String message) {
+        if (++waited <= SYNC_WAIT_TICKS) return ActionStatus.running();
+        Problem reason = Problem.of(Problem.Kind.STUCK, message);
+        return loadingPhase ? closeLoadWith(reason) : closeVerifyWith(reason);
+    }
+
     private ActionStatus closeLoadWith(Problem reason) {
         problem = reason;
         return enter(Stage.CLOSE_LOAD);
@@ -405,9 +468,12 @@ final class SpatialTransferRun implements FullRun {
 
     @Override public String describe() {
         return switch (stage) {
-            case CLEAR_HAND, OPEN_LOAD, PREPARE_SLOTS, WAIT_LOAD, CLOSE_LOAD -> "向空间传输站装入空间元件";
-            case LOCATE_SWITCH, APPROACH_SWITCH, RESET_LEVER, PULSE_GAP, TRIGGER_SWITCH -> "触发空间传输站红石上升沿脉冲";
-            case WAIT_TRANSITION, OPEN_VERIFY, VERIFY_SLOT, WAIT_TAKE, CLOSE_VERIFY -> "核对空间互换结果并收回空间元件";
+            case CLEAR_HAND, OPEN_LOAD, PREPARE_SLOTS, WAIT_CLEAR_OUTPUT, WAIT_CLEAR_INPUT, WAIT_LOAD, CLOSE_LOAD ->
+                "向空间传输站装入空间元件";
+            case LOCATE_SWITCH, APPROACH_SWITCH, WAIT_BUTTON_RESET, RESET_LEVER, PULSE_GAP, TRIGGER_SWITCH ->
+                "触发空间传输站红石上升沿脉冲";
+            case WAIT_TRANSITION, OPEN_VERIFY, VERIFY_SLOT, WAIT_TAKE, CLOSE_VERIFY ->
+                "核对空间互换结果并收回空间元件";
             case FINISHED -> "空间传输站操作结束";
         };
     }

@@ -65,6 +65,7 @@ final class ExplosionTransformRun implements Action {
 
     private Stage stage = Stage.HAND_EXPLOSIVE;
     private Action current;
+    private TossesTogether activeToss;
     private Set<Integer> dropsBefore = Set.of();
     private Map<Long, Integer> carriedBefore = Map.of();
     private int waitTicks;
@@ -97,7 +98,7 @@ final class ExplosionTransformRun implements Action {
             case TOSS_REAGENTS -> tossReagents(context);
             case HAND_IGNITER -> moveItemToHand(context, loadout.igniterItem(), Stage.APPROACH_IGNITE);
             case APPROACH_IGNITE -> runSub(context,
-                    () -> services.approach().toward(ApproachTarget.ofBlock(site.explosiveAt()), permissions),
+                    () -> services.approach().toward(igniteApproachTarget(), permissions),
                     Stage.IGNITE);
             case IGNITE -> igniteExplosive(context);
             case RETREAT -> runSub(context,
@@ -139,16 +140,38 @@ final class ExplosionTransformRun implements Action {
         return advanceSub(context, Stage.TOSS_REAGENTS);
     }
 
-    // 紧贴引爆块相邻 1 格（稳落在 AE2 爆炸转化 ±1 格 2×2×2 盒内）精确丢出 1 枚奇点与 1 枚末影珍珠/粉。
+    // 紧贴引爆块相邻 1 格（稳落在 AE2 爆炸转化 ±1 格 2×2×2 盒内）精确丢出 1 枚奇点与 1 枚末影珍珠/粉；
+    // 丢完必须确认两样原料都已丢出，否则中止不点火，避免缺一料引爆白白烧毁奇点。
     private ActionStatus tossReagents(TickContext context) {
         if (current == null) {
             List<TossesTogether.Toss> tosses = List.of(
                     new TossesTogether.Toss(ExplosionTransformPlan.SINGULARITY_ITEM, 1, true),
                     new TossesTogether.Toss(loadout.enderItem(), 1, true));
-            current = new TossesTogether(tosses, site.tossAt(), 0.1, permissions, services.approach(),
+            activeToss = new TossesTogether(tosses, site.tossAt(), 0.1, permissions, services.approach(),
                     services.toMainhand(), FirstPersonScene::of, Optional.empty());
+            current = activeToss;
         }
-        return advanceSub(context, Stage.HAND_IGNITER);
+        ActionStatus status = current.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        Map<String, Integer> thrown = activeToss == null ? Map.of() : activeToss.thrown();
+        current.close();
+        current = null;
+        activeToss = null;
+        if (status instanceof ActionStatus.Failed failed) return stop(failed.problem());
+        if (!ExplosionTransformPlan.allReagentsThrown(thrown, loadout.enderItem())) {
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "奇点与末影原料未全部确认丢出（实际丢出：" + thrown + "），已中止点火以防烧毁奇点",
+                    "请检查奇点与末影珍珠/粉均在背包中且丢料格无障碍后重试"));
+        }
+        return enter(Stage.HAND_IGNITER);
+    }
+
+    // 用红石火把点火时实际交互目标是丢料格下方顶面，走近站位须与放置面一致。
+    private ApproachTarget igniteApproachTarget() {
+        if ("minecraft:redstone_torch".equals(loadout.igniterItem())) {
+            return ApproachTarget.ofBlockFace(site.tossAt().below(), Direction.UP);
+        }
+        return ApproachTarget.ofBlock(site.explosiveAt());
     }
 
     // 点燃引爆块：打火石/火焰弹/熵变仪直接右键引爆块；红石火把则放到引爆块邻格触发红石引爆。

@@ -96,13 +96,15 @@ public final class AppliedEnergisticsAdvanced implements Ae2AdvancedReads {
         }
         String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
         SpatialPlotInfo binding = stack.get(AEComponents.SPATIAL_PLOT_INFO);
+        // 客户端直接从同步的 SPATIAL_PLOT_INFO 组件读地块编号，绝不调服务端专用的 getAllocatedPlotId。
+        int allocatedPlotId = binding == null ? -1 : binding.id();
         int lockedX = binding != null && binding.size() != null ? binding.size().getX() : 0;
         int lockedY = binding != null && binding.size() != null ? binding.size().getY() : 0;
         int lockedZ = binding != null && binding.size() != null ? binding.size().getZ() : 0;
         return Optional.of(new SpatialCellSpec(
                 itemId,
                 cell.getMaxStoredDim(stack),
-                cell.getAllocatedPlotId(stack),
+                allocatedPlotId,
                 lockedX,
                 lockedY,
                 lockedZ));

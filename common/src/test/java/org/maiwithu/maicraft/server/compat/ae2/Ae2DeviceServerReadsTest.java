@@ -115,6 +115,31 @@ class Ae2DeviceServerReadsTest {
     }
 
     @Test
+    void 升级槽保留完整下标并支持无符号P2P频率与连接目标及红石卡标记() {
+        Map<String, Object> readings = new LinkedHashMap<>();
+        readings.put("p2p_output", true);
+        readings.put("p2p_frequency", Short.toUnsignedInt((short) 0x9A3C));
+        readings.put("connected_to", "minecraft:chest");
+        readings.put("has_redstone_card", true);
+        DeviceSnapshot part = new DeviceSnapshot("cable_part", "ae2:cable_bus", "north", "ae2:storage_bus",
+                Map.of("access", "read_write"),
+                List.of("ae2:speed_card", "", "ae2:capacity_card", ""),
+                readings);
+
+        JsonObject json = Ae2DeviceServerReads.toJson(part);
+        assertEquals(4, json.getAsJsonArray("upgrades").size());
+        assertEquals("ae2:speed_card", json.getAsJsonArray("upgrades").get(0).getAsString());
+        assertEquals("", json.getAsJsonArray("upgrades").get(1).getAsString());
+        assertEquals("ae2:capacity_card", json.getAsJsonArray("upgrades").get(2).getAsString());
+        assertEquals("", json.getAsJsonArray("upgrades").get(3).getAsString());
+
+        JsonObject body = json.getAsJsonObject("readings");
+        assertEquals(39484, body.get("p2p_frequency").getAsInt());
+        assertEquals("minecraft:chest", body.get("connected_to").getAsString());
+        assertTrue(body.get("has_redstone_card").getAsBoolean());
+    }
+
+    @Test
     void 空读端返回空快照() {
         assertEquals(Optional.empty(), Ae2DeviceServerReads.Reader.NONE.read(null, BlockPos.ZERO, null));
     }

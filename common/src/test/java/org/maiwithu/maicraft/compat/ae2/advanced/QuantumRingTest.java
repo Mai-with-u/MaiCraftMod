@@ -91,11 +91,19 @@ class QuantumRingTest {
         assertEquals(true, withServer.readings().get("peer_cross_dimension"));
         assertEquals("minecraft:the_nether", withServer.readings().get("peer_dimension"));
 
-        // 无服务端且未开菜单时，有奇点但客户端不知频率 -> 标为 unknown。
+        // 无服务端且未开菜单时，有奇点但客户端不知频率 -> 标为 unknown，绝不伪造 1L 假频率。
         MachineState clientOnly = QuantumRing.state(QuantumRing.LINK_BLOCK, cell,
                 Optional.empty(), Optional.empty(), Optional.empty());
         assertEquals("unknown", clientOnly.readings().get("frequency"));
         assertTrue(clientOnly.note().contains("ae2.device"));
+
+        // 槽位显式记录“有奇点但频率未知(0L)”时，仍只报 unknown 而绝不报 1L。
+        QuantumLink.SeenSlot unknownFreqSlot = new QuantumLink.SeenSlot(true, 0L);
+        Optional<Long> cached = unknownFreqSlot.hasSingularity() && unknownFreqSlot.frequency() != 0L
+                ? Optional.of(unknownFreqSlot.frequency()) : Optional.empty();
+        MachineState unknownFreqState = QuantumRing.state(QuantumRing.LINK_BLOCK, cell,
+                Optional.empty(), cached, Optional.empty());
+        assertEquals("unknown", unknownFreqState.readings().get("frequency"));
     }
 
     @Test
