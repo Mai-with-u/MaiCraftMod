@@ -92,7 +92,7 @@
 | SPI-1 | `behavior.inventory.spi.CarriedBackpack` 与 `bootstrap.AbilityCatalog` | 新增 `CombinedCarriedBackpacks` 合并全部已登记的 `CarriedBackpack`（`freeSlots()` 求和、`store()` 顺序尝试直到有背包给出动作、`carried()` 合并列表），替换 `AbilityCatalog` 中 `carriedBackpacks.stream().findFirst()` | 精妙背包与 AE2 便携存储元件同时安装时，`InventorySpace` 腾背包不会再因 `findFirst()` 丢弃 AE2 便携元件 |
 | SPI-2 | `ability.machine.spi.MachineSettings`、`compat.CompatMachineSettings`、`ability.machine.MachineAreaReport` | 在 `MachineSettings` 增加默认方法 `default List<MachineSetting> partSettings(BlockPos host, Direction side) { return List.of(); }`；`CompatMachineSettings` 包一层停用转发；`MachineAreaReport` 构造部件 `DeviceView` 时读取并填入 `settings`（空时保持 `null`） | `machine_inspect` 查看 `ae2:cable_bus` 各面部件时，部件设置项直接呈现在对应 `DeviceView.settings` 中，无需混进 `state.readings` |
 | SPI-3 | `ability.machine.spi.ItemSettings`、`compat.CompatItemSettings`、`ability.machine.ItemSettingsTask` | 在 `ItemSettings` 增加默认重载 `default boolean holds(ItemStack stack, Player player, String key, String wanted) { return holds(stack, key, wanted); }`；`CompatItemSettings` 转发；`ItemSettingsTask` 核对时传入当前角色 `Player` | 石英切割刀刻名（`engrave_name`）改完关窗后可核对角色背包是否产出了指定名字的 `ae2:name_press` |
-| SPI-4 | `behavior.survival.defense.spi.RangedWeapon`、`compat.CompatRangedWeapon`、`behavior.combat.ModShot` | 在 `RangedWeapon` 增加可选默认方法 `default boolean usesInternalAmmo() { return false; }` 与 `default boolean shotFired(ItemStack before, ItemStack after, LocalPlayer self) { return false; }`；`ModShot` 确认发射条件并入 `rule.shotFired(beforeWeapon, currentMainHand, self)`；确认 `ArrowAim` 支持 `gravity == 0 && drag == 1.0` 的瞬发直线弹道 | 物质炮弹药存于武器内部且无原版冷却，避免 `ModShot` 因背包弹药数未减且无冷却永远判未确认 |
+| SPI-4 | `behavior.survival.defense.spi.RangedWeapon`、`compat.CompatRangedWeapon`、`behavior.combat.ModShot` | 在 `RangedWeapon` 增加可选默认方法 `default boolean usesInternalAmmo() { return false; }` 与 `default boolean shotFired(ItemStack before, ItemStack after, Player self) { return false; }`；`ModShot` 确认发射条件并入 `rule.shotFired(beforeWeapon, currentMainHand, self)`；确认 `ArrowAim` 支持 `gravity == 0 && drag == 1.0` 的瞬发直线弹道 | 物质炮弹药存于武器内部且无原版冷却，避免 `ModShot` 因背包弹药数未减且无冷却永远判未确认 |
 
 ### 3.3 阶段 1：日常工作方块、容器与基础工具
 
@@ -171,8 +171,10 @@
 
 #### 3.3.10 陨石罗盘
 
-- **反透视与感知（`ModSight`）**：`compat.ae2.tool.MeteoriteCompassSight` 每轮先检查角色主手、副手或背包中是否真实携带 `ae2:meteorite_compass`；**未携带时直接返回空，绝不调用 `CompassManager`**。携带时调用 `CompassManager.INSTANCE.getClosestMeteorite(chunkPos, true)`，若已有服务端响应坐标，向 `observe(scene).mod_things` 输出种类 `meteorite_compass`，字段含 `direction`（八向方位）、`horizontal_distance`（水平距离格数）与 `status`（`found` / `searching` / `none_in_range`，不伪造高度 Y）。
-- **显式查看（`ItemSettings`）**：`machine_inspect(item="ae2:meteorite_compass")` 返回只读项 `meteorite_direction`、`meteorite_distance`、`compass_status`；`use` 持罗盘可触发一次刷新等待。
+- **反透视与感知（`ModSight`）**：`compat.ae2.tool.MeteoriteCompassSight` 每轮先检查角色主手、副手或背包中是否真实携带 `ae2:meteorite_compass`；**未携带时直接返回空，绝不调用 `CompassManager`**。携带时调用 `CompassManager.INSTANCE.getClosestMeteorite(chunkPos, true)`，严格按游戏内 `MeteoriteCompassBakedModel.getAnimatedRotation` 玩家肉眼可见的 3 种指针状态换算，向 `observe(scene).mod_things` 输出种类 `meteorite_compass`（**绝不透出玩家看不到的精确水平格数距离与高度 Y**）：
+  - `status`：`pointing`（水平距离 `> 6` 格，指针稳定指向目标水平方位）/ `nearby_spinning`（水平距离 `<= 6` 格，指针慢转 3 秒/圈）/ `searching_spinning`（无目标或查询中，指针快转 0.5 秒/圈）；
+  - `direction`：仅在 `status == "pointing"` 时给出八向水平方位，其余两种旋转状态不输出。
+- **显式查看（`ItemSettings`）**：`machine_inspect(item="ae2:meteorite_compass")` 返回只读项 `compass_status` 与 `meteorite_direction`（仅 `pointing` 时提供，不透出精确距离）；`use` 持罗盘可触发一次刷新等待。
 
 ---
 
@@ -359,7 +361,7 @@
 - **上色器（`ae2:color_applicator`）**：
   - `ItemSettings`：客户端直读 `energy`、`energy_max`、`active_color`（`AEComponents.SELECTED_COLOR`）与内部各色颜料余量；配置键 `color=<ae_color|transparent>` 换到主手直接发送 `ColorApplicatorSelectColorPacket(@Nullable AEColor)` 切换当前颜色（仅当包内已有该色时游戏才接受，改完读 `getActiveColor` 核对）；
   - 染色操作复用 `use(item="ae2:color_applicator", target=...)`；放染色线缆时支持副手持上色器自动染色。
-- **充能法杖（`ae2:charged_staff`）**：近战战斗识别其满电（`> 300` AE）附加 6 点魔法伤害与电量门槛，没电时按普通低伤棍子计并提示补电。
+- **充能法杖（`ae2:charged_staff`）**：`ItemSettings` 只读展示 `energy` 与 `energy_max`（注明单次近战耗电 300 AE、满电附加 6 点魔法伤害），低电时提示经充能器 `machine_run` 补电，电量条自动在 `observe(self).gear_bars` 呈现，并在知识资料中说明用法。当前全仓没有近战武器 SPI（`WeaponCarriedReader` 仅读原版物品属性修饰与剑/斧标签），本轮不修改通用近战自动选剑口径。
 - **通用带电物品**：所有 `IAEItemPowerStorage`（上述工具、10 种便携元件、无线终端、能源元件物品）的电量条已自动进入 `observe(self).gear_bars`；任一工具因低电无法工作时，失败说明固定给出当前/上限电量与「可用充能器 `machine_run` 补电」建议，不增加越权打断主任务的自动充电生存需求。
 
 #### 3.6.5 知识层补强
@@ -462,9 +464,9 @@
    - 石英扳手 `DismantleTool`（排除陨石箱、线缆分拆部件/中心线缆）与 `PlacementRules.turnsTo`（排除网络工具）；
    - 便携存储元件客户端直读 `STORAGE_CELL_INV` 折算 `freeSlots()`、普通右键打开绝不潜行、低电报 0 与清晰报错；
    - 石英切割刀刻名流程、缺锭 `NEED_ITEM`、关窗前清空槽 0 防掉锭、`holds(..., Player, ...)` 核验背包产出；
-   - 内存卡 12 组件只读解析与清空；网络工具 9 格升级卡来源；上色器直切颜色与核对；熵变仪/充能法杖低电门槛；
+   - 内存卡 12 组件只读解析与清空；网络工具 9 格升级卡来源；上色器直切颜色与核对；熵变仪/充能法杖 `ItemSettings` 电量读数与低电补电提示；
    - 物质炮客户端配方查伤害、排除 0 伤彩弹、`gravity=0` 直线瞄准与 `shotFired` 确认；
-   - 陨石罗盘未携带时零调用反透视测试、携带时方位与距离换算；GuideME JSX 标签剥离与 `item_ids` 索引单测。
+   - 陨石罗盘未携带时零调用反透视测试，以及携带时 3 种指针状态（`> 6` 格 `pointing` + 八向方位、`<= 6` 格 `nearby_spinning` 无精确距离、无目标 `searching_spinning`）换算；GuideME JSX 标签剥离与 `item_ids` 索引单测。
 5. **高级机制与服务端扩展（Worker D，`compat.ae2.advanced` + `server.compat.ae2`）**：
    - 量子环 3×3 平面校验、四角不暴露接线点、链接仓奇点放取与跨维状态读数；
    - 奇点爆炸转化来源：优先选迷你 TNT、权限/保护校验、丢料范围与安全撤离、成对同频确认；
@@ -479,7 +481,7 @@
 3. **振动室与物质聚合器**：振动室 `machine_run` 投煤炭发电读数正常；聚合器放 1k 元件切 `matter_balls` 投杂物产出物质球，换 64k 元件切 `singularity` 读数显示需求 256,000。
 4. **ME 箱子、陨石储罐与切割刀**：ME 箱子分别从顶面取物、从侧面换盘；陨石储罐装水读 16,000 mB；切割刀 `machine_configure(item=..., settings={"engrave_name": "test"})` 背包产出命名模板且地面无掉落残锭。
 5. **便携元件与精妙背包双共存**：身上同时背精妙背包与 4k 便携存储元件，填满主背包触发腾地方，验证两只随身容器均在 `observe(self).carried_backpacks` 显示且精妙背包满后继续无缝存入便携元件；空便携元件打开不误拆解。
-6. **陨石罗盘反透视**：背包不带罗盘时 `observe(scene).mod_things` 无 `meteorite_compass`；放入罗盘后报出水平方位与距离；丢弃后立即消失。
+6. **陨石罗盘反透视**：背包不带罗盘时 `observe(scene).mod_things` 无 `meteorite_compass`；放入罗盘后在远处报出 `pointing` 与八向方位、走近 6 格内转为 `nearby_spinning`（均不透出精确距离格数）；丢弃后立即消失。
 7. **完整自动合成闭环**：在样板编码终端先后编出合成样板与处理样板（含流体或 >64 数量），故意给无效配方验证不洗掉已有样板；将样板装入样板供应器并配阻挡/优先级，在终端下单后于 CPU 查看在途明细并成功取消一次作业；用合成终端 3×3 合成格手搓工作台物品并自动清格。
 8. **线缆部件多面配置与 P2P**：同一根线缆东面装输出总线、西面装存储总线、北面装 ME 接口（配 16 个备料）、南面装标准发信器（设阈值 64），验证 `machine_inspect` 各部件 `settings` 清晰分面展示且 `machine_configure` 按 `<side>.<key>` 生效；用主手内存卡配对一对 ME P2P 通道并读出出入端与频率。
 9. **元件工作台、IO 传输站与无线访问点**：在元件工作台给磁盘分区并改模糊模式；用 ME IO 传输站将旧盘数据倒进网络并收回空盘；给无线访问点插入 16 张增幅卡，`machine_inspect` 精确报出 80 格范围与对应耗电。
@@ -503,5 +505,5 @@
 | 按角色核对物品设置 | `ability.machine.spi.ItemSettings.holds(ItemStack, Player, String, String)` | 允许物品设置改完后检查角色背包产物的核对重载（如石英切割刀刻名） |
 | 远程武器发射确认 | `behavior.survival.defense.spi.RangedWeapon.shotFired` | 弹药存于武器内部且无冷却的远程武器按主手前后状态确认已开火的回调 |
 | AE2 服务端设备读数 | 服务端只读操作 `ae2.device`（`server.compat.ae2.Ae2DeviceServerReads`） | 视距 128 格已加载范围内只读回答客户端不同步的 AE2 设备与部件状态 |
-| 陨石罗盘观察 | `compat.ae2.tool.MeteoriteCompassSight`（`mod_things` 种类 `meteorite_compass`） | 仅在角色持有或携带陨石罗盘时向场景感知报出最近陨石的水平方位与距离 |
+| 陨石罗盘观察 | `compat.ae2.tool.MeteoriteCompassSight`（`mod_things` 种类 `meteorite_compass`） | 仅在角色持有或携带陨石罗盘时向场景感知报出指针状态（指向 / 6 格内慢转 / 搜寻快转）与指向方位，不透出精确距离 |
 | AE2 指南资料 | `compat.ae2.tool.Ae2GuideKnowledge` | 按物品 ID 索引 AE2 内置 GuideME 手册并在读取时剥离界面标签的知识来源 |
