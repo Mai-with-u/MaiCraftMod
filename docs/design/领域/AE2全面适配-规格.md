@@ -55,7 +55,7 @@
 所有继承 `UpgradeableMenu` 与 `MEStorageMenu` 的 AE2 界面在玩家背包带有 `ae2:network_tool` 时，会在界面最前面动态插入 9 个 `SlotSemantics.TOOLBOX` 槽，导致按固定下标或固定总槽数判定必然失效。
 
 - 新增读写接缝 `compat.ae2.Ae2MenuSlots`（附 `NONE` 空实现，由 NeoForge 读写端 `AppliedEnergisticsMenuSlots` 实现）：
-  - 查询当前打开的 AE2 菜单中指定 `SlotSemantic` ID（如 `"UPGRADE"`、`"CONFIG"`、`"STORAGE"`、`"STORAGE_CELL"`、`"MACHINE_INPUT"`、`"MACHINE_OUTPUT"`、`"MACHINE_CRAFTING_GRID"`、`"ENCODED_PATTERN"`、`"BLANK_PATTERN"`、`"CRAFTING_GRID"`、`"CRAFTING_RESULT"`、`"PROCESSING_INPUTS"`、`"PROCESSING_OUTPUTS"`、`"STONECUTTING_INPUT"`、`"SMITHING_TABLE_TEMPLATE"`、`"SMITHING_TABLE_BASE"`、`"SMITHING_TABLE_ADDITION"`、`"INSCRIBER_PLATE_TOP"`、`"INSCRIBER_PLATE_BOTTOM"`、`"INSCRIBER_PLATE_MIDDLE"`、`"INSCRIBER_OUTPUT"`、`"TOOLBOX"`）对应的槽位索引列表（经 `SlotSemantics.get(id)` 与 `AEBaseMenu.getSlots(semantic)` 读取）；
+  - 查询当前打开的 AE2 菜单中指定 `SlotSemantic` ID（如 `"UPGRADE"`、`"CONFIG"`、`"STORAGE"`、`"STORAGE_CELL"`、`"MACHINE_INPUT"`、`"MACHINE_OUTPUT"`、`"MACHINE_CRAFTING_GRID"`、`"ENCODED_PATTERN"`、`"BLANK_PATTERN"`、`"CRAFTING_GRID"`、`"CRAFTING_RESULT"`、`"PROCESSING_INPUTS"`、`"PROCESSING_OUTPUTS"`、`"STONECUTTING_INPUT"`、`"SMITHING_TABLE_TEMPLATE"`、`"SMITHING_TABLE_BASE"`、`"SMITHING_TABLE_ADDITION"`、`"INSCRIBER_PLATE_TOP"`、`"INSCRIBER_PLATE_BOTTOM"`、`"TOOLBOX"`）对应的槽位索引列表（经 `SlotSemantics.get(id)` 与 `AEBaseMenu.getSlots(semantic)` 读取）；
   - 提供通用 AE2 菜单发包动作：`sendConfigButton`、`sendSetFilter`、`sendGuiAction`（含强类型封装）、`openSubMenu`、`returnToParentMenu`。
 - 新增通用布局证明 `compat.ae2.Ae2SemanticsLayout`（实现 `MenuLayoutProof`）：按菜单注册 ID 接受声明式规则 `Rule(List<String> containerSemantics, Set<String> machineSemantics)`：
   - 绝不把 `CONFIG` / `CRAFTING_GRID` 等幽灵槽列进 `containerSlots` 或 `machineSlots`；

@@ -15,9 +15,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.FeedPlan;
 import org.maiwithu.maicraft.ability.machine.spi.FuelUse;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
@@ -203,5 +206,35 @@ class Ae2DeviceOpsTest {
         List<Ae2MachineCatalog.Kind> extended = Ae2MachineCatalog.kinds(List.of(tank));
         assertEquals(19, extended.size());
         assertEquals("ae2:sky_stone_tank", extended.getLast().id());
+    }
+
+    @Test
+    void 设备委托可覆盖连接口并在未覆写时回退默认六面或单机规则() {
+        BlockState dummy = Blocks.STONE.defaultBlockState();
+        List<ExchangePoint> customPoints = List.of(
+                new ExchangePoint(AT, Direction.NORTH, null, MeNetworkReader.KIND, ExchangePoint.Flow.BOTH, "前侧连网"),
+                new ExchangePoint(AT, Direction.SOUTH, null, MeNetworkReader.KIND, ExchangePoint.Flow.BOTH, "后侧连网"));
+        Ae2DeviceOps onlyFrontBack = new Ae2DeviceOps() {
+            @Override public Optional<List<ExchangePoint>> exchangePoints(BlockState state, BlockPos at, ClientLevel level) {
+                return Optional.of(customPoints);
+            }
+        };
+
+        // 覆写了 exchangePoints 时直接返回委托给出的受限面，不再退回六面。
+        Ae2MachineType overridden = machineWith("ae2:charger", Map.of("ae2:charger", onlyFrontBack));
+        List<ExchangePoint> actual = overridden.exchangePoints(dummy, AT);
+        assertEquals(2, actual.size());
+        assertEquals(Direction.NORTH, actual.get(0).side());
+        assertEquals(Direction.SOUTH, actual.get(1).side());
+
+        // 未覆写 exchangePoints 的空委托：单机回退为 1 个打开界面换物点，联网设备回退为默认 6 面。
+        Ae2DeviceOps emptyOps = new Ae2DeviceOps() {};
+        Ae2MachineType standalone = machineWith("ae2:charger", Map.of("ae2:charger", emptyOps));
+        List<ExchangePoint> standalonePoints = standalone.exchangePoints(dummy, AT);
+        assertEquals(1, standalonePoints.size());
+        assertEquals(ExchangePoint.Medium.ITEM, standalonePoints.getFirst().medium());
+
+        Ae2MachineType networked = machineWith("ae2:drive", Map.of("ae2:drive", emptyOps));
+        assertEquals(6, networked.exchangePoints(dummy, AT).size());
     }
 }

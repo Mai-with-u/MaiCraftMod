@@ -118,13 +118,18 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
         return blocks.contains(state.getBlock());
     }
 
-    // 挂在 ME 网上的设备六面都能接线缆；线缆格只算连着的面与空着的面（装了部件的那一面接不了线缆）。
+    // 设备委托给出了专属连接口（如充能器非正面五面、水晶催生器前后两面、量子环非四角四面）时优先采用；
+    // 否则按通用规则：单机打开界面放料取货，挂在 ME 网上的设备六面都能接线缆（线缆格跳过已装部件的面）。
     @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) {
+        ClientLevel level = level();
+        if (ops != null) {
+            Optional<List<ExchangePoint>> custom = ops.exchangePoints(state, at, level);
+            if (custom.isPresent()) return List.copyOf(custom.get());
+        }
         if (!kind.onGrid()) {
             return List.of(new ExchangePoint(at, null, ExchangePoint.Medium.ITEM, ExchangePoint.Flow.BOTH,
                     "不接 ME 网的单机：打开界面放料取货"));
         }
-        ClientLevel level = level();
         Optional<Ae2Grid.GridCell> cell = level == null ? Optional.empty() : compat.gridCell(level, at);
         List<ExchangePoint> points = new ArrayList<>();
         for (Direction side : Direction.values()) {

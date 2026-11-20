@@ -43,7 +43,7 @@ public interface Ae2MenuSlots {
     /** 发送配置按钮包（循环切换当前界面目标对象的枚举设置）；未打开 AE2 菜单或设置名未知返回 false。 */
     boolean sendConfigButton(String settingName, boolean backwards);
 
-    /** 给指定幽灵过滤槽写入过滤物品（传空堆叠即清空）；未打开 AE2 菜单或槽位越界返回 false。 */
+    /** 给指定幽灵过滤槽写入过滤物品（传空堆叠即清空）；未打开 AE2 菜单、槽位越界或目标槽不是启用的幽灵过滤槽返回 false。 */
     boolean sendSetFilter(int slotIndex, ItemStack stack);
 
     /** 向当前打开的 AE2 菜单发送无参界面动作（例如 clear、partition、encode、cancelCrafting）。 */
@@ -58,10 +58,13 @@ public interface Ae2MenuSlots {
     /** 向当前打开的 AE2 菜单发送布尔参数的界面动作（例如 setSubstitution、setFluidSubstitution）。 */
     boolean sendBooleanAction(String actionName, boolean value);
 
-    /** 向当前打开的 AE2 菜单发送字符串参数的界面动作（例如 setName、setStonecuttingRecipeId）。 */
+    /** 向当前打开的 AE2 菜单发送字符串参数的界面动作（例如 setName 等服务端注册为 String 的动作）。 */
     boolean sendStringAction(String actionName, String value);
 
-    /** 向当前打开的 AE2 菜单发送已序列化 JSON 载荷的界面动作（用于枚举等参数，null 表示无参）。 */
+    /**
+     * 向当前打开的 AE2 菜单发送已序列化 JSON 载荷的界面动作（用于枚举或 ResourceLocation 等对象参数，
+     * 由具体读写端或调用方按服务端期望的对象 JSON 发送；null 表示无参，超长载荷会被拒发）。
+     */
     boolean sendRawJsonAction(String actionName, String jsonPayload);
 
     /** 从当前打开的 AE2 菜单切到指定注册 ID 的子界面（例如 ae2:priority、ae2:craftingstatus）。 */

@@ -17,6 +17,7 @@ import appeng.menu.AEBaseMenu;
 import appeng.menu.ISubMenu;
 import appeng.menu.SlotSemantic;
 import appeng.menu.SlotSemantics;
+import appeng.menu.slot.FakeSlot;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -35,6 +36,8 @@ import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
 public final class AppliedEnergisticsMenuSlots implements Ae2MenuSlots {
 
     private static final Gson GSON = new Gson();
+    /** AE2 界面动作 JSON 载荷的长度上限，与 AEBaseMenu 服务端校验及网络字节流 UTF 编码上限一致。F 游戏事实。 */
+    private static final int MAX_ACTION_PAYLOAD_LENGTH = 32767;
 
     @Override public boolean isAe2MenuOpen() {
         return openMenu() != null;
@@ -67,10 +70,11 @@ public final class AppliedEnergisticsMenuSlots implements Ae2MenuSlots {
         return true;
     }
 
-    // 幽灵过滤槽设过滤走 AE2 原生 SET_FILTER 包，服务端会再校验目标槽是不是启用的 FakeSlot。
+    // 幽灵过滤槽设过滤走 AE2 原生 SET_FILTER 包：发包前先确认目标槽是已启用的 FakeSlot，避免对非过滤槽或未插容量卡锁住的格误报成功。
     @Override public boolean sendSetFilter(int slotIndex, ItemStack stack) {
         AEBaseMenu menu = openMenu();
         if (menu == null || slotIndex < 0 || slotIndex >= menu.slots.size()) return false;
+        if (!(menu.getSlot(slotIndex) instanceof FakeSlot fakeSlot) || !fakeSlot.isSlotEnabled()) return false;
         ItemStack filter = stack == null ? ItemStack.EMPTY : stack;
         PacketDistributor.sendToServer(new InventoryActionPacket(InventoryAction.SET_FILTER, slotIndex, filter));
         return true;
@@ -97,10 +101,11 @@ public final class AppliedEnergisticsMenuSlots implements Ae2MenuSlots {
         return sendRawJsonAction(actionName, GSON.toJson(value));
     }
 
-    // GuiActionPacket 绑定当前打开的 containerId，确保包只作用于角色此刻正打开的这一份 AE2 菜单。
+    // GuiActionPacket 绑定当前打开的 containerId，并对齐 AEBaseMenu 载荷长度上限，避免超长载荷触发网络包编码异常。
     @Override public boolean sendRawJsonAction(String actionName, String jsonPayload) {
         AEBaseMenu menu = openMenu();
         if (menu == null || actionName == null || actionName.isEmpty()) return false;
+        if (jsonPayload != null && jsonPayload.length() > MAX_ACTION_PAYLOAD_LENGTH) return false;
         PacketDistributor.sendToServer(new GuiActionPacket(menu.containerId, actionName, jsonPayload));
         return true;
     }

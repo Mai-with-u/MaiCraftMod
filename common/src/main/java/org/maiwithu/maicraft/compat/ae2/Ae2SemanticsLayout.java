@@ -22,6 +22,8 @@ import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
  */
 public final class Ae2SemanticsLayout implements MenuLayoutProof {
 
+    /** 原版角色背包槽位总数：27 格主背包加 9 格快捷栏。F 游戏事实。 */
+    private static final int PLAYER_INVENTORY_SLOTS = 36;
     /** 严禁纳入普通容器侧搬运的两种 AE2 槽位语义：幽灵过滤槽与随身网络工具箱槽。 */
     private static final Set<String> FORBIDDEN_SEMANTICS = Set.of("CONFIG", "TOOLBOX");
 
@@ -29,20 +31,30 @@ public final class Ae2SemanticsLayout implements MenuLayoutProof {
      * 单个 AE2 菜单类型的语义规则。
      *
      * @param containerSemantics 有序的容器侧语义名称列表，决定证明结果里 containerSlots 的槽位顺序
-     * @param machineSemantics   其中需要按机器槽确认搬运的语义集合（应为 containerSemantics 的子集）
+     * @param machineSemantics   其中需要按机器槽确认搬运的语义集合（必须为 containerSemantics 的子集）
      */
     public record Rule(List<String> containerSemantics, Set<String> machineSemantics) {
         public Rule {
             containerSemantics = List.copyOf(Objects.requireNonNull(containerSemantics, "containerSemantics"));
             machineSemantics = Set.copyOf(Objects.requireNonNull(machineSemantics, "machineSemantics"));
+            Set<String> declared = new LinkedHashSet<>(containerSemantics);
             for (String semantic : containerSemantics) {
+                if (semantic.isBlank()) {
+                    throw new IllegalArgumentException("容器侧语义不可为空白字符串");
+                }
                 if (FORBIDDEN_SEMANTICS.contains(semantic)) {
                     throw new IllegalArgumentException("容器侧语义禁止包含 " + semantic);
                 }
             }
             for (String semantic : machineSemantics) {
+                if (semantic.isBlank()) {
+                    throw new IllegalArgumentException("机器槽语义不可为空白字符串");
+                }
                 if (FORBIDDEN_SEMANTICS.contains(semantic)) {
                     throw new IllegalArgumentException("机器槽语义禁止包含 " + semantic);
+                }
+                if (!declared.contains(semantic)) {
+                    throw new IllegalArgumentException("机器槽语义必须是容器侧语义的子集：" + semantic);
                 }
             }
         }
@@ -82,6 +94,11 @@ public final class Ae2SemanticsLayout implements MenuLayoutProof {
     }
 
     @Override public MenuLayout.Layout classify(MenuSlots slots, List<Integer> playerSlots, List<Integer> otherSlots) {
+        // 只对带完整 36 格角色背包的菜单给 Supported，不含背包的子菜单不走通用容器布局证明。
+        if (playerSlots.size() != PLAYER_INVENTORY_SLOTS) {
+            return new MenuLayout.Unsupported("AE2 界面的角色背包槽位是 " + playerSlots.size() + " 格而不是 "
+                    + PLAYER_INVENTORY_SLOTS + " 格，证明不了布局");
+        }
         String typeId = slots.menuTypeId() == null ? "" : slots.menuTypeId().toLowerCase(Locale.ROOT);
         Rule rule = rules.get(typeId);
         if (rule == null) {

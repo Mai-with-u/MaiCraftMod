@@ -137,6 +137,13 @@ class Ae2SemanticsLayoutTest {
                 () -> new Ae2SemanticsLayout.Rule(List.of("TOOLBOX"), Set.of()));
         assertThrows(IllegalArgumentException.class,
                 () -> new Ae2SemanticsLayout.Rule(List.of("STORAGE"), Set.of("CONFIG")));
+        // 机器槽语义必须属于容器侧语义子集，且语义名不可为空白字符串。
+        assertThrows(IllegalArgumentException.class,
+                () -> new Ae2SemanticsLayout.Rule(List.of("STORAGE"), Set.of("MACHINE_INPUT")));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Ae2SemanticsLayout.Rule(List.of("  "), Set.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Ae2SemanticsLayout.Rule(List.of("STORAGE"), Set.of("")));
 
         Ae2SemanticsLayout layout = new Ae2SemanticsLayout(
                 Ae2MenuSlots.NONE,
@@ -148,6 +155,12 @@ class Ae2SemanticsLayoutTest {
         assertTrue(configOnly.containerSlots().isEmpty());
         assertTrue(configOnly.machineSlots().isEmpty());
         assertEquals(36, configOnly.playerSlots().size());
+
+        // 缺少完整 36 格角色背包的子菜单，即使是纯配置规则也必须拒绝放行。
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                layout.classify(menuOf("ae2:energy_level_emitter", 9, 0), List.of(), range(0, 8)));
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                layout.classify(menuOf("ae2:energy_level_emitter", 36, 9), range(9, 35), range(0, 8)));
 
         // 非纯配置规则在读不到任何语义槽时如实返回不支持。
         assertInstanceOf(MenuLayout.Unsupported.class,

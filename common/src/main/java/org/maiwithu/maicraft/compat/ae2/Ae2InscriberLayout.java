@@ -25,6 +25,8 @@ public final class Ae2InscriberLayout implements MenuLayoutProof {
     /** 压印器点开的界面。这里是菜单类型的注册 ID，不是方块 ID。类别：游戏事实（AE2 菜单类型注册，InscriberMenu）。 */
     static final String INSCRIBER_MENU = "ae2:inscriber";
 
+    /** 原版角色背包槽位总数：27 格主背包加 9 格快捷栏。F 游戏事实。 */
+    private static final int PLAYER_INVENTORY_SLOTS = 36;
     /** 界面容器侧总格数：四个工作格加四个升级格。 */
     private static final int INSCRIBER_SLOTS = 8;
     private static final int WORK_SLOTS = 4;
@@ -59,38 +61,52 @@ public final class Ae2InscriberLayout implements MenuLayoutProof {
     }
 
     @Override public MenuLayout.Layout classify(MenuSlots slots, List<Integer> playerSlots, List<Integer> otherSlots) {
-        if (playerSlots.isEmpty()) {
-            return new MenuLayout.Unsupported("压印器界面缺少角色背包槽位，证明不了布局");
+        // 压印器界面必须带完整 36 格角色背包；直接调用 prove 时同样拦下非 36 格异常菜单。
+        if (playerSlots.size() != PLAYER_INVENTORY_SLOTS) {
+            return new MenuLayout.Unsupported("压印器界面的角色背包槽位是 " + playerSlots.size() + " 格而不是 "
+                    + PLAYER_INVENTORY_SLOTS + " 格，证明不了布局");
         }
         MenuLayout.Layout bySemantic = classifyBySemantics(playerSlots, otherSlots);
         if (bySemantic != null) return bySemantic;
         return classifyByPosition(playerSlots, otherSlots);
     }
 
-    // 优先走 AE2 槽位语义识别：携带网络工具箱多出 9 个 TOOLBOX 槽时仍能精准挑出 4 工作格 + 4 升级格。
+    // 优先走 AE2 槽位语义识别：携带网络工具箱多出 9 个 TOOLBOX 槽时仍能精准挑出 4 工作格 + 4 升级格；
+    // 四种工作语义各自必须恰好命中 1 格，防止总数为 4 但槽位错位。
     private MenuLayout.Layout classifyBySemantics(List<Integer> playerSlots, List<Integer> otherSlots) {
         Set<Integer> allowedOther = Set.copyOf(otherSlots);
         Set<Integer> toolbox = Set.copyOf(slotsReader.apply("TOOLBOX"));
-        List<Integer> workSlots = new ArrayList<>(WORK_SLOTS);
         boolean anySemanticSeen = !toolbox.isEmpty();
+        List<List<Integer>> matchedByWorkSemantic = new ArrayList<>(WORK_SEMANTICS.size());
         for (String semantic : WORK_SEMANTICS) {
             List<Integer> found = slotsReader.apply(semantic);
             if (!found.isEmpty()) anySemanticSeen = true;
+            List<Integer> valid = new ArrayList<>();
             for (int index : found) {
-                if (allowedOther.contains(index) && !toolbox.contains(index)) workSlots.add(index);
+                if (allowedOther.contains(index) && !toolbox.contains(index)) valid.add(index);
             }
+            matchedByWorkSemantic.add(valid);
         }
         List<Integer> rawUpgrades = slotsReader.apply("UPGRADE");
         if (!rawUpgrades.isEmpty()) anySemanticSeen = true;
         if (!anySemanticSeen) return null;
 
+        List<Integer> workSlots = new ArrayList<>(WORK_SLOTS);
+        for (int i = 0; i < WORK_SEMANTICS.size(); i++) {
+            List<Integer> matched = matchedByWorkSemantic.get(i);
+            if (matched.size() != 1) {
+                return new MenuLayout.Unsupported("按语义认出的压印器工作格 " + WORK_SEMANTICS.get(i) + " 有 "
+                        + matched.size() + " 格而不是 1 格，证明不了布局");
+            }
+            workSlots.add(matched.getFirst());
+        }
         List<Integer> upgradeSlots = new ArrayList<>(UPGRADE_SLOTS);
         for (int index : rawUpgrades) {
             if (allowedOther.contains(index) && !toolbox.contains(index)) upgradeSlots.add(index);
         }
-        if (workSlots.size() != WORK_SLOTS || upgradeSlots.size() != UPGRADE_SLOTS) {
-            return new MenuLayout.Unsupported("按语义认出的压印器工作格（" + workSlots.size()
-                    + "）或升级格（" + upgradeSlots.size() + "）数量不对，证明不了布局");
+        if (upgradeSlots.size() != UPGRADE_SLOTS) {
+            return new MenuLayout.Unsupported("按语义认出的压印器升级格有 " + upgradeSlots.size()
+                    + " 格而不是 " + UPGRADE_SLOTS + " 格，证明不了布局");
         }
         List<Integer> ordered = new ArrayList<>(INSCRIBER_SLOTS);
         ordered.addAll(workSlots);

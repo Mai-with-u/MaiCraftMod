@@ -106,4 +106,43 @@ class Ae2InscriberLayoutTest {
         assertEquals(8, supported.machineSlots().size());
         assertEquals(36, supported.playerSlots().size());
     }
+
+    @Test
+    void 非三十六格角色背包或四工作语义凑数错位时拒绝放行() {
+        // 角色背包不足 36 格时，直接拦截而不冒充压印器布局。
+        List<Integer> otherSlots = new ArrayList<>();
+        otherSlots.addAll(range(0, 3));
+        otherSlots.addAll(range(31, 34));
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                new Ae2InscriberLayout().classify(inscriberSlots(4, 4), range(4, 30), otherSlots));
+
+        // 顶模板语义占 2 格、底模板语义占 0 格：尽管工作格总数为 4，但逐语义校验必须拦截错位。
+        Map<String, List<Integer>> skewed = Map.of(
+                "UPGRADE", List.of(0, 1, 2, 3),
+                "INSCRIBER_PLATE_TOP", List.of(40, 41),
+                "INSCRIBER_PLATE_BOTTOM", List.of(),
+                "MACHINE_INPUT", List.of(42),
+                "MACHINE_OUTPUT", List.of(43));
+        Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
+            @Override public boolean isAe2MenuOpen() { return true; }
+            @Override public List<Integer> slotsOf(String semanticId) {
+                return skewed.getOrDefault(semanticId, List.of());
+            }
+            @Override public boolean sendConfigButton(String settingName, boolean backwards) { return false; }
+            @Override public boolean sendSetFilter(int slotIndex, ItemStack stack) { return false; }
+            @Override public boolean sendNoArgAction(String actionName) { return false; }
+            @Override public boolean sendIntAction(String actionName, int value) { return false; }
+            @Override public boolean sendLongAction(String actionName, long value) { return false; }
+            @Override public boolean sendBooleanAction(String actionName, boolean value) { return false; }
+            @Override public boolean sendStringAction(String actionName, String value) { return false; }
+            @Override public boolean sendRawJsonAction(String actionName, String jsonPayload) { return false; }
+            @Override public boolean openSubMenu(String menuTypeId) { return false; }
+            @Override public boolean returnToParentMenu() { return false; }
+        };
+        List<Integer> fullOther = new ArrayList<>();
+        fullOther.addAll(range(0, 3));
+        fullOther.addAll(range(40, 43));
+        assertInstanceOf(MenuLayout.Unsupported.class,
+                new Ae2InscriberLayout(menuSlots).classify(inscriberSlots(4, 4), range(4, 39), fullOther));
+    }
 }

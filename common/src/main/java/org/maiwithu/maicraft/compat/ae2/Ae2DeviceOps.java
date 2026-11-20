@@ -8,7 +8,9 @@ import java.util.Optional;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.MachineFeeding;
 import org.maiwithu.maicraft.ability.machine.spi.MachineInstallations;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
@@ -22,6 +24,14 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
  * 避免把所有 AE2 设备分支都堆进同一个机器类型类里。
  */
 public interface Ae2DeviceOps {
+
+    /**
+     * 这种设备的连接口与换物面覆盖（如充能器非正面五面、水晶催生器前后两面、量子环非四角四面）；
+     * 返回空时走通用六面联网或单机默认规则。
+     */
+    default Optional<List<ExchangePoint>> exchangePoints(BlockState state, BlockPos at, ClientLevel level) {
+        return Optional.empty();
+    }
 
     /**
      * 这一格设备的完整客户端状态覆盖；返回空时由通用 ME 网格读数组装基础状态，再并入
