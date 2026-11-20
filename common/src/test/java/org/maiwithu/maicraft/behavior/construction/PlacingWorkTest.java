@@ -10,7 +10,9 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -18,11 +20,26 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.behavior.construction.spi.PlacementRules;
+import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
+import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
+import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 砌筑挑格与失败记忆的判断：挑格先挑站着就够得着的（最近几格都没有才回退按距离挑）；
@@ -141,5 +158,189 @@ class PlacingWorkTest {
 
         PlannedCell second = PlacingWork.pickNearestReachable(remaining, cell -> true, feet, new Vec3(0, 0, -1));
         assertEquals(side.pos(), second.pos(), "放完正前方后顺着侧面扫，仍排在正后方之前");
+    }
+
+    @Test
+    void 放置结果出乎预料且可扳手转正时先记账放下再转正() {
+        BlockPos target = new BlockPos(0, 64, 0);
+        BlockState wanted = Blocks.OAK_STAIRS.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        BlockState wrongFacing = wanted.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH);
+        DivergedRig rig = new DivergedRig(target, wanted, wrongFacing, true);
+
+        ActionStatus status = rig.run(40);
+        assertTrue(status instanceof ActionStatus.Done, "扳手转正后砌筑应正常完成：" + status);
+        assertEquals(1, rig.placeClicks, "已落地后只放 1 次，不应换面重复放");
+        assertEquals(1, rig.turnClicks, "应触发扳手转正 1 次");
+        assertEquals(wanted, rig.world.get(target), "扳手应把落点格转成目标朝向");
+        assertTrue(rig.changes.stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED),
+                "转正前应先把落地那块记账");
+        assertTrue(rig.changes.stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED),
+                "扳手转正后应记 BLOCK_CHANGED");
+        assertTrue(rig.site.placed().contains(target));
+        assertEquals(0, rig.site.notDone());
+    }
+
+    @Test
+    void 放置结果出乎预料且无法扳手转正时如实报STUCK不走没生效重放() {
+        BlockPos target = new BlockPos(0, 64, 0);
+        BlockState wanted = Blocks.OAK_STAIRS.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        BlockState wrongFacing = wanted.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH);
+        DivergedRig rig = new DivergedRig(target, wanted, wrongFacing, false);
+
+        ActionStatus status = rig.run(40);
+        assertTrue(status instanceof ActionStatus.Done, "放弃该格后砌筑阶段收尾：" + status);
+        assertEquals(1, rig.placeClicks, "落点格已落地不符时绝不当成没生效换其余支撑面重放");
+        assertEquals(0, rig.turnClicks);
+        assertEquals(1, rig.site.notDone());
+        var groups = rig.site.problemGroups();
+        assertEquals(1, groups.size());
+        assertTrue(groups.getFirst().reason().contains("目标格 0, 64, 0 已落地但状态与预期不符"), groups.toString());
+        assertEquals(Problem.Kind.STUCK, rig.site.reasonCounts().kind());
+    }
+
+    /** 离线替身：目标格有多个支撑面，首点落地成错朝向并返回 UNEXPECTED 失败；按开关决定能否扳手转正。 */
+    private static final class DivergedRig {
+        final BlockPos target;
+        final BlockState wanted;
+        final BlockState wrongFacing;
+        final boolean turnable;
+        final Map<BlockPos, BlockState> world = new HashMap<>();
+        final Map<String, Integer> carried = new HashMap<>();
+        final List<Change> changes = new ArrayList<>();
+        final ConstructionSite site;
+        final PlacingWork work;
+        int placeClicks;
+        int turnClicks;
+
+        DivergedRig(BlockPos target, BlockState wanted, BlockState wrongFacing, boolean turnable) {
+            this.target = target;
+            this.wanted = wanted;
+            this.wrongFacing = wrongFacing;
+            this.turnable = turnable;
+            world.put(target.below(), STONE);
+            world.put(target.east(), STONE);
+            world.put(target.west(), STONE);
+            carried.put("minecraft:oak_stairs", 4);
+            carried.put("minecraft:stick", 1);
+            PlannedCell cell = PlannedCell.block(target, wanted, Set.of("facing"));
+            Blueprint blueprint = new Blueprint("minecraft:overworld", target, List.of(cell));
+            this.site = new ConstructionSite(blueprint);
+            ConstructionSeams.ReadsSite reads = readsSite();
+            this.site.check(reads);
+            ConstructionServices services = new ConstructionServices(reads, instantClose(), plans(), clicks(),
+                    null, null, itemId -> new ConstructionSeams.HoldPlan.Ready(),
+                    (action, pos, blockType) -> Optional.empty(), noopLedger(), null);
+            this.work = new PlacingWork(services, site, new TaskRecords() {
+                @Override public void change(Change change) { changes.add(change); }
+                @Override public void unconfirmed(Change change) {}
+                @Override public void attempt(String tried, String whatHappened) {}
+            }, Permissions.DEFAULT, "测试砌筑", List.of(cell));
+        }
+
+        ActionStatus run(int maxTicks) {
+            ActionStatus status = ActionStatus.running();
+            for (int i = 1; i <= maxTicks && !(status instanceof ActionStatus.Done); i++) {
+                long tick = i;
+                status = work.tick(new TickContext() {
+                    @Override public long gameTick() { return tick; }
+                    @Override public PlayerContext player() { return null; }
+                });
+            }
+            return status;
+        }
+
+        private ConstructionSeams.ReadsSite readsSite() {
+            return new ConstructionSeams.ReadsSite() {
+                @Override public boolean loaded(BlockPos pos) { return true; }
+                @Override public BlockState state(BlockPos pos) { return world.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
+                @Override public String dimension() { return "minecraft:overworld"; }
+                @Override public BlockPos feet() { return new BlockPos(0, 64, 2); }
+                @Override public int carried(String itemId) { return carried.getOrDefault(itemId, 0); }
+                @Override public boolean creative() { return false; }
+                @Override public boolean unbreakable(BlockPos pos) { return false; }
+                @Override public Optional<String> temporaryMaterial() { return Optional.empty(); }
+            };
+        }
+
+        private BringsPlayerClose instantClose() {
+            return (approachTarget, permissions) -> new Action() {
+                @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
+                @Override public String describe() { return "走到跟前"; }
+            };
+        }
+
+        private ConstructionSeams.PlansPlacement plans() {
+            return new ConstructionSeams.PlansPlacement() {
+                @Override public Optional<PlacementPrediction.Placement> predict(PlannedCell cell, BlockPos clicked, Direction face) {
+                    return Optional.of(new PlacementPrediction.Placement(clicked, face, wanted, false));
+                }
+
+                @Override public boolean requiresSneak(BlockPos clicked) { return false; }
+
+                @Override public Optional<PlacementRules.Turns> turnsTo(BlockState placed, Predicate<BlockState> ok) {
+                    if (!turnable || ok.test(placed)) return Optional.empty();
+                    return Optional.of(new PlacementRules.Turns(Items.STICK, List.of(Direction.UP)));
+                }
+            };
+        }
+
+        private ConstructionSeams.Clicks clicks() {
+            return new ConstructionSeams.Clicks() {
+                @Override public Click place(PlannedCell cell, PlacementPrediction.Placement placement, boolean sneak,
+                        PlacementConfirmation confirmation) {
+                    InteractionResult[] out = {null};
+                    Action action = new Action() {
+                        @Override public ActionStatus tick(TickContext context) {
+                            placeClicks++;
+                            world.put(target, wrongFacing);
+                            carried.merge("minecraft:oak_stairs", -1, Integer::sum);
+                            out[0] = InteractionResult.unexpected("落点格 0, 64, 0 已落地但朝向或状态与预期不符");
+                            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, out[0].scene()));
+                        }
+
+                        @Override public String describe() { return "放方块"; }
+                    };
+                    return new Click(action, () -> out[0]);
+                }
+
+                @Override public Click turn(BlockPos block, Direction face, InteractionConfirmation confirmation) {
+                    InteractionResult[] out = {null};
+                    Action action = new Action() {
+                        @Override public ActionStatus tick(TickContext context) {
+                            turnClicks++;
+                            world.put(block, wanted);
+                            out[0] = InteractionResult.applied("扳手转正");
+                            return ActionStatus.done();
+                        }
+
+                        @Override public String describe() { return "扳手转正"; }
+                    };
+                    return new Click(action, () -> out[0]);
+                }
+
+                @Override public Click pour(PlannedCell cell, InteractionConfirmation confirmation) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override public Click scoop(BlockPos source, InteractionConfirmation confirmation) {
+                    throw new UnsupportedOperationException();
+                }
+
+                @Override public Click use(BlockPos block, InteractionConfirmation confirmation) {
+                    throw new UnsupportedOperationException();
+                }
+            };
+        }
+
+        private ConstructionSeams.Ledger noopLedger() {
+            return new ConstructionSeams.Ledger() {
+                @Override public void siteStarted(Blueprint blueprint) {}
+                @Override public void temporaryPlaced(BlockPos pos, String blockType, String purpose) {}
+                @Override public void temporaryRemoved(BlockPos pos) {}
+                @Override public List<BlockPos> temporaries() { return List.of(); }
+            };
+        }
     }
 }

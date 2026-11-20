@@ -617,11 +617,7 @@ final class PlacingWork extends ConstructionWork {
         if (result == null || result.verdict() == null) return unconfirmed(cell, itemId, "没有结论");
         return switch (result.verdict()) {
             case APPLIED -> {
-                int used = materialBefore < 0 ? 0 : Math.max(0, materialBefore - services.site().carried(itemId));
-                consumed += used;
-                attempt.uses++;
-                blockPlaced(cell.pos());
-                records.change(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, (attempt.temporary ? "临时方块 " : "") + cell.pos().toShortString()));
+                recordBlockPlaced(cell, itemId);
                 BlockState live = services.site().state(cell.pos());
                 // 放下来朝向不对、能拿扳手转到位（照放的，或预测说放得成却落成了别的朝向）：转到位再收下。
                 if (!PlacementPrediction.complete(cell, live) && !attempt.temporary && (attempt.turnAfter || turnable(live))) {
@@ -635,8 +631,32 @@ final class PlacingWork extends ConstructionWork {
                 attempt.missed(PlacementAttempt.WhyNotPlaced.NO_EFFECT);
                 yield tryNextCandidate();
             }
-            case UNEXPECTED, UNCONFIRMED -> unconfirmed(cell, itemId, result.scene());
+            case UNEXPECTED -> settleDiverged(result.scene());
+            case UNCONFIRMED -> unconfirmed(cell, itemId, result.scene());
         };
+    }
+
+    private void recordBlockPlaced(PlannedCell cell, String itemId) {
+        int used = materialBefore < 0 ? 0 : Math.max(0, materialBefore - services.site().carried(itemId));
+        consumed += used;
+        attempt.uses++;
+        blockPlaced(cell.pos());
+        records.change(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, (attempt.temporary ? "临时方块 " : "") + cell.pos().toShortString()));
+    }
+
+    // 落点格已经发生变化但与预期不符（例如方向机器落地朝向不对）：
+    // 能用扳手转正时先按已落地记账并转正；否则如实报出实际落地状态与落点格坐标，不当成没生效去换面重放。
+    private ActionStatus settleDiverged(String scene) {
+        PlannedCell cell = attempt.cell;
+        String itemId = itemId(cell);
+        BlockState live = services.site().loaded(cell.pos()) ? services.site().state(cell.pos()) : null;
+        if (!attempt.temporary && live != null && turnable(live)) {
+            recordBlockPlaced(cell, itemId);
+            return startTurn();
+        }
+        records.attempt("放 " + cell.pos().toShortString(), "已落地但与预期不符：" + scene);
+        site.problem(Problem.Kind.STUCK, "目标格 " + cell.pos().toShortString() + " 已落地但状态与预期不符：" + scene, cell.pos());
+        return abandonCell();
     }
 
     // 这一格点过一下，现场已经是要的样子，身上的耗材也少了（创造模式不看耗材）：就是这一下放成的。
@@ -709,28 +729,24 @@ final class PlacingWork extends ConstructionWork {
         return finish();
     }
 
-    private static String toolId(PlacementRules.Turns turns) {
-        return BuiltInRegistries.ITEM.getKey(turns.tool()).toString();
-    }
+    private static String toolId(PlacementRules.Turns turns) { return BuiltInRegistries.ITEM.getKey(turns.tool()).toString(); }
 
     private ActionStatus unconfirmed(PlannedCell cell, String itemId, String scene) {
         records.unconfirmed(new Change(Change.Kind.BLOCK_PLACED, itemId, 1, cell.pos().toShortString() + "：" + scene));
-        // 说不清放没放上就不再点第二下：这一格停在这里，算卡住。
         site.problem(Problem.Kind.STUCK, "放置结果没能确认，不敢再点", cell.pos());
-        attempt = null;
-        consumed = 0;
-        return nextCell();
+        return abandonCell();
     }
 
     private ActionStatus finish() {
         PlannedCell cell = attempt.cell;
-        if (attempt.temporary) {
-            services.ledger().temporaryPlaced(cell.pos(), BuiltInRegistries.BLOCK.getKey(cell.state().getBlock()).toString(), purpose);
-        } else {
-            site.placed(cell, consumed);
-        }
-        consumed = 0;
+        if (attempt.temporary) services.ledger().temporaryPlaced(cell.pos(), BuiltInRegistries.BLOCK.getKey(cell.state().getBlock()).toString(), purpose);
+        else site.placed(cell, consumed);
+        return abandonCell();
+    }
+
+    private ActionStatus abandonCell() {
         attempt = null;
+        consumed = 0;
         return nextCell();
     }
 
@@ -758,6 +774,11 @@ final class PlacingWork extends ConstructionWork {
         // 每一面都试过还没放成时，这格等它走开再回头，而不是当成站位不好去垫方块。
         // 点的那一下说视线被挡、够不着（射线先碰上了别的方块）算看不见那一面，别的出岔子算点了没生效。
         if (step == Step.CLICK && attempt.current() != null) {
+            InteractionResult result = click == null || click.result() == null ? null : click.result().get();
+            if (result != null && result.verdict() == InteractionVerdict.UNEXPECTED) return settleDiverged(result.scene());
+            if (result != null && result.verdict() == InteractionVerdict.UNCONFIRMED) {
+                return unconfirmed(attempt.cell, itemId(attempt.cell), result.scene());
+            }
             attempt.missed(failure.problem().kind() == Problem.Kind.UNREACHABLE
                     ? PlacementAttempt.WhyNotPlaced.HIDDEN : PlacementAttempt.WhyNotPlaced.NO_EFFECT);
             services.site().creatureBetween(attempt.current().clicked(), attempt.current().face())

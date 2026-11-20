@@ -56,4 +56,24 @@ class AnchorResolverTest {
         assertEquals(Problem.Kind.UNSUPPORTED, failed(new Target.Position(1, 64, 1, "minecraft:the_nether")).kind());
         assertEquals(Problem.Kind.UNSUPPORTED, failed(new Target.Player("Steve")).kind());
     }
+
+    @Test
+    void 观察编号位置缺少维度时按角色当前维度补齐() {
+        AnchorResolver seenWithoutDimension = new AnchorResolver(
+                id -> switch (id) {
+                    case "b9" -> Optional.of(WorldPosition.here(12, 68, -4));
+                    case "b10" -> Optional.of(new WorldPosition(1, 64, 1, "minecraft:the_nether"));
+                    default -> Optional.empty();
+                },
+                name -> Optional.empty(),
+                () -> new WorldPosition(5, 64, 5, DIM),
+                (x, z) -> Optional.empty());
+        WorldPosition resolved = assertInstanceOf(AnchorResolver.Resolution.Ready.class,
+                seenWithoutDimension.resolve(new Target.Seen("b9"))).anchor();
+        assertEquals(new WorldPosition(12, 68, -4, DIM), resolved, "观察编号不带维度时应回填角色所在维度");
+
+        Problem crossDim = assertInstanceOf(AnchorResolver.Resolution.Failed.class,
+                seenWithoutDimension.resolve(new Target.Seen("b10"))).problem();
+        assertEquals(Problem.Kind.UNSUPPORTED, crossDim.kind(), "观察编号落在另一维度时仍应如实拒绝");
+    }
 }

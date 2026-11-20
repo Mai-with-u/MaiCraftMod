@@ -52,13 +52,28 @@ public final class AnchorResolver {
                     .<Resolution>map(Resolution.Ready::new)
                     .orElseGet(() -> new Resolution.Failed(Problem.of(Problem.Kind.NOT_FOUND,
                             "没记住叫「" + landmark.name() + "」的地方", "先用 remember 记下，或改用坐标")));
-            case Target.Seen seenTarget -> seen.positionOf(seenTarget.id())
-                    .<Resolution>map(Resolution.Ready::new)
-                    .orElseGet(() -> new Resolution.Failed(Problem.of(Problem.Kind.TARGET_GONE,
-                            "观察编号 " + seenTarget.id() + " 对应的东西已经不在了", "重新 observe 拿新的编号")));
+            case Target.Seen seenTarget -> seen(seenTarget);
             default -> new Resolution.Failed(Problem.of(Problem.Kind.UNSUPPORTED,
                     "施工的锚点不接受这种目标对象：" + target.kind(), "用 here、坐标、记得的地点或观察编号"));
         };
+    }
+
+    // 观察编号：场景缓存读出的位置不带维度时，按角色当前所在维度补齐（与坐标目标同口径），
+    // 避免后续构造蓝图锚点时因维度为空触发空指针；明确指向另一维度时同样如实拒绝跨维度施工。
+    private Resolution seen(Target.Seen seenTarget) {
+        Optional<WorldPosition> found = seen.positionOf(seenTarget.id());
+        if (found.isEmpty()) {
+            return new Resolution.Failed(Problem.of(Problem.Kind.TARGET_GONE,
+                    "观察编号 " + seenTarget.id() + " 对应的东西已经不在了", "重新 observe 拿新的编号"));
+        }
+        WorldPosition at = found.get();
+        String here = character.currentPosition().dimension();
+        String dimension = at.dimension() == null ? here : at.dimension();
+        if (here != null && dimension != null && !dimension.equals(here)) {
+            return new Resolution.Failed(Problem.of(Problem.Kind.UNSUPPORTED,
+                    "锚点在另一个维度（" + dimension + "），跨维度施工还没有支持", null));
+        }
+        return new Resolution.Ready(new WorldPosition(at.x(), at.y(), at.z(), dimension));
     }
 
     // 坐标：没写维度按角色所在的算；省略 y 取那一列的地表，那一列没加载就说不清。

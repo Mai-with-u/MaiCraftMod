@@ -3,11 +3,13 @@ package org.maiwithu.maicraft.behavior.construction;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Set;
 
 import net.minecraft.SharedConstants;
+import net.minecraft.client.player.Input;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
@@ -90,5 +92,35 @@ class PlacementPredictionTest {
     void 支撑顺序先下后四周最后上() {
         assertEquals(Direction.DOWN, PlacementPrediction.SUPPORT_ORDER[0]);
         assertEquals(Direction.UP, PlacementPrediction.SUPPORT_ORDER[5]);
+    }
+
+    @Test
+    void 潜行试算隔离同步覆写并恢复输入潜行状态() {
+        // 前序临时方块续按潜行导致 input.shiftKeyDown=true 时，站立试算（sneak=false）必须同时隔离输入与标志。
+        Input input = new Input();
+        input.shiftKeyDown = true;
+        boolean[] flag = {true};
+        boolean observedInside = PlacementPrediction.withSneakOverride(
+                input, () -> flag[0], value -> flag[0] = value, false,
+                () -> input.shiftKeyDown || flag[0]);
+        assertFalse(observedInside, "站立试算期间 input.shiftKeyDown 与潜行标志都必须为 false");
+        assertTrue(input.shiftKeyDown, "退出试算后 input.shiftKeyDown 应恢复为原值");
+        assertTrue(flag[0], "退出试算后潜行标志应恢复为原值");
+
+        // 试算中途抛出异常也必须恢复原状，不污染后续真实操作。
+        assertThrows(IllegalStateException.class, () -> PlacementPrediction.withSneakOverride(
+                input, () -> flag[0], value -> flag[0] = value, false, () -> {
+                    assertFalse(input.shiftKeyDown);
+                    throw new IllegalStateException("试算异常");
+                }));
+        assertTrue(input.shiftKeyDown);
+        assertTrue(flag[0]);
+
+        // input 为空时安全降级仅覆写并恢复标志。
+        flag[0] = false;
+        boolean flagInside = PlacementPrediction.withSneakOverride(
+                null, () -> flag[0], value -> flag[0] = value, true, () -> flag[0]);
+        assertTrue(flagInside);
+        assertFalse(flag[0]);
     }
 }

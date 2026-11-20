@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.function.Function;
+
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.SharedConstants;
@@ -17,6 +19,8 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -28,6 +32,7 @@ import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.interaction.ScriptedInteractionSender;
 import org.maiwithu.maicraft.game.interaction.SettledConfirmations;
+import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.result.RawTextLeaks;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -684,5 +689,46 @@ class AimAndInteractTest {
                 context, sender, 10);
         assertEquals("TARGET_GONE", failedKind(status));
         assertTrue(sender.submissions.isEmpty());
+    }
+
+    @Test
+    void placingAgainstSupportCellDistinguishesSupportAndEffectCellInScene() {
+        // 放方块点击下方支撑格 (2,64,2) 顶面、落点在上方 (2,65,2)：
+        // 现场必须明确区分“点击支撑格”与“落点格”，不再把支撑格当作目标落点格打印。
+        BlockPos support = TARGET;
+        BlockPos effect = TARGET.above();
+        ScriptedInteractionSender sender = new ScriptedInteractionSender();
+        InteractionTestFakes.FakeContext context = new InteractionTestFakes.FakeContext().withSender(sender);
+        InteractionTestFakes.FakeScene scene = new InteractionTestFakes.FakeScene(context);
+        scene.blocks.put(support, Blocks.COBBLESTONE.defaultBlockState());
+        BlockState wrongFacing = Blocks.OAK_STAIRS.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH);
+        scene.blocks.put(effect, Blocks.AIR.defaultBlockState());
+        scene.ray = new BlockHitResult(Vec3.atCenterOf(support), Direction.UP, support, false);
+        InteractionConfirmation confirmation = new InteractionConfirmation() {
+            @Override public Verdict observe(PlayerContext c) {
+                return Verdict.PENDING;
+            }
+            @Override public BlockPos effectCell() {
+                return effect;
+            }
+            @Override public String describeScene(Function<BlockPos, BlockState> states) {
+                BlockState live = states.apply(effect);
+                return "落点格 " + effect.toShortString() + " 已落地但朝向或状态与预期不符（实际 "
+                        + live.getValue(BlockStateProperties.HORIZONTAL_FACING) + "）";
+            }
+        };
+        AimAndInteract action = new AimAndInteract(InteractionTarget.BlockTarget.facing(support, Direction.UP),
+                confirmation, c -> scene);
+        runUntilSubmitted(action, context);
+        scene.blocks.put(effect, wrongFacing);
+        sender.nextStatus = PendingInteraction.Status.DIVERGED;
+        ActionStatus status = action.tick(context.asTickContext());
+        assertTrue(status instanceof ActionStatus.Failed);
+        String text = action.result().scene();
+        assertTrue(text.contains("点击支撑格 " + support.toShortString()), text);
+        assertFalse(text.contains("目标格提交前是"), text);
+        assertTrue(text.contains("落点格 " + effect.toShortString()) && text.contains("已落地但朝向或状态与预期不符"), text);
+        RawTextLeaks.assertNone(text);
     }
 }

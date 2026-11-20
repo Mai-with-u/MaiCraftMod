@@ -362,12 +362,24 @@ public final class AimAndInteract implements Action {
         };
     }
 
-    // 现场说明：目标格提交前后的状态对比只在方块目标时有；前后两头都按玩家看到的方块名说。
+    // 现场说明：区分点击支撑格与目标落点格（放方块点在支撑格上时不再把支撑格当作落点格打印），
+    // 并附上确认条件给出的落点格实际状态与预期差异。
     private String sceneFacts(FirstPersonScene scene) {
         StringBuilder facts = new StringBuilder("提交时射线命中" + submittedHitDescription);
+        BlockPos effectPos = confirmation.effectCell();
         if (target instanceof InteractionTarget.BlockTarget block && targetStateAtSubmission != null) {
-            facts.append("；目标格提交前是").append(blockName(targetStateAtSubmission))
-                    .append("，现在是").append(blockName(scene.blockAt(block.pos())));
+            if (effectPos != null && !effectPos.equals(block.pos())) {
+                facts.append("；点击支撑格 ").append(block.pos().toShortString())
+                        .append(" 提交前是").append(blockName(targetStateAtSubmission))
+                        .append("，现在是").append(blockName(scene.blockAt(block.pos())));
+            } else {
+                facts.append("；目标格提交前是").append(blockName(targetStateAtSubmission))
+                        .append("，现在是").append(blockName(scene.blockAt(block.pos())));
+            }
+        }
+        String confirmationScene = confirmation.describeScene(scene::blockAt);
+        if (confirmationScene != null && !confirmationScene.isBlank()) {
+            facts.append("；").append(confirmationScene);
         }
         return facts.toString();
     }

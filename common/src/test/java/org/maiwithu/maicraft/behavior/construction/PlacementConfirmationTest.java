@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.properties.SlabType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation.Verdict;
+import org.maiwithu.maicraft.kernel.result.RawTextLeaks;
 
 /** 放置确认：主格、另一半与耗材一起看；没变要等服务端确认才算没生效，另一半晚到继续等，变成别的是出乎预料。 */
 class PlacementConfirmationTest {
@@ -138,5 +139,30 @@ class PlacementConfirmationTest {
         assertFalse(PlacementConfirmation.samePlacement(south, north));
         BlockState open = Blocks.OAK_DOOR.defaultBlockState().setValue(BlockStateProperties.OPEN, true);
         assertTrue(PlacementConfirmation.samePlacement(open, Blocks.OAK_DOOR.defaultBlockState()), "开关是运行态");
+    }
+
+    @Test
+    void 现场说明区分未落地与已落地朝向不符并无原始对象串() {
+        BlockPos target = new BlockPos(4, 65, 8);
+        BlockState northStairs = Blocks.OAK_STAIRS.defaultBlockState()
+                .setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.NORTH);
+        BlockState southStairs = northStairs.setValue(BlockStateProperties.HORIZONTAL_FACING, Direction.SOUTH);
+        var cell = PlannedCell.block(target, northStairs, Set.of("facing"));
+        var confirmation = new PlacementConfirmation(cell, Map.of(target, AIR), northStairs, -1);
+
+        assertEquals(target, confirmation.effectCell());
+
+        String notLanded = confirmation.describeScene(pos -> pos.equals(target) ? AIR : null);
+        assertTrue(notLanded.contains("4, 65, 8") && notLanded.contains("未落地"), notLanded);
+        RawTextLeaks.assertNone(notLanded);
+
+        String wrongFacing = confirmation.describeScene(pos -> pos.equals(target) ? southStairs : null);
+        assertTrue(wrongFacing.contains("4, 65, 8") && wrongFacing.contains("已落地但朝向或状态与预期不符"), wrongFacing);
+        assertTrue(wrongFacing.contains("facing=north") && wrongFacing.contains("facing=south"), wrongFacing);
+        RawTextLeaks.assertNone(wrongFacing);
+
+        String wrongBlock = confirmation.describeScene(pos -> pos.equals(target) ? Blocks.DIRT.defaultBlockState() : null);
+        assertTrue(wrongBlock.contains("已落地但变成了其他方块") && wrongBlock.contains("minecraft:dirt"), wrongBlock);
+        RawTextLeaks.assertNone(wrongBlock);
     }
 }

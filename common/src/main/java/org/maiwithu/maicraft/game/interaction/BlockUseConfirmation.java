@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
+import java.util.function.Function;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.block.state.BlockState;
+
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /** 给方块变化检查再加一层服务器确认：客户端先显示出来的预测方块，不能单独证明这次放置成功。 */
@@ -35,4 +40,10 @@ final class BlockUseConfirmation implements InteractionConfirmation {
     }
 
     @Override public int stableTicksRequired() { return 1; }
+
+    @Override public BlockPos effectCell() { return evidence.effectCell(); }
+
+    @Override public String describeScene(Function<BlockPos, BlockState> states) {
+        return evidence.describeScene(states);
+    }
 }

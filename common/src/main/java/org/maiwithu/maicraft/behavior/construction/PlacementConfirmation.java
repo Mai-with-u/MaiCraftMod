@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.construction;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +51,89 @@ public final class PlacementConfirmation implements InteractionConfirmation {
 
     @Override public boolean requiresBlockAcknowledgement() {
         return true;
+    }
+
+    @Override public BlockPos effectCell() {
+        return cell.pos();
+    }
+
+    /**
+     * 如实区分目标落点格“未落地”与“已落地但朝向/状态与预期不符”，并报出落点格坐标与实际方块状态，
+     * 不出现 Block{...} 原始对象串，避免上层把支撑格当成落点格或把错朝向误判成没点生效。
+     */
+    @Override public String describeScene(Function<BlockPos, BlockState> states) {
+        BlockPos pos = cell.pos();
+        BlockState live = states == null ? null : states.apply(pos);
+        if (live == null) {
+            return "落点格 " + pos.toShortString() + " 未加载";
+        }
+        BlockState old = before.get(pos);
+        if (live.equals(old)) {
+            return "落点格 " + pos.toShortString() + " 未落地（仍为 " + describeState(live) + "）";
+        }
+        boolean mainOk = PlacementPrediction.complete(cell, live) || PlacementPrediction.isProgress(cell, old, live);
+        List<PlacementPrediction.GeneratedCell> effects = effectsOf(live);
+        if (!effects.isEmpty() && predicted != null) {
+            mainOk &= sameBlockAndHalf(live, predicted);
+        }
+        if (mainOk) {
+            for (var effect : effects) {
+                BlockState now = states.apply(effect.pos());
+                if (now == null) {
+                    return "落点格 " + pos.toShortString() + " 现为 " + describeState(live)
+                            + "，关联格 " + effect.pos().toShortString() + " 未加载";
+                }
+                if (!samePlacement(now, effect.expected())) {
+                    return "落点格 " + pos.toShortString() + " 现为 " + describeState(live)
+                            + "，但关联格 " + effect.pos().toShortString() + " 实际为 " + describeState(now)
+                            + "（预期 " + describeState(effect.expected()) + "）";
+                }
+            }
+            return "落点格 " + pos.toShortString() + " 现为 " + describeState(live);
+        }
+        if (live.getBlock() == cell.state().getBlock()) {
+            return "落点格 " + pos.toShortString() + " 已落地但朝向或状态与预期不符（预期 "
+                    + describeExpected(cell) + "，实际 " + describeState(live) + "）";
+        }
+        return "落点格 " + pos.toShortString() + " 已落地但变成了其他方块（预期 "
+                + describeExpected(cell) + "，实际 " + describeState(live) + "）";
+    }
+
+    // 用方块注册 ID 与关键摆放属性（朝向、上下半、轴向等）表达现场状态，不泄漏 Block{...} 原始串。
+    static String describeState(BlockState state) {
+        if (state == null) return "未加载";
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        List<String> props = new ArrayList<>();
+        for (Property<?> property : state.getProperties()) {
+            if (placementProperty(property)) {
+                props.add(property.getName() + "=" + valueName(state, property));
+            }
+        }
+        return props.isEmpty() ? id : id + "[" + String.join(",", props) + "]";
+    }
+
+    private static String describeExpected(PlannedCell cell) {
+        BlockState desired = cell.state();
+        String id = BuiltInRegistries.BLOCK.getKey(desired.getBlock()).toString();
+        List<String> props = new ArrayList<>();
+        if (!cell.required().isEmpty()) {
+            for (Property<?> property : desired.getProperties()) {
+                if (cell.required().contains(property.getName())) {
+                    props.add(property.getName() + "=" + valueName(desired, property));
+                }
+            }
+        } else {
+            for (Property<?> property : desired.getProperties()) {
+                if (placementProperty(property)) {
+                    props.add(property.getName() + "=" + valueName(desired, property));
+                }
+            }
+        }
+        return props.isEmpty() ? id : id + "[" + String.join(",", props) + "]";
+    }
+
+    private static <T extends Comparable<T>> String valueName(BlockState state, Property<T> property) {
+        return property.getName(state.getValue(property));
     }
 
     @Override public Verdict observe(PlayerContext context) {

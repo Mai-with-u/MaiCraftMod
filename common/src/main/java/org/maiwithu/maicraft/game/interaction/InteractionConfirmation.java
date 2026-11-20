@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.game.interaction;
 
 import java.util.Arrays;
+import java.util.function.Function;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.inventory.AbstractSignEditScreen;
@@ -36,11 +37,22 @@ public interface InteractionConfirmation {
      * 过期照旧按没能确认交上去。
      */
     default boolean expiryMeansNotApplied() { return false; }
+
+    /** 这次交互实际作用与核对的落点格：点击支撑格放方块时与被点格不同，普通方块交互返回 null 表示就是被点格。 */
+    default BlockPos effectCell() { return null; }
+
+    /** 确认结论的补充现场事实（如目标落点格坐标、是否已落地、实际方块状态与预期差异）；无补充返回 null。 */
+    default String describeScene(Function<BlockPos, BlockState> states) { return null; }
+
     /** 调用方已拥有服务器发来的新实体证据时，不再多等一次稳定刻。 */
     static InteractionConfirmation serverObservedEntity(InteractionConfirmation evidence) {
         return new InteractionConfirmation() {
             public Verdict observe(PlayerContext context) { return evidence.observe(context); }
             public int stableTicksRequired() { return 1; }
+            @Override public BlockPos effectCell() { return evidence.effectCell(); }
+            @Override public String describeScene(Function<BlockPos, BlockState> states) {
+                return evidence.describeScene(states);
+            }
         };
     }
 
@@ -227,6 +239,10 @@ public interface InteractionConfirmation {
             @Override public boolean requiresBlockAcknowledgement() { return check.requiresBlockAcknowledgement(); }
             @Override public Verdict observeAcknowledged(PlayerContext context) { return check.observeAcknowledged(context); }
             @Override public boolean expiryMeansNotApplied() { return true; }
+            @Override public BlockPos effectCell() { return check.effectCell(); }
+            @Override public String describeScene(Function<BlockPos, BlockState> states) {
+                return check.describeScene(states);
+            }
         };
     }
 

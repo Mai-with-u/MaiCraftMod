@@ -2,7 +2,11 @@
 package org.maiwithu.maicraft.behavior.construction;
 
 import java.util.List;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
+import net.minecraft.client.player.Input;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -156,48 +160,66 @@ public final class PlacementPrediction {
                                     boolean sneak, BlockPos target) {
         if (!(stack.getItem() instanceof BlockItem blockItem)) return null;
         Direction[] nearest = LookDirections.ordered(yaw, pitch);
-        // 机械动力的方向机器按角色身上"蹲没蹲"定朝向（蹲着朝视线、站着背着视线），不看放置上下文：
-        // 试算时把角色的潜行标记临时换成候选值，算完立刻还原，这一刻不发包。
-        boolean wasSneaking = player.isShiftKeyDown();
-        if (wasSneaking != sneak) player.setShiftKeyDown(sneak);
+        // 机械动力的方向机器在试算时直接读角色的 isShiftKeyDown()：
+        // LocalPlayer 覆写的 isShiftKeyDown() 读的是 input.shiftKeyDown，只改实体潜行标志会被前序潜行续按污染，
+        // 必须在试算作用域内同步保存、覆写并恢复 input.shiftKeyDown 与实体潜行标志。
+        return withSneakOverride(player.input, player::isShiftKeyDown, player::setShiftKeyDown, sneak, () -> {
+            try {
+                BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
+                    @Override public boolean isSecondaryUseActive() {
+                        return sneak;
+                    }
+
+                    @Override public Direction getHorizontalDirection() {
+                        return Direction.fromYRot(yaw);
+                    }
+
+                    @Override public float getRotation() {
+                        return yaw;
+                    }
+
+                    @Override public Direction getNearestLookingDirection() {
+                        return nearest[0];
+                    }
+
+                    @Override public Direction getNearestLookingVerticalDirection() {
+                        return LookDirections.vertical(pitch);
+                    }
+
+                    @Override public Direction[] getNearestLookingDirections() {
+                        return LookDirections.forPlacement(nearest, getClickedFace(), replacingClickedOnBlock());
+                    }
+                };
+                // 点同类半砖可能补成被点格的双层砖而不是放到邻格：落点也要和这次的目标格对上。
+                BlockPos destination = context.getClickedPos();
+                if (!destination.equals(target) || !context.canPlace()) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
+                // 原版右键放方块的顺序：物品先改放置上下文（脚手架往外续），再由物品自己定放成什么。
+                BlockPlaceContext placing = blockItem.updatePlacementContext(context);
+                if (placing == null || !placing.getClickedPos().equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
+                BlockState placed = PlacementItems.placementState(blockItem, placing);
+                return new Placement(hit.getBlockPos(), hit.getDirection(), placed, sneak);
+            } catch (RuntimeException unavailable) {
+                return null;
+            }
+        });
+    }
+
+    /**
+     * 在试算作用域内同步隔离潜行输入与实体潜行标志，退出或抛异常时一律按原值恢复，不污染后续真实操作。
+     */
+    static <T> T withSneakOverride(Input input, BooleanSupplier readFlag, Consumer<Boolean> writeFlag,
+                                   boolean sneak, Supplier<T> action) {
+        boolean hasInput = input != null;
+        boolean wasInputShift = hasInput && input.shiftKeyDown;
+        // 必须在覆写 input.shiftKeyDown 前直接读实体潜行标志，避免改完输入后读到被覆盖的新值。
+        boolean wasFlag = readFlag.getAsBoolean();
+        if (hasInput) input.shiftKeyDown = sneak;
+        if (wasFlag != sneak) writeFlag.accept(sneak);
         try {
-            BlockPlaceContext context = new BlockPlaceContext(new UseOnContext(player.level(), player, InteractionHand.MAIN_HAND, stack, hit) {}) {
-                @Override public boolean isSecondaryUseActive() {
-                    return sneak;
-                }
-
-                @Override public Direction getHorizontalDirection() {
-                    return Direction.fromYRot(yaw);
-                }
-
-                @Override public float getRotation() {
-                    return yaw;
-                }
-
-                @Override public Direction getNearestLookingDirection() {
-                    return nearest[0];
-                }
-
-                @Override public Direction getNearestLookingVerticalDirection() {
-                    return LookDirections.vertical(pitch);
-                }
-
-                @Override public Direction[] getNearestLookingDirections() {
-                    return LookDirections.forPlacement(nearest, getClickedFace(), replacingClickedOnBlock());
-                }
-            };
-            // 点同类半砖可能补成被点格的双层砖而不是放到邻格：落点也要和这次的目标格对上。
-            BlockPos destination = context.getClickedPos();
-            if (!destination.equals(target) || !context.canPlace()) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
-            // 原版右键放方块的顺序：物品先改放置上下文（脚手架往外续），再由物品自己定放成什么。
-            BlockPlaceContext placing = blockItem.updatePlacementContext(context);
-            if (placing == null || !placing.getClickedPos().equals(target)) return new Placement(hit.getBlockPos(), hit.getDirection(), null, sneak);
-            BlockState placed = PlacementItems.placementState(blockItem, placing);
-            return new Placement(hit.getBlockPos(), hit.getDirection(), placed, sneak);
-        } catch (RuntimeException unavailable) {
-            return null;
+            return action.get();
         } finally {
-            if (wasSneaking != sneak) player.setShiftKeyDown(wasSneaking);
+            if (hasInput) input.shiftKeyDown = wasInputShift;
+            if (wasFlag != sneak) writeFlag.accept(wasFlag);
         }
     }
 }

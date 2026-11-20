@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.compat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -38,6 +39,11 @@ public final class CompatPlacementRules implements PlacementRules {
 
     @Override public BlockState afterPlacing(Item item, BlockState placed, ClientLevel level, BlockPos at, Direction playerFacing) {
         return ask(() -> rules.afterPlacing(item, placed, level, at, playerFacing), placed);
+    }
+
+    // 联动启用时转发扳手转正方案（如机械动力方向机器放下后用扳手点几面转到位）；停用或接口对不上时交回空。
+    @Override public Optional<Turns> turnsTo(BlockState placed, Predicate<BlockState> wanted) {
+        return ask(() -> rules.turnsTo(placed, wanted), Optional.empty());
     }
 
     // 问一句：停用了或对不上时给"不归我管"的那个答案。
