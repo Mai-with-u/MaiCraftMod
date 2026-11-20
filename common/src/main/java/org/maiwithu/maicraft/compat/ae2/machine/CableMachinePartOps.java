@@ -339,7 +339,10 @@ final class CableMachinePartOps implements Ae2DeviceOps {
             if (wantInside && reading.get().containerSnapshots().stream().noneMatch(SlotSnapshot::isEmpty)) {
                 return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "线缆版样板供应器 9 个样板格已满"));
             }
-            if (!menu.quickMove(slot)) return ActionStatus.running();
+            if (!menu.quickMove(slot)) {
+                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+                return beginClose(Problem.of(Problem.Kind.STUCK, "无法移动线缆版样板供应器的样板槽"));
+            }
             waited = 0;
             stage = Stage.WAIT;
             return ActionStatus.progressed();

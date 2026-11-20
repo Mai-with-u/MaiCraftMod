@@ -140,7 +140,10 @@ final class MachineTestFakes {
     static final class ScriptedMenu implements OpenedMenu {
         private final Supplier<Optional<MenuContent.Reading>> readingSupplier;
         private final IntConsumer onQuickMove;
+        private Supplier<SlotSnapshot> cursorSupplier = SlotSnapshot::empty;
+        private IntConsumer onClick;
         final List<Integer> quickMoved = new ArrayList<>();
+        final List<Integer> clicked = new ArrayList<>();
         boolean closed;
 
         ScriptedMenu(Supplier<Optional<MenuContent.Reading>> readingSupplier, IntConsumer onQuickMove) {
@@ -148,16 +151,26 @@ final class MachineTestFakes {
             this.onQuickMove = onQuickMove;
         }
 
+        ScriptedMenu withCursor(Supplier<SlotSnapshot> cursorSupplier, IntConsumer onClick) {
+            this.cursorSupplier = cursorSupplier;
+            this.onClick = onClick;
+            return this;
+        }
+
         @Override public Optional<MenuContent.Reading> reading() { return readingSupplier.get(); }
         @Override public boolean busy() { return false; }
-        @Override public boolean cursorEmpty() { return true; }
-        @Override public SlotSnapshot cursor() { return SlotSnapshot.empty(); }
+        @Override public boolean cursorEmpty() { return cursorSupplier.get().isEmpty(); }
+        @Override public SlotSnapshot cursor() { return cursorSupplier.get(); }
         @Override public boolean quickMove(int slotId) {
             quickMoved.add(slotId);
             if (onQuickMove != null) onQuickMove.accept(slotId);
             return true;
         }
-        @Override public boolean click(int slotId, int button) { return true; }
+        @Override public boolean click(int slotId, int button) {
+            clicked.add(slotId);
+            if (onClick != null) onClick.accept(slotId);
+            return true;
+        }
         @Override public void noteCursorTakenFrom(int slotId) {}
         @Override public Action closing() {
             return new Action() {

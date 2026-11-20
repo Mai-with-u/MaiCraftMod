@@ -156,6 +156,7 @@ class PatternEncodingAndAccessTest {
                 """;
         PatternEncodingRequest req = PatternEncodingRequest.parse(rawJson).request();
         List<String> wrapped = new ArrayList<>();
+        AtomicBoolean procWritten = new AtomicBoolean(false);
         Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
             @Override public boolean isAe2MenuOpen() { return true; }
             @Override public List<Integer> slotsOf(String semanticId) {
@@ -166,7 +167,10 @@ class PatternEncodingAndAccessTest {
                 };
             }
             @Override public boolean sendConfigButton(String s, boolean b) { return true; }
-            @Override public boolean sendSetFilter(int slotIndex, ItemStack stack) { return !stack.isEmpty(); }
+            @Override public boolean sendSetFilter(int slotIndex, ItemStack stack) {
+                if (slotIndex == 30 && !stack.isEmpty()) procWritten.set(true);
+                return !stack.isEmpty();
+            }
             @Override public boolean sendNoArgAction(String a) { return true; }
             @Override public boolean sendIntAction(String a, int v) { return true; }
             @Override public boolean sendLongAction(String a, long v) { return true; }
@@ -180,7 +184,7 @@ class PatternEncodingAndAccessTest {
         Ae2MachineReads reads = new Ae2MachineReads() {
             @Override public Optional<PatternEncodingMenuView> openPatternEncodingMenu() {
                 return Optional.of(new PatternEncodingMenuView("processing", false, true, "", List.of(),
-                        "", 0, "", false, true, true, false));
+                        "", 0, "", false, procWritten.get(), procWritten.get(), false));
             }
             @Override public boolean sendEncodeMode(String mode) { return true; }
             @Override public boolean sendEncodeClear() { return true; }
@@ -329,5 +333,66 @@ class PatternEncodingAndAccessTest {
         assertEquals(rawJson, cache.encoding(HOST, Direction.EAST).orElseThrow().lastRequest());
         assertEquals("minecraft:stone_bricks", cache.encoding(HOST, Direction.EAST).orElseThrow().lastOutput());
         assertTrue(menu.closed);
+    }
+
+    @Test
+    void 同模式旧网格残留有效配方时必须先等clear清空_防止绕过防洗样板校验() {
+        String rawJson = "{\"mode\":\"crafting\",\"inputs\":[\"minecraft:stick\",\"minecraft:stick\"]}";
+        PatternEncodingRequest req = PatternEncodingRequest.parse(rawJson).request();
+        AtomicInteger clearDelay = new AtomicInteger(-1);
+        AtomicBoolean cleared = new AtomicBoolean(false);
+        AtomicBoolean encodeCalled = new AtomicBoolean(false);
+        Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
+            @Override public boolean isAe2MenuOpen() { return true; }
+            @Override public List<Integer> slotsOf(String semanticId) {
+                return "CRAFTING_GRID".equals(semanticId)
+                        ? List.of(10, 11, 12, 13, 14, 15, 16, 17, 18) : List.of();
+            }
+            @Override public boolean sendConfigButton(String s, boolean b) { return true; }
+            @Override public boolean sendSetFilter(int i, ItemStack st) { return true; }
+            @Override public boolean sendNoArgAction(String a) { return true; }
+            @Override public boolean sendIntAction(String a, int v) { return true; }
+            @Override public boolean sendLongAction(String a, long v) { return true; }
+            @Override public boolean sendBooleanAction(String a, boolean v) { return true; }
+            @Override public boolean sendStringAction(String a, String v) { return true; }
+            @Override public boolean sendRawJsonAction(String a, String j) { return true; }
+            @Override public boolean openSubMenu(String m) { return true; }
+            @Override public boolean returnToParentMenu() { return true; }
+        };
+        Ae2Compat compat = MachineTestFakes.compatWith(menuSlots, Ae2Patterns.NONE, MachineTestFakes.emptyGrid());
+        Ae2MachineReads reads = new Ae2MachineReads() {
+            @Override public Optional<PatternEncodingMenuView> openPatternEncodingMenu() {
+                if (clearDelay.get() > 0 && clearDelay.decrementAndGet() == 0) {
+                    cleared.set(true);
+                }
+                // clear 未生效前仍残留旧有效配方 minecraft:crafting_table；清空后新配方无效（空结果）。
+                String staleOrNew = cleared.get() ? "" : "minecraft:crafting_table";
+                return Optional.of(new PatternEncodingMenuView("crafting", false, true, "", List.of(),
+                        staleOrNew, 2, "", false, false, false, false));
+            }
+            @Override public boolean sendEncodeMode(String mode) { return true; }
+            @Override public boolean sendEncodeClear() {
+                clearDelay.set(3);
+                return true;
+            }
+            @Override public boolean sendEncodeCommit() {
+                encodeCalled.set(true);
+                return true;
+            }
+        };
+        MachineTestFakes.ScriptedMenu menu = new MachineTestFakes.ScriptedMenu(
+                () -> Optional.of(MachineTestFakes.readingOf(List.of(), List.of(), List.of(), List.of())), null);
+        PatternEncodingAction action = new PatternEncodingAction(HOST, Direction.NORTH,
+                MachineTestFakes.instantOpening(menu), compat, reads, new Ae2MachineCache(), req, rawJson, null, null);
+
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 80; i++) {
+            status = action.tick(MachineTestFakes.emptyTick());
+            if (!(status instanceof ActionStatus.Running)) break;
+        }
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status);
+        assertEquals(Problem.Kind.INVALID_PARAMETER, failed.problem().kind());
+        assertFalse(encodeCalled.get(), "必须先等 clear() 清空旧有效配方，绝不可拿旧残留放行 encode()");
+        assertTrue(cleared.get());
     }
 }

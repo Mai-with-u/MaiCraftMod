@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -19,13 +20,16 @@ import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.crafting.Ingredient;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
-import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.acquire.spi.AcquisitionCost;
+import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
@@ -72,6 +76,8 @@ class CraftingTermAndAssemblyTest {
         List<String> sent = new ArrayList<>();
         AtomicBoolean filled = new AtomicBoolean(false);
         AtomicBoolean gridOccupied = new AtomicBoolean(true);
+        AtomicReference<SlotSnapshot> cursor = new AtomicReference<>(SlotSnapshot.empty());
+        AtomicReference<SlotSnapshot> bagSlot = new AtomicReference<>(SlotSnapshot.empty());
         Ae2MachineReads reads = new Ae2MachineReads() {
             @Override public Optional<CraftingTermMenuView> openCraftingTermMenu() {
                 if (!filled.get()) {
@@ -86,6 +92,10 @@ class CraftingTermAndAssemblyTest {
             }
             @Override public boolean sendCraftResult(int outputSlotIndex, boolean shift) {
                 sent.add("craft:" + outputSlotIndex + ":" + (shift ? "shift" : "item"));
+                // 模拟 AE2 真实行为：CRAFT_ITEM 把单次成品放到鼠标光标。
+                if (!shift) {
+                    cursor.set(SlotSnapshot.of(new ItemStack(Items.CRAFTING_TABLE, 1)));
+                }
                 return true;
             }
             @Override public boolean sendClearCraftingGrid(boolean toPlayerInventory) {
@@ -96,26 +106,52 @@ class CraftingTermAndAssemblyTest {
         };
         Ae2Compat compat = MachineTestFakes.compatWith(menuSlots, Ae2Patterns.NONE, MachineTestFakes.emptyGrid());
         MachineTestFakes.ScriptedMenu menu = new MachineTestFakes.ScriptedMenu(
-                () -> Optional.of(MachineTestFakes.readingOf(List.of(), List.of(), List.of(), List.of())),
-                null);
+                () -> Optional.of(MachineTestFakes.readingOf(
+                        List.of(30), List.of(bagSlot.get()), List.of(), List.of())),
+                null)
+                .withCursor(cursor::get, slot -> {
+                    if (slot == 30 && !cursor.get().isEmpty()) {
+                        bagSlot.set(cursor.get());
+                        cursor.set(SlotSnapshot.empty());
+                    }
+                });
         List<ItemStack> templates = List.of(
                 new ItemStack(Items.OAK_PLANKS), new ItemStack(Items.OAK_PLANKS), ItemStack.EMPTY,
                 new ItemStack(Items.OAK_PLANKS), new ItemStack(Items.OAK_PLANKS), ItemStack.EMPTY,
                 ItemStack.EMPTY, ItemStack.EMPTY, ItemStack.EMPTY);
+        // 要 2 件也走 CRAFT_ITEM（绝不误用 CRAFT_SHIFT 搓一整组 64 件），两次从光标点入背包后成功 Done。
         CraftingTermAction action = new CraftingTermAction(MachineTestFakes.instantOpening(menu),
-                "minecraft:crafting_table", templates, "minecraft:crafting_table", 1, compat, reads);
+                "minecraft:crafting_table", templates, "minecraft:crafting_table", 2, compat, reads);
 
-        // 推进动作：在空角色上下文下取产物超时后会先退网再退包清格，最后安全关窗。
         ActionStatus status = ActionStatus.running();
-        for (int i = 0; i < 120; i++) {
+        for (int i = 0; i < 60; i++) {
             status = action.tick(MachineTestFakes.emptyTick());
             if (!(status instanceof ActionStatus.Running)) break;
         }
+        assertInstanceOf(ActionStatus.Done.class, status, "CRAFT_ITEM 光标入包应完整成功而非超时");
         assertTrue(sent.contains("fill:minecraft:crafting_table:9"), "必须发 FillCraftingGridFromRecipePacket");
-        assertTrue(sent.contains("craft:19:item"), "必须按 CRAFTING_RESULT 语义槽 19 发 CRAFT_ITEM，绝不走原版 pickup");
+        assertEquals(2, sent.stream().filter("craft:19:item"::equals).count(), "要 2 件应发 2 次 CRAFT_ITEM 而非 CRAFT_SHIFT");
+        assertEquals(List.of(30, 30), menu.clicked, "两次从光标点进玩家背包槽 30");
+        assertTrue(cursor.get().isEmpty(), "关窗前光标必须已清空，绝不掉地上");
         assertTrue(sent.contains("clear_network"), "完工先退回 ME 网络");
         assertTrue(sent.contains("clear_player"), "退网后格内仍有余料时再退回玩家背包");
         assertTrue(menu.closed);
+
+        // 报价防抢单：背包缺料时标 UNKNOWN_COUNT 并带 shortfallBlocks，代价高于 10 格外现货箱子；背包自足则报确定件数且零缺料。
+        SourceQuote.Offer uncertain = CraftingTermSource.buildOffer("ME 合成终端 3×3 手搓", 4, 0, 3, 2, "h", "r");
+        assertEquals(SourceQuote.Offer.UNKNOWN_COUNT, uncertain.obtainableCount());
+        AcquisitionCost nearbyChestSpot = new AcquisitionCost(10, 4, 0);
+        assertTrue(uncertain.cost().compareTo(nearbyChestSpot) > 0, "未知网络原料手搓不应压过 10 格外明确现货箱子");
+
+        SourceQuote.Offer selfSufficient = CraftingTermSource.buildOffer("ME 合成终端 3×3 手搓", 4, 0, 3, 0, "h", "r");
+        assertEquals(4, selfSufficient.obtainableCount());
+        assertEquals(0.0, selfSufficient.cost().shortfallBlocks());
+
+        // 多配方缺料计数：背包有 2 块木板时，2 格木板配方缺 0 格，4 格木板配方缺 2 格。
+        List<ItemStack> bag = List.of(new ItemStack(Items.OAK_PLANKS, 2));
+        Ingredient planks = Ingredient.of(Items.OAK_PLANKS);
+        assertEquals(0, CraftingTermSource.countMissingIngredients(List.of(planks, planks), bag));
+        assertEquals(2, CraftingTermSource.countMissingIngredients(List.of(planks, planks, planks, planks), bag));
 
         // 校验无线与固定终端 hint 编解码。
         String wHint = CraftingTermSource.encodeWirelessHint(

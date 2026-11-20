@@ -45,6 +45,8 @@ final class ChargerFullRun implements FullRun {
     static final int CRANK_INTERVAL_TICKS = 16;
     /** 弹出后走到正面捡起掉落物的等待上限（刻）。C 玩家常识。 */
     static final int PICKUP_WAIT_TICKS = 60;
+    /** 摇曲柄未旋转/被拒的连续安全试探上限（远低于 AE2 满电空摇超过 10 次无掉落毁曲柄的阈值）。F 游戏事实。 */
+    static final int MAX_CONSECUTIVE_CRANK_REFUSALS = 2;
 
     enum Stage { INSPECT, CLEAR_FOREIGN, PREPARE_ITEM, INSERT, WAIT_OR_CRANK, EJECT, PICKUP, DONE }
 
@@ -71,6 +73,7 @@ final class ChargerFullRun implements FullRun {
     private boolean collectingForeign;
     private boolean turningCrank;
     private boolean approachedFront;
+    private int consecutiveCrankRefusals;
 
     ChargerFullRun(BlockPos at, RunRequest request, Permissions permissions,
             Ae2MachineReads reads, PlayerServices services) {
@@ -236,6 +239,17 @@ final class ChargerFullRun implements FullRun {
             finishStep();
             if (turningCrank) {
                 turningCrank = false;
+                // 服务端满电拒转时曲柄不旋转且递增 hits（超过 10 次无掉落销毁），绝不可吞掉 Failed 反复空摇。
+                if (status instanceof ActionStatus.Failed) {
+                    if (++consecutiveCrankRefusals >= MAX_CONSECUTIVE_CRANK_REFUSALS) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                                "木质曲柄连续 " + consecutiveCrankRefusals
+                                        + " 次未能旋转（充能器可能已满电或拒转），为防空摇销毁曲柄已立刻停止"));
+                    }
+                    crankCooldown = CRANK_INTERVAL_TICKS;
+                    return ActionStatus.progressed();
+                }
+                consecutiveCrankRefusals = 0;
                 crankCooldown = CRANK_INTERVAL_TICKS;
             }
             return ActionStatus.progressed();
@@ -243,23 +257,31 @@ final class ChargerFullRun implements FullRun {
         if (crankCooldown > 0) crankCooldown--;
         if (view.working()) {
             idleTicks = 0;
+            consecutiveCrankRefusals = 0;
             return ActionStatus.running();
         }
         if (++idleTicks < IDLE_BEFORE_CRANK_TICKS) return ActionStatus.running();
-        // 持续未工作且侧面装有木质曲柄：严格校验曲柄可转且未到冷却再摇一下。
+        // 持续未工作且侧面装有木质曲柄：严格校验曲柄可转且未达连续拒转上限再摇一下。
         crankPos = findAttachedCrank(player.level()).orElse(null);
         if (crankPos == null) return ActionStatus.running();
         Optional<Ae2MachineReads.CrankView> crank = reads.crankAt(player.level(), crankPos);
-        if (crank.isEmpty() || !shouldTurnCrank(view, crank.get(), crankCooldown)) {
+        if (crank.isEmpty() || !shouldTurnCrank(view, crank.get(), crankCooldown, consecutiveCrankRefusals)) {
             return ActionStatus.running();
         }
         return startCrankTurn(crankPos, player);
     }
 
-    /** 纯判定：给定当前充能器与曲柄快照及节拍冷却，这一刻是否允许安全摇动曲柄。 */
+    /** 纯判定：给定当前充能器与曲柄快照、节拍冷却与连续拒转次数，这一刻是否允许安全摇动曲柄。 */
     static boolean shouldTurnCrank(Ae2MachineReads.ChargerView charger, Ae2MachineReads.CrankView crank,
             int crankCooldown) {
+        return shouldTurnCrank(charger, crank, crankCooldown, 0);
+    }
+
+    /** 纯判定：同时把连续未旋转/拒转次数纳入防毁曲柄红线。 */
+    static boolean shouldTurnCrank(Ae2MachineReads.ChargerView charger, Ae2MachineReads.CrankView crank,
+            int crankCooldown, int consecutiveRefusals) {
         if (charger == null || crank == null || crankCooldown > 0) return false;
+        if (consecutiveRefusals >= MAX_CONSECUTIVE_CRANK_REFUSALS) return false;
         if (charger.slotEmpty() || charger.fullyCharged()) return false;
         return crank.canTurn();
     }
@@ -273,11 +295,13 @@ final class ChargerFullRun implements FullRun {
         }
         float rotationBefore = reads.crankAt(player.level(), targetCrank)
                 .map(Ae2MachineReads.CrankView::visibleRotation).orElse(0f);
-        InteractionConfirmation turned = ctx -> reads.crankAt(ctx.level(), targetCrank)
-                .map(v -> Math.abs(v.visibleRotation() - rotationBefore) > 0.1f || !v.canTurn()
-                        ? InteractionConfirmation.Verdict.APPLIED
-                        : InteractionConfirmation.Verdict.PENDING)
-                .orElse(InteractionConfirmation.Verdict.APPLIED);
+        // 确认窗到期曲柄仍未旋转必须按未生效（NOT_APPLIED）收场，让外层计入拒转并及时停摇。
+        InteractionConfirmation turned = InteractionConfirmation.expiresAsNotApplied(
+                ctx -> reads.crankAt(ctx.level(), targetCrank)
+                        .map(v -> Math.abs(v.visibleRotation() - rotationBefore) > 0.1f || !v.canTurn()
+                                ? InteractionConfirmation.Verdict.APPLIED
+                                : InteractionConfirmation.Verdict.PENDING)
+                        .orElse(InteractionConfirmation.Verdict.APPLIED));
         turningCrank = true;
         step = new ApproachThenUse(targetCrank, ApproachTarget.ofBlock(targetCrank), permissions, services,
                 () -> services.interactions().useBlock(targetCrank, turned));

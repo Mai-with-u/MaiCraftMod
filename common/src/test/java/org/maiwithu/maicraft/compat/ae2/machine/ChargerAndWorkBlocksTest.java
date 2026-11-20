@@ -3,11 +3,14 @@ package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -27,6 +30,7 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
 import org.maiwithu.maicraft.compat.ae2.Ae2Patterns;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 
 /**
  * 阶段 1 工作方块离线测试：覆盖充能器与木质曲柄防毁纪律、曲柄放置面校验、
@@ -66,6 +70,8 @@ class ChargerAndWorkBlocksTest {
         assertFalse(ChargerFullRun.shouldTurnCrank(charging, canTurn, 5), "rotation 冷却期内不连点");
         assertFalse(ChargerFullRun.shouldTurnCrank(charging, cannotTurn, 0), "canTurn 为假必须立刻停摇");
         assertFalse(ChargerFullRun.shouldTurnCrank(fullTool, canTurn, 0), "工具满电必须立刻停摇");
+        assertFalse(ChargerFullRun.shouldTurnCrank(charging, canTurn, 0, ChargerFullRun.MAX_CONSECUTIVE_CRANK_REFUSALS),
+                "连续未旋转拒转达上限必须立刻停摇，绝不空摇销毁曲柄");
 
         // 木质曲柄读数与有效附着面校验：充能器/压印器非正面 5 面、水晶催生器前后 2 面。
         MachineState crankState = ChargerDeviceOps.CrankDeviceOps.buildCrankState(canTurn);
@@ -154,5 +160,65 @@ class ChargerAndWorkBlocksTest {
         assertEquals(2, points.size());
         assertEquals(Direction.NORTH, points.get(0).side());
         assertEquals(Direction.SOUTH, points.get(1).side());
+    }
+
+    @Test
+    void 物质聚合器运行等模式同步不连发且核实输出槽清空才累加产出() {
+        AtomicInteger configSends = new AtomicInteger();
+        AtomicInteger syncDelay = new AtomicInteger();
+        AtomicReference<String> currentMode = new AtomicReference<>("trash");
+        AtomicInteger outputCount = new AtomicInteger(1);
+        Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
+            @Override public boolean isAe2MenuOpen() { return true; }
+            @Override public List<Integer> slotsOf(String semanticId) {
+                return "MACHINE_OUTPUT".equals(semanticId) ? List.of(1) : List.of();
+            }
+            @Override public boolean sendConfigButton(String settingName, boolean backwards) {
+                configSends.incrementAndGet();
+                syncDelay.set(3);
+                return true;
+            }
+            @Override public boolean sendSetFilter(int i, ItemStack st) { return true; }
+            @Override public boolean sendNoArgAction(String a) { return true; }
+            @Override public boolean sendIntAction(String a, int v) { return true; }
+            @Override public boolean sendLongAction(String a, long v) { return true; }
+            @Override public boolean sendBooleanAction(String a, boolean v) { return true; }
+            @Override public boolean sendStringAction(String a, String v) { return true; }
+            @Override public boolean sendRawJsonAction(String a, String j) { return true; }
+            @Override public boolean openSubMenu(String m) { return true; }
+            @Override public boolean returnToParentMenu() { return true; }
+        };
+        Ae2Compat compat = MachineTestFakes.compatWith(menuSlots, Ae2Patterns.NONE, MachineTestFakes.emptyGrid());
+        Ae2MachineReads reads = new Ae2MachineReads() {
+            @Override public Optional<CondenserMenuView> openCondenserMenu() {
+                if (syncDelay.get() > 0 && syncDelay.decrementAndGet() == 0) {
+                    currentMode.set("matter_balls");
+                }
+                return Optional.of(new CondenserMenuView(currentMode.get(), 256, 256,
+                        "ae2:cell_component_1k", outputCount.get() > 0 ? "minecraft:clay_ball" : "", outputCount.get()));
+            }
+        };
+        MachineTestFakes.ScriptedMenu menu = new MachineTestFakes.ScriptedMenu(
+                () -> Optional.of(MachineTestFakes.readingOf(
+                        List.of(3), List.of(SlotSnapshot.empty()),
+                        List.of(1), List.of(outputCount.get() > 0
+                                ? SlotSnapshot.of(new ItemStack(Items.CLAY_BALL, outputCount.get()))
+                                : SlotSnapshot.empty()))),
+                slot -> {
+                    if (slot == 1) outputCount.set(0);
+                });
+        CondenserOps.CondenserFullRun run = new CondenserOps.CondenserFullRun(AT, "minecraft:clay_ball", 1,
+                "matter_balls", compat, reads, new Ae2MachineCache(), MachineTestFakes.instantOpening(menu));
+
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 30; i++) {
+            status = run.tick(MachineTestFakes.emptyTick());
+            if (!(status instanceof ActionStatus.Running)) break;
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(1, configSends.get(), "模式切换发一次包后应等同步，绝不连发");
+        assertEquals(1, run.produced(), "仅在输出槽真实清空后累加产出");
+        assertTrue(run.complete());
+        assertTrue(menu.closed);
     }
 }

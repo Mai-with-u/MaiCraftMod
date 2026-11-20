@@ -270,7 +270,10 @@ final class Ae2MenuActionSupport {
                 return beginClose(null);
             }
             if (!current.isEmpty()) {
-                if (!menu.quickMove(targetSlotId)) return ActionStatus.running();
+                if (!menu.quickMove(targetSlotId)) {
+                    if (++waited <= SYNC_WAIT_TICKS) return ActionStatus.running();
+                    return beginClose(Problem.of(Problem.Kind.STUCK, "无法从 " + label + " 移出原占位物品"));
+                }
                 clickedTakeOut = true;
                 waited = 0;
                 stage = Stage.WAIT_CONFIRM;
@@ -283,7 +286,10 @@ final class Ae2MenuActionSupport {
                 return beginClose(Problem.of(Problem.Kind.NEED_ITEM,
                         "背包里没有 " + wantedLabel + "，无法放入 " + label));
             }
-            if (!menu.quickMove(playerSlot)) return ActionStatus.running();
+            if (!menu.quickMove(playerSlot)) {
+                if (++waited <= SYNC_WAIT_TICKS) return ActionStatus.running();
+                return beginClose(Problem.of(Problem.Kind.STUCK, "无法将 " + wantedLabel + " 移入 " + label));
+            }
             clickedTakeOut = false;
             waited = 0;
             stage = Stage.WAIT_CONFIRM;

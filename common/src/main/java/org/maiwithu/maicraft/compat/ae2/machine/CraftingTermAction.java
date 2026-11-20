@@ -14,8 +14,10 @@ import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.ShapedRecipe;
 
+import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
+import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -28,12 +30,19 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 合成终端与无线合成终端 3×3 手搓合成动作：
  * 打开界面 → 按 SlotSemantics.CRAFTING_GRID / CRAFTING_RESULT 定位槽位 →
  * 发 FillCraftingGridFromRecipePacket(recipeId, templates9, false)（严格 craftMissing=false）→
- * 等产物格就绪后发 InventoryActionPacket(CRAFT_SHIFT / CRAFT_ITEM) 取货（绝不走原版 pickup）→
+ * 等产物格就绪后：仅在剩余需求达到整组（64 件）时发 CRAFT_SHIFT 直进背包，
+ * 否则发 CRAFT_ITEM 拿单次成品到光标 → 点背包空位/可堆叠格放下并核对入包 →
  * 完工调用 clearCraftingGrid() 退网（放不下再 clearToPlayerInventory() 退包）→ 关窗。
  */
 final class CraftingTermAction implements Action {
 
-    private enum Stage { OPEN, FILL_GRID, WAIT_RESULT, TAKE_RESULT, WAIT_TAKEN, CLEAR_GRID, WAIT_CLEAR, CLOSE, DONE }
+    /** 仅当剩余需求至少满一整组时才使用 CRAFT_SHIFT，防止要 1~2 件却把网内材料搓成 64 件。F 游戏事实。 */
+    static final int SHIFT_CRAFT_THRESHOLD = 64;
+
+    private enum Stage {
+        OPEN, FILL_GRID, WAIT_RESULT, TAKE_RESULT, WAIT_TAKEN,
+        PLACE_CURSOR, WAIT_PLACED, CLEAR_GRID, WAIT_CLEAR, CLOSE, DONE
+    }
 
     private final MenuOpening opening;
     private final String recipeId;
@@ -47,7 +56,9 @@ final class CraftingTermAction implements Action {
     private OpenedMenu menu;
     private Action closing;
     private int resultSlotIndex = -1;
+    private boolean lastUsedShift;
     private int carriedBefore;
+    private int cursorCountBefore;
     private int crafted;
     private int waited;
     private boolean clearedToNetwork;
@@ -77,16 +88,12 @@ final class CraftingTermAction implements Action {
             for (int r = 0; r < height; r++) {
                 for (int c = 0; c < width; c++) {
                     int idx = r * width + c;
-                    if (idx < ingredients.size()) {
-                        grid.set(r * 3 + c, firstStack(ingredients.get(idx)));
-                    }
+                    if (idx < ingredients.size()) grid.set(r * 3 + c, firstStack(ingredients.get(idx)));
                 }
             }
         } else {
             int limit = Math.min(9, ingredients.size());
-            for (int i = 0; i < limit; i++) {
-                grid.set(i, firstStack(ingredients.get(i)));
-            }
+            for (int i = 0; i < limit; i++) grid.set(i, firstStack(ingredients.get(i)));
         }
         return List.copyOf(grid);
     }
@@ -101,10 +108,12 @@ final class CraftingTermAction implements Action {
         PlayerContext player = tick.player();
         return switch (stage) {
             case OPEN -> open(tick, player);
-            case FILL_GRID -> fillGrid(player);
+            case FILL_GRID -> fillGrid();
             case WAIT_RESULT -> waitResult();
             case TAKE_RESULT -> takeResult(player);
             case WAIT_TAKEN -> waitTaken(player);
+            case PLACE_CURSOR -> placeCursor();
+            case WAIT_PLACED -> waitPlaced();
             case CLEAR_GRID -> clearGrid();
             case WAIT_CLEAR -> waitClear();
             case CLOSE -> closeMenu(tick);
@@ -118,7 +127,7 @@ final class CraftingTermAction implements Action {
         if (!(status instanceof ActionStatus.Done)) return status;
         menu = opening.opened().orElse(null);
         if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "合成终端界面没打开"));
-        // 严格按语义定位 3×3 合成格与产物格，兼容有线版与无线版截然不同的槽位排列以及网络工具箱 9 槽偏移。
+        // 按语义定位 3×3 合成格与产物格，免疫有线/无线槽序差异及网络工具箱动态 9 槽偏移。
         List<Integer> gridSlots = compat.menuSlotsOf("CRAFTING_GRID");
         List<Integer> resultSlots = compat.menuSlotsOf("CRAFTING_RESULT");
         if (gridSlots.size() < 9 || resultSlots.isEmpty()) {
@@ -126,14 +135,14 @@ final class CraftingTermAction implements Action {
                     "当前打开的界面缺少 3×3 合成格（CRAFTING_GRID）或产物格（CRAFTING_RESULT）"));
         }
         resultSlotIndex = resultSlots.getFirst();
-        carriedBefore = countCarried(player, wantedItemId);
+        carriedBefore = countInPlayer(player);
         waited = 0;
         stage = Stage.FILL_GRID;
         return ActionStatus.progressed();
     }
 
-    // 发 FillCraftingGridFromRecipePacket(..., false)：严禁 craftMissing=true，防止缺料时强切自动合成确认页。
-    private ActionStatus fillGrid(PlayerContext player) {
+    // 发 FillCraftingGridFromRecipePacket(..., false)：严禁 craftMissing=true，防止缺料时强切确认页。
+    private ActionStatus fillGrid() {
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isEmpty()) {
             if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
@@ -164,9 +173,9 @@ final class CraftingTermAction implements Action {
 
     // 必须走 AE2 原生 CRAFT_SHIFT / CRAFT_ITEM 包取产物，绝不走原版 pickup（CraftingTermSlot.mayPickup 恒为 false）。
     private ActionStatus takeResult(PlayerContext player) {
-        carriedBefore = countCarried(player, wantedItemId);
-        boolean useShift = (wantedCount - crafted) > 1;
-        if (!reads.sendCraftResult(resultSlotIndex, useShift)) {
+        carriedBefore = countInPlayer(player);
+        lastUsedShift = (wantedCount - crafted) >= SHIFT_CRAFT_THRESHOLD;
+        if (!reads.sendCraftResult(resultSlotIndex, lastUsedShift)) {
             return beginClearThenClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法发送合成终端取产物包"));
         }
         waited = 0;
@@ -174,26 +183,95 @@ final class CraftingTermAction implements Action {
         return ActionStatus.progressed();
     }
 
+    // CRAFT_SHIFT 直接进入玩家背包；CRAFT_ITEM 成品落在鼠标光标，需监测光标后点背包槽放进背包。
     private ActionStatus waitTaken(PlayerContext player) {
-        int now = countCarried(player, wantedItemId);
+        if (!lastUsedShift) {
+            SlotSnapshot cursor = menu.cursor();
+            if (!cursor.isEmpty() && wantedItemId.equals(cursor.key())) {
+                cursorCountBefore = cursor.count();
+                waited = 0;
+                stage = Stage.PLACE_CURSOR;
+                return ActionStatus.progressed();
+            }
+        }
+        int now = countInPlayer(player);
         if (now > carriedBefore) {
             crafted += (now - carriedBefore);
-            if (crafted >= wantedCount) {
-                return beginClearThenClose(null);
-            }
-            // 还需继续合成下一批：先看产物格是否已由 AE2 自动补料继续亮着。
-            Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
-            if (view.isPresent() && wantedItemId.equals(view.get().resultItemId()) && view.get().resultCount() > 0) {
-                stage = Stage.TAKE_RESULT;
-            } else {
-                stage = Stage.FILL_GRID;
-            }
-            waited = 0;
-            return ActionStatus.progressed();
+            return afterBatchPlaced();
         }
         if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
         return beginClearThenClose(crafted > 0 ? null
-                : Problem.of(Problem.Kind.STUCK, "合成终端已发取产物操作，但背包未收到 " + wantedItemId));
+                : Problem.of(Problem.Kind.STUCK, "合成终端已发取产物操作，但光标和背包均未收到 " + wantedItemId));
+    }
+
+    // 将光标上由 CRAFT_ITEM 拿到的成品点进玩家背包（优先同物未满堆叠格，其次空格），防止关窗丢在地上。
+    private ActionStatus placeCursor() {
+        SlotSnapshot cursor = menu.cursor();
+        if (cursor.isEmpty()) return afterBatchPlaced();
+        Optional<MenuContent.Reading> reading = menu.reading();
+        if (reading.isEmpty()) {
+            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+            return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "读取玩家背包槽位超时"));
+        }
+        int destSlot = findDestinationPlayerSlot(reading.get(), cursor);
+        if (destSlot < 0) {
+            return beginClearThenClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    "背包已满，无法把合成出的 " + wantedItemId + " 从光标放进背包"));
+        }
+        if (!menu.click(destSlot, 0)) {
+            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+            return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "无法点击背包槽放下光标上的合成成品"));
+        }
+        cursorCountBefore = cursor.count();
+        waited = 0;
+        stage = Stage.WAIT_PLACED;
+        return ActionStatus.progressed();
+    }
+
+    private ActionStatus waitPlaced() {
+        SlotSnapshot cursor = menu.cursor();
+        int nowCount = cursor.isEmpty() ? 0 : cursor.count();
+        if (nowCount < cursorCountBefore) {
+            crafted += (cursorCountBefore - nowCount);
+            if (nowCount > 0) {
+                // 原堆叠格已满仍有余量留在光标：再找下一个空格继续放完。
+                cursorCountBefore = nowCount;
+                waited = 0;
+                stage = Stage.PLACE_CURSOR;
+                return ActionStatus.progressed();
+            }
+            return afterBatchPlaced();
+        }
+        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+        return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "点击背包槽后光标上的成品一直未放下"));
+    }
+
+    private ActionStatus afterBatchPlaced() {
+        if (crafted >= wantedCount) return beginClearThenClose(null);
+        Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
+        if (view.isPresent() && wantedItemId.equals(view.get().resultItemId()) && view.get().resultCount() > 0) {
+            stage = Stage.TAKE_RESULT;
+        } else {
+            stage = Stage.FILL_GRID;
+        }
+        waited = 0;
+        return ActionStatus.progressed();
+    }
+
+    static int findDestinationPlayerSlot(MenuContent.Reading reading, SlotSnapshot cursor) {
+        int maxStack = Math.max(1, cursor.stack().getMaxStackSize());
+        for (int i = 0; i < reading.playerSnapshots().size(); i++) {
+            SlotSnapshot slot = reading.playerSnapshots().get(i);
+            if (!slot.isEmpty() && slot.sameIdentity(cursor) && slot.count() < maxStack) {
+                return reading.playerSlotIds().get(i);
+            }
+        }
+        for (int i = 0; i < reading.playerSnapshots().size(); i++) {
+            if (reading.playerSnapshots().get(i).isEmpty()) {
+                return reading.playerSlotIds().get(i);
+            }
+        }
+        return -1;
     }
 
     // 完工清格：先退回 ME 网络，若网格仍有余料再退回玩家背包，绝不把材料遗留在合成格中。
@@ -259,17 +337,25 @@ final class CraftingTermAction implements Action {
         return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
     }
 
-    private static int countCarried(PlayerContext player, String itemId) {
-        if (player == null || player.localPlayer() == null) return 0;
-        int total = 0;
-        Inventory inv = player.localPlayer().getInventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) {
-                total += stack.getCount();
+    private int countInPlayer(PlayerContext player) {
+        if (player != null && player.localPlayer() != null) {
+            int total = 0;
+            Inventory inv = player.localPlayer().getInventory();
+            for (int i = 0; i < inv.getContainerSize(); i++) {
+                ItemStack stack = inv.getItem(i);
+                if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(wantedItemId)) {
+                    total += stack.getCount();
+                }
             }
+            return total;
         }
-        return total;
+        return menu == null ? 0 : menu.reading().map(r -> {
+            int total = 0;
+            for (SlotSnapshot snap : r.playerSnapshots()) {
+                if (!snap.isEmpty() && wantedItemId.equals(snap.key())) total += snap.count();
+            }
+            return total;
+        }).orElse(0);
     }
 
     @Override public void pause() {
