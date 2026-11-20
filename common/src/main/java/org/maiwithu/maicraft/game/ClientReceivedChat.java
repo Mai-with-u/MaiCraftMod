@@ -9,6 +9,7 @@ import java.util.function.Function;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.multiplayer.PlayerInfo;
+import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.ChatTypeDecoration;
 import net.minecraft.network.chat.ClickEvent;
@@ -42,20 +43,31 @@ public final class ClientReceivedChat {
                                                 UUID senderId, String sender, ChatType.Bound chatType) {
         UUID self = minecraft.player == null ? null : minecraft.player.getUUID();
         String selfName = minecraft.player == null ? null : minecraft.player.getGameProfile().getName();
-        return player(line, content, senderId, sender, chatType, self, selfName, id -> nameOf(minecraft, id));
+        return player(line, content, senderId, sender, chatType, self, selfName,
+                id -> nameOf(minecraft, id), id -> loadedPlayerDistance(minecraft, id));
     }
 
     /**
-     * 同上，角色是谁、玩家列表里谁叫什么已经读好：离线测试直接喂组件。
-     *
-     * @param sender     加载器给的发言人名字；没给时为 null，按 UUID 从玩家列表里查
-     * @param self       角色自己的 UUID；不在世界里时为 null
-     * @param selfName   角色的账号名；不在世界里时为 null
-     * @param listedName 当前玩家列表里这个 UUID 的玩家叫什么；不在列表里时为 null
+     * 同上，角色是谁、玩家列表里谁叫什么已经读好（不查距离）：离线测试直接喂组件。
      */
     static Optional<ReceivedChat> player(Component line, Component content, UUID senderId, String sender,
                                          ChatType.Bound chatType, UUID self, String selfName,
                                          Function<UUID, String> listedName) {
+        return player(line, content, senderId, sender, chatType, self, selfName, listedName, id -> null);
+    }
+
+    /**
+     * 同上，额外注入已加载玩家距离查询：仅当发言人存在于客户端已加载世界实体列表里时计算真实距离。
+     *
+     * @param sender         加载器给的发言人名字；没给时为 null，按 UUID 从玩家列表里查
+     * @param self           角色自己的 UUID；不在世界里时为 null
+     * @param selfName       角色的账号名；不在世界里时为 null
+     * @param listedName     当前玩家列表里这个 UUID 的玩家叫什么；不在列表里时为 null
+     * @param loadedDistance 客户端已加载世界里这个 UUID 的玩家距本地角色的真实格数；未加载时为 null
+     */
+    static Optional<ReceivedChat> player(Component line, Component content, UUID senderId, String sender,
+                                         ChatType.Bound chatType, UUID self, String selfName,
+                                         Function<UUID, String> listedName, Function<UUID, Double> loadedDistance) {
         // 没有原话的消息只有套好格式的整行：按消息类型的格式找回原话那一段，点到的实体、翻译键都从原话里读。
         // 找不回时点到的实体从整行读；整行的翻译键只是聊天格式（chat.type.text），不当消息的翻译键。
         Component words = content != null ? content : contentOf(line, chatType).orElse(null);
@@ -79,11 +91,13 @@ public final class ClientReceivedChat {
         // 发言人 UUID 在当前玩家列表里、列表里的名字和这条消息的发言人名字对得上，才是那个在线玩家说的；
         // 签没签名都一样。没有 UUID 的（控制台、命令方块的 /say）只借了个名字，不算。
         boolean online = listed != null && listed.equals(name);
+        // 只有核对为在线玩家且该玩家实体此刻加载在客户端世界里时才给真实几何距离，未加载绝不猜测或透视。
+        Double distance = online && senderId != null ? loadedDistance.apply(senderId) : null;
         // 别人用 /msg 对角色说的话是"收到的私聊"这种消息类型；自己发出的私聊回显按发言人是自己滤掉。
         boolean isPrivate = chatType != null && chatType.chatType().is(ChatType.MSG_COMMAND_INCOMING);
         // 展示正文保留原样（有签名取原话、无签名取整行），点击可执行命令只从原话段提取，不扫外层名字装饰。
         String text = withClickCommands((content != null ? content : line).getString(), read);
-        return ReceivedChat.fromPlayer(text, senderId, name, online, isPrivate, self)
+        return ReceivedChat.fromPlayer(text, senderId, name, online, distance, isPrivate, self)
                 .map(chat -> chat.with(mentions, key));
     }
 
@@ -93,24 +107,34 @@ public final class ClientReceivedChat {
     /**
      * 服务器的系统消息；动作栏提示不算聊天。死亡播报这类带着点到的实体与翻译键。
      * 整句是公屏聊天格式、名字在当前玩家列表里的，是没有签名的服务器转来的玩家聊天，读成那个玩家说的话，
-     * 发言人 UUID 取玩家列表里这个名字的那一项。
+     * 发言人 UUID 取玩家列表里这个名字的那一项；若该玩家此刻已加载在客户端世界里，一并附上真实几何距离。
      */
     public static Optional<ReceivedChat> system(Minecraft minecraft, Component message, boolean actionBar) {
         UUID self = minecraft.player == null ? null : minecraft.player.getUUID();
         String selfName = minecraft.player == null ? null : minecraft.player.getGameProfile().getName();
         ClientPacketListener connection = minecraft.getConnection();
-        return system(message, actionBar, self, selfName, name -> listedId(connection, name));
+        return system(message, actionBar, self, selfName,
+                name -> listedId(connection, name), id -> loadedPlayerDistance(minecraft, id));
     }
 
     /**
-     * 同上，角色是谁、谁在线已经读好：离线测试直接喂组件。
-     *
-     * @param self     角色自己的 UUID；不在世界里时为 null
-     * @param selfName 角色的账号名；不在世界里时为 null
-     * @param listedId 当前玩家列表里叫这个名字的玩家的 UUID；不在列表里时为 null
+     * 同上，角色是谁、谁在线已经读好（不查距离）：离线测试直接喂组件。
      */
     static Optional<ReceivedChat> system(Component message, boolean actionBar, UUID self, String selfName,
                                          Function<String, UUID> listedId) {
+        return system(message, actionBar, self, selfName, listedId, id -> null);
+    }
+
+    /**
+     * 同上，额外注入已加载玩家距离查询：仅当拆出的在线玩家存在于客户端已加载世界实体列表里时计算真实距离。
+     *
+     * @param self           角色自己的 UUID；不在世界里时为 null
+     * @param selfName       角色的账号名；不在世界里时为 null
+     * @param listedId       当前玩家列表里叫这个名字的玩家的 UUID；不在列表里时为 null
+     * @param loadedDistance 客户端已加载世界里这个 UUID 的玩家距本地角色的真实格数；未加载时为 null
+     */
+    static Optional<ReceivedChat> system(Component message, boolean actionBar, UUID self, String selfName,
+                                         Function<String, UUID> listedId, Function<UUID, Double> loadedDistance) {
         Optional<PublicLine> said = actionBar ? Optional.empty() : publicLine(message);
         UUID listed = said.map(line -> listedId.apply(line.name())).orElse(null);
         if (listed != null) {
@@ -120,7 +144,8 @@ public final class ClientReceivedChat {
             // 别的玩家说的话：消息本身不带发言人 UUID，名字照聊天格式写；名字是按玩家列表对上的，算在线玩家说的，
             // 发言人 UUID 就用玩家列表里这个名字那一项的，宿主能按 UUID 认出是哪位玩家。点到的实体与翻译键只从原话里读。
             Component words = line.words();
-            return ReceivedChat.fromPlayer(withClickCommands(words), listed, line.name(), true, false, self)
+            Double distance = loadedDistance.apply(listed);
+            return ReceivedChat.fromPlayer(withClickCommands(words), listed, line.name(), true, distance, false, self)
                     .map(chat -> chat.with(EntityMentions.in(words), translationKey(words)));
         }
         return ReceivedChat.fromServer(withClickCommands(message), actionBar)
@@ -223,5 +248,19 @@ public final class ClientReceivedChat {
         if (senderId == null || connection == null) return null;
         PlayerInfo info = connection.getPlayerInfo(senderId);
         return info == null ? null : info.getProfile().getName();
+    }
+
+    // 仅从客户端当前已加载世界的玩家实体列表中找发言人，计算与本地角色的真实几何距离（保留 1 位小数）；
+    // 玩家不在当前已加载实体里（距离太远未加载、在别的维度等）时返回 null，绝不透视未加载区块。
+    private static Double loadedPlayerDistance(Minecraft minecraft, UUID senderId) {
+        if (senderId == null || minecraft == null || minecraft.player == null || minecraft.level == null) {
+            return null;
+        }
+        for (AbstractClientPlayer other : minecraft.level.players()) {
+            if (other != minecraft.player && !other.isRemoved() && senderId.equals(other.getUUID())) {
+                return ReceivedChat.roundDistance((double) minecraft.player.distanceTo(other));
+            }
+        }
+        return null;
     }
 }

@@ -296,4 +296,30 @@ class ClientReceivedChatTest {
                 underClickable, SELF, "Steve", ALEX_LISTED).orElseThrow();
         assertEquals("<Alex> 点这里传过来 [接受]（可点击执行: /tpaccept）", invite.text());
     }
+
+    @Test
+    void loadedPlayerChatCarriesRoundedSenderDistanceWhileUnloadedAndSystemStayNull() {
+        ChatType.Bound under = chatUnder(Component.literal("Alex"));
+        Component said = Component.literal("就在你旁边");
+
+        // 发言玩家存在于客户端已加载世界实体列表：保留 1 位小数真实距离。
+        ReceivedChat loaded = ClientReceivedChat.player(under.decorate(said), said, ALEX, "Alex", under,
+                SELF, "Steve", ALEX_LISTED, id -> ALEX.equals(id) ? 7.46 : null).orElseThrow();
+        assertEquals(7.5, loaded.senderDistance());
+
+        // 玩家在线但未加载到客户端世界（超出追踪距离或在别的维度）：距离为 null，绝不透视。
+        ReceivedChat unloaded = ClientReceivedChat.player(under.decorate(said), said, ALEX, "Alex", under,
+                SELF, "Steve", ALEX_LISTED, id -> null).orElseThrow();
+        assertNull(unloaded.senderDistance());
+
+        // 不走签名聊天的公屏消息拆出在线玩家时，同样只在已加载时附带距离。
+        ReceivedChat unsignedLoaded = ClientReceivedChat.system(publicLine(Component.literal("Alex"), "听到吗"),
+                false, SELF, "Steve", ONLINE, id -> ALEX.equals(id) ? 18.04 : null).orElseThrow();
+        assertEquals(18.0, unsignedLoaded.senderDistance());
+
+        // 真正系统消息不带距离。
+        ReceivedChat sys = ClientReceivedChat.system(Component.literal("服务器已保存"), false, SELF, "Steve", ONLINE,
+                id -> 3.2).orElseThrow();
+        assertNull(sys.senderDistance());
+    }
 }

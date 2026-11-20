@@ -18,6 +18,7 @@ import java.util.UUID;
  * @param sender         发言人名字；系统消息没有，名字还没同步到时也可能没有
  * @param senderId       发言人 UUID；系统消息没有；没有签名的消息只在发言人按名字对上在线玩家列表时有（取列表里那一项的）
  * @param senderOnline   玩家说的话：发言人是不是此刻在线玩家列表里的那个玩家，收到时核对过；系统消息为 false
+ * @param senderDistance 玩家说的话：发言玩家在客户端已加载世界实体里时与本地角色的真实几何距离格数（保留 1 位小数）；未加载或系统消息为 null
  * @param text           原话；超过 {@value #MAX_TEXT} 字时只留前面一段
  * @param isPrivate      别人私聊角色（/msg）时为 true
  * @param truncated      原话后面被截掉了
@@ -25,9 +26,9 @@ import java.util.UUID;
  * @param mentions       消息里按出现先后点到的实体（死亡播报的死者与凶手、进出提示的玩家）；没有时为空
  * @param translationKey 消息整句是一条翻译时的翻译键，例如 death.attack.explosion.player；不是时为 null
  */
-public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean senderOnline, String text,
-                           boolean isPrivate, boolean truncated, String shownAs, List<MentionedEntity> mentions,
-                           String translationKey) {
+public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean senderOnline, Double senderDistance,
+                           String text, boolean isPrivate, boolean truncated, String shownAs,
+                           List<MentionedEntity> mentions, String translationKey) {
 
     /** 原话最多留多少字：原版玩家聊天上限 256 字，只有系统消息可能很长。 */
     public static final int MAX_TEXT = 1024;
@@ -43,23 +44,34 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
     public ReceivedChat {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(text, "text");
+        // 系统消息没有实体发言人，不带距离；玩家消息的距离统一四舍五入保留 1 位小数，非法值丢弃。
+        senderDistance = kind == Kind.PLAYER ? roundDistance(senderDistance) : null;
         mentions = List.copyOf(mentions);
+    }
+
+    /**
+     * 玩家说的话（未计算距离或发言人未加载在当前客户端世界里）。
+     */
+    public static Optional<ReceivedChat> fromPlayer(String text, UUID senderId, String sender, boolean senderOnline,
+                                                    boolean isPrivate, UUID self) {
+        return fromPlayer(text, senderId, sender, senderOnline, null, isPrivate, self);
     }
 
     /**
      * 玩家说的话。发言人 UUID 是角色自己时（自己说话的回显、自己发出的私聊）不算收到的聊天；空白的话也不算。
      *
-     * @param senderOnline 发言人是不是此刻在线玩家列表里的那个玩家：有 UUID 的按 UUID 查到、名字也对得上；
-     *                     没有签名的服务器转来的公屏聊天按名字查到。控制台、命令方块借来的名字不算
-     * @param self         角色自己的 UUID；不在世界里时为 null
+     * @param senderOnline   发言人是不是此刻在线玩家列表里的那个玩家：有 UUID 的按 UUID 查到、名字也对得上；
+     *                       没有签名的服务器转来的公屏聊天按名字查到。控制台、命令方块借来的名字不算
+     * @param senderDistance 发言玩家此刻已加载在客户端世界里时与本地角色的真实几何距离（格）；未加载时为 null
+     * @param self           角色自己的 UUID；不在世界里时为 null
      */
     public static Optional<ReceivedChat> fromPlayer(String text, UUID senderId, String sender, boolean senderOnline,
-                                                    boolean isPrivate, UUID self) {
+                                                    Double senderDistance, boolean isPrivate, UUID self) {
         if (text == null || text.isBlank()) return Optional.empty();
         if (senderId != null && senderId.equals(self)) return Optional.empty();
         String name = sender == null || sender.isBlank() ? null : sender.strip();
         String kept = clipped(text);
-        return Optional.of(new ReceivedChat(Kind.PLAYER, name, senderId, senderOnline, kept, isPrivate,
+        return Optional.of(new ReceivedChat(Kind.PLAYER, name, senderId, senderOnline, senderDistance, kept, isPrivate,
                 kept.length() < text.strip().length(), null, List.of(), null));
     }
 
@@ -67,7 +79,7 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
     public static Optional<ReceivedChat> fromServer(String text, boolean actionBar) {
         if (actionBar || text == null || text.isBlank()) return Optional.empty();
         String kept = clipped(text);
-        return Optional.of(new ReceivedChat(Kind.SYSTEM, null, null, false, kept, false,
+        return Optional.of(new ReceivedChat(Kind.SYSTEM, null, null, false, null, kept, false,
                 kept.length() < text.strip().length(), null, List.of(), null));
     }
 
@@ -84,8 +96,8 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         String said = text.stripLeading();
         String prefix = "<" + name + "> ";
         if (!name.isEmpty() && said.startsWith(prefix)) said = said.substring(prefix.length());
-        return fromServer(said, false).map(chat -> new ReceivedChat(Kind.SYSTEM, null, null, false, chat.text(), false,
-                chat.truncated(), name.isEmpty() ? null : name, List.of(), null));
+        return fromServer(said, false).map(chat -> new ReceivedChat(Kind.SYSTEM, null, null, false, null, chat.text(),
+                false, chat.truncated(), name.isEmpty() ? null : name, List.of(), null));
     }
 
     /**
@@ -107,7 +119,14 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
 
     /** 同一条消息带上消息里点到的实体与翻译键。 */
     public ReceivedChat with(List<MentionedEntity> found, String key) {
-        return new ReceivedChat(kind, sender, senderId, senderOnline, text, isPrivate, truncated, shownAs, found, key);
+        return new ReceivedChat(kind, sender, senderId, senderOnline, senderDistance, text, isPrivate, truncated,
+                shownAs, found, key);
+    }
+
+    /** 把真实几何距离保留 1 位小数；非法或负数返回 null。 */
+    public static Double roundDistance(Double raw) {
+        if (raw == null || !Double.isFinite(raw) || raw < 0.0) return null;
+        return Math.round(raw * 10.0) / 10.0;
     }
 
     // 只留前 MAX_TEXT 个字：截在一对代理字符中间会留下半个表情，往前退一位。

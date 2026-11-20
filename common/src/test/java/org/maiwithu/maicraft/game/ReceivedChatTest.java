@@ -97,4 +97,18 @@ class ReceivedChatTest {
         assertFalse(Character.isHighSurrogate(chat.text().charAt(chat.text().length() - 1)));
         assertFalse(ReceivedChat.fromServer("a".repeat(ReceivedChat.MAX_TEXT), false).orElseThrow().truncated());
     }
+
+    @Test
+    void senderDistanceIsRoundedToOneDecimalAndAbsentForSystemOrInvalidValues() {
+        ReceivedChat nearby = ReceivedChat.fromPlayer("过来一下", STEVE, "Steve", true, 12.349, false, SELF).orElseThrow();
+        assertEquals(12.3, nearby.senderDistance());
+
+        ReceivedChat roundedUp = ReceivedChat.fromPlayer("抬头", STEVE, "Steve", true, 12.35, false, SELF).orElseThrow();
+        assertEquals(12.4, roundedUp.senderDistance());
+
+        ReceivedChat invalid = ReceivedChat.fromPlayer("远处", STEVE, "Steve", true, Double.NaN, false, SELF).orElseThrow();
+        assertNull(invalid.senderDistance());
+        assertNull(ReceivedChat.roundDistance(-1.5));
+        assertNull(ReceivedChat.fromServer("系统公告", false).orElseThrow().senderDistance());
+    }
 }

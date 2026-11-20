@@ -135,7 +135,11 @@ public final class EventsTool implements McpTool {
         if (chat.sender() != null) json.addProperty("sender", chat.sender());
         if (chat.senderId() != null) json.addProperty("sender_id", chat.senderId().toString());
         // 发言人是不是此刻在线玩家列表里的那个玩家：玩家说的话 true、false 都写；系统消息没有发言人，不写。
-        if (chat.kind() == ReceivedChat.Kind.PLAYER) json.addProperty("sender_online", chat.senderOnline());
+        if (chat.kind() == ReceivedChat.Kind.PLAYER) {
+            json.addProperty("sender_online", chat.senderOnline());
+            // 仅当发言玩家存在于客户端已加载世界实体列表里时附带真实几何距离（保留 1 位小数），绝不透视未加载区块。
+            if (chat.senderDistance() != null) json.addProperty("sender_distance", chat.senderDistance());
+        }
         if (chat.shownAs() != null) json.addProperty("shown_as", chat.shownAs());
         json.addProperty("text", chat.text());
         if (chat.isPrivate()) json.addProperty("private", true);
