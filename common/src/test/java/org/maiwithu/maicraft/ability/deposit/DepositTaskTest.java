@@ -47,6 +47,7 @@ import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** 存东西的任务：挑容器、点开、逐笔搬、满了换下一只、被打断重新点开，都对着离线替身跑。 */
@@ -461,6 +462,41 @@ class DepositTaskTest {
         TaskResult result = rig.run(rig.input(null, List.of("minecraft:diamond"), null));
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(0, rig.opens);
+    }
+
+    @Test
+    void 向网络存物部分存入余下满类型上限拒收时_摘要与问题如实透出拒收原因() {
+        Rig rig = new Rig();
+        rig.carry(DIRT, 16).carry(SAND, 24);
+        Problem rejection = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "已满/类型上限拒收，余下 24 件未存入",
+                "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存");
+        rig.network = new NetworkStorage() {
+            @Override public boolean reachable(TerminalSearch search) { return true; }
+
+            @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
+                    TaskRecords records) {
+                record PartialNetworkAction(Rig owner, TaskRecords ledger, Problem reason)
+                        implements Action, ReportsStoreProblem {
+                    @Override public ActionStatus tick(TickContext context) {
+                        // 已有种类泥土成功存入 16 件，新种类沙子因满类型上限被拒收。
+                        owner.take(DIRT, 16);
+                        ledger.change(new Change(Change.Kind.ITEM_STORED, DIRT, 16, "存东西：存进了网络"));
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() { return "部分存入网络"; }
+                    @Override public Optional<Problem> storeProblem() { return Optional.of(reason); }
+                }
+                return new TerminalPick.Chosen(new PartialNetworkAction(rig, records, rejection));
+            }
+        };
+        DepositInput input = new DepositInput(null, List.of(), null, 32, Permissions.DEFAULT, true);
+        TaskResult result = rig.run(input);
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+        assertTrue(result.problem().message().contains("已满/类型上限拒收"), result.problem().message());
+        assertTrue(result.summary().contains("已满/类型上限拒收"), result.summary());
+        assertFalse(result.problem().message().contains("附近的容器都满了"), result.problem().message());
     }
 
     private static int stored(TaskResult result) {

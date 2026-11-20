@@ -12,6 +12,7 @@ import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.BackpackStack;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
@@ -38,8 +39,11 @@ public final class CompatNetworkStorage implements NetworkStorage {
             TaskRecords records) {
         TerminalPick pick = ask(() -> storage.store(stacks, purpose, search, records),
                 new TerminalPick.NotFound(module.name() + " 的联动用不了，存不进网络"));
-        return pick instanceof TerminalPick.Chosen chosen
-                ? new TerminalPick.Chosen(CompatAction.of(module, chosen.storing())) : pick;
+        if (!(pick instanceof TerminalPick.Chosen chosen)) return pick;
+        Action wrapped = chosen.storing() instanceof ReportsStoreProblem reporting
+                ? new Storing(module, chosen.storing(), reporting)
+                : CompatAction.of(module, chosen.storing());
+        return new TerminalPick.Chosen(wrapped);
     }
 
     // 读最近记下的网络存货快照：模组已停用或接口对不上时返回空表。
@@ -69,6 +73,20 @@ public final class CompatNetworkStorage implements NetworkStorage {
 
         @Override public Optional<String> summary() {
             return look.summary();
+        }
+    }
+
+    /** 存进网络动作的联动保护壳：部分存入后把底层网络拒收原因原样透传给上层任务。 */
+    private static final class Storing extends CompatAction implements ReportsStoreProblem {
+        private final ReportsStoreProblem reporting;
+
+        Storing(CompatModule module, Action action, ReportsStoreProblem reporting) {
+            super(module, action);
+            this.reporting = reporting;
+        }
+
+        @Override public Optional<Problem> storeProblem() {
+            return reporting.storeProblem();
         }
     }
 

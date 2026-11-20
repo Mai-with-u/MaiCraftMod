@@ -5,6 +5,7 @@ import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.Set;
 
@@ -78,6 +79,8 @@ final class TerminalFlowFakes {
         int jamMoves;
         /** 阻塞时汇报给调用方的菜单动作结果状态（如 UNCERTAIN 模拟满盘无回包）。 */
         PendingMenuAction.Status jamStatus;
+        /** 按物品种类模拟满类型上限拒收：命中时不动该格并回报 jamStatus（或 UNCERTAIN）。 */
+        Predicate<ItemStack> rejectItem;
         /** 已发出的快速移动次数。 */
         int quickMoveCalls;
         /** 最近一次菜单动作的结算状态。 */
@@ -157,6 +160,10 @@ final class TerminalFlowFakes {
                 return false;
             }
             quickMoveCalls++;
+            if (slotId >= 27 && rejectItem != null && rejectItem.test(player.get(slotId - 27))) {
+                lastStatus = jamStatus != null ? jamStatus : PendingMenuAction.Status.UNCERTAIN;
+                return true;
+            }
             if (jamMoves > 0) {
                 jamMoves--;
                 lastStatus = jamStatus;

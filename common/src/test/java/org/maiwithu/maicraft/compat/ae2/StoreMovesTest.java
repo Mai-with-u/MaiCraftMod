@@ -210,4 +210,27 @@ class StoreMovesTest {
         assertEquals(20, rig.moves().stored(), "第 2、3 种共 20 件应全部存入");
         assertEquals(3, menu.quickMoveCalls, "3 种物品都应各自尝试 1 次");
     }
+
+    @Test
+    void 满类型上限时已有种类交错存入不把拒收计数清零_累计两次新种类拒收即早停() {
+        // 模拟 ME 磁盘 63 种类型上限：金锭是网络已有种类能正常存入，铁锭/钻石/绿宝石是新种类均触发 UNCERTAIN 拒收。
+        // 顺序交错为 新(铁锭) -> 已有(金锭) -> 新(钻石) -> 新(绿宝石)：
+        // 金锭成功存入不得清零拒收计数，钻石被拒收后累计 2 次立刻早停，不再白等绿宝石，且余下件数扣除已存入的金锭。
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        putInBackpack(menu, 3, "minecraft:emerald", 10);
+        menu.jamStatus = PendingMenuAction.Status.UNCERTAIN;
+        menu.rejectItem = stack -> !stack.is(Items.GOLD_INGOT);
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond", "minecraft:emerald");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 60));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, wrapUp.reason().kind());
+        assertEquals(10, rig.moves().stored(), "已有种类金锭应正常存入 10 件");
+        assertEquals(3, menu.quickMoveCalls, "铁锭拒收 + 金锭存入 + 钻石拒收后即应止损，不再尝试第 4 种绿宝石");
+        assertTrue(wrapUp.reason().message().contains("已满/类型上限拒收"), wrapUp.reason().message());
+        assertTrue(wrapUp.reason().message().contains("余下 30 件未存入"), wrapUp.reason().message());
+        assertEquals(wrapUp.reason(), rig.moves().rejectionProblem().orElseThrow());
+    }
 }

@@ -250,7 +250,7 @@ public final class MenuNetworkStores implements NetworkStorage {
     }
 
     /** 存几堆进网络的会话：打开 → 等连上 → 一样样一格格快速移动 → 刷新网络存货记忆再关上，跨刻推进。 */
-    private final class Storing implements Action {
+    private final class Storing implements Action, ReportsStoreProblem {
 
         /** 存东西会话的先后顺序。 */
         private enum Stage { OPEN, SYNC, STORE, CLOSE, DONE }
@@ -343,9 +343,15 @@ public final class MenuNetworkStores implements NetworkStorage {
         }
 
         // 收场：存进了就算做完；一件都没存进就按收场原因失败，腾地方改走别的路。
+        // 部分存入后仍把余下物品的拒收原因保留在 storeProblem() 中，供上层如实向玩家与模型透出。
         private ActionStatus result() {
             if (stopReason == null || (moves != null && moves.stored() > 0)) return ActionStatus.done();
             return ActionStatus.failed(stopReason);
+        }
+
+        @Override public Optional<Problem> storeProblem() {
+            if (stopReason != null) return Optional.of(stopReason);
+            return moves == null ? Optional.empty() : moves.rejectionProblem();
         }
 
         // 收场：还没打开界面就没有要关的，直接结束；开着就去关。

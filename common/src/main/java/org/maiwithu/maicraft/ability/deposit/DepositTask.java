@@ -80,6 +80,7 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private boolean offhandChecked;
     private final Set<String> networkTried = new HashSet<>();
     private Problem networkFailure;
+    private Action networkStoring;
     private NetworkStorage.TerminalSearch terminalSearch;
     private String searchedAt = "";
     private boolean planned;
@@ -426,8 +427,10 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         }
         if (batch.isEmpty()) return finish();
         return switch (storage.get().store(batch, "存东西", terminalSearch, networkLedger())) {
-            case NetworkStorage.TerminalPick.Chosen chosen ->
-                    goWith(Phase.NETWORK, chosen.storing(), "把 " + batch.size() + " 样东西存进网络");
+            case NetworkStorage.TerminalPick.Chosen chosen -> {
+                networkStoring = chosen.storing();
+                yield goWith(Phase.NETWORK, networkStoring, "把 " + batch.size() + " 样东西存进网络");
+            }
             case NetworkStorage.TerminalPick.NotFound notFound -> {
                 networkFailure = Problem.of(Problem.Kind.NOT_FOUND, searchedAt + notFound.reason(),
                         "带上绑好访问点的无线终端，或走近 ME 终端、用 target 点名一台再存，或改存进箱子（into=container）");
@@ -439,8 +442,16 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
     private Next<Phase> network(TickContext context) {
         return switch (runAction(context)) {
             case ActionStatus.Running running -> Next.stay();
-            case ActionStatus.Done done -> nextToNetwork();
+            case ActionStatus.Done done -> {
+                // 部分存入后网络仍可能因存储满/63 种类型上限拒收余下物品：把底层拒收原因保留下来供摘要如实透出。
+                if (networkStoring instanceof NetworkStorage.ReportsStoreProblem reporting) {
+                    reporting.storeProblem().ifPresent(problem -> networkFailure = problem);
+                }
+                networkStoring = null;
+                yield nextToNetwork();
+            }
             case ActionStatus.Failed failed -> {
+                networkStoring = null;
                 recordAttempt("存进网络", failed.problem().message());
                 networkFailure = failed.problem();
                 yield finish();
@@ -538,13 +549,17 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         }
         deposited += drained;
         Problem why = networkFailure != null ? networkFailure
+                : input.network() ? Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "ME 网络放不下余下的物品（存储满了或达到类型上限）",
+                        "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存")
                 : deposited == 0 && !openFailures.isEmpty() ? openFailures.getFirst()
                 : Problem.of(Problem.Kind.NOT_FOUND, "附近的容器都满了，或都开不了", "走远一点再存，或点名一只有空位的容器");
         if (deposited == 0) {
             return Next.fail(why);
         }
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                "存进了 " + deposited + " 件，还有 " + (total - deposited) + " 件没存下").problem(why).build());
+        String summary = networkFailure != null
+                ? "存进了 " + deposited + " 件，还有 " + (total - deposited) + " 件没存下（" + networkFailure.message() + "）"
+                : "存进了 " + deposited + " 件，还有 " + (total - deposited) + " 件没存下";
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary).problem(why).build());
     }
 
     // 带 source 的一轮转存收尾：这包全存进去了且还没搬完就回头拿下一包；目标满了没存完就立即停手如实交代余量。
@@ -553,14 +568,18 @@ final class DepositTask extends PhasedTask<DepositTask.Phase> {
         if (!allStored()) {
             long roundLeft = sumValues(wanted) - sumValues(confirmed) - sumValues(passed);
             Problem why = networkFailure != null ? networkFailure
+                    : input.network() ? Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "ME 网络放不下余下的物品（存储满了或达到类型上限）",
+                            "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存")
                     : totalDone == 0 && !openFailures.isEmpty() ? openFailures.getFirst()
                     : Problem.of(Problem.Kind.NOT_FOUND, "目标容器都满了，或开不了",
                             "换一只有空位的目标容器，或改用 into=\"network\" 存进 ME 网络");
             if (totalDone == 0) {
                 return Next.fail(why);
             }
-            return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL,
-                    "存进了 " + totalDone + " 件，还有 " + roundLeft + " 件留在背包里没存下").problem(why).build());
+            String summary = networkFailure != null
+                    ? "存进了 " + totalDone + " 件，还有 " + roundLeft + " 件留在背包里没存下（" + networkFailure.message() + "）"
+                    : "存进了 " + totalDone + " 件，还有 " + roundLeft + " 件留在背包里没存下";
+            return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary).problem(why).build());
         }
         if (input.count() != null && totalDone >= input.count()) {
             return finishSourceDone();

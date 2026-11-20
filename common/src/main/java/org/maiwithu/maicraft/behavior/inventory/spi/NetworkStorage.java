@@ -15,6 +15,7 @@ import net.minecraft.world.phys.AABB;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 
@@ -77,6 +78,15 @@ public interface NetworkStorage {
     interface TerminalLook extends Action {
         /** 同步完成后整理好的网络状态与存货摘要文字；同步超时未读出时为空。 */
         Optional<String> summary();
+    }
+
+    /**
+     * 存进网络的动作在部分物品已存入、余下物品被拒收（如存储元件达到 63 种类型上限）时，
+     * 通过此接口向调用方透出真实拒收原因，避免上层在部分完成后笼统报“附近的容器都满了”。
+     */
+    interface ReportsStoreProblem {
+        /** 这一趟里网络拒收余下物品的原因；全部存进或未发生拒收时为空。 */
+        Optional<Problem> storeProblem();
     }
 
     /**

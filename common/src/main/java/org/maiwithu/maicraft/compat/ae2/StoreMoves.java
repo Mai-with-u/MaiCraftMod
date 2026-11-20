@@ -31,8 +31,8 @@ final class StoreMoves {
 
     /** 快速移动发出去后等背包同步过来的宽限（刻）；过了还没少就是网络放不下。 */
     private static final int SETTLE_TICKS = 10;
-    /** 连续多少次快速移动出现服务端静默无回包（UNCERTAIN）且零移入即判定满盘/类型上限，提前止损不再逐格干等。 */
-    static final int CONSECUTIVE_UNCERTAIN_LIMIT = 2;
+    /** 累计多少次快速移动出现服务端静默无回包（UNCERTAIN）且零移入即判定满盘/类型上限，提前止损不再逐格干等。 */
+    static final int UNCERTAIN_REJECT_LIMIT = 2;
 
     /** 凑尾数的一下普通点击：在哪一格、左键还是右键；takesToCursor 表示这一下把东西拿上了光标。 */
     private record TrimClick(int slotId, int button, boolean takesToCursor) {}
@@ -67,12 +67,14 @@ final class StoreMoves {
     private boolean returning;
     /** 光标上的部分没被网络收下时收场的原因。 */
     private Problem heldProblem;
-    /** 最近一样存不进的原因：样样都存不进时按它收场。 */
+    /** 最近一样存不进的原因：样样都存不进或部分存不进时供外层如实透出。 */
     private Problem lastProblem;
+    /** 触发满盘/类型上限早停时记录的拒收原因：即使前面已有种类存进去了也保留供上层透出。 */
+    private Problem stopProblem;
     /** 当前等待结算的操作是否为快速移动；用于区分满盘静默拒收与普通凑尾数交回。 */
     private boolean lastWasQuickMove;
-    /** 连续快速移动触发 UNCERTAIN 且一件未移入的次数：满盘 63 种类型上限时提前止损。 */
-    private int consecutiveUncertain;
+    /** 累计快速移动触发 UNCERTAIN 且一件未移入的次数：满盘 63 种类型上限时不被已有种类成功存入清零，稳定早停。 */
+    private int uncertainRejects;
 
     StoreMoves(TerminalSession session, TaskRecords records, String terminal, List<BackpackStack> stacks,
             String purpose) {
@@ -154,13 +156,12 @@ final class StoreMoves {
 
     // 结算上一击：合计少了几件就是存进了网络几件，账与背包光标的变化一致；还没看出结果或到期限收场的，
     // 返回要推进的走向（返回 null 是结算完了，接着挑下一步）。
-    // 当快速移动连续多次触发 UNCERTAIN（服务端因磁盘已满或 63 种类型上限静默不回包）且零移入时提前止损，
-    // 避免对背包里余下所有新种类物品逐格白等 40 刻并刷屏告警。
+    // 当快速移动累计多次触发 UNCERTAIN（服务端因磁盘已满或 63 种类型上限静默不回包）且零移入时提前止损；
+    // 已有种类交错存入成功时不清零该计数，避免满类型上限被交错成功掩盖导致对后续所有新种类逐格白等。
     private TerminalTurn settleLastMove(OpenedMenu menu, int onHand, int onCursor) {
         return switch (NetworkStoreSettlement.settle(before, onHand, onCursor)) {
             case NetworkStoreSettlement.Stored storedMove -> {
                 credit(storedMove.moved());
-                consecutiveUncertain = 0;
                 lastWasQuickMove = false;
                 before = -1;
                 yield null;
@@ -169,7 +170,6 @@ final class StoreMoves {
                 // 期限到了光标还拿着没收完的：已经进了网络的照实记，剩下的点回背包再按放不下收场。
                 if (++quiet < SETTLE_TICKS) yield new TerminalTurn.Stay(ActionStatus.running());
                 if (held.moved() > 0) credit(held.moved());
-                consecutiveUncertain = 0;
                 lastWasQuickMove = false;
                 before = -1;
                 heldProblem = held.moved() > 0
@@ -183,21 +183,22 @@ final class StoreMoves {
             case NetworkStoreSettlement.Waiting waiting -> {
                 boolean uncertainQuickMove = lastWasQuickMove
                         && menu.lastActionStatus().map(status -> status == PendingMenuAction.Status.UNCERTAIN).orElse(false);
-                // 已确认服务端超时无响应（UNCERTAIN）时无需再空等 SETTLE_TICKS，直接结算并计入连续拒收次数。
+                // 已确认服务端超时无响应（UNCERTAIN）时无需再空等 SETTLE_TICKS，直接结算并累计未识别/新种类拒收次数。
                 if (!uncertainQuickMove && ++quiet < SETTLE_TICKS) {
                     yield new TerminalTurn.Stay(ActionStatus.running());
                 }
                 before = -1;
                 lastWasQuickMove = false;
-                if (uncertainQuickMove && ++consecutiveUncertain >= CONSECUTIVE_UNCERTAIN_LIMIT) {
+                if (uncertainQuickMove && ++uncertainRejects >= UNCERTAIN_REJECT_LIMIT) {
                     int unstored = remainingUnstoredCount();
                     Problem full = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                             "已满/类型上限拒收，余下 " + unstored + " 件未存入",
                             "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存");
+                    stopProblem = full;
+                    lastProblem = full;
                     records.attempt("把 " + stack.itemId() + " 存进 " + terminal + " 连着的网络", full.message());
                     yield new TerminalTurn.WrapUp(full, false);
                 }
-                if (!uncertainQuickMove) consecutiveUncertain = 0;
                 // 背包和光标都没少：网络放不下（存储满了、不收这种东西），如实记一笔，接着存下一样。
                 yield nextKind(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         "网络放不下 " + stack.itemId() + "（存储满了或不收这种东西）", null));
@@ -247,6 +248,11 @@ final class StoreMoves {
     /** 存进了网络几件：一件都没存进时外层按收场原因失败。 */
     int stored() {
         return stored;
+    }
+
+    /** 本趟若发生满盘/类型上限早停或个别种类被拒收，返回拒收原因供上层摘要如实透出。 */
+    Optional<Problem> rejectionProblem() {
+        return Optional.ofNullable(stopProblem != null ? stopProblem : lastProblem);
     }
 
     /** 正在存的一样，给面板与日志看进展到哪了。 */
