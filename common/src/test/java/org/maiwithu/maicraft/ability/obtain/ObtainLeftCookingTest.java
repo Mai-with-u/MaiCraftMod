@@ -15,7 +15,11 @@ import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.cook.FurnacesLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.cook.LeftCooking;
+import org.maiwithu.maicraft.behavior.acquire.cook.LeftStationBatch;
+import org.maiwithu.maicraft.behavior.acquire.cook.StationsLeftCooking;
 import org.maiwithu.maicraft.behavior.acquire.cook.WorkstationRecipe;
+import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
+import org.maiwithu.maicraft.behavior.acquire.mining.DugPits;
 import org.maiwithu.maicraft.behavior.acquire.engine.ItemAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.engine.StartsAcquisition;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
@@ -143,5 +147,89 @@ class ObtainLeftCookingTest {
         JsonObject details = ResultJson.result(TaskResult.builder(TaskResult.Status.DONE, "拿到了").details(via).build())
                 .getAsJsonObject("details");
         assertFalse(details.has("left_cooking"));
+        assertFalse(details.has("left_stations"));
+    }
+
+    @Test
+    void leavingAStationBatchIsPartialWithLeftStationsInDetails() {
+        StationsLeftCooking stationsLeft = new StationsLeftCooking(TIMER_SEVEN);
+        WorldPosition inputPos = new WorldPosition(6, 64, 0, "minecraft:overworld");
+        WorldPosition outputPos = new WorldPosition(10, 64, 0, "minecraft:overworld");
+        StartsAcquisition leavesStation = new StartsAcquisition() {
+            @Override public Action need(ItemRequest request, Permissions permissions, ItemAcquisition.Scope scope,
+                    Consumer<String> onDelivered, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        stationsLeft.leave(new LeftStationBatch("鼓风站", "smelt", inputPos, outputPos,
+                                "minecraft:iron_ingot_from_smelting_raw_iron", "minecraft:iron_ingot", "铁锭",
+                                "minecraft:raw_iron", "粗铁", 16, 16, 16, context.gameTick(), context.gameTick() + 400L, null));
+                        return ActionStatus.failed(stationsLeft.lastLeft());
+                    }
+                    @Override public String describe() { return "箱式站投料离开"; }
+                };
+            }
+
+            @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return need(requests.getFirst(), permissions, scope, onDelivered, records);
+            }
+        };
+        ObtainItems input = new ObtainItems(WantedItem.ofItem("minecraft:iron_ingot"), 16,
+                new ItemAcquisition.Scope(Set.of("smelt"), null, null, true), Permissions.DEFAULT, "按需要拿取", "烧铁");
+        TaskResult result = run(new ObtainTask(input, leavesStation, new ObtainTaskTest.FakeBackpack(), null,
+                itemId -> Set.of(), left, new DugPits(), new ChainMiningLedger(), stationsLeft));
+
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertEquals(Problem.Kind.WRONG_TIME, result.problem().kind());
+        JsonObject details = ResultJson.result(result).getAsJsonObject("details");
+        assertFalse(details.has("left_cooking"));
+        JsonArray leftStationsJson = details.getAsJsonArray("left_stations");
+        assertEquals(1, leftStationsJson.size());
+        JsonObject batch = leftStationsJson.get(0).getAsJsonObject();
+        assertEquals("鼓风站", batch.get("station").getAsString());
+        assertEquals("smelt", batch.get("via").getAsString());
+        assertEquals("minecraft:iron_ingot", batch.get("item").getAsString());
+        assertEquals(16, batch.get("loaded").getAsInt());
+        assertEquals(7, batch.get("timer_id").getAsInt());
+    }
+
+    @Test
+    void leavingBothFurnaceAndStationPreservesBothInDetails() {
+        StationsLeftCooking stationsLeft = new StationsLeftCooking(TIMER_SEVEN);
+        WorldPosition inputPos = new WorldPosition(6, 64, 0, "minecraft:overworld");
+        WorldPosition outputPos = new WorldPosition(10, 64, 0, "minecraft:overworld");
+        StartsAcquisition leavesBoth = new StartsAcquisition() {
+            @Override public Action need(ItemRequest request, Permissions permissions, ItemAcquisition.Scope scope,
+                    Consumer<String> onDelivered, TaskRecords records) {
+                return new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        left.leave(kelp(new WorldPosition(12, 64, -30, "minecraft:overworld"), context.gameTick()));
+                        stationsLeft.leave(new LeftStationBatch("鼓风站", "smelt", inputPos, outputPos,
+                                "minecraft:iron_ingot_from_smelting_raw_iron", "minecraft:iron_ingot", "铁锭",
+                                "minecraft:raw_iron", "粗铁", 16, 16, 16, context.gameTick(), context.gameTick() + 400L, null));
+                        return ActionStatus.failed(stationsLeft.lastLeft());
+                    }
+                    @Override public String describe() { return "熔炉与箱式站同时留场"; }
+                };
+            }
+
+            @Override public Action needSeveral(List<ItemRequest> requests, Permissions permissions,
+                    ItemAcquisition.Scope scope, Consumer<String> onDelivered, TaskRecords records) {
+                return need(requests.getFirst(), permissions, scope, onDelivered, records);
+            }
+        };
+        ObtainItems input = new ObtainItems(List.of(
+                new ItemRequest(WantedItem.ofItem(KELP), 64, "烤海带"),
+                new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 16, "烧铁")),
+                new ItemAcquisition.Scope(Set.of("smelt"), null, null, true), Permissions.DEFAULT, "多物品烧炼", "多物品");
+        TaskResult result = run(new ObtainTask(input, leavesBoth, new ObtainTaskTest.FakeBackpack(), null,
+                itemId -> Set.of(), left, new DugPits(), new ChainMiningLedger(), stationsLeft));
+
+        assertEquals(TaskResult.Status.PARTIAL, result.status());
+        assertEquals(Problem.Kind.WRONG_TIME, result.problem().kind());
+        JsonObject details = ResultJson.result(result).getAsJsonObject("details");
+        assertEquals(1, details.getAsJsonArray("left_cooking").size());
+        assertEquals(1, details.getAsJsonArray("left_stations").size());
+        assertEquals("鼓风站", details.getAsJsonArray("left_stations").get(0).getAsJsonObject().get("station").getAsString());
     }
 }
