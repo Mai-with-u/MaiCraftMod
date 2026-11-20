@@ -79,7 +79,10 @@ public final class ParamNames {
             Map.entry("minimum_light", "验收亮度：方块光要达到的等级（1..15）；crops 档默认 9，其余默认 8；随行补光取 1..13"),
             Map.entry("coverage", "验收范围档：all 全部样本达标 / most 九成达标 / crops 只按作物与耕地验收（全部达标）"),
             Map.entry("keep_inventory_confirmed", "调用方确认这个服务器开着死亡不掉落（keepInventory）；游戏读得到真实规则时以规则为准"),
-            Map.entry("sections", "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、records（容器与见过的资源）、network_stock（最近点开终端看到的 ME 网络存货）的列表；不给就四节都给"));
+            Map.entry("input", "箱式加工站的投料容器位置（写法与 source 相同：观察编号 b#、坐标 [x,y,z] 或记住的地标名）"),
+            Map.entry("output", "箱式加工站的取货容器位置（写法与 input 相同，可与 input 为同一容器）"),
+            Map.entry("exclude", "排除的物品 ID 或 # 标签列表：箱式加工站不处理命中的产物或原料"),
+            Map.entry("sections", "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、stations（标注的箱式加工站）、records（容器与见过的资源）、network_stock（最近点开终端看到的 ME 网络存货）的列表；不给就五节都给"));
 
     private ParamNames() {}
 

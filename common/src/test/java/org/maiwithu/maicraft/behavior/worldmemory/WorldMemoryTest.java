@@ -236,6 +236,39 @@ class WorldMemoryTest {
         assertEquals(List.of(), memory.allRecords());
         assertEquals(Optional.empty(), memory.recordAt(MemoryKind.CONTAINER, CHEST));
         assertEquals(Optional.empty(), memory.place("家"));
+        assertEquals(List.of(), memory.stations());
+    }
+
+    @Test
+    void 箱式加工站持久化读写与旧记忆向后兼容(@TempDir Path temp) throws IOException {
+        DocumentStore store = store(temp);
+        String world = "c".repeat(64);
+        MemoryCodec codec = new MemoryCodec();
+        // 旧格式记忆文件不含 stations 字段：必须能平滑读回且加工站集合为空。
+        String legacyJson = "{\"format\":1,\"records\":[],\"places\":{\"家\":{\"x\":1,\"y\":64,\"z\":2,\"dimension\":\"minecraft:overworld\"}},\"regions\":{}}";
+        MemoryBook decodedLegacy = codec.decode(legacyJson);
+        assertEquals(Map.of(), decodedLegacy.stations());
+        assertEquals(new WorldPosition(1, 64, 2, "minecraft:overworld"), decodedLegacy.places().get("家"));
+
+        // 写入箱式加工站后重新打开 WorldMemory 仍完整保留，并支持按途径与维度查询及区域清理保留。
+        var memory = new WorldMemory(store, world);
+        WorldPosition in = new WorldPosition(10, 64, 20, "minecraft:overworld");
+        WorldPosition out = new WorldPosition(14, 64, 20, "minecraft:overworld");
+        RememberedStation station = new RememberedStation("鼓风熔炼站", "smelt", in, out,
+                List.of("#maicraft:foods/edible", "minecraft:kelp"));
+        memory.rememberStation(station);
+
+        var reopened = new WorldMemory(store, world);
+        assertEquals(Optional.of(station), reopened.station("鼓风熔炼站"));
+        assertEquals(1, reopened.stationsFor("smelt", "minecraft:overworld").size());
+        assertEquals(0, reopened.stationsFor("smelt", "minecraft:the_nether").size());
+
+        // 按区域清理失效记忆不得误删人工标注的箱式加工站。
+        reopened.forgetArea(in, 32);
+        assertEquals(Optional.of(station), reopened.station("鼓风熔炼站"));
+
+        assertTrue(reopened.forgetStation("鼓风熔炼站"));
+        assertEquals(Optional.empty(), reopened.station("鼓风熔炼站"));
     }
 
     private WorldMemory memory(Path temp) {

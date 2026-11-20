@@ -25,6 +25,11 @@ final class MemoryCodec {
     private static final String RECORDS = "records";
     private static final String PLACES = "places";
     private static final String REGIONS = "regions";
+    private static final String STATIONS = "stations";
+    private static final String VIA = "via";
+    private static final String INPUT = "input";
+    private static final String OUTPUT = "output";
+    private static final String EXCLUDE = "exclude";
     private static final String RADIUS = "radius";
     private static final String KIND = "kind";
     private static final String X = "x";
@@ -57,6 +62,11 @@ final class MemoryCodec {
             regionObject.add(region.name(), json);
         }
         root.add(REGIONS, regionObject);
+        JsonObject stationObject = new JsonObject();
+        for (RememberedStation station : book.stations().values()) {
+            stationObject.add(station.name(), toJson(station));
+        }
+        root.add(STATIONS, stationObject);
         return root.toString();
     }
 
@@ -84,7 +94,37 @@ final class MemoryCodec {
                         regionJson.get(RADIUS).getAsInt()));
             }
         }
-        return new MemoryBook(records, places, regions);
+        // 早先存下的记忆文档没有箱式加工站一段：向后兼容为空集合，不当作坏文档。
+        Map<String, RememberedStation> stations = new LinkedHashMap<>();
+        if (root.has(STATIONS)) {
+            for (var entry : root.getAsJsonObject(STATIONS).entrySet()) {
+                stations.put(entry.getKey(), toStation(entry.getKey(), entry.getValue().getAsJsonObject()));
+            }
+        }
+        return new MemoryBook(records, places, regions, stations);
+    }
+
+    private static JsonObject toJson(RememberedStation station) {
+        JsonObject json = new JsonObject();
+        json.addProperty(VIA, station.via());
+        json.add(INPUT, toJson(station.input()));
+        json.add(OUTPUT, toJson(station.output()));
+        JsonArray excluded = new JsonArray();
+        for (String item : station.exclude()) excluded.add(item);
+        json.add(EXCLUDE, excluded);
+        return json;
+    }
+
+    private static RememberedStation toStation(String name, JsonObject json) {
+        try {
+            List<String> excluded = json.has(EXCLUDE) ? readContents(json.getAsJsonArray(EXCLUDE)) : List.of();
+            return new RememberedStation(name, json.get(VIA).getAsString(),
+                    toPosition(json.getAsJsonObject(INPUT)),
+                    toPosition(json.getAsJsonObject(OUTPUT)),
+                    excluded);
+        } catch (IllegalArgumentException | NullPointerException failure) {
+            throw new MemoryFormatException("记忆文档里有一条读不回来的箱式加工站记录：" + name, failure);
+        }
     }
 
     private static JsonObject toJson(MemoryRecord record) {

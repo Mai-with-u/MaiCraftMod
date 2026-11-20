@@ -10,21 +10,28 @@ import java.util.function.Predicate;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
- * 一册记忆：一个世界里的全部记忆记录，加上按名字记住的地点（家、床这类）与记住的区域（玩家的地盘）。
+ * 一册记忆：一个世界里的全部记忆记录，加上按名字记住的地点（家、床这类）、记住的区域（玩家的地盘）
+ * 与人工标注的箱式加工站（投料与取货容器）。
  *
  * <p>它是一次修改的最小单位：每次记住或忘记都整册重新编码存盘，避免半新半旧的记忆。
  */
 record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
-        Map<String, RememberedRegion> regions) {
+        Map<String, RememberedRegion> regions, Map<String, RememberedStation> stations) {
 
     MemoryBook {
         records = List.copyOf(records);
         places = Map.copyOf(places);
         regions = Map.copyOf(regions);
+        stations = stations == null ? Map.of() : Map.copyOf(stations);
+    }
+
+    MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
+            Map<String, RememberedRegion> regions) {
+        this(records, places, regions, Map.of());
     }
 
     static MemoryBook empty() {
-        return new MemoryBook(List.of(), Map.of(), Map.of());
+        return new MemoryBook(List.of(), Map.of(), Map.of(), Map.of());
     }
 
     /**
@@ -42,7 +49,7 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
             }
         }
         next.add(earlier == null ? incoming : earlier.mergedWith(incoming));
-        return new MemoryBook(next, places, regions);
+        return new MemoryBook(next, places, regions, stations);
     }
 
     /**
@@ -50,7 +57,7 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
      * 同一片树林可能记了上百条，读进来时收拢一次，之后的查询和存盘都只看并好的。没有可并的原册返回。
      */
     MemoryBook withDuplicatesMerged() {
-        MemoryBook merged = new MemoryBook(List.of(), places, regions);
+        MemoryBook merged = new MemoryBook(List.of(), places, regions, stations);
         for (MemoryRecord record : records) {
             merged = merged.withRecord(record);
         }
@@ -61,14 +68,21 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
     MemoryBook withPlace(String name, WorldPosition position) {
         var next = new HashMap<>(places);
         next.put(name, position);
-        return new MemoryBook(records, next, regions);
+        return new MemoryBook(records, next, regions, stations);
     }
 
     /** 记住一块区域；同名区域用新范围覆盖旧范围。 */
     MemoryBook withRegion(RememberedRegion region) {
         var next = new HashMap<>(regions);
         next.put(region.name(), region);
-        return new MemoryBook(records, places, next);
+        return new MemoryBook(records, places, next, stations);
+    }
+
+    /** 记住一座命名箱式加工站；同名覆盖。 */
+    MemoryBook withStation(RememberedStation station) {
+        var next = new HashMap<>(stations);
+        next.put(station.name(), station);
+        return new MemoryBook(records, places, regions, next);
     }
 
     /** 忘掉一条记忆：那个东西搬走了、不见了，留着只会误导。其他记忆不动。 */
@@ -76,14 +90,22 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
         List<MemoryRecord> next = records.stream()
                 .filter(record -> record.kind() != kind || !MemoryRecord.sameSpot(record.position(), position))
                 .toList();
-        return new MemoryBook(next, places, regions);
+        return new MemoryBook(next, places, regions, stations);
     }
 
     /** 忘掉一块区域：地界变了或记错了，留着只会把能干活的格子一直锁住。其他记忆不动。 */
     MemoryBook withoutRegion(String name) {
         var next = new HashMap<>(regions);
         next.remove(name);
-        return new MemoryBook(records, places, next);
+        return new MemoryBook(records, places, next, stations);
+    }
+
+    /** 忘掉一座命名箱式加工站；名字没记过时原册返回。 */
+    MemoryBook withoutStation(String name) {
+        if (!stations.containsKey(name)) return this;
+        var next = new HashMap<>(stations);
+        next.remove(name);
+        return new MemoryBook(records, places, regions, next);
     }
 
     /** 忘掉一个按名字记的地点：名字没记过时原册返回，别的记忆不动。 */
@@ -91,12 +113,12 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
         if (!places.containsKey(name)) return this;
         var next = new HashMap<>(places);
         next.remove(name);
-        return new MemoryBook(records, next, regions);
+        return new MemoryBook(records, next, regions, stations);
     }
 
     /**
      * 按范围清掉一片失效记忆：清掉落在范围内的命名地点与容器、工作站、产地线索；
-     * 圈的地盘、建筑档案、机器档案与还没收回的临时方块原样保留。
+     * 圈的地盘、标注的箱式加工站、建筑档案、机器档案与还没收回的临时方块原样保留。
      */
     AreaRemoval withoutArea(Predicate<WorldPosition> inArea) {
         var keptPlaces = new HashMap<String, WorldPosition>();
@@ -129,7 +151,7 @@ record MemoryBook(List<MemoryRecord> records, Map<String, WorldPosition> places,
             }
         }
         boolean changed = !removedPlaces.isEmpty() || keptRecords.size() != records.size();
-        MemoryBook next = changed ? new MemoryBook(keptRecords, keptPlaces, regions) : this;
+        MemoryBook next = changed ? new MemoryBook(keptRecords, keptPlaces, regions, stations) : this;
         return new AreaRemoval(next, new WorldMemory.AreaForgotten(removedPlaces, containers, workstations, sites), changed);
     }
 

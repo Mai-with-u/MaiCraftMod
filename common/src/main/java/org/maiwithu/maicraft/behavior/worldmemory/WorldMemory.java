@@ -203,6 +203,41 @@ public final class WorldMemory implements RemembersPlaces, RemembersRegions, Rem
         modifyAndSave(book -> book.withoutRegion(name));
     }
 
+    /** 记住一座命名箱式加工站（投料与取货容器及排除表）；同名覆盖并立刻存盘。 */
+    public void rememberStation(RememberedStation station) {
+        modifyAndSave(book -> book.withStation(station));
+    }
+
+    /** 忘掉一座命名箱式加工站；名字没记过就不动，返回有没有真的忘掉。 */
+    public boolean forgetStation(String name) {
+        if (readBook().stations().containsKey(name)) {
+            modifyAndSave(book -> book.withoutStation(name));
+            return true;
+        }
+        return false;
+    }
+
+    /** 按名字查记住的箱式加工站；没记过给空。 */
+    public Optional<RememberedStation> station(String name) {
+        return Optional.ofNullable(readBook().stations().get(name));
+    }
+
+    /** 全部记住的箱式加工站，按名字排好。 */
+    public List<RememberedStation> stations() {
+        return readBook().stations().values().stream()
+                .sorted(Comparator.comparing(RememberedStation::name))
+                .toList();
+    }
+
+    /** 指定途径与维度下全部记住的箱式加工站，按名字排好；dimension 为 null 时不限维度。 */
+    public List<RememberedStation> stationsFor(String via, String dimension) {
+        return readBook().stations().values().stream()
+                .filter(station -> station.via().equals(via))
+                .filter(station -> station.inDimension(dimension))
+                .sorted(Comparator.comparing(RememberedStation::name))
+                .toList();
+    }
+
     /** 按范围清掉的一个命名地点：保留原名和原坐标，误清时可照着记回。 */
     public record ForgottenPlace(String name, WorldPosition position) {}
 
