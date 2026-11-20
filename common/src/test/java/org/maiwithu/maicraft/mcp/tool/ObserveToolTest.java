@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.behavior.perception.SubtitleEar;
 import org.maiwithu.maicraft.behavior.travel.planning.SceneSeenTargets;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionSender;
 import org.maiwithu.maicraft.game.picture.CameraPictures;
@@ -502,9 +503,26 @@ class ObserveToolTest {
         assertEquals(1, networkOnly.keySet().size(), networkOnly::toString);
         assertEquals(0, networkOnly.getAsJsonArray("network_stock").size());
 
-        JsonObject allFour = data(observe(
-                "{\"what\": \"world_memory\", \"sections\": [\"places\", \"regions\", \"records\", \"network_stock\"]}"));
-        assertEquals(data(observe("{\"what\": \"world_memory\"}")), allFour, "四节都点名等于缺省不点名");
+        JsonObject allFive = data(observe(
+                "{\"what\": \"world_memory\", \"sections\": [\"places\", \"regions\", \"stations\", \"records\", \"network_stock\"]}"));
+        assertEquals(data(observe("{\"what\": \"world_memory\"}")), allFive, "五节都点名等于缺省不点名");
+
+        // 标注的箱式加工站在 observe(what=places) 与 observe(what=world_memory) 中同步输出完整信息。
+        memory.rememberStation(new RememberedStation("鼓风站", "smelt",
+                new WorldPosition(10, 64, 0, "minecraft:overworld"),
+                new WorldPosition(14, 64, 0, "minecraft:overworld"),
+                List.of("#maicraft:foods/edible")));
+        JsonObject placesView = data(observe("{\"what\": \"places\"}"));
+        JsonObject stationInPlaces = placesView.getAsJsonArray("stations").get(0).getAsJsonObject();
+        assertEquals("鼓风站", stationInPlaces.get("name").getAsString());
+        assertEquals("smelt", stationInPlaces.get("via").getAsString());
+        assertEquals(10, stationInPlaces.getAsJsonObject("input").get("x").getAsInt());
+        assertEquals(14, stationInPlaces.getAsJsonObject("output").get("x").getAsInt());
+        assertEquals("#maicraft:foods/edible", stationInPlaces.getAsJsonArray("exclude").get(0).getAsString());
+
+        JsonObject stationsOnly = data(observe("{\"what\": \"world_memory\", \"sections\": [\"stations\"]}"));
+        assertEquals(1, stationsOnly.keySet().size(), stationsOnly::toString);
+        assertEquals("鼓风站", stationsOnly.getAsJsonArray("stations").get(0).getAsJsonObject().get("name").getAsString());
     }
 
     @Test

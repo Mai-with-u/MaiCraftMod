@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -44,20 +45,37 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
         }
     }
 
+    /** 一座箱式加工站的配置摘要：途径、投料口、取货口与排除表。 */
+    record StationShape(String via, WorldPosition input, WorldPosition output, List<String> exclude) {
+        static StationShape of(RememberedStation station) {
+            return station == null ? null
+                    : new StationShape(station.via(), station.input(), station.output(), station.exclude());
+        }
+    }
+
     /**
-     * 结果细节：名字、做了哪种操作。记地点时 position 是那个位置，圈地盘时 position 是中心、radius 是半径；
-     * 改记时有 previous_position（圈地盘还有 previous_radius）；忘掉时 previous_position 是忘掉的地点，
-     * forgotten_region 是忘掉的地盘；按范围清记忆时有 position、radius 与 forgotten。
+     * 结果细节：名字、做了哪种操作。记地点时 position 是那个位置，圈地盘时 position 是中心、radius 是半径，
+     * 标注加工站时 station 是新配置；改记时有 previous_position（圈地盘还有 previous_radius，加工站有 previous_station）；
+     * 忘掉时 previous_position 是忘掉的地点，forgotten_region 是忘掉的地盘，forgotten_station 是忘掉的加工站；
+     * 按范围清记忆时有 position、radius 与 forgotten。
      */
     record RememberDetails(String name, String operation, WorldPosition position, Integer radius,
             WorldPosition previousPosition, Integer previousRadius, RegionShape forgottenRegion,
-            WorldMemory.AreaForgotten forgotten)
+            WorldMemory.AreaForgotten forgotten, StationShape station, StationShape previousStation,
+            StationShape forgottenStation)
             implements ResultDetails {
 
-        /** 记地点（或忘掉只记过地点的名字）时的细节：没有半径和地盘。 */
+        /** 记地点（或忘掉只记过地点的名字）时的细节：没有半径、地盘与加工站。 */
         static RememberDetails ofPlace(String name, String operation, WorldPosition position,
                 WorldPosition previousPosition) {
-            return new RememberDetails(name, operation, position, null, previousPosition, null, null, null);
+            return new RememberDetails(name, operation, position, null, previousPosition, null, null, null,
+                    null, null, null);
+        }
+
+        /** 标注箱式加工站时的细节。 */
+        static RememberDetails ofStation(String name, RememberedStation current, RememberedStation previous) {
+            return new RememberDetails(name, "station", null, null, null, null, null, null,
+                    StationShape.of(current), StationShape.of(previous), null);
         }
     }
 
@@ -71,11 +89,12 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
             case FORGET -> forget();
             case FORGET_AREA -> forgetArea();
             case REGION -> region();
+            case STATION -> station();
             case REMEMBER -> remember();
         };
     }
 
-    // 按范围清理失效记忆：清掉范围内命名地点、容器、工作站与产地线索，地盘、建筑机器档案与临时方块不动。
+    // 按范围清理失效记忆：清掉范围内命名地点、容器、工作站与产地线索，地盘、加工站、建筑机器档案与临时方块不动。
     private Next<Phase> forgetArea() {
         areaForgotten = memory.forgetArea(input.position(), input.radius());
         String summary;
@@ -91,7 +110,7 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
                 .build());
     }
 
-    // 忘掉：同名的地点与地盘记过哪样忘哪样，结果写清忘掉的是哪几样。
+    // 忘掉：同名的地点、地盘与加工站记过哪样忘哪样，结果写清忘掉的是哪几样。
     private Next<Phase> forget() {
         List<String> forgotten = new ArrayList<>();
         if (input.previous() != null) {
@@ -102,10 +121,21 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
             memory.forgetRegion(input.name());
             forgotten.add("地盘");
         }
+        if (input.previousStation() != null) {
+            memory.forgetStation(input.name());
+            forgotten.add("加工站");
+        }
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                        "已忘掉" + String.join("和", forgotten) + "「" + input.name() + "」")
+                        "已忘掉" + joinChinese(forgotten) + "「" + input.name() + "」")
                 .details(details())
                 .build());
+    }
+
+    // 两项用"和"，三项及以上用"、…和…"。
+    private static String joinChinese(List<String> items) {
+        if (items.size() <= 1) return items.isEmpty() ? "" : items.getFirst();
+        if (items.size() == 2) return items.get(0) + "和" + items.get(1);
+        return String.join("、", items.subList(0, items.size() - 1)) + "和" + items.getLast();
     }
 
     // 圈地盘：同名用新中心、新半径覆盖；记下立刻生效，保护判断把里面的方块都当受保护。
@@ -114,6 +144,18 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                         "已把「" + input.name() + "」圈成玩家地盘：中心 " + describe(input.position()) + "，半径 "
                                 + input.radius() + " 格；里面的方块不拆，箱子不当成能取用的")
+                .details(details())
+                .build());
+    }
+
+    // 标注箱式加工站：同名覆盖，结果写明进出料口与排除项，后续 obtain 烧炼时优先走它。
+    private Next<Phase> station() {
+        RememberedStation current = input.station();
+        memory.rememberStation(current);
+        String excluded = current.exclude().isEmpty() ? "" : "，排除 " + String.join("、", current.exclude());
+        String summary = "已标注箱式加工站「" + current.name() + "」（" + current.via() + "）：投料口 "
+                + describe(current.input()) + "，取货口 " + describe(current.output()) + excluded;
+        return Next.done(TaskResult.builder(TaskResult.Status.DONE, summary)
                 .details(details())
                 .build());
     }
@@ -135,12 +177,14 @@ public final class RememberPlaceTask extends PhasedTask<RememberPlaceTask.Phase>
                 RememberedRegion before = input.previousRegion();
                 yield new RememberDetails(input.name(), "region", input.position(), input.radius(),
                         before == null ? null : before.center(), before == null ? null : before.radiusBlocks(),
-                        null, null);
+                        null, null, null, null, null);
             }
+            case STATION -> RememberDetails.ofStation(input.name(), input.station(), input.previousStation());
             case FORGET -> new RememberDetails(input.name(), "forget", null, null, input.previous(), null,
-                    RegionShape.of(input.previousRegion()), null);
+                    RegionShape.of(input.previousRegion()), null, null, null,
+                    StationShape.of(input.previousStation()));
             case FORGET_AREA -> new RememberDetails(null, "forget_area", input.position(), input.radius(),
-                    null, null, null, areaForgotten);
+                    null, null, null, areaForgotten, null, null, null);
         };
     }
 

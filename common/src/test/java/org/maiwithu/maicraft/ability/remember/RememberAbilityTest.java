@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
@@ -85,12 +86,15 @@ class RememberAbilityTest {
     @BeforeEach
     void world() {
         memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "a".repeat(64));
-        // 角色站在主世界 (12, 64, -8)；观察编号 e7 指着 (0, 64, -12)。
+        // 角色站在主世界 (12, 64, -8)；e7 带维度，b3/b4 与实机观察编号一致不带维度（WorldPosition.here）。
         ability = new RememberAbility(memory,
                 () -> new WorldPosition(12, 64, -8, "minecraft:overworld"),
-                id -> "e7".equals(id)
-                        ? Optional.of(new WorldPosition(0, 64, -12, "minecraft:overworld"))
-                        : Optional.empty());
+                id -> switch (id) {
+                    case "e7" -> Optional.of(new WorldPosition(0, 64, -12, "minecraft:overworld"));
+                    case "b3" -> Optional.of(WorldPosition.here(0, 64, -12));
+                    case "b4" -> Optional.of(WorldPosition.here(4, 64, -12));
+                    default -> Optional.empty();
+                });
     }
 
     private ParamValues params(String json) {
@@ -420,5 +424,96 @@ class RememberAbilityTest {
         assertTrue(memory.place("刷铁机").isPresent());
         assertEquals(1, memory.temporaryBlocks().size());
         assertTrue(memory.recordAt(MemoryKind.CONTAINER, near).isEmpty());
+    }
+
+    @Test
+    void stationOperationRecordsUpdatesSkipsUnchangedAndForgetsCleanly() {
+        memory.remember("取货箱地标", new WorldPosition(20, 64, -8, "minecraft:overworld"));
+
+        // 标注箱式加工站：input 用无维度方块观察编号 b3（应自动补齐当前维度）、output 用 landmark，via 默认 smelt。
+        StepDecision.Run create = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"鼓风熔炼站\",\"input\":\"b3\",\"output\":\"取货箱地标\","
+                                + "\"exclude\":[\"#maicraft:foods/edible\",\"minecraft:kelp\"]}"))));
+        TaskResult created = runToFinish(create);
+        assertEquals(TaskResult.Status.DONE, created.status(), created.summary());
+        RememberedStation saved = memory.station("鼓风熔炼站").orElseThrow();
+        assertEquals("smelt", saved.via());
+        assertEquals(new WorldPosition(0, 64, -12, "minecraft:overworld"), saved.input());
+        assertEquals(new WorldPosition(20, 64, -8, "minecraft:overworld"), saved.output());
+        assertEquals(List.of("#maicraft:foods/edible", "minecraft:kelp"), saved.exclude());
+
+        // 同配置再次标注直接返回"本来就这样记着"，不启动写入任务。
+        StepDecision.Finish unchanged = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"鼓风熔炼站\",\"input\":\"b3\",\"output\":\"取货箱地标\","
+                                + "\"exclude\":[\"#maicraft:foods/edible\",\"minecraft:kelp\"]}"))));
+        assertEquals(TaskResult.Status.DONE, unchanged.result().status());
+        assertTrue(unchanged.result().summary().contains("本来就这样记着"), unchanged.result().summary());
+
+        // 允许进出料口为同一容器坐标，并同名覆盖记下旧配置。
+        StepDecision.Run overwrite = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"鼓风熔炼站\",\"input\":\"[5,64,5]\",\"output\":\"[5,64,5]\"}"))));
+        TaskResult updated = runToFinish(overwrite);
+        RememberPlaceTask.RememberDetails updateDetails =
+                assertInstanceOf(RememberPlaceTask.RememberDetails.class, updated.details());
+        assertEquals(new WorldPosition(0, 64, -12, "minecraft:overworld"), updateDetails.previousStation().input());
+        assertTrue(memory.station("鼓风熔炼站").orElseThrow().sameContainer());
+
+        // forget_area 不误删人工标注的箱式加工站。
+        StepDecision.Run areaClear = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget_area\",\"radius\":64}"))));
+        runToFinish(areaClear);
+        assertTrue(memory.station("鼓风熔炼站").isPresent());
+
+        // forget 查不到名字时把标注的加工站一并列出来。
+        StepDecision.Finish missing = assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget\",\"name\":\"不存在的站\"}"))));
+        assertEquals(Problem.Kind.NOT_FOUND, missing.result().problem().kind());
+        assertTrue(missing.result().problem().message().contains("鼓风熔炼站"),
+                missing.result().problem().message());
+
+        // forget 按名删除已标注的加工站。
+        StepDecision.Run forget = assertInstanceOf(StepDecision.Run.class,
+                ability.decide(step(goal(null, "{\"operation\":\"forget\",\"name\":\"鼓风熔炼站\"}"))));
+        TaskResult forgotten = runToFinish(forget);
+        assertEquals(TaskResult.Status.DONE, forgotten.status());
+        assertTrue(forgotten.summary().contains("加工站「鼓风熔炼站」"), forgotten.summary());
+        assertTrue(memory.station("鼓风熔炼站").isEmpty());
+    }
+
+    @Test
+    void stationParameterValidationRejectsMissingOrMisusedFields() {
+        // 缺 input/output 或给 here 均按参数错误拒绝。
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"operation\":\"station\",\"name\":\"空站\",\"input\":\"[1,64,1]\"}"))))
+                .result().problem().kind());
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"脚下站\",\"input\":\"here\",\"output\":\"[1,64,1]\"}"))))
+                .result().problem().kind());
+        // 非方块观察编号（e#/f#/s#）按参数错误拒绝。
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"实体站\",\"input\":\"e7\",\"output\":\"b4\"}"))))
+                .result().problem().kind());
+        // 无维度 b# 补齐当前维度后，与跨维度地标混用应命中跨维度拦截。
+        memory.remember("下界取货箱", new WorldPosition(10, 64, 10, "minecraft:the_nether"));
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"跨维站\",\"input\":\"b3\",\"output\":\"下界取货箱\"}"))))
+                .result().problem().kind());
+        // 角色不在世界时，无维度 b# 无法补齐维度应报 NOT_POSSIBLE_HERE。
+        RememberAbility offWorld = new RememberAbility(memory, () -> null,
+                id -> "b3".equals(id) ? Optional.of(WorldPosition.here(0, 64, -12)) : Optional.empty());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, assertInstanceOf(StepDecision.Finish.class,
+                offWorld.decide(step(goal(null,
+                        "{\"operation\":\"station\",\"name\":\"离线站\",\"input\":\"b3\",\"output\":\"[1,64,1]\"}"))))
+                .result().problem().kind());
+        // 非 station 操作不允许携带 input/output/via/exclude。
+        assertEquals(Problem.Kind.INVALID_PARAMETER, assertInstanceOf(StepDecision.Finish.class,
+                ability.decide(step(goal(null, "{\"name\":\"家\",\"input\":\"[1,64,1]\"}"))))
+                .result().problem().kind());
     }
 }

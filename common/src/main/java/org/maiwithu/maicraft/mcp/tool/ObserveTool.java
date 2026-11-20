@@ -300,14 +300,14 @@ public final class ObserveTool implements McpTool {
         }
         JsonArray asked = arguments.getAsJsonArray("sections");
         if (asked == null || asked.isEmpty()) {
-            check.error("sections", "sections 要是节名的数组：places、regions、records、network_stock；不给就是四节都要", null);
+            check.error("sections", "sections 要是节名的数组：places、regions、stations、records、network_stock；不给就是五节都要", null);
             return null;
         }
         Set<String> parsed = new LinkedHashSet<>();
         for (int index = 0; index < asked.size(); index++) {
             String section = asked.get(index).isJsonPrimitive() ? asked.get(index).getAsString() : null;
             if (section == null || !SECTIONS.contains(section)) {
-                check.error("sections", "sections 里第 " + index + " 项不是节名：places、regions、records、network_stock 之一", null);
+                check.error("sections", "sections 里第 " + index + " 项不是节名：places、regions、stations、records、network_stock 之一", null);
                 return null;
             }
             parsed.add(section);
@@ -328,8 +328,8 @@ public final class ObserveTool implements McpTool {
         return ToolReply.ok(data, check.notes(), null);
     }
 
-    /** world_memory 的四节名字：sections 参数只认这几个。 */
-    private static final Set<String> SECTIONS = Set.of("places", "regions", "records", "network_stock");
+    /** world_memory 的五节名字：sections 参数只认这几个。 */
+    private static final Set<String> SECTIONS = Set.of("places", "regions", "stations", "records", "network_stock");
 
     /** 在客户端线程上读场景与记忆；找不到 detail 的对象时返回 null。 */
     private JsonObject view(String what, String id, boolean grid, Integer radius, MemoryKind kindFilter,

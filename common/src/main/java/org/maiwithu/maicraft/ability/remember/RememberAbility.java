@@ -10,6 +10,7 @@ import org.maiwithu.maicraft.behavior.acquire.engine.ReadsCharacterPosition;
 import org.maiwithu.maicraft.behavior.travel.planning.LandmarkResolver;
 import org.maiwithu.maicraft.behavior.travel.planning.ReadsSeenTargets;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
@@ -20,6 +21,7 @@ import org.maiwithu.maicraft.kernel.goal.StepContext;
 import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.TargetKind;
+import org.maiwithu.maicraft.kernel.goal.TargetText;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.param.ParamSpec;
 import org.maiwithu.maicraft.kernel.param.ParamSpecs;
@@ -62,19 +64,28 @@ public final class RememberAbility implements AbilityModule {
     public AbilitySpec spec() {
         return new AbilitySpec(
                 "maicraft:remember",
-                "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
+                "记住或忘掉一个按名字叫的地点、标注箱式加工站、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
                 AbilityDoc.forAbility("remember"),
                 ParamSpecs.of(
                         ParamSpec.of("name", ParamType.TEXT)
-                                .doc("remember、forget、region 必填：地点或地盘的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给").build(),
+                                .doc("remember、forget、region、station 必填：地点、地盘或加工站的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给").build(),
                         ParamSpec.of("operation", ParamType.CHOICE).defaultValue("remember")
-                                .choices("remember", "forget", "region", "forget_area")
-                                .doc("remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，"
+                                .choices("remember", "forget", "region", "station", "forget_area")
+                                .doc("remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点、地盘与加工站，"
                                         + "region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用），"
+                                        + "station 标注一座箱式加工站（投料容器 + 取货容器），"
                                         + "forget_area 把目标周围 radius 格内的命名地点与容器、工作站、产地记忆清掉").build(),
                         ParamSpec.of("radius", ParamType.INTEGER).range(1, MAX_FORGET_AREA_RADIUS)
                                 .doc("用于 region（地盘半径，默认 " + DEFAULT_REGION_RADIUS + "，最大 " + MAX_REGION_RADIUS
-                                        + "）或 forget_area（清理半径，必填，1 到 " + MAX_FORGET_AREA_RADIUS + "）").build()),
+                                        + "）或 forget_area（清理半径，必填，1 到 " + MAX_FORGET_AREA_RADIUS + "）").build(),
+                        ParamSpec.of("via", ParamType.CHOICE).choices("smelt")
+                                .doc("用于 station：加工站用途途径，默认 smelt（烧炼）").build(),
+                        ParamSpec.of("input", ParamType.TEXT)
+                                .doc("用于 station（必填）：投料容器位置（观察编号 b#、坐标 [x,y,z] 或记住的地标名）").build(),
+                        ParamSpec.of("output", ParamType.TEXT)
+                                .doc("用于 station（必填）：取货容器位置（写法同 input，允许与 input 为同一容器）").build(),
+                        ParamSpec.of("exclude", ParamType.ITEM_LIST)
+                                .doc("用于 station（可选）：不交给本站处理的物品 ID 或 # 标签列表（如 [\"#maicraft:foods/edible\"]）").build()),
                 Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
                 ExecutionMode.MEMORY_ONLY,
                 Set.of(),
@@ -86,20 +97,25 @@ public final class RememberAbility implements AbilityModule {
     public StepDecision decide(StepContext step) {
         ParamValues params = step.goal().params();
         String operation = params.has("operation") ? params.text("operation") : "remember";
+        if (!"station".equals(operation) && hasStationOnlyParams(params)) {
+            return new StepDecision.Finish(TaskResult.failed("via、input、output、exclude 只用于标注箱式加工站",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "给了加工站参数，但 operation 不是 station",
+                            "标注箱式加工站请写 operation=station；其余操作不要传 via、input、output、exclude")));
+        }
         if ("forget_area".equals(operation)) {
             return forgetArea(step.goal().target(), params);
         }
         String name = params.has("name") ? params.text("name").trim() : "";
         if (name.isEmpty()) {
-            return new StepDecision.Finish(TaskResult.failed("缺少地点或地盘的名字",
+            return new StepDecision.Finish(TaskResult.failed("缺少地点、地盘或加工站的名字",
                     Problem.of(Problem.Kind.INVALID_PARAMETER, "operation=" + operation + " 必须给 name",
-                            "写上地点或地盘的名字；要按范围清一片失效记忆用 operation=forget_area")));
+                            "写上名字；要按范围清一片失效记忆用 operation=forget_area")));
         }
         // 给了半径却没说圈地盘：多半是想圈地盘忘了写，只记一个点会让 LLM 以为那片已经受保护，主播的基地照样被挖。
         if (params.has("radius") && !"region".equals(operation)) {
             return new StepDecision.Finish(TaskResult.failed("radius 只用于圈地盘或按范围清记忆",
                     Problem.of(Problem.Kind.INVALID_PARAMETER, "给了 radius，但 operation 不是 region 或 forget_area",
-                            "要圈一片玩家地盘写 operation=region；只记一个地点就去掉 radius")));
+                            "要圈一片玩家地盘写 operation=region；只记一个地点或标加工站就去掉 radius")));
         }
         if ("region".equals(operation) && params.has("radius") && params.integer("radius") > MAX_REGION_RADIUS) {
             return new StepDecision.Finish(TaskResult.failed("圈地盘的半径太大",
@@ -111,8 +127,71 @@ public final class RememberAbility implements AbilityModule {
             case "forget" -> forget(name);
             case "region" -> region(name, step.goal().target(), params.has("radius")
                     ? (int) params.integer("radius") : DEFAULT_REGION_RADIUS);
+            case "station" -> station(name, params);
             default -> remember(name, step.goal().target());
         };
+    }
+
+    private static boolean hasStationOnlyParams(ParamValues params) {
+        return params.has("via") || params.has("input") || params.has("output") || params.has("exclude");
+    }
+
+    /** 标注箱式加工站：解析进出料容器位置（带维度），未变直接报“本来就这样记着”，否则开任务写进去。 */
+    private StepDecision station(String name, ParamValues params) {
+        if (!params.has("input") || !params.has("output")) {
+            return new StepDecision.Finish(TaskResult.failed("标注箱式加工站必须给出 input 和 output 容器位置",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER, "operation=station 缺少 input 或 output",
+                            "给出投料容器 input 与取货容器 output（观察编号 b#、坐标 [x,y,z] 或记住的地标名；允许同一容器）")));
+        }
+        Located inputSpot = locateStationContainer("input", params.text("input"));
+        if (inputSpot.failure() != null) return inputSpot.failure();
+        Located outputSpot = locateStationContainer("output", params.text("output"));
+        if (outputSpot.failure() != null) return outputSpot.failure();
+        WorldPosition inputPos = inputSpot.position();
+        WorldPosition outputPos = outputSpot.position();
+        if (inputPos.dimension() != null && outputPos.dimension() != null
+                && !inputPos.dimension().equals(outputPos.dimension())) {
+            return new StepDecision.Finish(TaskResult.failed("投料容器与取货容器不在同一个维度",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER,
+                            "input 在 " + inputPos.dimension() + "，output 在 " + outputPos.dimension(),
+                            "同一座箱式加工站的投料口与取货口必须在同一个维度")));
+        }
+        String via = params.has("via") ? params.text("via") : "smelt";
+        List<String> exclude = params.has("exclude") ? params.list("exclude") : List.of();
+        RememberedStation desired = new RememberedStation(name, via, inputPos, outputPos, exclude);
+        RememberedStation previous = memory.station(name).orElse(null);
+        if (desired.equals(previous)) {
+            return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.DONE,
+                            "加工站「" + name + "」本来就这样记着")
+                    .details(RememberPlaceTask.RememberDetails.ofStation(name, desired, null))
+                    .build());
+        }
+        return new StepDecision.Run(RememberPlaceInput.station(desired, previous));
+    }
+
+    // 解析加工站的进出料容器参数：只接受方块观察编号（b#）、坐标 [x,y,z] 与记住的地标，缺维度时按角色当前所在维度补齐。
+    private Located locateStationContainer(String paramName, String raw) {
+        Optional<Target> parsed = TargetText.parse(raw);
+        if (parsed.isEmpty() || parsed.get() instanceof Target.Here) {
+            return Located.failed(new StepDecision.Finish(TaskResult.failed(paramName + " 容器位置写法不对",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER,
+                            paramName + " 需要观察编号（b#）、坐标 [x,y,z] 或记住的地标名，收到：" + raw,
+                            "不要用 here，请指明具体的投料或取货容器位置"))));
+        }
+        if (parsed.get() instanceof Target.Seen seen && !seen.id().startsWith("b")) {
+            return Located.failed(new StepDecision.Finish(TaskResult.failed(paramName + " 必须指向方块容器",
+                    Problem.of(Problem.Kind.INVALID_PARAMETER,
+                            paramName + " 只接受方块观察编号（b#），收到：" + seen.id(),
+                            "请改用方块容器的 b# 编号、坐标 [x,y,z] 或记住的地标名"))));
+        }
+        Located located = locate(parsed.get());
+        if (located.failure() != null) return located;
+        WorldPosition pos = located.position();
+        if (pos.dimension() != null) return located;
+        // 观察编号（b#）或历史无维度地标不带维度时，按角色此刻所在维度补齐，杜绝跨维度误用或绕过同维度校验。
+        WorldPosition here = characterPosition.currentPosition();
+        if (here == null || here.dimension() == null) return Located.failed(notInWorld());
+        return Located.at(new WorldPosition(pos.x(), pos.y(), pos.z(), here.dimension()));
     }
 
     /** 按范围清掉失效记忆：不用给 name，必须给 radius，中心省略就是角色脚下。 */
@@ -133,24 +212,28 @@ public final class RememberAbility implements AbilityModule {
         return new StepDecision.Run(RememberPlaceInput.forgetArea(located.position(), (int) params.integer("radius")));
     }
 
-    /** 忘掉：同名的地点与地盘记过哪样忘哪样；两样都没记过就失败并附上记得的全部名字。 */
+    /** 忘掉：同名的地点、地盘与加工站记过哪样忘哪样；三样都没记过就失败并附上记得的全部名字。 */
     private StepDecision forget(String name) {
         Optional<WorldPosition> previous = memory.place(name);
         Optional<RememberedRegion> region = memory.region(name);
-        if (previous.isEmpty() && region.isEmpty()) {
-            return new StepDecision.Finish(TaskResult.failed("没有叫「" + name + "」的记住的地点或地盘",
+        Optional<RememberedStation> station = memory.station(name);
+        if (previous.isEmpty() && region.isEmpty() && station.isEmpty()) {
+            return new StepDecision.Finish(TaskResult.failed("没有叫「" + name + "」的记住的地点、地盘或加工站",
                     Problem.of(Problem.Kind.NOT_FOUND, rememberedNames(),
-                            "核对名字再忘；要记下它先用 operation=remember 或 region")));
+                            "核对名字再忘；要记下它先用 operation=remember、region 或 station")));
         }
-        return new StepDecision.Run(RememberPlaceInput.forget(name, previous.orElse(null), region.orElse(null)));
+        return new StepDecision.Run(RememberPlaceInput.forget(name, previous.orElse(null),
+                region.orElse(null), station.orElse(null)));
     }
 
-    // 忘错名字时把记得的都列出来：地点一行、地盘一行，一个都没有也照实说。
+    // 忘错名字时把记得的都列出来：地点、地盘、加工站各列一行，一个都没有也照实说。
     private String rememberedNames() {
         List<String> places = new ArrayList<>(memory.places().keySet());
         List<String> regions = memory.regions().stream().map(RememberedRegion::name).toList();
+        List<String> stations = memory.stations().stream().map(RememberedStation::name).toList();
         return "记得的地点有：" + (places.isEmpty() ? "（一个都没记过）" : String.join("、", places))
-                + "；圈过的地盘有：" + (regions.isEmpty() ? "（一块都没圈过）" : String.join("、", regions));
+                + "；圈过的地盘有：" + (regions.isEmpty() ? "（一块都没圈过）" : String.join("、", regions))
+                + "；标注的加工站有：" + (stations.isEmpty() ? "（一座都没标过）" : String.join("、", stations));
     }
 
     /** 记住地点：先把目标对象落实成带维度的位置，再决定是当场说"本来就这样"还是动手写。 */
@@ -177,7 +260,8 @@ public final class RememberAbility implements AbilityModule {
         if (previous != null && previous.center().equals(center) && previous.radiusBlocks() == radius) {
             return new StepDecision.Finish(TaskResult.builder(TaskResult.Status.DONE,
                             "地盘「" + name + "」本来就这样记着")
-                    .details(new RememberPlaceTask.RememberDetails(name, "region", center, radius, null, null, null, null))
+                    .details(new RememberPlaceTask.RememberDetails(name, "region", center, radius, null, null, null,
+                            null, null, null, null))
                     .build());
         }
         return new StepDecision.Run(RememberPlaceInput.region(name, center, radius, previous));

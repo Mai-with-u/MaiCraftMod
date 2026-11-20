@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
+import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -29,9 +30,9 @@ import java.util.function.Function;
 /**
  * 世界记忆与命名地点的观察视图：
  * <ul>
- *   <li>{@code observe(what=places)}：紧凑列出按名字记的地点、建筑档案、机器档案和地盘，以及自动记录的分类总数；</li>
+ *   <li>{@code observe(what=places)}：紧凑列出按名字记的地点、建筑档案、机器档案、地盘与箱式加工站，以及自动记录的分类总数；</li>
  *   <li>{@code observe(what=world_memory)}：支持按 {@code radius}、{@code kind} 过滤，只出点名的节
- *       （places / regions / records / network_stock）；未过滤且四节都要时按由近到远装到回包上限以内，
+ *       （places / regions / stations / records / network_stock）；未过滤且五节都要时按由近到远装到回包上限以内，
  *       不触发整包 {@code too_large} 失败，超出的部分在 {@code records_not_listed} 与 {@code items_not_listed} 里如实报数。</li>
  * </ul>
  */
@@ -90,11 +91,12 @@ public final class WorldMemoryView {
         memory.pruneGoneContainers(loadedBlockAt, kinds::isContainer);
     }
 
-    /** 紧凑的命名地点视图（observe(what=places)）：速览读记住的地点用它，不再拉整份容器与产地记录。 */
+    /** 紧凑的命名地点视图（observe(what=places)）：速览读记住的地点、地盘与加工站用它，不再拉整份容器与产地记录。 */
     public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension) {
         JsonObject json = new JsonObject();
         json.add("places", namedPlaces(memory, self, dimension));
         json.add("regions", regions(memory.regions()));
+        json.add("stations", stations(memory.stations(), self, dimension));
         JsonObject counts = new JsonObject();
         Map<MemoryKind, Integer> tally = new LinkedHashMap<>();
         for (MemoryRecord record : memory.allRecords()) {
@@ -112,19 +114,19 @@ public final class WorldMemoryView {
         return json;
     }
 
-    /** 兼容无过滤调用：不限半径与种类、三节都出、不单独收说明。 */
+    /** 兼容无过滤调用：不限半径与种类、五节都出、不单独收说明。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, Function<WorldPosition, String> lastModifier) {
         return of(memory, self, null, null, null, fromLegacyModifier(lastModifier), ignored -> {}, null);
     }
 
-    /** 兼容传最后放置者函数的调用：三节都出。 */
+    /** 兼容传最后放置者函数的调用：五节都出。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
             Function<WorldPosition, String> lastModifier, Consumer<String> notes) {
         return of(memory, self, dimension, radius, kindFilter, fromLegacyModifier(lastModifier), notes, null);
     }
 
-    /** 兼容不传网络存货快照的调用：默认四节都出（network_stock 为空数组）。 */
+    /** 兼容不传网络存货快照的调用：默认五节都出（network_stock 为空数组）。 */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
             Integer radius, MemoryKind kindFilter,
             ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections) {
@@ -133,10 +135,10 @@ public final class WorldMemoryView {
 
     /**
      * 世界记忆视图：可按半径与种类过滤；records 与 network_stock 会随游玩变长，只要个别节的调用方按 sections 点名取那一节，
-     * 不点名就四节都出。记录或网络存货太多时按优先级装到单次回包装得下为止，其余折算成计数汇报。
+     * 不点名就五节都出。记录或网络存货太多时按优先级装到单次回包装得下为止，其余折算成计数汇报。
      *
      * @param self               角色此刻的位置，用来按远近排序；还没看清自己时为 null，按记录先后排
-     * @param sections           只出哪几节（places / regions / records / network_stock）；null 出全部四节
+     * @param sections           只出哪几节（places / regions / stations / records / network_stock）；null 出全部五节
      * @param rememberedNetworks 最近五分钟内点开终端记下的 ME 网络存货快照
      */
     public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
@@ -146,6 +148,7 @@ public final class WorldMemoryView {
         JsonObject json = new JsonObject();
         if (serves(sections, "places")) json.add("places", places(memory.places(), self, dimension));
         if (serves(sections, "regions")) json.add("regions", regions(memory.regions()));
+        if (serves(sections, "stations")) json.add("stations", stations(memory.stations(), self, dimension));
 
         List<MemoryRecord> filtered = new ArrayList<>();
         if (serves(sections, "records")) {
@@ -220,7 +223,7 @@ public final class WorldMemoryView {
         return total;
     }
 
-    /** 这一节这回出不出：没点名任何节（null）就三节都出。 */
+    /** 这一节这回出不出：没点名任何节（null）就全部五节都出。 */
     private static boolean serves(Set<String> sections, String section) {
         return sections == null || sections.contains(section);
     }
@@ -272,6 +275,34 @@ public final class WorldMemoryView {
             regions.add(item);
         }
         return regions;
+    }
+
+    // 渲染已标注的箱式加工站：同维度优先、按投料口由近到远排序，列出名字、途径、进出料口与排除列表。
+    private static JsonArray stations(List<RememberedStation> remembered, SceneSelf self, String dimension) {
+        List<RememberedStation> sorted = new ArrayList<>(remembered);
+        if (self != null) {
+            sorted.sort(Comparator
+                    .<RememberedStation>comparingInt(station -> sameDimension(station.input(), dimension) ? 0 : 1)
+                    .thenComparingInt(station -> sameDimension(station.input(), dimension)
+                            ? SceneView.distance(self, station.input()) : 0)
+                    .thenComparing(RememberedStation::name));
+        }
+        JsonArray list = new JsonArray();
+        for (RememberedStation station : sorted) {
+            JsonObject item = new JsonObject();
+            item.addProperty("name", station.name());
+            item.addProperty("via", station.via());
+            item.add("input", SceneView.position(station.input()));
+            item.add("output", SceneView.position(station.output()));
+            JsonArray excluded = new JsonArray();
+            station.exclude().forEach(excluded::add);
+            item.add("exclude", excluded);
+            if (self != null && sameDimension(station.input(), dimension)) {
+                item.addProperty("distance", SceneView.distance(self, station.input()));
+            }
+            list.add(item);
+        }
+        return list;
     }
 
     private static JsonArray places(Map<String, WorldPosition> places, SceneSelf self, String dimension) {

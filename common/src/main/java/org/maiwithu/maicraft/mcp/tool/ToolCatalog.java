@@ -210,11 +210,12 @@ public final class ToolCatalog {
         return field;
     }
 
-    // sections 参数的结构：节名的数组，只认 world_memory 的四节。
+    // sections 参数的结构：节名的数组，只认 world_memory 的五节。
     private static JsonObject sectionsSchema() {
         JsonArray sectionNames = new JsonArray();
         sectionNames.add("places");
         sectionNames.add("regions");
+        sectionNames.add("stations");
         sectionNames.add("records");
         sectionNames.add("network_stock");
         JsonObject item = new JsonObject();
@@ -224,8 +225,8 @@ public final class ToolCatalog {
         sections.addProperty("name", "sections");
         sections.addProperty("type", "array");
         sections.addProperty("description",
-                "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / records 容器与见过的资源 / "
-                        + "network_stock 最近点开终端看到的 ME 网络存货）；不给就四节都给");
+                "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / stations 标注的箱式加工站 / "
+                        + "records 容器与见过的资源 / network_stock 最近点开终端看到的 ME 网络存货）；不给就五节都给");
         sections.add("items", item);
         return sections;
     }
