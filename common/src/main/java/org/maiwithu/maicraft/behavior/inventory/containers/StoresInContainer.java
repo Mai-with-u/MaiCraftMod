@@ -105,6 +105,7 @@ public final class StoresInContainer implements Action {
     private ContainerTransfer.Unsettled carryOver;
     private int reopened;
     private Set<String> full = Set.of();
+    private Map<String, Integer> contentsAfter;
     private Problem openFailure;
 
     /**
@@ -126,6 +127,11 @@ public final class StoresInContainer implements Action {
     /** 这只容器里放不下的东西；搬完才有。 */
     public Set<String> full() {
         return full;
+    }
+
+    /** 搬完关箱前读到的容器内各物品件数；还没搬完或没读到为空。 */
+    public Optional<Map<String, Integer>> contentsAfter() {
+        return Optional.ofNullable(contentsAfter);
     }
 
     /** 点不开时的原因；点开过或还没试时为空。 */
@@ -170,6 +176,7 @@ public final class StoresInContainer implements Action {
         return switch (transfer.tick(context)) {
             case ActionStatus.Running running -> running;
             case ActionStatus.Done done -> {
+                contentsAfter = transfer.contentsAfter().map(Map::copyOf).orElse(null);
                 transfer.contentsAfter().ifPresent(this::remember);
                 full = transfer.full();
                 if (!full.isEmpty()) {
