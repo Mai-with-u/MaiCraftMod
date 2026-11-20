@@ -44,6 +44,8 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 支持通用箱式加工站：`remember` 新增 `operation="station"` 标注投料箱、取货箱与可选 `exclude` 排除名单并在 `observe(what="places" / "world_memory")` 展示；`obtain` 烧炼未排除物品时免燃料优先走该站（少量短等取货、大批量挂计时离开、堵料如实失败），排除项自动回落熔炉或烟熏炉。
+- `events(topic="chat")` 收到玩家聊天时，若发言玩家此刻位于客户端已加载世界实体中，事件会附带保留一位小数的真实距离格数 `sender_distance`；未加载玩家与系统消息不带该字段。
 - `obtain` 新增附近可见地面掉落物来源（`via=pickup`）：排在身上已有物品之后、翻找容器之前，周围地面有看得见的目标掉落物时直接走过去捡进背包，同时支持显式指定 `via="pickup"`。
 - `deposit` 新增可选参数 `source`（写法与 `target` 相同）：支持把点名容器（`b#`、坐标、储物生物 `e#`）或地标与脚边区域内多只箱子、木桶、潜影盒里的东西分轮搬出并整理进 ME 网络（`into=network`）或点名的目标容器（跳过熔炉与酿造台等加工台子，支持配 `items` / `count` 只搬指定物品与件数，结果细节附 `taken_from`），全程保留角色原本随身带的工具、食物与建材不被误存。
 - `observe(what="world_memory")` 新增 `network_stock` 一节（支持 `sections=["network_stock"]`，不传 `sections` 时四节都出）：列出五分钟内点开固定 ME 终端或随身无线终端看到的网络存货快照（`terminal`、`wireless`、固定终端的 `position` 与 `side`、`linked`、`complete`、`item_types`、`total_items`、按件数从多到少的 `contents`、有样板时的 `craftable` 与 `recorded_at`），已加载区块中被拆掉的终端当场划掉，传 `radius` 时随身无线终端不受方块距离过滤排除，种类过多逼近回包上限时剩余部分折入 `items_not_listed` 不再触发 `too_large`。

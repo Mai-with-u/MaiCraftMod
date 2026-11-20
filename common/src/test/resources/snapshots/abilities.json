@@ -331,8 +331,8 @@
       },
       {
         "ability": "maicraft:remember",
-        "summary": "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
-        "parameters": "name?: string, operation: string (remember / forget / region / forget_area) = remember, radius?: integer (1..512)",
+        "summary": "记住或忘掉一个按名字叫的地点、标注箱式加工站、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
+        "parameters": "name?: string, operation: string (remember / forget / region / station / forget_area) = remember, radius?: integer (1..512), via?: string (smelt), input?: string, output?: string, exclude?: array",
         "targets": [
           "here",
           "landmark",
@@ -1888,24 +1888,25 @@
     },
     {
       "ability": "maicraft:remember",
-      "summary": "记住或忘掉一个按名字叫的地点、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
+      "summary": "记住或忘掉一个按名字叫的地点、标注箱式加工站、按区域清掉失效记忆，或把一片地方圈成玩家地盘",
       "parameters": [
         {
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "remember、forget、region 必填：地点或地盘的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给"
+          "doc": "remember、forget、region、station 必填：地点、地盘或加工站的名字（首尾空白去掉后原样比较，不改大小写）；forget_area 不用给"
         },
         {
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点与地盘，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用），forget_area 把目标周围 radius 格内的命名地点与容器、工作站、产地记忆清掉",
+          "doc": "remember 记住地点（默认，同名覆盖），forget 忘掉同名的地点、地盘与加工站，region 以目标为中心圈一块玩家地盘（里面的方块不拆、箱子不取用），station 标注一座箱式加工站（投料容器 + 取货容器），forget_area 把目标周围 radius 格内的命名地点与容器、工作站、产地记忆清掉",
           "default": "remember",
           "choices": [
             "remember",
             "forget",
             "region",
+            "station",
             "forget_area"
           ]
         },
@@ -1916,6 +1917,33 @@
           "doc": "用于 region（地盘半径，默认 8，最大 64）或 forget_area（清理半径，必填，1 到 512）",
           "min": 1,
           "max": 512
+        },
+        {
+          "name": "via",
+          "type": "string",
+          "required": false,
+          "doc": "用于 station：加工站用途途径，默认 smelt（烧炼）",
+          "choices": [
+            "smelt"
+          ]
+        },
+        {
+          "name": "input",
+          "type": "string",
+          "required": false,
+          "doc": "用于 station（必填）：投料容器位置（观察编号 b#、坐标 [x,y,z] 或记住的地标名）"
+        },
+        {
+          "name": "output",
+          "type": "string",
+          "required": false,
+          "doc": "用于 station（必填）：取货容器位置（写法同 input，允许与 input 为同一容器）"
+        },
+        {
+          "name": "exclude",
+          "type": "array",
+          "required": false,
+          "doc": "用于 station（可选）：不交给本站处理的物品 ID 或 # 标签列表（如 [\"#maicraft:foods/edible\"]）"
         }
       ],
       "targets": [

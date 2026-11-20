@@ -38,12 +38,13 @@
           },
           "sections": {
             "type": "array",
-            "description": "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / records 容器与见过的资源 / network_stock 最近点开终端看到的 ME 网络存货）；不给就四节都给",
+            "description": "只在 what=world_memory 时用：只取哪几节（places 记住的地点 / regions 圈的地盘 / stations 标注的箱式加工站 / records 容器与见过的资源 / network_stock 最近点开终端看到的 ME 网络存货）；不给就五节都给",
             "items": {
               "type": "string",
               "enum": [
                 "places",
                 "regions",
+                "stations",
                 "records",
                 "network_stock"
               ]

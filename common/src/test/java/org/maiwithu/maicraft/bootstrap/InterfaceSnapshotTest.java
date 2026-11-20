@@ -206,9 +206,9 @@ class InterfaceSnapshotTest {
         // 角色在哪个世界：events 每一页与 observe(self) 都带同一个 world，online_mode 说服务器验不验正版账号。
         shapes.add("world", WorldIdentityView.of(new SaveIdentity("ab".repeat(32), SaveIdentity.Source.WORLD_ID_FILE,
                 "新的世界", null, Path.of("state"), false)));
-        // 聊天流里一条玩家说的话：发言人名字、UUID，以及发言人是不是此刻在线玩家列表里的那个玩家。
+        // 聊天流里一条玩家说的话：发言人名字、UUID、是否在线以及此刻已加载客户端实体列表中的真实距离格数。
         ReceivedChat said = ReceivedChat.fromPlayer("麦麦过来", UUID.fromString("8667ba71-b85a-4004-af54-457a9734eed7"),
-                "Steve", true, false, null).orElseThrow();
+                "Steve", true, 12.5, false, null).orElseThrow();
         shapes.add("chat_event", EventsTool.chatEvent(new ChatEvent(3, said)));
         return shapes;
     }

@@ -20,10 +20,12 @@
     "drops_from": "掉落线索：要的东西从哪些方块挖得到、哪些生物打得到（方块 ID、# 方块标签或实体类型 ID 的列表）",
     "edits": "对图纸按名合并的修改（JSON 对象）：objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name",
     "entity": "实体类型 ID，可给一个或几种",
+    "exclude": "排除的物品 ID 或 # 标签列表：箱式加工站不处理命中的产物或原料",
     "face": "点方块的哪一面：up / down / north / south / east / west；用扳手转机器时点哪一面决定绕哪根轴转",
     "file": "schematics 目录下的结构文件名",
     "floor": "坐电梯去哪一层：楼层名，或 top / bottom / up / down",
     "format": "导出文件的格式：json / nbt",
+    "input": "箱式加工站的投料容器位置（写法与 source 相同：观察编号 b#、坐标 [x,y,z] 或记住的地标名）",
     "inputs": "试按载具时逐条按的输入：[{control, ticks}]，control 是控制件和键，ticks 按住几刻",
     "interests": "探索途中留意的东西：地形要素（lava_pool）、结构 ID、方块 ID 或 # 标签、实体类型 ID",
     "into": "存进哪里：container 箱子、木桶这类容器（默认），network ME 网络（身上的无线终端或附近装着的 ME 终端）",
@@ -42,6 +44,7 @@
     "network": "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy",
     "note": "到点时原样带回给你的一句备注：写清到时要看什么、做什么决定",
     "operation": "一个能力内部的几种操作选哪一种，例如 enable、disable、status",
+    "output": "箱式加工站的取货容器位置（写法与 input 相同，可与 input 为同一容器）",
     "page": "分页看结果时的页码，从 0 起",
     "potion": "药水种类（药水注册表 ID，例如 minecraft:fire_resistance、minecraft:long_fire_resistance）：药水瓶的物品 ID 分不出是哪种药水，点名时另写",
     "prefer": "倾向用的材料（物品 ID 或 # 标签的列表）：几种做法都行时用到它们的排前面，只影响先后",
@@ -51,7 +54,7 @@
     "requirement": "任务里一条要求的编号（任务书资料的条目页里给的）",
     "reward": "一个任务自己的根奖励编号；奖池里的子奖励不是能单独领的奖励",
     "rotation": "蓝图落地时绕锚点转多少度：0 / 90 / 180 / 270",
-    "sections": "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、records（容器与见过的资源）、network_stock（最近点开终端看到的 ME 网络存货）的列表；不给就四节都给",
+    "sections": "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、stations（标注的箱式加工站）、records（容器与见过的资源）、network_stock（最近点开终端看到的 ME 网络存货）的列表；不给就五节都给",
     "settings": "要改成的设置（JSON 对象）：键是目标认的设置项（机器的、载具操纵表的、女仆的），值写字符串",
     "slot": "装备与卸下的目标栏位：mainhand / offhand / head / chest / legs / feet / armor（armor 只配合卸下）",
     "sneak": "按住潜行再右键：潜行右键马、驴打开它的物品栏，潜行右键女仆让她坐下；不给就不潜行",
@@ -364,6 +367,7 @@
       "sender": "Steve",
       "sender_id": "8667ba71-b85a-4004-af54-457a9734eed7",
       "sender_online": true,
+      "sender_distance": 12.5,
       "text": "麦麦过来"
     }
   }
