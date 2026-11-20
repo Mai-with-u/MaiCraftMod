@@ -343,8 +343,10 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
                     spot.expectedItem() + " 没进背包：采开了但没等到掉落物（可能没掉、被别人捡走，"
                             + "或掉在够不着的地方）"));
         }
-        return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                "采集完成：没有东西掉落入包，按现场如实记录").details(details()).build());
+        // 非概率掉落方块破坏后零掉落且未收获任何物品：如实上报未掉落失败事实，不再静默报"采集完成"。
+        return Next.fail(Problem.of(Problem.Kind.NOT_FOUND,
+                "挖开了 " + liveType + "，但没有东西掉落进背包（该方块可能本身无掉落、工具不对路、被别人捡走，或掉在够不着的地方）",
+                "确认方块是否需要精准采集或特定工具，或检查附近地面掉落物"));
     }
 
     // 点名捡地上掉落物的核验：必须确认目标掉落物实体已拾起或预期物品确实进包，顺脚吸起无关杂物绝不判完成。

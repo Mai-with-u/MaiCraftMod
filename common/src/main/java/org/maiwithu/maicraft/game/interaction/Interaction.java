@@ -370,9 +370,12 @@ public final class Interaction {
             failReason = "背包没有空格放手上的东西，腾不出空手";
             return Status.FAILED;
         }
-        // 点名工具找不到：照准星点一下的入口不点名工具（给的是 HELD），这里仍按失败收，不继续对着方块挥。
         if (result == BlockDigger.DigResult.MISSING_TOOL) {
             failReason = "dig_tool 点名的工具不在身上，这一格没挖";
+            return Status.FAILED;
+        }
+        if (result == BlockDigger.DigResult.REFUSED) {
+            failReason = digger.refusalWhy() != null ? digger.refusalWhy() : "方块挖掘被拒绝，仍在原位";
             return Status.FAILED;
         }
         if (result == BlockDigger.DigResult.NO_SHOT) {

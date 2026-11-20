@@ -229,6 +229,9 @@ final class LiveStandOpener implements StandOpener {
                         ? ActionStatus.failed(Problem.of(Problem.Kind.STUCK,
                         "站到 " + feet.toShortString() + " 后打不着要挖开的 " + targetCell.toShortString()))
                         : ActionStatus.running();
+                case REFUSED -> ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                        "挖开 " + targetCell.toShortString() + " 失败："
+                                + (digger.refusalWhy() != null ? digger.refusalWhy() : "方块仍在原位")));
                 case PROGRESSING -> ActionStatus.running();
             };
         }

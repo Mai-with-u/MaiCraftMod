@@ -143,10 +143,11 @@ public final class NativeBlockBreaking implements BlockBreaking {
                 case BROKE_TARGET, BROKE_OCCLUDER -> brokeConfirmed(context.gameTick());
                 case PROGRESSING, NO_SHOT, NO_ROOM -> ActionStatus.running();
                 case MISSING_TOOL -> missingNamedTool();
+                case REFUSED -> refusedBreak();
             };
         }
         // 挖得动就推进；一格真挖开了才算进展。暂时够不着（NO_SHOT）不算失败也不算进展，
-        // 由刨出任务按"多久没进展算卡住"统一收口。
+        // 由刨出任务按"多久没进展算卡住"统一收口；服务端拒绝或回弹立刻如实失败。
         return switch (digger.digTargetStep(player, cell)) {
             case PROGRESSING, NO_SHOT -> ActionStatus.running();
             case BROKE_TARGET, BROKE_OCCLUDER -> brokeConfirmed(context.gameTick());
@@ -155,6 +156,7 @@ public final class NativeBlockBreaking implements BlockBreaking {
                     "背包里没有空位，手里那件东西收不起来，腾不出手挖 " + cell.toShortString()));
             // 点名要用的工具身上没有：不换成别的，直接把原因交回。
             case MISSING_TOOL -> missingNamedTool();
+            case REFUSED -> refusedBreak();
         };
     }
 
@@ -178,6 +180,14 @@ public final class NativeBlockBreaking implements BlockBreaking {
         }
         watchedCell = null;
         return ActionStatus.progressed();
+    }
+
+    // 挖掘被游戏拒绝或方块被服务端回弹恢复原位：如实按游戏拒绝上报，不再静默重挖或误报完成。
+    private ActionStatus refusedBreak() {
+        String why = digger != null && digger.refusalWhy() != null
+                ? digger.refusalWhy() : "游戏拒绝了这次挖掘，方块仍在原位";
+        return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                "没能挖掉 " + cell.toShortString() + "：" + why));
     }
 
     // 点名工具找不到时的失败：说清点的是哪一件、差在哪，不另找工具代替。

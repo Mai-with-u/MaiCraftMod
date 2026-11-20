@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.inventory.hands;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -138,6 +140,50 @@ public final class ClientMovesToMainhand implements MovesToMainhand {
             if (inventory.getItem(slot).isEmpty()) return Optional.of(new HotbarSelection(slot));
         }
         return stowMainhand();
+    }
+
+    /**
+     * 主手拿着物品右键方块容器遭遇游戏拒绝时，按玩家常识切到空手或非工具格重试一次：
+     * 主手本来就空着时返回空不再徒劳重试；先找快捷栏空位或主背包空位腾出空手，
+     * 全满且当前主手拿着工具或可损耗物品时，退而切到快捷栏第一格普通非工具物品。
+     */
+    @Override
+    public Optional<Action> clearHeldForOpen() {
+        PlayerContext context = contexts.get();
+        if (context == null || context.localPlayer() == null) return Optional.empty();
+        var inventory = context.localPlayer().getInventory();
+        int selected = inventory.selected;
+        if (selected < 0 || selected >= Inventory.getSelectionSize()) return Optional.empty();
+        if (inventory.getItem(selected).isEmpty()) return Optional.empty();
+        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
+            if (inventory.getItem(slot).isEmpty()) return Optional.of(new HotbarSelection(slot));
+        }
+        Optional<Action> stowed = stowMainhand();
+        if (stowed.isPresent()) return stowed;
+        int nonTool = fallbackNonToolHotbarSlot(inventory.items, selected);
+        return nonTool >= 0 ? Optional.of(new HotbarSelection(nonTool)) : Optional.empty();
+    }
+
+    /**
+     * 快捷栏与背包全满时的纯判断：当前主手拿着工具或可损耗物品时，挑快捷栏里第一格非工具普通物品；
+     * 主手本就不是工具或找不到非工具格时返回 -1。
+     */
+    static int fallbackNonToolHotbarSlot(List<ItemStack> items, int selected) {
+        int limit = Math.min(Inventory.getSelectionSize(), items.size());
+        if (selected < 0 || selected >= limit) return -1;
+        ItemStack held = items.get(selected);
+        if (held.isEmpty() || !isToolLike(held)) return -1;
+        for (int slot = 0; slot < limit; slot++) {
+            if (slot == selected) continue;
+            ItemStack candidate = items.get(slot);
+            if (!candidate.isEmpty() && !isToolLike(candidate)) return slot;
+        }
+        return -1;
+    }
+
+    // 工具或可损耗物品判定：只认原版 TOOL 组件与可损耗属性，不写死任何具体物品 ID。
+    private static boolean isToolLike(ItemStack stack) {
+        return stack.has(DataComponents.TOOL) || stack.isDamageableItem();
     }
 
     /**

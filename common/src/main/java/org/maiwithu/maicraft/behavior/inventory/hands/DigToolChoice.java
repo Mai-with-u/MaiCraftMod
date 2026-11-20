@@ -34,6 +34,10 @@ public final class DigToolChoice {
     public static final double TIME_PRICE_PER_TICK = 0.01;
     /** 换手一次折算的成本：手上这把这一趟能省下的超过它才值得换。 */
     public static final double SWAP_COST = 0.2;
+    /** 同类型更高阶工具升级切换门槛（速度达主手两倍及以上）：换上后显著提速，降低单格切换门槛。 */
+    public static final double UPGRADE_SWAP_COST = 0.1;
+    /** 快捷栏内同类型高阶工具升级门槛：滚轮一键切换几乎无耗时。 */
+    public static final double HOTBAR_UPGRADE_SWAP_COST = 0.05;
     /** 有经验修补的工具，磨掉的耐久多半会被补回来，磨损成本按这个折扣算。 */
     public static final double MENDING_DISCOUNT = 0.2;
     /** 认不出材料的工具先按这个价算，别把不认识的模组工具当白菜。 */
@@ -150,12 +154,25 @@ public final class DigToolChoice {
         // 主手拿着的最便宜、或者手正空着而空手最便宜：不动。
         if (heldTool != null && best == heldTool || best.bareHand() && !mainOccupied) return new Verdict.Keep();
         // 换手的账：当前手上的方式本来就能满足要求时，这一趟省下的超过换手代价才换；
+        // 主手拿着低速工具而背包/快捷栏已有速度翻倍以上的同类型更高阶工具时，采用更合理的升级切换门槛；
         // 主手或空手挖不到掉落、或主手握着即将碎裂的珍贵工具必须换下时，不看省多少直接换。
         Trial baseline = mainOccupied ? heldTool : bareHand;
-        if (baseline != null && (baseline.cost() - best.cost()) * Math.max(1, expectedBlocks) <= SWAP_COST) {
+        if (baseline != null
+                && (baseline.cost() - best.cost()) * Math.max(1, expectedBlocks) <= swapThreshold(baseline, best)) {
             return new Verdict.Keep();
         }
         return best.bareHand() ? new Verdict.BareHand() : new Verdict.Swap(best.slot());
+    }
+
+    // 换手门槛分层：当主手是可用工具且候选是速度至少翻倍的同类型更高阶工具（如木级升石级/铁级）时，
+    // 快捷栏内滚轮切格几乎零耗时、从背包换上也能大幅提速，不再被一刀切的高换手门槛拦住单格升级。
+    private static double swapThreshold(Trial baseline, Trial best) {
+        if (!best.bareHand() && !baseline.bareHand()
+                && baseline.candidate().speed() > 1.0f
+                && best.candidate().speed() >= baseline.candidate().speed() * 2.0f) {
+            return best.slot() >= 0 && best.slot() < 9 ? HOTBAR_UPGRADE_SWAP_COST : UPGRADE_SWAP_COST;
+        }
+        return SWAP_COST;
     }
 
     /**

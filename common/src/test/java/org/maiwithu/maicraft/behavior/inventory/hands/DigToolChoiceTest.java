@@ -208,4 +208,21 @@ class DigToolChoiceTest {
         assertEquals(1.5, LiveDigToolRule.materialValue("minecraft:stone_pickaxe"));
         assertEquals(50, LiveDigToolRule.materialValue("minecraft:diamond_axe"));
     }
+
+    @Test
+    void 主手木制工具而背包有石级或铁级同类型工具时单格也升级换手() {
+        // 挖单格木板/原木（硬度 2.0）：木斧速度 2，背包石斧速度 4（省约 0.155）、铁斧速度 6（省约 0.177），均超升级切换门槛 0.10。
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(pick(0, 2, 59, 1), pick(9, 4, 131, 1.5)), 0, PLANKS, 1, true));
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(pick(0, 2, 59, 1), pick(9, 6, 250, 10)), 0, PLANKS, 1, true));
+        // 挖单格石头（硬度 1.5）：主手木镐换背包石镐（省约 0.115）或快捷栏石镐（门槛更低）均升级切换。
+        assertEquals(new DigToolChoice.Verdict.Swap(9),
+                DigToolChoice.choose(backpack(pick(0, 2, 59, 1), pick(9, 4, 131, 1.5)), 0, STONE, 1, true));
+        assertEquals(new DigToolChoice.Verdict.Swap(2),
+                DigToolChoice.choose(backpack(pick(0, 2, 59, 1), pick(2, 4, 131, 1.5)), 0, STONE, 1, true));
+        // 软泥土单格省幅很小（约 0.046），主手木锹不值得开背包换主背包里的石锹，避免频繁开关背包。
+        assertEquals(new DigToolChoice.Verdict.Keep(),
+                DigToolChoice.choose(backpack(pick(0, 2, 59, 1), pick(9, 4, 131, 1.5)), 0, DIRT, 1, true));
+    }
 }

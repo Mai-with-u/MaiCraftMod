@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.game.menu.PendingMenuAction;
 import org.maiwithu.maicraft.game.menu.VanillaHotbar;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
+import org.maiwithu.maicraft.game.world.BlockGone;
 import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
@@ -75,6 +76,10 @@ public final class BlockDigger {
     public void digTool(DigTool tool) { wanted = tool; }
     /** 点名的那件拿不到时的原因（身上没有、在副手上）：交给调用方原样说给下令人听。 */
     private String missingToolWhy;
+    /** 挖掘被游戏拒绝或服务端回弹恢复原位时的原因：交给调用方如实上报，不伪装成打不着。 */
+    private String refusalWhy;
+    /** 本次持续挖掘中是否曾看到目标格在客户端消失：若随后又恢复非空，说明被服务端回弹。 */
+    private boolean sawBlockGone;
     /** 这一趟挖下来的格子各用了什么工具：换工具就另起一段，供结果里的工具现场用。 */
     private final List<DigToolUse> toolUses = new ArrayList<>();
     /** 手上这一格已经挖了几刻、徒手要几刻、挖的是什么方块：破块确认时记进工具现场。 */
@@ -82,6 +87,8 @@ public final class BlockDigger {
     private int breakingBareTicks;
     private BlockState breakingState;
     public String missingToolWhy() { return missingToolWhy; }
+    /** 挖掘被游戏拒绝或被服务端回弹时的原因；未发生拒绝时为 null。 */
+    public String refusalWhy() { return refusalWhy; }
     /** 这一趟挖下来的格子用了哪些工具，按先后；还没挖过时为空。取只读快照，交出去之后不再变。 */
     public List<DigToolUse> toolUses() { return List.copyOf(toolUses); }
     private Predicate<BlockHitResult> preparation = hit -> true;
@@ -135,7 +142,9 @@ public final class BlockDigger {
         /** 该腾空主手才划算，可背包里腾不出放手里东西的地方；不丢东西，交回调用方。 */
         NO_ROOM,
         /** 目标点名要用的工具身上没有：直接失败，不换成别的工具。 */
-        MISSING_TOOL;
+        MISSING_TOOL,
+        /** 挖掘被游戏拒绝，或目标方块在客户端破坏后被服务端回弹恢复原位。 */
+        REFUSED;
 
         /** 本 tick 有方块真的没了(目标或遮挡物)。 */
         public boolean broke() {
@@ -180,20 +189,14 @@ public final class BlockDigger {
             cancel(context);
             return DigResult.NO_SHOT;
         }
+        sawBlockGone = true;
         if (!pending.terminal()) {
             pending = sender.poll(context, pending);
         }
         if (!pending.terminal()) {
             return DigResult.PROGRESSING;
         }
-        PendingInteraction.Status status = pending.status();
-        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) recordBroken();
-        reset();
-        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
-            blockHitDelay = POST_BREAK_DELAY_TICKS;
-            return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
-        }
-        return DigResult.NO_SHOT;
+        return finishPendingBreak(targetBreak);
     }
 
     // 坐标入口先找能看到的目标面；被挡时若调用方允许顺手拆遮挡物则先拆遮挡，否则在服务端放行距离内直接构造命中开挖。
@@ -321,10 +324,24 @@ public final class BlockDigger {
             breakingTicks = 0;
             breakingBareTicks = tools.bareHandTicks(player, breakingState);
         } else {
+            if (detectServerRollback(context)) return DigResult.REFUSED;
             pending = sender.continueBreaking(context, pending);
             breakingTicks++;
         }
         return settleBreak(context, targetBreak);
+    }
+
+    // 客户端曾看到方块破坏消失、未等来稳定确认时方块又回到原位：属于服务端回弹拒绝破坏，立即停挖并如实上报。
+    private boolean detectServerRollback(PlayerContext context) {
+        boolean goneNow = isTargetGoneNow();
+        if (goneNow) {
+            sawBlockGone = true;
+            return false;
+        }
+        if (!rolledBackAfterGone(sawBlockGone, false)) return false;
+        cancel(context);
+        refusalWhy = "方块在客户端破坏后被服务端回弹恢复原位，未能挖掉";
+        return true;
     }
 
     /** 关闭背包与搬工具两步的逐刻推进；还在等待或本刻只推进了准备时返回非空结果。 */
@@ -365,19 +382,54 @@ public final class BlockDigger {
         return null;
     }
 
-    /** 挖掘确认结束后统一收口：成功按目标或遮挡物结算，失败如实报无法命中。 */
+    /** 挖掘确认结束后统一收口：成功按目标或遮挡物结算，被拒绝或状态分歧如实报 REFUSED，其余按无法命中。 */
     private DigResult settleBreak(PlayerContext context, boolean targetBreak) {
         if (!pending.terminal()) {
+            // 低延迟与瞬挖场景中，本刻刚发出破块时客户端就已将方块变为空气而确认仍在等待稳定刻；
+            // 同步记下本刻已见消失，确保下一刻若被服务端回弹恢复原位时立即捕获。
+            sawBlockGone = updateSawBlockGone(sawBlockGone, isTargetGoneNow());
             return DigResult.PROGRESSING;
         }
+        return finishPendingBreak(targetBreak);
+    }
+
+    /** 纯状态推进：只要本轮挖掘任意一刻观测到目标格已消失，就保持已见消失标记供次刻核对是否回弹。 */
+    static boolean updateSawBlockGone(boolean sawGoneBefore, boolean goneNow) {
+        return sawGoneBefore || goneNow;
+    }
+
+    // 读取当前目标格在客户端已加载区块里是否已变为空气或仅剩流体。
+    private boolean isTargetGoneNow() {
+        return pos != null && player.level() != null && player.level().isLoaded(pos)
+                && BlockGone.gone(player.level(), pos);
+    }
+
+    private DigResult finishPendingBreak(boolean targetBreak) {
         PendingInteraction.Status status = pending.status();
+        String detail = pending.detail();
+        DigResult result = settleStatus(status, targetBreak);
         if (status == PendingInteraction.Status.CONFIRMED_APPLIED) recordBroken();
         reset();
-        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
+        if (result == DigResult.BROKE_TARGET || result == DigResult.BROKE_OCCLUDER) {
             blockHitDelay = POST_BREAK_DELAY_TICKS;
-            return targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+        } else if (result == DigResult.REFUSED) {
+            refusalWhy = detail == null || detail.isBlank() ? "游戏拒绝了此次挖掘，方块仍在原位" : detail;
         }
-        return DigResult.NO_SHOT;
+        return result;
+    }
+
+    /** 破块确认终态到挖掘结果的纯映射：明确拒绝或状态分歧不再混同为打不着。 */
+    static DigResult settleStatus(PendingInteraction.Status status, boolean targetBreak) {
+        return switch (status) {
+            case CONFIRMED_APPLIED -> targetBreak ? DigResult.BROKE_TARGET : DigResult.BROKE_OCCLUDER;
+            case CONFIRMED_NOT_APPLIED, DIVERGED -> DigResult.REFUSED;
+            default -> DigResult.NO_SHOT;
+        };
+    }
+
+    /** 纯判断：本次挖掘曾看到目标格在客户端消失，而当前又恢复非空，即判定为服务端回弹。 */
+    public static boolean rolledBackAfterGone(boolean sawGoneBefore, boolean goneNow) {
+        return sawGoneBefore && !goneNow;
     }
 
     // 换目标之前先结束旧挖掘和未完成的工具操作，下一次 tick 才开始新目标。
@@ -393,6 +445,7 @@ public final class BlockDigger {
         reset();
         // 换了要挖的格子就是另一趟：上一趟的工具现场留着给已经收走的动作读，这里重新攒。
         toolUses.clear();
+        refusalWhy = null;
         breakingTicks = 0;
         breakingBareTicks = 0;
         breakingState = null;
@@ -593,6 +646,7 @@ public final class BlockDigger {
         toolStagePending = null;
         pendingToolPlan = null;
         toolNoRoom = false;
+        sawBlockGone = false;
         destroyingItem = null;
         aimTicks = 0;
         turnBudget = PlayerInput.TURN_MIN_TICKS;

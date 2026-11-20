@@ -25,4 +25,13 @@ public interface MovesToMainhand {
     default Optional<Action> emptyMainhand() {
         return Optional.empty();
     }
+
+    /**
+     * 打开容器前遭遇游戏拒绝时，按玩家常识切到空手或快捷栏里的普通非工具格以重试一次。
+     * 优先腾空主手；快捷栏与主背包全满且当前主手拿着工具或可损耗物品时，切到快捷栏里第一格非工具普通物品；
+     * 主手本已为空或无更合适格子可切时返回 empty。
+     */
+    default Optional<Action> clearHeldForOpen() {
+        return emptyMainhand();
+    }
 }

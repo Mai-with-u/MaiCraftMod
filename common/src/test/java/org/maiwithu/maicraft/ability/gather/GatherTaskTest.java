@@ -726,4 +726,56 @@ class GatherTaskTest {
         assertEquals(TaskResult.Status.DONE, result.status());
         assertTrue(captured[0] != null && captured[0].wantsDrop() && captured[0].expectedBlocks() == 1);
     }
+
+    @Test
+    void 普通方块挖开后零掉落时如实上报失败_不再静默报采集完成() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = new FakeActions(backpack, null, 0) {
+            @Override public Optional<Action> dig(BlockPos target) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.done();
+                    }
+
+                    @Override public String describe() {
+                        return "挖一格";
+                    }
+                });
+            }
+        };
+        GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:oak_log", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.NOT_FOUND, result.problem().kind());
+        assertTrue(result.problem().message().contains("没有东西掉落进背包"), result.problem().message());
+        assertEquals(1, result.changes().size());
+        assertEquals(Change.Kind.BLOCK_BROKEN, result.changes().getFirst().kind());
+    }
+
+    @Test
+    void 挖掘方块被服务端回弹拒绝时如实上报失败且不记方块已拆() {
+        FakeBackpack backpack = new FakeBackpack();
+        FakeActions actions = new FakeActions(backpack, null, 0) {
+            @Override public Optional<Action> dig(BlockPos target) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext context) {
+                        return ActionStatus.failed(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                                "没能挖掉 10, 64, 10：方块在客户端破坏后被服务端回弹恢复原位，未能挖掉"));
+                    }
+
+                    @Override public String describe() {
+                        return "挖一格";
+                    }
+                });
+            }
+        };
+        GatherTask task = new GatherTask(blockSpot(null), actions, actions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:stone", false), null, actions, permission(), backpack, null, null, PERMS);
+        TaskResult result = run(task);
+        assertEquals(TaskResult.Status.FAILED, result.status());
+        assertEquals(Problem.Kind.REFUSED_BY_GAME, result.problem().kind());
+        assertTrue(result.problem().message().contains("回弹恢复原位"), result.problem().message());
+        assertTrue(result.changes().isEmpty(), "方块被服务端回弹留在原位时不应记为已破坏");
+    }
 }

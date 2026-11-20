@@ -119,4 +119,16 @@ class ClientMovesToMainhandTest {
         inventory.setItem(15, new ItemStack(Items.IRON_BOOTS));
         assertEquals(15, ClientMovesToMainhand.findInInventory(inventory, "minecraft:iron_boots"));
     }
+
+    @Test
+    void fallbackNonToolHotbarSlotPicksNonToolWhenHoldingTool() {
+        Inventory inventory = new Inventory(null);
+        inventory.setItem(0, new ItemStack(Items.WOODEN_AXE));
+        inventory.setItem(1, new ItemStack(Items.STONE_PICKAXE));
+        inventory.setItem(2, new ItemStack(Items.COBBLESTONE, 16));
+        assertEquals(2, ClientMovesToMainhand.fallbackNonToolHotbarSlot(inventory.items, 0),
+                "主手拿工具且无空位时应挑快捷栏里第一格非工具普通物品");
+        assertEquals(-1, ClientMovesToMainhand.fallbackNonToolHotbarSlot(inventory.items, 2),
+                "主手本来拿的就不是工具时不乱切");
+    }
 }
