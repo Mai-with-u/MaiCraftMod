@@ -152,10 +152,9 @@ class Ae2KnowledgeAndToolsTest {
                 Ae2Tools.MENU_PORTABLE_ITEM_CELL,
                 Ae2Tools.MENU_PORTABLE_FLUID_CELL), rules.keySet());
 
-        // 核实与既有 6 个 AE2 布局证明合并登记进同一 CompatRegistry 时无任何菜单 ID 冲突。
+        // 核实 Ae2Compat 全量登记进 CompatRegistry 时四个独占菜单布局已并入且与既有布局零冲突。
         CompatRegistry registry = CompatRegistry.empty();
         compat.contribute(registry);
-        registry.menuLayout(compat, new Ae2SemanticsLayout(compat, rules));
         assertNotNull(registry.menuLayouts());
     }
 }

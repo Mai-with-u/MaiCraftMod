@@ -137,7 +137,7 @@ class Ae2TerminalSourceTest {
                 registry.menuLayouts().classify(terminalSlots("ae2:pattern_access_terminal", 0)));
 
         List<ItemSource> sources = registry.itemSources(offlineServices());
-        assertEquals(2, sources.size());
+        assertEquals(6, sources.size());
         assertEquals("ae2", sources.getFirst().via().name());
         assertEquals("ME 终端", sources.getFirst().describe());
         assertEquals("container", sources.get(1).via().name());
