@@ -30,13 +30,20 @@ record PatternEncodingRequest(String mode, List<SlotEntry> inputs, List<SlotEntr
 
     static final List<String> MODES = List.of("crafting", "processing", "smithing", "stonecutting");
 
-    /** 单个幽灵槽条目：支持普通物品与流体，以及大于 64 的处理样板堆叠数量。 */
+    /** 单个幽灵槽条目：支持普通物品、流体与化学品，以及大于 64 的处理样板堆叠数量。 */
     record SlotEntry(String kind, String id, long amount) {
         boolean isEmpty() {
             return id == null || id.isBlank() || amount <= 0;
         }
         boolean isFluid() {
             return "fluid".equalsIgnoreCase(kind);
+        }
+        boolean isChemical() {
+            return "chemical".equalsIgnoreCase(kind);
+        }
+        /** 非普通物品（流体或化学品）必须经 GenericStack.wrapInItemStack 包装后发给处理样板幽灵槽。 */
+        boolean requiresGenericWrap() {
+            return isFluid() || isChemical();
         }
     }
 
@@ -169,16 +176,21 @@ record PatternEncodingRequest(String mode, List<SlotEntry> inputs, List<SlotEntr
             String fluid = readString(obj, "fluid");
             if (fluid != null && !fluid.isBlank()) {
                 long amount = readLong(obj, "amount", 1000L);
-                return new SlotEntry("fluid", fluid, amount);
+                return new SlotEntry("fluid", fluid.trim(), amount);
+            }
+            String chemical = readString(obj, "chemical");
+            if (chemical != null && !chemical.isBlank()) {
+                long amount = readLong(obj, "amount", 1000L);
+                return new SlotEntry("chemical", chemical.trim(), amount);
             }
             String kind = readString(obj, "kind");
             if (kind == null || kind.isBlank()) kind = "item";
             String id = readString(obj, "id");
             if (id == null || id.isBlank()) id = readString(obj, "item");
-            long defaultAmt = "fluid".equalsIgnoreCase(kind) ? 1000L : 1L;
+            long defaultAmt = "fluid".equalsIgnoreCase(kind) || "chemical".equalsIgnoreCase(kind) ? 1000L : 1L;
             long amount = obj.has("amount") ? readLong(obj, "amount", defaultAmt)
                     : readLong(obj, "count", defaultAmt);
-            return new SlotEntry(kind, id == null ? "" : id.trim(), amount);
+            return new SlotEntry(kind.trim(), id == null ? "" : id.trim(), amount);
         }
         return new SlotEntry("item", "", 0);
     }

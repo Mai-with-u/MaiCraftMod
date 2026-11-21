@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 import appeng.api.config.CondenserOutput;
@@ -59,6 +60,7 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
 
 /**
@@ -67,6 +69,18 @@ import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
  * 绝不使用反射访问任何 Screen 私有字段（包括 PatternAccessTermScreen 与 CraftingCPUScreen）。
  */
 final class AppliedEnergisticsMachinesMenus {
+
+    private static final String CHEMICAL_KEY_TYPE_ID = "appmek:chemical";
+
+    private final ExternalKeyWrappers externalKeys;
+
+    AppliedEnergisticsMachinesMenus() {
+        this(ExternalKeyWrappers.NONE);
+    }
+
+    AppliedEnergisticsMachinesMenus(ExternalKeyWrappers externalKeys) {
+        this.externalKeys = Objects.requireNonNull(externalKeys, "externalKeys");
+    }
 
     Optional<Ae2MachineReads.VibrationMenuView> openVibrationMenu() {
         if (!(openMenu() instanceof VibrationChamberMenu menu)) return Optional.empty();
@@ -264,9 +278,12 @@ final class AppliedEnergisticsMachinesMenus {
         return true;
     }
 
-    // PROCESSING 模式支持流体与大于 64 的数量，使用 GenericStack.wrapInItemStack 包装后发 SET_FILTER。
+    // PROCESSING 模式支持流体、外部扩展键（如化学品）与大于 64 的数量，使用 GenericStack.wrapInItemStack 包装后发 SET_FILTER。
     ItemStack wrapGenericStack(String kind, String id, long amount) {
         if (id == null || id.isBlank() || amount <= 0) return ItemStack.EMPTY;
+        if ("chemical".equalsIgnoreCase(kind)) {
+            return externalKeys.wrap(CHEMICAL_KEY_TYPE_ID, id.trim(), amount).orElse(ItemStack.EMPTY);
+        }
         ResourceLocation key = ResourceLocation.tryParse(id);
         if (key == null) return ItemStack.EMPTY;
         if ("fluid".equalsIgnoreCase(kind)) {

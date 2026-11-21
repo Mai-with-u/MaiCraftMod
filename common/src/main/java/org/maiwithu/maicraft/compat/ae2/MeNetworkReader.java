@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -154,7 +155,33 @@ final class MeNetworkReader implements NetworkReader {
                 readings.put(entry.getKey(), value.isBoolean() ? (Object) value.getAsBoolean()
                         : value.isNumber() ? (Object) value.getAsDouble() : value.getAsString());
             }
+            // 服务端附带网络化学品存量列表时，折成可读摘要字符串写入网络读数（NetworkSummary 只收标量值）。
+            String chemicals = formatStoredChemicals(body);
+            if (!chemicals.isEmpty()) {
+                readings.put("stored_chemicals", chemicals);
+            }
             return new NetworkSummary(networkId, true, readings, note(body));
+        }
+
+        private static String formatStoredChemicals(JsonObject body) {
+            if (!body.has("stored_chemicals") || !body.get("stored_chemicals").isJsonArray()) return "";
+            JsonArray array = body.getAsJsonArray("stored_chemicals");
+            if (array.isEmpty()) return "";
+            StringBuilder out = new StringBuilder();
+            for (JsonElement element : array) {
+                if (!element.isJsonObject()) continue;
+                JsonObject obj = element.getAsJsonObject();
+                if (!obj.has("id") || !obj.has("amount")) continue;
+                if (!out.isEmpty()) out.append(", ");
+                out.append(obj.get("id").getAsString()).append(' ').append(obj.get("amount").getAsLong()).append(" mB");
+            }
+            if (out.isEmpty()) return "";
+            int totalTypes = body.has("chemical_types") && body.get("chemical_types").isJsonPrimitive()
+                    ? body.get("chemical_types").getAsInt() : array.size();
+            if (totalTypes > array.size()) {
+                out.append(" 等共 ").append(totalTypes).append(" 种");
+            }
+            return out.toString();
         }
 
         // 一句话点出要紧的：没控制器、频道超了、没电。

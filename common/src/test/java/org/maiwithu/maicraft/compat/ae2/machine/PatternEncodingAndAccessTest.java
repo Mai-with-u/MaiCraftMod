@@ -395,4 +395,84 @@ class PatternEncodingAndAccessTest {
         assertFalse(encodeCalled.get(), "必须先等 clear() 清空旧有效配方，绝不可拿旧残留放行 encode()");
         assertTrue(cleared.get());
     }
+
+    @Test
+    void 处理样板支持化学品输入输出并走通用包装接口() {
+        String rawJson = """
+                {"mode":"processing",
+                 "inputs":[{"kind":"chemical","id":"mekanism:hydrogen","amount":1000},{"id":"minecraft:iron_ingot","amount":2}],
+                 "outputs":[{"chemical":"mekanism:oxygen","amount":500}]}
+                """;
+        PatternEncodingRequest.ParseResult parsed = PatternEncodingRequest.parse(rawJson);
+        assertTrue(parsed.ok());
+        PatternEncodingRequest req = parsed.request();
+        assertTrue(req.inputs().get(0).isChemical());
+        assertTrue(req.inputs().get(0).requiresGenericWrap());
+        assertEquals("mekanism:hydrogen", req.inputs().get(0).id());
+        assertEquals(1000L, req.inputs().get(0).amount());
+        assertTrue(req.outputs().get(0).isChemical());
+        assertEquals("mekanism:oxygen", req.outputs().get(0).id());
+        assertEquals(500L, req.outputs().get(0).amount());
+
+        List<String> wrappedCalls = new ArrayList<>();
+        AtomicBoolean encoded = new AtomicBoolean(false);
+        Ae2MenuSlots menuSlots = new Ae2MenuSlots() {
+            @Override public boolean isAe2MenuOpen() { return true; }
+            @Override public List<Integer> slotsOf(String semanticId) {
+                return switch (semanticId) {
+                    case "PROCESSING_INPUTS" -> List.of(10, 11);
+                    case "PROCESSING_OUTPUTS" -> List.of(20);
+                    case "ENCODED_PATTERN" -> List.of(30);
+                    default -> List.of();
+                };
+            }
+            @Override public boolean sendConfigButton(String s, boolean b) { return true; }
+            @Override public boolean sendSetFilter(int i, ItemStack st) { return !st.isEmpty(); }
+            @Override public boolean sendNoArgAction(String a) { return true; }
+            @Override public boolean sendIntAction(String a, int v) { return true; }
+            @Override public boolean sendLongAction(String a, long v) { return true; }
+            @Override public boolean sendBooleanAction(String a, boolean v) { return true; }
+            @Override public boolean sendStringAction(String a, String v) { return true; }
+            @Override public boolean sendRawJsonAction(String a, String j) { return true; }
+            @Override public boolean openSubMenu(String m) { return true; }
+            @Override public boolean returnToParentMenu() { return true; }
+        };
+        AtomicBoolean written = new AtomicBoolean(false);
+        AtomicBoolean taken = new AtomicBoolean(false);
+        Ae2MachineReads reads = new Ae2MachineReads() {
+            @Override public Optional<PatternEncodingMenuView> openPatternEncodingMenu() {
+                boolean hasOut = encoded.get() && !taken.get();
+                return Optional.of(new PatternEncodingMenuView("processing", false, false, "", List.of(),
+                        "", 1, hasOut ? "mekanism:oxygen" : "", hasOut,
+                        written.get(), written.get(), false));
+            }
+            @Override public boolean sendEncodeMode(String mode) { return true; }
+            @Override public boolean sendEncodeClear() { return true; }
+            @Override public boolean sendEncodeCommit() {
+                encoded.set(true);
+                return true;
+            }
+            @Override public ItemStack wrapGenericStack(String kind, String id, long amount) {
+                wrappedCalls.add(kind + ":" + id + ":" + amount);
+                written.set(true);
+                return new ItemStack(Items.PAPER);
+            }
+        };
+        MachineTestFakes.ScriptedMenu menu = new MachineTestFakes.ScriptedMenu(
+                () -> Optional.of(MachineTestFakes.readingOf(List.of(), List.of(), List.of(), List.of())),
+                slotId -> {
+                    if (slotId == 30) taken.set(true);
+                });
+        Ae2Compat compat = MachineTestFakes.compatWith(menuSlots, Ae2Patterns.NONE, MachineTestFakes.emptyGrid());
+        PatternEncodingAction action = new PatternEncodingAction(HOST, Direction.NORTH,
+                MachineTestFakes.instantOpening(menu), compat, reads, new Ae2MachineCache(), req, rawJson, null, null);
+
+        ActionStatus status = ActionStatus.running();
+        for (int i = 0; i < 60; i++) {
+            status = action.tick(MachineTestFakes.emptyTick());
+            if (!(status instanceof ActionStatus.Running)) break;
+        }
+        assertInstanceOf(ActionStatus.Done.class, status);
+        assertEquals(List.of("chemical:mekanism:hydrogen:1000", "chemical:mekanism:oxygen:500"), wrappedCalls);
+    }
 }

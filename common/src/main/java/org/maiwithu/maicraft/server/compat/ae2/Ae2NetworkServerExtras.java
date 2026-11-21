@@ -22,6 +22,8 @@ public interface Ae2NetworkServerExtras {
 
     /** 没接扩展读写端时的空实现：不向 ae2.network 回答里追加扩展字段。 */
     Ae2NetworkServerExtras NONE = (level, at) -> Optional.empty();
+    /** ae2.network 中 stored_chemicals[] 最多列出的化学品条目数（按存量降序），另附 chemical_types 总种类数。 */
+    int MAX_LISTED_CHEMICALS = 32;
 
     /** 读取这一格所在 ME 网络的扩展明细；这一格不在任何 ME 网上时返回空。 */
     Optional<NetworkDetail> detail(ServerLevel level, BlockPos at);
@@ -35,14 +37,26 @@ public interface Ae2NetworkServerExtras {
      * @param machines          按设备展示物品与缺频道状态分组后的耗电与发电能力清单
      * @param cpus              每台合成 CPU 的容量、协处理器、调度模式与作业明细
      * @param patternContainers 按样板容器分组汇总的总槽数、已用槽数与样板主产出清单
+     * @param chemicalTypes     网内存储的化学品种类总数（仅统计 {@code appmek:chemical}）
+     * @param storedChemicals   按数量降序排列的前若干种化学品存量清单（单位 mB）
      */
     record NetworkDetail(double powerInjection, double powerUsage, double channelPower,
                          List<MachineEntry> machines, List<CpuEntry> cpus,
-                         List<PatternGroupEntry> patternContainers) {
+                         List<PatternGroupEntry> patternContainers,
+                         int chemicalTypes, List<StockAmount> storedChemicals) {
         public NetworkDetail {
             machines = List.copyOf(Objects.requireNonNull(machines, "machines"));
             cpus = List.copyOf(Objects.requireNonNull(cpus, "cpus"));
             patternContainers = List.copyOf(Objects.requireNonNull(patternContainers, "patternContainers"));
+            chemicalTypes = Math.max(0, chemicalTypes);
+            storedChemicals = List.copyOf(Objects.requireNonNull(storedChemicals, "storedChemicals"));
+        }
+
+        /** 兼容未统计化学品库存的旧调用方构造。 */
+        public NetworkDetail(double powerInjection, double powerUsage, double channelPower,
+                             List<MachineEntry> machines, List<CpuEntry> cpus,
+                             List<PatternGroupEntry> patternContainers) {
+            this(powerInjection, powerUsage, channelPower, machines, cpus, patternContainers, 0, List.of());
         }
     }
 
@@ -129,6 +143,10 @@ public interface Ae2NetworkServerExtras {
         target.add("machines", machinesJson(detail.machines()));
         target.add("cpus", cpusJson(detail.cpus()));
         target.add("pattern_containers", patternContainersJson(detail.patternContainers()));
+        if (detail.chemicalTypes() > 0 || !detail.storedChemicals().isEmpty()) {
+            target.addProperty("chemical_types", detail.chemicalTypes());
+            target.add("stored_chemicals", stocksJson(detail.storedChemicals()));
+        }
     }
 
     /** 独立写出扩展明细 JSON（便于测试与外部汇总校验）。 */

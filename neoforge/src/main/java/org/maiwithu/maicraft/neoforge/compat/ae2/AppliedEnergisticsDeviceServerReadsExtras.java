@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.neoforge.compat.ae2;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -40,6 +41,8 @@ import org.maiwithu.maicraft.server.compat.ae2.Ae2NetworkServerExtras;
  */
 public final class AppliedEnergisticsDeviceServerReadsExtras implements Ae2NetworkServerExtras {
 
+    private static final String CHEMICAL_KEY_TYPE_ID = "appmek:chemical";
+
     @Override public Optional<NetworkDetail> detail(ServerLevel level, BlockPos at) {
         IGrid grid = gridAt(level, at);
         if (grid == null) return Optional.empty();
@@ -48,13 +51,38 @@ public final class AppliedEnergisticsDeviceServerReadsExtras implements Ae2Netwo
         List<MachineEntry> machines = readMachines(status);
         List<CpuEntry> cpus = readCpus(grid);
         List<PatternGroupEntry> patterns = readPatternContainers(grid, level);
+        ChemicalInventory chemicals = readStoredChemicals(grid);
         return Optional.of(new NetworkDetail(
                 status.getAveragePowerInjection(),
                 status.getAveragePowerUsage(),
                 status.getChannelPower(),
                 machines,
                 cpus,
-                patterns));
+                patterns,
+                chemicals.totalTypes(),
+                chemicals.topListed()));
+    }
+
+    private record ChemicalInventory(int totalTypes, List<StockAmount> topListed) {}
+
+    // 仅按 AEKeyType 注册 ID 筛选 appmek:chemical 库存并按数量降序截顶，不引用任何应用机械类。
+    private static ChemicalInventory readStoredChemicals(IGrid grid) {
+        List<StockAmount> found = new ArrayList<>();
+        for (var entry : grid.getStorageService().getCachedInventory()) {
+            AEKey key = entry.getKey();
+            long amount = entry.getLongValue();
+            if (key == null || amount <= 0L) continue;
+            if (!CHEMICAL_KEY_TYPE_ID.equals(key.getType().getId().toString())) continue;
+            found.add(new StockAmount(key.getId().toString(), amount));
+        }
+        int totalTypes = found.size();
+        if (totalTypes == 0) return new ChemicalInventory(0, List.of());
+        found.sort(Comparator.comparingLong(StockAmount::amount).reversed()
+                .thenComparing(StockAmount::keyId));
+        List<StockAmount> listed = found.size() > MAX_LISTED_CHEMICALS
+                ? List.copyOf(found.subList(0, MAX_LISTED_CHEMICALS))
+                : List.copyOf(found);
+        return new ChemicalInventory(totalTypes, listed);
     }
 
     private static List<MachineEntry> readMachines(NetworkStatus status) {

@@ -249,7 +249,7 @@ final class Ae2DirectPartAction implements Action {
         return new P2pRolePlan(null, mainIsCard ? null : invCardId, true, freqBefore, expectNew);
     }
 
-    /** 纯函数判定监视器设置展示物的执行步骤（已匹配 / 先解锁 / 样本直接右键 / 流体容器二次右键）。 */
+    /** 纯函数判定监视器设置展示物的执行步骤（已匹配 / 先解锁 / 样本直接右键 / 流体或化学品容器二次右键）。 */
     static MonitorDisplayPlan decideMonitorDisplay(Ae2PartControl.ClientPartReading reading, String wanted,
                                                    Optional<String> directItem, Optional<String> fluidContainer) {
         String current = reading != null && reading.hasMonitor() ? reading.displayed() : null;
@@ -258,7 +258,8 @@ final class Ae2DirectPartAction implements Action {
             return new MonitorDisplayPlan(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "AE2 监视器原生不支持交互清空已设展示物，需要拆下重装才能清空"), false, false, null, false);
         }
-        if (wanted.equals(current)) {
+        String expectedDisplay = stripChemicalPrefix(wanted);
+        if (expectedDisplay.equals(current)) {
             return new MonitorDisplayPlan(null, true, false, null, false);
         }
         boolean locked = reading != null && reading.hasMonitor() && reading.locked();
@@ -270,7 +271,17 @@ final class Ae2DirectPartAction implements Action {
             return new MonitorDisplayPlan(null, false, locked, holder, !holder.equals(current));
         }
         return new MonitorDisplayPlan(Problem.of(Problem.Kind.NEED_ITEM,
-                "背包里没有用于设监视器展示的样本 " + wanted + "（或对应的流体容器）"), false, false, null, false);
+                "背包里没有用于设监视器展示的样本 " + wanted + "（或对应的流体/化学品容器）"), false, false, null, false);
+    }
+
+    /** 去掉监视器目标里用于消歧的 {@code chemical:} 前缀，还原成客户端同步展示的裸注册 ID。 */
+    static String stripChemicalPrefix(String target) {
+        if (target == null) return "";
+        String trimmed = target.trim();
+        if (trimmed.regionMatches(true, 0, Ae2PartKeys.CHEMICAL_PREFIX, 0, Ae2PartKeys.CHEMICAL_PREFIX.length())) {
+            return trimmed.substring(Ae2PartKeys.CHEMICAL_PREFIX.length()).trim();
+        }
+        return trimmed;
     }
 
     // 监视器已锁定时，先空手 → 走到部件盒可达站位 → 潜行右键解锁，再换样本设展示物。
@@ -386,7 +397,7 @@ final class Ae2DirectPartAction implements Action {
                         .orElse(InteractionConfirmation.Verdict.PENDING);
             }
             case MONITOR_DISPLAY -> {
-                String expect = (!secondPass && needSecondFluidClick) ? itemToHold : wanted;
+                String expect = (!secondPass && needSecondFluidClick) ? itemToHold : stripChemicalPrefix(wanted);
                 yield ctx -> control.readClientPart(ctx.level(), host, side)
                         .filter(Ae2PartControl.ClientPartReading::hasMonitor)
                         .map(r -> expect.equals(r.displayed()) ? InteractionConfirmation.Verdict.APPLIED

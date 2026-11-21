@@ -110,7 +110,8 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
         if (kind.isEmpty()) return List.of();
         Map<String, String> values = cache.settingsFor(host, side, services.serverReads());
         Ae2PartControl.ClientPartReading client = control.readClientPart(level, host, side).orElse(null);
-        return Ae2PartKeys.partSettings(kind.get(), part.get().itemId(), values, client);
+        boolean chemicalSupported = compat.supportsExternalKeyType(Ae2PartKeys.CHEMICAL_KEY_TYPE);
+        return Ae2PartKeys.partSettings(kind.get(), part.get().itemId(), values, client, chemicalSupported);
     }
 
     /** 供测试或汇总层读取指定面部件的补充读数（整合客户端同步 + 缓存/服务端 ae2.device）。 */
@@ -177,7 +178,8 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
         if (kind == Ae2PartKeys.PartKind.ANNIHILATION_PLANE) return Optional.empty();
 
         String menuId = menuIdOf(kind);
-        if (localKey.equals("key_type.item") || localKey.equals("key_type.fluid")) {
+        if (localKey.equals("key_type.item") || localKey.equals("key_type.fluid")
+                || (localKey.equals("key_type.chemical") && chemicalKeyAvailable(host, side, services))) {
             if (kind != Ae2PartKeys.PartKind.IMPORT_BUS) return Optional.empty();
             if (!Ae2PartKeys.BOOL_CHOICES.contains(lower)) return invalid("导出/导入类型只接受 true 或 false");
             return Optional.of(menuAction(host, side, label, menuId, Ae2MenuConfigAction.Kind.KEY_TYPE, localKey,
@@ -259,8 +261,14 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
     private Optional<Action> p2pChange(BlockPos host, Direction side, String localKey, String lower,
                                        PlayerServices services, Permissions permissions) {
         if (localKey.equals("attunement")) {
-            if (!Ae2PartKeys.P2P_ATTUNEMENTS.contains(lower)) {
-                return invalid("attunement 只接受 me / redstone / item / fluid / fe / light");
+            boolean allowChemical = compat.supportsExternalKeyType(Ae2PartKeys.CHEMICAL_KEY_TYPE)
+                    || partAt(levelOf(services), host, side)
+                    .map(Ae2Grid.PartView::itemId)
+                    .filter(Ae2PartKeys.CHEMICAL_P2P_ITEM::equals)
+                    .isPresent();
+            List<String> choices = Ae2PartKeys.p2pAttunements(allowChemical);
+            if (!choices.contains(lower)) {
+                return invalid("attunement 只接受 " + String.join(" / ", choices));
             }
             return Optional.of(new Ae2DirectPartAction(compat, control, cache, services, host, side,
                     Ae2DirectPartAction.Kind.P2P_ATTUNEMENT, lower, permissions));
@@ -271,6 +279,11 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
                     Ae2DirectPartAction.Kind.P2P_ROLE, lower, permissions));
         }
         return Optional.empty();
+    }
+
+    private boolean chemicalKeyAvailable(BlockPos host, Direction side, PlayerServices services) {
+        return compat.supportsExternalKeyType(Ae2PartKeys.CHEMICAL_KEY_TYPE)
+                || cache.peekSettings(host, side, services.serverReads()).containsKey("key_type.chemical");
     }
 
     private Ae2MenuConfigAction menuAction(BlockPos host, Direction side, String label, String menuId,

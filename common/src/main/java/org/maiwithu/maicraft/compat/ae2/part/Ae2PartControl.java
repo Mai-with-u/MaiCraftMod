@@ -97,10 +97,20 @@ public interface Ae2PartControl {
      * @param menuIndex  菜单中的真实槽位编号（用于点击或发 SET_FILTER）
      * @param localIndex 在本语义组内的顺序号（从 0 起，用于 filter.N / stock.N / upgrade.N）
      * @param enabled    该槽位当前是否已启用（未插容量卡或当前元件无此升级槽时为 false）
-     * @param itemId     槽位内的物品或流体注册 ID；空槽为 null
+     * @param itemId     槽位内的物品、流体或化学品注册 ID；空槽为 null
      * @param count      槽位内的堆叠或备料数量；空槽为 0
+     * @param keyType    介质键类别（{@code item} / {@code fluid} / {@code chemical}，未标明时为空串）
      */
-    record MenuSlotEntry(int menuIndex, int localIndex, boolean enabled, String itemId, long count) {
+    record MenuSlotEntry(int menuIndex, int localIndex, boolean enabled, String itemId, long count, String keyType) {
+
+        public MenuSlotEntry {
+            keyType = keyType == null ? "" : keyType;
+        }
+
+        /** 兼容未区分介质键类别的旧构造与离线替身。 */
+        public MenuSlotEntry(int menuIndex, int localIndex, boolean enabled, String itemId, long count) {
+            this(menuIndex, localIndex, enabled, itemId, count, "");
+        }
 
         /** 该槽位是否为空。 */
         public boolean isEmpty() {
@@ -146,16 +156,16 @@ public interface Ae2PartControl {
     /** 读取当前打开的 AE2 菜单状态与全部语义槽位；未打开 AE2 菜单时为空。 */
     Optional<OpenMenuSnapshot> readOpenMenu();
 
-    /** 切换输入总线的导入键类型（item / fluid），发送 SelectKeyTypePacket 并更新客户端选中态。 */
+    /** 切换输入总线的导入键类型（item / fluid / chemical），发送 SelectKeyTypePacket 并更新客户端选中态。 */
     boolean selectKeyType(String keyType, boolean enabled);
 
     /** 设置元件工作台当前元件的模糊模式，走 setFuzzyMode 界面动作写入元件组件，不走 ConfigButtonPacket。 */
     boolean setCellWorkbenchFuzzy(String fuzzyMode);
 
-    /** 将物品或流体注册 ID（或 empty）包装成可直接发给幽灵过滤槽的 ItemStack；无法识别时为空。 */
+    /** 将物品、流体或化学品注册 ID（支持 {@code chemical:<id>} 前缀或 empty）包装成可直接发给幽灵过滤槽的 ItemStack；无法识别时为空。 */
     Optional<ItemStack> filterStackOf(String targetId);
 
-    /** 判定这件物品能把 P2P 通道调谐成哪一种类型（me / redstone / item / fluid / fe / light）；不能调谐为空。 */
+    /** 判定这件物品能把 P2P 通道调谐成哪一种类型（me / redstone / item / fluid / fe / light / chemical）；不能调谐为空。 */
     Optional<String> p2pAttunementOf(ItemStack stack);
 
     /** 这件物品能不能放进 ME IO 传输站倒盘（存储元件或实现 IBasicCellItem 的物质炮、上色器等工具）。 */
@@ -173,6 +183,6 @@ public interface Ae2PartControl {
     /** 核对这份已打开菜单的注册 ID 是否等于目标菜单 ID（供换页跟随时判定）。 */
     boolean isMenuType(AbstractContainerMenu menu, String menuTypeId);
 
-    /** 判断这件物品是不是盛有指定流体的容器物品（供监视器二次右键切换到内含流体时挑容器）。 */
+    /** 判断这件物品是不是盛有指定流体或化学品的容器物品（支持 {@code chemical:<id>} 消歧，供监视器二次右键切换内含物）。 */
     boolean isFluidContainerFor(ItemStack stack, String fluidId);
 }

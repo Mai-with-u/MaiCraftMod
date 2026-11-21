@@ -11,6 +11,7 @@ import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -29,12 +30,16 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
 import org.maiwithu.maicraft.compat.ae2.Ae2SemanticsLayout;
 import org.maiwithu.maicraft.game.serverlink.ServerReads;
+import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.ActionStatus;
 
 /**
  * 线缆格多面部件按面配置路由、去前缀 partSettings、缓存与服务端读数合并、
@@ -310,6 +315,67 @@ class Ae2PartCableOpsTest {
         assertEquals(Set.of(9), supported.machineSlots());
         assertFalse(supported.containerSlots().contains(0));
         assertFalse(supported.containerSlots().contains(46));
+    }
+
+    @Test
+    void 化学品键仅在外部包装可用时暴露给输入总线与化学品点对点并解析服务端介质类型() {
+        Map<Direction, Ae2Grid.PartView> parts = Map.of(
+                Direction.NORTH, new Ae2Grid.PartView("ae2:import_bus", true, true),
+                Direction.SOUTH, new Ae2Grid.PartView("ae2:me_p2p_tunnel", true, true),
+                Direction.EAST, new Ae2Grid.PartView("appmek:chemical_p2p_tunnel", true, true));
+        Ae2Grid grid = PartTestFakes.cableGrid(HOST, parts);
+        PartTestFakes.ScriptedSession control = new PartTestFakes.ScriptedSession(Ae2PartKeys.MENU_IMPORT_BUS);
+        PlayerServices services = PartTestFakes.services(() -> null, ServerReads.NONE);
+
+        // 未注册 appmek:chemical 时：输入总线不暴露 key_type.chemical，P2P 可选值也不含 chemical。
+        Ae2PartCableOps withoutChem = new Ae2PartCableOps(
+                PartTestFakes.compat(grid, control, ExternalKeyWrappers.NONE),
+                control, new Ae2PartCache(), (level, pos) -> grid.cell(level, pos));
+        assertFalse(toMap(withoutChem.partSettings(HOST, Direction.NORTH, services)).containsKey("key_type.chemical"));
+        assertTrue(withoutChem.buildPartChange(HOST, Direction.NORTH, Ae2PartKeys.PartKind.IMPORT_BUS,
+                "key_type.chemical", "true", services, Permissions.DEFAULT).isEmpty());
+        MachineSetting p2pWithout = withoutChem.partSettings(HOST, Direction.SOUTH, services).stream()
+                .filter(s -> s.key().equals("attunement")).findFirst().orElseThrow();
+        assertFalse(p2pWithout.choices().contains("chemical"));
+        Action rejectChemP2p = withoutChem.buildPartChange(HOST, Direction.SOUTH, Ae2PartKeys.PartKind.P2P_TUNNEL,
+                "attunement", "chemical", services, Permissions.DEFAULT).orElseThrow();
+        assertInstanceOf(ActionStatus.Failed.class, rejectChemP2p.tick(PartTestFakes.dummyTick()));
+
+        // 注册 appmek:chemical 后：输入总线暴露并接受 key_type.chemical，P2P 支持 attunement=chemical 与化学品 P2P 识别。
+        ExternalKeyWrappers wrappers = new ExternalKeyWrappers();
+        wrappers.register("appmek:chemical", (id, amt) -> Optional.empty());
+        Ae2PartCache cache = new Ae2PartCache();
+        Ae2PartCableOps withChem = new Ae2PartCableOps(
+                PartTestFakes.compat(grid, control, wrappers),
+                control, cache, (level, pos) -> grid.cell(level, pos));
+        assertTrue(toMap(withChem.partSettings(HOST, Direction.NORTH, services)).containsKey("key_type.chemical"));
+        assertTrue(withChem.buildPartChange(HOST, Direction.NORTH, Ae2PartKeys.PartKind.IMPORT_BUS,
+                "key_type.chemical", "true", services, Permissions.DEFAULT).isPresent());
+        MachineSetting p2pWith = withChem.partSettings(HOST, Direction.SOUTH, services).stream()
+                .filter(s -> s.key().equals("attunement")).findFirst().orElseThrow();
+        assertTrue(p2pWith.choices().contains("chemical"));
+        assertInstanceOf(Ae2DirectPartAction.class,
+                withChem.buildPartChange(HOST, Direction.SOUTH, Ae2PartKeys.PartKind.P2P_TUNNEL,
+                        "attunement", "chemical", services, Permissions.DEFAULT).orElseThrow());
+        assertEquals("chemical", toMap(withChem.partSettings(HOST, Direction.EAST, services)).get("attunement"));
+
+        // 服务端 ae2.device 返回 config_slot_types 时，化学槽自动带 chemical: 前缀，物品/流体保持原样。
+        JsonObject serverReply = new JsonObject();
+        serverReply.addProperty("part_id", "ae2:cable_interface");
+        JsonObject readings = new JsonObject();
+        JsonObject configSlots = new JsonObject();
+        configSlots.addProperty("0", "mekanism:sulfuric_acid x16000");
+        configSlots.addProperty("1", "minecraft:water x1000");
+        JsonObject slotTypes = new JsonObject();
+        slotTypes.addProperty("0", "chemical");
+        slotTypes.addProperty("1", "fluid");
+        readings.add("config_slots", configSlots);
+        readings.add("config_slot_types", slotTypes);
+        serverReply.add("readings", readings);
+        cache.acceptServerDevice(HOST, Direction.WEST, serverReply);
+        Map<String, String> merged = cache.peekSettings(HOST, Direction.WEST, ServerReads.NONE);
+        assertEquals("chemical:mekanism:sulfuric_acid 16000", merged.get("stock.0"));
+        assertEquals("minecraft:water 1000", merged.get("stock.1"));
     }
 
     private static Map<String, String> toMap(List<MachineSetting> list) {

@@ -182,11 +182,12 @@ class Ae2DirectPartActionTest {
 
     @Test
     void 全部六种点对点调谐类型双向映射完整() {
-        for (String attunement : Ae2PartKeys.P2P_ATTUNEMENTS) {
+        for (String attunement : Ae2PartKeys.P2P_ATTUNEMENTS_WITH_CHEMICAL) {
             String partId = Ae2PartKeys.p2pItemOf(attunement).orElseThrow();
             assertEquals(Optional.of(Ae2PartKeys.PartKind.P2P_TUNNEL), Ae2PartKeys.partKindOf(partId));
             assertEquals(Optional.of(attunement), Ae2PartKeys.attunementOfPart(partId));
         }
+        assertEquals(Optional.of("appmek:chemical_p2p_tunnel"), Ae2PartKeys.p2pItemOf("chemical"));
         assertEquals("unlinked", Ae2PartKeys.formatFrequency(0));
         assertEquals("00FF", Ae2PartKeys.formatFrequency(255));
     }
@@ -223,5 +224,20 @@ class Ae2DirectPartActionTest {
                 lockedIron, "minecraft:netherite_ingot", Optional.empty(), Optional.empty());
         assertNotNull(missing.problem());
         assertEquals(Problem.Kind.NEED_ITEM, missing.problem().kind());
+
+        // 设置化学品展示（裸 ID 与 chemical:<id> 前缀）：持化学品储罐二次右键切内含化学品，已展示同化学品直接命中。
+        Ae2DirectPartAction.MonitorDisplayPlan switchChem = Ae2DirectPartAction.decideMonitorDisplay(
+                lockedIron, "chemical:mekanism:hydrogen", Optional.empty(), Optional.of("mekanism:basic_chemical_tank"));
+        assertNull(switchChem.problem());
+        assertTrue(switchChem.needUnlock());
+        assertEquals("mekanism:basic_chemical_tank", switchChem.itemToHold());
+        assertTrue(switchChem.needSecondFluidClick());
+
+        Ae2PartControl.ClientPartReading showingHydrogen = Ae2PartControl.ClientPartReading.monitor(
+                "mekanism:hydrogen", 16000L, false, false);
+        Ae2DirectPartAction.MonitorDisplayPlan alreadyChem = Ae2DirectPartAction.decideMonitorDisplay(
+                showingHydrogen, "chemical:mekanism:hydrogen", Optional.empty(), Optional.empty());
+        assertNull(alreadyChem.problem());
+        assertTrue(alreadyChem.alreadyMatched());
     }
 }

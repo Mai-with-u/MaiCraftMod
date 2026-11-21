@@ -32,6 +32,7 @@ import org.maiwithu.maicraft.behavior.menu.PageSwaps;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 import org.maiwithu.maicraft.compat.ae2.Ae2Inscribers;
@@ -40,6 +41,9 @@ import org.maiwithu.maicraft.compat.ae2.Ae2Patterns;
 import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
 import org.maiwithu.maicraft.compat.ae2.Ae2Terminals;
 import org.maiwithu.maicraft.compat.ae2.Ae2Transforms;
+import org.maiwithu.maicraft.compat.ae2.advanced.Ae2AdvancedReads;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
+import org.maiwithu.maicraft.compat.ae2.tool.Ae2ToolReads;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
@@ -61,6 +65,10 @@ final class PartTestFakes {
     }
 
     static Ae2Compat compat(Ae2Grid grid, Ae2MenuSlots menuSlots) {
+        return compat(grid, menuSlots, ExternalKeyWrappers.NONE);
+    }
+
+    static Ae2Compat compat(Ae2Grid grid, Ae2MenuSlots menuSlots, ExternalKeyWrappers externalKeys) {
         Ae2Terminals noTerminals = new Ae2Terminals() {
             @Override public List<Terminal> near(ClientLevel level, BlockPos center, int radius) { return List.of(); }
             @Override public boolean stillThere(ClientLevel level, BlockPos block, Direction side) { return false; }
@@ -77,7 +85,8 @@ final class PartTestFakes {
             @Override public void putBack(AbstractContainerMenu menu) {}
         };
         return new Ae2Compat(noTerminals, noMenu, grid, Ae2Patterns.NONE, Ae2Transforms.NONE, Ae2Inscribers.NONE,
-                menuSlots);
+                menuSlots, Ae2MachineReads.NONE, Ae2PartControl.NONE, Ae2ToolReads.NONE, Ae2AdvancedReads.NONE,
+                externalKeys);
     }
 
     static Ae2Grid cableGrid(BlockPos pos, Map<Direction, Ae2Grid.PartView> parts) {

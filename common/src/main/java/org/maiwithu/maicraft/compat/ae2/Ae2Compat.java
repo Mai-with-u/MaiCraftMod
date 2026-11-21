@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.survival.defense.spi.RangedWeapon;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.advanced.Ae2Advanced;
 import org.maiwithu.maicraft.compat.ae2.advanced.Ae2AdvancedReads;
 import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
@@ -71,6 +72,7 @@ public final class Ae2Compat extends CompatModule {
     private final Ae2PartControl partControl;
     private final Ae2ToolReads toolReads;
     private final Ae2AdvancedReads advancedReads;
+    private final ExternalKeyWrappers externalKeys;
     private final Ae2DeviceOpsRouter router;
     /** 进世界时记下当前世界的玩家行为服务，供落地补料、服务端只读通道与放置转正规则实时取用；没进世界时为空。 */
     private volatile PlayerServices services;
@@ -113,6 +115,14 @@ public final class Ae2Compat extends CompatModule {
             Ae2Transforms transforms, Ae2Inscribers inscribers, Ae2MenuSlots menuSlots,
             Ae2MachineReads machineReads, Ae2PartControl partControl, Ae2ToolReads toolReads,
             Ae2AdvancedReads advancedReads) {
+        this(terminals, menus, grid, patterns, transforms, inscribers, menuSlots,
+                machineReads, partControl, toolReads, advancedReads, ExternalKeyWrappers.NONE);
+    }
+
+    public Ae2Compat(Ae2Terminals terminals, Ae2TerminalMenu menus, Ae2Grid grid, Ae2Patterns patterns,
+            Ae2Transforms transforms, Ae2Inscribers inscribers, Ae2MenuSlots menuSlots,
+            Ae2MachineReads machineReads, Ae2PartControl partControl, Ae2ToolReads toolReads,
+            Ae2AdvancedReads advancedReads, ExternalKeyWrappers externalKeys) {
         super(MOD_ID, "应用能源2");
         this.terminals = Objects.requireNonNull(terminals, "terminals");
         this.menus = Objects.requireNonNull(menus, "menus");
@@ -125,7 +135,13 @@ public final class Ae2Compat extends CompatModule {
         this.partControl = Objects.requireNonNull(partControl, "partControl");
         this.toolReads = Objects.requireNonNull(toolReads, "toolReads");
         this.advancedReads = Objects.requireNonNull(advancedReads, "advancedReads");
+        this.externalKeys = Objects.requireNonNull(externalKeys, "externalKeys");
         this.router = new Ae2DeviceOpsRouter(this, this.machineReads, this.partControl, this.advancedReads);
+    }
+
+    /** 查某附属外部键类型（如 {@code appmek:chemical}）此刻是否已由对应联动模组登记且可用。 */
+    public boolean supportsExternalKeyType(String keyTypeId) {
+        return externalKeys.supports(keyTypeId);
     }
 
     @Override public void contribute(CompatRegistry registry) {

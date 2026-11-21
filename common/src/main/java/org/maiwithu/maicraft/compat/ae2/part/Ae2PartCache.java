@@ -204,33 +204,41 @@ public final class Ae2PartCache {
         mergeIndexedArray(entry, source, "upgrades", "upgrade.", overwriteSettings);
         mergeIndexedArray(entry, source, "stock", "stock.", overwriteSettings);
         if (source.has("config_slots") && source.get("config_slots").isJsonObject()) {
-            mergeConfigSlotsObject(entry, source.getAsJsonObject("config_slots"), isInterface, overwriteSettings);
+            JsonObject slotTypes = source.has("config_slot_types") && source.get("config_slot_types").isJsonObject()
+                    ? source.getAsJsonObject("config_slot_types") : null;
+            mergeConfigSlotsObject(entry, source.getAsJsonObject("config_slots"), slotTypes, isInterface,
+                    overwriteSettings);
         }
         mergeScalars(entry, source, overwriteSettings);
     }
 
-    // 服务端 readings.config_slots 形如 {"0": "minecraft:iron_ingot x16"}：ME 接口映射至 stock.N，其余映射至 filter.N。
-    private static void mergeConfigSlotsObject(Entry entry, JsonObject slotsObj, boolean isInterface,
-                                               boolean overwriteSettings) {
+    // 服务端 readings.config_slots 形如 {"0": "minecraft:iron_ingot x16"}：ME 接口映射至 stock.N，其余映射至 filter.N；
+    // 若同时携带 config_slot_types 且标明为 chemical，补上 chemical: 前缀避免与同名流体混淆。
+    private static void mergeConfigSlotsObject(Entry entry, JsonObject slotsObj, JsonObject slotTypes,
+                                               boolean isInterface, boolean overwriteSettings) {
         String prefix = isInterface ? "stock." : "filter.";
         for (Map.Entry<String, JsonElement> item : slotsObj.entrySet()) {
             if (!item.getValue().isJsonPrimitive()) continue;
             String raw = item.getValue().getAsString().trim();
-            String formatted = formatServerConfigSlot(raw, isInterface);
+            boolean isChemical = slotTypes != null && slotTypes.has(item.getKey())
+                    && slotTypes.get(item.getKey()).isJsonPrimitive()
+                    && "chemical".equalsIgnoreCase(slotTypes.get(item.getKey()).getAsString());
+            String formatted = formatServerConfigSlot(raw, isInterface, isChemical);
             putSetting(entry, prefix + item.getKey(), formatted, overwriteSettings);
         }
     }
 
-    private static String formatServerConfigSlot(String raw, boolean isInterface) {
+    private static String formatServerConfigSlot(String raw, boolean isInterface, boolean isChemical) {
         if (raw.isEmpty() || raw.equalsIgnoreCase(Ae2PartKeys.EMPTY)) return Ae2PartKeys.EMPTY;
         int sep = raw.lastIndexOf(" x");
         if (sep > 0 && sep + 2 < raw.length()) {
             String id = raw.substring(0, sep).trim();
             String countText = raw.substring(sep + 2).trim();
-            if (!isInterface) return id;
-            return id + " " + countText;
+            String target = isChemical ? Ae2PartKeys.CHEMICAL_PREFIX + id : id;
+            if (!isInterface) return target;
+            return target + " " + countText;
         }
-        return raw;
+        return isChemical ? Ae2PartKeys.CHEMICAL_PREFIX + raw : raw;
     }
 
     private static boolean isInterfacePayload(JsonObject payload) {

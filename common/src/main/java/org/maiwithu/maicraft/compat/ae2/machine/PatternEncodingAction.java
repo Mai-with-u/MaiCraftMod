@@ -245,7 +245,7 @@ final class PatternEncodingAction implements Action {
         };
         if (!ok) {
             return beginClose(Problem.of(Problem.Kind.INVALID_PARAMETER,
-                    "无法向样板编码终端写入目标模式的幽灵槽（请检查物品或流体 ID）"));
+                    "无法向样板编码终端写入目标模式的幽灵槽（请检查物品、流体或化学品 ID）"));
         }
         waited = 0;
         stage = Stage.WAIT_RECIPE_SYNC;
@@ -296,8 +296,9 @@ final class PatternEncodingAction implements Action {
 
     private ItemStack buildGhostStack(PatternEncodingRequest.SlotEntry entry, boolean allowGenericWrap) {
         if (entry.isEmpty()) return ItemStack.EMPTY;
-        // 流体或超过 64 的数量必须通过 GenericStack.wrapInItemStack 包装后发 SET_FILTER。
-        if (entry.isFluid() || (allowGenericWrap && entry.amount() > 64)) {
+        // 流体、化学品或处理模式下超过 64 的数量必须通过 GenericStack.wrapInItemStack 包装后发 SET_FILTER。
+        if (entry.requiresGenericWrap() || (allowGenericWrap && entry.amount() > 64)) {
+            if (!allowGenericWrap) return ItemStack.EMPTY;
             return reads.wrapGenericStack(entry.kind(), entry.id(), entry.amount());
         }
         ResourceLocation key = ResourceLocation.tryParse(entry.id());

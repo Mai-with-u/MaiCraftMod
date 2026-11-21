@@ -50,6 +50,7 @@ class ModFeaturesTest {
                 "sophisticatedbackpacks", "1.2.0",
                 "ftbquests", "1.2.0",
                 "create", "1.2.0",
+                "appmek", "1.6.3",
                 "ftbultimine", "1.2.0",
                 "emi", "1.2.0");
         LoaderEnvironment loader = new LoaderEnvironment() {
@@ -62,15 +63,16 @@ class ModFeaturesTest {
             @Override public FurnaceFuels furnaceFuels() { return itemId -> 0; }
         };
         CompatRegistry compat = CompatRegistry.load(List.of(
-                mod("sophisticatedbackpacks"), mod("ftbquests"), mod("create"), mod("ftbultimine"), mod("emi")),
+                mod("sophisticatedbackpacks"), mod("ftbquests"), mod("create"), mod("appmek"),
+                mod("ftbultimine"), mod("emi")),
                 loader);
 
         // 客户端登记了 FTB 连锁破坏，但当前连的原版服务器不接连锁包：chain_mining 不该出现。
-        assertEquals(List.of("create", "ftb_quests", "sophisticated_backpacks"),
+        assertEquals(List.of("appmek", "create", "ftb_quests", "sophisticated_backpacks"),
                 ModFeatures.activeInWorld(compat, List.of(accelerator(false)), false));
 
         // 服务端接收连锁包且世界有 Lootr 容器标签：chain_mining 与 lootr 一并按字母排入列。
-        assertEquals(List.of("chain_mining", "create", "ftb_quests", "lootr", "sophisticated_backpacks"),
+        assertEquals(List.of("appmek", "chain_mining", "create", "ftb_quests", "lootr", "sophisticated_backpacks"),
                 ModFeatures.activeInWorld(compat, List.of(accelerator(true)), true));
     }
 }

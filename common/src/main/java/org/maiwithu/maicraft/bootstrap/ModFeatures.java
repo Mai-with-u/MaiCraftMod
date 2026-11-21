@@ -19,6 +19,7 @@ public final class ModFeatures {
 
     private static final Map<String, String> FEATURE_BY_MOD_ID = Map.of(
             "ae2", "ae2",
+            "appmek", "appmek",
             "create", "create",
             "ftbquests", "ftb_quests",
             "mekanism", "mekanism",

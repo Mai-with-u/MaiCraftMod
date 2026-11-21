@@ -303,13 +303,13 @@ final class Ae2MenuConfigAction implements Action {
             return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, tip));
         }
         boolean wantEmpty = spec.wantedValue().equalsIgnoreCase(Ae2PartKeys.EMPTY);
-        if ((wantEmpty && slot.isEmpty()) || (!wantEmpty && spec.wantedValue().equals(slot.itemId()))) {
+        if ((wantEmpty && slot.isEmpty()) || (!wantEmpty && Ae2PartSnapshots.matchesFilterTarget(slot, spec.wantedValue()))) {
             return succeed(snap);
         }
         if (!sent) {
             Optional<ItemStack> filter = control.filterStackOf(spec.wantedValue());
             if (filter.isEmpty()) {
-                return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的过滤物品或流体：" + spec.wantedValue()));
+                return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的过滤物品、流体或化学品：" + spec.wantedValue()));
             }
             if (!compat.sendSetFilter(slot.menuIndex(), filter.get())) {
                 return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法写入过滤槽 filter." + spec.slotIndex()));
@@ -347,11 +347,11 @@ final class Ae2MenuConfigAction implements Action {
                     : ActionStatus.running();
         }
         // 目标物还没写进过滤槽：先用 SET_FILTER 写进去，写好后再看要不要换页改数量。
-        if (!wanted.targetId().equals(slot.itemId())) {
+        if (!Ae2PartSnapshots.matchesFilterTarget(slot, wanted.targetId())) {
             if (!sent) {
                 Optional<ItemStack> filter = control.filterStackOf(wanted.targetId());
                 if (filter.isEmpty()) {
-                    return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的备料物品或流体：" + wanted.targetId()));
+                    return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的备料物品、流体或化学品：" + wanted.targetId()));
                 }
                 if (!compat.sendSetFilter(slot.menuIndex(), filter.get())) {
                     return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法设备料槽 stock." + spec.slotIndex()));

@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -21,6 +22,7 @@ import appeng.api.parts.IPartHost;
 import appeng.api.stacks.AEFluidKey;
 import appeng.api.stacks.AEKey;
 import appeng.api.stacks.AEKeyType;
+import appeng.api.stacks.AEKeyTypes;
 import appeng.api.stacks.GenericStack;
 import appeng.api.storage.StorageCells;
 import appeng.api.storage.cells.IBasicCellItem;
@@ -63,15 +65,30 @@ import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraft.world.phys.AABB;
 
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.part.Ae2PartControl;
 
 /**
  * AE2 线缆部件、元件工作台、ME IO 传输站与无线访问点的 NeoForge 客户端读写端。
  *
- * <p>全部直接调用 AE2 公开接口与公开数据包，不使用反射；只负责把 AE2 部件、菜单与物品状态
- * 翻译为纯 Minecraft / Java 记录交给通用层判断与驱动。
+ * <p>全部直接调用 AE2 公开接口与公开数据包，不使用反射，也不直接引用附属模组类；
+ * 扩展介质键（如应用机械化学品）通过 {@link ExternalKeyWrappers} 与 AE2 公开的 {@link AEKeyTypes} 按需配合。
  */
 public final class AppliedEnergisticsParts implements Ae2PartControl {
+
+    private static final String CHEMICAL_KEY_TYPE_ID = "appmek:chemical";
+    private static final String CHEMICAL_PREFIX = "chemical:";
+
+    private final ExternalKeyWrappers externalKeys;
+
+    /** 兼容未注入外部扩展键表的旧构造。 */
+    public AppliedEnergisticsParts() {
+        this(ExternalKeyWrappers.NONE);
+    }
+
+    public AppliedEnergisticsParts(ExternalKeyWrappers externalKeys) {
+        this.externalKeys = Objects.requireNonNull(externalKeys, "externalKeys");
+    }
 
     // 按部件自身报告的碰撞形状拼出世界坐标下的交互包围盒，避免右键误点中心线缆或邻面部件。
     @Override public Optional<AABB> partBox(ClientLevel level, BlockPos host, Direction side) {
@@ -180,17 +197,32 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
                 readSemanticSlots(menu, SlotSemantics.MACHINE_OUTPUT, false)));
     }
 
-    // 输入总线切换导入物品/流体类型：经 AE2 公开接口发 SelectKeyTypePacket 并更新客户端选中态。
+    // 输入总线切换导入物品/流体/化学品类型：经 AE2 公开接口与 AEKeyTypes 查注册通道，未装附属时安全返回 false。
     @Override public boolean selectKeyType(String keyType, boolean enabled) {
         if (!(openMenu() instanceof IOBusMenu menu)) return false;
-        AEKeyType resolved = switch (keyType == null ? "" : keyType.toLowerCase(Locale.ROOT)) {
-            case "item" -> AEKeyType.items();
-            case "fluid" -> AEKeyType.fluids();
-            default -> null;
-        };
+        AEKeyType resolved = resolveKeyType(keyType);
         if (resolved == null) return false;
         menu.selectKeyType(resolved, enabled);
         return true;
+    }
+
+    private static AEKeyType resolveKeyType(String keyType) {
+        String normalized = keyType == null ? "" : keyType.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "item" -> AEKeyType.items();
+            case "fluid" -> AEKeyType.fluids();
+            case "chemical" -> findRegisteredKeyType(CHEMICAL_KEY_TYPE_ID);
+            default -> null;
+        };
+    }
+
+    private static AEKeyType findRegisteredKeyType(String typeId) {
+        for (AEKeyType candidate : AEKeyTypes.getAll()) {
+            if (candidate != null && typeId.equals(candidate.getId().toString())) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     // 元件工作台模糊模式存在元件组件上，必须走 CellWorkbenchMenu.setCellFuzzyMode（GuiActionPacket）。
@@ -206,11 +238,16 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
         return true;
     }
 
-    // 过滤目标同时支持物品 ID、流体 ID（经 GenericStack.wrapInItemStack 包装）与 empty。
+    // 过滤目标支持显式 chemical:<id> 前缀消歧、普通物品、流体，以及裸 ID 未命中物品/流体时的化学品回落包装。
     @Override public Optional<ItemStack> filterStackOf(String targetId) {
         if (targetId == null || targetId.isBlank()) return Optional.empty();
-        if (targetId.equalsIgnoreCase("empty")) return Optional.of(ItemStack.EMPTY);
-        ResourceLocation key = ResourceLocation.tryParse(targetId);
+        String trimmed = targetId.trim();
+        if (trimmed.equalsIgnoreCase("empty")) return Optional.of(ItemStack.EMPTY);
+        if (trimmed.regionMatches(true, 0, CHEMICAL_PREFIX, 0, CHEMICAL_PREFIX.length())) {
+            String chemicalId = trimmed.substring(CHEMICAL_PREFIX.length()).trim();
+            return externalKeys.wrap(CHEMICAL_KEY_TYPE_ID, chemicalId, 1L);
+        }
+        ResourceLocation key = ResourceLocation.tryParse(trimmed);
         if (key == null) return Optional.empty();
         Optional<Item> item = BuiltInRegistries.ITEM.getOptional(key);
         if (item.isPresent() && item.get() != Items.AIR) {
@@ -220,10 +257,10 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
         if (fluid.isPresent() && fluid.get() != Fluids.EMPTY) {
             return Optional.of(GenericStack.wrapInItemStack(AEFluidKey.of(fluid.get()), 1));
         }
-        return Optional.empty();
+        return externalKeys.wrap(CHEMICAL_KEY_TYPE_ID, trimmed, 1L);
     }
 
-    // 调用 AE2 公开的 P2PTunnelAttunement 查这件物品能调谐出哪种 P2P 通道。
+    // 调用 AE2 公开的 P2PTunnelAttunement 查这件物品能调谐出哪种 P2P 通道（含应用机械化学品 P2P）。
     @Override public Optional<String> p2pAttunementOf(ItemStack stack) {
         if (stack == null || stack.isEmpty()) return Optional.empty();
         ItemStack tunnel = P2PTunnelAttunement.getTunnelPartByTriggerItem(stack);
@@ -236,6 +273,7 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
             case "ae2:fluid_p2p_tunnel" -> Optional.of("fluid");
             case "ae2:fe_p2p_tunnel" -> Optional.of("fe");
             case "ae2:light_p2p_tunnel" -> Optional.of("light");
+            case "appmek:chemical_p2p_tunnel" -> Optional.of("chemical");
             default -> Optional.empty();
         };
     }
@@ -268,11 +306,18 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
         return menuTypeIdOf(menu).equals(menuTypeId.toLowerCase(Locale.ROOT));
     }
 
-    // 监视器二次右键流体容器物品时切到内含流体：按 AE2 原生 ContainerItemStrategies 核对容器内流体。
-    @Override public boolean isFluidContainerFor(ItemStack stack, String fluidId) {
-        if (stack == null || stack.isEmpty() || fluidId == null) return false;
+    // 监视器二次右键流体或化学品容器物品时切到内含物：按 AE2 原生 ContainerItemStrategies 核对容器内键，支持 chemical:<id> 消歧。
+    @Override public boolean isFluidContainerFor(ItemStack stack, String targetId) {
+        if (stack == null || stack.isEmpty() || targetId == null || targetId.isBlank()) return false;
         GenericStack contained = ContainerItemStrategies.getContainedStack(stack);
-        return contained != null && contained.what().getId().toString().equals(fluidId);
+        if (contained == null) return false;
+        String trimmed = targetId.trim();
+        if (trimmed.regionMatches(true, 0, CHEMICAL_PREFIX, 0, CHEMICAL_PREFIX.length())) {
+            String bareId = trimmed.substring(CHEMICAL_PREFIX.length()).trim();
+            return CHEMICAL_KEY_TYPE_ID.equals(contained.what().getType().getId().toString())
+                    && contained.what().getId().toString().equals(bareId);
+        }
+        return contained.what().getId().toString().equals(trimmed);
     }
 
     private static void readUpgradeableSettings(UpgradeableMenu<?> menu, Map<String, String> settings) {
@@ -284,10 +329,18 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
 
     private static void readKeyTypes(KeyTypeSelectionMenu menu, Map<String, Boolean> keyTypes) {
         Map<AEKeyType, Boolean> synced = menu.getClientKeyTypeSelection().keyTypes();
-        Boolean items = synced.get(AEKeyType.items());
-        if (items != null) keyTypes.put("item", items);
-        Boolean fluids = synced.get(AEKeyType.fluids());
-        if (fluids != null) keyTypes.put("fluid", fluids);
+        for (Map.Entry<AEKeyType, Boolean> entry : synced.entrySet()) {
+            AEKeyType type = entry.getKey();
+            Boolean enabled = entry.getValue();
+            if (type == null || enabled == null) continue;
+            if (type == AEKeyType.items()) {
+                keyTypes.put("item", enabled);
+            } else if (type == AEKeyType.fluids()) {
+                keyTypes.put("fluid", enabled);
+            } else if (CHEMICAL_KEY_TYPE_ID.equals(type.getId().toString())) {
+                keyTypes.put("chemical", enabled);
+            }
+        }
     }
 
     private static List<MenuSlotEntry> readSemanticSlots(AEBaseMenu menu, SlotSemantic semantic, boolean unwrapGeneric) {
@@ -299,21 +352,30 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
             boolean enabled = !(slot instanceof AppEngSlot aeSlot) || aeSlot.isSlotEnabled();
             ItemStack stack = slot.getItem();
             if (stack.isEmpty()) {
-                list.add(new MenuSlotEntry(slot.index, i, enabled, null, 0L));
+                list.add(new MenuSlotEntry(slot.index, i, enabled, null, 0L, ""));
                 continue;
             }
             if (unwrapGeneric) {
                 GenericStack generic = GenericStack.fromItemStack(stack);
                 if (generic != null) {
                     long count = generic.amount() <= 0 ? 1L : generic.amount();
-                    list.add(new MenuSlotEntry(slot.index, i, enabled, generic.what().getId().toString(), count));
+                    String keyType = keyTypeCategory(generic.what());
+                    list.add(new MenuSlotEntry(slot.index, i, enabled, generic.what().getId().toString(), count,
+                            keyType));
                     continue;
                 }
             }
             String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-            list.add(new MenuSlotEntry(slot.index, i, enabled, id, stack.getCount()));
+            list.add(new MenuSlotEntry(slot.index, i, enabled, id, stack.getCount(), "item"));
         }
         return List.copyOf(list);
+    }
+
+    private static String keyTypeCategory(AEKey key) {
+        if (key.getType() == AEKeyType.items()) return "item";
+        if (key.getType() == AEKeyType.fluids()) return "fluid";
+        String typeId = key.getType().getId().toString();
+        return CHEMICAL_KEY_TYPE_ID.equals(typeId) ? "chemical" : typeId;
     }
 
     private static void putEnum(Map<String, String> settings, String key, Enum<?> value) {

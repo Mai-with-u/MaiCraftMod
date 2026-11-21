@@ -36,10 +36,14 @@ final class Ae2PartKeys {
     static final String MENU_CELL_TRANSFER = "ae2:ioport";
     static final String MENU_WIRELESS_ACCESS_POINT = "ae2:wireless_access_point";
 
-    /** 常用物品 ID。 */
+    /** 常用物品 ID 与外部扩展键常量。 */
     static final String MEMORY_CARD = "ae2:memory_card";
     static final String CAPACITY_CARD = "ae2:capacity_card";
     static final String WIRELESS_BOOSTER = "ae2:wireless_booster";
+    /** 应用机械化学品键类型 ID（字符串字面量，零模组类依赖）。 */
+    static final String CHEMICAL_KEY_TYPE = "appmek:chemical";
+    static final String CHEMICAL_PREFIX = "chemical:";
+    static final String CHEMICAL_P2P_ITEM = "appmek:chemical_p2p_tunnel";
 
     /** 各配置项的标准选项列表（全小写）。 */
     static final List<String> REDSTONE_MODES = List.of("ignore", "low_signal", "high_signal", "signal_pulse");
@@ -57,6 +61,8 @@ final class Ae2PartKeys {
     static final List<String> OPERATION_MODES = List.of("empty", "fill");
     static final List<String> FULLNESS_MODES = List.of("empty", "half", "full");
     static final List<String> P2P_ATTUNEMENTS = List.of("me", "redstone", "item", "fluid", "fe", "light");
+    static final List<String> P2P_ATTUNEMENTS_WITH_CHEMICAL = List.of(
+            "me", "redstone", "item", "fluid", "fe", "light", "chemical");
     static final List<String> P2P_ROLES = List.of("input", "output");
 
     /** 10 类线缆部件中容量卡未插时固定启用的基础过滤槽数（2 行 × 9 列）。F 游戏事实。 */
@@ -74,7 +80,8 @@ final class Ae2PartKeys {
             "ae2:item_p2p_tunnel", "item",
             "ae2:fluid_p2p_tunnel", "fluid",
             "ae2:fe_p2p_tunnel", "fe",
-            "ae2:light_p2p_tunnel", "light");
+            "ae2:light_p2p_tunnel", "light",
+            CHEMICAL_P2P_ITEM, "chemical");
 
     private static final Map<String, String> ATTUNEMENT_TO_P2P_ITEM = Map.of(
             "me", "ae2:me_p2p_tunnel",
@@ -82,7 +89,8 @@ final class Ae2PartKeys {
             "item", "ae2:item_p2p_tunnel",
             "fluid", "ae2:fluid_p2p_tunnel",
             "fe", "ae2:fe_p2p_tunnel",
-            "light", "ae2:light_p2p_tunnel");
+            "light", "ae2:light_p2p_tunnel",
+            "chemical", CHEMICAL_P2P_ITEM);
 
     /** 线缆部件种类（按注册物品 ID 分类）。 */
     enum PartKind {
@@ -184,17 +192,23 @@ final class Ae2PartKeys {
         }
     }
 
-    /** 解析 ME 接口备料项值：empty 或 "<item_or_fluid_id>" 或 "<item_or_fluid_id> <正整数数量>"。 */
+    /** 当前世界可用的 P2P 调谐可选值：仅在化学品键已登记或通道已是化学品 P2P 时附带 chemical。 */
+    static List<String> p2pAttunements(boolean chemicalSupported) {
+        return chemicalSupported ? P2P_ATTUNEMENTS_WITH_CHEMICAL : P2P_ATTUNEMENTS;
+    }
+
+    /** 解析 ME 接口备料项值：empty 或 "<物品/流体/化学品 ID>" 或 "<ID> <正整数数量>"（支持 chemical:<id> 前缀）。 */
     static Optional<StockValue> parseStockValue(String raw) {
         if (raw == null) return Optional.empty();
         String trimmed = raw.trim();
         if (trimmed.isEmpty()) return Optional.empty();
         if (trimmed.equalsIgnoreCase(EMPTY)) return Optional.of(new StockValue(true, null, null));
         String[] parts = trimmed.split("\\s+");
+        if (!isValidTargetToken(parts[0])) return Optional.empty();
         if (parts.length == 1) {
-            return parts[0].contains(":") ? Optional.of(new StockValue(false, parts[0], null)) : Optional.empty();
+            return Optional.of(new StockValue(false, parts[0], null));
         }
-        if (parts.length == 2 && parts[0].contains(":")) {
+        if (parts.length == 2) {
             try {
                 int amount = Integer.parseInt(parts[1]);
                 if (amount <= 0) return Optional.empty();
@@ -204,6 +218,15 @@ final class Ae2PartKeys {
             }
         }
         return Optional.empty();
+    }
+
+    private static boolean isValidTargetToken(String token) {
+        if (token == null || token.isBlank()) return false;
+        if (token.regionMatches(true, 0, CHEMICAL_PREFIX, 0, CHEMICAL_PREFIX.length())) {
+            String bare = token.substring(CHEMICAL_PREFIX.length());
+            return !bare.isBlank() && bare.contains(":");
+        }
+        return token.contains(":");
     }
 
     /** 解析元件工作台 cell 键的值：in:<item_id> 或 out。 */
@@ -246,9 +269,16 @@ final class Ae2PartKeys {
     /** 列出某类线缆部件（或方块 ME 接口）的全部局部设置项，现值优先读缓存/客户端，未读过填 unknown。 */
     static List<MachineSetting> partSettings(PartKind kind, String partItemId, Map<String, String> values,
                                              Ae2PartControl.ClientPartReading clientReading) {
+        return partSettings(kind, partItemId, values, clientReading, false);
+    }
+
+    /** 同 {@link #partSettings}，并按应用机械是否可用决定是否暴露化学品键类型与化学品 P2P 调谐选项。 */
+    static List<MachineSetting> partSettings(PartKind kind, String partItemId, Map<String, String> values,
+                                             Ae2PartControl.ClientPartReading clientReading,
+                                             boolean chemicalSupported) {
         List<MachineSetting> list = new ArrayList<>();
         switch (kind) {
-            case IMPORT_BUS -> addImportBusSettings(list, values);
+            case IMPORT_BUS -> addImportBusSettings(list, values, chemicalSupported);
             case EXPORT_BUS -> addExportBusSettings(list, values);
             case STORAGE_BUS -> addStorageBusSettings(list, values);
             case INTERFACE -> addInterfaceSettings(list, values);
@@ -257,17 +287,23 @@ final class Ae2PartKeys {
             case LEVEL_EMITTER -> addLevelEmitterSettings(list, values);
             case ENERGY_LEVEL_EMITTER -> addEnergyEmitterSettings(list, values);
             case STORAGE_MONITOR, CONVERSION_MONITOR -> addMonitorSettings(list, values, clientReading);
-            case P2P_TUNNEL -> addP2pSettings(list, partItemId, values);
+            case P2P_TUNNEL -> addP2pSettings(list, partItemId, values, chemicalSupported);
         }
         return List.copyOf(list);
     }
 
-    private static void addImportBusSettings(List<MachineSetting> list, Map<String, String> values) {
+    private static void addImportBusSettings(List<MachineSetting> list, Map<String, String> values,
+                                             boolean chemicalSupported) {
         list.add(setting("redstone_mode", values, REDSTONE_MODES, "红石控制模式（需装红石卡才受红石控制）"));
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "模糊匹配模式（需装模糊卡才生效）"));
         list.add(setting("key_type.item", values, BOOL_CHOICES, "是否启用导入物品"));
         list.add(setting("key_type.fluid", values, BOOL_CHOICES, "是否启用导入流体"));
-        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "过滤槽（物品或流体 ID，或 empty；18 格以上需容量卡解锁）");
+        // 仅在化学品键已登记或菜单同步已回报过 key_type.chemical 时暴露，避免未装应用机械时冒出无效设置键。
+        if (chemicalSupported || values.containsKey("key_type.chemical")) {
+            list.add(setting("key_type.chemical", values, BOOL_CHOICES, "是否启用导入化学品"));
+        }
+        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values,
+                "过滤槽（物品、流体或化学品 ID，支持 chemical:<id> 前缀，或 empty；18 格以上需容量卡解锁）");
         addIndexed(list, "upgrade.", BUS_UPGRADE_SLOTS, values, "升级卡槽（升级卡 ID 或 empty）");
     }
 
@@ -329,12 +365,15 @@ final class Ae2PartKeys {
                 ? (reading.displayed() == null ? EMPTY : reading.displayed())
                 : values.getOrDefault("displayed", UNKNOWN);
         list.add(new MachineSetting("locked", locked, BOOL_CHOICES, "监视器锁定状态（空手潜行右键切换）"));
-        list.add(new MachineSetting("displayed", displayed, List.of(), "展示物品或流体 ID（解锁后持样本右键设定）"));
+        list.add(new MachineSetting("displayed", displayed, List.of(),
+                "展示物品、流体或化学品 ID（支持 chemical:<id>；解锁后持样本右键，容器二次右键切内含物）"));
     }
 
-    private static void addP2pSettings(List<MachineSetting> list, String partItemId, Map<String, String> values) {
+    private static void addP2pSettings(List<MachineSetting> list, String partItemId, Map<String, String> values,
+                                       boolean chemicalSupported) {
         String attunement = attunementOfPart(partItemId).orElse(values.getOrDefault("attunement", UNKNOWN));
-        list.add(new MachineSetting("attunement", attunement, P2P_ATTUNEMENTS,
+        boolean allowChemical = chemicalSupported || CHEMICAL_P2P_ITEM.equals(partItemId);
+        list.add(new MachineSetting("attunement", attunement, p2pAttunements(allowChemical),
                 "P2P 调谐类型（手持对应调谐物品右键替换，不消耗物品）"));
         list.add(setting("p2p_role", values, P2P_ROLES,
                 "P2P 角色：input（主手内存卡潜行右键复制并分配频率）或 output（主手内存卡普通右键绑定）"));

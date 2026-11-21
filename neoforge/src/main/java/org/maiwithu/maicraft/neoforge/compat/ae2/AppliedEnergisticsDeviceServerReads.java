@@ -21,6 +21,8 @@ import appeng.api.networking.IGridNode;
 import appeng.api.networking.spatial.ISpatialService;
 import appeng.api.parts.IPart;
 import appeng.api.parts.IPartHost;
+import appeng.api.stacks.AEKey;
+import appeng.api.stacks.AEKeyType;
 import appeng.api.stacks.GenericStack;
 import appeng.api.upgrades.IUpgradeInventory;
 import appeng.api.upgrades.IUpgradeableObject;
@@ -127,10 +129,10 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
             readings.put("priority", priorityHost.getPriority());
         }
         if (part instanceof IConfigInvHost configHost) {
-            readings.put("config_slots", readGenericSlots(configHost.getConfig()));
+            putGenericSlots(readings, "config_slots", "config_slot_types", configHost.getConfig());
         }
         if (part instanceof InterfaceLogicHost interfaceHost) {
-            readings.put("storage_slots", readGenericSlots(interfaceHost.getStorage()));
+            putGenericSlots(readings, "storage_slots", "storage_slot_types", interfaceHost.getStorage());
         }
         if (part instanceof AbstractLevelEmitterPart emitter) {
             readings.put("reporting_value", emitter.getReportingValue());
@@ -233,7 +235,7 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         FuzzyMode fuzzy = cell.isEmpty() ? null : cell.get(AEComponents.STORAGE_CELL_FUZZY_MODE);
         readings.put("fuzzy_mode", fuzzy == null ? "" : fuzzy.name().toLowerCase(Locale.ROOT));
         readings.put("upgrade_slot_count", upgrades == null ? 0 : upgrades.size());
-        readings.put("config_slots", readGenericSlots(workbench.getConfig()));
+        putGenericSlots(readings, "config_slots", "config_slot_types", workbench.getConfig());
         return new DeviceSnapshot("cell_workbench", blockId, "", "",
                 exportSettings(workbench), readUpgrades(workbench), readings);
     }
@@ -447,10 +449,10 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
             readings.put("priority", priorityHost.getPriority());
         }
         if (entity instanceof IConfigInvHost configHost) {
-            readings.put("config_slots", readGenericSlots(configHost.getConfig()));
+            putGenericSlots(readings, "config_slots", "config_slot_types", configHost.getConfig());
         }
         if (entity instanceof InterfaceLogicHost interfaceHost) {
-            readings.put("storage_slots", readGenericSlots(interfaceHost.getStorage()));
+            putGenericSlots(readings, "storage_slots", "storage_slot_types", interfaceHost.getStorage());
         }
         if (settings.isEmpty() && upgrades.isEmpty() && readings.isEmpty()) {
             return Optional.empty();
@@ -480,15 +482,34 @@ public final class AppliedEnergisticsDeviceServerReads implements Ae2DeviceServe
         return out;
     }
 
-    private static Map<String, String> readGenericSlots(GenericStackInv inv) {
-        Map<String, String> out = new LinkedHashMap<>();
-        if (inv == null) return out;
-        for (int i = 0; i < inv.size(); i++) {
-            GenericStack stack = inv.getStack(i);
-            if (stack == null) continue;
-            out.put(Integer.toString(i), stack.what().getId().toString() + " x" + stack.amount());
+    // 保留原有 config_slots/storage_slots 文本格式向后兼容；当存在流体、化学品等非物品槽位时补充介质类型映射表。
+    private static void putGenericSlots(Map<String, Object> readings, String slotsKey, String typesKey,
+                                        GenericStackInv inv) {
+        Map<String, String> slots = new LinkedHashMap<>();
+        Map<String, String> types = new LinkedHashMap<>();
+        boolean hasNonItem = false;
+        if (inv != null) {
+            for (int i = 0; i < inv.size(); i++) {
+                GenericStack stack = inv.getStack(i);
+                if (stack == null) continue;
+                String indexKey = Integer.toString(i);
+                slots.put(indexKey, stack.what().getId().toString() + " x" + stack.amount());
+                String category = keyTypeCategory(stack.what());
+                types.put(indexKey, category);
+                if (!"item".equals(category)) hasNonItem = true;
+            }
         }
-        return out;
+        readings.put(slotsKey, slots);
+        if (hasNonItem) {
+            readings.put(typesKey, types);
+        }
+    }
+
+    private static String keyTypeCategory(AEKey key) {
+        if (key.getType() == AEKeyType.items()) return "item";
+        if (key.getType() == AEKeyType.fluids()) return "fluid";
+        String typeId = key.getType().getId().toString();
+        return "appmek:chemical".equals(typeId) ? "chemical" : typeId;
     }
 
     private static Map<String, Integer> readEnchantments(ItemEnchantments enchantments) {

@@ -5,9 +5,11 @@ import java.time.Instant;
 import java.util.List;
 
 import org.maiwithu.maicraft.compat.CompatModule;
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.appmek.AppMekCompat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
 import org.maiwithu.maicraft.compat.sable.SableCompat;
 import org.maiwithu.maicraft.compat.sable.SimulatedCompat;
@@ -34,6 +36,7 @@ import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTools;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTransforms;
+import org.maiwithu.maicraft.neoforge.compat.appmek.AppliedMekanisticsReads;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackMenus;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateBeltReads;
@@ -79,6 +82,8 @@ public final class ClientCompatCatalog {
     public static List<SupportedMod<CompatModule>> mods() {
         // Sable 与 Simulated 两个入口共用一本逐格读的记事本：在船上施工改了方块作废一次，两边都照新结构读。
         StructureScans scans = new StructureScans();
+        // AE2 与提供外部介质键的附属模组（如应用机械）共用这份实例级包装表，彼此零代码依赖且无静态可变状态。
+        ExternalKeyWrappers externalKeys = new ExternalKeyWrappers();
         return List.of(
                 // 精妙背包：按 3.25.69（精妙核心 1.4.72）编译，字节码签名与 3.26.17 逐项核对一致；装了 3.27 及以上不登记。
                 new SupportedMod<>(BackpackCompat.MOD_ID, "精妙背包", new VerifiedVersions("3.25.69", "3.27"),
@@ -89,9 +94,9 @@ public final class ClientCompatCatalog {
                         () -> new Ae2Compat(new AppliedEnergisticsTerminals(), new AppliedEnergisticsTerminalMenu(),
                                 new AppliedEnergisticsGrid(), new AppliedEnergisticsPatterns(),
                                 new AppliedEnergisticsTransforms(), new AppliedEnergisticsInscribers(),
-                                new AppliedEnergisticsMenuSlots(), new AppliedEnergisticsMachines(),
-                                new AppliedEnergisticsParts(), new AppliedEnergisticsTools(),
-                                new AppliedEnergisticsAdvanced())),
+                                new AppliedEnergisticsMenuSlots(), new AppliedEnergisticsMachines(externalKeys),
+                                new AppliedEnergisticsParts(externalKeys), new AppliedEnergisticsTools(),
+                                new AppliedEnergisticsAdvanced(), externalKeys)),
                 // 思索（Ponder）：随 Create 6.0.11 装的 1.0.82；装了 1.0.83 及以上不登记，实测通过后再放宽
                 // （读旁白要用它的几个非公开字段，换了版本可能改名）。
                 new SupportedMod<>(PonderCompat.MOD_ID, "思索（Ponder）", new VerifiedVersions("1.0.82", "1.0.83"),
@@ -138,6 +143,9 @@ public final class ClientCompatCatalog {
                         () -> new TouhouLittleMaidCompat(new TouhouLittleMaidReads(), new TouhouLittleMaidActions())),
                 // 农夫乐事：按实测实例装的 1.3.2 编译（源码仓库在 1.3.4 上核对的槽位与供热事实）；装了 1.3.3 及以上不登记。
                 new SupportedMod<>(FarmersDelightCompat.MOD_ID, "农夫乐事", new VerifiedVersions("1.3.2", "1.3.3"),
-                        () -> new FarmersDelightCompat(new FarmersDelightClientReads())));
+                        () -> new FarmersDelightCompat(new FarmersDelightClientReads())),
+                // 应用机械（Applied Mekanistics）：按 1.6.3 编译；装了 1.7 及以上不登记，实测通过后再放宽。
+                new SupportedMod<>(AppMekCompat.MOD_ID, "应用机械", new VerifiedVersions("1.6.3", "1.7"),
+                        () -> new AppMekCompat(new AppliedMekanisticsReads(), externalKeys)));
     }
 }

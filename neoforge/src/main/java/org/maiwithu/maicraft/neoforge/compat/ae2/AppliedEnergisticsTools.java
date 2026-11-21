@@ -161,12 +161,16 @@ public final class AppliedEnergisticsTools implements Ae2ToolReads {
         };
     }
 
-    // 免开界面读取便携存储元件的电量、字节/种类容量与客户端同步的 STORAGE_CELL_INV 库存。
+    // 免开界面读取 AE2 原生物品/流体便携存储元件的电量、字节/种类容量与同步库存；排除附属化学品等非物品/流体便携元件。
     @Override public Optional<PortableCellSnapshot> readPortableCell(ItemStack stack) {
         if (stack == null || stack.isEmpty() || !(stack.getItem() instanceof PortableCellItem cell)) {
             return Optional.empty();
         }
-        boolean fluid = cell.getKeyType() == AEKeyType.fluids();
+        AEKeyType keyType = cell.getKeyType();
+        if (keyType != AEKeyType.items() && keyType != AEKeyType.fluids()) {
+            return Optional.empty();
+        }
+        boolean fluid = keyType == AEKeyType.fluids();
         double currentEnergy = cell.getAECurrentPower(stack);
         double maxEnergy = cell.getAEMaxPower(stack);
         long totalBytes = cell.getBytes(stack);

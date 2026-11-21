@@ -6,6 +6,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -54,6 +55,7 @@ import net.minecraft.world.phys.AABB;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.IFluidTank;
 
+import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
 
 /**
@@ -63,7 +65,16 @@ import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
  */
 public final class AppliedEnergisticsMachines implements Ae2MachineReads {
 
-    private final AppliedEnergisticsMachinesMenus menus = new AppliedEnergisticsMachinesMenus();
+    private final AppliedEnergisticsMachinesMenus menus;
+
+    /** 兼容未注入外部扩展键表的旧构造。 */
+    public AppliedEnergisticsMachines() {
+        this(ExternalKeyWrappers.NONE);
+    }
+
+    public AppliedEnergisticsMachines(ExternalKeyWrappers externalKeys) {
+        this.menus = new AppliedEnergisticsMachinesMenus(Objects.requireNonNull(externalKeys, "externalKeys"));
+    }
 
     @Override public Optional<ChargerView> chargerAt(ClientLevel level, BlockPos at) {
         if (level == null || !level.isLoaded(at)) return Optional.empty();

@@ -140,6 +140,24 @@ class Ae2DeviceServerReadsTest {
     }
 
     @Test
+    void 含非物品过滤与备料槽时同步写出槽位介质类型映射表() {
+        Map<String, Object> readings = new LinkedHashMap<>();
+        readings.put("config_slots", Map.of("0", "mekanism:hydrogen x16000", "1", "minecraft:iron_ingot x64"));
+        readings.put("config_slot_types", Map.of("0", "chemical", "1", "item"));
+        readings.put("storage_slots", Map.of("0", "mekanism:hydrogen x8000"));
+        readings.put("storage_slot_types", Map.of("0", "chemical"));
+        DeviceSnapshot iface = new DeviceSnapshot("cable_part", "ae2:cable_bus", "east", "ae2:cable_interface",
+                Map.of(), List.of(), readings);
+
+        JsonObject json = Ae2DeviceServerReads.toJson(iface);
+        JsonObject body = json.getAsJsonObject("readings");
+        assertEquals("mekanism:hydrogen x16000", body.getAsJsonObject("config_slots").get("0").getAsString());
+        assertEquals("chemical", body.getAsJsonObject("config_slot_types").get("0").getAsString());
+        assertEquals("item", body.getAsJsonObject("config_slot_types").get("1").getAsString());
+        assertEquals("chemical", body.getAsJsonObject("storage_slot_types").get("0").getAsString());
+    }
+
+    @Test
     void 空读端返回空快照() {
         assertEquals(Optional.empty(), Ae2DeviceServerReads.Reader.NONE.read(null, BlockPos.ZERO, null));
     }

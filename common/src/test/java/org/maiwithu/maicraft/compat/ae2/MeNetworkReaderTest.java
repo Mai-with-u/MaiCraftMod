@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -131,6 +132,31 @@ class MeNetworkReaderTest {
         assertTrue(stale.note().contains("秒前收到的读数"), stale.note());
         assertTrue(stale.note().contains("还在路上"), stale.note());
         assertEquals(2, reads.asked.size());
+    }
+
+    @Test
+    void 服务端附带化学品存量时在网络汇总中保留种类数与可读摘要() {
+        JsonObject reply = new JsonObject();
+        reply.addProperty("found", true);
+        reply.addProperty("stored_types", 5);
+        reply.addProperty("stored_amount", 90000L);
+        reply.addProperty("chemical_types", 3);
+        JsonArray chems = new JsonArray();
+        JsonObject h2 = new JsonObject();
+        h2.addProperty("id", "mekanism:hydrogen");
+        h2.addProperty("amount", 64000L);
+        chems.add(h2);
+        JsonObject o2 = new JsonObject();
+        o2.addProperty("id", "mekanism:oxygen");
+        o2.addProperty("amount", 16000L);
+        chems.add(o2);
+        reply.add("stored_chemicals", chems);
+
+        NetworkSummary summary = MeNetworkReader.MeSummaries.of(NETWORK_ID, reply, Map.of());
+        assertTrue(summary.readable());
+        assertEquals(3.0, summary.readings().get("chemical_types"));
+        assertEquals("mekanism:hydrogen 64000 mB, mekanism:oxygen 16000 mB 等共 3 种",
+                summary.readings().get("stored_chemicals"));
     }
 
     /** 记下问出去的请求、按编号给回答的替身：回答没登记的当"还在等"。 */

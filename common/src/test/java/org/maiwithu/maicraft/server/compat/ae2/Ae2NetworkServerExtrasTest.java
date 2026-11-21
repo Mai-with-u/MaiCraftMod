@@ -82,6 +82,32 @@ class Ae2NetworkServerExtrasTest {
         assertEquals(9, group.get("total_slots").getAsInt());
         assertEquals(3, group.get("used_slots").getAsInt());
         assertEquals(2, group.getAsJsonArray("outputs").size());
+        // 无化学品库存时不附加空化学品字段，保持旧载荷结构干净。
+        assertFalse(base.has("chemical_types"));
+        assertFalse(base.has("stored_chemicals"));
+    }
+
+    @Test
+    void 存在化学品库存时向后兼容追加化学品总数与存量明细且不动原有总量口径() {
+        JsonObject base = Ae2ServerCompat.json(new Ae2GridReads.GridSummary("9f02", 16, "online", false, "default",
+                6, 8, "", true, 8000.0, 16000.0, 12, 120000L, 1, 0));
+        NetworkDetail detail = new NetworkDetail(
+                64.0, 12.0, 2.0, List.of(), List.of(), List.of(),
+                3,
+                List.of(
+                        new StockAmount("mekanism:hydrogen", 64000L),
+                        new StockAmount("mekanism:oxygen", 32000L)));
+
+        Ae2NetworkServerExtras.appendTo(base, detail);
+
+        assertEquals(12, base.get("stored_types").getAsInt());
+        assertEquals(120000L, base.get("stored_amount").getAsLong());
+        assertEquals(3, base.get("chemical_types").getAsInt());
+        JsonArray chems = base.getAsJsonArray("stored_chemicals");
+        assertEquals(2, chems.size());
+        assertEquals("mekanism:hydrogen", chems.get(0).getAsJsonObject().get("id").getAsString());
+        assertEquals(64000L, chems.get(0).getAsJsonObject().get("amount").getAsLong());
+        assertEquals("mekanism:oxygen", chems.get(1).getAsJsonObject().get("id").getAsString());
     }
 
     @Test

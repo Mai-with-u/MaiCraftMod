@@ -224,6 +224,42 @@ class Ae2MenuConfigActionTest {
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, disabledFail.problem().kind());
     }
 
+    @Test
+    void 输入总线支持化学品键类型且过滤槽按chemical前缀消歧同名流体() {
+        PartTestFakes.ScriptedSession session = new PartTestFakes.ScriptedSession(Ae2PartKeys.MENU_IMPORT_BUS);
+        session.keyTypes.put("item", true);
+        session.keyTypes.put("fluid", true);
+        session.keyTypes.put("chemical", false);
+        session.configSlots.add(new Ae2PartControl.MenuSlotEntry(5, 0, true, "mekanism:sulfuric_acid", 1L, "fluid"));
+        Ae2PartCache cache = new Ae2PartCache();
+        Ae2Compat compat = PartTestFakes.compat(PartTestFakes.cableGrid(HOST, Map.of()), session);
+        PlayerServices services = PartTestFakes.services(() -> null, ServerReads.NONE);
+
+        // 1. 启用 key_type.chemical 走 SelectKeyTypePacket 并刷新本地缓存。
+        Ae2MenuConfigAction.Spec chemKeySpec = new Ae2MenuConfigAction.Spec(HOST, Direction.NORTH, "输入总线",
+                Ae2PartKeys.MENU_IMPORT_BUS, Ae2MenuConfigAction.Kind.KEY_TYPE, "key_type.chemical", "true",
+                null, -1, false, null);
+        assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
+                chemKeySpec, () -> PartTestFakes.immediateOpening(session))));
+        assertTrue(session.log.contains("selectKeyType:chemical:true"));
+        assertEquals("true", cache.peekSettings(HOST, Direction.NORTH, ServerReads.NONE).get("key_type.chemical"));
+
+        // 2. 槽里是同名流体时，chemical:<id> 不能误判已匹配，必须发 SET_FILTER 覆盖成化学品后才确认。
+        assertFalse(Ae2PartSnapshots.matchesFilterTarget(session.configSlots.getFirst(),
+                "chemical:mekanism:sulfuric_acid"));
+        Ae2PartControl.MenuSlotEntry chemSlot = new Ae2PartControl.MenuSlotEntry(
+                5, 0, true, "mekanism:sulfuric_acid", 1L, "chemical");
+        assertTrue(Ae2PartSnapshots.matchesFilterTarget(chemSlot, "chemical:mekanism:sulfuric_acid"));
+        assertTrue(Ae2PartSnapshots.matchesFilterTarget(chemSlot, "mekanism:sulfuric_acid"));
+
+        // 3. ME 接口备料解析支持 chemical:<id> 与数量。
+        Ae2PartKeys.StockValue parsed = Ae2PartKeys.parseStockValue("chemical:mekanism:hydrogen 16000").orElseThrow();
+        assertFalse(parsed.empty());
+        assertEquals("chemical:mekanism:hydrogen", parsed.targetId());
+        assertEquals(16000, parsed.amount());
+        assertTrue(Ae2PartKeys.parseStockValue("chemical:bad").isEmpty());
+    }
+
     private static ActionStatus runToEnd(Action action) {
         ActionStatus last = ActionStatus.running();
         for (int i = 0; i < 60; i++) {

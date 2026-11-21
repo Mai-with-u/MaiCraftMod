@@ -87,16 +87,31 @@ final class Ae2PartSnapshots {
         return Optional.empty();
     }
 
+    /** 检查某过滤槽或备料槽目标是否已匹配目标 ID（支持 {@code chemical:<id>} 显式核对化学品键类别）。 */
+    static boolean matchesFilterTarget(Ae2PartControl.MenuSlotEntry slot, String wantedTarget) {
+        if (slot == null || slot.isEmpty() || wantedTarget == null || wantedTarget.isBlank()) return false;
+        String trimmed = wantedTarget.trim();
+        if (trimmed.regionMatches(true, 0, Ae2PartKeys.CHEMICAL_PREFIX, 0, Ae2PartKeys.CHEMICAL_PREFIX.length())) {
+            String bareId = trimmed.substring(Ae2PartKeys.CHEMICAL_PREFIX.length()).trim();
+            boolean typeOk = slot.keyType().isEmpty() || "chemical".equalsIgnoreCase(slot.keyType());
+            return typeOk && bareId.equals(slot.itemId());
+        }
+        return trimmed.equals(slot.itemId());
+    }
+
     /** 检查某备料槽内容是否已经满足目标备料规格。 */
     static boolean matchesStock(Ae2PartControl.MenuSlotEntry slot, Ae2PartKeys.StockValue wanted) {
         if (wanted.empty()) return slot.isEmpty();
-        if (slot.isEmpty() || !wanted.targetId().equals(slot.itemId())) return false;
+        if (slot.isEmpty() || !matchesFilterTarget(slot, wanted.targetId())) return false;
         return wanted.amount() == null || slot.count() == wanted.amount();
     }
 
     private static String formatConfigSlot(Ae2PartControl.MenuSlotEntry slot, boolean includeAmount) {
         if (slot.isEmpty()) return Ae2PartKeys.EMPTY;
-        if (!includeAmount) return slot.itemId();
-        return slot.itemId() + " " + Math.max(1L, slot.count());
+        // 化学品槽在读回缓存时标明 chemical: 前缀，避免与同名流体产生单位与介质歧义。
+        String target = "chemical".equalsIgnoreCase(slot.keyType())
+                ? Ae2PartKeys.CHEMICAL_PREFIX + slot.itemId() : slot.itemId();
+        if (!includeAmount) return target;
+        return target + " " + Math.max(1L, slot.count());
     }
 }
