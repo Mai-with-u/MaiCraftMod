@@ -115,7 +115,7 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
         IPart part = partHost.getPart(side);
         if (part instanceof AbstractMonitorPart monitor) {
             AEKey displayed = monitor.getDisplayed();
-            String id = displayed == null ? null : displayed.getId().toString();
+            String id = formatMonitorDisplayed(displayed);
             return Optional.of(ClientPartReading.monitor(id, monitor.getAmount(), monitor.canCraft(),
                     monitor.isLocked()));
         }
@@ -376,6 +376,13 @@ public final class AppliedEnergisticsParts implements Ae2PartControl {
         if (key.getType() == AEKeyType.fluids()) return "fluid";
         String typeId = key.getType().getId().toString();
         return CHEMICAL_KEY_TYPE_ID.equals(typeId) ? "chemical" : typeId;
+    }
+
+    // 监视器展示应用机械化学品时输出 chemical:<id>，与过滤/备料槽格式对齐并区分同名流体。
+    private static String formatMonitorDisplayed(AEKey displayed) {
+        if (displayed == null) return null;
+        String id = displayed.getId().toString();
+        return CHEMICAL_KEY_TYPE_ID.equals(displayed.getType().getId().toString()) ? CHEMICAL_PREFIX + id : id;
     }
 
     private static void putEnum(Map<String, String> settings, String key, Enum<?> value) {

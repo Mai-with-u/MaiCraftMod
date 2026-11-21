@@ -66,7 +66,7 @@ public final class AppMekKnowledge implements KnowledgeSource {
             - 配对（`p2p_role=input|output`）：与其余 AE2 P2P 一致，强制要求主手持有内存卡（`ae2:memory_card`），输入端潜行右键分配频率，输出端普通右键绑定频率。
 
             ## QIO 挂载与放射性 / 聚合器红线
-            - **QIO 仪表盘挂载**：为通用机械 `mekanism:qio_dashboard` 设好频率后，紧挨其贴上 AE2 存储总线（`ae2:storage_bus`），即可将整个 QIO 物品存储挂载进 ME 网络（按网格节点拥有者校核 QIO 安全权限）。
+            - **QIO 仪表盘挂载**：为通用机械 `mekanism:qio_dashboard` 设好频率后，必须把 AE2 存储总线（`ae2:storage_bus`）贴在仪表盘的**背面**（朝向的反面），才能将整个 QIO 存储挂载进 ME 网络（按网格节点拥有者校核 QIO 安全权限）；且该挂载**仅支持物品，不支持化学品与流体**。
             - **放射性化学品与物质聚合器限制**：应用机械主动拒绝放射性化学品进入任何 ME 化学品存储元件、拒绝虚空溢流卡销毁放射性化学品，也拒绝放射性化学品进入物质聚合器（`ae2:condenser`）；核废料、钚、钋等放射性化学品必须使用通用机械专用放射性废料桶与防辐射管线处理。
             """;
 

@@ -376,6 +376,24 @@ class Ae2PartCableOpsTest {
         Map<String, String> merged = cache.peekSettings(HOST, Direction.WEST, ServerReads.NONE);
         assertEquals("chemical:mekanism:sulfuric_acid 16000", merged.get("stock.0"));
         assertEquals("minecraft:water 1000", merged.get("stock.1"));
+
+        // 监视器化学品读回：默认回显 chemical:<id>；缓存记了对应裸 <id> 时回显裸 <id>；同名流体不冒充化学品。
+        Ae2PartControl.ClientPartReading liveChem = Ae2PartControl.ClientPartReading.monitor(
+                "chemical:mekanism:hydrogen", 32000L, false, false);
+        assertEquals("chemical:mekanism:hydrogen",
+                toMap(Ae2PartKeys.partSettings(Ae2PartKeys.PartKind.STORAGE_MONITOR, "ae2:storage_monitor",
+                        Map.of(), liveChem, true)).get("displayed"));
+        assertEquals("chemical:mekanism:hydrogen",
+                toMap(Ae2PartKeys.partSettings(Ae2PartKeys.PartKind.STORAGE_MONITOR, "ae2:storage_monitor",
+                        Map.of("displayed", "chemical:mekanism:hydrogen"), liveChem, true)).get("displayed"));
+        assertEquals("mekanism:hydrogen",
+                toMap(Ae2PartKeys.partSettings(Ae2PartKeys.PartKind.STORAGE_MONITOR, "ae2:storage_monitor",
+                        Map.of("displayed", "mekanism:hydrogen"), liveChem, true)).get("displayed"));
+        Ae2PartControl.ClientPartReading liveFluid = Ae2PartControl.ClientPartReading.monitor(
+                "mekanism:sulfuric_acid", 4000L, false, false);
+        assertEquals("mekanism:sulfuric_acid",
+                toMap(Ae2PartKeys.partSettings(Ae2PartKeys.PartKind.STORAGE_MONITOR, "ae2:storage_monitor",
+                        Map.of("displayed", "chemical:mekanism:sulfuric_acid"), liveFluid, true)).get("displayed"));
     }
 
     private static Map<String, String> toMap(List<MachineSetting> list) {

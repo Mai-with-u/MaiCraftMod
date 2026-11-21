@@ -175,12 +175,12 @@ record PatternEncodingRequest(String mode, List<SlotEntry> inputs, List<SlotEntr
             JsonObject obj = element.getAsJsonObject();
             String fluid = readString(obj, "fluid");
             if (fluid != null && !fluid.isBlank()) {
-                long amount = readLong(obj, "amount", 1000L);
+                long amount = obj.has("amount") ? readLong(obj, "amount", 1000L) : readLong(obj, "count", 1000L);
                 return new SlotEntry("fluid", fluid.trim(), amount);
             }
             String chemical = readString(obj, "chemical");
             if (chemical != null && !chemical.isBlank()) {
-                long amount = readLong(obj, "amount", 1000L);
+                long amount = obj.has("amount") ? readLong(obj, "amount", 1000L) : readLong(obj, "count", 1000L);
                 return new SlotEntry("chemical", chemical.trim(), amount);
             }
             String kind = readString(obj, "kind");

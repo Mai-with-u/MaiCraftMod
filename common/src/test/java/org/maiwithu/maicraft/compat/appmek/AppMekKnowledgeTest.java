@@ -48,6 +48,9 @@ class AppMekKnowledgeTest {
         assertTrue(doc.text().contains("\"kind\":\"chemical\""));
         assertTrue(doc.text().contains("attunement=chemical"));
         assertTrue(doc.text().contains("mekanism:qio_dashboard"));
+        assertTrue(doc.text().contains("背面"));
+        assertTrue(doc.text().contains("仅支持物品"));
+        assertTrue(doc.text().contains("不支持化学品"));
         assertTrue(doc.text().contains("放射性"));
         assertTrue(doc.text().contains("ae2:condenser"));
     }

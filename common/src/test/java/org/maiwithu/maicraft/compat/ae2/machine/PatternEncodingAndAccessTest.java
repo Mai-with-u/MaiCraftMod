@@ -414,6 +414,17 @@ class PatternEncodingAndAccessTest {
         assertEquals("mekanism:oxygen", req.outputs().get(0).id());
         assertEquals(500L, req.outputs().get(0).amount());
 
+        // 简写 {"chemical": ...} 与 {"fluid": ...} 均兼容 count 字段，不再静默回落 1000L。
+        PatternEncodingRequest.ParseResult withCount = PatternEncodingRequest.parse("""
+                {"mode":"processing",
+                 "inputs":[{"chemical":"mekanism:hydrogen","count":500},{"fluid":"minecraft:water","count":250}],
+                 "outputs":[{"chemical":"mekanism:oxygen","count":125}]}
+                """);
+        assertTrue(withCount.ok());
+        assertEquals(500L, withCount.request().inputs().get(0).amount());
+        assertEquals(250L, withCount.request().inputs().get(1).amount());
+        assertEquals(125L, withCount.request().outputs().get(0).amount());
+
         List<String> wrappedCalls = new ArrayList<>();
         AtomicBoolean encoded = new AtomicBoolean(false);
         Ae2MenuSlots menuSlots = new Ae2MenuSlots() {

@@ -225,7 +225,7 @@ class Ae2DirectPartActionTest {
         assertNotNull(missing.problem());
         assertEquals(Problem.Kind.NEED_ITEM, missing.problem().kind());
 
-        // 设置化学品展示（裸 ID 与 chemical:<id> 前缀）：持化学品储罐二次右键切内含化学品，已展示同化学品直接命中。
+        // 设置化学品展示（裸 ID 与 chemical:<id> 前缀）：持化学品储罐二次右键切内含化学品。
         Ae2DirectPartAction.MonitorDisplayPlan switchChem = Ae2DirectPartAction.decideMonitorDisplay(
                 lockedIron, "chemical:mekanism:hydrogen", Optional.empty(), Optional.of("mekanism:basic_chemical_tank"));
         assertNull(switchChem.problem());
@@ -233,11 +233,25 @@ class Ae2DirectPartActionTest {
         assertEquals("mekanism:basic_chemical_tank", switchChem.itemToHold());
         assertTrue(switchChem.needSecondFluidClick());
 
+        // 同名流体正在展示时请求 chemical:<id>：绝不能误判 alreadyMatched，必须换化学品储罐覆盖。
+        Ae2PartControl.ClientPartReading showingFluidAcid = Ae2PartControl.ClientPartReading.monitor(
+                "mekanism:sulfuric_acid", 4000L, false, false);
+        Ae2DirectPartAction.MonitorDisplayPlan fluidVsChem = Ae2DirectPartAction.decideMonitorDisplay(
+                showingFluidAcid, "chemical:mekanism:sulfuric_acid", Optional.empty(),
+                Optional.of("mekanism:basic_chemical_tank"));
+        assertNull(fluidVsChem.problem());
+        assertFalse(fluidVsChem.alreadyMatched());
+        assertEquals("mekanism:basic_chemical_tank", fluidVsChem.itemToHold());
+        assertTrue(fluidVsChem.needSecondFluidClick());
+
+        // 监视器已展示 chemical:<id> 时，带前缀写法与裸化学品 ID 写法都能精确命中。
         Ae2PartControl.ClientPartReading showingHydrogen = Ae2PartControl.ClientPartReading.monitor(
-                "mekanism:hydrogen", 16000L, false, false);
-        Ae2DirectPartAction.MonitorDisplayPlan alreadyChem = Ae2DirectPartAction.decideMonitorDisplay(
-                showingHydrogen, "chemical:mekanism:hydrogen", Optional.empty(), Optional.empty());
-        assertNull(alreadyChem.problem());
-        assertTrue(alreadyChem.alreadyMatched());
+                "chemical:mekanism:hydrogen", 16000L, false, false);
+        assertTrue(Ae2DirectPartAction.decideMonitorDisplay(
+                showingHydrogen, "chemical:mekanism:hydrogen", Optional.empty(), Optional.empty()).alreadyMatched());
+        assertTrue(Ae2DirectPartAction.decideMonitorDisplay(
+                showingHydrogen, "mekanism:hydrogen", Optional.empty(), Optional.empty()).alreadyMatched());
+        assertFalse(Ae2DirectPartAction.matchesMonitorDisplay(
+                "mekanism:sulfuric_acid", "chemical:mekanism:sulfuric_acid"));
     }
 }

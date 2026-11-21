@@ -312,7 +312,8 @@ final class Ae2PartKeys {
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "模糊匹配模式（需装模糊卡才生效）"));
         list.add(setting("craft_only", values, YES_NO, "是否仅靠自动合成输出（需装合成卡）"));
         list.add(setting("scheduling_mode", values, SCHEDULING_MODES, "多过滤槽轮询输出策略"));
-        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "过滤槽（物品或流体 ID，或 empty；18 格以上需容量卡解锁）");
+        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values,
+                "过滤槽（物品、流体或化学品 ID，支持 chemical:<id> 前缀，或 empty；18 格以上需容量卡解锁）");
         addIndexed(list, "upgrade.", BUS_UPGRADE_SLOTS, values, "升级卡槽（升级卡 ID 或 empty）");
     }
 
@@ -323,7 +324,8 @@ final class Ae2PartKeys {
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "模糊匹配模式（需装模糊卡）"));
         list.add(setting("priority", values, List.of(), "网络存取优先级（整数）"));
         list.add(actionSetting(values, "按相邻容器现存物分区（partition）或清空全部过滤（clear）"));
-        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "过滤槽（物品或流体 ID，或 empty；18 格以上需容量卡解锁）");
+        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values,
+                "过滤槽（物品、流体或化学品 ID，支持 chemical:<id> 前缀，或 empty；18 格以上需容量卡解锁）");
         addIndexed(list, "upgrade.", BUS_UPGRADE_SLOTS, values, "升级卡槽（升级卡 ID 或 empty）");
     }
 
@@ -331,7 +333,7 @@ final class Ae2PartKeys {
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "备料模糊匹配模式（需装模糊卡）"));
         list.add(setting("priority", values, List.of(), "ME 接口优先级（整数）"));
         addIndexed(list, "stock.", INTERFACE_STOCK_SLOTS, values,
-                "备料槽（<物品或流体 ID> [数量] 或 empty；支持合成卡自动下单备料）");
+                "备料槽（<物品、流体或化学品 ID> [数量] 或 empty，支持 chemical:<id>；支持合成卡自动下单备料）");
         addIndexed(list, "upgrade.", 1, values, "升级卡槽（模糊卡或合成卡，或 empty）");
     }
 
@@ -339,7 +341,8 @@ final class Ae2PartKeys {
         list.add(setting("place_mode", values, PLACE_MODES, "输出方式：放置方块（block）或扔出掉落物（drop）"));
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "模糊匹配模式（需装模糊卡）"));
         list.add(setting("priority", values, List.of(), "成型面板优先级（整数）"));
-        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "过滤槽（物品或流体 ID，或 empty；18 格以上需容量卡解锁）");
+        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values,
+                "过滤槽（物品、流体或化学品 ID，支持 chemical:<id> 前缀，或 empty；18 格以上需容量卡解锁）");
         addIndexed(list, "upgrade.", BUS_UPGRADE_SLOTS, values, "升级卡槽（升级卡 ID 或 empty）");
     }
 
@@ -348,7 +351,7 @@ final class Ae2PartKeys {
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "模糊匹配模式（需装模糊卡）"));
         list.add(setting("craft_via_redstone", values, YES_NO, "是否按红石信号触发自动合成（需装合成卡）"));
         list.add(setting("reporting_value", values, List.of(), "发信数量阈值（非负整数）"));
-        list.add(setting("filter.0", values, List.of(), "监测目标物品或流体 ID（或 empty）"));
+        list.add(setting("filter.0", values, List.of(), "监测目标物品、流体或化学品 ID（支持 chemical:<id> 或 empty）"));
         list.add(setting("upgrade.0", values, List.of(), "升级卡槽（模糊卡或合成卡，或 empty）"));
     }
 
@@ -361,9 +364,23 @@ final class Ae2PartKeys {
                                            Ae2PartControl.ClientPartReading reading) {
         String locked = reading != null && reading.hasMonitor()
                 ? Boolean.toString(reading.locked()) : values.getOrDefault("locked", UNKNOWN);
-        String displayed = reading != null && reading.hasMonitor()
-                ? (reading.displayed() == null ? EMPTY : reading.displayed())
-                : values.getOrDefault("displayed", UNKNOWN);
+        String displayed;
+        if (reading != null && reading.hasMonitor()) {
+            String live = reading.displayed();
+            if (live == null) {
+                displayed = EMPTY;
+            } else {
+                // 当客户端直读返回 chemical:<id> 而本次缓存刚写入对应裸 <id> 时，按裸 <id> 回显，
+                // 保证无论调用方写 chemical:<id> 还是裸 <id>，MachineConfigureTask 读回都能一次命中不打转。
+                String cached = values.get("displayed");
+                displayed = live.startsWith(CHEMICAL_PREFIX)
+                        && cached != null
+                        && live.equals(CHEMICAL_PREFIX + cached)
+                        ? cached : live;
+            }
+        } else {
+            displayed = values.getOrDefault("displayed", UNKNOWN);
+        }
         list.add(new MachineSetting("locked", locked, BOOL_CHOICES, "监视器锁定状态（空手潜行右键切换）"));
         list.add(new MachineSetting("displayed", displayed, List.of(),
                 "展示物品、流体或化学品 ID（支持 chemical:<id>；解锁后持样本右键，容器二次右键切内含物）"));
@@ -386,7 +403,7 @@ final class Ae2PartKeys {
         list.add(setting("copy_mode", values, COPY_MODES, "取走元件时清空或保留分区配置"));
         list.add(setting("fuzzy_mode", values, FUZZY_MODES, "写入当前元件组件的模糊匹配模式"));
         list.add(actionSetting(values, "按元件现存物自动分区（partition）或清空分区（clear）"));
-        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "分区过滤槽（物品或流体 ID，或 empty）");
+        addIndexed(list, "filter.", MAX_FILTER_SLOTS, values, "分区过滤槽（物品、流体或化学品 ID，支持 chemical:<id> 或 empty）");
         addIndexed(list, "upgrade.", WORKBENCH_UPGRADE_SLOTS, values, "元件升级卡槽（仅当前元件激活槽位内可放取）");
         return List.copyOf(list);
     }

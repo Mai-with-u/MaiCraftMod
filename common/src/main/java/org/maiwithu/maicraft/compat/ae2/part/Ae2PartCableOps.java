@@ -222,7 +222,7 @@ public final class Ae2PartCableOps implements Ae2DeviceOps {
             if (stockIdx >= 0) {
                 Optional<Ae2PartKeys.StockValue> parsed = Ae2PartKeys.parseStockValue(value);
                 if (parsed.isEmpty()) {
-                    return invalid("stock 写法应为 <物品或流体 ID> [正整数数量] 或 empty：" + value);
+                    return invalid("stock 写法应为 <物品、流体或化学品 ID> [正整数数量] 或 empty（支持 chemical:<id>）：" + value);
                 }
                 return Optional.of(menuAction(host, side, label, menuId, Ae2MenuConfigAction.Kind.STOCK_SLOT, localKey,
                         value, null, stockIdx, false, parsed.get(), services, permissions));

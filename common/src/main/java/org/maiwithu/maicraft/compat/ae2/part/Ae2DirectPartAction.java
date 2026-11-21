@@ -258,8 +258,7 @@ final class Ae2DirectPartAction implements Action {
             return new MonitorDisplayPlan(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "AE2 监视器原生不支持交互清空已设展示物，需要拆下重装才能清空"), false, false, null, false);
         }
-        String expectedDisplay = stripChemicalPrefix(wanted);
-        if (expectedDisplay.equals(current)) {
+        if (matchesMonitorDisplay(current, wanted)) {
             return new MonitorDisplayPlan(null, true, false, null, false);
         }
         boolean locked = reading != null && reading.hasMonitor() && reading.locked();
@@ -274,14 +273,20 @@ final class Ae2DirectPartAction implements Action {
                 "背包里没有用于设监视器展示的样本 " + wanted + "（或对应的流体/化学品容器）"), false, false, null, false);
     }
 
-    /** 去掉监视器目标里用于消歧的 {@code chemical:} 前缀，还原成客户端同步展示的裸注册 ID。 */
-    static String stripChemicalPrefix(String target) {
-        if (target == null) return "";
-        String trimmed = target.trim();
+    /**
+     * 核对监视器当前展示键是否匹配请求目标：
+     * 带 {@code chemical:} 前缀时严格要求当前展示为 {@code chemical:<裸ID>}（绝不误命中同名流体）；
+     * 不带前缀时允许匹配原值或 {@code chemical:<目标>}（裸写化学品 ID 也能确认生效）。
+     */
+    static boolean matchesMonitorDisplay(String current, String wanted) {
+        if (current == null || current.isEmpty() || wanted == null || wanted.isBlank()) return false;
+        String trimmed = wanted.trim();
         if (trimmed.regionMatches(true, 0, Ae2PartKeys.CHEMICAL_PREFIX, 0, Ae2PartKeys.CHEMICAL_PREFIX.length())) {
-            return trimmed.substring(Ae2PartKeys.CHEMICAL_PREFIX.length()).trim();
+            String normalized = Ae2PartKeys.CHEMICAL_PREFIX
+                    + trimmed.substring(Ae2PartKeys.CHEMICAL_PREFIX.length()).trim();
+            return current.equals(normalized);
         }
-        return trimmed;
+        return current.equals(trimmed) || current.equals(Ae2PartKeys.CHEMICAL_PREFIX + trimmed);
     }
 
     // 监视器已锁定时，先空手 → 走到部件盒可达站位 → 潜行右键解锁，再换样本设展示物。
@@ -397,11 +402,16 @@ final class Ae2DirectPartAction implements Action {
                         .orElse(InteractionConfirmation.Verdict.PENDING);
             }
             case MONITOR_DISPLAY -> {
-                String expect = (!secondPass && needSecondFluidClick) ? itemToHold : stripChemicalPrefix(wanted);
+                boolean awaitingContainer = !secondPass && needSecondFluidClick;
                 yield ctx -> control.readClientPart(ctx.level(), host, side)
                         .filter(Ae2PartControl.ClientPartReading::hasMonitor)
-                        .map(r -> expect.equals(r.displayed()) ? InteractionConfirmation.Verdict.APPLIED
-                                : InteractionConfirmation.Verdict.PENDING)
+                        .map(r -> {
+                            boolean matched = awaitingContainer
+                                    ? itemToHold.equals(r.displayed())
+                                    : matchesMonitorDisplay(r.displayed(), wanted);
+                            return matched ? InteractionConfirmation.Verdict.APPLIED
+                                    : InteractionConfirmation.Verdict.PENDING;
+                        })
                         .orElse(InteractionConfirmation.Verdict.PENDING);
             }
             case P2P_ATTUNEMENT -> {
