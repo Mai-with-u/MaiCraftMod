@@ -10,3 +10,5 @@ progression/progression-ender-dragon
 progression/progression-ftb-quests
 building/building-workflow
 touhoulittlemaid/maid-getting-started
+ae2/ae2-getting-started
+ae2/ae2-network-and-autocraft
