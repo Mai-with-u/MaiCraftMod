@@ -1,50 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.mining;
 
-import java.util.OptionalInt;
-import java.util.ArrayList;
-import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
+import java.util.OptionalInt;
 import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 
-import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
-import org.maiwithu.maicraft.kernel.goal.WorldPosition;
-import org.maiwithu.maicraft.kernel.result.Change;
-import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
-import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
  * 往下挖楼梯的生产实现：像玩家一样斜着往下挖，每下一级先从上往下挖开前面三格（齐头、齐脚、脚下），
- * 再走下去，把这一级挖出来的东西捡起来；挖够了就停在楼梯底，回地面顺着楼梯走上去，不用垫方块。
- *
- * <p>挖之前先看清这一级：要挖的三格不能是液体、挖不动的、不许动的；三格四周、头顶和下一级脚下
- * 不能挨着水或岩浆（挖开就灌进来）；下一级脚下不能是岩浆块（站上去烫脚，走路也不肯站）。这一级朝原方向挖不了、或挖到一半挖不动，就往左、往右拐着挖
- * （第一级四面都试），不往回挖；这一级几个方向都不行才如实停下。挖完再看下一级脚下踩不踩得住：下面是空洞时，
- * 许可准放方块、身上有不会往下掉的废料（泥土、圆石这类），就在下一级脚下垫一块接着往下挖；不许放、没垫料、
- * 旁边没有能对着垫的实地才不走下去，洞壁上露出来的石头已经看得见了，下回按采掘直接挖。这些都是现场是什么样，不是猜结果。
- *
- * <p>停下时挖到过想要的方块就算做完，由拿东西的引擎重新清点，不够再来（楼梯壁上的石头这时看得见了）；
- * 一格都没挖到就以原因失败，引擎把原因写进结果。
- *
- * <p>长程挖矿用同一套：在矿多的那一层之上先挖台阶下去，到了这一层改挖两格高（齐头、齐脚）的水平通道，
- * 每走一步看一眼，看见要的矿就停下去挖。装了连锁挖时每一行按住连锁键一下挖出一长条——往下对准前面那格的迎面
- * 用斜着往下的形状（最下一行对准顶面），横着用直着往前的形状；不是数次数，每一级照现场缺哪行补哪行，
- * 中间有矿把连锁打断了（模组跳过比触发格硬的方块）就照样补齐。线上每一格都要挖得、许可准挖、四周不挨水和岩浆才连锁。
+ * 等上方重力方块落定重清后再走下去，把这一级挖出来的东西捡起来；挖够了就停在楼梯底，回地面顺着楼梯走上去。
+ * 遇到连续重力覆盖层且 16 格内存在安全实岩顶面时，先走 2×1 双格交错穿沙井进入实岩下 3 格再平滑切回阶梯。
  */
 public final class ClientStairsDown implements DigsStairsDown {
 
@@ -100,6 +76,23 @@ public final class ClientStairsDown implements DigsStairsDown {
             return false;
         }
 
+        /** 这一格是不是受重力影响会塌落的方块（沙子、沙砾、模组黑沙这类）。 */
+        default boolean fallingBlock(TickContext context, BlockPos cell) {
+            return false;
+        }
+
+        /** 该格及正上方竖直柱内是否已有正在下落的重力实体。 */
+        default boolean hasFallingEntityAbove(TickContext context, BlockPos cell) {
+            return false;
+        }
+
+        /** 这一格是不是天然非重力实心岩石：穿沙井按它识别实岩顶面与 3 格实岩顶板。 */
+        default boolean solidRock(TickContext context, BlockPos cell) {
+            return ground(context, cell) == Ground.DIGGABLE
+                    && !fallingBlock(context, cell)
+                    && !hurtsToStandOn(context, cell);
+        }
+
         /** 走到下一级（往下挖是下一级台阶，往上挖是上一级）：这一级已经挖通，只走不改地形。 */
         Action stepTo(BlockPos feet);
 
@@ -119,8 +112,14 @@ public final class ClientStairsDown implements DigsStairsDown {
     static final int MAX_DRY_STEPS = 32;
     /** 一次最多挖几级：挖够了早就停了，这是防止没完没了的上限。 */
     static final int MAX_STEPS = 64;
-    /** 同一级最多挖几下：上面的沙砾一直往下掉时，不在原地挖到天荒地老。 */
+    /** 同一级最多挖几下：普通方块防死循环上限。 */
     static final int MAX_DIGS_PER_STEP = 12;
+    /** 遇到重力方块塌落时放宽的每级清理额度：够把几层厚的沙砾口袋清干净再迈步。 */
+    static final int MAX_GRAVITY_DIGS_PER_STEP = 24;
+    /** 挖空台阶后上方存在重力方块或下落实体时，原地等待落定的窗口刻数。 */
+    static final int GRAVITY_SETTLE_TICKS = 12;
+    /** 走入下一级失败且发现被落沙回填时，同一级最多退回重挖几次。 */
+    static final int MAX_STEP_DIG_RETRIES = 3;
     /** 下一级脚下空着时再往下看几格：两格以内有实地就落到上面（连这一级共掉不到三格，摔不伤）。 */
     static final int EXTRA_DROP = 2;
     /** 长程挖矿横着挖的通道最长几格：挖满还没看见要的矿就停，如实说。 */
@@ -153,629 +152,19 @@ public final class ClientStairsDown implements DigsStairsDown {
 
     @Override
     public Action digDown(Predicate<String> yields, int wantedCells, Permissions permissions) {
-        return new Digging(yields, wantedCells, permissions, null);
+        return new StairsDownDigging(site, digs, drops, permission, campground, yields, wantedCells, permissions, null);
     }
 
     @Override
     public Optional<Action> digDown(Predicate<BlockPos> reached, int plannedCells,
             Permissions permissions, TaskRecords records) {
-        return Optional.of(new Digging(reached, plannedCells, permissions, records));
+        return Optional.of(new StairsDownDigging(site, digs, drops, permission, campground,
+                reached, plannedCells, permissions, records));
     }
 
     @Override
     public Optional<Action> tunnelToward(Tunnel tunnel, Permissions permissions) {
-        return Optional.of(new Digging(tunnel.yields(), tunnel.wantedCells(), permissions, tunnel));
-    }
-
-    private static String at(BlockPos cell) {
-        return "(" + cell.getX() + ", " + cell.getY() + ", " + cell.getZ() + ")";
-    }
-
-        /** 一次往下挖楼梯（或长程挖矿、或挖到够深为止）：看清下一级 → 从上往下挖开 → 走下去 → 捡起这一级掉的东西，循环到挖够、下到够深的地方或该停。 */
-    private final class Digging implements Action {
-
-        private enum Stage { LOOK, WALK_OUT, DIG, FILL, STEP_DOWN, PICK_UP, MINE }
-
-        private final Predicate<String> yields;
-        private final int wantedCells;
-        private final Permissions permissions;
-        /** 长程挖矿往哪挖；挖楼梯找石头时为空。 */
-        private final Tunnel tunnel;
-        /** 站到这一格（脚的位置）就算下够了，提前停；按挖的格数停的挖法为空。 */
-        private final Predicate<BlockPos> reached;
-        /** 这一段大概还要挖几格：按格数停的挖法给 wantedCells，够深就停的挖法给规划时估的格数。 */
-        private final int plannedCells;
-        /** 挖掉的方块按种类记进这份变化；不给账本（采掘自己数）的挖法为空。 */
-        private final TaskRecords records;
-        private Stage stage = Stage.LOOK;
-        private Direction heading;
-        private BlockPos feet;
-        private Action step;
-        /** 手上正挖的这一格在哪、是什么：挖完记账、判掉不掉想要的东西与单格耐心超时都用它。 */
-        private BlockPos diggingCell;
-        private String diggingType;
-        /** 手上正挖的这一格挖掉会不会掉想要的东西：挖完才算数。 */
-        private boolean diggingYields;
-        private int digTicks;
-        private int digsThisStep;
-        /** 同一趟楼梯或通道内的连锁拒绝记忆：前方未加载、紧挨流体或工具挖不下只试一次，同区块同朝向不再每格白等。 */
-        private final ChainSkipMemory chainSkip = new ChainSkipMemory();
-        private int yielded;
-        private int steps;
-        /** 长程挖矿横着走了几步。 */
-        private int levelSteps;
-        /** 正走的这一步是横着的。 */
-        private boolean steppingLevel;
-        /** 正走的这一步一次走过几格：横着挖、前面连着空着时不止一格。 */
-        private int stepRun = 1;
-        /** 已经开始横着挖了：台阶挖到那一层时转一次向。 */
-        private boolean levelStarted;
-        private Set<Integer> dropsBefore = Set.of();
-        /** 这一级要走到哪一格落脚：一般是下一级，脚下空一两格时是再往下的实地上面。 */
-        private BlockPos stepTarget;
-        /** 刚连锁挖的那一行：触发格以外排着的格和各是什么，挖完数一数顺带挖到了几格想要的。 */
-        private BlockPos chainTrigger;
-        private Map<BlockPos, String> chainedRow = Map.of();
-        private ActionStatus ended;
-        /** 被打断过（夜里去睡觉、躲怪）：回来时人可能已经不在原来那一级上。 */
-        private boolean paused;
-        /** 来时的方向（上一级在这一边）：拐弯不往回挖，免得挖掉来时踩的那一级；第一级为空。 */
-        private Direction back;
-        /** 这一级已经在下一级脚下垫过一块：垫完还是空的就不再垫。走下一级、被打断回来就清掉。 */
-        private boolean filledThisStep;
-        /** 这一级已经挖不了、挖砸了的方向：换方向时不再试。走下一级就清空。 */
-        private final Set<Direction> refusedHere = EnumSet.noneOf(Direction.class);
-        /** 这一级第一个挖不了的原因：几个方向都不行时照它说。 */
-        private Problem firstRefusal;
-        /** 挖掉的方块按种类计数：一段台阶几十格石头，结果里合成一条，不一格一条。 */
-        private final Map<String, Integer> dugByType = new LinkedHashMap<>();
-        private boolean booked;
-        /** 开挖前看过一次在不在自己家里（在就先走出去了）：只看一次，走出去以后不再找。 */
-        private boolean leftHome;
-        /** 被叫先到安全处再停、手上那一下（走下一级、挖、垫、捡）说要先收尾：只推进它到停稳；暂停时清掉。 */
-        private boolean stopping;
-
-        Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel) {
-            this(yields, wantedCells, permissions, tunnel, null, null, wantedCells);
-        }
-
-        Digging(Predicate<BlockPos> reached, int plannedCells, Permissions permissions, TaskRecords records) {
-            this(null, 0, permissions, null, reached, records, plannedCells);
-        }
-
-        private Digging(Predicate<String> yields, int wantedCells, Permissions permissions, Tunnel tunnel,
-                Predicate<BlockPos> reached, TaskRecords records, int plannedCells) {
-            this.yields = yields;
-            this.wantedCells = wantedCells;
-            this.permissions = permissions;
-            this.tunnel = tunnel;
-            this.reached = reached;
-            this.records = records;
-            this.plannedCells = plannedCells;
-        }
-
-        @Override public ActionStatus tick(TickContext context) {
-            if (ended != null) return ended;
-            // 收尾途中：只把手上那一下推进到停稳（走下一级跳在半空的先落地），落地后原地等外层停下，
-            // 不把落地当成走下了这一级，也不挖下一格。
-            if (stopping) {
-                if (step != null && !step.stoppedSafely()) step.tick(context);
-                return ActionStatus.running();
-            }
-            // 被打断后回来：手上挖到一半、走到一半的都收掉，按此刻站的位置重新看下一级，
-            // 不对着原来那几格接着挖（人可能被带走了，够不着也看不见）。
-            if (paused) {
-                paused = false;
-                closeStep();
-                digTicks = 0;
-                stage = Stage.LOOK;
-                filledThisStep = false;
-                // 还没挖第一级就被叫走：回来时重新看一次在不在家里。
-                if (steps == 0) leftHome = false;
-            }
-            if (step != null) {
-                ActionStatus status = step.tick(context);
-                if (status instanceof ActionStatus.Running running) {
-                    if (running.progressed()) {
-                        digTicks = 0;
-                    } else if (stage == Stage.DIG && ++digTicks > DigsBlocks.DIG_PATIENCE_TICKS) {
-                        // 单格连续十五秒都没挖通（视线被卡住或够不着）：不傻等到外层一分钟判卡死，换个方向接着挖。
-                        closeStep();
-                        digTicks = 0;
-                        return turnOrFinish(Problem.of(Problem.Kind.STUCK,
-                                "往下挖楼梯：" + at(diggingCell) + " 挖了十五秒都没挖下来，换个方向再挖"));
-                    }
-                    return status;
-                }
-                if (stage == Stage.DIG && step instanceof TellsToolUse tells && tells.notChainedReason() != null) {
-                    chainSkip.noteRefusal(tells.notChainedReason(), feet, heading, down(), diggingType);
-                }
-                digTicks = 0;
-                closeStep();
-                return switch (stage) {
-                    case WALK_OUT -> walkedOut(status);
-                    case DIG -> dug(context, status);
-                    case FILL -> filled(status);
-                    case STEP_DOWN -> steppedDown(status);
-                    // 捡没捡全不停楼梯：掉进缝里的一两件不值得为它停手，够不够由引擎重新清点。
-                    case PICK_UP -> nextStep();
-                    // 看见的矿挖完了：长程挖矿到此收场，够不够由引擎重新清点。
-                    // 没挖成要说清是在哪看见的矿、卡在哪：原先只剩一句"东西走过去了还在地上"，看不出挖到了矿。
-                    case MINE -> finish(status instanceof ActionStatus.Failed failed
-                            ? Problem.of(failed.problem().kind(), "长程挖矿在 " + at(feet) + " 看见了要的矿，去挖的时候："
-                                    + failed.problem().message(), failed.problem().suggestion())
-                            : null);
-                    case LOOK -> throw new IllegalStateException("看下一级时手上不该有动作");
-                };
-            }
-            return stage == Stage.LOOK ? look(context) : digNext(context);
-        }
-
-        // 这一步往下还是横着：挖楼梯找石头一直往下；长程挖矿到了要挖的那一层就横着。
-        private boolean down() {
-            return tunnel == null || feet.getY() > tunnel.targetY();
-        }
-
-        // 挖下一级之前：够数就收工；先站稳，再看这一级能不能挖。第一级先朝脸对着的方向，
-        // 那边挖不了就转个方向，四面都挖不了才放弃；之后沿同一个方向一路往下。
-        private ActionStatus look(TickContext context) {
-            // 挖够想要的方块就收工；够深就停的挖法没有格数指标，站到停点判断的地方才收工。
-            if (reached == null && yielded >= wantedCells) return finish(null);
-            if (!site.onGround(context)) return ActionStatus.running();
-            Optional<BlockPos> standing = site.feet(context);
-            if (standing.isEmpty()) return ActionStatus.running();
-            feet = standing.get();
-            // 够深就停的挖法：站到的地方满足停点判断就收工，一格不挖也算做完（出发时就已经够深）。
-            if (reached != null && reached.test(feet)) return finish(null);
-            // 为拿东西挖楼梯（找石头、长程挖矿）时人在自己家里：先走出家门到家外的天然地面上再挖，
-            // 不在自家床底、地板底下开洞。出行的下掘段按路线定在哪挖，不走开。
-            if (reached == null && steps == 0 && !leftHome) {
-                leftHome = true;
-                if (atHome(context, feet)) return walkOut(context);
-            }
-            if (tunnel == null) {
-                if (steps >= MAX_STEPS) {
-                    return finish(Problem.of(Problem.Kind.STUCK, "往下挖了 " + steps + " 级楼梯，先停在这里"));
-                }
-                // 数想要的方块算停点的挖法才有"一直挖不到"一说；够深就停的挖法每一格都算数。
-                if (reached == null && yielded == 0 && steps >= MAX_DRY_STEPS) {
-                    return finish(Problem.of(Problem.Kind.NOT_FOUND, "往下挖了 " + steps
-                            + " 级楼梯还没挖到想要的方块，这一带地下可能是很厚的沙子或陶瓦，换个地方再挖"));
-                }
-            } else {
-                // 长程挖矿每走一步看一眼：看见要的矿就停下去挖它。
-                if (tunnel.inSight().test(feet)) return mineInSight();
-                if (!down() && levelSteps >= LEVEL_STEPS) {
-                    return finish(Problem.of(Problem.Kind.NOT_FOUND, "在 Y=" + feet.getY() + " 横着挖了 " + levelSteps
-                            + " 格通道还没看见要的矿，停在通道尽头"));
-                }
-                if (steps >= MAX_TUNNEL_STEPS) {
-                    return finish(Problem.of(Problem.Kind.STUCK, "长程挖矿走了 " + steps + " 步，先停在这里"));
-                }
-            }
-            // 台阶挖到那一层：转九十度再横着挖。连锁挖的斜线越过了这一层还往下伸，顺着原方向横挖会一路掉进那几条斜线里。
-            if (tunnel != null && !down() && !levelStarted) {
-                levelStarted = true;
-                if (heading != null) turnAside(context);
-            }
-            Optional<Problem> stop = chooseHeading(context);
-            if (stop.isPresent()) return finish(stop.get());
-            dropsBefore = drops.nearby();
-            digsThisStep = 0;
-            stage = Stage.DIG;
-            return ActionStatus.progressed();
-        }
-
-        // 这一级朝哪边挖：原方向挖得了就照原方向；挖不了就换——第一级四面都试（先朝脸对着的，再顺时针），
-        // 之后往左、往右拐，不往回挖（回头会挖掉来时踩的那一级）；这一级挖砸过的方向不再试。
-        // 几个方向都不行才停，原因用这一级第一个挖不了的。
-        private Optional<Problem> chooseHeading(TickContext context) {
-            List<Direction> order = new ArrayList<>();
-            if (heading == null) {
-                Direction facing = site.facing(context);
-                for (int turn = 0; turn < 4; turn++) {
-                    order.add(facing);
-                    facing = facing.getClockWise();
-                }
-            } else {
-                order.add(heading);
-                order.add(heading.getCounterClockWise());
-                order.add(heading.getClockWise());
-                order.add(heading.getOpposite());
-            }
-            for (Direction tried : order) {
-                if (tried == back || refusedHere.contains(tried)) continue;
-                Optional<Problem> why = refusal(context, tried);
-                if (why.isEmpty()) {
-                    heading = tried;
-                    return Optional.empty();
-                }
-                refusedHere.add(tried);
-                if (firstRefusal == null) firstRefusal = why.get();
-            }
-            return Optional.of(firstRefusal);
-        }
-
-        // 挖这一级挖到一半挖不了（上面掉下沙砾一直挖不通、挖不动、不许动）：这个方向记作挖不了，
-        // 回去重新挑方向，左右都不行才停。
-        private ActionStatus turnOrFinish(Problem why) {
-            refusedHere.add(heading);
-            if (firstRefusal == null) firstRefusal = why;
-            stage = Stage.LOOK;
-            return ActionStatus.progressed();
-        }
-
-        // 往右拐，右边挖不了往左拐；两边都不行就照原方向。
-        private void turnAside(TickContext context) {
-            for (Direction side : List.of(heading.getClockWise(), heading.getCounterClockWise())) {
-                if (refusal(context, side).isEmpty()) {
-                    heading = side;
-                    return;
-                }
-            }
-        }
-
-        // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、许不许动，四周看有没有水或岩浆。
-        private Optional<Problem> refusal(TickContext context, Direction toward) {
-            StairStepShape.Heading way = new StairStepShape.Heading(toward, down());
-            for (BlockPos cell : StairStepShape.stepCells(feet, toward, way.down())) {
-                if (reached == null && atHome(context, cell)) return Optional.of(underHome(cell));
-                Ground ground = site.ground(context, cell);
-                if (ground == Ground.OPEN) continue;
-                if (ground != Ground.DIGGABLE) return Optional.of(blocked(context, cell, ground));
-                Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                        position(context, cell), site.blockType(context, cell));
-                if (refused.isPresent()) return refused;
-            }
-            for (BlockPos cell : StairStepShape.surroundings(feet, way)) {
-                if (site.ground(context, cell) == Ground.FLUID) {
-                    return Optional.of(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面挨着 " + at(cell) + " 的 "
-                            + site.blockType(context, cell) + "，挖开会灌进来，停在这里"));
-                }
-            }
-            // 下一级脚下是岩浆块：挖开了也站不上去（烫脚，走路不肯站），这个方向当挖不了，往左右拐。
-            BlockPos floor = StairStepShape.nextFeet(feet, way).below();
-            if (site.hurtsToStandOn(context, floor)) return Optional.of(hotFloor(context, floor));
-            return Optional.empty();
-        }
-
-        // 挑家外最近、站得住的一格走过去；找不到、走不过去就如实停下，不在家里挖。
-        private ActionStatus walkOut(TickContext context) {
-            Optional<BlockPos> spot = StairsOutsideHome.pick(feet, cell -> atHome(context, cell),
-                    cell -> site.standable(context, cell));
-            if (spot.isEmpty()) {
-                return finish(Problem.of(Problem.Kind.NOT_FOUND, "人在自己家里，" + StairsOutsideHome.RADIUS
-                        + " 格内找不到家外能站的天然地面，不在自家底下往下挖楼梯", "先走出营地到空地上再要"));
-            }
-            stage = Stage.WALK_OUT;
-            stepTarget = spot.get();
-            step = site.stepTo(stepTarget);
-            return ActionStatus.progressed();
-        }
-
-        // 走到了家外那一格：从这里重新看第一级；走不过去如实停下。
-        private ActionStatus walkedOut(ActionStatus status) {
-            if (status instanceof ActionStatus.Failed failed) {
-                return finish(Problem.of(Problem.Kind.UNREACHABLE, "人在自己家里，要先走出家门到 " + at(stepTarget)
-                        + " 再挖楼梯，走不过去：" + failed.problem().message()));
-            }
-            return nextStep();
-        }
-
-        // 自家或床、箱子、工作台附近的营地范围：开挖前先走出这片地面再挖，楼梯也不挖进营地底下。
-        private boolean atHome(TickContext context, BlockPos cell) {
-            WorldPosition where = position(context, cell);
-            return permission.atOwnHome(where) || campground.covers(where);
-        }
-
-        private Problem underHome(BlockPos cell) {
-            return Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 在自己家里，不在自家底下挖");
-        }
-
-        // 下一级脚下站上去会掉血：写明是哪一格、什么方块。
-        private Problem hotFloor(TickContext context, BlockPos floor) {
-            return Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(floor.above()) + " 脚下是 "
-                    + site.blockType(context, floor) + "，站上去会烫脚，不往这边走");
-        }
-
-        // 从上往下挖这一级还没通的格子：上面掉下沙砾、流进液体都照现场重新判断。都通了，
-        // 下一级脚下踩得住就走下去；脚下空着、再往下一两格有实地（站在比地面高一格的地方开挖就是这样）就落到那上面；
-        // 往下三格都空（洞）就在下一级脚下垫一块再走下去，垫不了才停；落下去是液体、落脚的是岩浆块，
-        // 和挨着岩浆一样换个方向挖，几个方向都不行才停。
-        private ActionStatus digNext(TickContext context) {
-            StairStepShape.Heading way = new StairStepShape.Heading(heading, down());
-            List<BlockPos> cells = StairStepShape.stepCells(feet, heading, way.down());
-            for (int row = 0; row < cells.size(); row++) {
-                BlockPos cell = cells.get(row);
-                Ground ground = site.ground(context, cell);
-                if (ground == Ground.OPEN) continue;
-                if (ground != Ground.DIGGABLE) return turnOrFinish(blocked(context, cell, ground));
-                if (digsThisStep >= MAX_DIGS_PER_STEP) {
-                    return turnOrFinish(Problem.of(Problem.Kind.STUCK, "往下挖楼梯：" + at(cell) + " 挖了 "
-                            + digsThisStep + " 下还没挖通，上面可能一直在往下掉沙砾"));
-                }
-                String blockType = site.blockType(context, cell);
-                Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                        position(context, cell), blockType);
-                if (refused.isPresent()) return turnOrFinish(refused.get());
-                // 往下挖楼梯与长程挖矿统一走连锁挖掘：装了连锁时每行按斜下或水平通道成批挖通，没装或被拒时自动落回单挖。
-                Optional<Action> dig = chainDig(context, cell, row, way);
-                if (dig.isEmpty()) {
-                    return finish(Problem.of(Problem.Kind.UNSUPPORTED, "挖方块的现场动作没接上"));
-                }
-                step = dig.get();
-                diggingCell = cell;
-                diggingType = blockType;
-                digTicks = 0;
-                // 数想要的方块算停点的挖法只数想要的；够深就停的挖法挖掉的每一格都算进展。
-                diggingYields = yields == null || yields.test(blockType);
-                digsThisStep++;
-                return ActionStatus.progressed();
-            }
-            BlockPos landing = StairStepShape.nextFeet(feet, way);
-            Ground floor = site.ground(context, landing.below());
-            for (int extra = 0; floor == Ground.OPEN && extra < EXTRA_DROP; extra++) {
-                landing = landing.below();
-                floor = site.ground(context, landing.below());
-            }
-            if (floor == Ground.OPEN || floor == Ground.FLUID) {
-                // 长程挖矿挖穿进了洞：洞壁上露出要的矿就去挖，没有再垫一块或拐开。
-                if (tunnel != null && tunnel.inSight().test(feet)) return mineInSight();
-                if (floor == Ground.OPEN) return fillUnder(context, StairStepShape.nextFeet(feet, way).below());
-                // 下界挖穿进洞，洞底多半是岩浆海：这个方向不走，往左右拐着接着挖。
-                return turnOrFinish(Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(StairStepShape.nextFeet(feet, way))
-                        + " 脚下落下去是 " + site.blockType(context, landing.below()) + "，不往这边走"));
-            }
-            if (site.hurtsToStandOn(context, landing.below())) return turnOrFinish(hotFloor(context, landing.below()));
-            stage = Stage.STEP_DOWN;
-            stepTarget = landing;
-            steppingLevel = !way.down();
-            stepRun = 1;
-            // 横着挖、这一步一格没挖（前面本来就空着，洞里、地上）：连着空着、踩得住、不挨水和岩浆的几格一次走过去，
-            // 不每格停下来重新寻一次路；走到头再看一眼有没有矿，前面要挖了再一格一格来。
-            if (steppingLevel && digsThisStep == 0 && landing.equals(StairStepShape.nextFeet(feet, way))) {
-                while (stepRun < OPEN_RUN && levelSteps + stepRun < LEVEL_STEPS) {
-                    BlockPos further = stepTarget.relative(heading);
-                    if (!openStretch(context, further)) break;
-                    stepTarget = further;
-                    stepRun++;
-                }
-            }
-            step = site.stepTo(stepTarget);
-            return ActionStatus.progressed();
-        }
-
-        // 横着再往前一格还是现成的通道：齐头、齐脚两格空着，脚下踩得住（不是空的、液体、挖不动或没加载的、岩浆块），
-        // 两格四周和头顶不挨水、岩浆。
-        private boolean openStretch(TickContext context, BlockPos at) {
-            if (site.ground(context, at) != Ground.OPEN || site.ground(context, at.above()) != Ground.OPEN) return false;
-            Ground floor = site.ground(context, at.below());
-            if (floor == Ground.OPEN || floor == Ground.FLUID || floor == Ground.UNBREAKABLE) return false;
-            if (site.hurtsToStandOn(context, at.below())) return false;
-            for (BlockPos cell : List.of(at, at.above())) {
-                for (Direction side : Direction.Plane.HORIZONTAL) {
-                    if (site.ground(context, cell.relative(side)) == Ground.FLUID) return false;
-                }
-            }
-            return site.ground(context, at.above(2)) != Ground.FLUID;
-        }
-
-        // 下一级脚下往下三格都空：许可准放、身上有垫料，就在下一级脚下垫一块，垫好回去重新看这一级再走下去；
-        // 这一级垫过一次还是空的、身上没有能垫的、这一格不许放、旁边没有能对着垫的实地，才停在这里并写清为什么没法垫。
-        private ActionStatus fillUnder(TickContext context, BlockPos support) {
-            String hole = "往下挖楼梯：下一级 " + at(support.above()) + " 脚下是空的（往下三格都没有实地）";
-            if (filledThisStep) return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，垫过一块还是空的，不往下走了"));
-            List<String> fillers = site.fillers(context);
-            if (fillers.isEmpty()) {
-                return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，身上没有能垫的废料（泥土、圆石这类），没法垫，不往下走了",
-                        "带些泥土、圆石再来，或换个地方挖"));
-            }
-            String filler = fillers.getFirst();
-            Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.PLACE_BLOCK,
-                    position(context, support), filler);
-            if (refused.isPresent()) {
-                return finish(Problem.of(refused.get().kind(), hole + "，这一格不许垫方块，没法垫：" + refused.get().message(),
-                        refused.get().suggestion()));
-            }
-            Optional<Action> place = site.placeFiller(context, support, filler);
-            if (place.isEmpty()) {
-                return finish(Problem.of(Problem.Kind.NOT_FOUND, hole + "，旁边也没有能对着垫的实地，没法垫，不往下走了"));
-            }
-            filledThisStep = true;
-            stage = Stage.FILL;
-            step = place.get();
-            return ActionStatus.progressed();
-        }
-
-        // 垫完：回去重新看这一级（脚下有了实地就走下去）；没垫成如实停下。
-        private ActionStatus filled(ActionStatus status) {
-            if (status instanceof ActionStatus.Failed failed) {
-                return finish(Problem.of(failed.problem().kind(), "往下挖楼梯：下一级脚下是空的，垫一块没垫成："
-                        + failed.problem().message(), failed.problem().suggestion()));
-            }
-            stage = Stage.DIG;
-            return ActionStatus.progressed();
-        }
-
-        // 往下挖楼梯或长程挖矿挖一行：往下对准迎面（最下一行对准顶面，迎面贴着脚下那格打不着）用斜着往下的连锁，
-        // 横着对准迎面用直着往前的连锁；换格也不会变的拒绝原因同区块同朝向内只试一次，命中记忆直接跳过按键单挖。
-        private Optional<Action> chainDig(TickContext context, BlockPos trigger, int row, StairStepShape.Heading way) {
-            Optional<String> skip = chainSkip.skipReason(feet, heading, way.down(), site.blockType(context, trigger));
-            if (skip.isPresent()) {
-                chainTrigger = null;
-                chainedRow = Map.of();
-                return digs.digSkippingChain(trigger, toolPrep(), skip.get());
-            }
-            Direction face = way.down() && row == 2 ? Direction.UP : heading.getOpposite();
-            Map<BlockPos, String> line = lineAhead(context, trigger, way.down());
-            chainTrigger = trigger;
-            chainedRow = line;
-            return digs.digChained(trigger, face, way.down() ? BreakAccelerator.ChainShape.DOWNWARD_LINE
-                    : BreakAccelerator.ChainShape.STRAIGHT_LINE, line::containsKey, toolPrep());
-        }
-
-        // 这一趟大概还要挖几格：长程挖矿按到目标高度还剩几级、每级三格；其余按还要的格数，至少一级三格。
-        // 身上没有对路的工具时按它算现做一把划不划算。
-        private DigsBlocks.ToolPrep toolPrep() {
-            int left = tunnel != null && feet != null ? 3 * Math.max(1, feet.getY() - tunnel.targetY())
-                    : Math.max(3, plannedCells - yielded);
-            // 往下挖台阶只要路通，挖下来的东西不要：徒手、拿不对的工具挖也行。
-            // 挖哪一格由路决定、不是目标方块，目标里点名的工具没有传进这条链，按每格代价自动挑。
-            return new DigsBlocks.ToolPrep(left, false,
-                    permissions == null ? Permissions.DEFAULT : permissions, records, null);
-        }
-
-        // 从触发格顺着挖的方向排下去的那一行：伸出计划通道长度或矿脉下界的部分，只要仍是天然地形、不在营地或建筑档案里、
-        // 不碰设施和别人搭的方块、四周不挨水或岩浆，就一并放进可连锁集合，不因多挖几格天然石头而整条拒掉。
-        private Map<BlockPos, String> lineAhead(TickContext context, BlockPos trigger, boolean down) {
-            Map<BlockPos, String> line = new LinkedHashMap<>();
-            for (int k = 0; k < CHAIN_REACH; k++) {
-                BlockPos cell = trigger.relative(heading, k).below(down ? k : 0);
-                WorldPosition where = position(context, cell);
-                if (k > 0 && (atHome(context, cell) || permission.archivedBuildingAt(where).isPresent())) break;
-                if (site.ground(context, cell) != Ground.DIGGABLE) break;
-                String blockType = site.blockType(context, cell);
-                if (permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                        where, blockType).isPresent()) break;
-                if (touchesFluid(context, cell)) break;
-                line.put(cell, blockType);
-            }
-            return line;
-        }
-
-        // 四面上下有一面是水或岩浆：连锁一下挖开就灌进通道。
-        private boolean touchesFluid(TickContext context, BlockPos cell) {
-            for (Direction side : Direction.values()) {
-                if (site.ground(context, cell.relative(side)) == Ground.FLUID) return true;
-            }
-            return false;
-        }
-
-        // 挖完一格：挖掉的是想要的方块就记一格；连锁顺带挖开的那一行里挖到的想要的也记上；挖不动、看不到如实停下。
-        private ActionStatus dug(TickContext context, ActionStatus status) {
-            Map<BlockPos, String> row = chainedRow;
-            BlockPos trigger = chainTrigger;
-            chainedRow = Map.of();
-            chainTrigger = null;
-            // 这一格挖不下来（够不着、被拒）：这个方向记作挖不了，换个方向再挖。
-            if (status instanceof ActionStatus.Failed failed) return turnOrFinish(failed.problem());
-            if (records != null) dugByType.merge(diggingType, 1, Integer::sum);
-            if (diggingYields) yielded++;
-            for (Map.Entry<BlockPos, String> cell : row.entrySet()) {
-                if (cell.getKey().equals(trigger) || site.ground(context, cell.getKey()) != Ground.OPEN) continue;
-                if (records != null) dugByType.merge(cell.getValue(), 1, Integer::sum);
-                if (yields == null || yields.test(cell.getValue())) yielded++;
-            }
-            return ActionStatus.progressed();
-        }
-
-        // 走下一级：到了就去捡这一级掉的东西（大多走下去时已经吸进包了）；走不下去如实停下。
-        private ActionStatus steppedDown(ActionStatus status) {
-            if (status instanceof ActionStatus.Failed failed) {
-                return finish(Problem.of(Problem.Kind.UNREACHABLE, "往下挖楼梯：走不下下一级 "
-                        + at(stepTarget) + "：" + failed.problem().message()));
-            }
-            steps += stepRun;
-            if (steppingLevel) levelSteps += stepRun;
-            // 下到新的一级：上一级在来时方向的反面，这一级挖不了的方向从头算，垫没垫过也从头算。
-            back = heading.getOpposite();
-            filledThisStep = false;
-            refusedHere.clear();
-            firstRefusal = null;
-            stage = Stage.PICK_UP;
-            step = drops.pickUpNewSince(dropsBefore);
-            return ActionStatus.progressed();
-        }
-
-        // 看见要的矿：交给采掘去挖看见的那一片（整脉连锁、挖完捡起来）；看见的都不许挖就如实停下。
-        private ActionStatus mineInSight() {
-            Optional<Action> mining = tunnel.mineInSight().apply(feet);
-            if (mining.isEmpty()) {
-                return finish(Problem.of(Problem.Kind.NEED_APPROVAL, "长程挖矿在 " + at(feet)
-                        + " 看见了要的矿，可看见的那几格都不许挖"));
-            }
-            stage = Stage.MINE;
-            step = mining.get();
-            return ActionStatus.progressed();
-        }
-
-        private ActionStatus nextStep() {
-            stage = Stage.LOOK;
-            return ActionStatus.progressed();
-        }
-
-        // 停下：挖到过想要的方块（或看见的矿挖完了、站到够深的地方）就算做完，交给引擎重新清点；
-        // 一格都没挖到就以原因失败。要记账的挖法这时把挖掉的方块按种类合并进变化。
-        private ActionStatus finish(Problem why) {
-            book();
-            ended = why == null || yielded > 0 ? ActionStatus.done() : ActionStatus.failed(why);
-            return ended;
-        }
-
-        /** 挖掉的方块按种类合并记账；不给账本的挖法（采掘自己数）不记。 */
-        private void book() {
-            if (records == null || booked) return;
-            booked = true;
-            dugByType.forEach((type, count) -> records.change(new Change(Change.Kind.BLOCK_BROKEN, type, count,
-                    "往下挖台阶挖掉的（" + steps + " 级）")));
-        }
-
-        private Problem blocked(TickContext context, BlockPos cell, Ground ground) {
-            String what = site.blockType(context, cell);
-            return switch (ground) {
-                case FLUID -> Problem.of(Problem.Kind.DANGER, "往下挖楼梯：前面 " + at(cell) + " 是 " + what + "，停在这里");
-                case FACILITY -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 是设施 " + what
-                        + "，不为挖楼梯拆它，停在这里");
-                case BUILT -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
-                        + " 是搭出来的（平台、地板这类），不为挖楼梯拆它；到天然地面上再挖", "先走到天然的地面上");
-                default -> Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 的 " + what
-                        + " 挖不动，停在这里");
-            };
-        }
-
-        private WorldPosition position(TickContext context, BlockPos cell) {
-            return new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), site.dimension(context));
-        }
-
-        private void closeStep() {
-            if (step != null) {
-                step.close();
-                step = null;
-            }
-        }
-
-        @Override public void pause() {
-            stopping = false;
-            if (step != null) step.pause();
-            paused = true;
-        }
-
-        // 被叫先到安全处再停：转给手上那一下，走下一级悬在半空的先落地、落地才算停稳；站着挖、两步之间现在就能停。
-        @Override public boolean stopSafely() {
-            stopping = step != null && step.stopSafely();
-            return stopping;
-        }
-
-        @Override public boolean stoppedSafely() {
-            return !stopping || step == null || step.stoppedSafely();
-        }
-
-        @Override public void close() {
-            closeStep();
-        }
-
-        @Override public Interruptibility interruptibility() {
-            return step == null ? Interruptibility.BETWEEN_ACTIONS : step.interruptibility();
-        }
-
-        @Override public String describe() {
-            if (reached != null) return "往下挖台阶（第 " + (steps + 1) + " 级）";
-            if (tunnel == null) return "往下挖楼梯（第 " + (steps + 1) + " 级，已挖到 " + yielded + "/" + wantedCells + " 格）";
-            if (stage == Stage.MINE) return "长程挖矿：去挖看见的矿";
-            if (feet != null && !down()) {
-                return "长程挖矿：在 Y=" + feet.getY() + " 横着挖通道（第 " + (levelSteps + 1) + "/" + LEVEL_STEPS + " 格）";
-            }
-            return "长程挖矿：往下挖台阶到 Y=" + tunnel.targetY() + "（第 " + (steps + 1) + " 级）";
-        }
+        return Optional.of(new StairsDownDigging(site, digs, drops, permission, campground,
+                tunnel.yields(), tunnel.wantedCells(), permissions, tunnel));
     }
 }

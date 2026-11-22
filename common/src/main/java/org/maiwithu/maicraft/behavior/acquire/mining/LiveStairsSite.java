@@ -13,8 +13,12 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
 import org.maiwithu.maicraft.behavior.navigation.util.ClientSurfaceHeight;
@@ -113,6 +117,41 @@ public final class LiveStairsSite implements ClientStairsDown.Site {
     public boolean hurtsToStandOn(TickContext context, BlockPos cell) {
         ClientLevel level = level(context);
         return level != null && level.isLoaded(cell) && BlockPassability.hurtsToStandOn(level.getBlockState(cell));
+    }
+
+    // 这一格是不是受重力影响会塌落的方块（沙子、沙砾、模组黑沙这类）：不写模组方块 ID，直接认 FallingBlock。
+    @Override
+    public boolean fallingBlock(TickContext context, BlockPos cell) {
+        ClientLevel level = level(context);
+        return level != null && level.isLoaded(cell)
+                && level.getBlockState(cell).getBlock() instanceof FallingBlock;
+    }
+
+    // 检查该格及正上方竖直柱内是否已有正在下落的重力实体：避免单层重力方块实体化瞬间顶部变空气时漏检。
+    @Override
+    public boolean hasFallingEntityAbove(TickContext context, BlockPos cell) {
+        ClientLevel level = level(context);
+        if (level == null || !level.isLoaded(cell)) return false;
+        AABB column = new AABB(cell.getX(), cell.getY(), cell.getZ(),
+                cell.getX() + 1.0, cell.getY() + 4.0, cell.getZ() + 1.0);
+        return !level.getEntitiesOfClass(FallingBlockEntity.class, column).isEmpty();
+    }
+
+    // 实岩判定：已加载、属于天然可挖实心方块、不是重力方块也不烫脚，排除松散土沙冰雪，靠原版镐掘与基础岩石标签通吃原版与模组岩石。
+    @Override
+    public boolean solidRock(TickContext context, BlockPos cell) {
+        ClientLevel level = level(context);
+        if (level == null || !level.isLoaded(cell)) return false;
+        if (ground(context, cell) != ClientStairsDown.Ground.DIGGABLE) return false;
+        BlockState state = level.getBlockState(cell);
+        if (state.getBlock() instanceof FallingBlock || BlockPassability.hurtsToStandOn(state)) return false;
+        if (state.is(BlockTags.DIRT) || state.is(BlockTags.SAND)
+                || state.is(BlockTags.SNOW) || state.is(BlockTags.ICE)) {
+            return false;
+        }
+        return state.is(BlockTags.MINEABLE_WITH_PICKAXE)
+                || state.is(BlockTags.BASE_STONE_OVERWORLD)
+                || state.is(BlockTags.BASE_STONE_NETHER);
     }
 
     @Override
