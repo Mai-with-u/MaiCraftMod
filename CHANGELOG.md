@@ -53,6 +53,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 角色用 `body_language(operation="toss")` 朝玩家扔出物品并确认从背包扣减后，`events` 的 `self` 流新增 `items_tossed` 事件，在 `items_tossed` 中写明对方名字与 UUID、扔出坐标及确认扔出的物品件数（未确认的投掷不发出，也不假定对方已捡起）。
 - 观察视图（`self`、`scene`、`detail`、`places`、`world_memory`）正文维持纯英文 ID 不变，出现非原版模组物品、方块或实体时在末尾附去重的当前语言短词表 `mod_labels`（全原版响应不附）；能力与 `lookup` 的物品、方块、实体参数支持直接写中文名，唯一命中自动换算为标准 ID，多候选时返回候选清单供点选。
 - 新增应用机械（`appmek`）联动：装了应用机械时在 `observe(what="self").mod_features` 报出 `appmek`，支持免开窗查看 5 档便携化学品元件电量、容量与盘内化学品（`machine_inspect(item=...)`），识别便携化学品元件界面布局，并提供应用机械全物品与自动化要点专题资料。
 - 应用能源2现已兼容应用机械化学品通道：输入总线新增 `key_type.chemical` 开关，过滤/备料/分区槽与监视器支持化学品（含 `chemical:<id>` 同名消歧），处理样板编码支持 `kind="chemical"`，化学品 P2P 通道支持持通用机械储罐调谐与主手内存卡配对，服务端网络汇总同步附带 `stored_chemicals` 与槽位介质类型。

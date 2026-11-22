@@ -6,11 +6,12 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BiFunction;
 
-import org.maiwithu.maicraft.behavior.inventory.drops.ThrowsItems;
 import org.maiwithu.maicraft.behavior.perception.looking.Aim;
 import org.maiwithu.maicraft.behavior.perception.looking.TurnsHead;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -21,12 +22,16 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 final class FakeNonverbalMoves implements NonverbalMoves {
 
     static final UUID ALEX = UUID.randomUUID();
-    static final Partner ALEX_PARTNER = new Partner(7, ALEX, "Alex");
+    static final Partner ALEX_PARTNER = new Partner(7, ALEX, "Alex", true);
 
     /** 他的眼睛在角色正南方（偏航 0、俯仰 0）。 */
     Aim face = new Aim(0, 0);
+    Partner currentPartner = ALEX_PARTNER;
     boolean present = true;
     boolean riding;
+    WorldPosition currentPosition;
+    Action takeOutAction;
+    BiFunction<String, Integer, Toss> tossFactory;
     /** 视线抬到这个俯仰以上（更小的数）准星才什么都碰不到。 */
     float clearAbove = -10;
     boolean ceiling;
@@ -87,7 +92,7 @@ final class FakeNonverbalMoves implements NonverbalMoves {
     }
 
     @Override public Partner partner(TickContext context, Target target) {
-        return present ? ALEX_PARTNER : null;
+        return present ? currentPartner : null;
     }
 
     @Override public double distanceTo(TickContext context, int entityId) {
@@ -112,7 +117,7 @@ final class FakeNonverbalMoves implements NonverbalMoves {
     }
 
     @Override public Optional<Action> takeOut(TickContext context, String itemId) {
-        return Optional.empty();
+        return Optional.ofNullable(takeOutAction);
     }
 
     @Override public Optional<Action> emptyHand() {
@@ -123,8 +128,13 @@ final class FakeNonverbalMoves implements NonverbalMoves {
         throw new UnsupportedOperationException("替身不走路");
     }
 
-    @Override public ThrowsItems toss(String itemId, int count) {
+    @Override public Toss toss(String itemId, int count) {
+        if (tossFactory != null) return tossFactory.apply(itemId, count);
         throw new UnsupportedOperationException("替身不扔东西");
+    }
+
+    @Override public WorldPosition position(TickContext context) {
+        return currentPosition;
     }
 
     @Override public Set<Integer> pickable(TickContext context, Target target) {

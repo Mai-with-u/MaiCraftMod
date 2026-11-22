@@ -41,9 +41,11 @@ import org.maiwithu.maicraft.game.interaction.AttackKeyPress;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -96,8 +98,9 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
                     .orElse(null);
         }
         if (found == null || found == me || found.isRemoved()) return null;
-        String name = found instanceof Player player ? player.getGameProfile().getName() : found.getName().getString();
-        return new Partner(found.getId(), found.getUUID(), name);
+        boolean isPlayer = found instanceof Player;
+        String name = isPlayer ? ((Player) found).getGameProfile().getName() : found.getName().getString();
+        return new Partner(found.getId(), found.getUUID(), name, isPlayer);
     }
 
     @Override public double distanceTo(TickContext context, int entityId) {
@@ -165,8 +168,19 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
         return new WalkNear(entityId, within);
     }
 
-    @Override public ThrowsItems toss(String itemId, int count) {
-        return new ThrowsItems(itemId, count, FirstPersonScene::of);
+    @Override public Toss toss(String itemId, int count) {
+        return new LiveToss(new ThrowsItems(itemId, count, FirstPersonScene::of));
+    }
+
+    // 读角色此刻脚下的方块坐标与维度，供扔出物品事件记录发出地点；不在世界里或维度未就绪时给 null。
+    @Override public WorldPosition position(TickContext context) {
+        LocalPlayer me = me(context);
+        if (me == null || me.clientLevel == null || me.clientLevel.dimension() == null
+                || me.clientLevel.dimension().location() == null) {
+            return null;
+        }
+        return new WorldPosition(me.getBlockX(), me.getBlockY(), me.getBlockZ(),
+                me.clientLevel.dimension().location().toString());
     }
 
     // 点名的那件（观察编号）要是地上的掉落物；不点名就是最近 60 秒里别的玩家扔到身边的。都只算 6 格内还在的。
@@ -265,6 +279,43 @@ public final class LiveNonverbalMoves implements NonverbalMoves {
     private static LocalPlayer me(TickContext context) {
         PlayerContext player = context == null ? null : context.player();
         return player == null ? null : player.localPlayer();
+    }
+
+    /** 生产投掷包装：把原生抛掷动作接进肢体动作的投掷接口。 */
+    private static final class LiveToss implements Toss {
+        private final ThrowsItems delegate;
+
+        LiveToss(ThrowsItems delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override public int thrown() {
+            return delegate.thrown();
+        }
+
+        @Override public int unconfirmed() {
+            return delegate.unconfirmed();
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            return delegate.tick(context);
+        }
+
+        @Override public void pause() {
+            delegate.pause();
+        }
+
+        @Override public void close() {
+            delegate.close();
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return delegate.interruptibility();
+        }
+
+        @Override public String describe() {
+            return delegate.describe();
+        }
     }
 
     /** 已经拿在手上：立刻做完。 */

@@ -128,7 +128,13 @@ public record TaskEvent(long cursor, Kind kind, long goalRunId, String message, 
          * 在眼前视野里亲眼看见罕见目标（Boss 级强敌或露在外面的天然稀有矿脉）：
          * 同一只 Boss 或同一处矿脉去重只报一次，是什么、几块、在哪在消息与附带的 rare_sighting 里。
          */
-        RARE_SIGHTING
+        RARE_SIGHTING,
+        /**
+         * 角色朝某位玩家扔出了物品（只对确认从背包扣减的数量发出，未确认的不算）：
+         * 如实记录朝谁扔出了什么几件、扔出时角色在哪，不假定对方已捡起；
+         * 对方名字、UUID、扔出坐标与物品清单在附带的 items_tossed 里。
+         */
+        ITEMS_TOSSED
     }
 
     /** 不附自身摘要的事件：开始、提问、暂停、生存需求这些都是这一种。 */

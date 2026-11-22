@@ -5,10 +5,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-import org.maiwithu.maicraft.behavior.inventory.drops.ThrowsItems;
 import org.maiwithu.maicraft.behavior.perception.looking.Aim;
 import org.maiwithu.maicraft.behavior.perception.looking.TurnsHead;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -18,11 +18,20 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  */
 interface NonverbalMoves {
 
-    /** 对着的那个人：游戏实体编号、UUID、怎么称呼他。 */
-    record Partner(int entityId, UUID uuid, String name) {}
+    /** 对着的那个人或实体：游戏实体编号、UUID、怎么称呼他，以及是不是玩家（非玩家实体不发朝玩家扔出事件）。 */
+    record Partner(int entityId, UUID uuid, String name, boolean isPlayer) {}
 
     /** 看他哪里：眼睛（看着、点头摇头）、身体中间（拍一下）、脚下（扔东西）。 */
     enum AimPoint { EYES, CENTER, FEET }
+
+    /** 把主手上的东西一件件扔出去的动作：可查询确认扔出与未确认的件数。 */
+    interface Toss extends Action {
+        /** 确认从背包扣减并扔出的件数。 */
+        int thrown();
+
+        /** 已提交但没等到游戏确认的件数。 */
+        int unconfirmed();
+    }
 
     /** 对着谁：给了玩家名或观察编号就是他；不给就是最近 30 秒里最后一个冲角色做过肢体动作的玩家。找不到为 null。 */
     Partner partner(TickContext context, Target target);
@@ -52,7 +61,10 @@ interface NonverbalMoves {
     Action walkNear(int entityId, double within);
 
     /** 把主手上的这件东西扔出去 count 件（和丢东西同一下"抛"），扔出几件、没等到确认几件从它读。 */
-    ThrowsItems toss(String itemId, int count);
+    Toss toss(String itemId, int count);
+
+    /** 角色此刻所在的方块位置与维度；不在世界里时为 null。 */
+    WorldPosition position(TickContext context);
 
     /** 能捡的：给了观察编号就那一件；不给就最近 60 秒里别的玩家扔到身边的。离角色 6 格以外的不算。 */
     Set<Integer> pickable(TickContext context, Target target);

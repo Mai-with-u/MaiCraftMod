@@ -188,7 +188,8 @@
     "player_body_language",
     "others_things_touched",
     "rare_loot_found",
-    "rare_sighting"
+    "rare_sighting",
+    "items_tossed"
   ],
   "chat_kinds": [
     "player",

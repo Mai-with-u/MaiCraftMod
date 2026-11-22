@@ -102,6 +102,7 @@ final class PanelWords {
             case OTHERS_THINGS_TOUCHED -> "动了别人的东西";
             case RARE_LOOT_FOUND -> "开出稀罕战利品";
             case RARE_SIGHTING -> "看见罕见目标";
+            case ITEMS_TOSSED -> "扔出物品";
         };
     }
 

@@ -4,8 +4,9 @@ package org.maiwithu.maicraft.ability.bodylanguage;
 import java.util.Optional;
 import java.util.Set;
 
-import org.maiwithu.maicraft.behavior.inventory.drops.ThrowsItems;
+import org.maiwithu.maicraft.behavior.inventory.drops.ItemsTossedNotice;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -13,6 +14,7 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
+import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.Next;
 import org.maiwithu.maicraft.kernel.task.PhasedTask;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -40,13 +42,17 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     private final NonverbalInput input;
     private final NonverbalMoves moves;
     private final PokesGiven pokes;
+    private final ItemsTossedNotice tossedNotice;
     private NonverbalMoves.Partner partner;
     private Set<Integer> items = Set.of();
     private String heldItem;
     private int slot = -1;
     private Action hand;
     private Gesturing gesturing;
-    private ThrowsItems throwing;
+    private NonverbalMoves.Toss throwing;
+    private boolean tossedRecorded;
+    /** 扔出阶段最近一次读到的角色坐标：中途取消、超时或离开世界收尾时兜底记下扔出位置。 */
+    private WorldPosition lastTossPosition;
     private Gesturing facing;
     private int picked;
     /** 要捡的东西已经自己进了包时，进包的是几个什么；没有为 null。 */
@@ -59,10 +65,15 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
     record NonverbalDetails(String done, String to, String skipped) implements ResultDetails {}
 
     NonverbalTask(NonverbalInput input, NonverbalMoves moves, PokesGiven pokes) {
+        this(input, moves, pokes, ItemsTossedNotice.NONE);
+    }
+
+    NonverbalTask(NonverbalInput input, NonverbalMoves moves, PokesGiven pokes, ItemsTossedNotice tossedNotice) {
         super("做肢体动作", Phase.FIND, new ProgressTracker(100, NonverbalRhythm.MAX_TICKS + 200));
         this.input = input;
         this.moves = moves;
         this.pokes = pokes;
+        this.tossedNotice = tossedNotice == null ? ItemsTossedNotice.NONE : tossedNotice;
     }
 
     @Override protected Action enter(Phase phase) {
@@ -83,7 +94,8 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
                         NonverbalMoves.AimPoint.FEET);
                 hold(facing);
                 throwing = moves.toss(heldItem, input.count());
-                yield throwing;
+                // 任务中途被取消、被替换或离开世界时，基类会在组装结果前调用动作 close()：在这里兜底结清已确认扔出的件数。
+                yield new SettlingToss(throwing);
             }
             case PICK_UP -> moves.pickUp(items);
             default -> gesturing = new Gesturing(moves, input.operation(), input.count(), input.lookTicks(), partner,
@@ -185,12 +197,19 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
         return Next.go(Phase.DO, "开始" + op.words);
     }
 
-    // 做：扔东西时一边看着他脚下；做完记下扔出、捡到的东西，再选回原来那格快捷栏。
+    // 做：扔东西时一边看着他脚下并记录最近有效坐标；做完记下扔出、捡到的东西，再选回原来那格快捷栏。
     private Next<Phase> act(TickContext context) {
+        if (throwing != null) {
+            WorldPosition current = moves.position(context);
+            if (current != null) lastTossPosition = current;
+        }
         if (facing != null) facing.tick(context);
         ActionStatus status = runAction(context);
         if (status instanceof ActionStatus.Running) return Next.stay();
-        if (throwing != null) recordTossed();
+        if (throwing != null) {
+            WorldPosition current = moves.position(context);
+            recordTossed(current != null ? current : lastTossPosition);
+        }
         if (input.operation() == NonverbalOperation.PICK_UP) {
             picked = (int) items.stream().filter(id -> Double.isInfinite(moves.distanceTo(context, id))).count();
         }
@@ -201,12 +220,26 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
         return Next.go(Phase.PUT_BACK, "做完了");
     }
 
-    private void recordTossed() {
-        String note = "扔给 " + partner.name();
-        if (throwing.thrown() > 0) recordChange(new Change(Change.Kind.ITEM_DROPPED, heldItem, throwing.thrown(), note));
+    // 确认扔出数量大于 0 时记变化，并仅对玩家对象发出 items_tossed 事实事件；未确认的投掷只记进 unconfirmed，绝不冒充已扔出。
+    private void recordTossed(WorldPosition at) {
+        if (tossedRecorded || throwing == null) return;
+        tossedRecorded = true;
+        String note = partner == null ? "扔出" : "扔给 " + partner.name();
+        if (throwing.thrown() > 0) {
+            recordChange(new Change(Change.Kind.ITEM_DROPPED, heldItem, throwing.thrown(), note));
+            if (partner != null && partner.isPlayer() && partner.uuid() != null) {
+                tossedNotice.tossed(partner.name(), partner.uuid().toString(), at, heldItem, throwing.thrown());
+            }
+        }
         if (throwing.unconfirmed() > 0) {
             recordUnconfirmed(new Change(Change.Kind.ITEM_DROPPED, heldItem, throwing.unconfirmed(), note + "，没等到确认"));
         }
+    }
+
+    // 卡住或超时收场前先结清已确认扔出的物品，确保 changes 与 items_tossed 都不漏记。
+    @Override protected Next<Phase> beforeGivingUp(Problem problem) {
+        if (throwing != null) recordTossed(lastTossPosition);
+        return null;
     }
 
     // 选回原来那格快捷栏（本刻出不了手就下一刻再选，一秒还选不回就算了）。
@@ -266,5 +299,35 @@ final class NonverbalTask extends PhasedTask<NonverbalTask.Phase> {
             case DO -> input.describe();
             case PUT_BACK -> "收手";
         };
+    }
+
+    /** 扔出动作的收尾包装：中途被取消、被替换或离开世界时在拼装任务结果前兜底结清已确认扔出的件数。 */
+    private final class SettlingToss implements Action {
+        private final NonverbalMoves.Toss delegate;
+
+        SettlingToss(NonverbalMoves.Toss delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            return delegate.tick(context);
+        }
+
+        @Override public void pause() {
+            delegate.pause();
+        }
+
+        @Override public void close() {
+            delegate.close();
+            recordTossed(lastTossPosition);
+        }
+
+        @Override public Interruptibility interruptibility() {
+            return delegate.interruptibility();
+        }
+
+        @Override public String describe() {
+            return delegate.describe();
+        }
     }
 }

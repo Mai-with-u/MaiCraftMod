@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import org.maiwithu.maicraft.behavior.inventory.drops.ItemsTossedNotice;
 import org.maiwithu.maicraft.kernel.ability.AbilityDoc;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilitySpec;
@@ -37,15 +38,26 @@ public final class NonverbalModule implements AbilityModule {
     static final int MAX_LOOK_SECONDS = 10;
 
     private final NonverbalMoves moves;
+    private final ItemsTossedNotice tossedNotice;
     private final PokesGiven pokes = new PokesGiven();
 
     NonverbalModule(NonverbalMoves moves) {
-        this.moves = Objects.requireNonNull(moves, "moves");
+        this(moves, ItemsTossedNotice.NONE);
     }
 
-    /** 生产的一份：现场接在真实客户端上。 */
+    NonverbalModule(NonverbalMoves moves, ItemsTossedNotice tossedNotice) {
+        this.moves = Objects.requireNonNull(moves, "moves");
+        this.tossedNotice = tossedNotice == null ? ItemsTossedNotice.NONE : tossedNotice;
+    }
+
+    /** 生产的一份：现场接在真实客户端上，未接事件通报器。 */
     public static NonverbalModule live(LiveNonverbalMoves moves) {
-        return new NonverbalModule(moves);
+        return new NonverbalModule(moves, ItemsTossedNotice.NONE);
+    }
+
+    /** 生产的一份：现场接在真实客户端上，确认朝玩家扔出物品时经通报器发出事实事件。 */
+    public static NonverbalModule live(LiveNonverbalMoves moves, ItemsTossedNotice tossedNotice) {
+        return new NonverbalModule(moves, tossedNotice);
     }
 
     @Override
@@ -95,6 +107,6 @@ public final class NonverbalModule implements AbilityModule {
     @Override
     public void registerTasks(TaskFactories factories) {
         // 拍过谁的账整个能力共用一份：连着下达几次拍一下也按同一本账限。
-        factories.register(NonverbalInput.class, input -> new NonverbalTask(input, moves, pokes));
+        factories.register(NonverbalInput.class, input -> new NonverbalTask(input, moves, pokes, tossedNotice));
     }
 }

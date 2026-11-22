@@ -122,6 +122,7 @@ import org.maiwithu.maicraft.behavior.inventory.drops.ClientStepsAside;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientStackMerger;
 import org.maiwithu.maicraft.behavior.inventory.drops.DropAvoidance;
 import org.maiwithu.maicraft.behavior.inventory.drops.DropsItems;
+import org.maiwithu.maicraft.behavior.inventory.drops.ItemsTossedNotice;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
@@ -579,9 +580,10 @@ public final class AbilityCatalog {
                 deps.channels().events()));
 
         // 肢体动作：看着人蹲起、点头、挥手、拍一下、扔东西给他、捡他扔来的；换手、走过去、捡东西用共用的那几份，
-        // 不点名时对着最近冲角色做过肢体动作的人，做完告诉回头看回过他了。
+        // 不点名时对着最近冲角色做过肢体动作的人，做完告诉回头看回过他了；确认扔出后经事件出口发 items_tossed 事实事件。
         registry.register(NonverbalModule.live(new LiveNonverbalMoves(deps.world().scene().seen(), deps.world().nonverbal(),
-                shared.toMainhand(), deps.travel().walks(), shared.drops(), new AttackKeyPress())));
+                shared.toMainhand(), deps.travel().walks(), shared.drops(), new AttackKeyPress()),
+                new ItemsTossedNotice(deps.channels().events())));
 
         // 计时：不占身体的"过 N 秒叫我"，往启动侧每刻看钟的那份计时表里挂；想过一会儿回来看都走它，角色这期间照常干活。
         registry.register(new TimerAbility(deps.channels().timers()));

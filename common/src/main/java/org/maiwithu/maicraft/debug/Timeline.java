@@ -116,6 +116,8 @@ final class Timeline {
             case DISCOVERED -> PanelColor.MINOR;
             // 打开战利品箱看到稀罕贵重物、眼前看见 Boss 或稀有矿脉都是值得播报的高光发现，用成功色点亮
             case RARE_LOOT_FOUND, RARE_SIGHTING -> PanelColor.GOOD;
+            // 朝玩家扔出物品已确认扣减背包，用成功色标出当面扔出事实
+            case ITEMS_TOSSED -> PanelColor.GOOD;
             case FINISHED -> event.status() == null ? PanelColor.MINOR : switch (event.status()) {
                 case DONE -> PanelColor.GOOD;
                 case PARTIAL -> PanelColor.WAITING;
