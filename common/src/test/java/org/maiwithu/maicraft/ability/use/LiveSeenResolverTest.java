@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.use;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +15,7 @@ import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
 import org.maiwithu.maicraft.behavior.perception.RemembersSightings;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SeenRegistry;
 import org.maiwithu.maicraft.behavior.perception.SelfSight;
 import org.maiwithu.maicraft.behavior.perception.SignLines;
 import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
@@ -101,5 +103,35 @@ class LiveSeenResolverTest {
                 WorldPosition.here(0, 64, -3), true, true, false, null, Map.of())));
         scene.expire(400);
         assertTrue(resolver.resolve("e1").isEmpty(), "失效的编号按不在了结束");
+    }
+
+    @Test
+    void foundNonFacilityBlockStaysResolvableAcrossSceneRefreshesAndInvalidatesWhenBroken() {
+        WorldPosition shrinePos = WorldPosition.here(6, 65, -8);
+        String shrineId = scene.recordFoundBlock(shrinePos, "touhou_little_maid:shrine", "前方", 100);
+
+        // 5 秒后常规场景刷新只更新设施列表，非设施神龛不进设施列表但短期保活窗内仍可被 use 解析命中。
+        scene.updateFacilities(200, NOW, List.of(), pos -> pos.equals(shrinePos)
+                ? Optional.of("touhou_little_maid:shrine") : Optional.of("minecraft:air"));
+        scene.expire(200);
+        assertTrue(scene.facilities().isEmpty(), "非设施方块不污染 observe 的设施列表");
+        ResolvesSeen.Resolved kept = resolver.resolve(shrineId).orElseThrow();
+        assertEquals("touhou_little_maid:shrine", kept.typeId());
+        assertEquals(shrinePos, kept.position());
+
+        // 60 秒保活窗边界内依然有效。
+        long withinWindow = 100L + SeenRegistry.FOUND_BLOCK_RETENTION_TICKS;
+        scene.expire(withinWindow);
+        assertTrue(resolver.resolve(shrineId).isPresent(), "60 秒保活窗内编号应保持有效");
+
+        // 神龛真被挖掉变成空气后，下一次常规刷新立即使该编号失效。
+        scene.updateFacilities(withinWindow, NOW, List.of(), pos -> Optional.of("minecraft:air"));
+        assertTrue(resolver.resolve(shrineId).isEmpty(), "原位方块变成空气后编号必须失效");
+
+        // 未被挖掉但超过 60 秒保活窗且没有任务推进时，按到期正常失效。
+        WorldPosition altarPos = WorldPosition.here(12, 65, -8);
+        String altarId = scene.recordFoundBlock(altarPos, "touhou_little_maid:altar", "右前方", 1000);
+        scene.expire(1000L + SeenRegistry.FOUND_BLOCK_RETENTION_TICKS + 1);
+        assertTrue(resolver.resolve(altarId).isEmpty(), "超过 60 秒保活窗后应正常过期失效");
     }
 }

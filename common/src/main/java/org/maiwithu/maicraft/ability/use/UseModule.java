@@ -169,6 +169,10 @@ public final class UseModule implements AbilityModule {
                     @Override public List<String> systemMessagesSince(long mark) {
                         return refusals.systemMessagesSince(mark);
                     }
+
+                    @Override public List<String> refusalMessagesSince(long mark) {
+                        return refusals.refusalMessagesSince(mark);
+                    }
                 },
                 new MenuSignEditors(),
                 new ClientDropPickup(context, walks, confirmations),

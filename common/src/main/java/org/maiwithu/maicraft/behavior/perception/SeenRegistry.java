@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -48,9 +49,12 @@ public final class SeenRegistry {
     /** 一个刚失效的编号：最后看到的方位与位置，用来交代"最后一次在哪儿看见它"。 */
     public record Gone(String id, Kind kind, String lastDirection, WorldPosition lastPosition) {}
 
-    // 实体是会动的，最后一次看见后只信一小会儿；地形特征与设施不动，多留一阵。
+    // 实体是会动的，最后一次看见后只信一小会儿；地形特征与设施不动，多留一阵；
+    // find 命中的非设施方块（神龛、祭坛这类）短期保活 60 秒，够后续 use 等能力直接点名。
     private static final int ENTITY_RETENTION_TICKS = 200;
     private static final int PLACE_RETENTION_TICKS = 2400;
+    /** 寻找命中的非设施方块短期保活时长（60 秒 = 1200 刻）。 */
+    public static final int FOUND_BLOCK_RETENTION_TICKS = 20 * 60;
     /**
      * 目标推进中到期的编号最多再留多久，按最后一次看见算：一条 sequence 前几步走路、取物、做东西加起来
      * 十来分钟，留 20 分钟够它做完；再久就照常失效，不让一场陪伴里早就没再看的东西一直认得。
@@ -98,7 +102,8 @@ public final class SeenRegistry {
 
     /** 登记一个地形特征，返回观察编号 f#；同一个位置的特征还在册就沿用旧编号。 */
     public String feature(WorldPosition position, String direction, long nowTick) {
-        return place(position, null, direction, nowTick, Kind.FEATURE, () -> "f" + nextFeature++);
+        return place(position, null, direction, nowTick, Kind.FEATURE, PLACE_RETENTION_TICKS,
+                () -> "f" + nextFeature++);
     }
 
     /** 登记一个设施，返回观察编号 b#；同一个位置的设施还在册就沿用旧编号。 */
@@ -111,7 +116,17 @@ public final class SeenRegistry {
      * 方块种类说不出时给 null，只按这一格空没空判断。
      */
     public String facility(WorldPosition position, String blockType, String direction, long nowTick) {
-        return place(position, blockType, direction, nowTick, Kind.FACILITY, () -> "b" + nextFacility++);
+        return place(position, blockType, direction, nowTick, Kind.FACILITY, PLACE_RETENTION_TICKS,
+                () -> "b" + nextFacility++);
+    }
+
+    /**
+     * 登记一格由 find 命中的非设施方块（如神龛、祭坛），发放或沿用 b# 编号并给予 60 秒短期保活窗：
+     * 同位置已有常规设施编号时沿用原编号与原保留期，不缩短；新登记的非设施方块在 60 秒内只要原位方块未变就持续有效。
+     */
+    public String foundBlock(WorldPosition position, String blockType, String direction, long nowTick) {
+        return place(position, blockType, direction, nowTick, Kind.FACILITY, FOUND_BLOCK_RETENTION_TICKS,
+                () -> "b" + nextFacility++);
     }
 
     /**
@@ -240,8 +255,29 @@ public final class SeenRegistry {
         };
     }
 
+    /**
+     * 按当前已加载区块的方块读数淘汰已经不在原位的 b# 编号：方块真被挖掉变成空气或换成别的方块时立即失效，
+     * 未加载（返回空）或仍为原方块 ID 时保持在册。常规设施与 find 保活的非设施方块共用这份核验。
+     */
+    public List<Gone> pruneInvalidBlocks(Function<WorldPosition, Optional<String>> loadedBlockAt) {
+        if (loadedBlockAt == null) {
+            return List.of();
+        }
+        List<Gone> gone = new ArrayList<>();
+        for (Entry entry : new ArrayList<>(entries.values())) {
+            if (entry.kind() != Kind.FACILITY || entry.blockType() == null) {
+                continue;
+            }
+            Optional<String> current = loadedBlockAt.apply(entry.position());
+            if (current.isPresent() && !entry.blockType().equals(current.get())) {
+                gone.add(drop(entry));
+            }
+        }
+        return gone;
+    }
+
     private String place(WorldPosition position, String blockType, String direction, long nowTick, Kind kind,
-            Supplier<String> newId) {
+            int retentionTicks, Supplier<String> newId) {
         // 同一个位置的同种东西是同一样：沿用编号，方位按这次看到的刷新。
         String existing = placeIds.get(placeKey(position));
         if (existing != null && entries.containsKey(existing) && entries.get(existing).kind() == kind) {
@@ -250,7 +286,7 @@ public final class SeenRegistry {
         }
         String id = newId.get();
         placeIds.put(placeKey(position), id);
-        put(new Entry(id, kind, position, direction, nowTick, PLACE_RETENTION_TICKS, blockType, null, null));
+        put(new Entry(id, kind, position, direction, nowTick, retentionTicks, blockType, null, null));
         return id;
     }
 

@@ -336,8 +336,23 @@ public final class Scene {
         }
         if (loadedBlockAt != null) {
             memory.pruneGoneContainers(loadedBlockAt, kinds::isContainer);
+            // 已加载区块里被挖掉或替换的方块编号立即失效，仍在原位的非设施保活编号则不受常规设施刷新影响。
+            List<SeenRegistry.Gone> goneBlocks = ids.pruneInvalidBlocks(loadedBlockAt);
+            if (!goneBlocks.isEmpty()) {
+                List<String> dead = goneBlocks.stream().map(SeenRegistry.Gone::id).toList();
+                sightings = sightings.stream().filter(entry -> !dead.contains(entry.id())).toList();
+            }
         }
         replace(FacilitySighting.class, next);
+    }
+
+    /**
+     * 登记 find 命中的非设施方块（如神龛、祭坛）并短期保活其 b# 编号：
+     * 不把普通或模组非设施方块塞进 observe(scene) 的设施列表，但在 60 秒保活窗内原位方块未变时，
+     * 常规场景刷新不会清掉它，use 等能力拿到 b# 可以直接解析定位。
+     */
+    public String recordFoundBlock(WorldPosition position, String blockType, String direction, long nowTick) {
+        return ids.foundBlock(position, blockType, direction, nowTick);
     }
 
     /**

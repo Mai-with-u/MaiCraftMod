@@ -20,6 +20,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalTrees;
 import org.maiwithu.maicraft.behavior.explore.StructureClues;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
@@ -73,6 +74,8 @@ final class LiveFinder implements FindsAround {
     private final ScanQuietness quietness = new ScanQuietness();
     /** 被视线闸挡下的候选账本：配额满不冒充扫完，看不见的位置排除后继续外推。 */
     private final BlockedCandidates blocked = new BlockedCandidates();
+    /** 近处或已记住区域内被墙体挡住的非自然矿石方块线索账本：跨轮次累积，无可见命中时交代线索。 */
+    private final HiddenBlockLeads hiddenBlocks = new HiddenBlockLeads();
     /** 上一轮所在维度：扫描中换世界，这轮作废，不冒充结论。 */
     private String lastDimension;
 
@@ -101,11 +104,12 @@ final class LiveFinder implements FindsAround {
         if (changed) {
             // 换了世界旧账本全部作废：那边看不见的位置在这边没有意义。
             blocked.followQuery(null, List.of(), -1, -1);
+            hiddenBlocks.followQuery(null, List.of(), -1, -1);
             return new Round(List.of(), false, true);
         }
         BlockPos center = player.blockPosition();
         return switch (input.kind()) {
-            case BLOCK -> scanBlocks(input, level, player, center);
+            case BLOCK -> scanBlocks(input, level, player, center, dimension);
             case ENTITY -> scanEntities(input, center);
             case STRUCTURE -> structureLeads(input, center, dimension);
         };
@@ -116,7 +120,7 @@ final class LiveFinder implements FindsAround {
      * 索引侧先做六面暴露的粗筛再攒配额，埋着的候选不挤占名额；视线闸挡下的位置记进账本、
      * 下一轮作为排除名单喂回索引继续往外扫——配额被看不见的候选占满时，"没找到"不冒充"扫完"。
      */
-    private Round scanBlocks(FindInput input, ClientLevel level, LocalPlayer player, BlockPos center) {
+    private Round scanBlocks(FindInput input, ClientLevel level, LocalPlayer player, BlockPos center, String dimension) {
         Set<Block> targets = LiveWorldTypes.blocksOf(input.selectors());
         if (targets.isEmpty()) {
             // 决定阶段已校验过 ID；到不了这里，真到了也按"这一片扫完了没有"如实交代。
@@ -128,6 +132,7 @@ final class LiveFinder implements FindsAround {
         quietness.observe(scans.sectionsBuilt(level), level.getGameTime());
         // 账本跟着查询走：位置、目标、数量、半径任一变了就清账重来。
         blocked.followQuery(center, input.selectors(), input.count(), input.radius());
+        hiddenBlocks.followQuery(center, input.selectors(), input.count(), input.radius());
         // 由近到远一轮复核一批：看不见的整批排除，下一轮接着往外看。
         var result = scans.query(level, center, targets, Math.max(input.count(), SIGHT_CHECKS_PER_ROUND),
                 Math.max(1, Math.min(MAX_CHUNK_RADIUS, input.radius() / 16 + 1)), BUILD_BUDGET,
@@ -138,7 +143,7 @@ final class LiveFinder implements FindsAround {
         Map<BlockPos, Boolean> trunks = new HashMap<>();
         List<BlockPos> rejected = new ArrayList<>();
         for (BlockPos pos : result.hits()) {
-            if (!confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks)) {
+            if (!confirmBlock(level, player, pos, targets, center, input.radius(), dimension, hits, seen, trunks)) {
                 // 过不了视线闸或不在半径里的候选记下：下一轮从配额竞争里排除，让后面的候选有机会入围。
                 rejected.add(pos);
             }
@@ -146,30 +151,33 @@ final class LiveFinder implements FindsAround {
         // 刚放下的方块可能还没进扫描游标：最近同步的变化优先补查一遍，不能刚放下就找不到。
         // 最近变化不在索引窗口里，失败不进账本——它下一刻自然会进索引，不该被旧名单提前排除。
         for (BlockPos pos : scans.recentWrites(level)) {
-            confirmBlock(level, player, pos, targets, center, input.radius(), hits, seen, trunks);
+            confirmBlock(level, player, pos, targets, center, input.radius(), dimension, hits, seen, trunks);
         }
         boolean complete = blocked.settle(result.complete(), hits.size(), input.count(), rejected);
-        return new Round(List.copyOf(hits), complete, false, null, quietness.quiet(level.getGameTime()),
-                blocked.lastRuledOut());
+        return new Round(List.copyOf(hits), complete, false, hiddenBlocks.lead(center),
+                quietness.quiet(level.getGameTime()), blocked.lastRuledOut());
     }
 
-    /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；没过的返回 false。 */
+    /** 复核一格是不是真目标（索引可能过时）、在不在半径里、看不看得见，都过才收；仅被视线挡住时按防透视规则记线索。 */
     private boolean confirmBlock(ClientLevel level, LocalPlayer player, BlockPos pos, Set<Block> targets,
-            BlockPos center, int radius, List<Hit> hits, Set<String> seen, Map<BlockPos, Boolean> trunks) {
+            BlockPos center, int radius, String dimension, List<Hit> hits, Set<String> seen, Map<BlockPos, Boolean> trunks) {
         double dx = pos.getX() - center.getX();
         double dy = pos.getY() - center.getY();
         double dz = pos.getZ() - center.getZ();
         if (dx * dx + dy * dy + dz * dz > (double) radius * radius) {
             return false;
         }
-        Block state = level.getBlockState(pos).getBlock();
+        BlockState blockState = level.getBlockState(pos);
+        Block state = blockState.getBlock();
         if (!targets.contains(state)) {
             return false;
         }
-        // 视线被挡住的不是找到：等角色走近、看得见了再报。
+        // 视线被挡住的不是找到：等角色走近、看得见了再报；近处或已知建筑区内的非矿石功能块记下遮挡线索。
         if (!ObservationVisibility.block(player, pos)) {
+            hiddenBlocks.recordIfEligible(pos, blockState, center, dimension, memory);
             return false;
         }
+        hiddenBlocks.markVisible(pos);
         if (seen.add(pos.getX() + "," + pos.getY() + "," + pos.getZ())) {
             String typeId = BuiltInRegistries.BLOCK.getKey(state).toString();
             hits.add(new Hit(FindInput.FindKind.BLOCK, typeId, WorldPosition.here(pos.getX(), pos.getY(), pos.getZ()),

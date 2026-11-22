@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.serverlink.ReceivedConfirmations;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
@@ -60,6 +61,34 @@ public final class ClientGameRefusals {
      */
     public List<String> systemMessagesSince(long mark) {
         return chat.systemTextsAfter(mark);
+    }
+
+    /**
+     * 记号之后聊天栏收到的、可能表示游戏拒绝这次交互的服务端系统消息原话。
+     * 按原版翻译键排除成就与进度完成播报、玩家进出、死亡与跳过夜晚播报，不把刚弹出的进度成就当成拒绝。
+     */
+    public List<String> refusalMessagesSince(long mark) {
+        return chat.systemChatsAfter(mark).stream()
+                .filter(message -> !isNonRefusalBroadcast(message))
+                .map(ReceivedChat::text)
+                .toList();
+    }
+
+    /**
+     * 这条系统消息是不是已知的非拒绝类正向或公共播报：只凭游戏原生翻译键特征判定，不按显示文字猜。
+     * 成就与进度播报（chat.type.advancement.*）、进出服务器、死亡播报与全服睡眠播报都不可能是拒绝交互的原因。
+     */
+    public static boolean isNonRefusalBroadcast(ReceivedChat message) {
+        if (message == null || message.translationKey() == null) {
+            return false;
+        }
+        String key = message.translationKey();
+        return key.startsWith("chat.type.advancement.")
+                || key.startsWith("multiplayer.player.joined")
+                || key.equals("multiplayer.player.left")
+                || key.startsWith("death.")
+                || key.equals("sleep.players_sleeping")
+                || key.equals("sleep.skipping_night");
     }
 
     /** 最近一条动作栏提示语；没有在显示时为空。 */

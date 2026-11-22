@@ -441,9 +441,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         List<String> chatMessages = services.refusal() == null ? List.of()
                 : services.refusal().systemMessagesSince(chatMark);
+        List<String> refusalMessages = services.refusal() == null ? List.of()
+                : services.refusal().refusalMessagesSince(chatMark);
         String held = input.item() != null ? input.item()
                 : services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse("手上的东西");
-        return switch (UseDecider.settle(result, newGameMessage(), chatMessages, target == null, held)) {
+        return switch (UseDecider.settle(result, newGameMessage(), refusalMessages, target == null, held)) {
             case UseDecider.Settlement.Applied applied -> {
                 // 生效了照常算生效；这段时间聊天栏里服务端说的话原样附上，要不要当回事由 LLM 判断。
                 gameMessages.addAll(chatMessages);

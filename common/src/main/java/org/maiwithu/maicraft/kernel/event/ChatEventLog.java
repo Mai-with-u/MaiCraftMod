@@ -48,20 +48,28 @@ public final class ChatEventLog {
     }
 
     /**
-     * 某个序号之后收到的服务端系统消息原话，按收到先后，不等。玩家说的话不算（别人聊天和这一下无关）。
-     * 换了世界（流换了）时序号作废，给空。
+     * 某个序号之后收到的服务端系统消息完整记录（含原话与翻译键），按收到先后，不等。
+     * 玩家说的话不算；换了世界（流换了）时序号作废，给空。
      */
-    public List<String> systemTextsAfter(long cursor) {
+    public List<ReceivedChat> systemChatsAfter(long cursor) {
         if (cursor > log.latest()) return List.of();
         try {
             CursorLog.Page<ChatEvent> page = log.read(log.streamId(), cursor,
                     event -> event.chat().kind() == ReceivedChat.Kind.SYSTEM, CAPACITY, 0);
             if (page.cursorStatus() == CursorLog.CursorStatus.STREAM_CHANGED) return List.of();
-            return page.events().stream().map(event -> event.chat().text()).toList();
+            return page.events().stream().map(ChatEvent::chat).toList();
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return List.of();
         }
+    }
+
+    /**
+     * 某个序号之后收到的服务端系统消息原话，按收到先后，不等。玩家说的话不算（别人聊天和这一下无关）。
+     * 换了世界（流换了）时序号作废，给空。
+     */
+    public List<String> systemTextsAfter(long cursor) {
+        return systemChatsAfter(cursor).stream().map(ReceivedChat::text).toList();
     }
 
     /**

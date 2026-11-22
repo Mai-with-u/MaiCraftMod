@@ -13,6 +13,7 @@ import org.maiwithu.maicraft.behavior.perception.SceneEntity;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.SceneSighting;
 import org.maiwithu.maicraft.behavior.perception.SceneThing;
+import org.maiwithu.maicraft.behavior.perception.SeenRegistry;
 import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
 
 /**
@@ -39,6 +40,11 @@ public final class LiveSeenResolver implements ResolvesSeen {
         return current.lookup(seenId).flatMap(entry -> {
             Integer gameEntity = current.seen().gameEntityOf(seenId).orElse(null);
             Optional<String> type = typeOf(current, seenId);
+            // find 命中的非设施方块（神龛、祭坛等）不进入设施列表，但在短期保活窗内仍记着登记时的方块类型；
+            // 只要编号还在册就按该方块类型交回给 use 到现场核对，避免下一帧常规刷新后误报 TARGET_GONE。
+            if (type.isEmpty() && entry.kind() == SeenRegistry.Kind.FACILITY && entry.blockType() != null) {
+                type = Optional.of(entry.blockType());
+            }
             // 实体的类型交互前按游戏实体编号从世界里读：这一轮场景没列出它不等于它不在了。
             if (type.isEmpty() && gameEntity == null) return Optional.empty();
             return Optional.of(new Resolved(entry.position(), type.orElse(null), gameEntity));

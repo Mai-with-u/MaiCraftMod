@@ -233,6 +233,11 @@ final class UseSeams {
         default List<String> systemMessagesSince(long mark) {
             return List.of();
         }
+
+        /** 记号之后聊天栏收到的、已排除成就进度与公共播报的可能拒绝消息原话；默认沿用全部系统消息。 */
+        default List<String> refusalMessagesSince(long mark) {
+            return systemMessagesSince(mark);
+        }
     }
 
     /** 走到没加载的坐标：一直走到那一片加载出来；给不出走法时为空。 */

@@ -29,6 +29,7 @@ import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
 import org.maiwithu.maicraft.behavior.approach.ProtectedCells;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.interaction.ClientGameRefusals;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
@@ -38,8 +39,11 @@ import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.ReceivedChat;
+import org.maiwithu.maicraft.game.interaction.OverlayMessages;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ReadsBlockTags;
+import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -420,6 +424,31 @@ class UseTaskTest {
         TaskResult result = rig.run(rig.input(position(LEVER), null, null, null, 1));
         assertEquals(TaskResult.Status.DONE, result.status());
         assertEquals(List.of("某某加入了游戏"), ((UseDetails) result.details()).gameMessages());
+    }
+
+    @Test
+    void 点击方块后收到成就进度播报不再误判为游戏拒绝() {
+        // 复现点神龛触发进度播报时的场景：chat.type.advancement.task / goal / challenge 不得当成 REFUSED_BY_GAME。
+        for (String key : List.of("chat.type.advancement.task", "chat.type.advancement.goal",
+                "chat.type.advancement.challenge")) {
+            Rig rig = new Rig();
+            rig.refusal.useTypedChat = true;
+            rig.world.blocks.put(LEVER, "touhou_little_maid:shrine");
+            rig.interactions.outcome(InteractionResult.unconfirmed("确认没等到"),
+                    () -> rig.refusal.addServerChat("玩家甲达成了目标[我又复活啦!]", key));
+            TaskResult unconfirmedResult = rig.run(rig.input(position(LEVER), null, null, null, 1));
+            assertEquals(TaskResult.Status.PARTIAL, unconfirmedResult.status(),
+                    "进度播报不应把未确认交互改判为 REFUSED_BY_GAME：" + key);
+            assertEquals(1, unconfirmedResult.unconfirmed().size());
+
+            Rig notAppliedRig = new Rig();
+            notAppliedRig.refusal.useTypedChat = true;
+            notAppliedRig.world.blocks.put(LEVER, "touhou_little_maid:shrine");
+            notAppliedRig.interactions.outcome(InteractionResult.notApplied("现场没变"),
+                    () -> notAppliedRig.refusal.addServerChat("玩家甲达成了目标[我又复活啦!]", key));
+            TaskResult notAppliedResult = notAppliedRig.run(notAppliedRig.input(position(LEVER), null, null, null, 1));
+            assertProblem(notAppliedResult, Problem.Kind.NOT_POSSIBLE_HERE);
+        }
     }
 
     @Test
@@ -1179,13 +1208,36 @@ class UseTaskTest {
         String message;
         /** 聊天栏收到的服务端系统消息，按收到先后；记号就是条数。 */
         final List<String> chat = new ArrayList<>();
+        /** 需要按翻译键走真实拒绝过滤时写进这条聊天日志。 */
+        final ChatEventLog typedChat = new ChatEventLog();
+        final ClientGameRefusals typedRefusals = new ClientGameRefusals(
+                new OverlayMessages(), List::of, () -> 0L, typedChat);
+        boolean useTypedChat;
+
+        void addServerChat(String text, String translationKey) {
+            useTypedChat = true;
+            ReceivedChat base = ReceivedChat.fromServer(text, false).orElseThrow();
+            typedChat.append(translationKey == null ? base : base.with(List.of(), translationKey));
+        }
 
         @Override public Optional<String> latestMessage() { return Optional.ofNullable(message); }
 
-        @Override public long chatMark() { return chat.size(); }
+        @Override public long chatMark() {
+            return useTypedChat ? typedRefusals.chatMark() : chat.size();
+        }
 
         @Override public List<String> systemMessagesSince(long mark) {
+            if (useTypedChat) {
+                return typedRefusals.systemMessagesSince(mark);
+            }
             return List.copyOf(chat.subList((int) mark, chat.size()));
+        }
+
+        @Override public List<String> refusalMessagesSince(long mark) {
+            if (useTypedChat) {
+                return typedRefusals.refusalMessagesSince(mark);
+            }
+            return systemMessagesSince(mark);
         }
     }
 
