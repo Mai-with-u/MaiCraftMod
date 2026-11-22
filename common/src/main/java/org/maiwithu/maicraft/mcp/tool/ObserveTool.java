@@ -378,7 +378,11 @@ public final class ObserveTool implements McpTool {
             case "self" -> self(currentScene, context);
             case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard, localizedNames)
                     .orElse(null);
-            case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension, localizedNames);
+            case "places" -> {
+                BuildingArchives buildingArchives = pictures.archives().get();
+                yield WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension, localizedNames,
+                        name -> includeBuildingInPlaces(buildingArchives, name), name -> true);
+            }
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
                     radius, kindFilter, recordOrigin, notes::add, sections, rememberedNetworks.get(), localizedNames);
             case "menu" -> menu();
@@ -491,6 +495,13 @@ public final class ObserveTool implements McpTool {
 
     private static Prepared unknown(String message) {
         return new Prepared(null, null, Optional.empty(), new PictureLook.Turn.NoNeed(), null, null, message);
+    }
+
+    // 清洗 observe(what=places) 的建筑档案条目：查得到档案文件但从未实际施工放过方块（含历史只读勘查档与空施工档）时剥离；
+    // 查不到档案文件时仅按无名规则过滤，不误删。
+    private static boolean includeBuildingInPlaces(BuildingArchives archives, String name) {
+        if (archives == null) return true;
+        return archives.find(name).map(archive -> !archive.placedCells().isEmpty()).orElse(true);
     }
 
     // 这个世界、这个维度里叫这个名的一栋。

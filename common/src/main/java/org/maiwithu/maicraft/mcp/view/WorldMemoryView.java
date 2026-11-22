@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
  * 世界记忆与命名地点的观察视图：
@@ -100,8 +101,21 @@ public final class WorldMemoryView {
     /** 同上，并在尾部附上去重后的非原版模组短词表（全原版时不附）。 */
     public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension,
             ReadsLocalizedNames localizedNames) {
+        return placesView(memory, self, dimension, localizedNames, name -> true, name -> true);
+    }
+
+    /**
+     * 紧凑的命名地点视图（observe(what=places)）：在自动剥离无名坐标档案（"建筑"/"建筑@..."/"机器"/"机器@..."）的基础上，
+     * 允许调用方传入建筑与机器档案过滤回调（例如排除从未实际施工的历史只读勘查档与空施工档）；
+     * 命名地点（place）、圈过的地盘（regions）与箱式加工站（stations）始终完整保留。
+     */
+    public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension,
+            ReadsLocalizedNames localizedNames,
+            Predicate<String> includeBuilding, Predicate<String> includeMachine) {
+        Predicate<String> buildingFilter = includeBuilding == null ? name -> true : includeBuilding;
+        Predicate<String> machineFilter = includeMachine == null ? name -> true : includeMachine;
         JsonObject json = new JsonObject();
-        json.add("places", namedPlaces(memory, self, dimension));
+        json.add("places", namedPlaces(memory, self, dimension, buildingFilter, machineFilter));
         json.add("regions", regions(memory.regions()));
         json.add("stations", stations(memory.stations(), self, dimension));
         JsonObject counts = new JsonObject();
@@ -120,6 +134,18 @@ public final class WorldMemoryView {
         json.add("record_counts", counts);
         ModLabels.appendTo(json, localizedNames);
         return json;
+    }
+
+    // 历史自动生成的无名建筑档案名（"建筑" 或 "建筑@x,y,z"）：不进入 observe(what=places) 设施清单。
+    static boolean isAutoNamedBuilding(String name) {
+        String trimmed = name.trim();
+        return trimmed.equals("建筑") || trimmed.startsWith("建筑@");
+    }
+
+    // 历史自动生成的无名机器档案名（"机器" 或 "机器@x,y,z"）：不进入 observe(what=places) 设施清单。
+    static boolean isAutoNamedMachine(String name) {
+        String trimmed = name.trim();
+        return trimmed.equals("机器") || trimmed.startsWith("机器@");
     }
 
     /** 兼容无过滤调用：不限半径与种类、五节都出、不单独收说明。 */
@@ -249,13 +275,23 @@ public final class WorldMemoryView {
 
     private record NamedEntry(String name, String kind, WorldPosition position) {}
 
-    private static JsonArray namedPlaces(WorldMemory memory, SceneSelf self, String dimension) {
+    private static JsonArray namedPlaces(WorldMemory memory, SceneSelf self, String dimension,
+            Predicate<String> includeBuilding, Predicate<String> includeMachine) {
         Map<String, NamedEntry> merged = new LinkedHashMap<>();
         memory.places().forEach((name, pos) -> merged.put("place:" + name, new NamedEntry(name, "place", pos)));
         for (MemoryRecord record : memory.allRecords()) {
             if ((record.kind() == MemoryKind.BUILDING || record.kind() == MemoryKind.MACHINE)
                     && record.blockType() != null && !record.blockType().isBlank()) {
                 String name = record.blockType();
+                // 在合并覆盖同名 place 之前先过滤掉无名自动档与无效档案，避免把同地点的真实 place 记录一并删掉。
+                if (record.kind() == MemoryKind.BUILDING
+                        && (isAutoNamedBuilding(name) || !includeBuilding.test(name))) {
+                    continue;
+                }
+                if (record.kind() == MemoryKind.MACHINE
+                        && (isAutoNamedMachine(name) || !includeMachine.test(name))) {
+                    continue;
+                }
                 String kind = SceneView.lower(record.kind());
                 NamedEntry plain = merged.get("place:" + name);
                 if (plain != null && MemoryRecord.sameSpot(plain.position(), record.position())) {

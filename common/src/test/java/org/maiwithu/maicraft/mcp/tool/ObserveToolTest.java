@@ -4,9 +4,13 @@ package org.maiwithu.maicraft.mcp.tool;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
+import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksForPicture;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
 import org.maiwithu.maicraft.behavior.acquire.mining.ChainMiningLedger;
@@ -60,11 +64,14 @@ import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.mcp.view.MenuView;
 import org.maiwithu.maicraft.mcp.view.SelfView;
 
+import net.minecraft.SharedConstants;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
 
 import java.nio.file.Path;
 import java.time.Instant;
@@ -84,6 +91,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** observe 的六种视图：场景、自己、细节（观察编号或地标名）、世界记忆、开着的界面、画面；不在世界里时如实回答。 */
 class ObserveToolTest {
+
+    @BeforeAll
+    static void bootMinecraft() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
 
     /** 本刻上下文替身：刻号由测试推进；角色上下文替身只在看背包的用例里给。 */
     private record Tick(long gameTick, PlayerContext player) implements TickContext {
@@ -854,5 +867,92 @@ class ObserveToolTest {
         assertEquals("ae2:crafting_terminal", stock.get(1).getAsJsonObject().get("terminal").getAsString());
         assertEquals("north", stock.get(1).getAsJsonObject().get("side").getAsString());
         assertEquals(4, stock.get(1).getAsJsonObject().get("distance").getAsInt());
+    }
+
+    @Test
+    void placesViewCleansLegacyUnnamedAndUnbuiltArchivesWhileKeepingRealFacilitiesAndWorldMemory() {
+        String dim = "minecraft:overworld";
+        Instant now = Instant.ofEpochMilli(5000);
+        BuildingArchives buildingArchives = new BuildingArchives(
+                new DocumentStore(temp.resolve("archives.sqlite")), "a".repeat(64));
+        PlannedCell cell = PlannedCell.block(BlockPos.ZERO, Blocks.STONE.defaultBlockState(), Set.of());
+
+        // 真实命名地点、地盘与箱式加工站，以及与历史空施工档同名同点的 place（剥离空施工档后必须保留 place）。
+        memory.remember("家", new WorldPosition(0, 64, 10, dim));
+        memory.remember("老营地", new WorldPosition(15, 64, 0, dim));
+        memory.rememberRegion("农田保护区", new WorldPosition(20, 64, 20, dim), 12);
+        memory.rememberStation(new RememberedStation("鼓风站", "smelt",
+                new WorldPosition(10, 64, 0, dim), new WorldPosition(12, 64, 0, dim), List.of()));
+
+        // 历史污染：自动生成的无名建筑/机器档（建筑、建筑@坐标、机器、机器@坐标）。
+        memory.rememberBuilding(new WorldPosition(3, 64, 0, dim), "建筑", now);
+        memory.rememberBuilding(new WorldPosition(-367, 65, 46, dim), "建筑@-367,65,46", now);
+        memory.rememberMachine(new WorldPosition(4, 64, 0, dim), "机器", now);
+        memory.rememberMachine(new WorldPosition(-352, 65, 43, dim), "机器@-352,65,43", now);
+
+        // 历史只读勘查档（readFromSite=true, placedCells=[]）与空施工档（readFromSite=false, placedCells=[]）：均应剥离。
+        buildingArchives.save(new BuildingArchive("别人的风车", dim, new BlockPos(30, 64, 0), 0, null,
+                List.of(cell), now, BuildingArchives.READ_FROM_SITE_NOTE, true, List.of()));
+        memory.rememberBuilding(new WorldPosition(30, 64, 0, dim), "别人的风车", now);
+        buildingArchives.save(new BuildingArchive("老营地", dim, new BlockPos(15, 64, 0), 0, null,
+                List.of(cell), now, "还没放方块", false, List.of()));
+        memory.rememberBuilding(new WorldPosition(15, 64, 0, dim), "老营地", now);
+
+        // 真实有效设施：实际施工过的建筑（placedCells 非空）、实际改建过的读现场建筑、无档案文件的命名建筑、命名机器。
+        BlockPos builtPos = new BlockPos(25, 64, 0);
+        buildingArchives.save(new BuildingArchive("麦麦一号", dim, builtPos, 0, null,
+                List.of(cell), now, "整栋都对上了", false, List.of(builtPos)));
+        memory.rememberBuilding(new WorldPosition(25, 64, 0, dim), "麦麦一号", now);
+        BlockPos renovatedPos = new BlockPos(35, 64, 0);
+        buildingArchives.save(new BuildingArchive("翻修小屋", dim, renovatedPos, 0, null,
+                List.of(cell), now, "整栋都对上了", true, List.of(renovatedPos)));
+        memory.rememberBuilding(new WorldPosition(35, 64, 0, dim), "翻修小屋", now);
+        memory.rememberBuilding(new WorldPosition(45, 64, 0, dim), "远古遗迹", now);
+        memory.rememberMachine(new WorldPosition(50, 64, 0, dim), "刷铁机", now);
+
+        ToolDispatcher withArchives = new ToolDispatcher(List.of(new ObserveTool(
+                () -> scene, () -> memory, table, direct, () -> reminders,
+                () -> new MenuView.Reads(() -> openScreen, noTrades), List::of, x -> { },
+                () -> identity, () -> null,
+                new ObserveTool.Pictures(null, () -> LooksForPicture.NONE, () -> buildingArchives), () -> null)));
+
+        JsonObject placesData = data(withArchives.call("observe", arguments("{\"what\": \"places\"}")));
+        JsonArray places = placesData.getAsJsonArray("places");
+        List<String> keys = new ArrayList<>();
+        for (int i = 0; i < places.size(); i++) {
+            JsonObject entry = places.get(i).getAsJsonObject();
+            keys.add(entry.get("kind").getAsString() + ":" + entry.get("name").getAsString());
+        }
+        assertEquals(List.of(
+                "place:家",
+                "place:老营地",
+                "building:麦麦一号",
+                "building:翻修小屋",
+                "building:远古遗迹",
+                "machine:刷铁机"), keys, "places 只返回干净设施，并保留被剥离空档同名的 place");
+        assertEquals(1, placesData.getAsJsonArray("regions").size());
+        assertEquals(1, placesData.getAsJsonArray("stations").size());
+
+        // observe(what=world_memory, kind=building / machine) 保持原样可供显式排查历史原始档案。
+        JsonArray rawBuildings = data(withArchives.call("observe",
+                arguments("{\"what\": \"world_memory\", \"kind\": \"building\"}")))
+                .getAsJsonArray("records");
+        List<String> buildingNames = new ArrayList<>();
+        for (int i = 0; i < rawBuildings.size(); i++) {
+            buildingNames.add(rawBuildings.get(i).getAsJsonObject().get("block").getAsString());
+        }
+        assertTrue(buildingNames.contains("建筑@-367,65,46"));
+        assertTrue(buildingNames.contains("别人的风车"));
+        assertTrue(buildingNames.contains("老营地"));
+
+        JsonArray rawMachines = data(withArchives.call("observe",
+                arguments("{\"what\": \"world_memory\", \"kind\": \"machine\"}")))
+                .getAsJsonArray("records");
+        List<String> machineNames = new ArrayList<>();
+        for (int i = 0; i < rawMachines.size(); i++) {
+            machineNames.add(rawMachines.get(i).getAsJsonObject().get("block").getAsString());
+        }
+        assertTrue(machineNames.contains("机器@-352,65,43"));
+        assertTrue(machineNames.contains("刷铁机"));
     }
 }
