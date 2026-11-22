@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.interaction.spi.DismantleTool;
+import org.maiwithu.maicraft.behavior.permission.LowValueTerrainBlocks;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -63,8 +64,12 @@ final class ClearingWork extends ConstructionWork {
     private PlannedCell cell;
     private Step step;
     private BlockState before;
-    /** 挖之前触发格四周一圈里还排着要清的格和各自是什么：连锁挖顺带挖掉的，挖完逐格复查结算。 */
-    private Map<BlockPos, String> around = Map.of();
+    /** 挖之前触发格四周一圈里还排着要清的格和各自方块状态：连锁挖顺带挖掉的，挖完逐格复查结算并分级判断归属。 */
+    private Map<BlockPos, BlockState> around = Map.of();
+    /** 同一清障任务中拆掉的别人放在家里的低价值天然地形：≤3 格静默豁免归属说明，≥4 格收尾合并汇总 1 条。 */
+    private final Map<String, Map<BlockPos, LowValueCleared>> lowValueOwned = new LinkedHashMap<>();
+
+    private record LowValueCleared(BlockPos pos, String blockId, String prefix) {}
     /** 这一格挑的是一整片的中心：对准它的顶面挖，连锁的 3×3 正好是这一片；不是为 null，哪面看得见挖哪面。 */
     private Direction chainFace;
     /** 挖到一半被自卫、吃饭这类事叫走过：人已离了跟前，回来先重新走近再挖。 */
@@ -139,6 +144,7 @@ final class ClearingWork extends ConstructionWork {
             return ActionStatus.progressed();
         }
         cell = null;
+        flushLowValueOwned();
         // 主队列清完了，回头再试的格也什么都没等到（人没站高、旁边也没清出新路）：按走不到交代，这一阶段清完。
         for (DeferredCells.Left left : deferred.drain()) {
             site.giveUp(left.cell().pos(), Problem.Kind.UNREACHABLE, "走不到能挖这一格的位置");
@@ -264,15 +270,15 @@ final class ClearingWork extends ConstructionWork {
     }
 
     // 触发格四周（含斜角）一圈里还排着要清的格：命中面 3×3 不会超出这一圈。
-    private Map<BlockPos, String> queuedAround(BlockPos trigger) {
-        Map<BlockPos, String> cells = new LinkedHashMap<>();
+    private Map<BlockPos, BlockState> queuedAround(BlockPos trigger) {
+        Map<BlockPos, BlockState> cells = new LinkedHashMap<>();
         for (PlannedCell planned : queue) {
             BlockPos pos = planned.pos();
             if (Math.abs(pos.getX() - trigger.getX()) > 1 || Math.abs(pos.getY() - trigger.getY()) > 1
                     || Math.abs(pos.getZ() - trigger.getZ()) > 1) continue;
             if (!services.site().loaded(pos)) continue;
             BlockState state = services.site().state(pos);
-            if (!state.isAir()) cells.put(pos, blockId(state));
+            if (!state.isAir()) cells.put(pos, state);
         }
         return cells;
     }
@@ -285,8 +291,7 @@ final class ClearingWork extends ConstructionWork {
             records.attempt("用工具拆下 " + cell.pos().toShortString(), "拆完方块还在，改用挖");
             return dig();
         }
-        records.change(new Change(Change.Kind.BLOCK_BROKEN, blockId(before), 1,
-                withOwner("清障 " + cell.pos().toShortString(), cell.pos())));
+        recordCleared(cell.pos(), before, "清障");
         if (step == Step.DIG) settleChained();
         ActionStatus followUp = checkGravityRefill();
         if (followUp != null) return followUp;
@@ -359,13 +364,12 @@ final class ClearingWork extends ConstructionWork {
 
     // 挖之前还在、现在空了的那几格：是这一下连锁一起挖掉的，按格结算；没挖掉的留在队列里照原办法挖。
     private void settleChained() {
-        for (Map.Entry<BlockPos, String> entry : around.entrySet()) {
+        for (Map.Entry<BlockPos, BlockState> entry : around.entrySet()) {
             BlockPos pos = entry.getKey();
             if (!services.site().state(pos).isAir()) continue;
             PlannedCell planned = take(pos);
             if (planned == null) continue;
-            records.change(new Change(Change.Kind.BLOCK_BROKEN, entry.getValue(), 1,
-                    withOwner("连锁清障 " + pos.toShortString(), pos)));
+            recordCleared(pos, entry.getValue(), "连锁清障");
             site.cleared(planned);
             deferred.changed(pos);
         }
@@ -405,13 +409,48 @@ final class ClearingWork extends ConstructionWork {
         return nextCell();
     }
 
+    @Override public void close() {
+        flushLowValueOwned();
+        super.close();
+    }
+
     private static String blockId(BlockState state) {
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
     }
 
-    // 拆掉的是别人放在角色家里的一格：说明后面带上是谁放的，主播在回报里看得出动的是谁的东西。
-    private String withOwner(String note, BlockPos pos) {
+    // 按材质分级记清障变化：别人放在家里的高价值方块（容器/机械/红石/矿块/耕地/木构/石砖/装饰）1 格即精确附归属说明；
+    // 低价值天然地形（草方块、泥土、落沙、圆石等）暂存同任务计数，≤3 格静默豁免归属说明，≥4 格收尾合并汇总 1 条。
+    private void recordCleared(BlockPos pos, BlockState clearedState, String prefix) {
+        String id = blockId(clearedState);
         String owner = services.guards().othersAtHomeNote(pos);
-        return owner.isEmpty() ? note : note + "（" + owner + "）";
+        if (owner.isEmpty() || !LowValueTerrainBlocks.isLowValueTerrain(clearedState)) {
+            String base = prefix + " " + pos.toShortString();
+            records.change(new Change(Change.Kind.BLOCK_BROKEN, id, 1,
+                    owner.isEmpty() ? base : base + "（" + owner + "）"));
+            return;
+        }
+        BlockPos key = pos.immutable();
+        lowValueOwned.computeIfAbsent(owner, ignored -> new LinkedHashMap<>())
+                .putIfAbsent(key, new LowValueCleared(key, id, prefix));
+    }
+
+    // 结清本任务暂存的低价值天然地形：≤3 格逐格记破块但不带归属说明（静默豁免），≥4 格合并汇总报 1 条带归属说明。
+    private void flushLowValueOwned() {
+        if (lowValueOwned.isEmpty()) return;
+        for (Map.Entry<String, Map<BlockPos, LowValueCleared>> entry : lowValueOwned.entrySet()) {
+            String owner = entry.getKey();
+            Map<BlockPos, LowValueCleared> cells = entry.getValue();
+            if (cells.size() < LowValueTerrainBlocks.REPORT_THRESHOLD) {
+                for (LowValueCleared cleared : cells.values()) {
+                    records.change(new Change(Change.Kind.BLOCK_BROKEN, cleared.blockId(), 1,
+                            cleared.prefix() + " " + cleared.pos().toShortString()));
+                }
+            } else {
+                LowValueCleared first = cells.values().iterator().next();
+                records.change(new Change(Change.Kind.BLOCK_BROKEN, first.blockId(), cells.size(),
+                        "清障 " + cells.size() + " 格天然地形（从 " + first.pos().toShortString() + " 起，" + owner + "）"));
+            }
+        }
+        lowValueOwned.clear();
     }
 }

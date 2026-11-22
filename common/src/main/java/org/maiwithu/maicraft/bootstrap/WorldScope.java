@@ -40,6 +40,7 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.SolidEntityObstacles;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
+import org.maiwithu.maicraft.behavior.permission.LowValueTerrainBlocks;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
@@ -272,7 +273,7 @@ public final class WorldScope {
         this.buildingArchives = new BuildingArchives(documents, identity.key());
         this.ownHome = new OwnHomeSnapshot(memory, buildingArchives, System.currentTimeMillis());
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
-        this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, events);
+        this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, LowValueTerrainBlocks::isLowValueTerrainLive, events);
         RareLootNotice rareLootNotice = new RareLootNotice(protection, kinds::isNaturalLootContainer, memory, events);
         this.rareSightings = new ClientRareSightingWatch(blockScans, scene.seen(), ownership, memory, events);
         this.dimension = minecraft.level.dimension().location().toString();

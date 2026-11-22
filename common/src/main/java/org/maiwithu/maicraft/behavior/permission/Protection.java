@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.worldmemory.RemembersRegions;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -136,6 +137,15 @@ public final class Protection {
         Optional<String> owner = placedByOther(position);
         if (owner.isEmpty()) return "";
         return homeOf(position).map(where -> "是 " + nameOf(owner.get()) + " 放的，" + where).orElse("");
+    }
+
+    /**
+     * 按材质分级决定是否给单格归属说明：低价值天然地形（草方块、泥土、落沙、圆石等）单格静默豁免返回空串，
+     * 由调用方在同一任务累计达到阈值后合并汇总；容器、机械、红石、矿块、耕地与木构/石砖/装饰块 1 格即精确返回说明。
+     */
+    public String othersAtHomeNote(WorldPosition position, BlockState state) {
+        if (LowValueTerrainBlocks.isLowValueTerrain(state)) return "";
+        return othersAtHomeNote(position);
     }
 
     // 床那一格的归属要已经问到、而且不是别人放的：所在区块还没问过服务端时拿不准，不当家。
