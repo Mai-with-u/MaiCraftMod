@@ -17,7 +17,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -61,6 +60,12 @@ final class PlacingWork extends ConstructionWork {
     private final Permissions permissions;
     private final String purpose;
     private final Deque<PlannedCell> queue;
+    /** 本次待砌集合是否为高度跨度 1 的单层连通铺面/窄路：为真时从远离出口的一端起手往回退着铺。 */
+    private final boolean singleLayerStrip;
+    /** 单层退着铺首次进层时锁定的远端起手锚点，避免随角色移动来回摆动。 */
+    private BlockPos retreatTip;
+    /** 当前这次走近站位的超时预算（刻）：近距避让缩至 80 刻，远距走近保持 400 刻。 */
+    private long approachPatience = BringsPlayerClose.WALK_PATIENCE_TICKS;
     private final DeferredCells deferred = new DeferredCells();
     /** 走过去没走到之后人停在哪、要点的是哪一面：人没挪、附近也没新放方块之前，不再从同一处为同一面算路。 */
     private final Set<FailedApproach> failedApproaches = new HashSet<>();
@@ -91,6 +96,7 @@ final class PlacingWork extends ConstructionWork {
         this.permissions = permissions;
         this.purpose = purpose;
         this.queue = new ArrayDeque<>(cells);
+        this.singleLayerStrip = PlacementOrder.isSingleLayerConnected(cells);
     }
 
     /** 一次没走到的走近：人停在哪一格，要去点哪一格的哪一面。 */
@@ -148,6 +154,11 @@ final class PlacingWork extends ConstructionWork {
                 defer(cell, DeferredCells.Reason.WAITS_ON_OTHERS);
                 continue;
             }
+            // 垂向盖帽依赖门控：正下方 (x, y-1, z) 仍在未完成队列或延后表中时，禁止提前放置上方盖帽封死下层。
+            if (!temporary && hasPendingCellBelow(cell)) {
+                defer(cell, DeferredCells.Reason.WAITS_FOR_BELOW);
+                continue;
+            }
             // 对着哪一格放：多数就是它自己；规则说要对着别的格放而那一格被占着，怎么点都落不到这里。
             // 若是正常单格放砖前发现自己这一格被上方塌落重力方块（如黑沙、沙子）重新填实，直接退回重清该格，
             // 不进入贴面候选轮询、不把原格传进 guarded 禁止补救开路，也不无脑永久放弃。
@@ -171,16 +182,8 @@ final class PlacingWork extends ConstructionWork {
         }
     }
 
-    /** 站着不动点得着的距离（格）：眼睛到那一面的中心，比原版交互距离 4.5 留半格余量。 */
-    private static final double REACH_FROM_HERE = 4.0;
-    /** 眼睛比脚底高多少（格）：站着时的视线高度。 */
-    private static final double EYE_HEIGHT = 1.62;
-    /** 站着够得着时转头 180 度折算的距离代价（格）：顺着眼前这一侧扫完再转身，不在四格内前后交替甩头。 */
-    private static final double REACHABLE_TURN_WEIGHT = 3.5;
-    /** 需要迈步过去时平局或近距的朝向决胜代价（格）：对称等距时顺着当前朝向挑，不舍近求远跑冤枉路。 */
-    private static final double WALK_TURN_TIEBREAKER = 0.4;
-
-    // 同一层、同一阶段（清空、骨架、贴附件）里挑离人最近且顺手的一格：先把站的地方够得着的顺着视线扫完再转身或挪步。
+    // 同一层、同一阶段（清空、骨架、贴附件）里挑下一格：单层连通铺面/窄路从远端起手退着铺；
+    // 常规建筑挑离人最近且顺手的一格，同时对与角色当前脚格/头格相交的格加罚降权。
     // 临时方块链要按链上的顺序垫，队头是临时方块时照原顺序。
     private PlannedCell pollNearest() {
         PlannedCell head = queue.peek();
@@ -192,70 +195,39 @@ final class PlacingWork extends ConstructionWork {
             if (temporaries.contains(cell.pos()) || !sameTier(cell, head)) continue;
             tier.add(cell);
         }
-        tier.sort(Comparator.comparingDouble(cell -> pickScore(cell, feet, look, WALK_TURN_TIEBREAKER)));
-        // 站一处把够得着的放完再挪：在最近的预筛窗口里综合距离与视线夹角挑最顺手的一格。
-        PlannedCell picked = pickNearestReachable(tier,
-                cell -> reachableFromHere(services.site(), cell, site.placements().placeAt(cell, services.site()), feet),
-                feet, look);
+        PlannedCell picked;
+        if (singleLayerStrip) {
+            if (retreatTip == null) retreatTip = PlacementOrder.retreatTip(tier, feet);
+            picked = PlacementOrder.pickForSingleLayerRetreat(tier, retreatTip, feet, look);
+        } else {
+            tier.sort(Comparator.comparingDouble(
+                    cell -> PlacementOrder.pickScore(cell, feet, look, PlacementOrder.WALK_TURN_TIEBREAKER)));
+            picked = PlacementOrder.pickNearestReachable(tier,
+                    cell -> PlacementOrder.reachableFromHere(services.site(), cell,
+                            site.placements().placeAt(cell, services.site()), feet),
+                    feet, look);
+        }
         queue.remove(picked);
         return picked;
     }
 
-    /** 挑格预筛只看离人最近的这几格：找不到够得着的就回退按距离挑。 */
-    private static final int REACHABLE_PROBES = 8;
-
-    /**
-     * 挑格预筛的取舍：按距离排好序的档内候选里，前面几格有"站着就够得着"的就挑它，都没有才挑最近的。
-     * 纯函数：够得着与否由调用方回答。
-     */
+    /** 挑格预筛的取舍（委托纯函数 {@link PlacementOrder}）。 */
     static PlannedCell pickNearestReachable(List<PlannedCell> tier, Predicate<PlannedCell> hasReachableFace) {
-        return pickNearestReachable(tier, hasReachableFace, null, Vec3.ZERO);
+        return PlacementOrder.pickNearestReachable(tier, hasReachableFace, null, Vec3.ZERO);
     }
 
-    /**
-     * 带当前脚位与视线的挑格预筛：预筛窗口内所有站着够得着的格按距离加视线夹角综合打分，
-     * 顺着面朝这一侧依次扫过去再转身，避免在四格内前放一格、后放一格反复 180 度折返转头。
-     */
+    /** 带当前脚位与视线的挑格预筛（委托纯函数 {@link PlacementOrder}）。 */
     static PlannedCell pickNearestReachable(List<PlannedCell> tier, Predicate<PlannedCell> hasReachableFace,
             BlockPos feet, Vec3 look) {
-        int limit = Math.min(REACHABLE_PROBES, tier.size());
-        PlannedCell best = null;
-        double bestScore = Double.POSITIVE_INFINITY;
-        boolean hasLook = feet != null && look != null && look.lengthSqr() > 1.0e-6;
-        for (PlannedCell cell : tier.subList(0, limit)) {
-            if (!hasReachableFace.test(cell)) continue;
-            if (!hasLook) return cell;
-            double score = pickScore(cell, feet, look, REACHABLE_TURN_WEIGHT);
-            if (score < bestScore - 1.0e-9) {
-                bestScore = score;
-                best = cell;
-            }
-        }
-        return best != null ? best : tier.getFirst();
+        return PlacementOrder.pickNearestReachable(tier, hasReachableFace, feet, look);
     }
 
-    // 挑一格的综合代价：眼睛到目标格中心的距离，加上视线转向幅度折算的代价（正前方为 0，正后方 180 度为满额）。
     static double pickScore(PlannedCell cell, BlockPos feet, Vec3 look, double turnWeight) {
-        Vec3 eye = new Vec3(feet.getX() + 0.5, feet.getY() + EYE_HEIGHT, feet.getZ() + 0.5);
-        Vec3 toCell = Vec3.atCenterOf(cell.pos()).subtract(eye);
-        double distance = toCell.length();
-        if (look == null || look.lengthSqr() <= 1.0e-6 || distance <= 1.0e-6 || turnWeight <= 0.0) {
-            return distance;
-        }
-        double cos = Mth.clamp(look.normalize().dot(toCell.scale(1.0 / distance)), -1.0, 1.0);
-        return distance + turnWeight * (1.0 - cos) * 0.5;
+        return PlacementOrder.pickScore(cell, feet, look, turnWeight);
     }
 
-    // 这一格现在有没有站着就够得着的面：与 reachableFirst 同一个式子（可点面中心到眼睛不超过 4.0 格），只算几何。
     static boolean reachableFromHere(ReadsBlocks world, PlannedCell cell, BlockPos placeAt, BlockPos feet) {
-        for (PlacementAttempt.Candidate candidate : PlacementAttempt.candidates(world, cell, placeAt)) {
-            var face = PlacementSpots.faceBox(candidate.clicked(), candidate.face()).getCenter();
-            double dx = face.x - (feet.getX() + 0.5);
-            double dy = face.y - (feet.getY() + EYE_HEIGHT);
-            double dz = face.z - (feet.getZ() + 0.5);
-            if (dx * dx + dy * dy + dz * dz <= REACH_FROM_HERE * REACH_FROM_HERE) return true;
-        }
-        return false;
+        return PlacementOrder.reachableFromHere(world, cell, placeAt, feet);
     }
 
     // 施工顺序里同一档：同一层、同样要不要靠着别的东西、同一阶段。跨档仍按施工顺序，地基先、贴附件后。
@@ -274,9 +246,10 @@ final class PlacingWork extends ConstructionWork {
         for (PlacementAttempt.Candidate candidate : candidates) {
             var face = PlacementSpots.faceBox(candidate.clicked(), candidate.face()).getCenter();
             double dx = face.x - (feet.getX() + 0.5);
-            double dy = face.y - (feet.getY() + EYE_HEIGHT);
+            double dy = face.y - (feet.getY() + PlacementOrder.EYE_HEIGHT);
             double dz = face.z - (feet.getZ() + 0.5);
-            (dx * dx + dy * dy + dz * dz <= REACH_FROM_HERE * REACH_FROM_HERE ? near : far).add(candidate);
+            (dx * dx + dy * dy + dz * dz <= PlacementOrder.REACH_FROM_HERE * PlacementOrder.REACH_FROM_HERE
+                    ? near : far).add(candidate);
         }
         near.addAll(far);
         return near;
@@ -286,18 +259,16 @@ final class PlacingWork extends ConstructionWork {
     // 只差站高一格就垫一级台阶站上去，没有能点的面就垫一条临时方块链；都不行如实记下放不成。
     private Refill refill() {
         if (deferred.isEmpty()) return Refill.DONE;
-        List<PlannedCell> due = deferred.takeChanged(services.site().feet(), now, cell -> !waiting(cell).isEmpty());
+        List<PlannedCell> due = deferred.takeChanged(services.site().feet(), now, this::blockedByDependency);
         if (!due.isEmpty()) {
             queue.addAll(due);
             return Refill.REFILLED;
         }
-        PlannedCell stuck = deferred.takeStuck(cell -> !waiting(cell).isEmpty()).orElse(null);
+        PlannedCell stuck = deferred.takeStuck(this::blockedByDependency).orElse(null);
         if (stuck == null) {
             if (deferred.waitingForTime()) return Refill.WAIT;
-            // 剩下的只有等别的格的、和生物回头几次还挡着的：生物挡着的写明是谁、在哪、等了多久，
-            // LLM 能叫它挪开再下一次同样的目标；不为它垫方块，垫方块挪不走生物。
-            // 等了一阵生物没走开、等的格没放成，都是干等没有进展，算卡住。
-            for (DeferredCells.Left left : deferred.drain()) {
+            // 先结算无法继续的格（如生物一直挡着或联动依赖没放成）：一旦下层格确认放弃，被盖帽门控压住的上层格下轮即解除拦截。
+            for (DeferredCells.Left left : deferred.drainBlocked()) {
                 site.giveUp(left.cell().pos(), Problem.Kind.STUCK, left.reason() == DeferredCells.Reason.CREATURE_IN_THE_WAY
                         ? "被" + left.creature() + "挡着，前后等了 " + CREATURE_WAIT_SECONDS + " 秒没走开"
                         : "要等别的格先放好，那些格没放成");
@@ -392,7 +363,7 @@ final class PlacingWork extends ConstructionWork {
 
     // 一条走不过去的记忆被这个新方块作废了吗：起点或点击面在新方块触及范围（交互距离 4.0 格加 1 格余量）内就算。
     static boolean invalidatedBy(BlockPos placed, FailedApproach failed) {
-        double reach = REACH_FROM_HERE + 1;
+        double reach = PlacementOrder.REACH_FROM_HERE + 1;
         return (failed.from() != null && failed.from().distSqr(placed) <= reach * reach)
                 || failed.clicked().distSqr(placed) <= reach * reach;
     }
@@ -401,6 +372,21 @@ final class PlacingWork extends ConstructionWork {
     private List<BlockPos> waiting(PlannedCell cell) {
         return site.placements().waitsFor(cell).stream()
                 .filter(pos -> site.declared().contains(pos) && site.needsWork(pos)).toList();
+    }
+
+    // 垂向盖帽依赖检查：正下方 (x, y-1, z) 仍在未完成队列或延后表中时，禁止提前放置正上方盖帽封死下层。
+    private boolean hasPendingCellBelow(PlannedCell cell) {
+        if (temporaries.contains(cell.pos())) return false;
+        BlockPos below = cell.pos().below();
+        if (deferred.contains(below)) return true;
+        for (PlannedCell queued : queue) {
+            if (!temporaries.contains(queued.pos()) && queued.pos().equals(below)) return true;
+        }
+        return false;
+    }
+
+    private boolean blockedByDependency(PlannedCell cell) {
+        return !waiting(cell).isEmpty() || hasPendingCellBelow(cell);
     }
 
     // 对着放的那一格被不可替换的东西占着（空气、水、草这类能直接放进去的不算）。
@@ -456,10 +442,9 @@ final class PlacingWork extends ConstructionWork {
                 && services.guards().allows(PermissionCheck.WorldAction.PLACE_BLOCK, pos, null).isEmpty();
     }
 
-    // 走近站位这一趟也有限时：走向站位的走路自己不出走不通的结论（人掉进深坑、站位在够不着的高处，
-    // 走路一刻答一次"还在走"），到点收掉换下一面再试，不让一格的走近吃满施工的停滞闸。
+    // 走近站位这一趟也有限时：近距避让（目标距当前格 < 3 格）缩至 80 刻快速切候选面或延后，远距保持 400 刻。
     @Override protected long maxActionTicks(Action current) {
-        return step == Step.APPROACH ? BringsPlayerClose.WALK_PATIENCE_TICKS : Long.MAX_VALUE;
+        return step == Step.APPROACH ? approachPatience : Long.MAX_VALUE;
     }
 
     private ActionStatus tryNextCandidate() {
@@ -502,9 +487,10 @@ final class PlacingWork extends ConstructionWork {
         return ActionStatus.progressed();
     }
 
-    // 走到能点这一面的站位：避开放下后会占住的格，以及这一面已经站过却点不到的位置。
+    // 走到能点这一面的站位：避开放下后会占住的格，以及这一面已经站过却点不到的位置；近距避让按短步距预算限时。
     private void approach(PlacementAttempt.Candidate candidate) {
         Set<BlockPos> avoid = Set.copyOf(poorSpots);
+        approachPatience = PlacementOrder.approachPatienceTicks(services.site().feet(), attempt.cell.pos());
         begin(services.close().toward(PlacementSpots.faceTarget(candidate.clicked(), candidate.face()), permissions,
                         PlacementSpots.avoiding(attempt.occupied(), avoid::contains)),
                 "走到能点 " + candidate.clicked().toShortString() + " " + candidate.face() + " 面的位置");

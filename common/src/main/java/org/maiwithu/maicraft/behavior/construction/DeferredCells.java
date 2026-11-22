@@ -34,6 +34,8 @@ final class DeferredCells {
     enum Reason {
         /** 蓝图里要等别的格先放好（带漏斗等下面的带子）。 */
         WAITS_ON_OTHERS,
+        /** 正下方同建筑格仍在未完成或延后队列中：禁止提前盖帽封死下层，等下层处理完或确认放不成再回头。 */
+        WAITS_FOR_BELOW,
         /** 每一面都试过，点不到或落下来不是要的样子。 */
         NO_FACE_WORKED,
         /** 有生物站在那一格里（原版不让放），或者挡在人和要点的那一面之间（点下去点到了它）。 */
@@ -68,6 +70,15 @@ final class DeferredCells {
 
     boolean isEmpty() {
         return entries.isEmpty();
+    }
+
+    /** 这一格坐标当前是否仍在延后表中：用于垂向盖帽依赖门控检查正下方是否还有延迟未放的格。 */
+    boolean contains(BlockPos pos) {
+        if (pos == null) return false;
+        for (Entry entry : entries) {
+            if (entry.cell().pos().equals(pos)) return true;
+        }
+        return false;
     }
 
     /** 现场动了一块（放成或清掉）：之后记着的格拿它判断情况变没变。 */
@@ -126,6 +137,10 @@ final class DeferredCells {
         if (entry.reason() == Reason.WAITS_ON_OTHERS) {
             return entry.mark() < changed.size() && !waitingOnOthers.test(entry.cell());
         }
+        // 正下方格延后导致的盖帽等待：只要下层已离开未完成与延后表（放好了或已确认放不成），立刻解除拦截试放。
+        if (entry.reason() == Reason.WAITS_FOR_BELOW) {
+            return !waitingOnOthers.test(entry.cell());
+        }
         if (entry.retryAt() <= now) return true;
         // 人站高了一层才多看得见几面；在高低不平的地上往下走一层看不到更多，不算情况变了。
         if (feet != null && entry.feetY() != null && feet.getY() > entry.feetY()) return true;
@@ -164,5 +179,21 @@ final class DeferredCells {
         List<Left> out = entries.stream().map(entry -> new Left(entry.cell(), entry.reason(), entry.creature())).toList();
         entries.clear();
         return out;
+    }
+
+    /**
+     * 先结算非垂向盖帽等待的剩余格（如生物一直挡着或联动依赖失败的格）：
+     * 结算掉下层确认放不成的格后，原本被盖帽门控压住的上层格即可在下一轮解除拦截并正常试放。
+     */
+    List<Left> drainBlocked() {
+        List<Left> out = new ArrayList<>();
+        for (Iterator<Entry> it = entries.iterator(); it.hasNext(); ) {
+            Entry entry = it.next();
+            if (entry.reason() != Reason.WAITS_FOR_BELOW) {
+                out.add(new Left(entry.cell(), entry.reason(), entry.creature()));
+                it.remove();
+            }
+        }
+        return out.isEmpty() ? drain() : out;
     }
 }
