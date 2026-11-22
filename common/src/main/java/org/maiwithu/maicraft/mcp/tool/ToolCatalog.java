@@ -62,7 +62,8 @@ public final class ToolCatalog {
                         + "what=picture 是角色眼里此刻的画面（一张图），只拍游戏世界，不带物品栏、血条、聊天栏；图上标着看得见的观察编号，"
                         + "文字里的 in_picture 列出每个编号在图上的位置。看外观、看地图和画、看别人比划的那一处时用；"
                         + "数量、血量、背包、聊天、告示牌的字以 self、scene、detail、events 为准。"
-                        + "给 id 时角色闲着就先转头看过去再拍，手上有活时不转头。",
+                        + "给 id 时角色闲着就先转头看过去再拍，手上有活时不转头。"
+                        + "视图里出现非原版（非 minecraft:）的模组物品、方块或实体 ID 时，响应尾部附去重短词表 mod_labels；全原版时不附。",
                 properties(
                         field("what", "string", "看什么：self、scene（默认）、detail、places（只列记住的地点与档案名）、world_memory、menu、picture", "scene"),
                         field("id", "string", "只在 what=detail 或 picture 时用：观察编号（e12、f3、b5、s2）或地标名；"

@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.Locale;
@@ -45,8 +46,18 @@ public final class DetailView {
     /** 生产观察入口：按当前维度与保护读端给容器详情及记忆记录补齐容器来源五态。 */
     public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id,
             String dimension, Protection protection) {
+        return of(scene, memory, id, dimension, protection, ReadsLocalizedNames.NONE);
+    }
+
+    /** 同上，并在尾部附上去重后的非原版模组短词表（全原版时不附）。 */
+    public static Optional<JsonObject> of(Scene scene, WorldMemory memory, String id,
+            String dimension, Protection protection, ReadsLocalizedNames localizedNames) {
         return of(scene, memory, id, dimension,
-                WorldMemoryView.originFrom(scene.facilityKinds(), protection, dimension));
+                WorldMemoryView.originFrom(scene.facilityKinds(), protection, dimension))
+                .map(json -> {
+                    ModLabels.appendTo(json, localizedNames);
+                    return json;
+                });
     }
 
     /** 场景设施的容器来源读口：只对容器方块给出容器来源，工作台、熔炉、床给 null。 */

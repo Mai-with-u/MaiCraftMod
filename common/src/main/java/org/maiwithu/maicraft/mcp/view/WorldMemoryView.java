@@ -15,6 +15,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedStation;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.ArrayList;
@@ -93,6 +94,12 @@ public final class WorldMemoryView {
 
     /** 紧凑的命名地点视图（observe(what=places)）：速览读记住的地点、地盘与加工站用它，不再拉整份容器与产地记录。 */
     public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension) {
+        return placesView(memory, self, dimension, ReadsLocalizedNames.NONE);
+    }
+
+    /** 同上，并在尾部附上去重后的非原版模组短词表（全原版时不附）。 */
+    public static JsonObject placesView(WorldMemory memory, SceneSelf self, String dimension,
+            ReadsLocalizedNames localizedNames) {
         JsonObject json = new JsonObject();
         json.add("places", namedPlaces(memory, self, dimension));
         json.add("regions", regions(memory.regions()));
@@ -111,6 +118,7 @@ public final class WorldMemoryView {
             }
         }
         json.add("record_counts", counts);
+        ModLabels.appendTo(json, localizedNames);
         return json;
     }
 
@@ -145,6 +153,16 @@ public final class WorldMemoryView {
             Integer radius, MemoryKind kindFilter,
             ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections,
             List<NetworkStorage.RememberedNetwork> rememberedNetworks) {
+        return of(memory, self, dimension, radius, kindFilter, containerOrigin, notes, sections,
+                rememberedNetworks, ReadsLocalizedNames.NONE);
+    }
+
+    /** 同上，并在尾部附上去重后的非原版模组短词表（含 records 与 network_stock 里出现的模组 ID；全原版时不附）。 */
+    public static JsonObject of(WorldMemory memory, SceneSelf self, String dimension,
+            Integer radius, MemoryKind kindFilter,
+            ContainerOrigin containerOrigin, Consumer<String> notes, Set<String> sections,
+            List<NetworkStorage.RememberedNetwork> rememberedNetworks,
+            ReadsLocalizedNames localizedNames) {
         JsonObject json = new JsonObject();
         if (serves(sections, "places")) json.add("places", places(memory.places(), self, dimension));
         if (serves(sections, "regions")) json.add("regions", regions(memory.regions()));
@@ -207,6 +225,7 @@ public final class WorldMemoryView {
         if (networkStock != null) {
             json.add("network_stock", networkStock);
         }
+        ModLabels.appendTo(json, localizedNames);
         return json;
     }
 

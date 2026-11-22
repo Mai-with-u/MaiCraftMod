@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.game.ModIdentity;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.game.interaction.DigTool;
@@ -34,9 +35,16 @@ public final class GoalReader {
     private static final int MAX_DEPTH = 3;
 
     private final AbilityRegistry registry;
+    private final ReadsLocalizedNames localizedNames;
 
     public GoalReader(AbilityRegistry registry) {
+        this(registry, ReadsLocalizedNames.NONE);
+    }
+
+    /** @param localizedNames 当前游戏语言的名称读端：入参里写了中文名等可读名称时自动反查标准英文 ID */
+    public GoalReader(AbilityRegistry registry, ReadsLocalizedNames localizedNames) {
         this.registry = Objects.requireNonNull(registry, "registry");
+        this.localizedNames = Objects.requireNonNull(localizedNames, "localizedNames");
     }
 
     /** 读一个目标；路径前缀是 {@code goal}。 */
@@ -138,14 +146,15 @@ public final class GoalReader {
     }
 
     /** 按能力的参数规格读 parameters；能力不认识时只检查它是不是对象。 */
-    private static ParamValues parameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
+    private ParamValues parameters(JsonObject object, String path, AbilityModule module, RequestCheck check) {
         JsonElement raw = object.get("parameters");
         if (raw != null && !raw.isJsonNull() && !raw.isJsonObject()) {
             check.error(path + ".parameters", "parameters 应该是一个对象", "{\"count\": 8}", raw);
             return null;
         }
         if (module == null) return null;
-        ParseResult parsed = module.spec().paramSpecs().parse(raw == null || raw.isJsonNull() ? null : raw.getAsJsonObject());
+        ParseResult parsed = module.spec().paramSpecs().parse(
+                raw == null || raw.isJsonNull() ? null : raw.getAsJsonObject(), localizedNames);
         for (ParamError error : parsed.errors()) {
             check.add(new FieldError(path + ".parameters." + error.field(), error.message(), error.expected(),
                     error.received()));

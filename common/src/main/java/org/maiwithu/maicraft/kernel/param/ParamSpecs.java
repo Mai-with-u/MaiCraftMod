@@ -7,6 +7,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.LocalizedIdResolver;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -67,7 +70,16 @@ public final class ParamSpecs {
 
     /** 解析一份原始参数；{@code raw} 为 null 时按空对象处理。 */
     public ParseResult parse(JsonObject raw) {
+        return parse(raw, ReadsLocalizedNames.NONE);
+    }
+
+    /**
+     * 解析一份原始参数并支持按当前游戏语言名称反查资源 ID：当物品、方块或实体类型参数收到非
+     * {@code namespace:path} 格式的中文名等可读名称时，唯一命中自动换为标准英文 ID，多候选则返回候选清单。
+     */
+    public ParseResult parse(JsonObject raw, ReadsLocalizedNames localizedNames) {
         JsonObject input = raw == null ? new JsonObject() : raw;
+        ReadsLocalizedNames names = localizedNames == null ? ReadsLocalizedNames.NONE : localizedNames;
         List<ParamError> errors = new ArrayList<>();
         List<String> notes = new ArrayList<>();
         Map<String, Object> values = new LinkedHashMap<>();
@@ -89,7 +101,7 @@ public final class ParamSpecs {
                 }
                 continue;
             }
-            Object value = convert(param, element, errors, notes);
+            Object value = convert(param, element, errors, notes, names);
             if (value != null) values.put(name, value);
         }
         return new ParseResult(errors.isEmpty() ? new ParamValues(values) : null, errors, notes);
@@ -117,7 +129,8 @@ public final class ParamSpecs {
         return fields;
     }
 
-    private static Object convert(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes) {
+    private static Object convert(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes,
+            ReadsLocalizedNames localizedNames) {
         String name = param.name();
         return switch (param.type()) {
             case INTEGER -> integer(param, element, errors, notes);
@@ -125,9 +138,10 @@ public final class ParamSpecs {
             case BOOLEAN -> bool(name, element, errors, notes);
             case TEXT -> text(name, element, errors);
             case CHOICE -> choice(param, element, errors, notes);
-            case ITEM_OR_TAG, BLOCK_OR_TAG -> resource(name, element, true, errors, notes);
-            case ENTITY_TYPE -> resource(name, element, false, errors, notes);
-            case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes);
+            case ITEM_OR_TAG -> resource(name, element, true, IdKind.ITEM, errors, notes, localizedNames);
+            case BLOCK_OR_TAG -> resource(name, element, true, IdKind.BLOCK, errors, notes, localizedNames);
+            case ENTITY_TYPE -> resource(name, element, false, IdKind.ENTITY_TYPE, errors, notes, localizedNames);
+            case ITEM_LIST, BLOCK_LIST, TEXT_LIST, ENTITY_TYPE_LIST -> list(param, element, errors, notes, localizedNames);
             case JSON_OBJECT -> structured(name, element, true, errors, notes);
             case JSON_ARRAY -> structured(name, element, false, errors, notes);
         };
@@ -245,8 +259,8 @@ public final class ParamSpecs {
         return null;
     }
 
-    private static String resource(String name, JsonElement element, boolean allowTag,
-                                   List<ParamError> errors, List<String> notes) {
+    private static String resource(String name, JsonElement element, boolean allowTag, IdKind kind,
+                                   List<ParamError> errors, List<String> notes, ReadsLocalizedNames localizedNames) {
         if (isString(element)) {
             String raw = element.getAsString();
             String value = raw.trim().toLowerCase(Locale.ROOT);
@@ -255,6 +269,19 @@ public final class ParamSpecs {
                 if (!value.equals(raw)) notes.add(name + "：\"" + raw + "\" 按 \"" + value + "\" 处理");
                 return value;
             }
+            // 非标准 namespace:path 写法（例如中文名"神龛""魂符"）：尝试按当前语言名称反查标准英文 ID。
+            LocalizedIdResolver.Resolution resolved = LocalizedIdResolver.resolve(localizedNames, kind, raw);
+            if (resolved instanceof LocalizedIdResolver.Resolution.Resolved matched) {
+                notes.add(name + "：\"" + raw.trim() + "\" 按 \"" + matched.id() + "\"（" + matched.label() + "）处理");
+                return matched.id();
+            }
+            if (resolved instanceof LocalizedIdResolver.Resolution.Ambiguous ambiguous) {
+                errors.add(new ParamError(name, LocalizedIdResolver.ambiguousMessage(kind, raw, ambiguous),
+                        allowTag ? "命名空间:路径，例如 minecraft:torch；标签以 # 开头，例如 #minecraft:logs"
+                                : "命名空间:路径，例如 minecraft:sheep",
+                        ReceivedShape.of(element)));
+                return null;
+            }
         }
         errors.add(new ParamError(name, name + " 写法不对", allowTag
                 ? "命名空间:路径，例如 minecraft:torch；标签以 # 开头，例如 #minecraft:logs"
@@ -262,7 +289,8 @@ public final class ParamSpecs {
         return null;
     }
 
-    private static List<String> list(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes) {
+    private static List<String> list(ParamSpec param, JsonElement element, List<ParamError> errors, List<String> notes,
+            ReadsLocalizedNames localizedNames) {
         List<JsonElement> items = new ArrayList<>();
         // find 的 blocks 这类列表被包成 {"item": [...]} 时，取出里面的数组按列表收，不当成一个写错的值。
         MangledArrays mangled = new MangledArrays();
@@ -280,8 +308,10 @@ public final class ParamSpecs {
             // 列表项的写法各类型不同：文字按文字收，实体类型不接受标签，其余接受 # 标签。
             Object value = switch (param.type()) {
                 case TEXT_LIST -> text(param.name(), item, errors);
-                case ENTITY_TYPE_LIST -> resource(param.name(), item, false, errors, notes);
-                default -> resource(param.name(), item, true, errors, notes);
+                case ENTITY_TYPE_LIST -> resource(param.name(), item, false, IdKind.ENTITY_TYPE, errors, notes,
+                        localizedNames);
+                case BLOCK_LIST -> resource(param.name(), item, true, IdKind.BLOCK, errors, notes, localizedNames);
+                default -> resource(param.name(), item, true, IdKind.ITEM, errors, notes, localizedNames);
             };
             if (value != null) values.add((String) value);
         }

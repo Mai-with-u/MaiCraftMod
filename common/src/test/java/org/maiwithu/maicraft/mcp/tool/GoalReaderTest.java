@@ -5,12 +5,15 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.game.interaction.DigTool;
+import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.task.TaskFactories;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -228,5 +231,44 @@ class GoalReaderTest {
                    {"ability": "maicraft:use"}, {"ability": "maicraft:use", "parameters": {"count": 0}}]}""");
 
         assertEquals(List.of("goal.steps[1].parameters.count"), fields(reading));
+    }
+
+    @Test
+    void localizedItemNamesResolveOrListCandidates() {
+        AbilityRegistry registry = new AbilityRegistry(new TaskFactories());
+        registry.register(ToolTestAbility.use());
+        ReadsLocalizedNames names = new ReadsLocalizedNames() {
+            private final List<NamedId> items = List.of(
+                    new NamedId("touhou_little_maid:smart_slab_empty", "魂符"),
+                    new NamedId("touhou_little_maid:smart_slab_has_maid", "魂符（已有女仆）"),
+                    new NamedId("touhou_little_maid:hakurei_gohei", "博丽御币"));
+
+            @Override public Optional<String> labelOf(IdKind kind, String id) {
+                return kind == IdKind.ITEM
+                        ? items.stream().filter(entry -> entry.id().equals(id)).map(NamedId::label).findFirst()
+                        : Optional.empty();
+            }
+
+            @Override public List<NamedId> entries(IdKind kind) {
+                return kind == IdKind.ITEM ? items : List.of();
+            }
+        };
+        GoalReader bilingual = new GoalReader(registry, names);
+
+        // 唯一匹配中文名：自动换为标准英文 ID 并在 notes 说明。
+        GoalReader.Reading resolved = bilingual.read(JsonParser.parseString("""
+                {"ability": "maicraft:use", "parameters": {"item": "博丽御币"}}"""));
+        assertTrue(resolved.ok(), resolved.errors()::toString);
+        assertEquals("touhou_little_maid:hakurei_gohei", resolved.goal().params().text("item"));
+        assertTrue(resolved.notes().stream().anyMatch(note -> note.contains("touhou_little_maid:hakurei_gohei")),
+                resolved.notes()::toString);
+
+        // 多候选中文名：返回清晰参数错误并附带前若干个 id (中文名) 候选。
+        GoalReader.Reading ambiguous = bilingual.read(JsonParser.parseString("""
+                {"ability": "maicraft:use", "parameters": {"item": "符"}}"""));
+        assertFalse(ambiguous.ok());
+        assertEquals(ErrorCode.INVALID_PARAMETER, ambiguous.code());
+        assertEquals(List.of("goal.parameters.item"), fields(ambiguous));
+        assertTrue(ambiguous.errors().getFirst().message().contains("touhou_little_maid:smart_slab_empty (魂符)"));
     }
 }

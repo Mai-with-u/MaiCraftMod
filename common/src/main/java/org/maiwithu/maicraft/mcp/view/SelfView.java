@@ -14,6 +14,7 @@ import org.maiwithu.maicraft.game.player.StackKey;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.world.KeepInventoryRule;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.game.world.RespawnPoint;
 import org.maiwithu.maicraft.game.world.SaveIdentity;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
@@ -189,6 +190,11 @@ public final class SelfView {
         json.add("not_chained_reason", summary.notChainedReason() == null
                 ? JsonNull.INSTANCE : new JsonPrimitive(summary.notChainedReason()));
         view.add("last_chain_mining", json);
+    }
+
+    /** 响应尾部附上去重后的非原版模组名称词表；全原版或无有效本地化名时不写这一项。 */
+    public static void addModLabels(JsonObject view, ReadsLocalizedNames names) {
+        ModLabels.appendTo(view, names);
     }
 
     /**

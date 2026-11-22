@@ -9,7 +9,9 @@ import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.game.world.IdKind;
+import org.maiwithu.maicraft.game.world.LocalizedIdResolver;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
 import org.maiwithu.maicraft.kernel.ability.AbilityModule;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
@@ -71,6 +73,8 @@ public final class LookupTool implements McpTool {
     private final WikiTopic wiki;
     /** 查完配方告诉闲时看：角色闲着时翻开那一页给观众看，查到的内容不变。 */
     private final LooksAfterReading looks;
+    /** 当前游戏语言的名称读端：topic=recipe / knowledge 的 id 写了中文名时反查标准英文 ID。 */
+    private final ReadsLocalizedNames localizedNames;
 
     /**
      * @param knowledge    知识库：随包常识、物品资料页与联动模组的资料来源
@@ -91,7 +95,17 @@ public final class LookupTool implements McpTool {
     public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
                       ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
                       Supplier<List<String>> installedMods, WebKnowledgeService web, LooksAfterReading looks) {
+        this(registry, knowledge, recipes, items, registered, clientThread, installedMods, web, looks,
+                ReadsLocalizedNames.NONE);
+    }
+
+    /** @param localizedNames 当前游戏语言的名称读端：id 写了中文名时反查标准英文 ID */
+    public LookupTool(AbilityRegistry registry, KnowledgeLibrary knowledge, RecipeLookup recipes,
+                      ReadsItemDescriptions items, ReadsRegisteredIds registered, ClientThread clientThread,
+                      Supplier<List<String>> installedMods, WebKnowledgeService web, LooksAfterReading looks,
+                      ReadsLocalizedNames localizedNames) {
         this.looks = Objects.requireNonNull(looks, "looks");
+        this.localizedNames = Objects.requireNonNull(localizedNames, "localizedNames");
         this.registry = Objects.requireNonNull(registry, "registry");
         this.knowledge = Objects.requireNonNull(knowledge, "knowledge");
         this.recipes = Objects.requireNonNull(recipes, "recipes");
@@ -225,11 +239,12 @@ public final class LookupTool implements McpTool {
 
     private JsonObject knowledgeOnce(String id, String query, Integer offset, RequestCheck check) {
         try {
-            return clientThread.call(context -> knowledge(knowledge, id, query, offset, new ArrayList<>(check.notes())));
+            return clientThread.call(context -> knowledge(knowledge, id, query, offset,
+                    new ArrayList<>(check.notes()), localizedNames));
         } catch (ClientThread.NotInWorld absent) {
             List<String> notes = new ArrayList<>(check.notes());
             notes.add("角色不在世界里：这次只查得到随包的机制常识，物品资料页与模组的资料要进了世界才读得到");
-            return knowledge(offline, id, query, offset, notes);
+            return knowledge(offline, id, query, offset, notes, localizedNames);
         } catch (ClientThread.Busy busy) {
             return ToolReply.error(ErrorCode.BUSY, "游戏这会儿腾不出手查资料：" + busy.getMessage() + "；稍后再试");
         }
@@ -240,9 +255,19 @@ public final class LookupTool implements McpTool {
      * 都不给就列出目录并附各来源现状。常识只讲游戏规则，让角色去做时看对应能力的说明。
      */
     private static JsonObject knowledge(KnowledgeLibrary knowledge, String id, String query, Integer offset,
-            List<String> notes) {
+            List<String> notes, ReadsLocalizedNames localizedNames) {
         if (id != null) {
             KnowledgeDocument document = knowledge.find(id).orElse(null);
+            if (document == null) {
+                // 资料目录未直接命中且传入了中文等非命名空间名称时，反查物品 ID 读物品资料页。
+                LocalizedIdResolver.Resolution resolved = LocalizedIdResolver.resolve(localizedNames, IdKind.ITEM, id);
+                if (resolved instanceof LocalizedIdResolver.Resolution.Resolved matched) {
+                    document = knowledge.find(matched.id()).orElse(null);
+                } else if (resolved instanceof LocalizedIdResolver.Resolution.Ambiguous ambiguous) {
+                    return ToolReply.error(ErrorCode.INVALID_PARAMETER,
+                            LocalizedIdResolver.ambiguousMessage(IdKind.ITEM, id, ambiguous));
+                }
+            }
             if (document == null) {
                 return ToolReply.error(ErrorCode.UNKNOWN_ID, "没有这篇资料：" + id
                         + "；不带 id 调用 lookup(topic=knowledge) 看目录，或者用 query 按关键词找");
@@ -308,17 +333,31 @@ public final class LookupTool implements McpTool {
         }
     }
 
-    // 配方页或用途页：物品 ID 要在注册表里；给了过滤词就只留沾词的配方，跳过了哪个配方查看器、为什么写进 notes。
+    // 配方页或用途页：物品 ID 要在注册表里（给中文名时唯一命中自动反查，多候选报错给清单）；
+    // 给了过滤词就只留沾词的配方，跳过了哪个配方查看器、为什么写进 notes。
     private JsonObject recipe(String rawId, boolean uses, String query, RequestCheck check) {
         String itemId = rawId.strip().toLowerCase(Locale.ROOT);
+        List<String> notes = new ArrayList<>(check.notes());
         Optional<ReadsItemDescriptions.ItemDescription> item = items.describe(itemId);
+        if (item.isEmpty()) {
+            LocalizedIdResolver.Resolution resolved = LocalizedIdResolver.resolve(localizedNames, IdKind.ITEM, rawId);
+            if (resolved instanceof LocalizedIdResolver.Resolution.Resolved matched) {
+                itemId = matched.id();
+                item = items.describe(itemId);
+                if (item.isPresent()) {
+                    notes.add("id \"" + rawId.strip() + "\" 按 " + itemId + "（" + matched.label() + "）读取");
+                }
+            } else if (resolved instanceof LocalizedIdResolver.Resolution.Ambiguous ambiguous) {
+                return ToolReply.error(ErrorCode.INVALID_PARAMETER,
+                        LocalizedIdResolver.ambiguousMessage(IdKind.ITEM, rawId, ambiguous));
+            }
+        }
         if (item.isEmpty()) {
             // 写岔的物品 ID 带上本实例里相近的名字，再提示只知道名字时怎么找。
             return ToolReply.error(ErrorCode.UNKNOWN_ID, registered.missing(IdKind.ITEM, rawId.strip())
                     + "；只知道名字时用 lookup(topic=recipe, query=名字) 找它的 ID");
         }
         List<String> terms = terms(query);
-        List<String> notes = new ArrayList<>(check.notes());
         JsonObject data;
         if (uses) {
             RecipeLookup.Answer asIngredient = recipes.using(itemId);

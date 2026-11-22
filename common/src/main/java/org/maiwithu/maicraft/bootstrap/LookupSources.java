@@ -12,6 +12,7 @@ import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ClientItemDescriptions;
+import org.maiwithu.maicraft.game.world.ClientLocalizedNames;
 import org.maiwithu.maicraft.game.world.ClientRegisteredIds;
 import org.maiwithu.maicraft.game.world.ReadsItemDescriptions;
 import org.maiwithu.maicraft.game.world.ReadsRegisteredIds;
@@ -60,6 +61,6 @@ final class LookupSources {
                 : WebKnowledgeService.off();
         // 列能力时顶上那一行装了哪些联动模组，照登记表此刻的样子给：进没进世界都一样。
         return new LookupTool(abilities, new KnowledgeLibrary(sources), recipes, items, registered, clientWork,
-                compat::installedModIds, wiki, looks);
+                compat::installedModIds, wiki, looks, ClientLocalizedNames.builtIn());
     }
 }

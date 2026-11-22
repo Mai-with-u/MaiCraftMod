@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.player.ClientFoodValues;
 import org.maiwithu.maicraft.game.player.ReadsFoodValues;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunTable;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -116,6 +117,8 @@ public final class ObserveTool implements McpTool {
     private final Supplier<ChainMiningLedger.Summary> lastChainMining;
     /** 最近五分钟内点开终端记下的 ME 网络存货快照；没有时为空列表。 */
     private final Supplier<List<NetworkStorage.RememberedNetwork>> rememberedNetworks;
+    /** 当前游戏语言的名称读端：各视图响应尾部按它附加去重的非原版模组短词表 mod_labels。 */
+    private final ReadsLocalizedNames localizedNames;
 
     /**
      * @param scene  当前世界的感知场景；不在世界里时给 null
@@ -224,12 +227,32 @@ public final class ObserveTool implements McpTool {
                        Supplier<List<String>> modFeatures,
                        Supplier<ChainMiningLedger.Summary> lastChainMining,
                        Supplier<List<NetworkStorage.RememberedNetwork>> rememberedNetworks) {
+        this(scene, memory, table, clientThread, reminders, menus, reserved, looks, identity, afterDeath, pictures,
+                protection, carriedBackpacks, modFeatures, lastChainMining, rememberedNetworks,
+                ReadsLocalizedNames.NONE);
+    }
+
+    /**
+     * @param localizedNames 当前游戏语言的名称读端：各视图响应尾部附去重非原版模组短词表 mod_labels
+     */
+    public ObserveTool(Supplier<Scene> scene, Supplier<WorldMemory> memory, GoalRunTable table,
+                       ClientThread clientThread, Supplier<List<Reminder>> reminders,
+                       Supplier<MenuView.Reads> menus, Supplier<List<SelfView.Reserved>> reserved,
+                       LooksAfterReading looks, Supplier<SelfView.Identity> identity,
+                       Supplier<SelfView.AfterDeath> afterDeath, Pictures pictures,
+                       Supplier<Protection> protection,
+                       Supplier<List<CarriedBackpack.CarriedPack>> carriedBackpacks,
+                       Supplier<List<String>> modFeatures,
+                       Supplier<ChainMiningLedger.Summary> lastChainMining,
+                       Supplier<List<NetworkStorage.RememberedNetwork>> rememberedNetworks,
+                       ReadsLocalizedNames localizedNames) {
         this.pictures = Objects.requireNonNull(pictures, "pictures");
         this.protection = protection;
         this.carriedBackpacks = Objects.requireNonNull(carriedBackpacks, "carriedBackpacks");
         this.modFeatures = Objects.requireNonNull(modFeatures, "modFeatures");
         this.lastChainMining = Objects.requireNonNull(lastChainMining, "lastChainMining");
         this.rememberedNetworks = Objects.requireNonNull(rememberedNetworks, "rememberedNetworks");
+        this.localizedNames = Objects.requireNonNull(localizedNames, "localizedNames");
         this.afterDeath = Objects.requireNonNull(afterDeath, "afterDeath");
         this.identity = Objects.requireNonNull(identity, "identity");
         this.looks = Objects.requireNonNull(looks, "looks");
@@ -353,13 +376,15 @@ public final class ObserveTool implements McpTool {
                 WorldMemoryView.originFrom(currentScene.facilityKinds(), guard, dimension);
         JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
-            case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard).orElse(null);
-            case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension);
+            case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard, localizedNames)
+                    .orElse(null);
+            case "places" -> WorldMemoryView.placesView(currentMemory, currentScene.self(), dimension, localizedNames);
             case "world_memory" -> WorldMemoryView.of(currentMemory, currentScene.self(), dimension,
-                    radius, kindFilter, recordOrigin, notes::add, sections, rememberedNetworks.get());
+                    radius, kindFilter, recordOrigin, notes::add, sections, rememberedNetworks.get(), localizedNames);
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid,
-                    DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin));
+                    DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin),
+                    localizedNames);
         };
         // 看了自己、周围或某样东西：角色闲着时顺着看过去（开背包、转头、开手边的箱子）。
         // 记忆、界面在世界里没有对应的东西可看，不演；读到的内容照旧当场返回，不等角色看完。
@@ -609,6 +634,8 @@ public final class ObserveTool implements McpTool {
         // 当前实例在这个世界里真正就绪可用的模组能力，与本世界最近一次挖掘动作的连锁统计。
         SelfView.addModFeatures(view, modFeatures.get());
         SelfView.addLastChainMining(view, lastChainMining.get());
+        // 响应尾部附上去重后的非原版模组名称词表（全原版时不附）。
+        SelfView.addModLabels(view, localizedNames);
         return view;
     }
 }

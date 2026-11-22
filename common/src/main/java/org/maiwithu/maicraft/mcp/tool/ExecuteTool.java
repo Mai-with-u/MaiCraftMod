@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import org.maiwithu.maicraft.behavior.perception.looking.LooksAfterReading;
 import org.maiwithu.maicraft.behavior.perception.looking.PointsAt;
 import org.maiwithu.maicraft.behavior.perception.looking.WhatWasRead;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
 import org.maiwithu.maicraft.kernel.ability.ExecutionMode;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
@@ -68,14 +69,25 @@ public final class ExecuteTool implements McpTool {
 
     /** @param looks 只读能力出完报告告诉闲时看；不演的给 {@link LooksAfterReading#NONE} */
     public ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks) {
-        this(registry, table, clientThread, looks, ASIDE_WAIT_MILLIS, ASIDE_POLL_MILLIS);
+        this(registry, table, clientThread, looks, ReadsLocalizedNames.NONE);
+    }
+
+    /** @param localizedNames 当前游戏语言的名称读端：入参里写了中文名时自动反查标准英文 ID */
+    public ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread,
+                       LooksAfterReading looks, ReadsLocalizedNames localizedNames) {
+        this(registry, table, clientThread, looks, localizedNames, ASIDE_WAIT_MILLIS, ASIDE_POLL_MILLIS);
     }
 
     ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks,
             long asideWaitMillis, long asidePollMillis) {
+        this(registry, table, clientThread, looks, ReadsLocalizedNames.NONE, asideWaitMillis, asidePollMillis);
+    }
+
+    ExecuteTool(AbilityRegistry registry, GoalRunTable table, ClientThread clientThread, LooksAfterReading looks,
+            ReadsLocalizedNames localizedNames, long asideWaitMillis, long asidePollMillis) {
         this.looks = Objects.requireNonNull(looks, "looks");
         this.registry = Objects.requireNonNull(registry, "registry");
-        this.reader = new GoalReader(registry);
+        this.reader = new GoalReader(registry, Objects.requireNonNull(localizedNames, "localizedNames"));
         this.table = Objects.requireNonNull(table, "table");
         this.clientThread = Objects.requireNonNull(clientThread, "clientThread");
         this.estimates = new GoalEstimates(registry);

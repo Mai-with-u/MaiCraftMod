@@ -18,6 +18,8 @@ import org.maiwithu.maicraft.mcp.tool.GoalTool;
 import org.maiwithu.maicraft.mcp.tool.LookupTool;
 import org.maiwithu.maicraft.mcp.tool.ObserveTool;
 import org.maiwithu.maicraft.game.picture.CameraPictures;
+import org.maiwithu.maicraft.game.world.ClientLocalizedNames;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.mcp.tool.RecentToolCalls;
 import org.maiwithu.maicraft.mcp.tool.ToolDispatcher;
 import org.maiwithu.maicraft.mcp.view.SelfView;
@@ -40,6 +42,8 @@ final class McpTools {
         // 拍画面：取画面的观察口全程一份；转头交给当前世界的闲时看，建筑档案读当前世界的那一份。
         ObserveTool.Pictures pictures = new ObserveTool.Pictures(cameraPictures,
                 inWorld(worldScope, WorldScope::idleLooking), inWorld(worldScope, WorldScope::buildingArchives));
+        // 当前游戏语言的名称读端：observe 尾部附非原版模组词表，execute 参数支持中文名反查。
+        ReadsLocalizedNames localizedNames = ClientLocalizedNames.builtIn();
         return new ToolDispatcher(List.of(
                 new ObserveTool(inWorld(worldScope, WorldScope::scene),
                         inWorld(worldScope, WorldScope::memory), goals, clientWork,
@@ -61,10 +65,11 @@ final class McpTools {
                         () -> {
                             WorldScope scope = worldScope.get();
                             return scope == null ? List.of() : scope.rememberedNetworks();
-                        }),
+                        },
+                        localizedNames),
                 // 查资料接随包的机制常识、物品资料页、联动模组登记的资料来源与配方；联网的资料来源还没登记。
                 lookup,
-                new ExecuteTool(abilities, goals, clientWork, looks),
+                new ExecuteTool(abilities, goals, clientWork, looks, localizedNames),
                 new GoalTool(goals, clientWork),
                 // 读事件每一页都带角色眼下在哪个世界：读的是这一趟进世界认出的那个，不在世界里为 null。
                 new EventsTool(taskEvents, chatEvents, goals, clientWork,

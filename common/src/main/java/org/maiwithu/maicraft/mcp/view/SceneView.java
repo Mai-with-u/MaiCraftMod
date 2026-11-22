@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.behavior.perception.SceneSelf;
 import org.maiwithu.maicraft.behavior.perception.SceneSign;
 import org.maiwithu.maicraft.behavior.perception.TerrainFeature;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 import java.util.Locale;
@@ -38,6 +39,13 @@ public final class SceneView {
 
     public static JsonObject scene(Scene scene, boolean withGrid,
             BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin) {
+        return scene(scene, withGrid, facilityOrigin, ReadsLocalizedNames.NONE);
+    }
+
+    /** 同上，并在尾部附上去重后的非原版模组短词表（全原版时不附）。 */
+    public static JsonObject scene(Scene scene, boolean withGrid,
+            BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin,
+            ReadsLocalizedNames localizedNames) {
         JsonObject json = new JsonObject();
         SceneEnvironment environment = scene.environment();
         if (environment != null) {
@@ -104,6 +112,7 @@ public final class SceneView {
         if (withGrid && scene.grid() != null) {
             json.add("grid", grid(scene.grid()));
         }
+        ModLabels.appendTo(json, localizedNames);
         return json;
     }
 
