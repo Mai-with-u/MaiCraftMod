@@ -86,4 +86,28 @@ class EatsCarriedFoodTest {
         EatsCarriedFood poisonMoves = new EatsCarriedFood(poisonOnly, values, item -> Optional.empty(), null, id -> 0);
         assertFalse(poisonMoves.carriesBite(new HungerNeed.Facts(8, false, 0, true, true, 0)), "会中毒的不吃");
     }
+
+    @Test
+    void 身上只有可烹饪生鱼_平时不生吃_真正挨饿或重伤回血才应急吃() {
+        BackpackView rawFishOnly = new BackpackView() {
+            @Override public List<BackpackStack> stacks() {
+                return List.of(new BackpackStack("minecraft:cod", 2, 64, false, true, false, false));
+            }
+
+            @Override public int usedSlots() { return 1; }
+            @Override public int totalSlots() { return 36; }
+        };
+        ReadsFoodValues values = id -> "minecraft:cod".equals(id)
+                ? Optional.of(new ReadsFoodValues.FoodValue(id, 2, 0.4f, 1.6f, false, List.of(), true))
+                : Optional.empty();
+        EatsCarriedFood fishMoves = new EatsCarriedFood(rawFishOnly, values, item -> Optional.empty(), null, id -> 0);
+
+        // 非紧急状态（饱食 18、饱食 11 且未重伤）：不生啃生鱼。
+        assertFalse(fishMoves.carriesBite(new HungerNeed.Facts(18, false, 0)));
+        assertFalse(fishMoves.carriesBite(new HungerNeed.Facts(11, false, 0, true, false, 0)));
+        // 真正挨饿（SOON / NOW）或重伤急需回血且无熟食：允许应急生吃生鱼。
+        assertTrue(fishMoves.carriesBite(new HungerNeed.Facts(HungerNeed.SPRINT_FLOOR, false, 0)));
+        assertTrue(fishMoves.carriesBite(new HungerNeed.Facts(0, true, 0)));
+        assertTrue(fishMoves.carriesBite(new HungerNeed.Facts(11, false, 0, true, true, 0)));
+    }
 }

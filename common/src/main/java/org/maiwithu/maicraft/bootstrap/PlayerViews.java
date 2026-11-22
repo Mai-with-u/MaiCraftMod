@@ -86,13 +86,31 @@ public final class PlayerViews {
         };
     }
 
-    /** 食物数值：按当刻的角色读物品的食物组件。 */
+    /** 食物数值：按当刻的角色读物品的食物组件，并按配方表缓存生食材识别结果避免每刻重复扫表。 */
     public static ReadsFoodValues foods(Supplier<PlayerContext> context) {
         Objects.requireNonNull(context, "context");
-        return itemId -> {
-            PlayerContext current = context.get();
-            return current == null || current.localPlayer() == null
-                    ? Optional.empty() : new ClientFoodValues(current.localPlayer()).of(itemId);
+        return new ReadsFoodValues() {
+            private ClientFoodValues cached;
+            private Object cachedPlayer;
+            private Object cachedRecipes;
+
+            @Override
+            public Optional<FoodValue> of(String itemId) {
+                PlayerContext current = context.get();
+                if (current == null || current.localPlayer() == null) {
+                    cached = null;
+                    cachedPlayer = null;
+                    cachedRecipes = null;
+                    return Optional.empty();
+                }
+                Object recipes = current.level() == null ? null : current.level().getRecipeManager().getRecipes();
+                if (cached == null || cachedPlayer != current.localPlayer() || cachedRecipes != recipes) {
+                    cached = new ClientFoodValues(current.localPlayer());
+                    cachedPlayer = current.localPlayer();
+                    cachedRecipes = recipes;
+                }
+                return cached.of(itemId);
+            }
         };
     }
 

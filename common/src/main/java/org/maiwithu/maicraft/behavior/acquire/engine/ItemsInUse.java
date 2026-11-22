@@ -35,11 +35,31 @@ public final class ItemsInUse implements ItemsToKeep {
 
     /** 上一个目标拿到的：物品或 #标签 → 件数。 */
     private Map<String, Integer> lastGoal = Map.of();
+    /** 进行中的目标刚收获的物品（如钓鱼本趟已钓上来的鱼和宝藏）：防中途被顺手吃掉或扔掉，目标结束时交棒给 lastGoal。 */
+    private final Map<String, Integer> inProgressGained = new LinkedHashMap<>();
     /** 手上这件事正在拿的：拿东西的引擎此刻在推进的那一串请求；引擎建好前是空的。 */
     private Supplier<List<ItemRequest>> acquiring = List::of;
 
     public ItemsInUse(ReadsItemTags tags) {
         this.tags = Objects.requireNonNull(tags, "tags");
+    }
+
+    /** 进行中任务刚收获一批物品（如钓鱼刚钓起的鱼与战利品）：立即纳入短期保护，直到动过背包的目标结束交棒。 */
+    public void noteGained(Map<String, Integer> gained) {
+        if (gained == null || gained.isEmpty()) return;
+        for (var entry : gained.entrySet()) {
+            String what = entry.getKey();
+            int count = entry.getValue() == null ? 0 : entry.getValue();
+            if (count > 0 && what != null && !what.isBlank() && !wantsFood(what)) {
+                inProgressGained.merge(what, count, Integer::sum);
+            }
+        }
+    }
+
+    /** 离开世界时清空全部进行中与上一目标记录，不跨世界残留保护。 */
+    public void clear() {
+        lastGoal = Map.of();
+        inProgressGained.clear();
     }
 
     /** 一个目标结束：动过背包的才记下它拿到的东西、换掉更早那个目标的；没有物品变化的不算"上一个目标"。 */
@@ -53,6 +73,8 @@ public final class ItemsInUse implements ItemsToKeep {
                 gained.merge(change.what(), change.count(), Integer::sum);
             }
         }
+        // 目标结束时把本趟进行中收获无缝交棒给 lastGoal，避免同一批收获被重复累加两遍。
+        inProgressGained.clear();
         lastGoal = Map.copyOf(gained);
     }
 
@@ -79,13 +101,16 @@ public final class ItemsInUse implements ItemsToKeep {
     @Override
     public int keep(String itemId) {
         Set<String> itemTags = tags.tagsOf(itemId);
-        int keep = 0;
+        long keep = 0;
         for (var gained : lastGoal.entrySet()) {
+            if (new WantedItem(gained.getKey()).matches(itemId, itemTags)) keep += gained.getValue();
+        }
+        for (var gained : inProgressGained.entrySet()) {
             if (new WantedItem(gained.getKey()).matches(itemId, itemTags)) keep += gained.getValue();
         }
         for (ItemRequest request : acquiring.get()) {
             if (request.wanted().matches(itemId, itemTags)) keep += request.count();
         }
-        return keep;
+        return keep >= ItemsToKeep.ALL ? ItemsToKeep.ALL : (int) keep;
     }
 }

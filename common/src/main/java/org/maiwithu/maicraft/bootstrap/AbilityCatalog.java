@@ -586,10 +586,10 @@ public final class AbilityCatalog {
         // 计时：不占身体的"过 N 秒叫我"，往启动侧每刻看钟的那份计时表里挂；想过一会儿回来看都走它，角色这期间照常干活。
         registry.register(new TimerAbility(deps.channels().timers()));
 
-        // 钓鱼：钓位几何与咬钩收竿都接上了；缺竿回到拿到物品的内需入口，捡钓获用顺手捡起同一套。
+        // 钓鱼：钓位几何与咬钩收竿都接上了；缺竿回到拿到物品的内需入口，捡钓获用顺手捡起同一套，钓获进正要用的东西防顺手消耗。
         registry.register(new FishModule(deps.character().context(), shared.innerNeeds(), shared.toMainhand(),
                 deps.travel().walks(), shared.drops(), shared.space(),
-                new ClientFishingHookFacts(deps.character().context())));
+                new ClientFishingHookFacts(deps.character().context()), deps.itemsInUse()::noteGained));
 
         // 出行：目的地解析用当刻的世界、记住的地点与场景里的观察编号；走到由内嵌 Baritone 执行，
         // 路上垫的方块从走到实现方读回。跨维度的现场部件一次拼好：找门、进门、建门与末地门房间共用。

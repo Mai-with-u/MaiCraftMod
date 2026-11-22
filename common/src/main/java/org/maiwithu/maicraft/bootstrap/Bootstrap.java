@@ -644,9 +644,10 @@ public final class Bootstrap {
             if (nonverbal != null) nonverbal.forget();
             dimensionChanges.forget();
             skyChanges.forget();
-            // 没到点的计时属于刚离开的那个世界，不跟到下一个；预留也换回不存，进下一个世界读那个世界的。
+            // 没到点的计时属于刚离开的那个世界，不跟到下一个；预留与正要用的东西一并清掉，不跨世界残留。
             timers.clear();
             reserved.detach();
+            itemsInUse.clear();
             publishingGoalRuns = null;
             if (worldScope[0] != null) {
                 WorldScope leaving = worldScope[0];

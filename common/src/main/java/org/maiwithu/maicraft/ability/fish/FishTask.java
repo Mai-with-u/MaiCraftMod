@@ -47,7 +47,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  *
  * <p>钓上来的东西照单全收（鱼、垃圾、宝藏都算一次），以背包实际增长如实记账，不挑拣不伪造；
  * 鱼钩消失、钩住实体、抛出没入水、一竿没咬钩都是失败重抛，连续五次结束（成功一次清零并清排除集）。
- * 等咬钩是正常干活，可以被打断；收竿或抛竿已提交、等游戏确认的那几刻停下不安全。
+ * 等咬钩是正常干活，可以被打断；抛竿、收竿等游戏确认以及收竿后捡获记账期间停下不安全。
  */
 class FishTask extends PhasedTask<FishTask.Phase> {
 
@@ -122,7 +122,11 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private int cooldownWaited;
 
     FishTask(FishInput input, FishServices services, Permissions permissions) {
-        super("钓鱼", Phase.CHECK_ROD, new ProgressTracker(STUCK_AFTER_TICKS,
+        this(input, services, permissions, Phase.CHECK_ROD);
+    }
+
+    FishTask(FishInput input, FishServices services, Permissions permissions, Phase startPhase) {
+        super("钓鱼", startPhase, new ProgressTracker(STUCK_AFTER_TICKS,
                 input.maxSeconds() > 0 ? input.maxSeconds() * 20 : Long.MAX_VALUE));
         this.input = input;
         this.services = services;
@@ -351,8 +355,9 @@ class FishTask extends PhasedTask<FishTask.Phase> {
             return Next.fail(Problem.of(Problem.Kind.STUCK,
                     "收竿成功了，但没有钓获进背包（已钓到 " + caught + " 次、抛了 " + casts + " 竿）"));
         }
-        // 钓到什么记什么：按背包差集一条 item_gained，垃圾和宝藏与鱼同样记账。
+        // 钓到什么记什么：按背包差集一条 item_gained，垃圾和宝藏与鱼同样记账，并立刻纳入短期保护防顺手消耗。
         gains.forEach((itemId, count) -> recordChange(Change.of(Change.Kind.ITEM_GAINED, itemId, count)));
+        services.protectLoot().accept(gains);
         caught++;
         // 成功一竿清零失败计数并清排除集：小池塘的落点重新可用，清空重算的限额也重新给一次。
         failedCasts = 0;
@@ -466,10 +471,18 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         return collect.pickup;
     }
 
-    /** 等咬钩可以被打断；收竿或抛竿已提交、等游戏确认的那几刻停下不安全。 */
+    /** 暴露当前阶段给同包测试核对防打断与阶段流转。 */
+    Phase currentPhase() {
+        return phase();
+    }
+
+    /** 等咬钩可以被打断；抛竿、收竿等游戏确认以及收竿后捡获记账期间停下不安全。 */
     @Override public Interruptibility interruptibility(TickContext context) {
         if (phase() == Phase.REEL && cast.reelPending != null) return Interruptibility.UNSAFE_TO_STOP;
         if (phase() == Phase.CAST && cast.castPending != null) return Interruptibility.UNSAFE_TO_STOP;
+        // 收竿后正在等战利品飞回、捡拾并核对背包增长记账：此时被打断会改变背包内容，
+        // 导致本竿钓获对不上账，需等记完账再允许低优生存需求插队。
+        if (phase() == Phase.COLLECT) return Interruptibility.UNSAFE_TO_STOP;
         return super.interruptibility(context);
     }
 

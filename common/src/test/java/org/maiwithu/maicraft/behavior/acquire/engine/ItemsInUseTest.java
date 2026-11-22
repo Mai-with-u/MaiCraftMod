@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -71,5 +72,27 @@ class ItemsInUseTest {
         assertEquals(0, inUse.keep("minecraft:mutton"));
         assertEquals(0, inUse.keep("minecraft:bread"));
         assertEquals(8, inUse.keep("minecraft:dried_kelp"), "点名要的具体食物（要交任务的熟海带）照旧留着");
+    }
+
+    @Test
+    void 进行中刚钓起的收获立即受保护_目标结束交棒不重复计数() {
+        // 多竿钓鱼进行中：第 1 竿与第 2 竿钓起的生鳕鱼立即受保护，防中途被顺手吃掉或腾包扔掉。
+        inUse.noteGained(Map.of("minecraft:cod", 1));
+        assertEquals(1, inUse.keep("minecraft:cod"));
+        inUse.noteGained(Map.of("minecraft:cod", 1, "minecraft:salmon", 1));
+        assertEquals(2, inUse.keep("minecraft:cod"));
+        assertEquals(1, inUse.keep("minecraft:salmon"));
+
+        // 钓鱼目标结束交棒给 lastGoal：保护件数与目标实收一致，不因两处并存而翻倍。
+        inUse.goalFinished(List.of(
+                Change.of(Change.Kind.ITEM_GAINED, "minecraft:cod", 2),
+                Change.of(Change.Kind.ITEM_GAINED, "minecraft:salmon", 1)));
+        assertEquals(2, inUse.keep("minecraft:cod"));
+        assertEquals(1, inUse.keep("minecraft:salmon"));
+
+        // 离开世界清空全部保护，不跨世界残留。
+        inUse.clear();
+        assertEquals(0, inUse.keep("minecraft:cod"));
+        assertEquals(0, inUse.keep("minecraft:salmon"));
     }
 }

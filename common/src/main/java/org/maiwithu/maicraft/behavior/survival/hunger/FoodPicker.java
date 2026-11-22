@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.survival.hunger;
 
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -75,11 +76,27 @@ public final class FoodPicker {
 
     /**
      * 普通食物：吃了不带任何效果、饱腹时也不能吃。金苹果、紫颂果这类饱腹也能吃的要么珍贵、要么吃了会传送，
-     * 腐肉、毒马铃薯、河豚带害，都不算；饿了顺手吃只吃这一类。生羊肉、生牛肉、生猪排、生鲑鱼、生鳕鱼这类
-     * 没坏效果的生肉也是普通食物：饿了、伤重时身上只有它就直接吃，不先去烤；生鸡肉带饥饿效果，归垃圾食物。
+     * 腐肉、毒马铃薯、河豚带害，都不算。生鸡肉带饥饿效果，归垃圾食物；没坏效果的生肉、生鱼属于可烹饪生食材，
+     * 平时趁空当不生吃，只在真正挨饿或重伤回血且身上没有现成熟食时才应急生吃。
      */
     public static boolean plain(ReadsFoodValues.FoodValue value) {
         return value.nutrition() > 0 && value.effects().isEmpty() && !value.canAlwaysEat();
+    }
+
+    /**
+     * 可烹饪的生食材：本身无有害效果，但可经熔炉或烟熏炉烧成更高营养的食物（原版生肉、生鱼、生土豆及模组生食材）。
+     * 非紧急饥饿时禁止选择，留着烹饪或交给后续目标；饿到不能疾跑、掉血或重伤回血且无熟食时才应急生吃。
+     */
+    public static boolean rawCookable(ReadsFoodValues.FoodValue value) {
+        return plain(value) && value.rawCookable();
+    }
+
+    /**
+     * 可直接顺手吃的普通食物：排除可烹饪生食材后的普通食物（熟肉、面包、烤土豆、果蔬、曲奇等）。
+     * 平时趁空当垫一口（LATER）只统计和选择这一类，避免刚钓起生鱼或拿到生肉就顺手生啃。
+     */
+    public static boolean readyPlain(ReadsFoodValues.FoodValue value) {
+        return plain(value) && !value.rawCookable();
     }
 
     /**
@@ -96,21 +113,22 @@ public final class FoodPicker {
     }
 
     /**
-     * 自己饿了顺手吃一口：只在普通食物里挑，按饱食度还差多少挑补得刚好的——补得进去的里面挑最多的，
-     * 都会溢出就挑溢出最少的，不拿一块牛排去补一格饱食度。没有普通食物时，饿到不能疾跑（饱食 6 及以下，
-     * 见 {@link HungerNeed#SPRINT_FLOOR}）就吃腐肉这类垃圾食物垫一口，见底掉血才什么都吃：
-     * 先按 {@link #autoPick} 吃垃圾食物，再没有才动珍贵的、会传送的，会中毒的留到最后；否则不吃，交给弄吃的或 LLM。
+     * 自己饿了顺手吃一口：平时只在可直接吃的普通食物（排除可烹饪生食材）里按还差多少饱食度挑补得刚好的——
+     * 补得进去的里面挑最多的，都会溢出就挑溢出最少的，不拿一块牛排去补一格饱食度，也不在非紧急时生啃生鱼生肉。
+     * 仅在真正挨饿（饿到不能疾跑 {@link HungerNeed#SPRINT_FLOOR} 或见底掉血）且身上无更好熟食时，
+     * 才依次允许应急生吃无害生食材、再吃腐肉这类垃圾食物垫一口；见底掉血才动珍贵的、会传送的，会中毒的垫底。
      */
     public static Optional<String> forHunger(List<Carried> carried, int foodLevel, boolean starving) {
         int missing = Math.max(1, 20 - foodLevel);
-        Optional<String> plainPick = carried.stream()
-                .filter(candidate -> plain(candidate.value()))
-                .min(Comparator.comparingInt(candidate -> waste(candidate.value().nutrition(), missing)))
-                .map(Carried::itemId);
-        // 饿到不能疾跑就先顾身体：没有普通食物时吃垃圾食物（腐肉这类）。类别：玩家常识——饿极了先吃差粮，
-        // 短暂的饥饿效果比跑不动、继续掉到见底掉血轻；但珍贵的、会传送的、会中毒的还不到动它们的时候。
-        boolean eatJunk = starving || foodLevel <= HungerNeed.SPRINT_FLOOR;
-        if (plainPick.isPresent() || !eatJunk) return plainPick;
+        // 先在可直接吃的普通食物（熟食、面包、果蔬等）里挑补得刚好的，非紧急饥饿绝不选生食材。
+        Optional<String> readyPick = pickLeastWaste(carried, candidate -> readyPlain(candidate.value()), missing);
+        if (readyPick.isPresent()) return readyPick;
+        // 饿到不能疾跑（SOON）或见底掉血（NOW）且身上没有更好熟食时，才允许应急生吃无害生食材或差粮。
+        boolean urgent = starving || foodLevel <= HungerNeed.SPRINT_FLOOR;
+        if (!urgent) return Optional.empty();
+        // 应急先吃无害生食材（不带饥饿效果，比腐肉与生鸡肉稳妥），再没有才吃垃圾食物。
+        Optional<String> rawPick = pickLeastWaste(carried, candidate -> rawCookable(candidate.value()), missing);
+        if (rawPick.isPresent()) return rawPick;
         Optional<String> casual = autoPick(carried);
         if (casual.isPresent()) return casual;
         if (!starving) return Optional.empty();
@@ -120,6 +138,14 @@ public final class FoodPicker {
                 .sorted(Comparator.comparingInt(FoodPicker::lastResortRank).thenComparing(FoodPicker::byGain))
                 .map(Carried::itemId)
                 .findFirst();
+    }
+
+    // 在满足条件的食物里挑补得刚好的：能整份补进去且剩空最少的优先，都会溢出时溢出最少的优先。
+    private static Optional<String> pickLeastWaste(List<Carried> carried, Predicate<Carried> filter, int missing) {
+        return carried.stream()
+                .filter(filter)
+                .min(Comparator.comparingInt(candidate -> waste(candidate.value().nutrition(), missing)))
+                .map(Carried::itemId);
     }
 
     // 饿到掉血时最后才动的那些怎么排：全是有益效果的最先，没效果但饱腹也能吃的（紫颂果）其次，带害的最后。
@@ -146,16 +172,22 @@ public final class FoodPicker {
     }
 
     /**
-     * 没点名（"随便吃点"）：普通食物里补得最多的；没有普通的，垃圾食物里补得最多的；
-     * 身上只剩要点名才吃的（珍贵的、会传送的、会中毒的）时为 empty，由调用方写清身上有哪些。
+     * 没点名（"随便吃点"）：优先挑可直接吃的普通食物里补得最多的；没有现成熟食再挑无害生食材；
+     * 都没有才挑垃圾食物；身上只剩要点名才吃的（珍贵的、会传送的、会中毒的）时为 empty，由调用方写清身上有哪些。
      */
     public static Optional<String> autoPick(List<Carried> carried) {
-        Optional<String> plainPick = carried.stream()
-                .filter(candidate -> plain(candidate.value()))
+        Optional<String> readyPick = carried.stream()
+                .filter(candidate -> readyPlain(candidate.value()))
                 .sorted(FoodPicker::byGain)
                 .map(Carried::itemId)
                 .findFirst();
-        if (plainPick.isPresent()) return plainPick;
+        if (readyPick.isPresent()) return readyPick;
+        Optional<String> rawPick = carried.stream()
+                .filter(candidate -> rawCookable(candidate.value()))
+                .sorted(FoodPicker::byGain)
+                .map(Carried::itemId)
+                .findFirst();
+        if (rawPick.isPresent()) return rawPick;
         return carried.stream()
                 .filter(candidate -> junk(candidate.value()))
                 .sorted(FoodPicker::byGain)

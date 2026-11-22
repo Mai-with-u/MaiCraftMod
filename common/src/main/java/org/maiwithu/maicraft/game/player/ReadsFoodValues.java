@@ -24,13 +24,21 @@ public interface ReadsFoodValues {
      * @param eatSeconds   吃一件要几秒
      * @param canAlwaysEat 饱食度满时能不能照吃（金苹果这类，饱腹也能吃）
      * @param effects      吃下去可能获得的状态效果；普通食物为空列表
+     * @param rawCookable  是否属于可通过烧炼或烟熏制成更高营养食物的生食材（生肉、生鱼、生土豆及模组生食材等）
      */
     record FoodValue(
             String itemId, int nutrition, float saturation, float eatSeconds,
-            boolean canAlwaysEat, List<FoodEffect> effects) {
+            boolean canAlwaysEat, List<FoodEffect> effects, boolean rawCookable) {
 
         public FoodValue {
             effects = List.copyOf(effects);
+        }
+
+        /** 不区分可烹饪生食材时的便捷构造：默认不是待烹饪生食材，供不关心生熟分层的调用方与测试使用。 */
+        public FoodValue(
+                String itemId, int nutrition, float saturation, float eatSeconds,
+                boolean canAlwaysEat, List<FoodEffect> effects) {
+            this(itemId, nutrition, saturation, eatSeconds, canAlwaysEat, effects, false);
         }
 
         /** 饱食度没满时能不能开始吃：普通食物可以，满饱食度只留"饱腹也能吃"的。 */

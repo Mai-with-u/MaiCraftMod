@@ -2,8 +2,10 @@
 package org.maiwithu.maicraft.ability.fish;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
@@ -60,10 +62,16 @@ public final class FishModule implements AbilityModule {
 
     public FishModule(Supplier<PlayerContext> context, ItemNeeds obtain, MovesToMainhand toMainhand,
                       WalkTo walks, PicksUpDrops pickups, InventorySpace space, FishingHookFacts hooks) {
+        this(context, obtain, toMainhand, walks, pickups, space, hooks, FishServices.noLootProtection());
+    }
+
+    public FishModule(Supplier<PlayerContext> context, ItemNeeds obtain, MovesToMainhand toMainhand,
+                      WalkTo walks, PicksUpDrops pickups, InventorySpace space, FishingHookFacts hooks,
+                      Consumer<Map<String, Integer>> protectLoot) {
         this.context = Objects.requireNonNull(context, "context");
         // 受保护的格暂无生产读端：钓位判断按"没有格子受保护"处理，保护判断接上后在清单里补一行。
         this.services = new FishServices(obtain, toMainhand, walks, pickups, space, hooks,
-                FishServices.nothingProtected());
+                FishServices.nothingProtected(), Objects.requireNonNull(protectLoot, "protectLoot"));
     }
 
     @Override public AbilitySpec spec() {

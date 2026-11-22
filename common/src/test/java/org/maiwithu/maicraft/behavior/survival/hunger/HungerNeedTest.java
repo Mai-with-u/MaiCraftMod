@@ -113,6 +113,17 @@ class HungerNeedTest {
         assertTrue(new HungerNeed.Facts(11, false, 0, true, true, 0).eatsKeptFood());
     }
 
+    @Test
+    void 饱食18拿到生鱼不计入普通食物阈值_不触发趁空当吃饭() {
+        // 生鱼不计入 smallestPlainNutrition（为 0）：饱食 18 拿到营养 2 的生鱼不会凑成 18+2=20 引爆吃饭。
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(18, false, 0)), "身上只有生鱼时不触发 LATER");
+        // 身上既有面包（营养 5）又有生鱼（营养 2）时，只按面包算 smallest=5，18+5>20 同样不触发。
+        assertNull(HungerNeed.assess(new HungerNeed.Facts(18, false, 5)), "只按熟食营养算阈值，不触发 LATER");
+        // 真正挨饿时即使没有现成熟食仍正常触发 SOON / NOW，由选食环节决定是否应急生吃。
+        assertEquals(Urgency.SOON, HungerNeed.assess(new HungerNeed.Facts(HungerNeed.SPRINT_FLOOR, false, 0)));
+        assertEquals(Urgency.NOW, HungerNeed.assess(new HungerNeed.Facts(0, true, 0)));
+    }
+
     // 把吃饭任务推进到结束，最多一百刻。
     private void runToEnd(Task task) {
         task.start(tick);

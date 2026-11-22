@@ -39,15 +39,14 @@ public final class LiveHungerView implements HungerNeed.ReadsFacts {
         boolean injured = self.getHealth() <= self.getMaxHealth() - 2;
         // 血不到一半算伤得重：没有普通食物时，腐肉这类垃圾食物也先吃，吃到回血线或吃完为止。
         boolean badlyHurt = self.getHealth() <= self.getMaxHealth() / 2;
-        // 伤得重或饿到不能疾跑时先顾身体，预留的、正要用的吃的也算口粮；只是趁空当垫一口时才绕开它们。
-        // 身上补得最少的一件普通食物：按游戏的食物组件认，和吃饭任务挑吃的用同一条规则；
-        // 趁空当吃要看它能不能整份补进去。
+        // 身上补得最少的一件可直接吃的普通食物（排除可烹饪生食材）：
+        // 不把生鱼、生肉计入趁空当触发阈值，消除饱食 18 刚钓起一条营养 2 的生鱼就立刻引爆吃饭的问题。
         BackpackView backpack = context.player().backpack();
         List<FoodPicker.Carried> counted = backpack == null ? List.of()
                 : HungerNeed.eatsKeptFood(food, badlyHurt) ? FoodPicker.everything(backpack.stacks(), foods)
                 : FoodPicker.carried(backpack.stacks(), foods, keeps);
         int smallest = counted.stream()
-                .filter(candidate -> FoodPicker.plain(candidate.value()))
+                .filter(candidate -> FoodPicker.readyPlain(candidate.value()))
                 .mapToInt(candidate -> candidate.value().nutrition())
                 .min().orElse(0);
         int bestJunk = counted.stream()

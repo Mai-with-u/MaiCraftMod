@@ -24,6 +24,10 @@ class FoodPickerTest {
         return new FoodValue(id, nutrition, saturation, 1.6f, false, List.of(effects));
     }
 
+    private static FoodValue rawFood(String id, int nutrition, float saturation) {
+        return new FoodValue(id, nutrition, saturation, 1.6f, false, List.of(), true);
+    }
+
     private static FoodPicker.Carried carried(String id, int count, FoodValue value) {
         return new FoodPicker.Carried(id, count, value);
     }
@@ -133,15 +137,42 @@ class FoodPickerTest {
     }
 
     @Test
-    void 没坏效果的生肉饿了伤了就直接吃_生鸡肉不算普通食物() {
-        // 10-15 直播：三颗心、饱食度 11，身上只有生羊肉和生鸡肉。生羊肉没坏效果，是普通食物，直接吃不先去烤；
-        // 生鸡肉带饥饿效果，没饿到掉血不吃。
-        FoodValue mutton = food("minecraft:mutton", 2, 1.2f);
+    void 可烹饪生食材平时禁选_真正挨饿且无熟食时才应急生吃() {
+        // 原版生鳕鱼、生羊肉以及农夫乐事模组生肉切块均凭 rawCookable 识别，零硬编码名单。
+        FoodValue rawCod = rawFood("minecraft:cod", 2, 0.4f);
+        FoodValue rawMuttonChops = rawFood("farmersdelight:mutton_chops", 1, 0.6f);
+        FoodValue cookedCod = food("minecraft:cooked_cod", 5, 6.0f);
         FoodValue chicken = food("minecraft:chicken", 2, 1.2f, new FoodEffect("minecraft:hunger", false));
-        assertTrue(FoodPicker.plain(mutton));
+
+        assertTrue(FoodPicker.plain(rawCod));
+        assertTrue(FoodPicker.rawCookable(rawCod));
+        assertFalse(FoodPicker.readyPlain(rawCod));
+        assertTrue(FoodPicker.rawCookable(rawMuttonChops));
+        assertFalse(FoodPicker.readyPlain(rawMuttonChops));
+        assertTrue(FoodPicker.readyPlain(cookedCod));
+        assertFalse(FoodPicker.rawCookable(cookedCod));
         assertFalse(FoodPicker.plain(chicken));
-        assertEquals(Optional.of("minecraft:mutton"), FoodPicker.forHunger(
-                List.of(carried("minecraft:chicken", 1, chicken), carried("minecraft:mutton", 1, mutton)), 11, false));
+
+        List<FoodPicker.Carried> rawOnly = List.of(
+                carried("minecraft:chicken", 1, chicken),
+                carried("minecraft:cod", 2, rawCod),
+                carried("farmersdelight:mutton_chops", 2, rawMuttonChops));
+        // 非紧急饥饿（LATER，如饱食 18、11）：禁止选生鱼和模组生肉，绝不静默生啃。
+        assertEquals(Optional.empty(), FoodPicker.forHunger(rawOnly, 18, false));
+        assertEquals(Optional.empty(), FoodPicker.forHunger(rawOnly, 11, false));
+        // 真正挨饿（SOON 饱食 <= 6、NOW 见底掉血）且身上无熟食：允许应急生吃无害生食材，优先于带饥饿效果的生鸡肉。
+        assertEquals(Optional.of("minecraft:cod"), FoodPicker.forHunger(rawOnly, HungerNeed.SPRINT_FLOOR, false));
+        assertEquals(Optional.of("minecraft:cod"), FoodPicker.forHunger(rawOnly, 0, true));
+
+        // 真正挨饿但身上有熟食：优先吃熟食，不生啃生鱼。
+        List<FoodPicker.Carried> cookedAndRaw = List.of(
+                carried("minecraft:cod", 2, rawCod),
+                carried("minecraft:cooked_cod", 1, cookedCod));
+        assertEquals(Optional.of("minecraft:cooked_cod"), FoodPicker.forHunger(cookedAndRaw, 6, false));
+        assertEquals(Optional.of("minecraft:cooked_cod"), FoodPicker.forHunger(cookedAndRaw, 0, true));
+        // 随便吃点（autoPick）同样分层：先即食熟食，再无害生食材，最后垃圾食物。
+        assertEquals(Optional.of("minecraft:cooked_cod"), FoodPicker.autoPick(cookedAndRaw));
+        assertEquals(Optional.of("minecraft:cod"), FoodPicker.autoPick(rawOnly));
         assertEquals(Optional.empty(), FoodPicker.forHunger(List.of(carried("minecraft:chicken", 1, chicken)), 11, false));
     }
 
