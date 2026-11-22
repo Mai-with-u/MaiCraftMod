@@ -15,7 +15,9 @@ import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.menu.ClientMenuContent;
+import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -30,7 +32,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 站的位置看不到台面或够不着时换个站位再点，换遍了才如实失败；做配方和烧炉子共用这一段，
  * 烧炉子关着界面等完回来取货时再走一遍。
  */
-final class StationVisit {
+final class StationVisit implements StationOpening {
 
     /** 等界面打开并同步完的期限（刻）。 */
     private static final int MENU_WAIT_LIMIT = 40;
@@ -74,7 +76,8 @@ final class StationVisit {
     }
 
     /** 推进一刻：界面打开、同步完、类型对上时给完成，之后用 {@link #menus()} 读写这份界面。 */
-    ActionStatus tick(TickContext tick) {
+    @Override
+    public ActionStatus tick(TickContext tick) {
         return switch (stage) {
             case APPROACH -> approach(tick);
             case OPEN -> open(tick);
@@ -84,8 +87,15 @@ final class StationVisit {
     }
 
     /** 点开的那份界面的读端；还没点开时为空。 */
-    ClientMenuContent menus() {
+    @Override
+    public ClientMenuContent menus() {
         return menus;
+    }
+
+    /** 认领刚刚点开的那份工作站界面，交给搬运执行逐刻点击与核对。 */
+    @Override
+    public OpenedMenu claimMenu() {
+        return ClientOpenedMenu.claimCurrent(context, menus);
     }
 
     /** 建读端用的上下文来源：认领这份界面时要用它。 */
@@ -164,13 +174,15 @@ final class StationVisit {
     }
 
     /** 被生存需求打断：正在走的那一趟、正在点的那一下先停住。 */
-    void pause() {
+    @Override
+    public void pause() {
         if (approaching != null) approaching.pause();
         if (opening != null) opening.pause();
     }
 
     /** 不再用：没走完的走到、没确认的点开一并收尾。界面由用它的动作负责关。 */
-    void close() {
+    @Override
+    public void close() {
         if (approaching != null) approaching.close();
         if (opening != null) opening.close();
     }

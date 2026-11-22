@@ -18,7 +18,6 @@ import net.minecraft.world.level.block.AbstractFurnaceBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.inventory.hands.StackSplit;
-import org.maiwithu.maicraft.behavior.menu.ClientOpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.MenuClick;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuReopenCount;
@@ -70,7 +69,6 @@ final class FurnaceRun implements Action {
     private static final int HANDLING_TICKS = 20 * 120;
     /** 换一台炉子多给的时间：走到下一台、点开看一眼。 */
     private static final int SWITCH_TICKS = 20 * 60;
-    /** 界面不是被打断关上、而是无缘无故没了，最多重开几次。 */
     /** 一格最多放一组。 */
     private static final int STACK = FurnaceFuel.STACK;
     /** 熔炉容器侧：0 投入口、1 燃料槽、2 产出格。 */
@@ -91,7 +89,7 @@ final class FurnaceRun implements Action {
     private WorldPosition station;
     private BlockPos at;
     /** 到某一台炉子跟前点开的一趟。 */
-    private final Function<WorldPosition, StationVisit> visits;
+    private final Function<WorldPosition, ? extends StationOpening> visits;
     private final ReadsFuels fuels;
     private final WorldMemory memory;
     /** 装炉就走留下的那几台：走的时候记一笔、挂计时，回到记着的那台时核对并划掉。 */
@@ -104,7 +102,7 @@ final class FurnaceRun implements Action {
     private long giveUpTicks;
 
     private Stage stage = Stage.VISIT;
-    private StationVisit visit;
+    private StationOpening visit;
     private MenuContent menus;
     private MenuSession closingSession;
     /** 关上界面以后是去旁边等（true）还是收场（false）。 */
@@ -152,8 +150,8 @@ final class FurnaceRun implements Action {
      * @param visits   到某一台炉子跟前点开的一趟
      */
     FurnaceRun(RecipeHolder<?> holder, WorkstationRecipe recipe, List<WorldPosition> stations, int times,
-            Function<WorldPosition, StationVisit> visits, ReadsFuels fuels, WorldMemory memory, TaskRecords records,
-            FurnacesLeftCooking leftCooking, boolean leavesLongCooking) {
+            Function<WorldPosition, ? extends StationOpening> visits, ReadsFuels fuels, WorldMemory memory,
+            TaskRecords records, FurnacesLeftCooking leftCooking, boolean leavesLongCooking) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.choices = new FurnaceChoices(stations);
@@ -211,7 +209,7 @@ final class FurnaceRun implements Action {
         }
         if (status instanceof ActionStatus.Done) {
             menus = visit.menus();
-            menu = ClientOpenedMenu.claimCurrent(visit.context(), visit.menus());
+            menu = visit.claimMenu();
             run = menu == null ? null : new TransferRun(menu);
             closingSession = null;
             stage = Stage.TEND;
@@ -452,6 +450,10 @@ final class FurnaceRun implements Action {
         if (reading.isEmpty()) {
             // 收拾到一半界面没了（被打断）：回去点开再收；无缘无故一再被关就按失败收场。
             return reopen();
+        }
+        // 上一笔收回搬运还没结清时先推进它，避免连续提交两笔搬运触发状态异常或提前关界面。
+        if (run != null && !run.idle()) {
+            return run.tickAction(this::onMoveSettled);
         }
         MenuContent.Reading open = reading.get();
         SlotSnapshot fuel = open.containerSnapshots().get(FUEL);
