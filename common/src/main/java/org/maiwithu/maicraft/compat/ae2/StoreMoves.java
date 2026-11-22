@@ -31,8 +31,8 @@ final class StoreMoves {
 
     /** 快速移动发出去后等背包同步过来的宽限（刻）；过了还没少就是网络放不下。 */
     private static final int SETTLE_TICKS = 10;
-    /** 累计多少次快速移动出现服务端静默无回包（UNCERTAIN）且零移入即判定满盘/类型上限，提前止损不再逐格干等。 */
-    static final int UNCERTAIN_REJECT_LIMIT = 2;
+    /** 累计多少次快速移动确认零移入即判定 AE2 满盘/类型上限，提前止损不再逐格尝试剩余种类。 */
+    static final int REJECT_STOP_LIMIT = 2;
 
     /** 凑尾数的一下普通点击：在哪一格、左键还是右键；takesToCursor 表示这一下把东西拿上了光标。 */
     private record TrimClick(int slotId, int button, boolean takesToCursor) {}
@@ -71,10 +71,10 @@ final class StoreMoves {
     private Problem lastProblem;
     /** 触发满盘/类型上限早停时记录的拒收原因：即使前面已有种类存进去了也保留供上层透出。 */
     private Problem stopProblem;
-    /** 当前等待结算的操作是否为快速移动；用于区分满盘静默拒收与普通凑尾数交回。 */
+    /** 当前等待结算的操作是否为快速移动；用于区分满盘/类型上限零移入拒收与普通凑尾数交回。 */
     private boolean lastWasQuickMove;
-    /** 累计快速移动触发 UNCERTAIN 且一件未移入的次数：满盘 63 种类型上限时不被已有种类成功存入清零，稳定早停。 */
-    private int uncertainRejects;
+    /** 累计快速移动落地确认实际移入为 0 的次数：满类型上限时不被已有种类成功存入清零，稳定早停。 */
+    private int zeroMoveRejects;
 
     StoreMoves(TerminalSession session, TaskRecords records, String terminal, List<BackpackStack> stacks,
             String purpose) {
@@ -156,7 +156,7 @@ final class StoreMoves {
 
     // 结算上一击：合计少了几件就是存进了网络几件，账与背包光标的变化一致；还没看出结果或到期限收场的，
     // 返回要推进的走向（返回 null 是结算完了，接着挑下一步）。
-    // 当快速移动累计多次触发 UNCERTAIN（服务端因磁盘已满或 63 种类型上限静默不回包）且零移入时提前止损；
+    // 当快速移动累计多次落地确认零移入（无论服务端因拒收仍递增 stateId 回包 CONFIRMED_APPLIED，还是超时无回包 UNCERTAIN）时提前止损；
     // 已有种类交错存入成功时不清零该计数，避免满类型上限被交错成功掩盖导致对后续所有新种类逐格白等。
     private TerminalTurn settleLastMove(OpenedMenu menu, int onHand, int onCursor) {
         return switch (NetworkStoreSettlement.settle(before, onHand, onCursor)) {
@@ -181,18 +181,20 @@ final class StoreMoves {
                 yield new TerminalTurn.Stay(ActionStatus.progressed());
             }
             case NetworkStoreSettlement.Waiting waiting -> {
-                boolean uncertainQuickMove = lastWasQuickMove
+                boolean quickMove = lastWasQuickMove;
+                boolean uncertainQuickMove = quickMove
                         && menu.lastActionStatus().map(status -> status == PendingMenuAction.Status.UNCERTAIN).orElse(false);
-                // 已确认服务端超时无响应（UNCERTAIN）时无需再空等 SETTLE_TICKS，直接结算并累计未识别/新种类拒收次数。
+                // 已确认服务端超时无响应（UNCERTAIN）时无需再空等 SETTLE_TICKS；
+                // 其他终态（含 AE2 拒收仍递增 stateId 回包 CONFIRMED_APPLIED）等满 SETTLE_TICKS 确认背包与光标总量零减少。
                 if (!uncertainQuickMove && ++quiet < SETTLE_TICKS) {
                     yield new TerminalTurn.Stay(ActionStatus.running());
                 }
                 before = -1;
                 lastWasQuickMove = false;
-                if (uncertainQuickMove && ++uncertainRejects >= UNCERTAIN_REJECT_LIMIT) {
+                if (quickMove && ++zeroMoveRejects >= REJECT_STOP_LIMIT) {
                     int unstored = remainingUnstoredCount();
                     Problem full = Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                            "已满/类型上限拒收，余下 " + unstored + " 件未存入",
+                            "AE2 网络已满/类型上限拒收，余下 " + unstored + " 件未存入",
                             "给 ME 驱动器增加新的存储元件或腾出磁盘空间后再存");
                     stopProblem = full;
                     lastProblem = full;

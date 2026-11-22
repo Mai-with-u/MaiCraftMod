@@ -233,4 +233,60 @@ class StoreMovesTest {
         assertTrue(wrapUp.reason().message().contains("余下 30 件未存入"), wrapUp.reason().message());
         assertEquals(wrapUp.reason(), rig.moves().rejectionProblem().orElseThrow());
     }
+
+    @Test
+    void 满盘服务端回包CONFIRMED_APPLIED但零移入_累计两次仍准确触发早停() {
+        // 模拟 AE2 MEStorageMenu 拒收 Shift 点击时服务端仍递增 stateId 回包（状态落到 CONFIRMED_APPLIED）：
+        // 经 SETTLE_TICKS 确认背包与光标总量零减少后仍记为拒收，累计 2 次立刻早停，不再白点第 3、4 样。
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        putInBackpack(menu, 3, "minecraft:emerald", 10);
+        menu.jamMoves = Integer.MAX_VALUE;
+        menu.jamStatus = PendingMenuAction.Status.CONFIRMED_APPLIED;
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond", "minecraft:emerald");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 80));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, wrapUp.reason().kind());
+        assertEquals(2, menu.quickMoveCalls, "即使回包 CONFIRMED_APPLIED，连续 2 次零移入后也应立即早停");
+        assertTrue(wrapUp.reason().message().contains("AE2 网络已满/类型上限拒收"), wrapUp.reason().message());
+        assertTrue(wrapUp.reason().message().contains("余下 40 件未存入"), wrapUp.reason().message());
+        assertEquals(0, rig.moves().stored());
+    }
+
+    @Test
+    void 满类型上限时CONFIRMED_APPLIED零移入与已有种类交错_累计两次零移入仍早停() {
+        // 铁锭与钻石是新种类（回包 CONFIRMED_APPLIED 但零移入），金锭是网络已有种类（正常存入 10 件）：
+        // 中途金锭存入成功不应清零拒收计数，钻石零移入后累计 2 次即早停，不再尝试绿宝石。
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        putInBackpack(menu, 3, "minecraft:emerald", 10);
+        menu.jamStatus = PendingMenuAction.Status.CONFIRMED_APPLIED;
+        menu.rejectItem = stack -> !stack.is(Items.GOLD_INGOT);
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond", "minecraft:emerald");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 80));
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, wrapUp.reason().kind());
+        assertEquals(10, rig.moves().stored());
+        assertEquals(3, menu.quickMoveCalls, "铁锭零移入 + 金锭存入 + 钻石零移入后即应早停，不尝试绿宝石");
+        assertTrue(wrapUp.reason().message().contains("AE2 网络已满/类型上限拒收"), wrapUp.reason().message());
+        assertTrue(wrapUp.reason().message().contains("余下 30 件未存入"), wrapUp.reason().message());
+    }
+
+    @Test
+    void 多种物品正常快速移动均有移入_全部存完不误触发早停() {
+        TerminalFlowFakes.Menu menu = new TerminalFlowFakes.Menu();
+        putInBackpack(menu, 0, "minecraft:iron_ingot", 10);
+        putInBackpack(menu, 1, "minecraft:gold_ingot", 10);
+        putInBackpack(menu, 2, "minecraft:diamond", 10);
+        Rig rig = Rig.rig(menu, new TerminalFlowFakes.Reads(), 10,
+                "minecraft:iron_ingot", "minecraft:gold_ingot", "minecraft:diamond");
+        TerminalTurn.WrapUp wrapUp = assertInstanceOf(TerminalTurn.WrapUp.class, settle(rig.moves(), 60));
+        assertNull(wrapUp.reason());
+        assertEquals(30, rig.moves().stored());
+        assertEquals(3, menu.quickMoveCalls);
+    }
 }
