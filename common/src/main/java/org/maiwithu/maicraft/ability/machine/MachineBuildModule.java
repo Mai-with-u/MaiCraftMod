@@ -62,7 +62,7 @@ final class MachineBuildModule implements AbilityModule {
     private final Function<Permissions, ConstructionServices> construction;
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_build",
-            "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；"
+            "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，显式起名或指向记住的地标时才建成入档；"
                     + "target 指已有档案就是修改，operation=remove 拆档案里的整台",
             AbilityDoc.forAbility("machine_build"),
             ParamSpecs.of(
@@ -73,7 +73,7 @@ final class MachineBuildModule implements AbilityModule {
                     ParamSpec.of("design_id", ParamType.TEXT)
                             .doc("已保存的设计编号：按它存的方块清单建（没有机器附加条目）").build(),
                     ParamSpec.of("name", ParamType.TEXT)
-                            .doc("新机器的档案名；不给就按锚点起名。修改已有档案时不用给").build(),
+                            .doc("新机器的档案名；不给且 target 不是记过的地标时不建永久档案。修改已有档案时不用给").build(),
                     ParamSpec.of("operation", ParamType.TEXT).defaultValue("build")
                             .doc("build 建或改（默认）/ remove 拆档案里的整台（target 指档案名）").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
@@ -149,8 +149,8 @@ final class MachineBuildModule implements AbilityModule {
         if (offWorld != null) {
             return new StepDecision.Finish(TaskResult.failed(offWorld.headline(), offWorld));
         }
-        String name = archiveName(params, step.goal().target(), at);
-        if (archives.find(name).isPresent()) {
+        String name = archiveName(params, step.goal().target());
+        if (name != null && archives.find(name).isPresent()) {
             return fail("档案名「" + name + "」已经有一台机器在用", Problem.Kind.INVALID_PARAMETER,
                     "换一个 name，或把 target 指到那台机器上来修改它");
         }
@@ -316,15 +316,15 @@ final class MachineBuildModule implements AbilityModule {
         return null;
     }
 
-    /** 档案名：给定的优先；目标是地标用它的名字；再不然按锚点起"机器@x,y,z"。 */
-    private String archiveName(ParamValues params, Target target, WorldPosition at) {
+    /** 档案名：显式给 name 优先，其次 target 为记过的地标名；均无时返回 null（不自动起默认坐标名、不落永久档案）。 */
+    private String archiveName(ParamValues params, Target target) {
         if (params.has("name")) {
-            return params.text("name");
+            return params.text("name").trim();
         }
         if (target instanceof Target.Landmark landmark) {
-            return landmark.name();
+            return landmark.name().trim();
         }
-        return "机器@" + at.x() + "," + at.y() + "," + at.z();
+        return null;
     }
 
     /** 设计编号里的图只有逐格清单，没有机器附加条目；按它建出来的机器档案也照实记。 */

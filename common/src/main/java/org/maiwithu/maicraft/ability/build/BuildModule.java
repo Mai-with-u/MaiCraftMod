@@ -51,9 +51,10 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * target 是锚点，rotation 绕锚点转。自己只做参数核对、锚点解析和把蓝图落到锚点；
  * 核对、备料、清障、砌筑、倒桶、验收、收回临时方块都是施工引擎的事，结果也是它的结果。
  *
- * <p>盖完记一份建筑档案（名字、图纸版本、锚点、朝向、整栋蓝图）。target 写一栋的档案名就是改建：锚点和朝向照档案，
- * 新一版图纸整份换掉档案的蓝图，逐格清单或单格是补丁、并进档案；收场时整栋比一遍，没对上的每一格都列。
- * 单格放在某一栋的范围里也并进那一栋；范围外的单格不建档。
+ * <p>盖完按需记一份建筑档案（名字、图纸版本、锚点、朝向、整栋蓝图）：仅当显式给出档案名、使用已显式命名的图纸
+ * 或导入结构文件时建档；单格放置与未起名的逐格清单视为临时修补，不建永久档案也不静默改动周围档案。
+ * target 写一栋的档案名就是改建：锚点和朝向照档案，新一版图纸整份换掉档案的蓝图，逐格清单或单格是补丁、并进档案；
+ * 收场时整栋比一遍，没对上的每一格都列。
  */
 public final class BuildModule implements AbilityModule {
 
@@ -65,18 +66,18 @@ public final class BuildModule implements AbilityModule {
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":build",
             "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；"
-                    + "盖完记建筑档案，target 写档案名就是改那一栋",
+                    + "显式起名或按命名图纸/结构文件盖完记建筑档案，target 写档案名就是改那一栋",
             AbilityDoc.forAbility("build"),
             ParamSpecs.of(
                     ParamSpec.of("design_id", ParamType.TEXT).doc("按 design 存的图纸施工（四选一）；target 是档案名时整份换掉那一栋的图").build(),
                     ParamSpec.of("cells", ParamType.JSON_ARRAY)
                             .doc("逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶；"
-                                    + "target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁").build(),
-                    ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（四选一）：放在 target 那一格；落在某一栋的范围里就并进那一栋").build(),
+                                    + "target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁；非改建且不给 name 时视为零散修补，不建永久建筑档案").build(),
+                    ParamSpec.of("block", ParamType.BLOCK_OR_TAG).doc("只放一格（四选一）：放在 target 那一格；非改建时不建永久建筑档案，改建时 target 写档案名").build(),
                     ParamSpec.of("properties", ParamType.JSON_OBJECT).doc("配 block：要求的方块状态属性，例如 {\"facing\":\"north\"}").build(),
                     ParamSpec.of("file", ParamType.TEXT).doc("schematics 目录下的结构文件名（四选一）：.nbt / .snbt / .litematic / .schem，或 design 导出的 .json；摆设实体不装").build(),
                     ParamSpec.of("rotation", ParamType.INTEGER).range(0, 270).defaultValue(0).doc("绕锚点转 0 / 90 / 180 / 270 度；只配 design_id 或 file；改建不用给：照档案那一版改出来的图按档案的朝向，读现场读出来的照现场").build(),
-                    ParamSpec.of("name", ParamType.TEXT).doc("新建筑的档案名；不给就用图纸名，撞名加 @x,y,z；target 已经是档案时不用给").build()),
+                    ParamSpec.of("name", ParamType.TEXT).doc("新建筑的档案名；design_id（显式起名的图纸）/ file 不给时用图纸或文件名，cells 给了 name 才建新档；撞名加 @x,y,z；target 已经是档案时不用给").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.CONTROLS_PLAYER,
             Set.of(),
@@ -140,13 +141,17 @@ public final class BuildModule implements AbilityModule {
         }
     }
 
-    // 新盖的一栋记档；单格落在某一栋的范围里并进那一栋；范围外的单格不建档。
+    // 非改建新施工的建档规则：只有显式给了 name、或使用显式命名的图纸/结构文件时才建永久建筑档案；
+    // 单格放置、未起名的逐格清单与未起名/读现场自动命名的图纸都视为临时或零散放置，不建档也不静默改动周围档案。
     private RecordsConstruction recorderFor(ParamValues params, Source source, Blueprint blueprint, int degrees) {
         if (params.has("block")) {
-            BlockPos cell = blueprint.cells().getFirst().pos();
-            return records.archives().containing(blueprint.dimension(), cell)
-                    .<RecordsConstruction>map(home -> new BuildingRecorder(records, patched(home, blueprint), true))
-                    .orElse(RecordsConstruction.NONE);
+            return RecordsConstruction.NONE;
+        }
+        if (params.has("cells") && !params.has("name")) {
+            return RecordsConstruction.NONE;
+        }
+        if (params.has("design_id") && !params.has("name") && isAutoOrUnnamed(source.name())) {
+            return RecordsConstruction.NONE;
         }
         String wanted = params.has("name") ? params.text("name").trim() : source.name();
         String name = records.archives().unusedName(wanted, blueprint.dimension(), blueprint.anchor());
@@ -155,11 +160,11 @@ public final class BuildModule implements AbilityModule {
         return new BuildingRecorder(records, planned, false);
     }
 
-    // 一格补丁并进一栋：偏移换成相对那一栋的锚点，同一格以补丁为准。
-    private static BuildingArchive patched(BuildingArchive archive, Blueprint patch) {
-        Blueprint relativeToArchive = new Blueprint(patch.dimension(), archive.anchor(), patch.cells());
-        return archive.with(BlueprintPatch.merge(archive.cells(), BuildingRecorder.relative(relativeToArchive)), archive.designId(),
-                archive.lastCheckAt(), archive.lastCheckNote());
+    // 读现场自动生成的"现场@..."或图纸未写名字时的"未命名"都不算显式起名，不自动落为永久建筑档案。
+    private static boolean isAutoOrUnnamed(String name) {
+        if (name == null) return true;
+        String trimmed = name.trim();
+        return trimmed.isEmpty() || trimmed.equals("未命名") || trimmed.startsWith("现场@");
     }
 
     /**

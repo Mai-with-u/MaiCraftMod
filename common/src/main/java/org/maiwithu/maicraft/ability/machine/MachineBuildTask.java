@@ -413,7 +413,8 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         saveArchive(structureOk);
         if (onStructure != null) onStructure.finished();
         boolean allOk = structureOk && entriesOk && constructionDone() && structureStop == null;
-        String summary = "机器「" + input.name() + "」"
+        String label = input.name() != null ? "机器「" + input.name() + "」" : "机器";
+        String summary = label
                 + (allOk ? (input.remove() ? "拆完了" : "建好了") : "做到一半：结构与机器条目详见结果细节");
         return allOk ? Next.done(TaskResult.done(summary))
                 : Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, summary)
@@ -423,18 +424,22 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     // 结构没了：最后一块方块拆掉后 Sable 删掉整个结构。已确认的拆放照算，跟在它上面的档案标成已拆除（蓝图留着）。
     private Next<Phase> structureGone() {
         onStructure.finished();
+        String label = input.name() != null ? "机器「" + input.name() + "」" : "机器";
         if (input.archive() != null && !archives.save(input.archive().markRemoved())) {
             recordAttempt("存档案", "档案「" + input.name() + "」没存进去，施工结果不受影响");
         }
         if (input.remove()) {
-            return Next.done(TaskResult.done("机器「" + input.name() + "」拆完了，最后一块拆掉后结构也没了"));
+            return Next.done(TaskResult.done(label + "拆完了，最后一块拆掉后结构也没了"));
         }
-        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, "机器「" + input.name() + "」做到一半：结构没了")
+        return Next.done(TaskResult.builder(TaskResult.Status.PARTIAL, label + "做到一半：结构没了")
                 .problem(structureStop).build());
     }
 
-    /** 档案更新：补丁并入或标拆除；存不进只记问题，不改判施工。 */
+    /** 档案更新：有档案名时新建或并入、拆除时标拆除；匿名施工（name 为 null）不落永久档案也不写世界记忆。 */
     private void saveArchive(boolean structureOk) {
+        if (!input.remove() && input.name() == null) {
+            return;
+        }
         Instant now = Instant.now();
         MachineArchive stored;
         if (input.remove()) {

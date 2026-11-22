@@ -90,7 +90,7 @@ final class MachineConnectTask extends PhasedTask<MachineConnectTask.Phase> {
         this.memory = memory;
         this.lineBuilding = lineBuilding;
         this.targets = new MachineTargets(services);
-        this.routes = new LineRoutes(services, archives);
+        this.routes = new LineRoutes(services);
     }
 
     /** 铺线路的施工任务怎么建：线路写成的机器施工输入交给它，拿回要运行的任务。 */

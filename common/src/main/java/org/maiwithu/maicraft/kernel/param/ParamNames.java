@@ -82,6 +82,7 @@ public final class ParamNames {
             Map.entry("input", "箱式加工站的投料容器位置（写法与 source 相同：观察编号 b#、坐标 [x,y,z] 或记住的地标名）"),
             Map.entry("output", "箱式加工站的取货容器位置（写法与 input 相同，可与 input 为同一容器）"),
             Map.entry("exclude", "排除的物品 ID 或 # 标签列表：箱式加工站不处理命中的产物或原料"),
+            Map.entry("save_archive", "read_site 时是否顺便保存为永久建筑或机器档案：默认 false（纯只读勘查），true 时需给档案名"),
             Map.entry("sections", "要 world_memory 里的哪几节：places（记住的地点）、regions（圈的地盘）、stations（标注的箱式加工站）、records（容器与见过的资源）、network_stock（最近点开终端看到的 ME 网络存货）的列表；不给就五节都给"));
 
     private ParamNames() {}

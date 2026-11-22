@@ -24,16 +24,14 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
  * 接网络的线路：从现场与机器类型落实两端的接线面、看现场哪些格能铺，交给线路规划挑一条，
- * 再把挑出的线路写成一份机器蓝图交给施工——目标有档案就并进那份档案，没有就按目标那一格起一份。
+ * 再把挑出的线路写成一份机器蓝图交给施工——目标有档案就并进那份档案，没有就不另建匿名档案。
  */
 final class LineRoutes {
 
     private final MachineServices services;
-    private final MachineArchives archives;
 
-    LineRoutes(MachineServices services, MachineArchives archives) {
+    LineRoutes(MachineServices services) {
         this.services = services;
-        this.archives = archives;
     }
 
     /**
@@ -120,21 +118,17 @@ final class LineRoutes {
     }
 
     /**
-     * 把线路写成施工输入：目标有档案就把线路当补丁并进去、按档案锚点施工；没有就按目标那一格起一份新档案，
-     * 名字照 machine_build 的规矩起"机器@x,y,z"，这个名字已经有档案就并进它。
+     * 把线路写成施工输入：目标有档案就把线路当补丁并进去、按档案锚点施工；没有档案时只铺线不自动建匿名坐标档案。
      */
     MachineBuildInput buildInput(RoutePlanner.Plan plan, LineMaterials materials, BlockPos targetCell,
             String dimension, MachineArchive archive, Permissions permissions) {
-        MachineArchive into = archive;
-        String name = archive != null ? archive.name()
-                : "机器@" + targetCell.getX() + "," + targetCell.getY() + "," + targetCell.getZ();
-        if (into == null) into = archives.find(name).orElse(null);
-        BlockPos anchor = into != null ? into.anchor() : targetCell;
+        String name = archive != null ? archive.name() : null;
+        BlockPos anchor = archive != null ? archive.anchor() : targetCell;
         MachineBlueprint route = blueprintOf(plan, materials, anchor);
-        MachineBlueprint merged = into != null ? MachinePatch.merge(into.blueprint(), route) : route;
+        MachineBlueprint merged = archive != null ? MachinePatch.merge(archive.blueprint(), route) : route;
         WorldPosition at = new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(),
-                into != null ? into.dimension() : dimension);
-        return new MachineBuildInput(false, merged, at, name, into, permissions,
+                archive != null ? archive.dimension() : dimension);
+        return new MachineBuildInput(false, merged, at, name, archive, permissions,
                 "铺一条线路接到 (" + targetCell.getX() + "," + targetCell.getY() + "," + targetCell.getZ() + ")");
     }
 

@@ -123,7 +123,7 @@
       {
         "ability": "maicraft:design",
         "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
-        "parameters": "operation: string (create / update / inspect / preview / export / read_site), drawing?: object, design_id?: string, edits?: object, name?: string, radius?: integer (0..15), page: integer (0..1000000) = 0, rotation: integer (0..270) = 0, format: string (json / nbt) = json",
+        "parameters": "operation: string (create / update / inspect / preview / export / read_site), drawing?: object, design_id?: string, edits?: object, name?: string, save_archive?: boolean, radius?: integer (0..15), page: integer (0..1000000) = 0, rotation: integer (0..270) = 0, format: string (json / nbt) = json",
         "targets": [
           "here",
           "landmark",
@@ -134,7 +134,7 @@
       },
       {
         "ability": "maicraft:build",
-        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
+        "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；显式起名或按命名图纸/结构文件盖完记建筑档案，target 写档案名就是改那一栋",
         "parameters": "design_id?: string, cells?: array, block?: string, properties?: object, file?: string, rotation: integer (0..270) = 0, name?: string",
         "targets": [
           "here",
@@ -146,8 +146,8 @@
       },
       {
         "ability": "maicraft:machine_inspect",
-        "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
-        "parameters": "radius: integer (1..32) = 16, item?: string, balance?: string (forces / ballast), operation: string (inspect / read_site) = inspect, name?: string",
+        "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 默认只读把 target 那一台抄成机器蓝图（需建档时传 save_archive=true）",
+        "parameters": "radius: integer (1..32) = 16, item?: string, balance?: string (forces / ballast), operation: string (inspect / read_site) = inspect, save_archive?: boolean, name?: string",
         "targets": [
           "here",
           "landmark",
@@ -189,7 +189,7 @@
       },
       {
         "ability": "maicraft:machine_build",
-        "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+        "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，显式起名或指向记住的地标时才建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
         "parameters": "blueprint?: object, design_id?: string, name?: string, operation: string = build",
         "targets": [
           "here",
@@ -921,7 +921,7 @@
           "name": "operation",
           "type": "string",
           "required": true,
-          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 把 target 处已有的一栋建筑读成一版层图，带楼层、门、门洞、床这些布局",
+          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）",
           "choices": [
             "create",
             "update",
@@ -953,7 +953,13 @@
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：新图纸的名字，这一栋还没有建筑档案时用这个名字建档"
+          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字"
+        },
+        {
+          "name": "save_archive",
+          "type": "boolean",
+          "required": false,
+          "doc": "read_site 用：是否把读出的现场保存为永久建筑档案，默认 false（只读勘查生成临时图纸，不建永久档案、不记进世界记忆）；true 时必须传非空 name"
         },
         {
           "name": "radius",
@@ -1006,7 +1012,7 @@
     },
     {
       "ability": "maicraft:build",
-      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；盖完记建筑档案，target 写档案名就是改那一栋",
+      "summary": "按图纸、逐格清单、结构文件或单格在 target 处施工：缺料自己拿、挡着的挖掉、从底往上砌、够不着就垫临时方块再收走；显式起名或按命名图纸/结构文件盖完记建筑档案，target 写档案名就是改那一栋",
       "parameters": [
         {
           "name": "design_id",
@@ -1018,13 +1024,13 @@
           "name": "cells",
           "type": "array",
           "required": false,
-          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶；target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁"
+          "doc": "逐格蓝图（四选一）：[{\"offset\":[x,y,z],\"block\":\"minecraft:stone\",\"properties\":{...}}]，block 为 minecraft:air 表示清空，水源、岩浆源表示倒桶；target 是档案名时 offset 相对档案锚点，是并进那一栋的补丁；非改建且不给 name 时视为零散修补，不建永久建筑档案"
         },
         {
           "name": "block",
           "type": "string",
           "required": false,
-          "doc": "只放一格（四选一）：放在 target 那一格；落在某一栋的范围里就并进那一栋"
+          "doc": "只放一格（四选一）：放在 target 那一格；非改建时不建永久建筑档案，改建时 target 写档案名"
         },
         {
           "name": "properties",
@@ -1051,7 +1057,7 @@
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "新建筑的档案名；不给就用图纸名，撞名加 @x,y,z；target 已经是档案时不用给"
+          "doc": "新建筑的档案名；design_id（显式起名的图纸）/ file 不给时用图纸或文件名，cells 给了 name 才建新档；撞名加 @x,y,z；target 已经是档案时不用给"
         }
       ],
       "targets": [
@@ -1067,7 +1073,7 @@
     },
     {
       "ability": "maicraft:machine_inspect",
-      "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+      "summary": "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；operation=read_site 默认只读把 target 那一台抄成机器蓝图（需建档时传 save_archive=true）",
       "parameters": [
         {
           "name": "radius",
@@ -1098,7 +1104,7 @@
           "name": "operation",
           "type": "string",
           "required": false,
-          "doc": "inspect 看（默认）；read_site 把 target 指的那一台机器读成能直接喂回 machine_build 的机器蓝图（结果 site.blueprint），并按 name 建一份档案；指档案名时不另建档，给整机比对",
+          "doc": "inspect 看（默认）；read_site 默认只读把 target 指的那一台机器抄成能直接喂回 machine_build 的机器蓝图（结果 site.blueprint），不建永久档案；需建档时传 save_archive=true 与 name；指档案名时不另建档，给整机比对",
           "default": "inspect",
           "choices": [
             "inspect",
@@ -1106,10 +1112,16 @@
           ]
         },
         {
+          "name": "save_archive",
+          "type": "boolean",
+          "required": false,
+          "doc": "read_site 用：是否把读出的机器保存为永久机器档案，默认 false（只读抄蓝图不建档、不写世界记忆）；true 时需传 name 或让 target 指已记住的地标名"
+        },
+        {
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "read_site 时新档案的名字；不给按锚点起\"机器@x,y,z\""
+          "doc": "read_site 配合 save_archive=true 时新档案的名字（target 不是记过的地标名时必填）"
         }
       ],
       "targets": [
@@ -1252,7 +1264,7 @@
     },
     {
       "ability": "maicraft:machine_build",
-      "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
+      "summary": "按机器蓝图在 target 处建一台机器：逐格施工、装安装段与部件、改装后设置，显式起名或指向记住的地标时才建成入档；target 指已有档案就是修改，operation=remove 拆档案里的整台",
       "parameters": [
         {
           "name": "blueprint",
@@ -1270,7 +1282,7 @@
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "新机器的档案名；不给就按锚点起名。修改已有档案时不用给"
+          "doc": "新机器的档案名；不给且 target 不是记过的地标时不建永久档案。修改已有档案时不用给"
         },
         {
           "name": "operation",

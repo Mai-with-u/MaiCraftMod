@@ -3,8 +3,12 @@ package org.maiwithu.maicraft.ability.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.google.gson.JsonParser;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -35,6 +39,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemNeeds;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
+import org.maiwithu.maicraft.ability.vehicle.api.VehicleControls;
+import org.maiwithu.maicraft.behavior.construction.AnchorResolver;
 import org.maiwithu.maicraft.behavior.construction.ConstructionDetails;
 import org.maiwithu.maicraft.behavior.construction.ConstructionSeams;
 import org.maiwithu.maicraft.behavior.construction.ConstructionServices;
@@ -49,8 +55,14 @@ import org.maiwithu.maicraft.behavior.recipe.GameRecipeTable;
 import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.StepContext;
+import org.maiwithu.maicraft.kernel.goal.StepDecision;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
+import org.maiwithu.maicraft.kernel.param.ParamValues;
+import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -151,6 +163,44 @@ class MachineBuildTaskTest {
         assertTrue(rig.memory.allRecords().stream().anyMatch(record ->
                 record.kind() == MemoryKind.MACHINE
                         && "压机".equals(record.blockType())));
+    }
+
+    @Test
+    void 未起名的机器施工正常完成但不建永久档案也不写世界记忆() throws Exception {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint plan = blueprint(null, null, null);
+        TaskResult result = rig.run(buildInput(plan, null, null));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(FURNACE, rig.world.blocks.get(ANCHOR));
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertEquals(null, details.archiveName(), "匿名施工不生成默认坐标档案名");
+        assertTrue(rig.documents.keys(MachineArchives.SCOPE, "world1").isEmpty(), "匿名施工不落永久机器档案");
+        assertTrue(rig.memory.allRecords().stream().noneMatch(record -> record.kind() == MemoryKind.MACHINE));
+    }
+
+    @Test
+    void 计划阶段坐标无name施工不自动起默认档案名() {
+        Rig rig = new Rig(tempDir);
+        AnchorResolver anchors = new AnchorResolver(id -> Optional.empty(), name -> Optional.empty(),
+                () -> new WorldPosition(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), DIM), (x, z) -> Optional.of(64));
+        MachineVehicles noVehicles = new MachineVehicles(List.of(), new VehicleControls(rig.documents, "world1"),
+                id -> Optional.empty(), List.of(), id -> Optional.empty(), List.of());
+        MachineBuildModule module = new MachineBuildModule(rig.services, rig.archives, anchors, Optional.empty(),
+                rig.memory, permissions -> rig.site.services(), noVehicles);
+        ParseResult parsed = module.spec().paramSpecs().parse(JsonParser.parseString(
+                "{\"blueprint\":{\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:furnace\"}]}}").getAsJsonObject());
+        assertTrue(parsed.ok(), () -> parsed.errors().toString());
+        ParamValues params = parsed.params();
+        Goal goal = Goal.of("maicraft:machine_build",
+                new Target.Position(ANCHOR.getX(), ANCHOR.getY(), ANCHOR.getZ(), null), params);
+        StepDecision decision = module.decide(new StepContext() {
+            @Override public Goal goal() { return goal; }
+            @Override public int stepIndex() { return 0; }
+            @Override public TickContext tick() { return null; }
+        });
+        MachineBuildInput input = assertInstanceOf(MachineBuildInput.class,
+                assertInstanceOf(StepDecision.Run.class, decision).input());
+        assertNull(input.name(), "坐标且未传 name 的机器施工应返回 name=null，不自动拼\"机器@x,y,z\"");
     }
 
     @Test
@@ -574,6 +624,7 @@ Rig rig = new Rig(tempDir);
         final MachineTestDoubles.FakeWorld world = new MachineTestDoubles.FakeWorld();
         final MachineTestDoubles.FakeClicks clicks = new MachineTestDoubles.FakeClicks();
         final FakeSite site = new FakeSite(world.blocks);
+        final DocumentStore documents;
         final MachineArchives archives;
         final WorldMemory memory;
         final MachineServices services;
@@ -587,7 +638,7 @@ Rig rig = new Rig(tempDir);
                     world.blocks.put(new BlockPos(x, ANCHOR.getY() - 1, z), Blocks.STONE.defaultBlockState());
                 }
             }
-            DocumentStore documents = new DocumentStore(tempDir.resolve("state.sqlite"));
+            documents = new DocumentStore(tempDir.resolve("state.sqlite"));
             archives = new MachineArchives(documents, "world1");
             memory = new WorldMemory(documents, "world1");
             services = new MachineServices(() -> null, world, List.of(type), List.of(),

@@ -69,13 +69,15 @@ public final class DesignModule implements AbilityModule {
             ParamSpecs.of(
                     ParamSpec.of("operation", ParamType.CHOICE).required().choices("create", "update", "inspect", "preview", "export", "read_site")
                             .doc("create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；"
-                                    + "read_site 把 target 处已有的一栋建筑读成一版层图，带楼层、门、门洞、床这些布局").build(),
+                                    + "read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）").build(),
                     ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("create 用：图纸正文，格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)").build(),
                     ParamSpec.of("design_id", ParamType.TEXT).doc("update / inspect / preview / export 用：设计编号").build(),
                     ParamSpec.of("edits", ParamType.JSON_OBJECT)
                             .doc("update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name").build(),
                     ParamSpec.of("name", ParamType.TEXT).doc("inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。"
-                            + "read_site 用：新图纸的名字，这一栋还没有建筑档案时用这个名字建档").build(),
+                            + "read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字").build(),
+                    ParamSpec.of("save_archive", ParamType.BOOLEAN)
+                            .doc("read_site 用：是否把读出的现场保存为永久建筑档案，默认 false（只读勘查生成临时图纸，不建永久档案、不记进世界记忆）；true 时必须传非空 name").build(),
                     ParamSpec.of("radius", ParamType.INTEGER).range(0, 15)
                             .doc("read_site 用：不自动框整栋，改读以 target 为中心、边长 2×radius+1 的方盒").build(),
                     ParamSpec.of("page", ParamType.INTEGER).range(0, 1_000_000).defaultValue(0).doc("inspect 的页码，从 0 起；结果带 next_page 才有下一页").build(),
@@ -113,6 +115,10 @@ public final class DesignModule implements AbilityModule {
     @Override public StepDecision decide(StepContext step) {
         ParamValues params = step.goal().params();
         String operation = params.text("operation");
+        // save_archive 只在 read_site 时有意义，其余操作显式传入直接按参数错误拒绝。
+        if (!"read_site".equals(operation) && params.has("save_archive")) {
+            return fail("save_archive 只在 operation=read_site 时用", Problem.Kind.INVALID_PARAMETER, "去掉 save_archive");
+        }
         try {
             return switch (operation) {
                 case "create" -> create(params);
@@ -201,7 +207,8 @@ public final class DesignModule implements AbilityModule {
 
     /**
      * 读现场：定范围（指着档案读档案范围、给了 radius 读方盒、不然从目标起自动框），读看得见的与自己放的方块，
-     * 画成一版层图存起来，再给这一栋的布局；指着档案时另给整栋比对；给了 name 而这一栋没档案时建一份。
+     * 画成一版临时层图并给这一栋的布局；指着已有档案时另给整栋比对。
+     * 默认纯只读不建永久档案；只有非已有档案且显式传了 save_archive=true 与非空 name 时，才新建永久建筑档案并记进世界记忆。
      * 档案名和一个记过的地点同名又不在一处：先问指哪个。
      */
     private StepDecision readSite(StepContext step) {
@@ -221,6 +228,12 @@ public final class DesignModule implements AbilityModule {
         }
         if (archive != null && !archive.dimension().equals(site.dimension())) {
             return fail("「" + archive.name() + "」在 " + archive.dimension() + "，角色现在在 " + site.dimension(), Problem.Kind.UNREACHABLE, "先 travel 回那个维度");
+        }
+        // 非已有档案且显式要求保存永久建筑档案时，必须给出非空档案名，避免自动生成无名档污染设施清单。
+        boolean saveArchive = params.has("save_archive") && params.bool("save_archive");
+        if (archive == null && saveArchive && (!params.has("name") || params.text("name").isBlank())) {
+            return fail("read_site 传了 save_archive=true 时必须传非空 name 作为永久建筑档案名",
+                    Problem.Kind.INVALID_PARAMETER, "传入清晰的 name，或去掉 save_archive 仅做只读勘查");
         }
         Blueprint.Bounds range;
         BlockPos origin;
@@ -245,8 +258,8 @@ public final class DesignModule implements AbilityModule {
                 records.facility());
         BlueprintCheck.Report check = archive == null ? null : BlueprintCheck.report(archive.laid(), readsBlocks());
         String archiveName = archive != null ? archive.name() : null;
-        if (archive == null && params.has("name")) {
-            // 给了名字、这一栋还没档案：照读出来的这一版建一份，锚点是范围最小角、朝向 0，之后 build 指着它改。
+        if (archive == null && saveArchive) {
+            // 仅在显式要求建档（save_archive=true）且给了非空名字时，才落盘永久建筑档案并写入世界记忆。
             String unique = records.archives().unusedName(name, site.dimension(), origin);
             // 读现场建的档记成"读来的"：那一栋可能是别人的房子，不算进她自己的家。
             BuildingArchive created = new BuildingArchive(unique, site.dimension(), origin, 0, design.id(), compiled.cells(),

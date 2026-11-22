@@ -219,8 +219,8 @@ record MachineDetails(List<NetworkView> networks, List<DeviceView> devices, List
      * 读现场抄出来的那一台：照着建一台就把 blueprint 原样交给 machine_build，改这一台就让 machine_build 指档案名。
      *
      * @param devices       抄进来的是这一眼里的哪些设备（d#）；连接件随设备一起抄，不另列
-     * @param archive       档案名：指档案读时是那份档案，不然是这次建的那份
-     * @param archived      这次新建了档案；指档案读、名字被占、存不进时为 false，notes 写明
+     * @param archive       档案名：指已有档案读时是那份档案，显式 save_archive=true 且建档成功时是新建的那份，只读未建档时为 null
+     * @param archived      这次新建了档案；默认只读（save_archive=false）、指档案读、名字被占、存不进时为 false
      * @param anchor        锚点：蓝图里 offset 的原点（包围盒最小角，指档案时是档案的锚点）
      * @param size          包围盒东西、上下、南北各几格
      * @param blueprint     machine_build 的 blueprint 正文，可以原样喂回去

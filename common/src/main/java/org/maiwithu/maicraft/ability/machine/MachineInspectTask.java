@@ -38,8 +38,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 写明缺哪个联动；没加载的格只数个数，不按空气算。指的是档案名时看档案的范围，并和档案整机比对：
  * 没对上的每一格、多出来的格、安装段与部件装没装成都列全；没指档案只给现状，不凭空生成参考设计。
  *
- * <p>读现场（read_site）时多走一步：挑出 target 那一台，按它的包围盒逐格抄成机器蓝图，再建一份档案；
- * 指着档案读时不另建档，和档案的整机比对照给。
+ * <p>读现场（read_site）时多走一步：挑出 target 那一台，按它的包围盒逐格抄成机器蓝图；默认纯只读不建档，
+ * 只有显式传 save_archive=true 且给出档案名时才建档，指着已有档案读时不另建档，和档案的整机比对照给。
  */
 final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
 
@@ -226,7 +226,7 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         return Next.done(TaskResult.done(summary()));
     }
 
-    // 读现场：挑出 target 那一台（指档案时是和档案有交集的几台），框包围盒逐格抄成机器蓝图，再建档。
+    // 读现场：挑出 target 那一台（指档案时是和档案有交集的几台），框包围盒逐格抄成机器蓝图；显式要求建档时才落档。
     private Optional<Problem> readSite() {
         List<MachineGrouping.Machine> chosen = siteMachines();
         if (chosen.isEmpty() && input.archive() == null) {
@@ -258,14 +258,25 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
         if (copied.blueprint().cells().isEmpty()) {
             notes.add("逐格清单是空的（只有安装段与部件），machine_build 要至少一格方块：照着建前在 cells 里补一格");
         }
-        String name = input.archive() != null ? input.archive().name()
-                : input.name() != null ? input.name() : "机器@" + anchor.getX() + "," + anchor.getY() + "," + anchor.getZ();
-        boolean archived = input.archive() == null && archive(name, anchor, copied.blueprint(), notes);
+        // 默认纯只读不保存永久档案也不写世界记忆；只有指着已有档案（沿用原名）或显式 saveArchive=true 且给了名字时才关联档案。
+        String archiveName = null;
+        boolean archived = false;
+        if (input.archive() != null) {
+            archiveName = input.archive().name();
+        } else if (input.saveArchive()) {
+            String wanted = input.name() == null ? null : input.name().trim();
+            if (wanted != null && !wanted.isEmpty()) {
+                archived = archive(wanted, anchor, copied.blueprint(), notes);
+                archiveName = archived ? wanted : null;
+            } else {
+                notes.add("未提供显式档案名，本次仅返回机器蓝图，未保存永久档案");
+            }
+        }
         // 抄进来的设备：挑中的那几块机器方块里的设备（连接件随设备一起抄，不另列）。
         Set<BlockPos> chosenCells = new LinkedHashSet<>();
         chosen.forEach(machine -> chosenCells.addAll(machine.cells()));
         List<String> devicesRead = report.devicesIn(chosenCells);
-        site = new MachineDetails.SiteRead(devicesRead, name, archived, anchor,
+        site = new MachineDetails.SiteRead(devicesRead, archiveName, archived, anchor,
                 List.of(copied.size().getX(), copied.size().getY(), copied.size().getZ()), copied.json(),
                 copied.blueprint().cells().size(), copied.blueprint().installations().size(),
                 copied.blueprint().parts().size(), copied.unread(), copied.unread() == 0 && !reachesEdge, notes);
@@ -320,8 +331,10 @@ final class MachineInspectTask extends PhasedTask<MachineInspectTask.Phase> {
     private String summary() {
         StringBuilder line = new StringBuilder();
         if (site != null) {
-            line.append("把 ").append(site.devices().isEmpty() ? "档案「" + site.archive() + "」那一片"
-                            : String.join("、", site.devices()) + " 连同它们之间的连接件")
+            String subject = !site.devices().isEmpty()
+                    ? String.join("、", site.devices()) + " 连同它们之间的连接件"
+                    : site.archive() != null ? "档案「" + site.archive() + "」那一片" : "那一片机器";
+            line.append("把 ").append(subject)
                     .append(" 读成了机器蓝图（").append(site.cells()).append(" 格方块、").append(site.installations())
                     .append(" 段安装段、").append(site.parts()).append(" 个部件）")
                     .append(site.archived() ? "，建了档案「" + site.archive() + "」" : "")

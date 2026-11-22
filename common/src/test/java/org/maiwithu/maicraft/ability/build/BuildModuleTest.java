@@ -135,28 +135,28 @@ class BuildModuleTest {
     }
 
     @Test
-    void 盖完记一份档案_名字照图纸_撞名加坐标() throws Exception {
+    void 显式起名盖完记一份档案_撞名加坐标() throws Exception {
         Fixture fixture = fixture();
-        JsonObject cells = json("{\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"},{\"offset\":[1,0,0],\"block\":\"minecraft:stone\"}]}");
+        JsonObject cells = json("{\"name\":\"仓库\",\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"},{\"offset\":[1,0,0],\"block\":\"minecraft:stone\"}]}");
         BuildInput first = run(fixture.module(), new Target.Here(), cells);
         BuildDetails details = settle(first, Map.of(new BlockPos(5, 64, 5), Blocks.STONE.defaultBlockState(),
                 new BlockPos(6, 64, 5), Blocks.STONE.defaultBlockState()));
-        assertEquals("建筑", details.archive().name());
+        assertEquals("仓库", details.archive().name());
         assertTrue(details.check().allMatch(), details.check().toString());
         assertEquals(null, details.layout(), "新盖的不带布局，改建才带");
-        BuildingArchive stored = fixture.archives().find("建筑").orElseThrow();
+        BuildingArchive stored = fixture.archives().find("仓库").orElseThrow();
         assertEquals(List.of(new BlockPos(0, 0, 0), new BlockPos(1, 0, 0)), stored.cells().stream().map(PlannedCell::pos).toList(), "档案存相对锚点的偏移");
         assertEquals("整栋都对上了", stored.lastCheckNote());
         assertEquals(List.of(stored), fixture.remembered(), "存好就记进世界记忆");
         BuildInput second = run(fixture.module(), new Target.Position(20, 64, 20, null), cells);
-        assertEquals("建筑@20,64,20", settle(second, Map.of()).archive().name(), "同名的一栋在别处，加上坐标");
-        assertEquals("整栋都对上了", fixture.archives().find("建筑").orElseThrow().lastCheckNote(), "原来那一栋的档案不被覆盖");
+        assertEquals("仓库@20,64,20", settle(second, Map.of()).archive().name(), "同名的一栋在别处，加上坐标");
+        assertEquals("整栋都对上了", fixture.archives().find("仓库").orElseThrow().lastCheckNote(), "原来那一栋的档案不被覆盖");
     }
 
     @Test
     void 盖完只把真放下的格记成她的_有格受保护的那次一格不添() throws Exception {
         Fixture fixture = fixture();
-        JsonObject cells = json("{\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"},{\"offset\":[1,0,0],\"block\":\"minecraft:stone\"}]}");
+        JsonObject cells = json("{\"name\":\"仓库\",\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:stone\"},{\"offset\":[1,0,0],\"block\":\"minecraft:stone\"}]}");
         BuildInput input = run(fixture.module(), new Target.Here(), cells);
         BlockPos anchor = input.construction().blueprint().anchor();
         ConstructionDetails engine = new ConstructionDetails(new WorldPosition(anchor.getX(), anchor.getY(), anchor.getZ(), DIM),
@@ -166,13 +166,13 @@ class BuildModuleTest {
         BlockPos second = new BlockPos(6, 64, 5);
         // 头一回只放成了第一格：图上画了两格，记成她的只有放下的那一格。
         recorder.record(engine, world(Map.of()), Set.of(first), 0);
-        assertEquals(List.of(first), fixture.archives().find("建筑").orElseThrow().placedCells());
+        assertEquals(List.of(first), fixture.archives().find("仓库").orElseThrow().placedCells());
         // 再来一回放下了第二格，可这次有一格被保护挡下：多半盖到了别人的东西上，这次一格都不添。
         recorder.record(engine, world(Map.of()), Set.of(second), 1);
-        assertEquals(List.of(first), fixture.archives().find("建筑").orElseThrow().placedCells());
+        assertEquals(List.of(first), fixture.archives().find("仓库").orElseThrow().placedCells());
         // 没被挡的一回：和以前记的合起来。
         recorder.record(engine, world(Map.of()), Set.of(second), 0);
-        assertEquals(List.of(first, second), fixture.archives().find("建筑").orElseThrow().placedCells());
+        assertEquals(List.of(first, second), fixture.archives().find("仓库").orElseThrow().placedCells());
     }
 
     @Test
@@ -247,16 +247,60 @@ class BuildModuleTest {
     }
 
     @Test
-    void 单格落在一栋的范围里并进那一栋_范围外不建档() throws Exception {
+    void 单格与未起名清单和临时图纸均不建档_显式指档案名改建或显式起名才建档() throws Exception {
         Fixture fixture = fixture();
         cottage(fixture, 0);
-        BuildInput inside = run(fixture.module(), new Target.Position(11, 64, 10, null), json("{\"block\":\"minecraft:spruce_planks\"}"));
-        settle(inside, Map.of());
+        // 坐标单格放置：即使落在已有建筑范围内也不建新档、不静默改动已有档案。
+        BuildInput singleInside = run(fixture.module(), new Target.Position(11, 64, 10, null), json("{\"block\":\"minecraft:spruce_planks\"}"));
+        assertEquals(RecordsConstruction.NONE, singleInside.construction().recorder());
+        BuildInput singleOutside = run(fixture.module(), new Target.Position(30, 64, 30, null), json("{\"block\":\"minecraft:torch\"}"));
+        assertEquals(RecordsConstruction.NONE, singleOutside.construction().recorder());
+        // 显式以档案名为目标改建单格：并进那一栋。
+        BuildInput renovateSingle = run(fixture.module(), new Target.Landmark("小屋"), json("{\"block\":\"minecraft:spruce_planks\"}"));
+        settle(renovateSingle, Map.of());
         BuildingArchive merged = fixture.archives().find("小屋").orElseThrow();
-        assertEquals(Blocks.SPRUCE_PLANKS, merged.cells().stream().filter(cell -> cell.pos().equals(new BlockPos(1, 0, 0)))
-                .findFirst().orElseThrow().state().getBlock(), "门那一格换成了新放的方块");
-        BuildInput outside = run(fixture.module(), new Target.Position(30, 64, 30, null), json("{\"block\":\"minecraft:torch\"}"));
-        assertEquals(RecordsConstruction.NONE, outside.construction().recorder());
+        assertEquals(Blocks.SPRUCE_PLANKS, merged.cells().stream().filter(cell -> cell.pos().equals(new BlockPos(0, 0, 0)))
+                .findFirst().orElseThrow().state().getBlock(), "显式指档案名改建单格应并入档案");
+
+        // 未起名的逐格清单（无论在已有建筑内还是范围外）：一律不建默认名"建筑"档案，也不静默改动周围档案。
+        BuildInput anonCellsInside = run(fixture.module(), new Target.Position(10, 64, 10, null),
+                json("{\"cells\":[{\"offset\":[1,0,0],\"block\":\"minecraft:oak_planks\"}]}"));
+        assertEquals(RecordsConstruction.NONE, anonCellsInside.construction().recorder());
+        BuildInput anonCellsOutside = run(fixture.module(), new Target.Position(30, 64, 30, null),
+                json("{\"cells\":[{\"offset\":[0,0,0],\"block\":\"minecraft:dirt\"}]}"));
+        assertEquals(RecordsConstruction.NONE, anonCellsOutside.construction().recorder());
+        assertTrue(fixture.archives().find("建筑").isEmpty());
+
+        // 读现场自动命名的图纸（"现场@..."）与未命名图纸，未传 name 参数时不建永久档案；显式命名的图纸与结构文件正常建档。
+        JsonObject siteReadDrawing = json("""
+                {"name":"现场@10,64,10","coordinate_system":"minecraft_y_up","materials":{"S":{"block_id":"minecraft:stone"}},
+                 "objects":[{"name":"石","type":"MESH","primitive":"cube","location":[0.5,0.5,0.5],"dimensions":[1,1,1],"material":"S"}]}
+                """);
+        JsonObject unnamedDrawing = json("""
+                {"coordinate_system":"minecraft_y_up","materials":{"S":{"block_id":"minecraft:stone"}},
+                 "objects":[{"name":"石","type":"MESH","primitive":"cube","location":[0.5,0.5,0.5],"dimensions":[1,1,1],"material":"S"}]}
+                """);
+        JsonObject namedDrawing = json("""
+                {"name":"钟楼","coordinate_system":"minecraft_y_up","materials":{"S":{"block_id":"minecraft:stone"}},
+                 "objects":[{"name":"石","type":"MESH","primitive":"cube","location":[0.5,0.5,0.5],"dimensions":[1,1,1],"material":"S"}]}
+                """);
+        var siteDesign = fixture.designs().create(siteReadDrawing);
+        var unnamedDesign = fixture.designs().create(unnamedDrawing);
+        var namedDesign = fixture.designs().create(namedDrawing);
+        assertEquals(RecordsConstruction.NONE, run(fixture.module(), new Target.Here(),
+                json("{\"design_id\":\"" + siteDesign.id() + "\"}")).construction().recorder());
+        assertEquals(RecordsConstruction.NONE, run(fixture.module(), new Target.Here(),
+                json("{\"design_id\":\"" + unnamedDesign.id() + "\"}")).construction().recorder());
+
+        // 显式传 name 或图纸本身显式起名、或使用结构文件：照常建档。
+        BuildInput namedFromSite = run(fixture.module(), new Target.Here(),
+                json("{\"design_id\":\"" + siteDesign.id() + "\",\"name\":\"翻建屋\"}"));
+        assertEquals("翻建屋", settle(namedFromSite, Map.of()).archive().name());
+        BuildInput fromNamedDesign = run(fixture.module(), new Target.Position(40, 64, 40, null),
+                json("{\"design_id\":\"" + namedDesign.id() + "\"}"));
+        assertEquals("钟楼", settle(fromNamedDesign, Map.of()).archive().name());
+        BuildInput fromFile = run(fixture.module(), new Target.Position(50, 64, 50, null), json("{\"file\":\"house\"}"));
+        assertEquals("house", settle(fromFile, Map.of()).archive().name());
     }
 
     @Test

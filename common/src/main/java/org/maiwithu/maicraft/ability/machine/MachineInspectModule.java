@@ -35,8 +35,9 @@ import org.maiwithu.maicraft.kernel.task.TaskFactories;
  * <p>指物理结构 s#、或指跟到结构上的档案名，就是看一辆载具：vehicle 一节，加上结构局部坐标（local），
  * 指档案名时再按局部坐标整机比对。
  *
- * <p>operation=read_site 读现场：把 target 那一台机器抄成能直接喂回 machine_build 的机器蓝图，并建一份档案
- * （指着档案读时不另建，给整机比对）。只读，不动角色、不改世界。
+ * <p>operation=read_site 读现场：默认只读，把 target 那一台机器抄成能直接喂回 machine_build 的机器蓝图，不建永久档案；
+ * 显式传 save_archive=true 且给出档案名（name 或地标 target）时才保存机器档案并写入世界记忆
+ * （指着已有档案读时不另建，给整机比对）。只读，不动角色、不改世界。
  */
 final class MachineInspectModule implements AbilityModule {
 
@@ -47,7 +48,7 @@ final class MachineInspectModule implements AbilityModule {
     private final AbilitySpec spec = new AbilitySpec(
             ModIdentity.MOD_ID + ":machine_inspect",
             "看一台机器或一片机器区：有哪些网、哪些设备、设备之间怎么连着，各自的运行状态；指档案名时再和档案整机比对；"
-                    + "operation=read_site 把 target 那一台读成机器蓝图并建档（只读）",
+                    + "operation=read_site 默认只读把 target 那一台抄成机器蓝图（需建档时传 save_archive=true）",
             AbilityDoc.forAbility("machine_inspect"),
             ParamSpecs.of(
                     ParamSpec.of("radius", ParamType.INTEGER).range(1, 32).defaultValue(16)
@@ -58,10 +59,14 @@ final class MachineInspectModule implements AbilityModule {
                             .doc("看载具（target 给 s#）时要不要受力：forces 开着与关着动力两种情况往哪边倒、升力比重量；"
                                     + "ballast 再给几处放配重的位置").build(),
                     ParamSpec.of("operation", ParamType.CHOICE).choices("inspect", "read_site").defaultValue("inspect")
-                            .doc("inspect 看（默认）；read_site 把 target 指的那一台机器读成能直接喂回 machine_build 的"
-                                    + "机器蓝图（结果 site.blueprint），并按 name 建一份档案；指档案名时不另建档，给整机比对").build(),
+                            .doc("inspect 看（默认）；read_site 默认只读把 target 指的那一台机器抄成能直接喂回 machine_build 的"
+                                    + "机器蓝图（结果 site.blueprint），不建永久档案；需建档时传 save_archive=true 与 name；"
+                                    + "指档案名时不另建档，给整机比对").build(),
+                    ParamSpec.of("save_archive", ParamType.BOOLEAN)
+                            .doc("read_site 用：是否把读出的机器保存为永久机器档案，默认 false（只读抄蓝图不建档、不写世界记忆）；"
+                                    + "true 时需传 name 或让 target 指已记住的地标名").build(),
                     ParamSpec.of("name", ParamType.TEXT)
-                            .doc("read_site 时新档案的名字；不给按锚点起\"机器@x,y,z\"").build()),
+                            .doc("read_site 配合 save_archive=true 时新档案的名字（target 不是记过的地标名时必填）").build()),
             Set.of(TargetKind.HERE, TargetKind.SEEN, TargetKind.LANDMARK, TargetKind.POSITION),
             ExecutionMode.READ_ONLY,
             Set.of(),
@@ -80,7 +85,7 @@ final class MachineInspectModule implements AbilityModule {
         return spec;
     }
 
-    // 范围在参数规格里已经校过；目标是档案名就带上档案，看它的范围并做整机比对；read_site 再抄成机器蓝图并建档。
+    // 范围在参数规格里已经校过；目标是档案名就带上档案，看它的范围并做整机比对；read_site 默认只读抄成机器蓝图，显式传 save_archive=true 才建档。
     @Override public StepDecision decide(StepContext step) {
         boolean readSite = step.goal().params().has("operation")
                 && step.goal().params().text("operation").equals("read_site");
@@ -117,19 +122,25 @@ final class MachineInspectModule implements AbilityModule {
         if (!readSite) {
             return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius, archive));
         }
-        // 读现场的新档案名：给了 name 用它，target 是记过的地点就用地点名，都没有由任务按锚点起"机器@x,y,z"。
-        String name = step.goal().params().has("name") ? step.goal().params().text("name")
-                : step.goal().target() instanceof Target.Landmark landmark ? landmark.name() : null;
-        return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius, archive, true, name));
+        // read_site 默认只读抄蓝图不建档；仅当 save_archive=true 且非已有档案时，使用显式名字（name 或地标 target）保存档案。
+        boolean saveArchive = step.goal().params().has("save_archive")
+                && step.goal().params().bool("save_archive");
+        String name = saveArchive && archive == null ? explicitArchiveName(step) : null;
+        return new StepDecision.Run(new MachineInspectInput(step.goal().target(), radius, archive, true, saveArchive, name));
     }
 
     /**
-     * 读现场的写法在计划阶段一次核清：name 只在 read_site 时用；read_site 读的是现场的机器，不和 item、载具的 s# 一起用；
-     * 指着档案读不另建档，不用给 name；新档案的名字已经有一台机器在用就不覆盖。
+     * 读现场的写法在计划阶段一次核清：name 与 save_archive 只在 read_site 时用；read_site 读的是现场的机器，
+     * 不和 item、载具的 s# 一起用；指着已有档案读不另建档，不用给 name；save_archive=true 且非已有档案时必须有显式档案名
+     * （name 或记过的地标 target），且不覆盖已有同名档案。
      */
     private Optional<StepDecision> readSiteMisuse(StepContext step, boolean readSite) {
         boolean named = step.goal().params().has("name");
+        boolean hasSaveArchive = step.goal().params().has("save_archive");
         if (!readSite) {
+            if (hasSaveArchive) {
+                return Optional.of(fail("save_archive 只在 operation=read_site 时用", "去掉 save_archive"));
+            }
             return named ? Optional.of(fail("name 只在 operation=read_site 时用", null)) : Optional.empty();
         }
         if (step.goal().params().has("item")) {
@@ -138,18 +149,35 @@ final class MachineInspectModule implements AbilityModule {
         if (step.goal().target() instanceof Target.Seen seen && seen.id().startsWith("s")) {
             return Optional.of(fail("载具（s#）不读成机器蓝图", "target 指机器的一格（b# 或坐标）"));
         }
-        if (!named) return Optional.empty();
-        String name = step.goal().params().text("name");
         boolean pointsAtArchive = step.goal().target() instanceof Target.Landmark landmark
                 && archives.find(landmark.name()).filter(found -> !found.removed()).isPresent();
-        if (pointsAtArchive) {
+        if (named && pointsAtArchive) {
             return Optional.of(fail("指着机器档案读现场不另建档案，不用给 name", "去掉 name；要另建一份就让 target 指那台机器的一格"));
         }
-        if (archives.find(name).isPresent()) {
-            return Optional.of(fail("档案名「" + name + "」已经有一台机器在用",
-                    "换一个 name，或让 target 指这个档案名来读它的现场"));
+        boolean saveArchive = hasSaveArchive && step.goal().params().bool("save_archive");
+        if (saveArchive && !pointsAtArchive) {
+            String resolvedName = explicitArchiveName(step);
+            if (resolvedName == null || resolvedName.isBlank()) {
+                return Optional.of(fail("read_site 传了 save_archive=true 时必须给出显式档案名",
+                        "传入非空 name，或让 target 指已记住的地标名"));
+            }
+            if (archives.find(resolvedName).isPresent()) {
+                return Optional.of(fail("档案名「" + resolvedName + "」已经有一台机器在用",
+                        "换一个 name，或让 target 指这个档案名来读它的现场"));
+            }
         }
         return Optional.empty();
+    }
+
+    // 取 read_site 建档用的显式名字：优先参数 name，其次记过的地标 target；都不存在时返回 null，绝不自动拼"机器@x,y,z"。
+    private static String explicitArchiveName(StepContext step) {
+        if (step.goal().params().has("name")) {
+            return step.goal().params().text("name").trim();
+        }
+        if (step.goal().target() instanceof Target.Landmark landmark) {
+            return landmark.name().trim();
+        }
+        return null;
     }
 
     private static String balanceOf(StepContext step) {

@@ -93,7 +93,7 @@ class DesignModuleTest {
     }
 
     @Test
-    void 读现场_读成层图_给布局_起了名就建档() {
+    void 读现场默认纯只读不建永久档案_即使传了name也不落档不记记忆() {
         // 床是自己放的：屋里看不见也读得到。
         site.selfPlaced.add(new BlockPos(3, 64, 1));
         site.selfPlaced.add(new BlockPos(3, 64, 2));
@@ -104,21 +104,61 @@ class DesignModuleTest {
         DesignDetails details = assertInstanceOf(DesignDetails.class, result.details());
         assertEquals(new WorldPosition(0, 62, 0, DIM), details.anchor(), "设计原点是范围最小角");
         assertEquals("LAYERS", details.site().get("type").getAsString());
-        assertEquals("庇护所", details.archive());
+        assertNotNull(details.designId(), "只读勘查仍生成临时图纸");
+        assertNull(details.archive(), "默认不传 save_archive 时不建永久建筑档案");
         assertEquals(1, details.layout().doors().size(), details.layout().toString());
         assertEquals(1, details.layout().beds().size());
         assertTrue(!details.layout().freeFloor().isEmpty(), "屋里有能放东西的空地");
+        assertTrue(archives.find("庇护所").isEmpty(), "不落永久建筑档案");
+        assertTrue(remembered.isEmpty(), "不往世界记忆写入 BUILDING 记录");
+    }
+
+    @Test
+    void 读现场显式建档需传非空name_建档后指档案再读照常比对() {
+        // 床是自己放的：屋里看不见也读得到。
+        site.selfPlaced.add(new BlockPos(3, 64, 1));
+        site.selfPlaced.add(new BlockPos(3, 64, 2));
+        // 显式 save_archive=true 但没给 name：必须直接报参数错误。
+        JsonObject missingName = operation("read_site");
+        missingName.addProperty("save_archive", true);
+        TaskResult rejected = run(new Target.Position(2, 64, 0, null), missingName);
+        assertEquals(TaskResult.Status.FAILED, rejected.status());
+        assertEquals(Problem.Kind.INVALID_PARAMETER, rejected.problem().kind());
+        assertTrue(remembered.isEmpty());
+
+        // 显式 save_archive=true 并传非空 name：建永久建筑档案（标记为读现场建的）并写入世界记忆。
+        JsonObject raw = operation("read_site");
+        raw.addProperty("name", "庇护所");
+        raw.addProperty("save_archive", true);
+        TaskResult result = run(new Target.Position(2, 64, 0, null), raw);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        DesignDetails details = assertInstanceOf(DesignDetails.class, result.details());
+        assertEquals("庇护所", details.archive());
         BuildingArchive created = archives.find("庇护所").orElseThrow();
         assertEquals(details.designId(), created.designId(), "档案照读出来的这一版");
         // 读现场建的档存下又读回来仍记着是读来的：那一栋可能是别人的房子，圈她自己的家时不算进去。
         assertTrue(created.readFromSite(), "读现场建的档记成读来的");
         assertEquals(List.of(created), remembered);
-        // 指着刚建的档案再读：读档案的范围，另给整栋比对。
+
+        // 指着已有建筑档案再读（默认不传 save_archive）：读档案的范围，另给整栋比对。
         JsonObject again = operation("read_site");
         TaskResult second = run(new Target.Landmark("庇护所"), again);
         DesignDetails compared = assertInstanceOf(DesignDetails.class, second.details());
         assertTrue(compared.check().allMatch(), compared.check().toString());
         assertEquals("庇护所", compared.archive());
+    }
+
+    @Test
+    void 非read_site操作传入save_archive报参数错误() {
+        JsonObject createRaw = operation("create");
+        createRaw.add("drawing", DesignSamples.drawing(DesignSamples.mesh("Box", "cube", new double[] {1, 1, 1}, new int[] {2, 2, 2}, "Body")));
+        createRaw.addProperty("save_archive", false);
+        assertEquals(Problem.Kind.INVALID_PARAMETER, run(null, createRaw).problem().kind());
+
+        JsonObject inspectRaw = operation("inspect");
+        inspectRaw.addProperty("design_id", "00000000-0000-0000-0000-000000000000");
+        inspectRaw.addProperty("save_archive", true);
+        assertEquals(Problem.Kind.INVALID_PARAMETER, run(null, inspectRaw).problem().kind());
     }
 
     @Test

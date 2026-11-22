@@ -18,13 +18,13 @@ target 指跟到船上的机器档案名（组装后档案会跟着船走）时�
 
 ## 读成机器蓝图（operation=read_site）
 
-主播手搭的机器想照着再建一台、或者以后要改它：`operation=read_site`，target 指那台机器的一格（观察编号、坐标、记过的地点），可选 `name` 给档案起名（不给按锚点起"机器@x,y,z"）。挑 target 落在的那一台（不在任何一台上就挑最近的），按它的包围盒把里面每一格都抄下来，连夹在中间的箱子、原版方块、水源一起，存成一份机器档案。只读，不动角色、不改世界。
+主播手搭的机器想照着再建一台、或者以后要改它：`operation=read_site`，target 指那台机器的一格（观察编号、坐标、记过的地点）。挑 target 落在的那一台（不在任何一台上就挑最近的），按它的包围盒把里面每一格都抄下来，连夹在中间的箱子、原版方块、水源一起，产出可直接喂回 `machine_build` 的机器蓝图。默认纯只读，不建永久机器档案也不写世界记忆；需要同时保存成永久机器档案时显式传 `save_archive=true`，并提供显式档案名（`name` 或记住的地标 `target`）。不动角色、不改世界。
 
-- `site.blueprint` 就是 `machine_build` 的 `blueprint` 参数，原样喂回去：照着建一台用 `machine_build(target=新地方, blueprint=site.blueprint)`；改这一台用 `machine_build(target=档案名, blueprint=补丁)`，补丁和它同一个锚点（`site.anchor`）；之后 `machine_inspect(target=档案名)` 看它和档案差在哪。
+- `site.blueprint` 就是 `machine_build` 的 `blueprint` 参数，原样喂回去：照着建一台用 `machine_build(target=新地方, blueprint=site.blueprint)`；建过档后改这一台用 `machine_build(target=档案名, blueprint=补丁)`，补丁和它同一个锚点（`site.anchor`）；之后 `machine_inspect(target=档案名)` 看它和档案差在哪。
 - 传送带抄成两头的轴加一段 `create:belt` 安装段，链条输送机之间的链、机械臂（连取放点）、ME 线缆与线缆上的部件也都写成安装段与部件，照着建时按模组自己的装法装。
 - 方块的摆放属性（朝向、轴向、上下半）写进去当验收标准；开关、充能、亮灭、在不在线这些转起来会变的不写。空气不写：照着建时那些格里原有的东西会留着，要清空就在 `cells` 里补写 `minecraft:air`。流动的水不写，倒下水源它自己会流。
 - 箱子与机器里的东西、Mekanism 侧面和过滤规则这类要开界面才看得见的设置不抄：照着建完再 `machine_configure`。
-- 指着档案名读时不另建档，`site` 照现场给、`check` 照给整机比对；`name` 已经有档案在用时不覆盖（参数错误）。
+- 指着档案名读时不另建档，`site` 照现场给、`check` 照给整机比对；`save_archive=true` 且非已有档案时必须有显式名字（`name` 或地标 `target`），且 `name` 已经有档案在用时不覆盖（参数错误）。
 - `site.complete` 为 false 时看 `site.notes`：包围盒里有格没加载、机器碰到了这次看的范围边上（加大 `radius` 再读）、带子伸出了这台机器这类没抄全的地方都写在那里。
 
 ## 结果怎么读
@@ -45,5 +45,5 @@ target 指跟到船上的机器档案名（组装后档案会跟着船走）时�
 
 - `TARGET_GONE`：观察编号指的东西不在了；重新 `observe` 拿新编号。
 - `NOT_FOUND`：没有叫这个名字的记过地点或机器档案；read_site 时这一片一台认得的机器都没有。
-- `INVALID_PARAMETER`：read_site 的 `name` 已经有档案在用；`name` 没配 read_site；read_site 配了 `item` 或载具的 `s#`。
+- `INVALID_PARAMETER`：read_site 的 `save_archive=true` 但缺少显式名字（`name` 或地标 `target`）；`name` 已经有档案在用；`name` 或 `save_archive` 没配 read_site；read_site 配了 `item` 或载具的 `s#`。
 - `UNREACHABLE`：目标在另一个维度，或看到一半离开了世界。

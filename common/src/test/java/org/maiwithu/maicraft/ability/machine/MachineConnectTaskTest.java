@@ -4,6 +4,7 @@ package org.maiwithu.maicraft.ability.machine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
@@ -216,6 +217,7 @@ class MachineConnectTaskTest {
         };
         TaskResult result = rig.run(input("kinetic", positionOf(TARGET), positionOf(source)));
         assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertNull(laid.getFirst().name(), "目标无档案时只铺线不自动建匿名坐标档案");
         List<BlockPos> cells = laid.getFirst().blueprint().cells().stream().map(cell -> cell.pos()).toList();
         assertEquals(new BlockPos(0, 0, -1), cells.getLast(), "最后一格接在目标北面（往里收的面）：" + cells);
         assertEquals(new BlockPos(-3, 0, 0), cells.getFirst(), "从来源东面（往外送的面）那一格起：" + cells);

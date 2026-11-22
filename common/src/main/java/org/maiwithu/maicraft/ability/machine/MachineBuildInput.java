@@ -14,7 +14,7 @@ import org.maiwithu.maicraft.kernel.task.TaskInput;
  * @param remove      拆档案里的整台：蓝图按档案范围换成全清空，其余字段照给
  * @param blueprint   要落地的整机蓝图（相对锚点的偏移；拆整台时为 null）
  * @param anchor      锚点：蓝图原点落在的那一格（拆整台时是档案锚点）；在结构上施工时是结构地块里的格
- * @param name        档案名：新建时用给定的或按锚点起的，补丁与拆除时是已有档案的名字
+ * @param name        档案名：显式命名新建、补丁与拆除时非空；匿名临时施工不建永久档案时为 null
  * @param archive     目标是已有档案时的那份档案；新建为 null
  * @param permissions 这次任务的许可
  * @param what        一句话：这次是建、改还是拆
@@ -32,15 +32,18 @@ record MachineBuildInput(boolean remove, MachineBlueprint blueprint, WorldPositi
 
     MachineBuildInput {
         Objects.requireNonNull(anchor, "anchor");
-        Objects.requireNonNull(name, "name");
         Objects.requireNonNull(permissions, "permissions");
         Objects.requireNonNull(what, "what");
+        if (remove && name == null && archive == null) {
+            throw new IllegalArgumentException("拆机器要指定档案");
+        }
         if (!remove && blueprint == null) {
             throw new IllegalArgumentException("施工要给蓝图");
         }
     }
 
     @Override public String describe() {
-        return (remove ? "拆机器「" : "按机器蓝图施工：「") + name + "」";
+        if (remove) return "拆机器「" + name + "」";
+        return name != null ? "按机器蓝图施工：「" + name + "」" : "按机器蓝图施工";
     }
 }
