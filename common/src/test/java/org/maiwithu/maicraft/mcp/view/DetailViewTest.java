@@ -11,6 +11,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.maiwithu.maicraft.behavior.perception.CampfireState;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
@@ -83,6 +84,71 @@ class DetailViewTest {
         assertEquals("minecraft:chest", now.get("block").getAsString());
         assertTrue(now.has("position") && now.has("direction") && now.has("compass") && now.has("distance"));
         assertEquals(1, json.getAsJsonArray("remembered").size(), "这个位置记过什么，详情一并交代");
+    }
+
+    @Test
+    void campfireDetailReportsLitCookingAndUnlitStatesWithoutFabricatingEmptySlots() {
+        freshScene();
+        WorldPosition litWithFood = WorldPosition.here(0, 64, -2);
+        WorldPosition litEmpty = WorldPosition.here(1, 64, -2);
+        WorldPosition unlitWithFood = WorldPosition.here(-1, 64, -2);
+        scene.updateFacilities(10, NOW, List.of(
+                new NearbyBlocksSight.BlockSighting(litWithFood, "minecraft:campfire",
+                        new CampfireState(true, 4, List.of(
+                                new CampfireState.CookingItem("minecraft:potato", 30, 12, 18),
+                                new CampfireState.CookingItem("minecraft:beef", 30)))),
+                new NearbyBlocksSight.BlockSighting(litEmpty, "minecraft:campfire",
+                        new CampfireState(true, 4, List.of())),
+                new NearbyBlocksSight.BlockSighting(unlitWithFood, "minecraft:soul_campfire",
+                        new CampfireState(false, 4, List.of(
+                                new CampfireState.CookingItem("minecraft:potato", 30))))));
+
+        String litWithFoodId = scene.facilities().get(0).id();
+        String litEmptyId = scene.facilities().get(1).id();
+        String unlitId = scene.facilities().get(2).id();
+
+        // 点燃且有正在烤的食物：只列非空烤位，已知已烤/剩余秒数照写，未同步进度的不编造。
+        JsonObject nowLitFood = DetailView.of(scene, memory, litWithFoodId, pos -> null).orElseThrow()
+                .getAsJsonObject("now");
+        assertTrue(nowLitFood.get("lit").getAsBoolean());
+        assertEquals(2, nowLitFood.get("slots_used").getAsInt());
+        assertEquals(4, nowLitFood.get("slots_total").getAsInt());
+        JsonArray cookingLit = nowLitFood.getAsJsonArray("cooking");
+        assertEquals(2, cookingLit.size());
+        JsonObject first = cookingLit.get(0).getAsJsonObject();
+        assertEquals("minecraft:potato", first.get("item").getAsString());
+        assertEquals(30, first.get("cook_seconds").getAsInt());
+        assertEquals(12, first.get("elapsed_seconds").getAsInt());
+        assertEquals(18, first.get("remaining_seconds").getAsInt());
+        JsonObject second = cookingLit.get(1).getAsJsonObject();
+        assertEquals("minecraft:beef", second.get("item").getAsString());
+        assertEquals(30, second.get("cook_seconds").getAsInt());
+        assertFalse(second.has("elapsed_seconds"), "客户端未同步已烤秒数时不编造");
+        assertFalse(second.has("remaining_seconds"), "客户端未同步剩余秒数时不编造");
+        assertTrue(nowLitFood.get("note").getAsString().contains("自动弹出"), nowLitFood.get("note").getAsString());
+
+        // 点燃但空炉：cooking 为空数组，slots_used=0。
+        JsonObject nowLitEmpty = DetailView.of(scene, memory, litEmptyId, pos -> null).orElseThrow()
+                .getAsJsonObject("now");
+        assertTrue(nowLitEmpty.get("lit").getAsBoolean());
+        assertEquals(0, nowLitEmpty.get("slots_used").getAsInt());
+        assertEquals(0, nowLitEmpty.getAsJsonArray("cooking").size());
+        assertTrue(nowLitEmpty.get("note").getAsString().contains("没有正在烤"), nowLitEmpty.get("note").getAsString());
+
+        // 熄灭但架上有食物：lit=false，note 明示未点燃不会烤熟、无法右键取下。
+        JsonObject nowUnlit = DetailView.of(scene, memory, unlitId, pos -> null).orElseThrow()
+                .getAsJsonObject("now");
+        assertFalse(nowUnlit.get("lit").getAsBoolean());
+        assertEquals(1, nowUnlit.get("slots_used").getAsInt());
+        assertEquals("minecraft:potato", nowUnlit.getAsJsonArray("cooking").get(0).getAsJsonObject()
+                .get("item").getAsString());
+        assertTrue(nowUnlit.get("note").getAsString().contains("未点燃"), nowUnlit.get("note").getAsString());
+
+        // observe(scene) 设施列表也直接暴露 lit。
+        JsonArray sceneFacilities = SceneView.scene(scene, false).getAsJsonArray("facilities");
+        assertEquals(3, sceneFacilities.size());
+        assertTrue(sceneFacilities.get(0).getAsJsonObject().get("lit").getAsBoolean());
+        assertFalse(sceneFacilities.get(2).getAsJsonObject().get("lit").getAsBoolean());
     }
 
     @Test

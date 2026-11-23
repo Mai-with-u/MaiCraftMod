@@ -19,8 +19,16 @@ public interface NearbyBlocksSight {
         return List.of();
     }
 
-    /** 一个看得见的方块：位置与类型注册 ID。 */
-    record BlockSighting(WorldPosition position, String blockType) {}
+    /**
+     * 一个看得见的方块：位置、类型注册 ID，以及营火的实时状态（非营火为 null）。
+     *
+     * @param campfire 营火实时点燃与烤位状态；非营火方块为 null
+     */
+    record BlockSighting(WorldPosition position, String blockType, CampfireState campfire) {
+        public BlockSighting(WorldPosition position, String blockType) {
+            this(position, blockType, null);
+        }
+    }
 
     /**
      * 一块看得见的告示牌：位置、方块类型、牌子上写的字。

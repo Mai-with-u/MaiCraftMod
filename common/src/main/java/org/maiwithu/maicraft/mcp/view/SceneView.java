@@ -192,6 +192,10 @@ public final class SceneView {
         json.addProperty("compass", facility.compass());
         json.addProperty("distance", facility.distance());
         json.add("position", position(facility.position()));
+        // 营火的点燃状态肉眼可见：在设施列表里直接带上 lit，方便先确认火点没点着。
+        if (facility.campfire() != null) {
+            json.addProperty("lit", facility.campfire().lit());
+        }
         if (facilityOrigin != null) {
             WorldMemoryView.writeContainerOrigin(json,
                     facilityOrigin.apply(facility.position(), facility.blockType()));

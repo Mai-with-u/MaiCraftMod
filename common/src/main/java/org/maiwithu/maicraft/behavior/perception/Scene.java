@@ -327,7 +327,7 @@ public final class Scene {
             String direction = bearing.direction();
             String id = ids.facility(sighting.position(), sighting.blockType(), direction, nowTick);
             next.add(new FacilitySighting(id, sighting.blockType(), sighting.position(),
-                    direction, bearing.compass(), bearing.distance()));
+                    direction, bearing.compass(), bearing.distance(), sighting.campfire()));
             if (kinds.isContainer(sighting.blockType())) {
                 memory.containerSeen(sighting.position(), sighting.blockType(), when);
             } else if (kinds.isWorkstation(sighting.blockType())) {

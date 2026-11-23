@@ -62,7 +62,15 @@ class FacilityKindsTest {
         FacilityKinds noTags = new FacilityKinds(new FakeBlockTags());
         assertTrue(noTags.isWorkstation("minecraft:smoker"));
         assertTrue(noTags.isWorkstation("minecraft:anvil"));
+        assertTrue(noTags.isWorkstation("minecraft:campfire"));
+        assertTrue(noTags.isWorkstation("minecraft:soul_campfire"));
+        assertTrue(FacilityKinds.isWorkstationId("minecraft:campfire"));
+        assertTrue(FacilityKinds.isWorkstationId("minecraft:soul_campfire"));
+        assertFalse(noTags.isContainer("minecraft:campfire"));
+        assertFalse(noTags.isContainer("minecraft:soul_campfire"));
         assertTrue(noTags.workstationBlockTypes().contains("minecraft:brewing_stand"));
+        assertTrue(noTags.workstationBlockTypes().contains("minecraft:campfire"));
+        assertTrue(noTags.facilityBlockTypes().contains("minecraft:soul_campfire"));
     }
 
     @Test

@@ -20,9 +20,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.SingleRecipeInput;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.SignBlock;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.entity.SignText;
 import net.minecraft.world.level.block.state.BlockState;
@@ -112,7 +117,7 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
         var result = scans.query(level, player.blockPosition(), targets,
                 WANT, MAX_CHUNK_RADIUS, BUILD_BUDGET);
         SeenFacilities seen = seenFacilitiesWithCounts(result.hits(),
-                p -> ObservationVisibility.block(player, p), level::getBlockState);
+                p -> ObservationVisibility.block(player, p), level::getBlockState, p -> campfireAt(level, p));
         reportScan(result.complete(), result.hits().size(), seen);
         return seen.sightings();
     }
@@ -161,6 +166,14 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
      */
     static SeenFacilities seenFacilitiesWithCounts(Collection<BlockPos> hits, Predicate<BlockPos> visible,
             Function<BlockPos, BlockState> stateAt) {
+        return seenFacilitiesWithCounts(hits, visible, stateAt, pos -> null);
+    }
+
+    /**
+     * 同上，额外接收营火实时状态读口：看得见的营火顺带读出点燃状态与架上食物，其余设施返回 null。
+     */
+    static SeenFacilities seenFacilitiesWithCounts(Collection<BlockPos> hits, Predicate<BlockPos> visible,
+            Function<BlockPos, BlockState> stateAt, Function<BlockPos, CampfireState> campfireAt) {
         List<BlockSighting> sightings = new ArrayList<>();
         Set<BlockPos> seenBeds = new HashSet<>();
         int blocked = 0;
@@ -182,10 +195,33 @@ public final class ClientNearbyBlocksSight implements NearbyBlocksSight {
                 }
             }
             String typeId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            CampfireState campfire = state.getBlock() instanceof CampfireBlock ? campfireAt.apply(cell) : null;
             sightings.add(new BlockSighting(
-                    WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()), typeId));
+                    WorldPosition.here(cell.getX(), cell.getY(), cell.getZ()), typeId, campfire));
         }
         return new SeenFacilities(sightings, blocked, duplicates);
+    }
+
+    // 读取客户端原版营火此刻的点燃状态与架上非空烤位物品：客户端不同步已烤刻数，只给真实读到的物品与配方总烤制秒数。
+    private static CampfireState campfireAt(ClientLevel level, BlockPos cell) {
+        BlockState state = level.getBlockState(cell);
+        if (!(state.getBlock() instanceof CampfireBlock)) return null;
+        boolean lit = state.hasProperty(CampfireBlock.LIT) && state.getValue(CampfireBlock.LIT);
+        List<CampfireState.CookingItem> cooking = new ArrayList<>();
+        int capacity = 4;
+        if (level.getBlockEntity(cell) instanceof CampfireBlockEntity campfire) {
+            capacity = campfire.getItems().size();
+            for (ItemStack stack : campfire.getItems()) {
+                if (stack.isEmpty()) continue;
+                String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+                Integer cookSeconds = level.getRecipeManager()
+                        .getRecipeFor(RecipeType.CAMPFIRE_COOKING, new SingleRecipeInput(stack), level)
+                        .map(holder -> Math.max(1, (holder.value().getCookingTime() + 19) / 20))
+                        .orElse(null);
+                cooking.add(new CampfireState.CookingItem(itemId, cookSeconds));
+            }
+        }
+        return new CampfireState(lit, capacity, cooking);
     }
 
     @Override

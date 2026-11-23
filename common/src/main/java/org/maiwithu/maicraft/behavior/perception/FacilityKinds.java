@@ -29,10 +29,11 @@ public final class FacilityKinds {
     static final String ENDER_CHEST_TAG = "c:chests/ender";
     static final String ENDER_CHEST = "minecraft:ender_chest";
 
-    /** 原版按 ID 认的工作设施：用一次就知道能用的台子。 */
+    /** 原版按 ID 认的工作设施：用一次就知道能用的台子，含普通营火与灵魂营火。 */
     static final Set<String> WORKSTATIONS = Set.of(
             "minecraft:crafting_table", "minecraft:furnace", "minecraft:blast_furnace",
-            "minecraft:smoker", "minecraft:anvil", "minecraft:grindstone", "minecraft:stonecutter",
+            "minecraft:smoker", "minecraft:campfire", "minecraft:soul_campfire",
+            "minecraft:anvil", "minecraft:grindstone", "minecraft:stonecutter",
             "minecraft:loom", "minecraft:cartography_table", "minecraft:smithing_table",
             "minecraft:brewing_stand");
 

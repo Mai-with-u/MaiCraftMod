@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.mcp.view;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import org.maiwithu.maicraft.behavior.perception.CampfireState;
 import org.maiwithu.maicraft.behavior.perception.DirectionWords;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FacilitySighting;
@@ -106,7 +107,7 @@ public final class DetailView {
                     case SceneEntity entity -> SceneView.entity(entity);
                     case TerrainFeature feature -> SceneView.feature(feature);
                     case SceneCampPit pit -> SceneView.campPit(pit);
-                    case FacilitySighting facility -> SceneView.facility(facility, facilityOrigin);
+                    case FacilitySighting facility -> facility(facility, facilityOrigin);
                     case SceneSign sign -> sign(sign);
                     // 模组的东西单独收着：它的详情要并进同号实体的样子里，见下面。
                     case SceneThing ignored -> null;
@@ -141,6 +142,30 @@ public final class DetailView {
             json.add("remembered", remembered);
         }
         return json;
+    }
+
+    // 设施详情：在场景那几项之上，若为原版营火则展开实时点燃状态、架上正在烤的非空烤位与客观规则说明。
+    private static JsonObject facility(FacilitySighting facility,
+            BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin) {
+        JsonObject now = SceneView.facility(facility, facilityOrigin);
+        CampfireState campfire = facility.campfire();
+        if (campfire != null) {
+            now.addProperty("lit", campfire.lit());
+            now.addProperty("slots_used", campfire.cooking().size());
+            now.addProperty("slots_total", campfire.capacity());
+            JsonArray cooking = new JsonArray();
+            for (CampfireState.CookingItem slot : campfire.cooking()) {
+                JsonObject entry = new JsonObject();
+                entry.addProperty("item", slot.item());
+                if (slot.cookSeconds() != null) entry.addProperty("cook_seconds", slot.cookSeconds());
+                if (slot.elapsedSeconds() != null) entry.addProperty("elapsed_seconds", slot.elapsedSeconds());
+                if (slot.remainingSeconds() != null) entry.addProperty("remaining_seconds", slot.remainingSeconds());
+                cooking.add(entry);
+            }
+            now.add("cooking", cooking);
+            now.addProperty("note", campfire.note());
+        }
+        return now;
     }
 
     // 告示牌的详情：场景里那几项，加上正反两面各四行（空行照留，看得出字写在第几行）；
