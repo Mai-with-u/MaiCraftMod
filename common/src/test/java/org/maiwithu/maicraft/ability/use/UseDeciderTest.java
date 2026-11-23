@@ -142,4 +142,13 @@ class UseDeciderTest {
         assertTrue(solidProblem.suggestion().contains("drop")
                 && solidProblem.suggestion().contains("machine_configure"), solidProblem.suggestion());
     }
+
+    @Test
+    void campfireEmptyHandProblemExplainsAutoPopRule() {
+        Problem problem = UseDecider.campfireEmptyHandProblem();
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, problem.kind());
+        assertTrue(problem.message().contains("不支持右键取物") && problem.message().contains("自动弹出"),
+                problem.message());
+        assertTrue(problem.suggestion().contains("gather"), problem.suggestion());
+    }
 }
