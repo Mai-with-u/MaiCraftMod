@@ -190,7 +190,7 @@ public final class ClientSpotsContainers implements SpotsContainers {
     }
 
     // 盖子压没压住按原版：箱子类上方是实心导电方块才打不开，其余容器不看上方。
-    // 压住的方块受保护（别人的）要先问；不受保护的可以挖开。
+    // 压住的方块受圈地保护或属于建筑/机器结构保护区时不自动挖盖；不受保护的天然顶盖才可挖开。
     private ContainerChooser.Lid lidOf(ClientLevel level, BlockPos at) {
         if (!(level.getBlockState(at).getBlock() instanceof AbstractChestBlock<?>)) {
             return ContainerChooser.Lid.CLEAR;
@@ -200,7 +200,13 @@ public final class ClientSpotsContainers implements SpotsContainers {
         if (!above.isRedstoneConductor(level, lid)) {
             return ContainerChooser.Lid.CLEAR;
         }
-        return protection.blockProtected(positionOf(level, lid), blockTypeIdOf(above), Set.of())
+        return lidStatus(protection, positionOf(level, lid), blockTypeIdOf(above));
+    }
+
+    /** 判定压住箱盖的实心方块能不能自动挖开：圈地保护或结构保护区（建筑/机器）上的绝不挖。 */
+    static ContainerChooser.Lid lidStatus(Protection protection, WorldPosition lidPos, String blockTypeId) {
+        return protection.blockProtected(lidPos, blockTypeId, Set.of())
+                || protection.structureBlockAt(lidPos).protects()
                 ? ContainerChooser.Lid.BLOCKED_BY_FOREIGN : ContainerChooser.Lid.BLOCKED_BY_NATURAL;
     }
 

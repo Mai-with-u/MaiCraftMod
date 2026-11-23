@@ -24,6 +24,8 @@ import org.maiwithu.maicraft.behavior.interaction.Interactions;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.permission.Protection;
+import org.maiwithu.maicraft.behavior.permission.StructureProtection;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -51,9 +53,14 @@ public final class InWorldBlockTransform implements Action {
         Optional<Action> apply(BlockPos cell, WantedItem held, String resultBlockId, boolean breaksIntoAir);
     }
 
-    /** 原地摆块改造所需的现场接缝：放一格、看那一格现在是什么、持物右键改造、挖回一格、捡掉落物。 */
+    /** 原地摆块改造所需的现场接缝：放一格、看那一格现在是什么、持物右键改造、挖回一格、捡掉落物、保护判断。 */
     public record Seams(PlacesBlockBeside placer, ReadsBlockTypes blockTypes, AppliesToBlock applier,
-                        CollectsBlocks collects, PicksUpDrops drops) {
+                        CollectsBlocks collects, PicksUpDrops drops, Protection protection) {
+        public Seams(PlacesBlockBeside placer, ReadsBlockTypes blockTypes, AppliesToBlock applier,
+                     CollectsBlocks collects, PicksUpDrops drops) {
+            this(placer, blockTypes, applier, collects, drops, null);
+        }
+
         public Seams {
             Objects.requireNonNull(placer, "placer");
             Objects.requireNonNull(blockTypes, "blockTypes");
@@ -206,6 +213,20 @@ public final class InWorldBlockTransform implements Action {
         if (status instanceof ActionStatus.Failed failed) return settleOrFail(failed.problem());
         if (placedCell == null) {
             return settleOrFail(Problem.of(Problem.Kind.UNREACHABLE, "没拿到临时方块的落点", null));
+        }
+        // 底线保护：即便放置接缝未过滤，也不对属于建筑或机器结构保护区的格动手改造与挖回。
+        if (seams.protection() != null) {
+            String dimension = context.player() == null || context.player().level() == null
+                    ? null : context.player().level().dimension().location().toString();
+            WorldPosition spot = new WorldPosition(placedCell.getX(), placedCell.getY(), placedCell.getZ(), dimension);
+            StructureProtection guarded = seams.protection().structureBlockAt(spot);
+            if (guarded.protects()) {
+                BlockPos skipped = placedCell;
+                placedCell = null;
+                return settleOrFail(Problem.of(Problem.Kind.NEED_APPROVAL,
+                        skipped.toShortString() + guarded.describe() + "，不在结构保护区内改造或挖回方块",
+                        "换到建筑与机器外部空地再试"));
+            }
         }
         if (breaksIntoAir && seams.drops() != null) dropsBefore = seams.drops().nearby();
         stage = Stage.APPLY_HELD;

@@ -16,6 +16,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.behavior.permission.StructureProtection;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -270,7 +271,9 @@ final class StairsDownDigging implements Action {
 
     // 评估并启动 2×1 穿沙井：当前位下方遇流体/空腔时尝试横移 2 格重选井位，无安全井位则关闭穿沙井回退常规阶梯。
     private ActionStatus tryStartSandShaft(TickContext context) {
-        Predicate<BlockPos> forbidden = cell -> reached == null && atHome(context, cell);
+        // 穿沙井同样避开自家营地与结构保护区（已登记建筑、在役机器），防止垂直掘进挖穿地下设施。
+        Predicate<BlockPos> forbidden = cell -> (reached == null && atHome(context, cell))
+                || permission.structureBlockAt(position(context, cell)).protects();
         Predicate<BlockPos> digAllowed = cell -> permission.blockAllowed(permissions,
                 PermissionCheck.WorldAction.DIG_BLOCK, position(context, cell), site.blockType(context, cell)).isEmpty();
         Direction preferred = heading != null ? heading : site.facing(context);
@@ -355,7 +358,7 @@ final class StairsDownDigging implements Action {
         }
     }
 
-    // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、许不许动，四周看有没有水或岩浆。
+    // 这一级为什么不能挖；能挖为空。要挖的格看能不能挖、是否在结构保护区、许不许动，四周看有没有水或岩浆。
     private Optional<Problem> refusal(TickContext context, Direction toward) {
         StairStepShape.Heading way = new StairStepShape.Heading(toward, down());
         for (BlockPos cell : StairStepShape.stepCells(feet, toward, way.down())) {
@@ -363,8 +366,12 @@ final class StairsDownDigging implements Action {
             ClientStairsDown.Ground ground = site.ground(context, cell);
             if (ground == ClientStairsDown.Ground.OPEN) continue;
             if (ground != ClientStairsDown.Ground.DIGGABLE) return Optional.of(blocked(context, cell, ground));
+            WorldPosition where = position(context, cell);
+            // 前方剖面落入已登记建筑或在役世界机器的结构保护区时，不挖穿它，交给选向拐弯避开或停下。
+            StructureProtection structure = permission.structureBlockAt(where);
+            if (structure.protects()) return Optional.of(protectedStructure(cell, structure));
             Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                    position(context, cell), site.blockType(context, cell));
+                    where, site.blockType(context, cell));
             if (refused.isPresent()) return refused;
         }
         for (BlockPos cell : StairStepShape.surroundings(feet, way)) {
@@ -411,6 +418,13 @@ final class StairsDownDigging implements Action {
         return Problem.of(Problem.Kind.NOT_FOUND, "往下挖楼梯：前面 " + at(cell) + " 在自己家里，不在自家底下挖");
     }
 
+    // 前方格属于已登记建筑或在役机器的结构保护区：返回需确认问题，驱动楼梯自动拐弯避开或停下。
+    private Problem protectedStructure(BlockPos cell, StructureProtection structure) {
+        return Problem.of(Problem.Kind.NEED_APPROVAL,
+                "往下挖楼梯：前面 " + at(cell) + structure.describe() + "，不为挖楼梯或通道拆它，停在这里",
+                "换个方向避开建筑与机器，或确实要拆时用 gather 点名那一格");
+    }
+
     private Problem hotFloor(TickContext context, BlockPos floor) {
         return Problem.of(Problem.Kind.DANGER, "往下挖楼梯：下一级 " + at(floor.above()) + " 脚下是 "
                 + site.blockType(context, floor) + "，站上去会烫脚，不往这边走");
@@ -430,9 +444,13 @@ final class StairsDownDigging implements Action {
                 return turnOrFinish(Problem.of(Problem.Kind.STUCK, "往下挖楼梯：" + at(cell) + " 挖了 "
                         + digsThisStep + " 下还没挖通，上面可能一直在往下掉沙砾"));
             }
+            WorldPosition where = position(context, cell);
+            // 逐格开挖前复核结构保护区，防止落沙后露出或档案刚刷新进入的建筑/机器格被挖穿。
+            StructureProtection structure = permission.structureBlockAt(where);
+            if (structure.protects()) return turnOrFinish(protectedStructure(cell, structure));
             String blockType = site.blockType(context, cell);
             Optional<Problem> refused = permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,
-                    position(context, cell), blockType);
+                    where, blockType);
             if (refused.isPresent()) return turnOrFinish(refused.get());
             boolean aboveGravity = site.fallingBlock(context, cell.above())
                     || site.hasFallingEntityAbove(context, cell);
@@ -580,7 +598,8 @@ final class StairsDownDigging implements Action {
         for (int k = 0; k < ClientStairsDown.CHAIN_REACH; k++) {
             BlockPos cell = trigger.relative(heading, k).below(down ? k : 0);
             WorldPosition where = position(context, cell);
-            if (k > 0 && (atHome(context, cell) || permission.archivedBuildingAt(where).isPresent())) break;
+            // 连锁沿线遇到自家营地、已登记建筑或在役世界机器时立即截断，不把受保护结构连带挖掉。
+            if (k > 0 && (atHome(context, cell) || permission.structureBlockAt(where).protects())) break;
             if (site.ground(context, cell) != ClientStairsDown.Ground.DIGGABLE) break;
             String blockType = site.blockType(context, cell);
             if (permission.blockAllowed(permissions, PermissionCheck.WorldAction.DIG_BLOCK,

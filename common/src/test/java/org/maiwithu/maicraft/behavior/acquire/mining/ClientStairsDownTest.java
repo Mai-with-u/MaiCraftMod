@@ -24,13 +24,16 @@ import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
 import org.maiwithu.maicraft.behavior.interaction.spi.BreakAccelerator;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
+import org.maiwithu.maicraft.behavior.permission.FarmlandIrrigation;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsBlockOwnership;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
 import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
+import org.maiwithu.maicraft.behavior.permission.ReadsStructureProtection;
 import org.maiwithu.maicraft.behavior.permission.SeesVillagers;
+import org.maiwithu.maicraft.behavior.permission.StructureProtection;
 import org.maiwithu.maicraft.behavior.permission.TrustedPlayers;
 import org.maiwithu.maicraft.game.interaction.DigToolUse;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -224,13 +227,18 @@ class ClientStairsDownTest {
     private final Digs digs = new Digs(world);
     /** 受保护的格子：圈起来的地盘，许可检查点拒绝挖。 */
     private final Set<BlockPos> protectedCells = new HashSet<>();
+    /** 结构保护区里的格子（例如营地外的在役机器）：下挖楼梯、隧道与连锁必须避开。 */
+    private final Map<BlockPos, StructureProtection> structureCells = new HashMap<>();
 
     private ClientStairsDown stairs() {
+        ReadsStructureProtection structures = position -> structureCells.getOrDefault(
+                new BlockPos(position.x(), position.y(), position.z()), StructureProtection.NONE);
         PermissionCheck check = new PermissionCheck(
                 new Protection((dimension, x, y, z) -> Optional.empty(),
                         () -> protectedCells.stream()
                                 .map(cell -> new RememberedRegion("别人的地盘", new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), null), 0)).toList(),
-                        name -> Optional.empty(), "self"),
+                        name -> Optional.empty(), "self", SeesVillagers.NOBODY, ReadsOwnHome.NOWHERE, id -> id,
+                        structures, FarmlandIrrigation.WaterGrid.EMPTY),
                 new ReadsCreatureSituation() {
                     @Override public Optional<CreatureSituation> situationOf(UUID entityId) {
                         return Optional.empty();
@@ -763,5 +771,46 @@ class ClientStairsDownTest {
         prospectSeeing(40, 0, feet -> feet.getZ() >= 18);
         assertEquals(2, digs.chainAttempts, "区块 0 试一次，跨进区块 1 后恢复再试一次");
         assertTrue(digs.skippedChainDigs >= 6);
+    }
+
+    @Test
+    void 下挖楼梯单步剖面与连锁遇到营地外在役机器自动避开不挖穿() {
+        // 场景 A：北侧前方第一级就是营地外在役机器格，楼梯应自动转到东侧挖下去，机器格一格不碰。
+        BlockPos northMachine = new BlockPos(0, 63, -1);
+        structureCells.put(northMachine, StructureProtection.machine("鼓风洗矿机"));
+
+        assertInstanceOf(ActionStatus.Done.class, run(2));
+        assertFalse(digs.dug.contains(northMachine), "单步剖面必须避开在役机器格：" + digs.dug);
+        assertEquals(new BlockPos(1, 63, 0), digs.dug.getFirst(), "北侧有机器，应自动转东侧开挖");
+
+        // 场景 B：四面都是机器结构保护，应直接以 NEED_APPROVAL 停下且一格不挖。
+        world.placed.clear();
+        world.feet = new BlockPos(0, 64, 0);
+        world.walkedTo.clear();
+        digs.dug.clear();
+        digs.types.clear();
+        structureCells.clear();
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            structureCells.put(new BlockPos(0, 63, 0).relative(side), StructureProtection.machine("地下动力炉"));
+        }
+        ActionStatus.Failed blocked = assertInstanceOf(ActionStatus.Failed.class, run(1));
+        assertEquals(Problem.Kind.NEED_APPROVAL, blocked.problem().kind());
+        assertTrue(blocked.problem().message().contains("地下动力炉"), blocked.problem().message());
+        assertTrue(digs.dug.isEmpty(), "四面受机器结构保护时不得开挖任何一格");
+
+        // 场景 C：斜线连锁下挖前方第 4 级埋着在役机器格，lineAhead 必须截断并在到达前拐弯绕开。
+        world.placed.clear();
+        world.feet = new BlockPos(0, 64, 0);
+        world.walkedTo.clear();
+        digs.dug.clear();
+        digs.types.clear();
+        digs.chains.clear();
+        digs.chaining = true;
+        structureCells.clear();
+        BlockPos buriedMachine = new BlockPos(0, 60, -4);
+        structureCells.put(buriedMachine, StructureProtection.machine("地下刷石机"));
+
+        assertInstanceOf(ActionStatus.Done.class, run(6));
+        assertFalse(digs.dug.contains(buriedMachine), "连锁斜线与单步下挖都绝不能挖穿前方埋着的在役机器：" + digs.dug);
     }
 }

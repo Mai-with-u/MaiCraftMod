@@ -22,6 +22,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.permission.PermissionCheck;
+import org.maiwithu.maicraft.behavior.permission.StructureProtection;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.interaction.DigTool;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -214,9 +215,10 @@ public final class MiningSource implements ItemSource {
                     + " 格会掉出" + what + "的地面都在床、箱子或工作台旁边的营地范围内，不在营地地面就地往下挖坑；走出营地或放大搜索半径再取");
         }
         if (!seen.isEmpty() && outside.isEmpty()) {
+            StructureProtection hit = structureOf(seen.getFirst(), context.characterAt().dimension());
             return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的 " + seen.size() + " 格会掉出" + what
-                    + "的方块都在建筑档案「" + buildingOf(seen.getFirst(), context.characterAt().dimension())
-                    + "」上，不拆房子当材料；真要拆就用 gather 点名那一格，或者换个地方找");
+                    + "的方块都" + hit.describe()
+                    + "，不拆建筑或机器当材料；真要拆就用 gather 点名那一格，或者换个地方找");
         }
         if (!seen.isEmpty()) {
             return new SourceQuote.Unavailable(describe(), "半径 " + radius + " 格内看得见的 " + seen.size() + " 格会掉出" + what
@@ -235,12 +237,12 @@ public final class MiningSource implements ItemSource {
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
-        // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准；刚试过做不成的格这一阵不挑。
+        // 动手前重新扫一遍：问价到动手之间矿可能被挖走了，以现场为准；先过滤建筑/机器结构保护格，再去掉近期失败格。
         String dimension = context.characterAt().dimension();
         List<MinableSpot> spots = SurfaceMiningPolicy.prioritizeExposed(
                 SurfaceMiningPolicy.outsideCampFlatGround(
-                        withoutFailed(minables.minable(request.wanted(), request.dropsFrom(),
-                                context.characterAt(), searchRadius(context)), dimension),
+                        withoutFailed(outsideBuildings(minables.minable(request.wanted(), request.dropsFrom(),
+                                context.characterAt(), searchRadius(context)), dimension), dimension),
                         dimension, campground),
                 context.characterAt());
         if (spots.isEmpty() && !minables.scanComplete()) {
@@ -420,15 +422,15 @@ public final class MiningSource implements ItemSource {
                 .toList();
     }
 
-    // 不在建筑档案里任何一栋图上的那些格。
+    // 不在已登记建筑档案或在役机器档案结构保护区上的那些格。
     private List<MinableSpot> outsideBuildings(List<MinableSpot> spots, String dimension) {
-        return spots.stream().filter(spot -> buildingOf(spot, dimension).isEmpty()).toList();
+        return spots.stream().filter(spot -> !structureOf(spot, dimension).protects()).toList();
     }
 
-    // 这一格在哪一栋的图上；不在为空串。
-    private String buildingOf(MinableSpot spot, String dimension) {
+    // 这一格受哪一路结构保护（建筑档案或在役世界机器）；不在结构保护区里为 NONE。
+    private StructureProtection structureOf(MinableSpot spot, String dimension) {
         BlockPos pos = spot.pos();
-        return permission.archivedBuildingAt(new WorldPosition(pos.getX(), pos.getY(), pos.getZ(), dimension)).orElse("");
+        return permission.structureBlockAt(new WorldPosition(pos.getX(), pos.getY(), pos.getZ(), dimension));
     }
 
     /**
@@ -630,7 +632,7 @@ public final class MiningSource implements ItemSource {
             Optional<String> blockType = minables.minableAt(request.wanted(), request.dropsFrom(), pos);
             if (blockType.isEmpty()) return false;
             WorldPosition at = new WorldPosition(pos.getX(), pos.getY(), pos.getZ(), here.dimension());
-            if (permission.archivedBuildingAt(at).isPresent()) return false;
+            if (permission.structureBlockAt(at).protects()) return false;
             if ((campground.covers(at) || permission.atOwnHome(at)) && !SurfaceMiningPolicy.isLog(blockType.get())) {
                 return false;
             }

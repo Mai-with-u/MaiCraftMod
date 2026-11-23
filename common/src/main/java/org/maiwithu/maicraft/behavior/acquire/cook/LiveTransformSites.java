@@ -18,9 +18,11 @@ import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransform;
 import org.maiwithu.maicraft.behavior.acquire.spi.FluidTransforms;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ScanTargets;
+import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
 /**
  * 往水里扔料要看的现场的生产读端：配方按当刻角色的客户端世界读；水格按方块扫描找认的那种流体的方块，
@@ -56,14 +58,25 @@ public final class LiveTransformSites implements TransformSites {
         if (targets.isEmpty()) return new Pools(List.of(), true);
         registered.ensure(level, targets);
         var result = services.blockScans().query(level, center, targets, WANT, radius / 16 + 1, BUILD_BUDGET, Set.of(), true);
+        String dimension = level.dimension().location().toString();
         List<Pool> pools = new ArrayList<>();
         for (BlockPos hit : result.hits()) {
             double distance = Math.sqrt(hit.distSqr(center));
             if (distance > radius || !TransformSites.usable(level, hit, fluids)) continue;
+            // 流体转化选水格时避开圈地保护与结构保护区（建筑水池、机器洗格水、耕地非无限灌溉水源）。
+            WorldPosition spot = new WorldPosition(hit.getX(), hit.getY(), hit.getZ(), dimension);
+            if (!isAllowedPool(services.protection(), spot)) continue;
             boolean crowded = !level.getEntitiesOfClass(ItemEntity.class, new AABB(hit).inflate(CROWD_RADIUS)).isEmpty();
             pools.add(new Pool(hit.immutable(), distance, crowded));
         }
         return new Pools(TransformSites.order(pools), result.complete());
+    }
+
+    /** 流体转化能否借用这格静水：同时避开圈地保护与建筑/机器/农田灌溉结构保护区。 */
+    static boolean isAllowedPool(Protection protection, WorldPosition spot) {
+        if (protection == null) return true;
+        return !protection.blockProtected(spot, null, Set.of())
+                && !protection.structureFluidAt(spot).protects();
     }
 
     // 认的流体对应的方块：水和流动的水都是水方块，按流体自己给的方块形态认。

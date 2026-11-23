@@ -201,7 +201,7 @@ public final class ExplosionTransformPlan {
      * 在候选空地集合里挑选满足全部安全与权限条件的爆炸点：
      * <ul>
      * <li>远离记住的区域、额外保护的地标（{@link Protection#protectedAreaNear}）、自家（{@link Protection#homeOf}）
-     * 与建筑档案（{@link Protection#archivedBuildingAt}）；</li>
+     * 与结构保护区（{@link Protection#structureBlockAt}）；</li>
      * <li>半径内没有机器/方块实体；</li>
      * <li>放爆点与邻格（原版 TNT 再校验爆破邻域）逐格通过 {@link PermissionCheck#blockAllowed}；</li>
      * <li>同平面旁边有开阔丢料格（距爆点 1 格，稳落在 ±1 格 2×2×2 盒内）以及足够远的撤退立足格。</li>
@@ -217,7 +217,7 @@ public final class ExplosionTransformPlan {
         for (BlockPos spot : candidates) {
             if (!probe.openGround(spot)) continue;
             WorldPosition worldPos = new WorldPosition(spot.getX(), spot.getY(), spot.getZ(), dimension);
-            // 保护范围校验：记住的区域、额外保护的地标、自家与已建建筑全部避让。
+            // 保护范围校验：记住的区域、额外保护的地标、自家与建筑/机器结构保护区全部避让。
             Optional<String> nearProtected = protection.protectedAreaNear(
                     worldPos, loadout.safeRadius(), permissions.protectedLandmarks());
             if (nearProtected.isPresent()) {
@@ -226,10 +226,10 @@ public final class ExplosionTransformPlan {
                         "走到远离保护区与地标的开阔空地再执行奇点爆炸转化");
                 continue;
             }
-            if (protection.homeOf(worldPos).isPresent() || protection.archivedBuildingAt(worldPos).isPresent()) {
+            if (protection.homeOf(worldPos).isPresent() || protection.structureBlockAt(worldPos).protects()) {
                 lastApproval = Problem.of(Problem.Kind.NEED_APPROVAL,
-                        spot.toShortString() + " 位于自家或已建建筑保护范围内，不能在此引爆",
-                        "走到远离基地与建筑的开阔空地再执行奇点爆炸转化");
+                        spot.toShortString() + " 位于自家、已建建筑或在役机器保护范围内，不能在此引爆",
+                        "走到远离基地、建筑与机器的开阔空地再执行奇点爆炸转化");
                 continue;
             }
             if (probe.hasMachineNear(spot, machineRadius)) {

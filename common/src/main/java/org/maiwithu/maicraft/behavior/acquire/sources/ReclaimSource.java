@@ -100,7 +100,7 @@ public final class ReclaimSource implements ItemSource {
         }
         return new SourceQuote.Unavailable(describe(), "半径 " + (int) radius(context) + " 格内没有记得的、"
                 + "自己放下或自己睡过的还在原处的" + request.wanted().describe()
-                + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的、村里睡过的床不收）");
+                + "（只收床、工作台、熔炉：睡过的床、用过或见过的台子和炉子；家附近的、村里睡过的床、建筑或机器里的不收）");
     }
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
@@ -164,7 +164,10 @@ public final class ReclaimSource implements ItemSource {
             if (record.kind() != MemoryKind.WORKSTATION || type == null || !reclaimable(type)) continue;
             if (!request.wanted().matches(type, tags.tagsOf(type))) continue;
             WorldPosition at = record.position();
-            if (!type.equals(blocks.blockTypeAt(at).orElse(null)) || protection.insideHome(at)) continue;
+            // 不拆记住的家附近、已登记建筑档案或在役世界机器档案里的工作站。
+            if (!type.equals(blocks.blockTypeAt(at).orElse(null))
+                    || protection.insideHome(at)
+                    || protection.structureBlockAt(at).protects()) continue;
             // 记忆里亲手睡过的床是自己的：不用等归属问到、也不看是不是写着自己放的；
             // 记录写明是别人放的让开，村里的床也让开（睡过一张村民的床不等于床是自己的，村民还要睡）。
             boolean sleptIn = SleptBeds.sleptIn(record);

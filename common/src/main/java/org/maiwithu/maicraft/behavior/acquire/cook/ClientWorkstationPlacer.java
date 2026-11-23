@@ -31,6 +31,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.WalkTo;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.navigation.util.BlockPassability;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.worldmemory.WorldMemory;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -78,20 +79,29 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
     private final CollectsBlocks collects;
     /** 泡在水里时先游到附近岸边干地再摆台；没接上时只看当场身边与浅水底。 */
     private final WalkTo walks;
+    /** 保护判断：就地摆临时工作站或原木基底时避开圈地与建筑/机器结构保护区；没接上为 null。 */
+    private final Protection protection;
 
     public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
             WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects) {
-        this(interactions, toMainhand, memory, context, collects, null);
+        this(interactions, toMainhand, memory, context, collects, null, null);
     }
 
     public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
             WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects, WalkTo walks) {
+        this(interactions, toMainhand, memory, context, collects, walks, null);
+    }
+
+    public ClientWorkstationPlacer(Interactions interactions, ClientMovesToMainhand toMainhand,
+            WorldMemory memory, Supplier<PlayerContext> context, CollectsBlocks collects, WalkTo walks,
+            Protection protection) {
         this.interactions = Objects.requireNonNull(interactions, "interactions");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
         this.memory = Objects.requireNonNull(memory, "memory");
         this.context = Objects.requireNonNull(context, "context");
         this.collects = Objects.requireNonNull(collects, "collects");
         this.walks = walks;
+        this.protection = protection;
     }
 
     @Override
@@ -316,7 +326,27 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
             return this.spot = best;
         }
 
+        private boolean isProtectedCell(PlayerContext current, BlockPos cell) {
+            if (protection == null || current == null || current.level() == null) return false;
+            WorldPosition spot = new WorldPosition(cell.getX(), cell.getY(), cell.getZ(),
+                    current.level().dimension().location().toString());
+            return protection.blockProtected(spot, blockType, Set.of())
+                    || protection.structureBlockAt(spot).protects();
+        }
+
+        // 浅水中落工作台会直接顶替水格：额外避开建筑水池、机器流体与耕地非无限灌溉水源。
+        private boolean isProtectedFluidCell(PlayerContext current, BlockPos cell) {
+            if (protection == null || current == null || current.level() == null) return false;
+            WorldPosition spot = new WorldPosition(cell.getX(), cell.getY(), cell.getZ(),
+                    current.level().dimension().location().toString());
+            return protection.structureFluidAt(spot).protects();
+        }
+
         private boolean placeableAt(PlayerContext current, BlockPos cell) {
+            // 落点落在圈地或结构保护区（建筑/机器）里时跳过，不在建筑结构或机器格里摆临时方块再挖回。
+            if (isProtectedCell(current, cell)) {
+                return false;
+            }
             BlockState state = current.level().getBlockState(cell);
             // 空着，或长着草、花这类可被顶替的；水、岩浆里不放（点不到，放下去也泡着）。
             if (!state.isAir() && !state.canBeReplaced() || !state.getFluidState().isEmpty()) {
@@ -394,7 +424,10 @@ public final class ClientWorkstationPlacer implements SetsUpWorkstation, ReadsBl
         }
 
         private boolean placeableSubmergedAt(PlayerContext current, BlockPos cell, Vec3 eye) {
-            if (!current.level().isLoaded(cell)) return false;
+            if (!current.level().isLoaded(cell) || isProtectedCell(current, cell)
+                    || isProtectedFluidCell(current, cell)) {
+                return false;
+            }
             BlockState state = current.level().getBlockState(cell);
             if (!BlockPassability.isWater(state) || !state.canBeReplaced()) return false;
             BlockState placed = blockOf(blockType).orElseThrow().defaultBlockState();

@@ -24,6 +24,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -86,13 +87,13 @@ public final class WaterFillSource implements ItemSource {
         if (!request.wanted().matches(WATER_BUCKET, services.itemTags().tagsOf(WATER_BUCKET))) {
             return new SourceQuote.Unavailable(describe(), "水边只装得了水桶和水瓶");
         }
-        List<BlockPos> water = refillingWater(context.characterAt());
+        List<BlockPos> water = refillingWater(context.characterAt(), context.permissions());
         if (water.isEmpty() && !lastScanComplete) {
             return new SourceQuote.NotYet(describe(), "附近的水还没扫完，这一刻说不准有没有");
         }
         if (water.isEmpty()) {
             return new SourceQuote.Unavailable(describe(), "半径 " + SEARCH_RADIUS_BLOCKS
-                    + " 格内没有舀了会自己补回来的水（两边挨着水源的池塘、河、海）；孤零零一两格的水是机器或刚放的，不舀");
+                    + " 格内没有不受保护且舀了会自己补回来的水（池塘、河、海）；圈地、建筑、机器、农田灌溉水与孤零零一两格水都不舀");
         }
         BlockPos nearest = water.getFirst();
         WorldPosition here = context.characterAt();
@@ -108,14 +109,15 @@ public final class WaterFillSource implements ItemSource {
         return WATER_BOTTLE.specifier().equals(request.wanted().specifier());
     }
 
-    // 水瓶的报价：哪一格水源都行，最近的那格按路程算；身上的玻璃瓶够几瓶报几瓶，不够的先去弄。
+    // 水瓶的报价：不受保护的露天水源都行，最近的那格按路程算；身上的玻璃瓶够几瓶报几瓶，不够的先去弄。
     private SourceQuote quoteBottles(ItemRequest request, SourceContext context) {
-        List<BlockPos> water = waterSources(context.characterAt(), false);
+        List<BlockPos> water = waterSources(context.characterAt(), context.permissions(), false);
         if (water.isEmpty() && !lastScanComplete) {
             return new SourceQuote.NotYet(describe(), "附近的水还没扫完，这一刻说不准有没有");
         }
         if (water.isEmpty()) {
-            return new SourceQuote.Unavailable(describe(), "半径 " + SEARCH_RADIUS_BLOCKS + " 格内没有露天的水源，装不了水瓶");
+            return new SourceQuote.Unavailable(describe(), "半径 " + SEARCH_RADIUS_BLOCKS
+                    + " 格内没有不受保护的露天水源（圈地、建筑、机器与农田灌溉水不取），装不了水瓶");
         }
         BlockPos nearest = water.getFirst();
         WorldPosition here = context.characterAt();
@@ -129,7 +131,7 @@ public final class WaterFillSource implements ItemSource {
 
     @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
         if (wantsWaterBottle(request)) return beginBottles(request, context);
-        List<BlockPos> water = refillingWater(context.characterAt());
+        List<BlockPos> water = refillingWater(context.characterAt(), context.permissions());
         if (water.isEmpty()) return Optional.empty();
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
@@ -143,7 +145,7 @@ public final class WaterFillSource implements ItemSource {
 
     // 装水瓶：玻璃瓶不够先经引擎弄够 → 走到水边 → 玻璃瓶换到主手 → 一瓶一瓶装，装够或瓶子用完为止。
     private Optional<Action> beginBottles(ItemRequest request, SourceContext context) {
-        List<BlockPos> water = waterSources(context.characterAt(), false);
+        List<BlockPos> water = waterSources(context.characterAt(), context.permissions(), false);
         if (water.isEmpty()) return Optional.empty();
         Permissions permissions = context.permissions();
         List<Action> steps = new ArrayList<>();
@@ -164,29 +166,41 @@ public final class WaterFillSource implements ItemSource {
         return CarriedItems.matching(services.backpack(), null, WATER_BOTTLE, services.itemTags());
     }
 
-    // 附近舀了会自己补回来的水源格，由近及远；角色不在世界里给空。
-    private List<BlockPos> refillingWater(WorldPosition center) {
-        return waterSources(center, true);
+    // 附近不受保护且舀了会自己补回来的水源格，由近及远；角色不在世界里给空。
+    private List<BlockPos> refillingWater(WorldPosition center, Permissions permissions) {
+        return waterSources(center, permissions, true);
     }
 
-    // 附近的水源格，由近及远：refillingOnly 时只要舀了会补回来的（装水桶），否则露天的都算（装水瓶不会把水装少）。
-    private List<BlockPos> waterSources(WorldPosition center, boolean refillingOnly) {
+    // 附近不受保护的水源格，由近及远：refillingOnly 时只要舀了会补回来的（装水桶），否则露天的都算（装水瓶）。
+    private List<BlockPos> waterSources(WorldPosition center, Permissions permissions, boolean refillingOnly) {
         PlayerContext player = services.context().get();
         ClientLevel level = player == null ? null : player.level();
         if (level == null) return List.of();
         Set<Block> targets = Set.of(Blocks.WATER);
         registered.ensure(level, targets);
         BlockPos at = new BlockPos(center.x(), center.y(), center.z());
+        String dimension = center.dimension() != null ? center.dimension() : level.dimension().location().toString();
+        Set<String> protectedLandmarks = permissions == null ? Set.of() : permissions.protectedLandmarks();
         var result = services.blockScans().query(level, at, targets, WANT, SEARCH_RADIUS_BLOCKS / 16 + 1, BUILD_BUDGET,
                 Set.of(), true);
         lastScanComplete = result.complete();
         List<BlockPos> hits = new ArrayList<>();
         for (BlockPos hit : result.hits()) {
             boolean usable = refillingOnly ? refills(level, hit) : bottleFills(level, hit);
-            if (Math.sqrt(hit.distSqr(at)) <= SEARCH_RADIUS_BLOCKS && usable) hits.add(hit.immutable());
+            if (!usable || Math.sqrt(hit.distSqr(at)) > SEARCH_RADIUS_BLOCKS) continue;
+            WorldPosition spot = new WorldPosition(hit.getX(), hit.getY(), hit.getZ(), dimension);
+            if (!isAllowedWater(services.protection(), spot, protectedLandmarks)) continue;
+            hits.add(hit.immutable());
         }
         hits.sort(Comparator.comparingDouble(hit -> hit.distSqr(at)));
         return hits;
+    }
+
+    /** 自动装水允许取水的保护判断：同时避开圈地保护、额外保护地标，以及建筑/机器/农田灌溉结构保护区。 */
+    static boolean isAllowedWater(Protection protection, WorldPosition spot, Set<String> protectedLandmarks) {
+        if (protection == null) return true;
+        return !protection.blockProtected(spot, "minecraft:water", protectedLandmarks)
+                && !protection.structureFluidAt(spot).protects();
     }
 
     // 舀了会自己补回来：水平四邻里至少两格是水源，底下是实心方块或水源（原版无限水的规矩）；头顶露天好舀。

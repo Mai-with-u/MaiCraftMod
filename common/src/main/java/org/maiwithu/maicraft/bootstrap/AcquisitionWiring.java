@@ -100,7 +100,7 @@ final class AcquisitionWiring {
         ClientYieldScans yieldScans = new ClientYieldScans(deps.world().blockScans(), deps.character().context(), deps.world().generatedTerrain());
         ClientWorkstationPlacer placer = new ClientWorkstationPlacer(
                 deps.hands().interactions(), toMainhand, deps.world().memory(), deps.character().context(), collects,
-                deps.travel().walks());
+                deps.travel().walks(), deps.guards().protection());
         RecipeSource craftSource = new RecipeSource(
                 Set.of(WorkstationRecipe.Kind.CRAFTING, WorkstationRecipe.Kind.STONECUTTING),
                 recipeReads, deps.world().memory(), recipeReads, recipeRuns,
@@ -261,7 +261,7 @@ final class AcquisitionWiring {
         return new InWorldBlockTransform.Seams(
                 placer, placer, InWorldBlockTransform.liveApplier(deps.character().context(),
                         playerServices.toMainhand(), deps.hands().interactions(), playerServices.sneak(),
-                        deps.items().itemTags()), collects, drops);
+                        deps.items().itemTags()), collects, drops, deps.guards().protection());
     }
 
     /** 原版斧头去皮来源：在身边放下一格未去皮木料，拿斧头削皮再当场挖回，归入合成途径。 */
