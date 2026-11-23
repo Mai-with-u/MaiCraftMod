@@ -246,8 +246,9 @@ class McpTransportHttpTest {
 
     @Test
     void resourcesListAndReadExposeBundledSkills() throws Exception {
+        SkillLibrary skills = new SkillLibrary(mod -> true);
         EmbeddedMcpService withSkills = new EmbeddedMcpService(McpConfig.local(0),
-                new ToolDispatcher(List.of()), new SkillLibrary(mod -> true));
+                new ToolDispatcher(List.of()), skills);
         withSkills.start();
         try {
             URI endpoint = URI.create("http://127.0.0.1:" + withSkills.port() + "/mcp");
@@ -257,7 +258,8 @@ class McpTransportHttpTest {
 
             HttpResponse<String> list = post(skillsSession, 90, "resources/list", new JsonObject(), null, endpoint, null);
             JsonArray resources = result(list).getAsJsonArray("resources");
-            assertEquals(12, resources.size(), "十二篇随包技能都在目录里");
+            // 随包技能总数由 SkillLibraryTest 守护，这里只验证 HTTP resources/list 原样暴露全部技能目录。
+            assertEquals(skills.catalog().size(), resources.size(), "随包技能目录全部经 HTTP resources/list 暴露");
             JsonObject opening = null;
             for (JsonElement element : resources) {
                 JsonObject resource = element.getAsJsonObject();
