@@ -88,6 +88,11 @@ final class UseSeams {
             return Optional.empty();
         }
 
+        /** 那一格是原版营火时此刻的点燃状态与烤位占用数；不是营火或没加载为空。 */
+        default Optional<CampfireStatus> campfire(BlockPos cell) {
+            return Optional.empty();
+        }
+
         /** 那一格正上方的方块有没有把整格底面封死：没封死（空气、溜槽、漏斗）时能点到工作盆顶面盆口边沿。 */
         default boolean topRimOpen(BlockPos cell) {
             return air(cell.above());
@@ -163,6 +168,15 @@ final class UseSeams {
          * @param count  这一堆有几个
          */
         record Held(String itemId, int count) {}
+
+        /**
+         * 原版营火此刻的实时状态：是否点燃、当前架上已占几格、总烤位数。
+         *
+         * @param lit      是否点燃
+         * @param occupied 当前已放置食物的烤位数
+         * @param capacity 总烤位数（原版营火固定为 4）
+         */
+        record CampfireStatus(boolean lit, int occupied, int capacity) {}
     }
 
     /**
@@ -278,6 +292,14 @@ final class UseSeams {
          */
         default String whyOthers(ResolvedTarget target, Set<String> protectedLandmarks) {
             return "玩家放的或在玩家的地盘里";
+        }
+
+        /**
+         * 目标是否落入「结构保护区」（已登记建筑、在役机器、耕地非无限灌溉水源）且本次持物操作属于破坏性或舀取流体：
+         * 非破坏性普通交互（开门、按按钮、开箱、往营火放食物、点燃营火或蜡烛等）返回空；命中时返回结构保护说明。
+         */
+        default Optional<String> structureGuardReason(String heldItem, ResolvedTarget target) {
+            return Optional.empty();
         }
 
         /**

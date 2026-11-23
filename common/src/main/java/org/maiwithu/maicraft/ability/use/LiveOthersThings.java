@@ -2,7 +2,9 @@
 package org.maiwithu.maicraft.ability.use;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -24,11 +26,13 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.Protection;
 import org.maiwithu.maicraft.behavior.permission.ReadsCreatureSituation;
+import org.maiwithu.maicraft.behavior.permission.StructureProtection;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -121,6 +125,57 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         if (target.isEntity()) return "有主（有名字、被驯服、拴着绳、圈养着）或是玩家";
         // 说清是哪一路挡的：记住的区域，还是额外保护的地标。只在指着的那一格被拒时问这里。
         return guard.describe(guard.protectedBy(cellOf(target), blockId(target), protectedLandmarks));
+    }
+
+    @Override
+    public Optional<String> structureGuardReason(String heldItem, ResolvedTarget target) {
+        Protection guard = protection.get();
+        if (guard == null || target == null || target.isEntity()) return Optional.empty();
+        return structureGuard(guard, heldItem, target, cellOf(target));
+    }
+
+    /**
+     * 结构保护区对 use 的纯判断：只拦截会破坏方块或舀取流体的手势（空桶舀取、满桶倾倒、非照明设施点火、
+     * 锄/锹改形、斧头去皮刮铜、刷子，以及常见破坏性工具标签），开门、按按钮、开箱、往营火放食物与点燃营火/蜡烛一律放行。
+     */
+    static Optional<String> structureGuard(Protection guard, String heldItem, ResolvedTarget target,
+            WorldPosition spot) {
+        if (guard == null || target == null || target.isEntity()) return Optional.empty();
+        ItemUseAim.Gesture gesture = gestureForGuard(heldItem);
+        StructureProtection hit = switch (gesture) {
+            case SCOOP -> guard.structureFluidAt(spot);
+            case POUR, TRANSFORM_TOOL, STRIP_TOOL, BRUSH -> guard.structureBlockAt(spot);
+            case IGNITE -> isIgnitableLightFacility(target.typeId())
+                    ? StructureProtection.NONE : guard.structureBlockAt(spot);
+            case EMPTY_HAND, USE_TARGET, OWN_USE, UNSUPPORTED -> StructureProtection.NONE;
+        };
+        return hit.protects() ? Optional.of(hit.describe()) : Optional.empty();
+    }
+
+    // 除具体物品 ID 外，备手前提前识别常见破坏性工具标签，避免传标签配纯坐标绕过结构保护或白跑备手流程。
+    private static ItemUseAim.Gesture gestureForGuard(String heldItem) {
+        ItemUseAim.Gesture direct = ItemUseAim.gestureOf(heldItem);
+        if (direct != ItemUseAim.Gesture.USE_TARGET || heldItem == null || !heldItem.startsWith("#")) {
+            return direct;
+        }
+        String tag = heldItem.toLowerCase(Locale.ROOT);
+        if (tag.equals("#minecraft:hoes") || tag.equals("#minecraft:shovels")
+                || tag.equals("#c:tools/hoe") || tag.equals("#c:tools/shovel")) {
+            return ItemUseAim.Gesture.TRANSFORM_TOOL;
+        }
+        if (tag.equals("#minecraft:axes") || tag.equals("#c:tools/axe")) {
+            return ItemUseAim.Gesture.STRIP_TOOL;
+        }
+        return direct;
+    }
+
+    // 营火、灵魂营火与蜡烛/蜡烛蛋糕本身靠打火石点亮使用，不属于纵火破坏建筑。
+    private static boolean isIgnitableLightFacility(String blockId) {
+        if (blockId == null) return false;
+        String lower = blockId.toLowerCase(Locale.ROOT);
+        return lower.equals("minecraft:campfire") || lower.equals("minecraft:soul_campfire")
+                || lower.endsWith("_candle") || lower.equals("minecraft:candle")
+                || lower.endsWith("_candle_cake") || lower.equals("minecraft:candle_cake");
     }
 
     /** 这一格最后由谁放下，说成名字：动别人放的东西时回报里写明。归属没问到、自己放的给 null。 */

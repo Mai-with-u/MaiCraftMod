@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.ability.use;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -10,6 +11,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
@@ -24,6 +26,9 @@ import org.maiwithu.maicraft.kernel.result.Change;
  * 变成了黑曜石，就记黑曜石。对实体用时骑上了记移动，其余记对实体的影响。
  */
 final class UseChanges {
+
+    /** 原版营火方块：烤制行为遵循固定原版规则（点燃后约 30 秒烤熟自动弹出），不属于不认识的加工容器。 */
+    static final Set<String> CAMPFIRE_BLOCKS = Set.of("minecraft:campfire", "minecraft:soul_campfire");
 
     /** 带方块实体但只是收纳摆设或感测装置、不是加工容器的原版方块：排除后其余吃掉手中物品的方块实体按未知加工容器如实说明。 */
     private static final Set<String> NON_PROCESSOR_BLOCK_ENTITIES = Set.of(
@@ -144,11 +149,12 @@ final class UseChanges {
         return true;
     }
 
-    // 目标方块带方块实体，且不是普通储物容器、床、告示牌或纯摆设：把手中物品塞进去后，Mod 不掌握它的加工条件与产出。
+    // 目标方块带方块实体，且不是原版营火、普通储物容器、床、告示牌或纯摆设：把手中物品塞进去后，Mod 不掌握它的加工条件与产出。
     private static boolean isUnknownProcessorBlock(UseSeams.ReadsWorld world, FacilityKinds facilities,
             ResolvedTarget target) {
         String typeId = target.typeId();
-        if (typeId == null || NON_PROCESSOR_BLOCK_ENTITIES.contains(typeId) || FacilityKinds.isBed(typeId)) {
+        if (typeId == null || CAMPFIRE_BLOCKS.contains(typeId)
+                || NON_PROCESSOR_BLOCK_ENTITIES.contains(typeId) || FacilityKinds.isBed(typeId)) {
             return false;
         }
         if (world.sign(target.cell()) != UseSeams.ReadsWorld.Sign.NOT_A_SIGN) {
@@ -178,5 +184,82 @@ final class UseChanges {
         record.accept(new Change(Change.Kind.ITEM_CONSUMED, before.itemId(), 1, "用掉了"));
         now.ifPresent(held -> record.accept(new Change(Change.Kind.ITEM_GAINED, held.itemId(), 1, "拿在了手上")));
         return true;
+    }
+
+    /**
+     * 追踪往原版营火放食物的状态变化，防止把拿圆石等方块潜行或贴着营火放进旁格误报成「已放上营火」。
+     * 出手前记录营火已占烤位与六邻格同名方块，生效时核对未潜行、未在旁格新落块且烤位增加或尚有空位。
+     */
+    static final class CampfirePlacement {
+        private int occupiedBefore = -1;
+        private Set<BlockPos> matchingNeighborsBefore = Set.of();
+        private boolean placed;
+
+        // 出手前冻结营火烤位与六邻格现状，供生效后分辨食物上火还是旁格落块。
+        void beforeInteract(UseSeams.ReadsWorld world, ResolvedTarget target,
+                UseSeams.ReadsWorld.Held heldBefore, boolean sneak) {
+            occupiedBefore = !sneak && target != null && !target.isEntity()
+                    ? world.campfire(target.cell()).map(UseSeams.ReadsWorld.CampfireStatus::occupied).orElse(-1)
+                    : -1;
+            matchingNeighborsBefore = occupiedBefore >= 0 && heldBefore != null
+                    ? matchingNeighbors(world, target.cell(), heldBefore.itemId())
+                    : Set.of();
+        }
+
+        // 主手消耗并生效后核对：未潜行、未拆解、未在营火旁格新落块，且烤位增加或出手前尚有空位才记为放上营火。
+        void afterConsumed(UseSeams.ReadsWorld world, ResolvedTarget target,
+                UseSeams.Built.Ready interaction, boolean sneak, boolean disassembled) {
+            if (sneak || disassembled || occupiedBefore < 0 || target == null || target.isEntity()
+                    || interaction == null || interaction.gesture() != ItemUseAim.Gesture.USE_TARGET
+                    || interaction.heldBefore() == null) {
+                return;
+            }
+            if (placedBlockBeside(world, target.cell(), interaction.heldBefore().itemId(), matchingNeighborsBefore)) {
+                return;
+            }
+            Optional<UseSeams.ReadsWorld.CampfireStatus> after = world.campfire(target.cell());
+            if (after.isPresent()
+                    && (after.get().occupied() > occupiedBefore || occupiedBefore < after.get().capacity())) {
+                placed = true;
+            }
+        }
+
+        // 确认放上营火后按实时点燃状态与烤位占用数给明确结论；未放上营火返回 null。
+        String summary(UseSeams.ReadsWorld world, ResolvedTarget target, boolean disassembled) {
+            if (!placed || disassembled || target == null || target.isEntity()) return null;
+            Optional<UseSeams.ReadsWorld.CampfireStatus> status = world.campfire(target.cell());
+            if (status.isEmpty()) return null;
+            UseSeams.ReadsWorld.CampfireStatus nowCampfire = status.get();
+            // 放上食物已确认消耗主手，若方块实体同步包晚到一刻尚未刷新，至少按当前已占 1 格算，不误报 0/4。
+            int occupied = Math.max(1, nowCampfire.occupied());
+            int capacity = Math.max(occupied, nowCampfire.capacity());
+            if (nowCampfire.lit()) {
+                return "已放上营火（已点燃，当前 " + occupied + "/" + capacity
+                        + " 格，约 30 秒烤熟后会自动弹出成掉落物，无需右键取下）";
+            }
+            return "已放上营火，但营火目前未点燃，不会烤熟，请先用打火石或火焰弹点火（当前 " + occupied + "/" + capacity + " 格）";
+        }
+
+        private static Set<BlockPos> matchingNeighbors(UseSeams.ReadsWorld world, BlockPos center, String blockId) {
+            Set<BlockPos> matched = new HashSet<>();
+            for (Direction side : Direction.values()) {
+                BlockPos neighbor = center.relative(side);
+                if (world.blockId(neighbor).map(blockId::equals).orElse(false)) {
+                    matched.add(neighbor.immutable());
+                }
+            }
+            return Set.copyOf(matched);
+        }
+
+        private static boolean placedBlockBeside(UseSeams.ReadsWorld world, BlockPos center, String heldItemId,
+                Set<BlockPos> before) {
+            for (Direction side : Direction.values()) {
+                BlockPos neighbor = center.relative(side);
+                if (!before.contains(neighbor) && world.blockId(neighbor).map(heldItemId::equals).orElse(false)) {
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }

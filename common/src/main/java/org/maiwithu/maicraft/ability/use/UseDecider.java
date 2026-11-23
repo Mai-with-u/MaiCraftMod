@@ -103,6 +103,13 @@ final class UseDecider {
                 "投固体原料请站到盆边用 drop 扔进盆口、用 machine_run，或用漏斗对准工作盆所在的那一格本身输入；真要改工作盆的配方产物过滤请用 machine_configure 设 filter");
     }
 
+    /** 空手右键营火没有交互效果的游戏事实说明。类别：F 游戏事实（原版营火仅接受放入可烤食物，烤熟自动弹出成掉落物，不支持右键取物）。 */
+    static Problem campfireEmptyHandProblem() {
+        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                "营火不支持右键取物：点燃后约 30 秒烤熟会自动弹出成掉落物（走近自动捡起或用 gather 捡掉落物）；未点燃或未烤熟的食物无法右键取下",
+                "先用 observe(detail) 查看营火是否点燃及架上食物；未点燃请先用打火石或火焰弹点火，烤熟弹出后走近或用 gather 捡起掉落物");
+    }
+
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */
     record Rejection(String message, String suggestion) {}
 

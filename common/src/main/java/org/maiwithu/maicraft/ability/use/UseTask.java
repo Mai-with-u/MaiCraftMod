@@ -64,7 +64,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private Action prepared;
     /** 落实下来的目标；只对手上的东西用时为 null。 */
     private ResolvedTarget target;
-    /** 这一下会改动别人放在角色家里的那一格时，回报里补的归属半句；不是为空串。 */
+    /** 本次目标是否由观察编号直接点名（点名即显式许可，备手后复核结构保护时放行）。 */
+    private boolean targetNamed;
     /** 动过的这格最后由谁放下：收场时写进说明，主播看得出动的是谁的东西；归属没问到为空串。 */
     private String othersAtHome = "";
     /** 出手前趁原方块还在冻结好的改动通报：确认生效时触发一次，连点同一格不重复报。 */
@@ -97,6 +98,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private boolean placedIntoUnrecognizedProcessor;
     private boolean openedUnrecognizedBlockMenu;
     private boolean consumedHeldInUse;
+    /** 追踪原版营火放食物状态变化，区分食物上火与拿方块贴着营火落块。 */
+    private final UseChanges.CampfirePlacement campfirePlacement = new UseChanges.CampfirePlacement();
     /** 出手前背包物品计数快照：用于识别潜行右键拆解或转化进背包的物品。 */
     private Map<String, Integer> backpackBefore = Map.of();
     /** 交互中拆解/转化进背包的产物描述；没有为 null。 */
@@ -151,13 +154,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             }
             case UseTargets.Lookup.TravelFirst travel -> startTravel(travel.where(), travel.heightKnown());
             case UseTargets.Lookup.Failed failed -> stop(failed.problem());
-            case UseTargets.Lookup.Found found -> found(found.target());
+            case UseTargets.Lookup.Found found -> found(found.target(), found.named());
         };
     }
 
-    private Next<Phase> found(ResolvedTarget resolved) {
+    private Next<Phase> found(ResolvedTarget resolved, boolean named) {
         // 指定了点哪一面：靠近与出手都只认方块朝这一面的表面；要连着点的每一下只等几刻。
         target = resolved.facing(input.face()).quickly(input.keepTrying() > 0);
+        targetNamed = named;
         // 会改动它时记下最后由谁放下，收场时写进那句话，主播知情；归属没问到、自己放的不写。
         UseSeams.OthersThings others = services.others();
         String modifiedBy = others == null ? null : others.lastModifiedBy(target);
@@ -287,6 +291,13 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         if (target == null) {
             return interactNow();
         }
+        // 备手完成后拿实际主手物品对非点名方块目标复核结构保护：
+        // 覆盖任意自定义工具标签（备手前还看不出最终拿到手的具体工具），只拦破坏性/舀流体手势，不误拦普通交互。
+        if (!target.isEntity() && !targetNamed) {
+            String actualHeld = services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse(input.item());
+            Optional<Problem> refused = UseTargets.guardStructureAfterHand(services, target, actualHeld);
+            if (refused.isPresent()) return stop(refused.get());
+        }
         if (!target.isEntity() && UseDecider.BASIN_BLOCK.equals(target.typeId()) && !input.writesText()) {
             String held = services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse(input.item());
             if (held != null && !services.world().interactsWithBasin(held)) {
@@ -307,9 +318,13 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             Optional<BlockPos> source = services.world().nearestSource(target.cell(), SOURCE_SEARCH_RADIUS);
             if (source.isEmpty()) {
                 return stop(Problem.of(Problem.Kind.NOT_FOUND, target.describe() + " 是流动的，"
-                        + SOURCE_SEARCH_RADIUS + " 格内没有同种的源格可舀", null));
+                        + SOURCE_SEARCH_RADIUS + " 格内没有连通的同种源格可舀", null));
             }
-            target = target.movedTo(source.get(), "点到的是流动的，改舀最近的源格");
+            ResolvedTarget redirected = target.movedTo(source.get(), "点到的是流动的，改舀最近的源格");
+            String heldItem = services.world().heldItem().map(UseSeams.ReadsWorld.Held::itemId).orElse(input.item());
+            Optional<Problem> refused = UseTargets.guardRedirectedScoop(services, input, redirected, heldItem);
+            if (refused.isPresent()) return stop(refused.get());
+            target = redirected;
             recordAttempt("对流动的格子舀", "空桶只舀得起源格，改舀 " + source.get().toShortString());
         }
         return approach();
@@ -363,6 +378,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 }
                 interaction = ready;
                 backpackBefore = services.world().backpackCounts();
+                campfirePlacement.beforeInteract(services.world(), target, ready.heldBefore(), input.sneak());
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
                 chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
                 dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
@@ -464,6 +480,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                         if (!gains.isEmpty()) {
                             disassembledSummary = interaction.heldBefore().itemId()
                                     + " 未放进方块，拆解/转化成了 " + UseChanges.formatGains(gains);
+                        } else {
+                            campfirePlacement.afterConsumed(services.world(), target, interaction, input.sneak(), false);
                         }
                     }
                     if (UseChanges.recordApplied(this::recordChange, services.world(), services.facilities(),
@@ -490,7 +508,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 recordUnconfirmed(new Change(Change.Kind.OTHER, describeWhat(), 1, unconfirmed.scene()));
                 yield Next.done(UseDecider.unconfirmed(appliedTimes, unconfirmed.scene()));
             }
-            case UseDecider.Settlement.NotApplied notApplied -> stop(notApplied.problem());
+            case UseDecider.Settlement.NotApplied notApplied -> {
+                // 空手右键原版营火无效果且游戏没有给其他拒绝提示时，直接给出营火不支持右键取物的游戏事实。
+                boolean emptyHandCampfire = notApplied.problem().kind() == Problem.Kind.NOT_POSSIBLE_HERE
+                        && target != null && !target.isEntity() && interaction.heldBefore() == null
+                        && (UseChanges.CAMPFIRE_BLOCKS.contains(target.typeId())
+                                || services.world().campfire(target.cell()).isPresent());
+                yield stop(emptyHandCampfire ? UseDecider.campfireEmptyHandProblem() : notApplied.problem());
+            }
         };
     }
 
@@ -677,6 +702,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         if (menuInsertion == UseSeams.MenuLook.Insertion.REJECTED && menuInsertItem != null) {
             return Next.done(TaskResult.done(describeTarget() + "：点开了界面，但手上的 " + menuInsertItem
                     + " 没有放进去（槽位已满或界面不收此物品）" + openedNote + tail));
+        }
+        // 往原版营火放入食物生效后，按当前点燃状态与烤位占用数给明确结论，不再笼统报“生效了 N 次”。
+        String campfireSummary = campfirePlacement.summary(services.world(), target, disassembledSummary != null);
+        if (campfireSummary != null) {
+            return Next.done(TaskResult.done(describeTarget() + "：" + campfireSummary + tail));
         }
         return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + openedNote + tail));
     }

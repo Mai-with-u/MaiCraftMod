@@ -24,10 +24,12 @@ import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.DoorBlock;
 import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
+import net.minecraft.world.level.block.entity.CampfireBlockEntity;
 import net.minecraft.world.level.block.entity.SignBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
@@ -111,6 +113,24 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
                 || state.getBlock() instanceof FenceGateBlock).map(state -> state.getValue(BlockStateProperties.OPEN));
     }
 
+    // 原版营火：读方块状态的点燃标记与方块实体四个烤位的占用数，供放食后给出准确回报。
+    @Override public Optional<CampfireStatus> campfire(BlockPos cell) {
+        ClientLevel level = level();
+        if (level == null || !level.isLoaded(cell)) return Optional.empty();
+        BlockState state = level.getBlockState(cell);
+        if (!(state.getBlock() instanceof CampfireBlock)) return Optional.empty();
+        boolean lit = state.hasProperty(CampfireBlock.LIT) && state.getValue(CampfireBlock.LIT);
+        int occupied = 0;
+        int capacity = 4;
+        if (level.getBlockEntity(cell) instanceof CampfireBlockEntity campfire) {
+            capacity = campfire.getItems().size();
+            for (ItemStack stack : campfire.getItems()) {
+                if (!stack.isEmpty()) occupied++;
+            }
+        }
+        return Optional.of(new CampfireStatus(lit, occupied, capacity));
+    }
+
     // 工作盆顶面四周边沿有 2/16 宽：只要正上方那一格底面不是整格实心封死的（空气、溜槽、漏斗都留着边沿），就能点到顶面。
     @Override public boolean topRimOpen(BlockPos cell) {
         ClientLevel level = level();
@@ -160,26 +180,18 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         return fluid.isSource() ? Fluid.SOURCE : Fluid.FLOWING;
     }
 
-    // 同种流体按流体类型自己的"是不是同一种"判断（流动的水与水源是同一种水）；只看已加载的格子。
+    // 沿连通的同种流体做三维广度优先搜索向源格回溯：只走已加载的同种流体格，绝不跨墙跨空气跳到另一片水体。
     @Override public Optional<BlockPos> nearestSource(BlockPos near, int radius) {
         ClientLevel level = level();
         if (level == null || !level.isLoaded(near)) return Optional.empty();
         FluidState kind = level.getFluidState(near);
         if (kind.isEmpty()) return Optional.empty();
-        BlockPos best = null;
-        double bestDistance = Double.MAX_VALUE;
-        for (BlockPos cell : BlockPos.betweenClosed(near.offset(-radius, -radius, -radius),
-                near.offset(radius, radius, radius))) {
-            if (!level.isLoaded(cell)) continue;
+        return ConnectedFluidSource.find(near, radius, cell -> {
+            if (!level.isLoaded(cell)) return Fluid.NONE;
             FluidState fluid = level.getFluidState(cell);
-            if (!fluid.isSource() || !fluid.getType().isSame(kind.getType())) continue;
-            double distance = cell.distSqr(near);
-            if (distance <= (double) radius * radius && distance < bestDistance) {
-                best = cell.immutable();
-                bestDistance = distance;
-            }
-        }
-        return Optional.ofNullable(best);
+            if (fluid.isEmpty() || !fluid.getType().isSame(kind.getType())) return Fluid.NONE;
+            return fluid.isSource() ? Fluid.SOURCE : Fluid.FLOWING;
+        });
     }
 
     // 告示牌的上蜡状态随方块实体同步到客户端：上过蜡的游戏不让改字。

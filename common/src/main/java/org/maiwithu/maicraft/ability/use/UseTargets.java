@@ -28,8 +28,8 @@ final class UseTargets {
 
     /** 找目标的结论。 */
     sealed interface Lookup {
-        /** 落实到了具体的一格或一只。 */
-        record Found(ResolvedTarget target) implements Lookup {}
+        /** 落实到了具体的一格或一只；named 为真表示由观察编号直接点名（点名即显式许可）。 */
+        record Found(ResolvedTarget target, boolean named) implements Lookup {}
 
         /** 不对着任何方块和实体用，只用手上的东西（喝药水、吹山羊角）。 */
         record HandOnly() implements Lookup {}
@@ -121,7 +121,7 @@ final class UseTargets {
         }
         ResolvesSeen.Resolved found = resolved.get();
         if (found.gameEntityId() != null) {
-            return entity(found.gameEntityId(), "观察编号 " + seenId);
+            return entity(found.gameEntityId(), "观察编号 " + seenId, true);
         }
         if (seenId.startsWith("f") && (input.block() != null || input.entity() != null)) {
             return search(found.blockPos());
@@ -193,7 +193,7 @@ final class UseTargets {
             SearchesNearby.EntityResult result = services.search().nearestEntity(input.entity(), center, radius,
                     this::othersCreature);
             if (result.found().isPresent()) {
-                return entity(result.found().getAsInt(), input.entity());
+                return entity(result.found().getAsInt(), input.entity(), false);
             }
             return result.scannedComplete() ? notFound(input.entity()) : new Lookup.Scanning("正在扫附近的" + input.entity());
         }
@@ -206,7 +206,7 @@ final class UseTargets {
     }
 
     // 一只实体：按编号找回当刻的它；准星选不中的（掉落物、经验球、箭）用不了；类型对不上就是换了东西。
-    private Lookup entity(int entityId, String label) {
+    private Lookup entity(int entityId, String label, boolean named) {
         Optional<UseSeams.ReadsWorld.SeenEntity> seen = services.world().entity(entityId);
         if (seen.isEmpty()) {
             return new Lookup.Failed(Problem.of(Problem.Kind.TARGET_GONE,
@@ -225,13 +225,14 @@ final class UseTargets {
             return new Lookup.Failed(Problem.of(Problem.Kind.TARGET_GONE,
                     "目标应为 " + input.entity() + "，现在是 " + now.typeId(), null));
         }
-        return new Lookup.Found(ResolvedTarget.entity(entityId, now.cell(), now.typeId()));
+        return new Lookup.Found(ResolvedTarget.entity(entityId, now.cell(), now.typeId()), named);
     }
 
-    // 按类型找到的一格是别人的、这次的用法又会改动它：跳过，记下跳过过。
+    // 按类型找到的一格受圈地保护或结构保护、这次的用法又会改动/破坏它：跳过，记下跳过过。
     private boolean othersBlock(BlockPos cell) {
         String now = services.world().blockId(cell).orElse("minecraft:air");
-        boolean skip = guarded(ResolvedTarget.block(cell, now, now), false);
+        ResolvedTarget candidate = ResolvedTarget.block(cell, now, now);
+        boolean skip = guarded(candidate, false) || structureGuarded(candidate).isPresent();
         skippedOthers |= skip;
         return skip;
     }
@@ -254,6 +255,48 @@ final class UseTargets {
                 && (pointed ? others.someoneElsesPointedAt(target, landmarks) : others.someoneElses(target, landmarks));
     }
 
+    // 结构保护区检查：非点名（纯坐标/地点直指或按类型查找）且会破坏或舀取流体时，拦截建筑、机器与农田灌溉水。
+    private Optional<String> structureGuarded(ResolvedTarget target) {
+        UseSeams.OthersThings others = services.others();
+        return others == null ? Optional.empty() : others.structureGuardReason(input.item(), target);
+    }
+
+    /**
+     * 备手完成后持实际主手物品对非点名方块目标复核结构保护：
+     * 覆盖任意自定义工具标签（备手前还看不出最终拿到手的具体工具），只拦截破坏性或舀取流体手势。
+     */
+    static Optional<Problem> guardStructureAfterHand(UseServices services, ResolvedTarget target, String heldItem) {
+        UseSeams.OthersThings others = services.others();
+        if (others == null || target == null || target.isEntity()) return Optional.empty();
+        return others.structureGuardReason(heldItem, target).map(why -> Problem.of(Problem.Kind.NEED_APPROVAL,
+                target.describe() + why + "，纯坐标直指不破坏或舀取受保护结构，不碰",
+                "确实要操作，请先 observe 获取目标的观察编号 b# 后点名执行"));
+    }
+
+    /**
+     * 空桶点到流动流体后自动改舀到同种源格时，必须对新坐标重跑圈地与结构保护检查：
+     * 即使原流动水格经过了点名或放行，也不能借自动改舀偷抽受保护区域、建筑、机器或农田的源格。
+     */
+    static Optional<Problem> guardRedirectedScoop(UseServices services, UseInput input, ResolvedTarget redirected,
+            String heldItem) {
+        UseSeams.OthersThings others = services.others();
+        if (others == null) return Optional.empty();
+        Set<String> landmarks = input.permissions().protectedLandmarks();
+        if (others.someoneElsesPointedAt(redirected, landmarks)) {
+            String why = others.whyOthers(redirected, landmarks);
+            return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
+                    "点到的是流动流体，追溯到的源格 " + redirected.describe() + why + "，不能自动改舀",
+                    "确实要舀这格源格，请先 observe 获取该源格的观察编号 b# 后点名执行"));
+        }
+        Optional<String> structureWhy = others.structureGuardReason(heldItem, redirected);
+        if (structureWhy.isPresent()) {
+            return Optional.of(Problem.of(Problem.Kind.NEED_APPROVAL,
+                    "点到的是流动流体，追溯到的源格 " + redirected.describe() + structureWhy.get() + "，不能自动改舀",
+                    "确实要舀这格源格，请先 observe 获取该源格的观察编号 b# 后点名执行"));
+        }
+        return Optional.empty();
+    }
+
     /** 一格方块是怎么落到这次 use 上的：点了观察编号、给了坐标或地点、按类型找到的。 */
     private enum Pick {
         /** LLM 用观察编号点名：点名就是许可，不问保护。 */
@@ -264,7 +307,7 @@ final class UseTargets {
         FOUND
     }
 
-    // 一格方块：没加载先走过去；给了 block 就核对那一格现在是不是它；不是点名的，别人的东西用法会改动它时不碰。
+    // 一格方块：没加载先走过去；给了 block 就核对那一格现在是不是它；不是点名的，圈地与结构保护区里的破坏/舀取不碰。
     private Lookup block(BlockPos cell, String label, Pick pick) {
         if (!services.world().loaded(cell)) {
             return travelTo(cell);
@@ -284,7 +327,15 @@ final class UseTargets {
                     target.describe() + why + "，这样用会改动它，不碰",
                     "确实要用，就先 observe 再用观察编号点名它"));
         }
-        return new Lookup.Found(target);
+        if (pick != Pick.NAMED) {
+            Optional<String> structureWhy = structureGuarded(target);
+            if (structureWhy.isPresent()) {
+                return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
+                        target.describe() + structureWhy.get() + "，纯坐标直指不破坏或舀取受保护结构，不碰",
+                        "确实要操作，请先 observe 获取目标的观察编号 b# 后点名执行"));
+            }
+        }
+        return new Lookup.Found(target, pick == Pick.NAMED);
     }
 
     private Lookup travelTo(BlockPos cell) {
