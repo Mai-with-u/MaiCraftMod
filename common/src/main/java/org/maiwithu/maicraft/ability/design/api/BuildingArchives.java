@@ -95,9 +95,9 @@ public final class BuildingArchives {
         return out;
     }
 
-    /** 这一格落在哪一栋的范围里；落在好几栋里时取范围最小的那栋（贴得最近的那一栋）。 */
+    /** 这一格落在哪一栋在役建筑的范围里；落在好几栋里时取范围最小的那栋（贴得最近的那一栋），已退役的跳过。 */
     public Optional<BuildingArchive> containing(String dimension, BlockPos pos) {
-        return all().stream().filter(archive -> archive.contains(dimension, pos))
+        return all().stream().filter(archive -> !archive.removed() && archive.contains(dimension, pos))
                 .min(Comparator.comparingLong(archive -> archive.bounds().volume()));
     }
 
@@ -153,6 +153,8 @@ public final class BuildingArchives {
             archive.placedCells().forEach(pos -> placed.add(pos.asLong()));
             root.add("placed_cells", placed);
         }
+        // 已退役标记：退役后解除结构保护区保护，原蓝图与记录保留。
+        if (archive.removed()) root.addProperty("removed", true);
         return root.toString();
     }
 
@@ -168,10 +170,12 @@ public final class BuildingArchives {
         if (root.has("placed_cells")) {
             for (JsonElement pos : root.getAsJsonArray("placed_cells")) placed.add(BlockPos.of(pos.getAsLong()));
         }
+        // 兼容旧档：缺少 removed 字段一律视为在役（false）。
+        boolean removed = root.has("removed") && root.get("removed").getAsBoolean();
         return new BuildingArchive(root.get("name").getAsString(), root.get("dimension").getAsString(),
                 BlockPos.of(root.get("anchor").getAsLong()), root.get("rotation").getAsInt(),
                 root.has("design_id") ? root.get("design_id").getAsString() : null, cells,
                 root.has("last_check_at") ? Instant.parse(root.get("last_check_at").getAsString()) : null,
-                note, readFromSite, placed);
+                note, readFromSite, placed, removed);
     }
 }

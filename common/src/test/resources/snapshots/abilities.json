@@ -123,7 +123,7 @@
       {
         "ability": "maicraft:design",
         "summary": "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
-        "parameters": "operation: string (create / update / inspect / preview / export / read_site), drawing?: object, design_id?: string, edits?: object, name?: string, save_archive?: boolean, radius?: integer (0..15), page: integer (0..1000000) = 0, rotation: integer (0..270) = 0, format: string (json / nbt) = json",
+        "parameters": "operation: string (create / update / inspect / preview / export / read_site / remove_archive), drawing?: object, design_id?: string, edits?: object, name?: string, save_archive?: boolean, radius?: integer (0..15), page: integer (0..1000000) = 0, rotation: integer (0..270) = 0, format: string (json / nbt) = json",
         "targets": [
           "here",
           "landmark",
@@ -921,14 +921,15 @@
           "name": "operation",
           "type": "string",
           "required": true,
-          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）",
+          "doc": "create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）；remove_archive 退役已废弃或已拆除的建筑档案并解除结构保护（传 name 或 target 指档案名，原蓝图保留）",
           "choices": [
             "create",
             "update",
             "inspect",
             "preview",
             "export",
-            "read_site"
+            "read_site",
+            "remove_archive"
           ]
         },
         {
@@ -953,7 +954,7 @@
           "name": "name",
           "type": "string",
           "required": false,
-          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字"
+          "doc": "inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字。remove_archive 用：要退役解除结构保护的建筑档案名（也可经 target 传入地标名）"
         },
         {
           "name": "save_archive",

@@ -84,6 +84,12 @@ public record DesignDetails(
                 null, null, null, layout, null, null);
     }
 
+    /** 只带档案名：remove_archive 退役解除保护时用。 */
+    static DesignDetails archiveOnly(String archiveName) {
+        return new DesignDetails(null, null, null, null, null, null, null, null, null, null, null,
+                null, null, null, null, null, archiveName);
+    }
+
     // LLM 读完现场，角色闲着时扫过那一栋：长的那一边两头与中间，高的再抬头看一眼顶；
     // 读的是图纸（没落在现场）时没有可看的。
     @Override public List<WorldPosition> pointsAt() {

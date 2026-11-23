@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.ability.machine.api;
 
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -10,18 +11,28 @@ import net.minecraft.world.level.block.Rotation;
 
 /**
  * 已建档的机器（`machine_build` 建的、`machine_inspect(operation=read_site)` 读的）：按一格找它属于哪一台，
- * 以及组装、拆回物理结构时让组装器所在的那份档案跟着结构走。档案读不出来按没有对待。
+ * 列出在役世界机器供结构保护区快照读取，以及组装、拆回物理结构时让组装器所在的那份档案跟着结构走。档案读不出来按没有对待。
  */
 public interface ArchivedMachines {
 
     /**
-     * 这个维度里声明了这一格要放方块、还没拆除的那一份档案；几份都盖住时取档案名排在前面的那份，没有为空。
+     * 这个维度里声明了这一格要放方块或流体源、还没拆除的那一份档案；几份都盖住时取档案名排在前面的那份，没有为空。
      * 记在物理结构上的档案不算（它的格在结构的地块里）。
      *
      * @param dimension 维度 ID，例如 minecraft:overworld
      * @param cell      世界坐标的一格
      */
     Optional<Machine> covering(String dimension, BlockPos cell);
+
+    /** 这个世界里所有未拆除、且当前在世界里（非物理结构上）的机器档案：含方块格与流体源格，供结构保护区快照使用。 */
+    default List<ActiveMachine> activeInWorld() {
+        return List.of();
+    }
+
+    /** 机器档案库这一刻的修订记号：每次存盘或退役都会变化，供保护快照避免无变化时重复解码。 */
+    default String revision() {
+        return "";
+    }
 
     /** 记在这个物理结构上、还没拆除的那份档案名；没有为空。 */
     default Optional<String> onStructure(String structureId) {
@@ -58,12 +69,27 @@ public interface ArchivedMachines {
      * 一台机器落地后的样子。
      *
      * @param name   档案名
-     * @param blocks 蓝图里声明要放方块的每一格（世界坐标）；清空的格与倒桶的格不算
+     * @param blocks 蓝图里声明要放方块与流体源的每一格（世界坐标）；清空的格不算
      */
     record Machine(String name, Set<BlockPos> blocks) {
         public Machine {
             Objects.requireNonNull(name, "name");
             blocks = Set.copyOf(blocks);
+        }
+    }
+
+    /**
+     * 一台在役世界机器的结构保护格快照。
+     *
+     * @param name      档案名
+     * @param dimension 机器所在维度 ID
+     * @param cells     蓝图落地后声明的全部非空气格（含方块格与流体源格，世界坐标）
+     */
+    record ActiveMachine(String name, String dimension, Set<BlockPos> cells) {
+        public ActiveMachine {
+            Objects.requireNonNull(name, "name");
+            Objects.requireNonNull(dimension, "dimension");
+            cells = Set.copyOf(cells);
         }
     }
 

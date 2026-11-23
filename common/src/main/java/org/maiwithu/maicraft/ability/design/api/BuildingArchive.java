@@ -11,6 +11,7 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Rotation;
 import org.maiwithu.maicraft.behavior.construction.Blueprint;
+import org.maiwithu.maicraft.behavior.construction.CellKind;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 
 /**
@@ -29,21 +30,29 @@ import org.maiwithu.maicraft.behavior.construction.PlannedCell;
  *                      她按图盖的为假。圈"她自己的家"不认读来的档
  * @param placedCells   她施工时确认真放下过方块的格（世界坐标，几次施工合起来）：圈"她自己的家"只认这些格外扩一圈，
  *                      不认整张蓝图。被保护拒绝过的那次施工不往这里添
+ * @param removed       已退役标记：退役后的废弃/已拆除建筑不再受结构保护区保护，蓝图记录仍保留
  */
 public record BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
                               List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote, boolean readFromSite,
-                              List<BlockPos> placedCells) {
+                              List<BlockPos> placedCells, boolean removed) {
 
     /** 她按图盖的一栋，还没记下真放下过哪几格：盖完时由施工记账补上。 */
     public BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
                            List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote) {
-        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, false, List.of());
+        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, false, List.of(), false);
     }
 
     /** 读现场建的档（readFromSite 为真）或别的不带放下格的档。 */
     public BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
                            List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote, boolean readFromSite) {
-        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, readFromSite, List.of());
+        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, readFromSite, List.of(), false);
+    }
+
+    /** 兼容不传退役标记的构造：默认在役（removed=false）。 */
+    public BuildingArchive(String name, String dimension, BlockPos anchor, int rotation, String designId,
+                           List<PlannedCell> cells, Instant lastCheckAt, String lastCheckNote, boolean readFromSite,
+                           List<BlockPos> placedCells) {
+        this(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote, readFromSite, placedCells, false);
     }
 
     public BuildingArchive {
@@ -71,10 +80,15 @@ public record BuildingArchive(String name, String dimension, BlockPos anchor, in
         return this.dimension.equals(dimension) && bounds().contains(pos);
     }
 
-    /** 换一份整栋蓝图（新一版图纸或并过补丁）与这次比对的结论：名字、维度、锚点、朝向不动。 */
+    /** 档案中声明为非空气（方块或流体源）的格数：用于过滤历史上误存的单格残档。 */
+    public long nonAirCellCount() {
+        return cells.stream().filter(cell -> cell.kind() != CellKind.AIR).count();
+    }
+
+    /** 换一份整栋蓝图（新一版图纸或并过补丁）与这次比对的结论：名字、维度、锚点、朝向不动；重新施工视作重新生效。 */
     public BuildingArchive with(List<PlannedCell> merged, String newDesignId, Instant checkedAt, String checkNote) {
         return new BuildingArchive(name, dimension, anchor, rotation, newDesignId, merged, checkedAt, checkNote,
-                readFromSite, placedCells);
+                readFromSite, placedCells, false);
     }
 
     /** 再记上这次施工确认真放下过的几格：和以前记的合起来，同一格只记一次。 */
@@ -82,6 +96,12 @@ public record BuildingArchive(String name, String dimension, BlockPos anchor, in
         List<BlockPos> all = new ArrayList<>(placedCells);
         all.addAll(more);
         return new BuildingArchive(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote,
-                readFromSite, all);
+                readFromSite, all, removed);
+    }
+
+    /** 退役标记：解除该建筑档案的结构保护，原蓝图与历史记录保留。 */
+    public BuildingArchive markRemoved() {
+        return new BuildingArchive(name, dimension, anchor, rotation, designId, cells, lastCheckAt, lastCheckNote,
+                readFromSite, placedCells, true);
     }
 }

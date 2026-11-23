@@ -177,4 +177,37 @@ class MachineArchivesTest {
         MachineArchives archives = new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1");
         assertTrue(archives.find("没有的机器").isEmpty());
     }
+
+    @Test
+    void 机器坐标提取包含流体源格_activeInWorld与revision随在役与退役更新() {
+        MachineArchives archives = new MachineArchives(new DocumentStore(tempDir.resolve("state.sqlite")), "world1");
+        MachineBlueprint washer = new MachineBlueprint(List.of(
+                PlannedCell.block(new BlockPos(0, 0, 0), Blocks.STONE.defaultBlockState(), Set.of()),
+                PlannedCell.fluid(new BlockPos(1, 0, 0), Blocks.WATER.defaultBlockState()),
+                PlannedCell.air(new BlockPos(2, 0, 0))),
+                List.of(), List.of(), List.of(), List.of());
+        BlockPos anchor = new BlockPos(10, 64, 10);
+        String rev0 = archives.revision();
+        assertTrue(archives.save(MachineArchive.fresh("鼓风洗矿机", "minecraft:overworld", anchor, washer, null)));
+        String rev1 = archives.revision();
+        assertFalse(rev1.isEmpty());
+        assertFalse(rev1.equals(rev0), "保存机器档案后修订记号更新");
+
+        // FLUID_SOURCE（洗格水）必须包含在 blocksOf、covering 与 activeInWorld 中，AIR 不包含。
+        BlockPos waterCell = new BlockPos(11, 64, 10);
+        BlockPos airCell = new BlockPos(12, 64, 10);
+        assertTrue(archives.covering("minecraft:overworld", waterCell).isPresent(), "机器里的水源格必须命中 covering");
+        assertTrue(archives.covering("minecraft:overworld", airCell).isEmpty(), "清空格不命中 covering");
+        List<ArchivedMachines.ActiveMachine> active = archives.activeInWorld();
+        assertEquals(1, active.size());
+        assertEquals("鼓风洗矿机", active.getFirst().name());
+        assertTrue(active.getFirst().cells().contains(new BlockPos(10, 64, 10)));
+        assertTrue(active.getFirst().cells().contains(waterCell), "在役机器快照必须包含 FLUID_SOURCE 流体源格");
+        assertFalse(active.getFirst().cells().contains(airCell));
+
+        // 标记拆除后不再出现在 activeInWorld，且修订记号再次变化。
+        assertTrue(archives.save(archives.find("鼓风洗矿机").orElseThrow().markRemoved()));
+        assertTrue(archives.activeInWorld().isEmpty(), "已拆除机器不进入在役快照");
+        assertFalse(archives.revision().equals(rev1));
+    }
 }

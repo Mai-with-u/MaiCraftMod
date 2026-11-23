@@ -12,6 +12,7 @@ import java.util.Set;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchive;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.behavior.construction.CellKind;
 import org.maiwithu.maicraft.behavior.construction.PlannedCell;
 import org.maiwithu.maicraft.behavior.permission.ReadsOwnHome;
 import org.maiwithu.maicraft.behavior.survival.beds.SleptBeds;
@@ -72,11 +73,16 @@ final class OwnHomeSnapshot implements ReadsOwnHome {
         Map<String, Map<BlockPos, String>> cells = new HashMap<>();
         List<Bounds> bounds = new ArrayList<>();
         for (BuildingArchive archive : archives.all()) {
-            // 取材时不拆房子：每一栋图上的格都记下，读现场建的也算（多半是别人的房子，更不能拆）。
-            Map<BlockPos, String> inDimension = cells.computeIfAbsent(archive.dimension(), dimension -> new HashMap<>());
-            List<PlannedCell> laid = archive.laid().cells();
-            addBounds(bounds, archive.dimension(), laid);
-            for (PlannedCell cell : laid) inDimension.putIfAbsent(cell.pos().immutable(), archive.name());
+            // 已退役建筑不再算家、不再参与建筑保护。
+            if (archive.removed()) continue;
+            // 取材时不拆房子：每一栋有效建筑（过滤历史单格残档）的非空气格都记下，读现场建的也算。
+            if (archive.nonAirCellCount() >= StructureProtectionSnapshot.MIN_VALID_BUILDING_CELLS) {
+                Map<BlockPos, String> inDimension = cells.computeIfAbsent(archive.dimension(), dimension -> new HashMap<>());
+                List<PlannedCell> nonAir = archive.laid().cells().stream()
+                        .filter(cell -> cell.kind() != CellKind.AIR).toList();
+                addBounds(bounds, archive.dimension(), nonAir);
+                for (PlannedCell cell : nonAir) inDimension.putIfAbsent(cell.pos().immutable(), archive.name());
+            }
             // 读现场建的档可能是别人的房子；没记下真放下过哪几格的旧档也不认：宁可认小。
             if (archive.readFromSite() || archive.placedCells().isEmpty()) continue;
             buildings.add(new Building(archive.name(), archive.dimension(), Set.copyOf(archive.placedCells())));

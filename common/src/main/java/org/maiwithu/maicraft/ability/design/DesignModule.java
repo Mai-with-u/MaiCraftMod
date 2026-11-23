@@ -67,15 +67,17 @@ public final class DesignModule implements AbilityModule {
             "画一张建筑图纸、改它、看它、投影到世界里预览，或导出成结构文件；图纸不绑地点",
             AbilityDoc.forAbility("design"),
             ParamSpecs.of(
-                    ParamSpec.of("operation", ParamType.CHOICE).required().choices("create", "update", "inspect", "preview", "export", "read_site")
+                    ParamSpec.of("operation", ParamType.CHOICE).required().choices("create", "update", "inspect", "preview", "export", "read_site", "remove_archive")
                             .doc("create 新建；update 按名合并修改成新的一版；inspect 看；preview 投到 target 预览；export 导出；"
-                                    + "read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）").build(),
+                                    + "read_site 默认只读勘查，把 target 处已有的一栋建筑读成临时图纸与布局，不建永久建筑档案（需建档时传 save_archive=true 与 name）；"
+                                    + "remove_archive 退役已废弃或已拆除的建筑档案并解除结构保护（传 name 或 target 指档案名，原蓝图保留）").build(),
                     ParamSpec.of("drawing", ParamType.JSON_OBJECT).doc("create 用：图纸正文，格式看 lookup(topic=knowledge, id=building/design)，屋顶看 lookup(topic=knowledge, id=building/roofs)").build(),
                     ParamSpec.of("design_id", ParamType.TEXT).doc("update / inspect / preview / export 用：设计编号").build(),
                     ParamSpec.of("edits", ParamType.JSON_OBJECT)
                             .doc("update 用：按名合并的修改，字段 objects、materials、components、remove_objects、remove_components、block_state_axes、overlap_policy、name").build(),
                     ParamSpec.of("name", ParamType.TEXT).doc("inspect 用：看某个对象（展开路径也行）；看组件在名字前加 component:。"
-                            + "read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字").build(),
+                            + "read_site 用：临时图纸的名字；配合 save_archive=true 且该处尚无档案时作为新建永久建筑档案的名字。"
+                            + "remove_archive 用：要退役解除结构保护的建筑档案名（也可经 target 传入地标名）").build(),
                     ParamSpec.of("save_archive", ParamType.BOOLEAN)
                             .doc("read_site 用：是否把读出的现场保存为永久建筑档案，默认 false（只读勘查生成临时图纸，不建永久档案、不记进世界记忆）；true 时必须传非空 name").build(),
                     ParamSpec.of("radius", ParamType.INTEGER).range(0, 15)
@@ -127,6 +129,7 @@ public final class DesignModule implements AbilityModule {
                 case "preview" -> preview(step);
                 case "export" -> export(params);
                 case "read_site" -> readSite(step);
+                case "remove_archive" -> removeArchive(step);
                 default -> fail("不认识的操作：" + operation, Problem.Kind.INVALID_PARAMETER, null);
             };
         } catch (IllegalArgumentException invalid) {
@@ -275,6 +278,34 @@ public final class DesignModule implements AbilityModule {
                 + (read.unseen() > 0 ? "（" + read.unseen() + " 格没看到）" : "") + "，存成图纸 " + design.id();
         return done(summary, DesignDetails.of(design.id(), null, compiled)
                 .withSite(at, read.unseen(), drawn, layout, check, archiveName));
+    }
+
+    // 退役已废弃或已拆除的建筑档案：保留蓝图历史记录，只打上退役标记，立即解除该建筑的结构保护。
+    private StepDecision removeArchive(StepContext step) {
+        ParamValues params = step.goal().params();
+        String archiveName = params.has("name") ? params.text("name").trim() : null;
+        if ((archiveName == null || archiveName.isEmpty()) && step.goal().target() instanceof Target.Landmark landmark) {
+            archiveName = landmark.name().trim();
+        }
+        if (archiveName == null || archiveName.isEmpty()) {
+            return fail("remove_archive 要给出要退役的建筑档案名", Problem.Kind.INVALID_PARAMETER,
+                    "通过 name 或 target（landmark 写法）传入建筑档案名");
+        }
+        var found = records.archives().find(archiveName);
+        if (found.isEmpty()) {
+            return fail("没有「" + archiveName + "」这份建筑档案", Problem.Kind.NOT_FOUND,
+                    "核对建筑档案名再试");
+        }
+        BuildingArchive archive = found.get();
+        if (archive.removed()) {
+            return fail("建筑档案「" + archive.name() + "」已经是退役状态", Problem.Kind.NOT_POSSIBLE_HERE,
+                    "无需重复退役；该区域已不再受此建筑档案的结构保护");
+        }
+        if (!records.archives().save(archive.markRemoved())) {
+            return fail("建筑档案「" + archive.name() + "」退役状态保存失败", Problem.Kind.INTERNAL_ERROR, null);
+        }
+        return done("已退役建筑档案「" + archive.name() + "」，解除其结构保护（蓝图记录已保留）",
+                DesignDetails.archiveOnly(archive.name()));
     }
 
     private StepDecision askWhich(String name, BuildingRecords.Lookup.Ambiguous ambiguous) {

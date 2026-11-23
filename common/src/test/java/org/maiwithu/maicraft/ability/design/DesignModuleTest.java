@@ -12,14 +12,19 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.block.Blocks;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.design.api.DesignStore;
+import org.maiwithu.maicraft.behavior.construction.PlannedCell;
+import org.maiwithu.maicraft.behavior.construction.PlannedCellCodec;
 import org.maiwithu.maicraft.kernel.storage.DocumentStore;
 import org.maiwithu.maicraft.ability.design.api.BuildingRecords;
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
@@ -233,5 +238,58 @@ class DesignModuleTest {
         raw = operation("inspect");
         raw.addProperty("design_id", "00000000-0000-0000-0000-000000000000");
         assertEquals(Problem.Kind.INVALID_PARAMETER, run(null, raw).problem().kind(), "编号不存在");
+    }
+
+    @Test
+    void 退役建筑档案_显式标记removed解除保护_重复退役与不存在各报准确问题() throws Exception {
+        // 先经 read_site + save_archive 建一份永久建筑档案。
+        JsonObject save = operation("read_site");
+        save.addProperty("name", "旧木屋");
+        save.addProperty("save_archive", true);
+        assertEquals(TaskResult.Status.DONE, run(new Target.Position(2, 64, 0, null), save).status());
+        String revBefore = archives.revision();
+        assertTrue(!archives.find("旧木屋").orElseThrow().removed());
+
+        // 显式 remove_archive 退役：落盘 removed=true、蓝图保留、修订号推进。
+        JsonObject remove = operation("remove_archive");
+        remove.addProperty("name", "旧木屋");
+        TaskResult retired = run(null, remove);
+        assertEquals(TaskResult.Status.DONE, retired.status(), retired.summary());
+        assertEquals("旧木屋", assertInstanceOf(DesignDetails.class, retired.details()).archive());
+        assertTrue(archives.find("旧木屋").orElseThrow().removed(), "退役标记已落盘");
+        assertTrue(!archives.revision().equals(revBefore), "退役后档案修订号变化以刷新结构保护快照");
+        assertTrue(archives.containing(DIM, new BlockPos(2, 64, 0)).isEmpty(), "已退役档案不再命中 containing");
+
+        // 重复退役：报 NOT_POSSIBLE_HERE。
+        TaskResult again = run(new Target.Landmark("旧木屋"), operation("remove_archive"));
+        assertEquals(TaskResult.Status.FAILED, again.status());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, again.problem().kind());
+
+        // 不存在的档案名：报 NOT_FOUND；缺少名字：报 INVALID_PARAMETER。
+        JsonObject missing = operation("remove_archive");
+        missing.addProperty("name", "不存在的房子");
+        assertEquals(Problem.Kind.NOT_FOUND, run(null, missing).problem().kind());
+        assertEquals(Problem.Kind.INVALID_PARAMETER, run(null, operation("remove_archive")).problem().kind());
+    }
+
+    @Test
+    void 建筑档案兼容旧JSON_缺省removed字段反序列化为false() throws Exception {
+        DocumentStore store = new DocumentStore(directory.resolve("legacy-building.sqlite"));
+        String worldKey = "l".repeat(64);
+        JsonObject root = new JsonObject();
+        root.addProperty("name", "老木屋");
+        root.addProperty("dimension", DIM);
+        root.addProperty("anchor", new BlockPos(10, 64, 10).asLong());
+        root.addProperty("rotation", 0);
+        JsonArray cells = new JsonArray();
+        cells.add(PlannedCellCodec.encode(PlannedCell.block(new BlockPos(0, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of())));
+        cells.add(PlannedCellCodec.encode(PlannedCell.block(new BlockPos(1, 0, 0), Blocks.OAK_PLANKS.defaultBlockState(), Set.of())));
+        root.add("cells", cells);
+        // 旧版档案 JSON 不包含 removed 字段。
+        assertTrue(store.write("building-archive", worldKey, "老木屋", root.toString(), false));
+        BuildingArchives loaded = new BuildingArchives(store, worldKey);
+        BuildingArchive archive = loaded.find("老木屋").orElseThrow();
+        assertTrue(!archive.removed(), "旧档缺少 removed 字段应默认视为在役（false）");
+        assertEquals(2L, archive.nonAirCellCount());
     }
 }

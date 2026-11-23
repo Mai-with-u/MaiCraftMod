@@ -45,7 +45,7 @@ public record BuildingRecords(BuildingArchives archives, ReadsRememberedPlaces p
      */
     public Lookup lookup(String name) {
         Optional<BuildingArchive> archive = archives.find(name);
-        if (archive.isEmpty()) return new Lookup.Missing();
+        if (archive.isEmpty() || archive.get().removed()) return new Lookup.Missing();
         Optional<WorldPosition> place = places.place(name);
         if (place.isPresent()) {
             WorldPosition at = place.get();

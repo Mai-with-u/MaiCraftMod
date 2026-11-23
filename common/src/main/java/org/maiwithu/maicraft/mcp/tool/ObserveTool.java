@@ -497,19 +497,19 @@ public final class ObserveTool implements McpTool {
         return new Prepared(null, null, Optional.empty(), new PictureLook.Turn.NoNeed(), null, null, message);
     }
 
-    // 清洗 observe(what=places) 的建筑档案条目：查得到档案文件但从未实际施工放过方块（含历史只读勘查档与空施工档）时剥离；
+    // 清洗 observe(what=places) 的建筑档案条目：查得到档案文件但已退役或从未实际施工放过方块（含历史只读勘查档与空施工档）时剥离；
     // 查不到档案文件时仅按无名规则过滤，不误删。
     private static boolean includeBuildingInPlaces(BuildingArchives archives, String name) {
         if (archives == null) return true;
-        return archives.find(name).map(archive -> !archive.placedCells().isEmpty()).orElse(true);
+        return archives.find(name).map(archive -> !archive.removed() && !archive.placedCells().isEmpty()).orElse(true);
     }
 
-    // 这个世界、这个维度里叫这个名的一栋。
+    // 这个世界、这个维度里叫这个名的在役建筑。
     private Optional<BuildingArchive> building(TickContext context, String name) {
         BuildingArchives archives = pictures.archives().get();
         if (archives == null || context.player() == null || context.player().level() == null) return Optional.empty();
         String dimension = context.player().level().dimension().location().toString();
-        return archives.find(name).filter(archive -> archive.dimension().equals(dimension));
+        return archives.find(name).filter(archive -> !archive.removed() && archive.dimension().equals(dimension));
     }
 
     // 没转的原因说成调用方照着就能做的话：手上的目标带上编号，告诉它怎么暂停、怎么恢复。

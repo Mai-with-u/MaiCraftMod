@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -36,6 +37,9 @@ final class MachineArchives implements ArchivedMachines {
 
     /** 文档库里的范围名：机器档案都存这个范围下，与别的用途互不覆盖。 */
     static final String SCOPE = "machine-archive";
+    /** 机器档案库修订记号单独一个范围：避免和某台机器的名字冲突。 */
+    static final String META_SCOPE = "machine-archive-meta";
+    private static final String REVISION_KEY = "revision";
 
     /** 一篇档案的存盘预算：一台机器几十到几百格的蓝图加机器条目，远用不到这么大；超出时不写。 */
     private static final int DOCUMENT_LIMIT = 2 * 1024 * 1024;
@@ -123,11 +127,41 @@ final class MachineArchives implements ArchivedMachines {
         return Optional.empty();
     }
 
-    // 档案落地后声明要放方块的格：锚点加偏移；清空与倒桶的格不是这台机器的方块。
+    @Override public List<ActiveMachine> activeInWorld() {
+        List<String> keys;
+        try {
+            keys = documents.keys(SCOPE, worldKey);
+        } catch (IOException broken) {
+            return List.of();
+        }
+        List<ActiveMachine> out = new ArrayList<>();
+        for (String key : keys) {
+            Optional<MachineArchive> archive = readKey(key);
+            // 已拆除或组装到物理结构上的机器不在世界里，不纳入世界结构保护区。
+            if (archive.isEmpty() || archive.get().removed() || archive.get().onStructure()) continue;
+            Set<BlockPos> cells = blocksOf(archive.get());
+            if (!cells.isEmpty()) {
+                out.add(new ActiveMachine(archive.get().name(), archive.get().dimension(), cells));
+            }
+        }
+        return List.copyOf(out);
+    }
+
+    @Override public String revision() {
+        try {
+            String rev = documents.read(META_SCOPE, worldKey, REVISION_KEY, DOCUMENT_LIMIT);
+            return rev == null ? "" : rev;
+        } catch (IOException | RuntimeException broken) {
+            return "";
+        }
+    }
+
+    // 档案落地后声明的全部非空气格：锚点加偏移，含实心方块（BLOCK）与流体源格（FLUID_SOURCE，如洗格水、刷石机水源）。
+    // 清空格（AIR）不算这台机器占用的格。
     static Set<BlockPos> blocksOf(MachineArchive archive) {
         Set<BlockPos> blocks = new HashSet<>();
         for (PlannedCell cell : archive.blueprint().cells()) {
-            if (cell.kind() == CellKind.BLOCK) blocks.add(archive.anchor().offset(cell.pos()));
+            if (cell.kind() != CellKind.AIR) blocks.add(archive.anchor().offset(cell.pos()));
         }
         return blocks;
     }
@@ -144,14 +178,19 @@ final class MachineArchives implements ArchivedMachines {
         }
     }
 
-    /** 存一份档案；存不进去返回假，调用方把"档案没留住"记进结果，不因此改判施工。 */
+    /** 存一份档案并推进修订记号；存不进去返回假，调用方把"档案没留住"记进结果，不因此改判施工。 */
     boolean save(MachineArchive archive) {
         try {
             String json = encode(archive);
             if (json.getBytes(StandardCharsets.UTF_8).length > DOCUMENT_LIMIT) {
                 return false;
             }
-            return documents.write(SCOPE, worldKey, key(archive.name()), json, false);
+            if (!documents.write(SCOPE, worldKey, key(archive.name()), json, false)) {
+                return false;
+            }
+            // 每次写入推进修订记号，结构保护快照据此决定是否重读机器档案库。
+            documents.write(META_SCOPE, worldKey, REVISION_KEY, UUID.randomUUID().toString(), false);
+            return true;
         } catch (IOException | RuntimeException failure) {
             return false;
         }
