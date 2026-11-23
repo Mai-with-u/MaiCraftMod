@@ -263,7 +263,7 @@ class MiningSourceTest {
         // 看得见的都在房子上：不拆，说清是哪一栋、要拆就点名。
         SourceQuote.Unavailable unavailable = assertInstanceOf(SourceQuote.Unavailable.class,
                 sourceWithHut(new FakeMinables(List.of(coalAt(3, 0)), true)).quote(coal, context));
-        assertTrue(unavailable.reason().contains("建筑档案「小屋」"), unavailable.reason());
+        assertTrue(unavailable.reason().contains("已登记的建筑「小屋」"), unavailable.reason());
         assertTrue(unavailable.reason().contains("gather"), unavailable.reason());
     }
 
