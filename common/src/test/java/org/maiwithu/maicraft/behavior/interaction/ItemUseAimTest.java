@@ -137,13 +137,33 @@ class ItemUseAimTest {
                 around(Set.of(Direction.SOUTH), Set.of(), false, false));
         assertTrue(air.isPresent());
         assertEquals(target.south(), air.get().clickCell());
+        assertEquals(target, air.get().effectCell());
+        assertEquals(Direction.NORTH, air.get().clickFace(), "点击南侧支撑格朝北的一面，火精准落在目标空气格");
         assertEquals(ItemUseAim.Confirmation.FIRE_APPEARS, air.get().confirmation());
 
+        // 未点燃的营火、蜡烛、TNT 点着后是目标方块状态本身变化（不是生成明火方块），用 BLOCK_TURNS_INTO 确认。
         Optional<ItemUseAim.Aim> tnt = ItemUseAim.aim(ItemUseAim.Gesture.IGNITE, target,
                 ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, true));
         assertTrue(tnt.isPresent());
         assertEquals(target, tnt.get().clickCell());
-        assertEquals(ItemUseAim.Confirmation.FIRE_APPEARS, tnt.get().confirmation());
+        assertEquals(target, tnt.get().effectCell());
+        assertEquals(ItemUseAim.Confirmation.BLOCK_TURNS_INTO, tnt.get().confirmation());
+    }
+
+    @Test
+    void igniterSkipsAlreadyLitBlockInsteadOfLightingAdjacentAir() {
+        // 已点燃的营火或蜡烛不再落回往旁边空气格点火，而普通实心方块照旧在朝向角色的一面外点火并锁定该点击面。
+        ItemUseAim.Around alreadyLit = new ItemUseAim.Around(feet, Set.of(), Set.of(), STONE_ABOVE, false, true);
+        assertTrue(ItemUseAim.aim(ItemUseAim.Gesture.IGNITE, target,
+                ItemUseAim.CellNature.SOLID, alreadyLit).isEmpty(), "已点燃的目标不该再点，也不该点到旁边空气格");
+
+        Optional<ItemUseAim.Aim> plainSolid = ItemUseAim.aim(ItemUseAim.Gesture.IGNITE, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false));
+        assertTrue(plainSolid.isPresent());
+        assertEquals(target, plainSolid.get().clickCell());
+        assertEquals(Direction.EAST, plainSolid.get().clickFace(), "未显式传 face 时锁定算出的朝向角色点击面");
+        assertEquals(target.relative(plainSolid.get().clickFace()), plainSolid.get().effectCell());
+        assertEquals(ItemUseAim.Confirmation.FIRE_APPEARS, plainSolid.get().confirmation());
     }
 
     @Test

@@ -74,21 +74,28 @@ public final class ItemUseAim {
     }
 
     /**
-     * 一份瞄准决定：点哪一格、效果落在哪一格、怎样算生效。
+     * 一份瞄准决定：点哪一格、效果落在哪一格、应点哪一面、怎样算生效。
      * 效果格是被点面外面那一格（倒流体、点火时流体和火落在那里）；
      * 与目标同格时说明效果就发生在目标本身。
      *
      * @param clickCell    右键点中的格子
      * @param effectCell   效果实际落下的格子
+     * @param clickFace    必须命中的方块面（与 {@code effectCell} 保持一致）；不限定点击面时为 null
      * @param confirmation 怎样算生效
      * @param describe     给日志与结果用的一句话，说明为什么点这里
      */
-    public record Aim(BlockPos clickCell, BlockPos effectCell, Confirmation confirmation, String describe) {
+    public record Aim(BlockPos clickCell, BlockPos effectCell, Direction clickFace,
+                      Confirmation confirmation, String describe) {
         public Aim {
             Objects.requireNonNull(clickCell, "clickCell");
             Objects.requireNonNull(effectCell, "effectCell");
             Objects.requireNonNull(confirmation, "confirmation");
             Objects.requireNonNull(describe, "describe");
+        }
+
+        /** 不限定点击面时的兼容构造。 */
+        public Aim(BlockPos clickCell, BlockPos effectCell, Confirmation confirmation, String describe) {
+            this(clickCell, effectCell, null, confirmation, describe);
         }
     }
 
@@ -99,15 +106,23 @@ public final class ItemUseAim {
      * @param solidNeighbors           目标的六个邻居里哪些是实心方块（可当支撑面）
      * @param rightClickableNeighbors  邻居里哪些自己有右键行为（箱子、门、工作台），点它会先触发方块的行为
      * @param above                    目标正上方那一格：空着，还是压着什么；锄和锹要求上方敞开
-     * @param ignitesItself            目标本身是不是能点着的方块（TNT、营火、蜡烛），点它本身就生效
+     * @param ignitesItself            目标本身是不是能点着的方块（TNT、未点燃的营火/蜡烛/蜡烛蛋糕），点它本身就生效
+     * @param alreadyLit               目标本身是不是已经点着的营火、蜡烛或蜡烛蛋糕（无需再点，且绝不落回往旁边空气点火）
      */
     public record Around(BlockPos feet, Set<Direction> solidNeighbors,
-                         Set<Direction> rightClickableNeighbors, AboveCell above, boolean ignitesItself) {
+                         Set<Direction> rightClickableNeighbors, AboveCell above,
+                         boolean ignitesItself, boolean alreadyLit) {
         public Around {
             Objects.requireNonNull(feet, "feet");
             Objects.requireNonNull(above, "above");
             solidNeighbors = Set.copyOf(solidNeighbors);
             rightClickableNeighbors = Set.copyOf(rightClickableNeighbors);
+        }
+
+        /** 不指定已点燃标记时的兼容构造（默认未点着）。 */
+        public Around(BlockPos feet, Set<Direction> solidNeighbors,
+                      Set<Direction> rightClickableNeighbors, AboveCell above, boolean ignitesItself) {
+            this(feet, solidNeighbors, rightClickableNeighbors, above, ignitesItself, false);
         }
 
         /** 目标正上方是不是空气。 */
@@ -205,9 +220,12 @@ public final class ItemUseAim {
                 Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO, "点目标本身，按住直到刷完"));
             case SCOOP -> aimScoop(nature, target);
             case POUR -> aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS, face);
-            case IGNITE -> around.ignitesItself()
-                    ? Optional.of(new Aim(target, target, Confirmation.FIRE_APPEARS, "点着目标本身"))
-                    : aimEffect(gesture, target, nature, around, Confirmation.FIRE_APPEARS, face);
+            // 本身是营火、蜡烛且已经点着时不再点，避免落回往旁边空气格乱点火；
+            // 未点燃的营火、蜡烛、蜡烛蛋糕与 TNT 点着后是目标方块状态本身发生变化，不是生成明火方块，用 BLOCK_TURNS_INTO 确认。
+            case IGNITE -> around.alreadyLit() ? Optional.empty()
+                    : around.ignitesItself()
+                            ? Optional.of(new Aim(target, target, null, Confirmation.BLOCK_TURNS_INTO, "点着目标本身"))
+                            : aimEffect(gesture, target, nature, around, Confirmation.FIRE_APPEARS, face);
             case TRANSFORM_TOOL -> aimTransform(target, nature, around);
             case STRIP_TOOL -> aimStrip(target, nature);
             case UNSUPPORTED -> Optional.empty();
@@ -262,27 +280,31 @@ public final class ItemUseAim {
             Around around, Confirmation confirmation, Direction face) {
         String doing = gesture == Gesture.POUR ? "倒" : "点火";
         if (nature == CellNature.AIR_OR_REPLACEABLE) {
-            return supportFace(target, around)
-                    .map(support -> new Aim(support, target, confirmation,
-                            "点 " + support.toShortString() + " 朝向目标的支撑面，把" + doing + "到 " + target.toShortString()));
+            return supportDirection(target, around)
+                    .map(dir -> {
+                        BlockPos support = target.relative(dir);
+                        // 点击支撑格朝向目标空气格的那一面，确保火或流体精准落在 target 而不是支撑格的其他面外。
+                        return new Aim(support, target, dir.getOpposite(), confirmation,
+                                "点 " + support.toShortString() + " 朝向目标的支撑面，把" + doing + "到 " + target.toShortString());
+                    });
         }
         if (nature != CellNature.SOLID) return Optional.empty();
-        // 点名了哪一面就落在那一面外面：实机 10-13 站在草地边上"对草地顶面倒水"，按朝向角色的面猜成了侧面，
-        // 侧面外面是脚下那块地、看不见，回回"看不到任何一面"。
+        // 点名了哪一面就落在那一面外面：没点名时按朝向角色的面确定，并把该面随 Aim 传给交互执行层，
+        // 避免预测格按东面算、交互却随机点中南面导致确认器盯着错格子超时。
         Direction towardPlayer = face != null ? face : faceToward(around.feet(), target);
         BlockPos effect = target.relative(towardPlayer);
         // 目标在脚下、点它的顶面，效果就落在自己站的格子里：不拒绝也不替 LLM 挪站位，照倒、照点，说明里写清落在自己身上。
         // 往脚下倒水救火、寻死往脚下倒岩浆都是这条路；真不想淋到自己，LLM 点名别的面或先 travel 一步就行。
         String onSelf = overlapsPlayer(effect, around.feet()) ? "，那一格正是自己站的地方" : "";
-        return Optional.of(new Aim(target, effect, confirmation,
+        return Optional.of(new Aim(target, effect, towardPlayer, confirmation,
                 "点目标朝向角色的面，" + doing + "在面外的 " + effect.toShortString() + onSelf));
     }
 
     /**
-     * 挑一个支撑面：优先没有右键行为的实心邻居；实在只有箱子、门这类，也用它，
+     * 挑一个支撑面所在方向：优先没有右键行为的实心邻居；实在只有箱子、门这类，也用它，
      * 调用方看到说明后潜行再点，免得手里的东西被方块的行为截走。周围没有实心邻居时给不出。
      */
-    private static Optional<BlockPos> supportFace(BlockPos target, Around around) {
+    private static Optional<Direction> supportDirection(BlockPos target, Around around) {
         List<Direction> plain = new ArrayList<>();
         List<Direction> clickable = new ArrayList<>();
         for (Direction direction : Direction.values()) {
@@ -300,7 +322,7 @@ public final class ItemUseAim {
                 best = direction;
             }
         }
-        return Optional.of(target.relative(best));
+        return Optional.of(best);
     }
 
     // 目标朝向角色那一面：脚下位置到目标的三个轴里，差得最多的那个轴决定面。

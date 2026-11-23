@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
@@ -152,7 +153,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             // 锄、锹被上面一下就能打掉的野生草木挡着：交给任务先过许可、打掉它，再回来出手。
             Optional<BlockPos> clear = ItemUseAim.clearFirst(gesture, cell, nature, around);
             if (clear.isPresent()) return new UseSeams.Built.ClearAbove(clear.get(), around.above().blockId());
-            return new UseSeams.Built.CannotAim(whyNoAim(gesture, target, nature, around.above()));
+            return new UseSeams.Built.CannotAim(whyNoAim(gesture, target, nature, around));
         }
         ItemUseAim.Aim aim = planned.get();
         var confirmation = GestureConfirmations.forGesture(aim.confirmation(), aim.effectCell(),
@@ -171,36 +172,53 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
         // "使用手里物品"这一步，船自己沿视线按流体的规则找落点。同样朝目标用手里物品。
         boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
-        // 指定了点哪一面、点的就是目标那一格：只点朝这一面的表面（扳手点哪一面决定绕哪根轴转）。
-        boolean faced = target.face() != null && aim.clickCell().equals(cell);
+        // 瞄准阶段已算出明确点击面（例如实心目标按朝向角色算出的面，或空气旁支撑格朝向目标的面）时必须把该面传下去，
+        // 保证实际点击的面与 effectCell 预测格一致；否则在点击目标格本身时沿用调用方指定的面。
+        Direction clickFace = resolvedClickFace(aim, cell, target.face());
         if (!bucket && !ownUse && ItemUseAim.sneaksPastOffhandShield(
                 gesture, player.getOffhandItem().is(Items.SHIELD))) {
             // 主手持斧且副手持盾时，原版非潜行右键会被当成举盾直接跳过：改发潜行右键让原版执行去皮、刮铜或除蜡。
-            SneakingUse use = faced ? interactions.useBlockFaceSneaking(cell, target.face(), sneak, confirmation)
+            SneakingUse use = clickFace != null
+                    ? interactions.useBlockFaceSneaking(aim.clickCell(), clickFace, sneak, confirmation)
                     : target.quick() ? interactions.useBlockQuicklySneaking(aim.clickCell(), sneak, confirmation)
                     : interactions.useBlockSneaking(aim.clickCell(), sneak, confirmation);
             return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
         }
         AimAndInteract use = bucket || ownUse
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
-                : faced ? interactions.useBlockFace(cell, target.face(), confirmation)
+                : clickFace != null ? interactions.useBlockFace(aim.clickCell(), clickFace, confirmation)
                 : target.quick() ? interactions.useBlockQuickly(aim.clickCell(), confirmation)
                 : interactions.useBlock(aim.clickCell(), confirmation);
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
     }
 
-    // 瞄不出来的原因按手势说：工具与空桶是这一格用不了；倒和点火是旁边没有能点的面（落到自己身上不算瞄不出，照做）。
+    /**
+     * 决定右键方块时要锁定的点击面：瞄准决定本身给出明确点击面时优先采用（让实际点击面与效果预测格完全一致），
+     * 否则仅在点击目标格本身时采用调用方显式传进来的面。
+     */
+    static Direction resolvedClickFace(ItemUseAim.Aim aim, BlockPos targetCell, Direction requestedFace) {
+        if (aim.clickFace() != null) return aim.clickFace();
+        return aim.clickCell().equals(targetCell) ? requestedFace : null;
+    }
+
+    // 瞄不出来的原因按手势说：已点着的营火/蜡烛直接告知无需再点；工具与空桶是这一格用不了；
+    // 倒和点火是旁边没有能点的面（落到自己身上不算瞄不出，照做）。
     // 锄、锹分开说是目标本身不是实心，还是上面压着什么（说出是什么），LLM 才知道该换目标还是先清上面；斧只看目标实不实心。
-    private static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target, ItemUseAim.CellNature nature,
-            ItemUseAim.AboveCell above) {
+    static Problem whyNoAim(ItemUseAim.Gesture gesture, ResolvedTarget target, ItemUseAim.CellNature nature,
+            ItemUseAim.Around around) {
         return switch (gesture) {
             case SCOOP -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 不是流体源格，空桶舀不起来", null);
             case TRANSFORM_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                    target.describe() + " " + ItemUseAim.whyTransformBlocked(nature, above), null);
+                    target.describe() + " " + ItemUseAim.whyTransformBlocked(nature, around.above()), null);
             case STRIP_TOOL -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 不是实心方块，斧头用不上", null);
-            case POUR, IGNITE -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            case IGNITE -> around.alreadyLit()
+                    ? Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, target.describe() + " 已经点着了，无需再点", null)
+                    : Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                            target.describe() + " 是空气或流体，旁边又没有实心方块当支撑面，倒、点火落不到那一格",
+                            "点名它旁边的实心方块，或先在旁边放一块方块再对着那一面倒、点");
+            case POUR -> Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     target.describe() + " 是空气或流体，旁边又没有实心方块当支撑面，倒、点火落不到那一格",
                     "点名它旁边的实心方块，或先在旁边放一块方块再对着那一面倒、点");
             default -> Problem.of(Problem.Kind.UNSUPPORTED, "手上的东西 use 不接", null);
@@ -228,7 +246,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             if (handlesRightClick(level, at, neighbor)) clickable.add(direction);
         }
         return new ItemUseAim.Around(player.blockPosition(), solid, clickable,
-                aboveOf(level, cell.above()), ignitesItself(state));
+                aboveOf(level, cell.above()), ignitesItself(state), alreadyLit(state));
     }
 
     // 目标正上方那一格：空着；压着什么，是不是一下就能打掉的野生草木（草木按种类认，种的、树苗不算；
@@ -249,9 +267,32 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 || block instanceof ButtonBlock || block instanceof LeverBlock;
     }
 
-    // 点它本身就能点着：TNT，还没点着的营火、蜡烛、蜡烛蛋糕。
-    private static boolean ignitesItself(BlockState state) {
-        return state.getBlock() instanceof TntBlock || CampfireBlock.canLight(state)
-                || CandleBlock.canLight(state) || CandleCakeBlock.canLight(state);
+    // 点它本身就能点着：TNT，还没点着且未含水的营火、蜡烛、蜡烛蛋糕。
+    static boolean ignitesItself(BlockState state) {
+        if (state.getBlock() instanceof TntBlock
+                || CampfireBlock.canLight(state)
+                || CandleBlock.canLight(state)
+                || CandleCakeBlock.canLight(state)) {
+            return true;
+        }
+        // 同时按方块类与属性兜底，确保未加载数据包方块标签的离线测试与原版一致识别未点燃且未含水的营火、蜡烛与蜡烛蛋糕。
+        boolean ignitableBlock = state.getBlock() instanceof CampfireBlock
+                || state.getBlock() instanceof CandleBlock
+                || state.getBlock() instanceof CandleCakeBlock;
+        if (!ignitableBlock || !state.hasProperty(BlockStateProperties.LIT)
+                || state.getValue(BlockStateProperties.LIT)) {
+            return false;
+        }
+        return !state.hasProperty(BlockStateProperties.WATERLOGGED)
+                || !state.getValue(BlockStateProperties.WATERLOGGED);
+    }
+
+    // 目标本身就是营火、蜡烛或蜡烛蛋糕，且此刻已经点着：不需要再点，也绝不能落回往旁边空气格点火。
+    static boolean alreadyLit(BlockState state) {
+        return (state.getBlock() instanceof CampfireBlock
+                || state.getBlock() instanceof CandleBlock
+                || state.getBlock() instanceof CandleCakeBlock)
+                && state.hasProperty(BlockStateProperties.LIT)
+                && state.getValue(BlockStateProperties.LIT);
     }
 }
