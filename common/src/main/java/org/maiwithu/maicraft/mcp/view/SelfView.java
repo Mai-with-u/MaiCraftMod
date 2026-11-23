@@ -228,6 +228,7 @@ public final class SelfView {
         json.addProperty("max_air", self.maxAir());
         json.addProperty("on_ground", self.onGround());
         json.addProperty("in_water", self.inWater());
+        // 主手只在非空时写入 held，不再拿副手顶替；副手独立写入 offhand。
         if (self.heldItem() != null) json.addProperty("held", self.heldItem());
         // 副手拿着的单列：盾、火把这类常备的，或者顺手攥着的零碎，整理背包时一眼看得出来。
         if (self.offhandItem() != null) json.addProperty("offhand", self.offhandItem());

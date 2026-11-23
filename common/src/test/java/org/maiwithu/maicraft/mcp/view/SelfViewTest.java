@@ -76,4 +76,19 @@ class SelfViewTest {
         assertEquals(120, halfWorn.get("durability").getAsInt());
         assertEquals(250, halfWorn.get("max_durability").getAsInt());
     }
+
+    @Test
+    void 主手空副手拿盾时不写held只写offhand_两手都有物时各自独立写入() {
+        SceneSelf offhandOnly = new SceneSelf(0.0, 64.0, 0.0, 0f, "南", 20f, 20, 300, 300,
+                null, List.of(), List.of(), true, false, List.of(), "minecraft:shield");
+        JsonObject offhandJson = SelfView.of(offhandOnly, "minecraft:overworld", null, null, null, null, false);
+        assertFalse(offhandJson.has("held"), "主手空时不写 held，不拿副手盾牌顶替");
+        assertEquals("minecraft:shield", offhandJson.get("offhand").getAsString());
+
+        SceneSelf bothHands = new SceneSelf(0.0, 64.0, 0.0, 0f, "南", 20f, 20, 300, 300,
+                "minecraft:potato", List.of(), List.of(), true, false, List.of(), "minecraft:shield");
+        JsonObject bothJson = SelfView.of(bothHands, "minecraft:overworld", null, null, null, null, false);
+        assertEquals("minecraft:potato", bothJson.get("held").getAsString());
+        assertEquals("minecraft:shield", bothJson.get("offhand").getAsString());
+    }
 }

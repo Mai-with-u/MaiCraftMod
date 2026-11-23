@@ -41,13 +41,13 @@ public final class SelfBrief {
         return shown == Math.rint(shown) ? Long.toString((long) shown) : Double.toString(shown);
     }
 
-    // 手上拿着的按主手优先、主手空着算副手（和 observe(self) 的 held 一样）；副手另有别的东西时一并写上。
+    // 主手与副手分别写明：主手空而副手有物时写清主手空，两手都拿着东西（哪怕同种）也一并写清副手。
     private static String hands(SceneSelf self) {
-        if (self.heldItem() == null) return "两手空着";
-        String text = "手上 " + self.heldItem();
-        if (self.offhandItem() != null && !self.offhandItem().equals(self.heldItem())) {
-            text += "（副手 " + self.offhandItem() + "）";
-        }
-        return text;
+        String main = self.heldItem();
+        String offhand = self.offhandItem();
+        if (main == null && offhand == null) return "两手空着";
+        if (main == null) return "主手空（副手 " + offhand + "）";
+        if (offhand == null) return "手上 " + main;
+        return "手上 " + main + "（副手 " + offhand + "）";
     }
 }

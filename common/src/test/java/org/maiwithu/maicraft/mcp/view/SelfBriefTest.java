@@ -42,6 +42,17 @@ class SelfBriefTest {
     }
 
     @Test
+    void 主手空副手拿盾时明写主手空_两手同物也分别写清() {
+        String offhandOnly = SelfBrief.line(self(false, 300, null, "minecraft:shield"),
+                "minecraft:overworld", Optional.empty());
+        assertEquals("在 minecraft:overworld 12, 64, -8；血 18，饱食 15；主手空（副手 minecraft:shield）", offhandOnly);
+
+        String sameBothHands = SelfBrief.line(self(false, 300, "minecraft:torch", "minecraft:torch"),
+                "minecraft:overworld", Optional.empty());
+        assertTrue(sameBothHands.endsWith("；手上 minecraft:torch（副手 minecraft:torch）"), sameBothHands);
+    }
+
+    @Test
     void 两手空着开着界面时说界面和谁开的() {
         OpenScreen chest = new OpenScreen(OpenScreen.Kind.STORAGE, "minecraft:generic_9x3", "箱子", null, null,
                 "界面刚打开，里面的东西还没从服务器同步过来，过一会儿再看", null, ScreenOpening.OpenedBy.TASK);

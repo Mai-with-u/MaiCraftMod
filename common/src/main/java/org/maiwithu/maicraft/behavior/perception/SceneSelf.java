@@ -9,7 +9,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 状态效果，以及落地或入水。场景里的方位都拿它当基准，所以先有它再整理别的观察。
  *
  * @param facingYaw 角色的视角角：0 朝南，顺时针增大
- * @param heldItem 手上拿着的物品注册 ID，两手都空时为 null
+ * @param heldItem 主手拿着的物品注册 ID，主手空着时为 null
  * @param gearBars 身上装备与手里东西自己画的那条还剩多少（耐久、背罐的气、电量）
  * @param offhandItem 副手拿着的物品注册 ID，空着为 null（整理背包时看得出副手攥着什么）
  * @param health 生命值原样（带小数，一格是半颗心）；对外展示用 {@link #shownHealth()}

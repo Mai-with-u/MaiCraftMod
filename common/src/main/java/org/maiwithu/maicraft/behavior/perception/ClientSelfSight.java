@@ -74,15 +74,14 @@ public final class ClientSelfSight implements SelfSight {
         return bars;
     }
 
-    // 主手优先，主手空着看副手；两手都空是"没拿东西"而不是读不到。
+    // 只读主手：主手空着就是 null，不再拿副手顶替；副手由独立字段单独报告。
     private static String heldItem(LocalPlayer player) {
-        if (!player.getMainHandItem().isEmpty()) {
-            return itemTypeId(player.getMainHandItem());
-        }
-        if (!player.getOffhandItem().isEmpty()) {
-            return itemTypeId(player.getOffhandItem());
-        }
-        return null;
+        return mainHandItemId(player.getMainHandItem());
+    }
+
+    /** 读取主手物品注册 ID；主手为空时返回 null，不拿副手物品顶替。 */
+    static String mainHandItemId(ItemStack mainHand) {
+        return mainHand == null || mainHand.isEmpty() ? null : itemTypeId(mainHand);
     }
 
     private static String itemTypeId(ItemStack stack) {

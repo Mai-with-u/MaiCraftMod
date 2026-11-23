@@ -16,7 +16,7 @@ public interface SelfSight {
      * 角色自己的原始事实，方位词由感知整理，这里只给数值。
      *
      * @param facingYaw 视角角：0 朝南，顺时针增大
-     * @param heldItem 手上物品注册 ID，两手都空为 null
+     * @param heldItem 主手物品注册 ID，主手空着为 null
      * @param gearBars 身上装备与手里东西自己画的那条还剩多少（耐久、背罐的气、电量），物品不画条的不列
      * @param offhandItem 副手拿着的物品注册 ID，空着为 null
      * @param health 生命值原样（带小数，一格是半颗心），不取整：低于 1 的存活血量取整会读成 0
