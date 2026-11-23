@@ -141,8 +141,8 @@ public final class ClientCompatCatalog {
                 // 车万女仆：按 1.5.3 编译（加载器报 1.5.3-neoforge+mc1.21.1），粉丝服两端装的就是它；装了 1.5.4 及以上不登记。
                 new SupportedMod<>(TouhouLittleMaidCompat.MOD_ID, "车万女仆", new VerifiedVersions("1.5.3", "1.5.4"),
                         () -> new TouhouLittleMaidCompat(new TouhouLittleMaidReads(), new TouhouLittleMaidActions())),
-                // 农夫乐事：按实测实例装的 1.3.2 编译（源码仓库在 1.3.4 上核对的槽位与供热事实）；装了 1.3.3 及以上不登记。
-                new SupportedMod<>(FarmersDelightCompat.MOD_ID, "农夫乐事", new VerifiedVersions("1.3.2", "1.3.3"),
+                // 农夫乐事：按 1.3.2 编译，已核对 1.3.2~1.3.4 厨锅槽位常量、供热与菜单布局无破坏性变更；装了 1.4 及以上不登记。
+                new SupportedMod<>(FarmersDelightCompat.MOD_ID, "农夫乐事", new VerifiedVersions("1.3.2", "1.4"),
                         () -> new FarmersDelightCompat(new FarmersDelightClientReads())),
                 // 应用机械（Applied Mekanistics）：按 1.6.3 编译；装了 1.7 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(AppMekCompat.MOD_ID, "应用机械", new VerifiedVersions("1.6.3", "1.7"),

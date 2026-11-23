@@ -57,6 +57,17 @@ class VerifiedVersionsTest {
     }
 
     @Test
+    void 农夫乐事兼容范围接受一三二至一三四并拒绝一四() {
+        VerifiedVersions farmersDelight = new VerifiedVersions("1.3.2", "1.4");
+        assertTrue(farmersDelight.contains("1.3.2"));
+        assertTrue(farmersDelight.contains("1.3.3"));
+        assertTrue(farmersDelight.contains("1.3.4"));
+        assertFalse(farmersDelight.contains("1.3.1"));
+        assertFalse(farmersDelight.contains("1.4"));
+        assertFalse(farmersDelight.contains("1.4.0"));
+    }
+
+    @Test
     void 日志里写成方括号圆括号() {
         assertEquals("[3.25.69, 3.26)", range.describe());
     }
