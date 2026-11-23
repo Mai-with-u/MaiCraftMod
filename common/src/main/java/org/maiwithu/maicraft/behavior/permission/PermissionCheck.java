@@ -54,6 +54,16 @@ public final class PermissionCheck {
         return protection.archivedBuildingAt(position);
     }
 
+    /** 这一格是不是建筑档案或在役世界机器的结构保护格：采掘、收回、寻路清障、箱顶挖盖时避开。 */
+    public StructureProtection structureBlockAt(WorldPosition position) {
+        return protection.structureBlockAt(position);
+    }
+
+    /** 这一格流体是否受结构保护区保护（建筑外框/档案、在役机器流体格、耕地非无限灌溉水源）。 */
+    public StructureProtection structureFluidAt(WorldPosition position) {
+        return protection.structureFluidAt(position);
+    }
+
     public PermissionCheck(Protection protection, ReadsCreatureSituation creatures) {
         this.protection = protection;
         this.creatures = creatures;

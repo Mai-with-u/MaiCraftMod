@@ -2,9 +2,12 @@
 package org.maiwithu.maicraft.bootstrap;
 
 import org.maiwithu.maicraft.ability.design.api.BuildingArchives;
+import org.maiwithu.maicraft.ability.machine.MachineAbilities;
+import org.maiwithu.maicraft.ability.machine.api.ArchivedMachines;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.combat.SparPartner;
 import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
+import org.maiwithu.maicraft.behavior.permission.FarmlandIrrigation;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.io.IOException;
 import java.time.Instant;
@@ -145,6 +148,8 @@ public final class WorldScope {
     private final RegionsSnapshot regions;
     /** 圈出角色自己的家：最近睡过的床、她按图盖过的房子；客户端刻里隔几秒抄一次。 */
     private final OwnHomeSnapshot ownHome;
+    /** 结构保护区快照：已登记在役建筑档案与在役世界机器档案，供寻路与取材无锁读取。 */
+    private final StructureProtectionSnapshot structureProtection;
     /** 角色此刻所在的维度：寻路在后台线程上问保护时按它定位置。 */
     private volatile String dimension;
     /** 这个世界的目标运行存盘：退出游戏、换世界之后，没做完的目标从这里读回来。 */
@@ -209,12 +214,27 @@ public final class WorldScope {
         return new TrustedPlayers(instanceConfig.trustedPlayers(), name -> OnlinePlayers.idByName(minecraft, name));
     }
 
-    // 角色自己的家按床与她盖过的房子圈（快照）；回报里说是谁放的，编号按在线玩家换成名字。
+    // 进世界时即抄一份记住区域的线程安全快照。
+    private static RegionsSnapshot freshRegions(WorldMemory memory) {
+        RegionsSnapshot snapshot = new RegionsSnapshot(memory);
+        snapshot.refresh();
+        return snapshot;
+    }
+
+    // 构造结构保护区快照：合并建筑档案库与在役世界机器档案库，进世界即先抄一次。
+    private StructureProtectionSnapshot assembleStructureProtection(DocumentStore documents, String worldKey) {
+        ArchivedMachines archivedMachines = MachineAbilities.archivedMachines(documents, worldKey);
+        return new StructureProtectionSnapshot(buildingArchives, archivedMachines, System.currentTimeMillis());
+    }
+
+    // 角色自己的家按床与她盖过的房子圈（快照）；结构保护区覆盖已登记建筑、在役世界机器与耕地非无限灌溉水源。
     private Protection assembleProtection(WorldMemory memory, PlayerControlBoundary playerControl, String selfPlayerId) {
         return new Protection(ownership, regions, memory, selfPlayerId,
                 new ClientVillagers(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)),
                 ownHome,
-                id -> OnlinePlayers.nameOrSomeoneOffline(playerControl.activeContext().orElse(null), id));
+                id -> OnlinePlayers.nameOrSomeoneOffline(playerControl.activeContext().orElse(null), id),
+                structureProtection,
+                FarmlandIrrigation.live(() -> playerControl.activeContext().map(context -> context.level()).orElse(null)));
     }
 
     /**
@@ -263,15 +283,13 @@ public final class WorldScope {
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
         this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds, minecraft::isTextFilteringEnabled);
-        // 保护判断：归属记录按区块问服务端（还没问到的按受保护处理；自己刚放下的按服务端推来的确认当刻记上），
-        // 区域读每刻抄一份的快照，地标问世界记忆；
+        // 保护判断：归属记录按区块问服务端，区域读每刻抄一份的快照，地标问世界记忆。
         this.ownership = new OwnershipMap(session, minecraft.player.getUUID().toString());
-        this.regions = new RegionsSnapshot(memory);
-        this.regions.refresh();
+        this.regions = freshRegions(memory);
         this.trusted = trustedPlayers(instanceConfig, minecraft);
-        // 建筑档案库先建好：圈"她自己的家"要读她盖过的房子（进世界先抄一次）。
         this.buildingArchives = new BuildingArchives(documents, identity.key());
         this.ownHome = new OwnHomeSnapshot(memory, buildingArchives, System.currentTimeMillis());
+        this.structureProtection = assembleStructureProtection(documents, identity.key());
         this.protection = assembleProtection(memory, playerControl, minecraft.player.getUUID().toString());
         this.othersNotice = new OthersThingsNotice(protection, kinds::isNaturalLootContainer, LowValueTerrainBlocks::isLowValueTerrainLive, events);
         RareLootNotice rareLootNotice = new RareLootNotice(protection, kinds::isNaturalLootContainer, memory, events);
@@ -369,7 +387,10 @@ public final class WorldScope {
     private void installNavigationProtection() {
         NavigationProtection.installWorldRule(new NavigationProtection.CellRule() {
             @Override public boolean protects(int x, int y, int z, BlockState state) {
-                return protection.blockProtectedAsSeen(new WorldPosition(x, y, z, dimension), Set.of());
+                WorldPosition at = new WorldPosition(x, y, z, dimension);
+                // 寻路清障与垫路同时避开圈地保护与结构保护区，绝不为了抄近路挖穿建筑墙体或机器。
+                return protection.blockProtectedAsSeen(at, Set.of())
+                        || protection.structureBlockAt(at).protects();
             }
 
             @Override public boolean escapeBreakable(int x, int y, int z, BlockState state) {
@@ -404,10 +425,12 @@ public final class WorldScope {
         if (player == null) {
             return;
         }
-        // 保护判断要的现场先刷新：维度、记住的区域、自己的家（隔几秒抄一次）、角色周围的方块归属。
+        // 保护判断要的现场先刷新：维度、记住的区域、自己的家、结构保护区快照、角色周围的方块归属。
         dimension = current.level().dimension().location().toString();
         regions.refresh();
-        ownHome.refresh(System.currentTimeMillis());
+        long nowMillis = System.currentTimeMillis();
+        ownHome.refresh(nowMillis);
+        structureProtection.refresh(nowMillis);
         ownership.tick(dimension, player.blockPosition());
         Instant when = Instant.now();
         var self = new ClientSelfSight(() -> current).current();

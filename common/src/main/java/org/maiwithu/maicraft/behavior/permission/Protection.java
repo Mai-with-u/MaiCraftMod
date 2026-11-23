@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.behavior.worldmemory.RemembersRegions;
 import org.maiwithu.maicraft.behavior.worldmemory.RememberedRegion;
@@ -42,6 +43,10 @@ public final class Protection {
     private final SeesVillagers villagers;
     private final ReadsOwnHome home;
     private final Function<String, String> names;
+    /** 独立于圈地保护的结构保护区：已登记在役建筑档案与在役世界机器档案。 */
+    private final ReadsStructureProtection structures;
+    /** 耕地灌溉水源识别用的只读水格视图：防止从耕地周围抽干非无限灌溉水源。 */
+    private final FarmlandIrrigation.WaterGrid waterGrid;
 
     /**
      * @param ownership    方块归属的只读接缝（服务端记录），做事实判断用
@@ -51,7 +56,8 @@ public final class Protection {
      */
     public Protection(ReadsBlockOwnership ownership, RemembersRegions regions,
             ReadsRememberedPlaces places, String selfPlayerId) {
-        this(ownership, regions, places, selfPlayerId, SeesVillagers.NOBODY, ReadsOwnHome.NOWHERE, id -> id);
+        this(ownership, regions, places, selfPlayerId, SeesVillagers.NOBODY, ReadsOwnHome.NOWHERE, id -> id,
+                ReadsStructureProtection.NONE, FarmlandIrrigation.WaterGrid.EMPTY);
     }
 
     /**
@@ -61,6 +67,17 @@ public final class Protection {
      */
     public Protection(ReadsBlockOwnership ownership, RemembersRegions regions, ReadsRememberedPlaces places,
             String selfPlayerId, SeesVillagers villagers, ReadsOwnHome home, Function<String, String> names) {
+        this(ownership, regions, places, selfPlayerId, villagers, home, names,
+                ReadsStructureProtection.NONE, FarmlandIrrigation.WaterGrid.EMPTY);
+    }
+
+    /**
+     * @param structures 结构保护区只读接缝（已登记在役建筑、在役世界机器）；没接上传 {@link ReadsStructureProtection#NONE}
+     * @param waterGrid  耕地灌溉水源只读视图；没接上传 {@link FarmlandIrrigation.WaterGrid#EMPTY}
+     */
+    public Protection(ReadsBlockOwnership ownership, RemembersRegions regions, ReadsRememberedPlaces places,
+            String selfPlayerId, SeesVillagers villagers, ReadsOwnHome home, Function<String, String> names,
+            ReadsStructureProtection structures, FarmlandIrrigation.WaterGrid waterGrid) {
         this.ownership = ownership;
         this.regions = regions;
         this.places = places;
@@ -68,6 +85,8 @@ public final class Protection {
         this.villagers = Objects.requireNonNull(villagers, "villagers");
         this.home = Objects.requireNonNull(home, "home");
         this.names = Objects.requireNonNull(names, "names");
+        this.structures = Objects.requireNonNull(structures, "structures");
+        this.waterGrid = Objects.requireNonNull(waterGrid, "waterGrid");
     }
 
     /**
@@ -192,17 +211,19 @@ public final class Protection {
 
     /**
      * 角色被封死在小坑里、按任务许可已经挖不出去时，这一格能不能挖开出去：不是功能方块、
-     * 不在记住的区域里、不在记住的地点（地标，含"家"）周围 {@link #LANDMARK_RADIUS} 格内，就能挖。
+     * 不在记住的区域里、不在记住的地点（地标，含"家"）周围 {@link #LANDMARK_RADIUS} 格内、
+     * 且不属于已登记建筑或在役世界机器的结构保护区，就能挖。
      * 谁放的不再参与：别人放的普通方块照挖，挖开后在结果里写明是谁放的（{@link #placedByOther}）。
      *
      * @param functional 这一格是不是功能方块（有方块实体、门、会发红石信号、铁轨），调用方按读到的方块认
      */
     public boolean breakableWhenTrapped(WorldPosition position, boolean functional) {
         if (functional) return false;
+        if (structureBlockAt(position).protects()) return false;
         for (RememberedRegion region : regions.regions()) {
             if (region.contains(position)) return false;
         }
-        // 记住的地点周围不碰：家门口被围也不挖，所有者 2026-10-27 定的。
+        // 记住的地点周围不碰：家门口被围也不挖。
         for (WorldPosition spot : places.places().values()) {
             if (sameDimension(spot, position) && distance(spot, position) <= LANDMARK_RADIUS) return false;
         }
@@ -218,12 +239,47 @@ public final class Protection {
     }
 
     /**
-     * 被困在自己家里、附近没有能开的门时，这一格墙能不能水平拆开出去：在家里、不是功能方块、不在记住的区域里。
+     * 这一格方块受不受「结构保护区」保护：检查已登记且未退役的建筑档案（过滤单格残档）与在役世界机器档案。
+     * 独立于圈地保护与存储取存（{@link #storageUse} 绝不读这里，建筑与机器里的箱子终端照常取存）。
+     */
+    public StructureProtection structureBlockAt(WorldPosition position) {
+        // 已接上独立结构保护接缝时直接以它为准，避免建筑退役后结构快照已释放却仍被缓存更久的自家快照挡住。
+        if (structures != ReadsStructureProtection.NONE) {
+            return structures.blockAt(position);
+        }
+        // 未接上结构保护接缝（例如只接了 ReadsOwnHome 的离线测试）时，回退读取建筑档案。
+        return home.archivedBuildingAt(position).map(StructureProtection::building).orElse(StructureProtection.NONE);
+    }
+
+    /**
+     * 这一格流体受不受「结构保护区」保护：依次检查建筑档案与建筑外框范围、在役世界机器档案（含流体源格），
+     * 以及周围耕地的非无限水灌溉水源（舀走后不会自动再生的水源格）。
+     */
+    public StructureProtection structureFluidAt(WorldPosition position) {
+        // 已接上独立结构保护接缝时只查它与耕地灌溉水源，不再回退到缓存更久的自家快照。
+        StructureProtection hit = structures != ReadsStructureProtection.NONE
+                ? structures.fluidAt(position)
+                : home.archivedBuildingAt(position).map(StructureProtection::building).orElse(StructureProtection.NONE);
+        if (hit.protects()) return hit;
+        String gridDimension = waterGrid.dimension();
+        boolean sameDim = gridDimension == null || position.dimension() == null
+                || gridDimension.equals(position.dimension());
+        if (sameDim && FarmlandIrrigation.isProtectedIrrigationWater(waterGrid,
+                new BlockPos(position.x(), position.y(), position.z()))) {
+            return StructureProtection.FARMLAND_WATER;
+        }
+        return StructureProtection.NONE;
+    }
+
+    /**
+     * 被困在自己家里、附近没有能开的门时，这一格墙能不能水平拆开出去：在家里、不是功能方块、不在记住的区域里、
+     * 且不是在役机器结构格（被困自家屋里时允许临时拆一格普通房墙出去再补回，但绝不拆机器）。
      * 谁放的墙都能拆（拆完会补回去，回报写明是谁放的）；这次任务另外保护的格由寻路自己的保护格挡，
      * 床、门、家具与它们底下的格由寻路那一侧另外挡。
      */
     public boolean breakableAtHome(WorldPosition position, boolean functional) {
         if (functional || homeOf(position).isEmpty()) return false;
+        if (structureBlockAt(position).route() == StructureProtection.Route.MACHINE) return false;
         for (RememberedRegion region : regions.regions()) {
             if (region.contains(position)) return false;
         }
