@@ -23,6 +23,7 @@ import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.AbstractFurnaceBlock;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.DoorBlock;
@@ -129,6 +130,22 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
             }
         }
         return Optional.of(new CampfireStatus(lit, occupied, capacity));
+    }
+
+    // 原版熔炉、烟熏炉、高炉及其继承 AbstractFurnaceBlock 的变体：非潜行右键只会打开炉界面，不会直接消耗主手物品投料。
+    @Override public boolean isVanillaFurnace(BlockPos cell) {
+        return state(cell).map(state -> state.getBlock() instanceof AbstractFurnaceBlock
+                || UseDecider.isVanillaFurnaceId(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString()))
+                .orElse(false);
+    }
+
+    // 机械动力合成器右键投料、空手取料与扳手改向都严格要求命中正面（HORIZONTAL_FACING），点侧面或背面会被直接忽略。
+    @Override public Optional<Direction> preferredInteractFace(BlockPos cell) {
+        return state(cell)
+                .filter(state -> UseDecider.MECHANICAL_CRAFTER_BLOCK.equals(
+                        BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString()))
+                .filter(state -> state.hasProperty(BlockStateProperties.HORIZONTAL_FACING))
+                .map(state -> state.getValue(BlockStateProperties.HORIZONTAL_FACING));
     }
 
     // 工作盆顶面四周边沿有 2/16 宽：只要正上方那一格底面不是整格实心封死的（空气、溜槽、漏斗都留着边沿），就能点到顶面。

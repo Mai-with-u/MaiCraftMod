@@ -57,6 +57,11 @@ final class UseDecider {
 
     /** 机械动力工作盆的方块 ID。 */
     static final String BASIN_BLOCK = "create:basin";
+    /** 机械动力合成器的方块 ID：右键投料、空手取料与扳手改向都必须命中正面（HORIZONTAL_FACING）。 */
+    static final String MECHANICAL_CRAFTER_BLOCK = "create:mechanical_crafter";
+    /** 原版三类炉子方块 ID（熔炉、烟熏炉、高炉）：右键只会打开界面，不支持直接右键投料。 */
+    static final Set<String> VANILLA_FURNACE_BLOCKS = Set.of(
+            "minecraft:furnace", "minecraft:smoker", "minecraft:blast_furnace");
 
     /** 对机械动力工作盆直接右键有原生交互（倒装流体、吸水、旋转拆装、抄写配置、选点）的固定物品名单。类别：F 游戏事实（BasinBlock.useItemOn 与 ValueSettingsInputHandler）。 */
     private static final Set<String> BASIN_DIRECT_USE_ITEMS = Set.of(
@@ -108,6 +113,32 @@ final class UseDecider {
         return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                 "营火不支持右键取物：点燃后约 30 秒烤熟会自动弹出成掉落物（走近自动捡起或用 gather 捡掉落物）；未点燃或未烤熟的食物无法右键取下",
                 "先用 observe(detail) 查看营火是否点燃及架上食物；未点燃请先用打火石或火焰弹点火，烤熟弹出后走近或用 gather 捡起掉落物");
+    }
+
+    /** 按方块 ID 判定是不是原版炉类（熔炉、烟熏炉、高炉）。 */
+    static boolean isVanillaFurnaceId(String blockTypeId) {
+        return blockTypeId != null && VANILLA_FURNACE_BLOCKS.contains(lower(blockTypeId));
+    }
+
+    /**
+     * 拿着物品对原版炉类（熔炉、烟熏炉、高炉）非潜行调用 use、结果只打开界面却未放入任何物品时，
+     * 返回清晰的游戏事实失败说明，不再误报“确认生效（里面有：空的）”。
+     */
+    static Optional<Problem> vanillaFurnaceNoInsert(ResolvedTarget target, String requestedItem, boolean sneak,
+            boolean consumedHeld, boolean openedBlockMenu, UseSeams.MenuLook.Insertion menuInsertion,
+            String openedMenu, boolean isVanillaFurnace) {
+        if (target == null || target.isEntity() || requestedItem == null || sneak || consumedHeld
+                || !openedBlockMenu || menuInsertion == UseSeams.MenuLook.Insertion.INSERTED) {
+            return Optional.empty();
+        }
+        if (!isVanillaFurnace && !isVanillaFurnaceId(target.typeId())) {
+            return Optional.empty();
+        }
+        String inside = openedMenu == null || openedMenu.isBlank() ? "" : "；里面有：" + openedMenu;
+        return Optional.of(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                "原版炉类不支持 use 直接投料（仅打开了界面，手上的 " + requestedItem + " 未放入" + inside
+                        + "），请用 obtain(via=\"smelt\") 或 machine_run 烧炼",
+                "烧炼物品请改用 obtain(via=\"smelt\") 或 machine_run；只想查看炉内内容请空手调用 use"));
     }
 
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */

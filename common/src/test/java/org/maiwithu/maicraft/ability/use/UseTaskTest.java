@@ -123,6 +123,85 @@ class UseTaskTest {
     }
 
     @Test
+    void 持物对原版炉类右键只开界面未放入物品时明确失败提示改用烧炼能力_空手查看照常成功() {
+        for (String furnace : List.of("minecraft:furnace", "minecraft:smoker", "minecraft:blast_furnace")) {
+            Rig rig = new Rig();
+            rig.world.blocks.put(LEVER, furnace);
+            rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:raw_iron", 8);
+            // 非潜行右键原版炉只打开空界面，主手物品件数未减少。
+            rig.interactions.outcome(InteractionResult.applied("打开了界面"), () -> { });
+            rig.menus.look = new FakeLook(Map.of());
+
+            TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:raw_iron", null, null, 3));
+            assertEquals(TaskResult.Status.FAILED, result.status(), furnace + " 持物只开界面不应误报成功");
+            assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, result.problem().kind());
+            assertTrue(result.problem().message().contains("原版炉类不支持 use 直接投料"), result.problem().message());
+            assertTrue(result.problem().message().contains("obtain(via=\"smelt\")")
+                    && result.problem().message().contains("machine_run"), result.problem().message());
+            assertEquals(1, rig.interactions.builds, "第 1 次确认只开了界面就应停下，不再连开 3 次");
+            UseDetails details = assertInstanceOf(UseDetails.class, result.details());
+            assertEquals(0L, details.appliedTimes(), "未投入任何物品不应记生效次数");
+            assertEquals(List.of("还有 3 次没做"), result.remaining(), "扣回误加计数后剩余次数应保持完整");
+        }
+
+        // 空手右键原版熔炉：只为查看炉内内容，照常返回 DONE 并列出内容。
+        Rig emptyHand = new Rig();
+        emptyHand.world.blocks.put(LEVER, "minecraft:furnace");
+        emptyHand.interactions.applied("打开了界面");
+        emptyHand.menus.look = new FakeLook(Map.of("minecraft:coal", 4));
+        TaskResult looked = emptyHand.run(emptyHand.input(position(LEVER), null, null, null, 1));
+        assertEquals(TaskResult.Status.DONE, looked.status(), looked.summary());
+        assertTrue(looked.summary().contains("minecraft:coal ×4"), looked.summary());
+
+        // 潜行持漏斗贴在原版熔炉侧面放置：属于潜行贴方块而不是企图右键投料，照常放行。
+        Rig sneakPlace = new Rig();
+        sneakPlace.world.blocks.put(LEVER, "minecraft:furnace");
+        sneakPlace.world.held = new UseSeams.ReadsWorld.Held("minecraft:hopper", 1);
+        sneakPlace.interactions.placed("minecraft:hopper", "放下了漏斗", () -> sneakPlace.world.held = null);
+        UseInput sneakHopper = new UseInput(position(LEVER), "minecraft:hopper", null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, Direction.EAST, 0, true);
+        TaskResult placed = sneakPlace.run(sneakHopper);
+        assertEquals(TaskResult.Status.DONE, placed.status(), placed.summary());
+        assertEquals(1L, assertInstanceOf(UseDetails.class, placed.details()).appliedTimes());
+    }
+
+    @Test
+    void 机械动力合成器未指定点击面时自动瞄准正面_显式传面或潜行时尊重调用方指定() {
+        // 1. 持物品指向动力合成器、未传 face：自动锁定正面 SOUTH 靠近并右键投料，绝不乱点侧面。
+        Rig crafter = new Rig();
+        crafter.world.blocks.put(LEVER, "create:mechanical_crafter");
+        crafter.world.preferredFaces.put(LEVER, Direction.SOUTH);
+        crafter.world.held = new UseSeams.ReadsWorld.Held("minecraft:iron_ingot", 4);
+        crafter.interactions.placed("minecraft:iron_ingot", "放进合成器",
+                () -> crafter.world.held = new UseSeams.ReadsWorld.Held("minecraft:iron_ingot", 3));
+
+        TaskResult frontHit = crafter.run(crafter.input(position(LEVER), "minecraft:iron_ingot", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, frontHit.status(), frontHit.summary());
+        assertEquals(Direction.SOUTH, crafter.interactions.lastTarget.face(), "未指定 face 时应自动锁定合成器正面");
+        assertEquals(Direction.SOUTH, crafter.close.lastTarget.face(), "靠近站位也应朝合成器正面");
+
+        // 2. 调用方显式传了 face=EAST：保留 EAST，不覆盖。
+        Rig explicitFace = new Rig();
+        explicitFace.world.blocks.put(LEVER, "create:mechanical_crafter");
+        explicitFace.world.preferredFaces.put(LEVER, Direction.SOUTH);
+        explicitFace.interactions.applied("点东面");
+        UseInput withEast = new UseInput(position(LEVER), "minecraft:iron_ingot", null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, Direction.EAST, 0, false);
+        assertEquals(TaskResult.Status.DONE, explicitFace.run(withEast).status());
+        assertEquals(Direction.EAST, explicitFace.interactions.lastTarget.face());
+
+        // 3. 潜行操作（例如潜行把漏斗贴在合成器侧面）：不强制改写正面。
+        Rig sneaking = new Rig();
+        sneaking.world.blocks.put(LEVER, "create:mechanical_crafter");
+        sneaking.world.preferredFaces.put(LEVER, Direction.SOUTH);
+        sneaking.interactions.applied("潜行贴方块");
+        UseInput sneakInput = new UseInput(position(LEVER), "minecraft:hopper", null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 0, true);
+        assertEquals(TaskResult.Status.DONE, sneaking.run(sneakInput).status());
+        assertNull(sneaking.interactions.lastTarget.face());
+    }
+
+    @Test
     void 判断_放下的床落在被点面的邻居格() {
         Rig rig = new Rig();
         rig.world.blocks.put(LEVER, "minecraft:grass_block");
@@ -1059,6 +1138,8 @@ class UseTaskTest {
         Held held;
         /** 门、活板门、栅栏门此刻开着没有：没记的不是门。 */
         final Map<BlockPos, Boolean> doors = new HashMap<>();
+        /** 方块右键优先瞄准的面（如机械动力合成器正面 HORIZONTAL_FACING）。 */
+        final Map<BlockPos, Direction> preferredFaces = new HashMap<>();
 
         @Override public String dimension() { return dimension; }
         @Override public BlockPos feet() { return BlockPos.ZERO; }
@@ -1076,6 +1157,9 @@ class UseTaskTest {
         final Set<BlockPos> blockEntities = new HashSet<>();
         @Override public boolean hasBlockEntity(BlockPos cell) { return blockEntities.contains(cell); }
         @Override public Optional<Boolean> doorOpen(BlockPos cell) { return Optional.ofNullable(doors.get(cell)); }
+        @Override public Optional<Direction> preferredInteractFace(BlockPos cell) {
+            return Optional.ofNullable(preferredFaces.get(cell));
+        }
         @Override public Fluid fluid(BlockPos cell) { return fluids.getOrDefault(cell, Fluid.NONE); }
         @Override public Optional<BlockPos> nearestSource(BlockPos near, int radius) {
             return Optional.ofNullable(sources.get(near));
@@ -1093,8 +1177,10 @@ class UseTaskTest {
             Double front = signs.getOrDefault(target.cell(), Sign.NOT_A_SIGN) == Sign.WRITABLE
                     ? signFronts.getOrDefault(target.cell(), 0.0) : null;
             if (writesSign && front == null) return Optional.empty();
-            return Optional.of(front == null ? ApproachTarget.ofBlock(target.cell())
-                    : ApproachTarget.onFrontSideOf(target.cell(), front));
+            if (front != null) return Optional.of(ApproachTarget.onFrontSideOf(target.cell(), front));
+            return Optional.of(target.face() != null
+                    ? ApproachTarget.ofBlockFace(target.cell(), target.face())
+                    : ApproachTarget.ofBlock(target.cell()));
         }
     }
 

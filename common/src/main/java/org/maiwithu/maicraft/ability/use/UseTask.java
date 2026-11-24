@@ -303,9 +303,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             if (held != null && !services.world().interactsWithBasin(held)) {
                 return stop(UseDecider.basinSolidUseProblem(held));
             }
-            // 空手取工作盆内的物品且未点名面时，自动对准盆口顶面 2/16 宽实体边沿（顶面被整格封死时退回底面）：
-            // 工作盆四个水平侧面的上半截挂着配方产物过滤框，空手点中只会被 Create 当成清空过滤拦掉；
-            // 上下面不激活过滤框，且不用按潜行（避免副手拿盾时原版潜行右键跳过方块交互）。
+            // 空手取工作盆内的物品且未点名面时自动对准盆口顶面（封死时退回底面），避开水平侧面的产物过滤框。
             if (held == null && target.face() == null) {
                 if (services.world().topRimOpen(target.cell())) {
                     target = target.facing(Direction.UP);
@@ -313,6 +311,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                     target = target.facing(Direction.DOWN);
                 }
             }
+        }
+        // 机械动力合成器等限定交互面的方块，在未显式传 face 且非潜行时自动锁定正面（HORIZONTAL_FACING）靠近并右键。
+        if (!target.isEntity() && !input.writesText() && !input.sneak() && target.face() == null) {
+            services.world().preferredInteractFace(target.cell()).ifPresent(face -> target = target.facing(face));
         }
         if (!target.isEntity() && scoopsNow() && services.world().fluid(target.cell()) == UseSeams.ReadsWorld.Fluid.FLOWING) {
             Optional<BlockPos> source = services.world().nearestSource(target.cell(), SOURCE_SEARCH_RADIUS);
@@ -568,9 +570,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     // 看完界面：终端界面直接记录真实网络状态与存货（不写假空箱子进世界记忆）；普通容器列得出内容就记进世界记忆。
     private Next<Phase> look(TickContext context) {
         ActionStatus status = runAction(context);
-        if (status instanceof ActionStatus.Running) {
-            return Next.stay();
-        }
+        if (status instanceof ActionStatus.Running) return Next.stay();
         if (looking.isNetworkTerminal()) {
             Optional<String> terminalSummary = looking.networkTerminalSummary();
             if (terminalSummary.isPresent()) {
@@ -655,9 +655,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     // 顺手捡起这一下新掉出来的东西（剪下来的羊毛）：等一小会儿看有没有东西冒出来，有就走过去捡；
     // 没接上捡东西就直接做下一次或收工。
     private Next<Phase> collectOrNext() {
-        if (services.drops() == null) {
-            return nextOrDone();
-        }
+        if (services.drops() == null) return nextOrDone();
         return goWith(Phase.COLLECT, services.drops().pickUpNewSince(dropsBefore), "捡起掉出的东西");
     }
 
@@ -676,6 +674,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     private Next<Phase> nextOrDone() {
+        // 持物非潜行对原版炉类只点开界面未放入任何物品时立即失败说明并扣回预加计数，不再误报“确认生效（里面有：空的）”。
+        Optional<Problem> furnaceNoInsert = UseDecider.vanillaFurnaceNoInsert(target, input.item(), input.sneak(),
+                consumedHeldInUse, looking != null && !looking.isNetworkTerminal(), menuInsertion, openedMenu,
+                target != null && !target.isEntity() && services.world().isVanillaFurnace(target.cell()));
+        if (furnaceNoInsert.isPresent()) {
+            if (appliedTimes > 0) appliedTimes--;
+            return Next.fail(furnaceNoInsert.get());
+        }
         if (appliedTimes < input.count()) {
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();

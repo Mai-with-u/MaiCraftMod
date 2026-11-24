@@ -212,7 +212,7 @@ public final class ItemUseAim {
         return switch (gesture) {
             // 刷子点目标本身，按住直到刷完；做成以那一格变回普通方块为准。
             case EMPTY_HAND, USE_TARGET ->
-                Optional.of(new Aim(target, target, Confirmation.TARGET_OR_HAND_CHANGES, "对目标本身用"));
+                Optional.of(new Aim(target, target, face, Confirmation.TARGET_OR_HAND_CHANGES, "对目标本身用"));
             // 放船这类点不进方块：朝目标的方向使用手里物品，放出去的落点由物品自己按射线找。
             case OWN_USE -> Optional.of(new Aim(target, target, Confirmation.OWN_USE_TAKES_EFFECT,
                     "朝目标的方向使用手里的东西，放出的东西由物品自己找落点"));

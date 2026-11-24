@@ -93,6 +93,19 @@ final class UseSeams {
             return Optional.empty();
         }
 
+        /** 那一格是不是原版炉类（熔炉、烟熏炉、高炉及其子类）：用于区分开炉查看与持物企图直接投料。 */
+        default boolean isVanillaFurnace(BlockPos cell) {
+            return blockId(cell).map(UseDecider::isVanillaFurnaceId).orElse(false);
+        }
+
+        /**
+         * 那一格方块右键交互时优先瞄准的方块面（例如机械动力合成器必须点正面 HORIZONTAL_FACING 才能投料、取料或改向）；
+         * 不限定交互面时为空。
+         */
+        default Optional<Direction> preferredInteractFace(BlockPos cell) {
+            return Optional.empty();
+        }
+
         /** 那一格正上方的方块有没有把整格底面封死：没封死（空气、溜槽、漏斗）时能点到工作盆顶面盆口边沿。 */
         default boolean topRimOpen(BlockPos cell) {
             return air(cell.above());

@@ -241,4 +241,19 @@ class ItemUseAimTest {
                 ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false)).isEmpty());
         assertFalse(ItemUseAim.needsSourceSearch(ItemUseAim.Gesture.POUR, ItemUseAim.CellNature.FLUID_FLOWING));
     }
+
+    @Test
+    void targetFaceIsPreservedForDirectUseAndEmptyHand() {
+        // 动力合成器等限定正面交互的方块锁定了正面朝向后，直接持物投料与空手取料都保留该点击面。
+        Optional<ItemUseAim.Aim> itemUse = ItemUseAim.aim(ItemUseAim.Gesture.USE_TARGET, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false), Direction.SOUTH);
+        assertTrue(itemUse.isPresent());
+        assertEquals(target, itemUse.get().clickCell());
+        assertEquals(Direction.SOUTH, itemUse.get().clickFace());
+
+        Optional<ItemUseAim.Aim> emptyHand = ItemUseAim.aim(ItemUseAim.Gesture.EMPTY_HAND, target,
+                ItemUseAim.CellNature.SOLID, around(Set.of(), Set.of(), false, false), Direction.WEST);
+        assertTrue(emptyHand.isPresent());
+        assertEquals(Direction.WEST, emptyHand.get().clickFace());
+    }
 }
