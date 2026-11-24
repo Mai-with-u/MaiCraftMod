@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
@@ -127,8 +128,9 @@ class UseStructureProtectionTest {
 
     @Test
     void 传工具标签配纯坐标拦截建筑破坏_自定义标签在备手后复核拦截_用b号点名放行() {
-        // 场景 A：原版常见破坏性工具标签（#minecraft:axes / #minecraft:hoes / #minecraft:shovels）配纯坐标提前拦截。
-        for (String tag : List.of("#minecraft:axes", "#minecraft:hoes", "#minecraft:shovels")) {
+        // 场景 A：原版与通用常见破坏性工具标签配纯坐标提前拦截（含单复数对称形式）。
+        for (String tag : List.of("#minecraft:axes", "#minecraft:hoes", "#minecraft:shovels",
+                "#c:tools/axes", "#c:tools/hoes", "#c:tools/shovels")) {
             TestRig rig = new TestRig();
             rig.blocks.put(LOG_WALL, "minecraft:oak_log");
             rig.structureBlocks.put(LOG_WALL, StructureProtection.building("森林木屋"));
@@ -221,6 +223,91 @@ class UseStructureProtectionTest {
         assertEquals(SAFE_SOURCE, safeRig.lastInteractedCell);
     }
 
+    @Test
+    void 建筑内持锄头补耕泥土类方块默认放行_持锹或改原木仍拦截且拒绝文案含b号点名提示() {
+        // 建筑内被踩坏的菜地：dirt / grass_block / coarse_dirt / dirt_path 持具体锄头或锄标签都默认放行。
+        for (String soil : List.of("minecraft:dirt", "minecraft:grass_block", "minecraft:coarse_dirt", "minecraft:dirt_path")) {
+            TestRig hoeRig = new TestRig();
+            hoeRig.blocks.put(LOG_WALL, soil);
+            hoeRig.structureBlocks.put(LOG_WALL, StructureProtection.building("温室菜园"));
+
+            TaskResult withHoe = hoeRig.run(new UseInput(new Target.Position(10, 64, 10, DIM), "minecraft:iron_hoe",
+                    null, null, 1, 32, List.of(), Permissions.DEFAULT));
+            assertEquals(TaskResult.Status.DONE, withHoe.status(), soil + " 持锄头补耕应放行：" + withHoe.summary());
+            assertEquals(1, hoeRig.interactedCount);
+
+            // 传 #minecraft:hoes 或自定义锄标签且备手拿到铁锄：guardStructureAfterHand 复核同样放行。
+            TestRig tagRig = new TestRig();
+            tagRig.blocks.put(LOG_WALL, soil);
+            tagRig.structureBlocks.put(LOG_WALL, StructureProtection.building("温室菜园"));
+            tagRig.resolvedHandItem = "minecraft:iron_hoe";
+
+            TaskResult withCustomTag = tagRig.run(new UseInput(new Target.Position(10, 64, 10, DIM), "#mod:custom_hoes",
+                    null, null, 1, 32, List.of(), Permissions.DEFAULT));
+            assertEquals(TaskResult.Status.DONE, withCustomTag.status(), soil + " 备手拿到锄头复核应放行");
+
+            // 复数标签 #c:tools/hoes 同样对称放行补耕。
+            TestRig pluralHoeRig = new TestRig();
+            pluralHoeRig.blocks.put(LOG_WALL, soil);
+            pluralHoeRig.structureBlocks.put(LOG_WALL, StructureProtection.building("温室菜园"));
+            pluralHoeRig.resolvedHandItem = "minecraft:iron_hoe";
+            assertEquals(TaskResult.Status.DONE, pluralHoeRig.run(new UseInput(new Target.Position(10, 64, 10, DIM),
+                    "#c:tools/hoes", null, null, 1, 32, List.of(), Permissions.DEFAULT)).status());
+        }
+
+        // 持锹对建筑内草方块压土径：不属于农田补耕，仍拦截，且 message 末尾含「若确需操作，请先 observe 用 b# 点名」。
+        TestRig shovelRig = new TestRig();
+        shovelRig.blocks.put(LOG_WALL, "minecraft:grass_block");
+        shovelRig.structureBlocks.put(LOG_WALL, StructureProtection.building("温室菜园"));
+        TaskResult shovelBlocked = shovelRig.run(new UseInput(new Target.Position(10, 64, 10, DIM), "minecraft:iron_shovel",
+                null, null, 1, 32, List.of(), Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, shovelBlocked.status());
+        assertEquals(Problem.Kind.NEED_APPROVAL, shovelBlocked.problem().kind());
+        assertTrue(shovelBlocked.problem().message().endsWith("若确需操作，请先 observe 用 b# 点名"),
+                shovelBlocked.problem().message());
+
+        // 备手后二次复核拦截（自定义斧标签拿真斧头对建筑原木墙）：message 末尾同样含引导提示。
+        TestRig afterHandRig = new TestRig();
+        afterHandRig.blocks.put(LOG_WALL, "minecraft:oak_log");
+        afterHandRig.structureBlocks.put(LOG_WALL, StructureProtection.building("森林木屋"));
+        afterHandRig.resolvedHandItem = "minecraft:diamond_axe";
+        TaskResult afterHandBlocked = afterHandRig.run(new UseInput(new Target.Position(10, 64, 10, DIM), "#mod:custom_axes",
+                null, null, 1, 32, List.of(), Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, afterHandBlocked.status());
+        assertTrue(afterHandBlocked.problem().message().endsWith("若确需操作，请先 observe 用 b# 点名"),
+                afterHandBlocked.problem().message());
+    }
+
+    @Test
+    void 空桶点水车旁流动水自动改舀追溯到水车驱动水源时即使未建档也被拦截() {
+        TestRig wheelRig = new TestRig();
+        wheelRig.blocks.put(FLOWING_OUTSIDE, "minecraft:water");
+        wheelRig.blocks.put(PROTECTED_SOURCE, "minecraft:water");
+        wheelRig.fluids.put(FLOWING_OUTSIDE, UseSeams.ReadsWorld.Fluid.FLOWING);
+        wheelRig.fluids.put(PROTECTED_SOURCE, UseSeams.ReadsWorld.Fluid.SOURCE);
+        wheelRig.nearestSourceResult = Optional.of(PROTECTED_SOURCE);
+        // 在 PROTECTED_SOURCE 正下方放一台 Z 轴小水车（未建任何机器档案）。
+        BlockPos wheelBelow = PROTECTED_SOURCE.below();
+        wheelRig.waterGrid = new FarmlandIrrigation.WaterGrid() {
+            @Override public String dimension() { return DIM; }
+            @Override public boolean isWaterSource(BlockPos pos) { return pos.equals(PROTECTED_SOURCE); }
+            @Override public boolean isSolidFloor(BlockPos pos) { return false; }
+            @Override public boolean isFarmland(BlockPos pos) { return false; }
+            @Override public FarmlandIrrigation.WaterWheelAt waterWheelAt(BlockPos pos) {
+                return pos.equals(wheelBelow)
+                        ? FarmlandIrrigation.WaterWheelAt.small(Direction.Axis.Z)
+                        : FarmlandIrrigation.WaterWheelAt.NONE;
+            }
+        };
+
+        TaskResult refused = wheelRig.run(new UseInput(new Target.Position(20, 64, 20, DIM), "minecraft:bucket",
+                null, null, 1, 32, List.of(), Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, refused.status());
+        assertEquals(Problem.Kind.NEED_APPROVAL, refused.problem().kind());
+        assertTrue(refused.problem().message().contains("水车"), refused.problem().message());
+        assertEquals(0, wheelRig.interactedCount);
+    }
+
     private static WorldPosition pos(BlockPos cell) {
         return new WorldPosition(cell.getX(), cell.getY(), cell.getZ(), DIM);
     }
@@ -233,6 +320,7 @@ class UseStructureProtectionTest {
         final Map<BlockPos, StructureProtection> structureBlocks = new HashMap<>();
         final Map<BlockPos, StructureProtection> structureFluids = new HashMap<>();
         List<RememberedRegion> regions = List.of();
+        FarmlandIrrigation.WaterGrid waterGrid = FarmlandIrrigation.WaterGrid.EMPTY;
         Optional<BlockPos> nearestSourceResult = Optional.empty();
         /** 备手后实际拿在主手上的具体物品 ID（用于模拟传工具标签后换上具体工具）。 */
         String resolvedHandItem;
@@ -253,7 +341,7 @@ class UseStructureProtectionTest {
                             BlockPos cell = new BlockPos(p.x(), p.y(), p.z());
                             return structureFluids.getOrDefault(cell, blockAt(p));
                         }
-                    }, FarmlandIrrigation.WaterGrid.EMPTY);
+                    }, waterGrid);
 
             UseSeams.ReadsWorld world = new UseSeams.ReadsWorld() {
                 @Override public String dimension() { return DIM; }

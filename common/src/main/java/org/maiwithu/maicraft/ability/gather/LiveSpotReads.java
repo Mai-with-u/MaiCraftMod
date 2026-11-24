@@ -15,6 +15,8 @@ import net.minecraft.world.level.block.CropBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 
+import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
+import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -70,6 +72,20 @@ public final class LiveSpotReads implements ReadsSpot {
             return OptionalInt.empty();
         }
         return OptionalInt.of(level.getHeight(Heightmap.Types.MOTION_BLOCKING, x, z));
+    }
+
+    @Override
+    public boolean isFacilityBlock(WorldPosition at, String blockType) {
+        if (blockType != null && (FacilityKinds.isWorkstationId(blockType) || FacilityKinds.isBed(blockType))) {
+            return true;
+        }
+        Level level = level();
+        BlockPos pos = new BlockPos(at.x(), at.y(), at.z());
+        if (level == null || !level.isLoaded(pos)) {
+            return false;
+        }
+        // 复用全仓统一的功能方块判定，覆盖营火、箱子、木桶、熔炉、厨锅与各类带方块实体的模组加工台，不另造重复名单。
+        return FunctionalBlocks.functional(level.getBlockState(pos));
     }
 
     private Level level() {

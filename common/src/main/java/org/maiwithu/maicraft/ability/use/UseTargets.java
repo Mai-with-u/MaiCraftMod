@@ -269,7 +269,7 @@ final class UseTargets {
         UseSeams.OthersThings others = services.others();
         if (others == null || target == null || target.isEntity()) return Optional.empty();
         return others.structureGuardReason(heldItem, target).map(why -> Problem.of(Problem.Kind.NEED_APPROVAL,
-                target.describe() + why + "，纯坐标直指不破坏或舀取受保护结构，不碰",
+                target.describe() + why + "，纯坐标直指不破坏或舀取受保护结构，不碰；若确需操作，请先 observe 用 b# 点名",
                 "确实要操作，请先 observe 获取目标的观察编号 b# 后点名执行"));
     }
 
@@ -331,7 +331,8 @@ final class UseTargets {
             Optional<String> structureWhy = structureGuarded(target);
             if (structureWhy.isPresent()) {
                 return new Lookup.Failed(Problem.of(Problem.Kind.NEED_APPROVAL,
-                        target.describe() + structureWhy.get() + "，纯坐标直指不破坏或舀取受保护结构，不碰",
+                        target.describe() + structureWhy.get()
+                                + "，纯坐标直指不破坏或舀取受保护结构，不碰；若确需操作，请先 observe 用 b# 点名",
                         "确实要操作，请先 observe 获取目标的观察编号 b# 后点名执行"));
             }
         }

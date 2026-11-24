@@ -20,7 +20,11 @@ public record StructureProtection(Route route, String name) {
     public static final StructureProtection FARMLAND_WATER =
             new StructureProtection(Route.FARMLAND_IRRIGATION, null);
 
-    /** 结构保护区的三类来源。 */
+    /** 属于驱动水车的动力水源。 */
+    public static final StructureProtection WATER_WHEEL_WATER =
+            new StructureProtection(Route.WATER_WHEEL_POWER, null);
+
+    /** 结构保护区的来源种类。 */
     public enum Route {
         /** 不在结构保护区里。 */
         NONE,
@@ -29,7 +33,9 @@ public record StructureProtection(Route route, String name) {
         /** 属于在役世界机器档案（含机器里的流体源格）。 */
         MACHINE,
         /** 属于耕地周围的非无限水灌溉水源。 */
-        FARMLAND_IRRIGATION
+        FARMLAND_IRRIGATION,
+        /** 属于紧邻水车驱动面的动力水源。 */
+        WATER_WHEEL_POWER
     }
 
     public StructureProtection {
@@ -58,6 +64,7 @@ public record StructureProtection(Route route, String name) {
             case BUILDING -> "属于已登记的建筑「" + name + "」";
             case MACHINE -> "属于在役机器「" + name + "」";
             case FARMLAND_IRRIGATION -> "是周围耕地的灌溉水源（非无限水，舀走后不会自动再生）";
+            case WATER_WHEEL_POWER -> "是水车的动力水源（舀走会导致水车停转）";
         };
     }
 }

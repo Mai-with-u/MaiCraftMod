@@ -11,11 +11,15 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.npc.AbstractVillager;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.item.HoeItem;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.BellBlock;
 import net.minecraft.world.level.block.Block;
@@ -131,25 +135,72 @@ final class LiveOthersThings implements UseSeams.OthersThings {
     public Optional<String> structureGuardReason(String heldItem, ResolvedTarget target) {
         Protection guard = protection.get();
         if (guard == null || target == null || target.isEntity()) return Optional.empty();
-        return structureGuard(guard, heldItem, target, cellOf(target));
+        // 生产端在已启动的游戏环境里额外结合 HoeItem 与 ItemTags.HOES 识别所有模组锄头。
+        boolean hoe = isHoeById(heldItem) || isRegisteredHoe(heldItem);
+        return structureGuard(guard, heldItem, target, cellOf(target), hoe);
     }
 
     /**
-     * 结构保护区对 use 的纯判断：只拦截会破坏方块或舀取流体的手势（空桶舀取、满桶倾倒、非照明设施点火、
-     * 锄/锹改形、斧头去皮刮铜、刷子，以及常见破坏性工具标签），开门、按按钮、开箱、往营火放食物与点燃营火/蜡烛一律放行。
+     * 结构保护区对 use 的纯判断（离线测试入口，不触碰游戏注册表）：只拦截会破坏方块或舀取流体的手势，
+     * 开门、按按钮、开箱、往营火放食物、点燃营火/蜡烛，以及持锄头把受保护结构内的泥土类方块耕回农田一律放行。
      */
     static Optional<String> structureGuard(Protection guard, String heldItem, ResolvedTarget target,
             WorldPosition spot) {
+        return structureGuard(guard, heldItem, target, spot, isHoeById(heldItem));
+    }
+
+    static Optional<String> structureGuard(Protection guard, String heldItem, ResolvedTarget target,
+            WorldPosition spot, boolean heldIsHoe) {
         if (guard == null || target == null || target.isEntity()) return Optional.empty();
         ItemUseAim.Gesture gesture = gestureForGuard(heldItem);
         StructureProtection hit = switch (gesture) {
             case SCOOP -> guard.structureFluidAt(spot);
-            case POUR, TRANSFORM_TOOL, STRIP_TOOL, BRUSH -> guard.structureBlockAt(spot);
+            // 持锄头对建筑或菜地内被踩坏的泥土类方块（泥土、草方块、砂土、土径）执行耕地恢复，属于正常农田维护而非破坏，默认放行。
+            case TRANSFORM_TOOL -> heldIsHoe && isTillableFarmSoil(target.typeId())
+                    ? StructureProtection.NONE : guard.structureBlockAt(spot);
+            case POUR, STRIP_TOOL, BRUSH -> guard.structureBlockAt(spot);
             case IGNITE -> isIgnitableLightFacility(target.typeId())
                     ? StructureProtection.NONE : guard.structureBlockAt(spot);
             case EMPTY_HAND, USE_TARGET, OWN_USE, UNSUPPORTED -> StructureProtection.NONE;
         };
         return hit.protects() ? Optional.of(hit.describe()) : Optional.empty();
+    }
+
+    /** 可被锄头耕回耕地的泥土类方块名单（用于放行受保护建筑内菜地的补耕恢复）。 */
+    private static final Set<String> TILLABLE_FARM_SOILS = Set.of(
+            "minecraft:dirt", "minecraft:grass_block", "minecraft:coarse_dirt", "minecraft:dirt_path");
+
+    // 纯字符串层面的锄头识别（覆盖原版与模组锄标签及常规锄头 ID，离线测试安全不触发注册表初始化）。
+    static boolean isHoeById(String heldItem) {
+        if (heldItem == null || heldItem.isBlank()) return false;
+        String spec = stripComponents(heldItem);
+        if (spec.startsWith("#")) {
+            return spec.equals("#minecraft:hoes") || spec.equals("#c:tools/hoe") || spec.equals("#c:tools/hoes");
+        }
+        return spec.endsWith("_hoe") || spec.endsWith(":hoe");
+    }
+
+    // 生产运行期通过物品注册表补充识别非 _hoe 命名的自定义锄头（HoeItem 或 #minecraft:hoes 标签）。
+    private static boolean isRegisteredHoe(String heldItem) {
+        if (heldItem == null || heldItem.isBlank()) return false;
+        String spec = stripComponents(heldItem);
+        if (spec.startsWith("#")) return false;
+        ResourceLocation id = ResourceLocation.tryParse(spec);
+        if (id == null) return false;
+        Optional<Item> found = BuiltInRegistries.ITEM.getOptional(id);
+        if (found.isEmpty()) return false;
+        Item item = found.get();
+        return item instanceof HoeItem || new ItemStack(item).is(ItemTags.HOES);
+    }
+
+    private static String stripComponents(String heldItem) {
+        String spec = heldItem.strip().toLowerCase(Locale.ROOT);
+        int bracket = spec.indexOf('[');
+        return bracket > 0 ? spec.substring(0, bracket) : spec;
+    }
+
+    private static boolean isTillableFarmSoil(String blockId) {
+        return blockId != null && TILLABLE_FARM_SOILS.contains(blockId.toLowerCase(Locale.ROOT));
     }
 
     // 除具体物品 ID 外，备手前提前识别常见破坏性工具标签，避免传标签配纯坐标绕过结构保护或白跑备手流程。
@@ -160,10 +211,11 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         }
         String tag = heldItem.toLowerCase(Locale.ROOT);
         if (tag.equals("#minecraft:hoes") || tag.equals("#minecraft:shovels")
-                || tag.equals("#c:tools/hoe") || tag.equals("#c:tools/shovel")) {
+                || tag.equals("#c:tools/hoe") || tag.equals("#c:tools/hoes")
+                || tag.equals("#c:tools/shovel") || tag.equals("#c:tools/shovels")) {
             return ItemUseAim.Gesture.TRANSFORM_TOOL;
         }
-        if (tag.equals("#minecraft:axes") || tag.equals("#c:tools/axe")) {
+        if (tag.equals("#minecraft:axes") || tag.equals("#c:tools/axe") || tag.equals("#c:tools/axes")) {
             return ItemUseAim.Gesture.STRIP_TOOL;
         }
         return direct;

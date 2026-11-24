@@ -778,4 +778,72 @@ class GatherTaskTest {
         assertTrue(result.problem().message().contains("回弹恢复原位"), result.problem().message());
         assertTrue(result.changes().isEmpty(), "方块被服务端回弹留在原位时不应记为已破坏");
     }
+
+    @Test
+    void 坐标指定设施格且预期物品不匹配时拒绝误拆并引导拾取掉落物() {
+        // 场景 A：营火格坐标配熟鳕鱼（误把烤熟弹出的掉落物位置当方块去挖）-> 必须拒绝，绝不拆营火。
+        FakeBackpack campfireBag = new FakeBackpack();
+        FakeActions campfireActions = new FakeActions(campfireBag, "minecraft:charcoal", 2);
+        GatherTask campfireTask = new GatherTask(blockSpot("minecraft:cooked_cod"), campfireActions, campfireActions,
+                new NoToolsNeeded(), new FakeWorld("minecraft:campfire", false), null, campfireActions,
+                permission(), campfireBag, null, null, PERMS);
+        TaskResult campfireRefused = run(campfireTask);
+        assertEquals(TaskResult.Status.FAILED, campfireRefused.status());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, campfireRefused.problem().kind());
+        assertTrue(campfireRefused.problem().message().contains("minecraft:campfire"), campfireRefused.problem().message());
+        assertTrue(campfireRefused.problem().suggestion().contains("travel")
+                && campfireRefused.problem().suggestion().contains("e#"), campfireRefused.problem().suggestion());
+        assertTrue(campfireActions.log.stream().noneMatch(line -> line.startsWith("挖")), "被设施防误拆拦截后绝不能动手挖");
+
+        // 场景 B：模组厨锅（带方块实体设施）配烤土豆 -> 同样拒绝误拆。
+        ReadsSpot cookingPotWorld = new ReadsSpot() {
+            @Override public Optional<String> blockTypeAt(WorldPosition at) { return Optional.of("farmersdelight:cooking_pot"); }
+            @Override public boolean isCrop(String blockType) { return false; }
+            @Override public boolean matureCrop(WorldPosition at, String blockType) { return false; }
+            @Override public OptionalInt surfaceY(int x, int z) { return OptionalInt.of(64); }
+            @Override public boolean isFacilityBlock(WorldPosition at, String blockType) { return true; }
+        };
+        FakeBackpack potBag = new FakeBackpack();
+        FakeActions potActions = new FakeActions(potBag, "farmersdelight:cooking_pot", 1);
+        TaskResult potRefused = run(new GatherTask(blockSpot("minecraft:baked_potato"), potActions, potActions,
+                new NoToolsNeeded(), cookingPotWorld, null, potActions, permission(), potBag, null, null, PERMS));
+        assertEquals(TaskResult.Status.FAILED, potRefused.status());
+        assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, potRefused.problem().kind());
+        assertTrue(potActions.log.stream().noneMatch(line -> line.startsWith("挖")));
+    }
+
+    @Test
+    void 明确要拆设施本身或取其已知掉落或用观察编号点名时照常放行() {
+        // 1. 预期物品是营火已知掉落（木炭）：放行。
+        FakeBackpack charcoalBag = new FakeBackpack();
+        FakeActions charcoalActions = new FakeActions(charcoalBag, "minecraft:charcoal", 2);
+        TaskResult charcoalOk = run(new GatherTask(blockSpot("minecraft:charcoal"), charcoalActions, charcoalActions,
+                new NoToolsNeeded(), new FakeWorld("minecraft:campfire", false), null, charcoalActions,
+                permission(), charcoalBag, null, null, PERMS));
+        assertEquals(TaskResult.Status.DONE, charcoalOk.status(), charcoalOk.summary());
+
+        // 2. 预期物品就是设施本身（营火）：放行。
+        FakeBackpack selfBag = new FakeBackpack();
+        FakeActions selfActions = new FakeActions(selfBag, "minecraft:campfire", 1);
+        TaskResult selfOk = run(new GatherTask(blockSpot("minecraft:campfire"), selfActions, selfActions,
+                new NoToolsNeeded(), new FakeWorld("minecraft:campfire", false), null, selfActions,
+                permission(), selfBag, null, null, PERMS));
+        assertEquals(TaskResult.Status.DONE, selfOk.status(), selfOk.summary());
+
+        // 3. 未指定不匹配的 expectedItem（直接拆坐标处的营火）：放行。
+        FakeBackpack noExpectedBag = new FakeBackpack();
+        FakeActions noExpectedActions = new FakeActions(noExpectedBag, "minecraft:charcoal", 2);
+        TaskResult noExpectedOk = run(new GatherTask(blockSpot(null), noExpectedActions, noExpectedActions,
+                new NoToolsNeeded(), new FakeWorld("minecraft:campfire", false), null, noExpectedActions,
+                permission(), noExpectedBag, null, null, PERMS));
+        assertEquals(TaskResult.Status.DONE, noExpectedOk.status(), noExpectedOk.summary());
+
+        // 4. 用方块观察编号 b# 点名拆营火（即使带了 item）：点名即明确意图，放行。
+        FakeBackpack namedBag = new FakeBackpack();
+        FakeActions namedActions = new FakeActions(namedBag, "minecraft:cooked_cod", 1);
+        GatherSpot named = new GatherSpot(AT, false, null, "minecraft:cooked_cod", PERMS, true, "采集 b3 处的方块");
+        TaskResult namedOk = run(new GatherTask(named, namedActions, namedActions, new NoToolsNeeded(),
+                new FakeWorld("minecraft:campfire", false), null, namedActions, permission(), namedBag, null, null, PERMS));
+        assertEquals(TaskResult.Status.DONE, namedOk.status(), namedOk.summary());
+    }
 }

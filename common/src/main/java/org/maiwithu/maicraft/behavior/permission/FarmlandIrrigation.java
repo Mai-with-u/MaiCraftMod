@@ -7,8 +7,10 @@ import java.util.function.Supplier;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluids;
 
 /**
@@ -26,7 +28,29 @@ public final class FarmlandIrrigation {
     /** 原版无限水至少需要相邻水平水源格数。游戏事实。 */
     public static final int INFINITE_WATER_MIN_NEIGHBORS = 2;
 
-    /** 读取一格水与耕地事实的只读接缝：生产接客户端世界，测试用内存替身。 */
+    /** 一格位置上的水车形态：没有水车、小水车或大水车及其旋转轴（读不到轴向时为 null）。 */
+    public record WaterWheelAt(Kind kind, Direction.Axis axis) {
+
+        /** 这一格不是水车。 */
+        public static final WaterWheelAt NONE = new WaterWheelAt(Kind.NONE, null);
+
+        /** 水车规格种类。 */
+        public enum Kind { NONE, SMALL, LARGE }
+
+        public WaterWheelAt {
+            Objects.requireNonNull(kind, "kind");
+        }
+
+        public static WaterWheelAt small(Direction.Axis axis) {
+            return new WaterWheelAt(Kind.SMALL, axis);
+        }
+
+        public static WaterWheelAt large(Direction.Axis axis) {
+            return new WaterWheelAt(Kind.LARGE, axis);
+        }
+    }
+
+    /** 读取一格水、耕地与水车事实的只读接缝：生产接客户端世界，测试用内存替身。 */
     public interface WaterGrid {
 
         /** 该只读视图对应的当前维度 ID；不在世界里或离线测试不区分维度时可为 null。 */
@@ -36,6 +60,11 @@ public final class FarmlandIrrigation {
 
         /** 这一格是否是水源格（纯水方块水源与含水方块均算）。 */
         boolean isWaterSource(BlockPos pos);
+
+        /** 这一格是否含有水体（水源格与流动水均算），供水车斜上方供水判定核对驱动面是否有水。 */
+        default boolean hasWater(BlockPos pos) {
+            return isWaterSource(pos);
+        }
 
         /**
          * 这一格是否是纯水方块（非含水活板门/台阶）：原版中只有纯水格被舀空后才可能由两侧水源自动再生，
@@ -50,6 +79,11 @@ public final class FarmlandIrrigation {
 
         /** 这一格是否是耕地（{@code minecraft:farmland}）。 */
         boolean isFarmland(BlockPos pos);
+
+        /** 这一格是否是水车方块（小水车或大水车中心）及其旋转轴；不是水车返回 {@link WaterWheelAt#NONE}。 */
+        default WaterWheelAt waterWheelAt(BlockPos pos) {
+            return WaterWheelAt.NONE;
+        }
 
         /** 空世界：没有水源也没有耕地。 */
         WaterGrid EMPTY = new WaterGrid() {
@@ -134,6 +168,12 @@ public final class FarmlandIrrigation {
                         && level.getFluidState(pos).isSourceOfType(Fluids.WATER);
             }
 
+            @Override public boolean hasWater(BlockPos pos) {
+                ClientLevel level = levelSupplier.get();
+                return level != null && level.isLoaded(pos)
+                        && (level.getFluidState(pos).is(Fluids.WATER) || level.getFluidState(pos).is(Fluids.FLOWING_WATER));
+            }
+
             @Override public boolean isPureWaterBlock(BlockPos pos) {
                 ClientLevel level = levelSupplier.get();
                 return level != null && level.isLoaded(pos)
@@ -152,6 +192,25 @@ public final class FarmlandIrrigation {
                 ClientLevel level = levelSupplier.get();
                 return level != null && level.isLoaded(pos)
                         && level.getBlockState(pos).is(Blocks.FARMLAND);
+            }
+
+            @Override public WaterWheelAt waterWheelAt(BlockPos pos) {
+                ClientLevel level = levelSupplier.get();
+                if (level == null || !level.isLoaded(pos)) return WaterWheelAt.NONE;
+                // 只读取标准注册 ID 与原版方块状态属性，不依赖第三方模组类。
+                BlockState state = level.getBlockState(pos);
+                String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+                if ("create:water_wheel".equals(blockId)) {
+                    Direction.Axis axis = state.hasProperty(BlockStateProperties.FACING)
+                            ? state.getValue(BlockStateProperties.FACING).getAxis() : null;
+                    return WaterWheelAt.small(axis);
+                }
+                if ("create:large_water_wheel".equals(blockId)) {
+                    Direction.Axis axis = state.hasProperty(BlockStateProperties.AXIS)
+                            ? state.getValue(BlockStateProperties.AXIS) : null;
+                    return WaterWheelAt.large(axis);
+                }
+                return WaterWheelAt.NONE;
             }
         };
     }

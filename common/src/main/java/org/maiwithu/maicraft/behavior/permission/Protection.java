@@ -264,9 +264,15 @@ public final class Protection {
         String gridDimension = waterGrid.dimension();
         boolean sameDim = gridDimension == null || position.dimension() == null
                 || gridDimension.equals(position.dimension());
-        if (sameDim && FarmlandIrrigation.isProtectedIrrigationWater(waterGrid,
-                new BlockPos(position.x(), position.y(), position.z()))) {
-            return StructureProtection.FARMLAND_WATER;
+        if (sameDim) {
+            BlockPos cell = new BlockPos(position.x(), position.y(), position.z());
+            // 物理语义优先守护紧邻水车驱动面的动力水源，再检查周围耕地的非无限灌溉水源。
+            if (WaterWheelPower.isProtectedPowerWater(waterGrid, cell)) {
+                return StructureProtection.WATER_WHEEL_WATER;
+            }
+            if (FarmlandIrrigation.isProtectedIrrigationWater(waterGrid, cell)) {
+                return StructureProtection.FARMLAND_WATER;
+            }
         }
         return StructureProtection.NONE;
     }

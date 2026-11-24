@@ -59,6 +59,11 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
     /** 半分钟没有真实进展算卡住；整件事最多做五分钟。 */
     private static final long STUCK_AFTER_TICKS = 20L * 30;
     private static final long MAX_TICKS = 20L * 60 * 5;
+    /** 无精准采集破坏时不掉自身的原版功能设施已知掉落对照，避免误拦明确拆设施拿掉落的调用。 */
+    private static final Map<String, String> FACILITY_KNOWN_DROPS = Map.of(
+            "minecraft:campfire", "minecraft:charcoal",
+            "minecraft:soul_campfire", "minecraft:soul_soil",
+            "minecraft:ender_chest", "minecraft:obsidian");
 
     private final GatherSpot spot;
     private final ApproachesTargets approaches;
@@ -182,6 +187,18 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         if (spot.declaredType() != null && !spot.declaredType().equals(liveType)) {
             return Next.fail(Problem.of(Problem.Kind.TARGET_GONE,
                     "要采的是 " + spot.declaredType() + "，但那里现在是 " + liveType));
+        }
+        // 按坐标指定目标且声明了预期物品，但该格是功能设施（营火、容器、工作站、厨锅等）且本身不会掉该物品时，
+        // 拒绝挖掘：调用方多半是想捡落在设施旁或弹出在上的掉落物，直接挖会误拆设施。
+        if (!spot.named() && !spot.drop() && !spot.frame()
+                && spot.expectedItem() != null && !spot.expectedItem().isBlank()
+                && world.isFacilityBlock(spot.at(), liveType)
+                && !expectedMatchesFacility(liveType, spot.expectedItem())) {
+            return Next.fail(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    spot.at().x() + ", " + spot.at().y() + ", " + spot.at().z() + " 处是功能设施 " + liveType
+                            + "，并非期望物品 " + spot.expectedItem() + " 的掉落物，直接挖掘会误拆该设施",
+                    "捡地面掉落物请用 travel 走近自动拾取，或先 observe 再按实体编号 e# 传给 gather 拾取；"
+                            + "若确实要拆除该设施，请去掉不匹配的 item 参数或改用方块观察编号 b# 点名"));
         }
         if (world.isCrop(liveType)) {
             if (!world.matureCrop(spot.at(), liveType)) {
@@ -372,6 +389,32 @@ final class GatherTask extends PhasedTask<GatherTask.Phase> {
         }
         return Next.done(TaskResult.builder(TaskResult.Status.DONE,
                 "采集完成：" + gainedText(gained) + " 进了背包").details(details()).build());
+    }
+
+    // 判定调用方声明的预期物品是否与该功能设施本身或其已知挖掉掉落物一致（一致说明明确要拆设施，照常放行）。
+    static boolean expectedMatchesFacility(String blockType, String expectedItem) {
+        if (blockType == null || expectedItem == null) return false;
+        if (expectedItem.equals(blockType)) return true;
+        String knownFacilityDrop = FACILITY_KNOWN_DROPS.get(blockType);
+        if (expectedItem.equals(knownFacilityDrop)) return true;
+        String vanillaDrop = VanillaBlockDrops.droppedBy(blockType);
+        if (expectedItem.equals(vanillaDrop)) return true;
+        if (VanillaBlockDrops.chanceDropsOf(blockType).stream()
+                .anyMatch(drop -> drop.itemId().equals(expectedItem))) {
+            return true;
+        }
+        if (expectedItem.startsWith("#")) {
+            return itemMatchesTag(blockType, expectedItem)
+                    || (knownFacilityDrop != null && itemMatchesTag(knownFacilityDrop, expectedItem));
+        }
+        return false;
+    }
+
+    private static boolean itemMatchesTag(String itemId, String tagSpec) {
+        ResourceLocation key = ResourceLocation.tryParse(itemId);
+        Optional<Item> item = key == null ? Optional.empty() : BuiltInRegistries.ITEM.getOptional(key);
+        return item.isPresent() && item.get() != Items.AIR
+                && ItemMatch.matches(new ItemStack(item.get()), tagSpec);
     }
 
     private static boolean gainedMatchesExpected(Map<String, Integer> gained, String expected) {

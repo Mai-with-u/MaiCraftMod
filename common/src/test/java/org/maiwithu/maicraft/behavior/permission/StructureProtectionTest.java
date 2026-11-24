@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -12,6 +13,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 
@@ -24,21 +26,29 @@ class StructureProtectionTest {
     private static final String DIM = "minecraft:overworld";
     private static final String SELF = "self-player";
 
-    /** 内存水格替身：支持纯水源、含水方块、实心底与耕地布局。 */
+    /** 内存水格替身：支持纯水源、含水方块、流动水、实心底、耕地与水车布局。 */
     private static final class FakeWaterGrid implements FarmlandIrrigation.WaterGrid {
         final Set<BlockPos> pureWaterSources = new HashSet<>();
         final Set<BlockPos> waterloggedSources = new HashSet<>();
+        final Set<BlockPos> flowingWaters = new HashSet<>();
         final Set<BlockPos> solidFloors = new HashSet<>();
         final Set<BlockPos> farmlands = new HashSet<>();
+        final Map<BlockPos, FarmlandIrrigation.WaterWheelAt> waterWheels = new HashMap<>();
         String dim = DIM;
 
         @Override public String dimension() { return dim; }
         @Override public boolean isWaterSource(BlockPos pos) {
             return pureWaterSources.contains(pos) || waterloggedSources.contains(pos);
         }
+        @Override public boolean hasWater(BlockPos pos) {
+            return isWaterSource(pos) || flowingWaters.contains(pos);
+        }
         @Override public boolean isPureWaterBlock(BlockPos pos) { return pureWaterSources.contains(pos); }
         @Override public boolean isSolidFloor(BlockPos pos) { return solidFloors.contains(pos); }
         @Override public boolean isFarmland(BlockPos pos) { return farmlands.contains(pos); }
+        @Override public FarmlandIrrigation.WaterWheelAt waterWheelAt(BlockPos pos) {
+            return waterWheels.getOrDefault(pos, FarmlandIrrigation.WaterWheelAt.NONE);
+        }
     }
 
     @Test
@@ -202,5 +212,62 @@ class StructureProtectionTest {
                 ReadsStructureProtection.NONE, FarmlandIrrigation.WaterGrid.EMPTY);
         assertEquals(StructureProtection.building("已退役旧屋"), fallbackOnly.structureBlockAt(retiredWall));
         assertEquals(StructureProtection.building("已退役旧屋"), fallbackOnly.structureFluidAt(retiredWall));
+    }
+
+    @Test
+    void 水车驱动面动力水源不依赖建档即受保护_含小水车大水车斜上供水且不误伤轴端与外部无限水() {
+        FakeWaterGrid grid = new FakeWaterGrid();
+        // 小水车：中心 (0, 64, 0)，旋转轴 Z（东西上下 4 个紧邻格为驱动面，南北轴端不是驱动面）。
+        BlockPos smallWheel = new BlockPos(0, 64, 0);
+        grid.waterWheels.put(smallWheel, FarmlandIrrigation.WaterWheelAt.small(Direction.Axis.Z));
+        BlockPos topDrive = new BlockPos(0, 65, 0);
+        BlockPos westDrive = new BlockPos(-1, 64, 0);
+        BlockPos axleEnd = new BlockPos(0, 64, 1);
+        BlockPos upperDiagFeeder = new BlockPos(-1, 65, 0);
+        grid.pureWaterSources.add(topDrive);
+        grid.pureWaterSources.add(axleEnd);
+        grid.pureWaterSources.add(upperDiagFeeder);
+        grid.flowingWaters.add(westDrive);
+
+        assertTrue(WaterWheelPower.isProtectedPowerWater(grid, topDrive), "紧贴小水车顶面驱动格的水源应受保护");
+        assertTrue(WaterWheelPower.isProtectedPowerWater(grid, upperDiagFeeder), "水车斜上方给有水驱动面供水的非无限水源应受保护");
+        assertFalse(WaterWheelPower.isProtectedPowerWater(grid, axleEnd), "沿旋转轴端不驱动水车的水源不应误拦");
+
+        // 大水车：中心 (20, 64, 0)，旋转轴 Z（外圈 12 个驱动格，如 (20, 66, 0)、(21, 66, 0)、(22, 65, 0)）。
+        BlockPos largeWheel = new BlockPos(20, 64, 0);
+        grid.waterWheels.put(largeWheel, FarmlandIrrigation.WaterWheelAt.large(Direction.Axis.Z));
+        BlockPos largeRimTop = new BlockPos(20, 66, 0);
+        BlockPos largeRimCorner = new BlockPos(22, 65, 0);
+        BlockPos largeAxleSide = new BlockPos(20, 64, 2);
+        grid.pureWaterSources.add(largeRimTop);
+        grid.pureWaterSources.add(largeRimCorner);
+        grid.pureWaterSources.add(largeAxleSide);
+
+        assertEquals(4, WaterWheelPower.smallOffsets(Direction.Axis.Z).size());
+        assertEquals(12, WaterWheelPower.largeOffsets(Direction.Axis.Z).size());
+        assertTrue(WaterWheelPower.isProtectedPowerWater(grid, largeRimTop), "大水车外圈顶部驱动格水源应受保护");
+        assertTrue(WaterWheelPower.isProtectedPowerWater(grid, largeRimCorner), "大水车外圈侧角驱动格水源应受保护");
+        assertFalse(WaterWheelPower.isProtectedPowerWater(grid, largeAxleSide), "大水车轴向位置不应误判为驱动面");
+
+        // 驱动面外的 2x2 无限水池：即使贴在有水驱动面旁边，舀走会立即再生，应放行。
+        FakeWaterGrid infiniteGrid = new FakeWaterGrid();
+        infiniteGrid.waterWheels.put(new BlockPos(0, 64, 0), FarmlandIrrigation.WaterWheelAt.small(Direction.Axis.Z));
+        infiniteGrid.flowingWaters.add(new BlockPos(1, 64, 0));
+        for (int x = 2; x <= 3; x++) {
+            for (int z = 0; z <= 1; z++) {
+                infiniteGrid.pureWaterSources.add(new BlockPos(x, 64, z));
+                infiniteGrid.solidFloors.add(new BlockPos(x, 63, z));
+            }
+        }
+        assertFalse(WaterWheelPower.isProtectedPowerWater(infiniteGrid, new BlockPos(2, 64, 0)),
+                "驱动面外的 2x2 无限水池舀完自动再生，不应误拦");
+
+        // 不建任何机器档案，直接通过 Protection.structureFluidAt 也能拦截水车动力水源。
+        Protection protection = new Protection((d, x, y, z) -> Optional.empty(), List::of,
+                name -> Optional.empty(), SELF, SeesVillagers.NOBODY, ReadsOwnHome.NOWHERE, id -> id,
+                ReadsStructureProtection.NONE, grid);
+        StructureProtection hit = protection.structureFluidAt(new WorldPosition(0, 65, 0, DIM));
+        assertEquals(StructureProtection.Route.WATER_WHEEL_POWER, hit.route());
+        assertTrue(hit.describe().contains("水车"), hit.describe());
     }
 }
