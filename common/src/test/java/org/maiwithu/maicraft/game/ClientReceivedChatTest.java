@@ -18,6 +18,7 @@ import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.ChatTypeDecoration;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.EntityType;
 import org.junit.jupiter.api.BeforeAll;
@@ -321,5 +322,64 @@ class ClientReceivedChatTest {
         ReceivedChat sys = ClientReceivedChat.system(Component.literal("服务器已保存"), false, SELF, "Steve", ONLINE,
                 id -> 3.2).orElseThrow();
         assertNull(sys.senderDistance());
+    }
+
+    @Test
+    void advancementBroadcastExtractsHoverDescriptionStrippingTitleAndExtraWhitespace() {
+        // 原版成就播报：顶层为 chat.type.advancement.*，第二参数带方括号包裹的成就名，悬停文本首行重复标题，次行为描述。
+        Component playerHover = Component.literal("Alex")
+                .withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("点击发送私聊"))));
+        Component tooltip = Component.literal("石头时代\n\n  用你的新镐   挖掘\t圆石 \r\n  解锁基础工具  ");
+        Component titleNode = Component.literal("石头时代")
+                .withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, tooltip)));
+        Component bracketed = Component.translatableWithFallback("chat.square_brackets", "[%s]", titleNode);
+        Component advancement = Component.translatableWithFallback("chat.type.advancement.task", "%s 获得了进度 %s",
+                playerHover, bracketed);
+
+        ReceivedChat chat = ClientReceivedChat.system(advancement, false, SELF, "Steve", ONLINE).orElseThrow();
+
+        assertEquals(ReceivedChat.Kind.SYSTEM, chat.kind());
+        assertEquals("chat.type.advancement.task", chat.translationKey());
+        assertEquals("用你的新镐 挖掘 圆石 解锁基础工具", chat.detail());
+    }
+
+    @Test
+    void advancementHoverOnlyTitleOrOverlongDescriptionAreHandledCleanly() {
+        // 仅重复标题没有额外描述时 detail 应为 null，不重复占字段。
+        Component titleOnly = Component.literal("初次启程")
+                .withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("  初次启程  \n  "))));
+        Component bracketedEmpty = Component.translatableWithFallback("chat.square_brackets", "[%s]", titleOnly);
+        Component emptyAdv = Component.translatableWithFallback("chat.type.advancement.goal", "%s 达成了目标 %s",
+                Component.literal("Alex"), bracketedEmpty);
+        assertNull(ClientReceivedChat.system(emptyAdv, false, SELF, "Steve", ONLINE).orElseThrow().detail());
+
+        // 模组超长悬停文本按上限截断，防止撑爆聊天事件。
+        String longDesc = "很长的成就说明".repeat(200);
+        Component hugeNode = Component.literal("极限挑战")
+                .withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("极限挑战\n" + longDesc))));
+        Component hugeAdv = Component.translatableWithFallback("chat.type.advancement.challenge", "%s 完成了挑战 %s",
+                Component.literal("Alex"), Component.translatableWithFallback("chat.square_brackets", "[%s]", hugeNode));
+        ReceivedChat chat = ClientReceivedChat.system(hugeAdv, false, SELF, "Steve", ONLINE).orElseThrow();
+        assertEquals(ReceivedChat.MAX_DETAIL, chat.detail().length());
+        assertTrue(chat.detail().startsWith("很长的成就说明"));
+    }
+
+    @Test
+    void nonAdvancementSystemMessagesNeverExtractHoverTextIntoDetail() {
+        // 死亡播报、物品展示、分页按钮等其他系统消息即使带有 SHOW_TEXT，也不提取 detail。
+        Component hoverBtn = Component.literal("[下一页]")
+                .withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                        Component.literal("点击翻到第 2 页"))));
+        Component baritonePage = Component.literal("搜索结果第 1 页 ").append(hoverBtn);
+        assertNull(ClientReceivedChat.system(baritonePage, false, SELF, "Steve", ONLINE).orElseThrow().detail());
+
+        Component deathWithHover = Component.translatableWithFallback("death.attack.player", "%s 被 %s 杀死了",
+                Component.literal("Alex"),
+                Component.literal("附魔钻石剑").withStyle(style -> style.withHoverEvent(
+                        new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("锋利 V\n耐久 III")))));
+        assertNull(ClientReceivedChat.system(deathWithHover, false, SELF, "Steve", ONLINE).orElseThrow().detail());
     }
 }

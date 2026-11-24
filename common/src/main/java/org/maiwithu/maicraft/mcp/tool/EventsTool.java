@@ -157,6 +157,7 @@ public final class EventsTool implements McpTool {
             json.add("mentions", mentions);
         }
         if (chat.translationKey() != null) json.addProperty("translation_key", chat.translationKey());
+        if (chat.detail() != null && !chat.detail().isBlank()) json.addProperty("detail", chat.detail());
         return json;
     }
 

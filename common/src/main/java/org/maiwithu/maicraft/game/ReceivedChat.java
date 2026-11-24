@@ -25,13 +25,16 @@ import java.util.UUID;
  * @param shownAs        借角色名字显示的系统消息，聊天格式里写的那个名字；其余为 null
  * @param mentions       消息里按出现先后点到的实体（死亡播报的死者与凶手、进出提示的玩家）；没有时为空
  * @param translationKey 消息整句是一条翻译时的翻译键，例如 death.attack.explosion.player；不是时为 null
+ * @param detail         成就或进度播报悬停文本里的补充描述；非成就消息或没有描述时为 null
  */
 public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean senderOnline, Double senderDistance,
                            String text, boolean isPrivate, boolean truncated, String shownAs,
-                           List<MentionedEntity> mentions, String translationKey) {
+                           List<MentionedEntity> mentions, String translationKey, String detail) {
 
     /** 原话最多留多少字：原版玩家聊天上限 256 字，只有系统消息可能很长。 */
     public static final int MAX_TEXT = 1024;
+    /** 成就或进度补充描述最多留多少字，防止异常模组超长悬停文本撑爆上下文。 */
+    public static final int MAX_DETAIL = 512;
 
     /** 谁说的。 */
     public enum Kind {
@@ -47,6 +50,8 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         // 系统消息没有实体发言人，不带距离；玩家消息的距离统一四舍五入保留 1 位小数，非法值丢弃。
         senderDistance = kind == Kind.PLAYER ? roundDistance(senderDistance) : null;
         mentions = List.copyOf(mentions);
+        // 补充描述空白时统一记作 null，超长时按字符上限安全截断。
+        detail = clipDetail(detail);
     }
 
     /**
@@ -72,7 +77,7 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         String name = sender == null || sender.isBlank() ? null : sender.strip();
         String kept = clipped(text);
         return Optional.of(new ReceivedChat(Kind.PLAYER, name, senderId, senderOnline, senderDistance, kept, isPrivate,
-                kept.length() < text.strip().length(), null, List.of(), null));
+                kept.length() < text.strip().length(), null, List.of(), null, null));
     }
 
     /** 服务器的系统消息。动作栏提示不在聊天栏里，不算；空白的也不算。 */
@@ -80,7 +85,7 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         if (actionBar || text == null || text.isBlank()) return Optional.empty();
         String kept = clipped(text);
         return Optional.of(new ReceivedChat(Kind.SYSTEM, null, null, false, null, kept, false,
-                kept.length() < text.strip().length(), null, List.of(), null));
+                kept.length() < text.strip().length(), null, List.of(), null, null));
     }
 
     /**
@@ -97,7 +102,7 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         String prefix = "<" + name + "> ";
         if (!name.isEmpty() && said.startsWith(prefix)) said = said.substring(prefix.length());
         return fromServer(said, false).map(chat -> new ReceivedChat(Kind.SYSTEM, null, null, false, null, chat.text(),
-                false, chat.truncated(), name.isEmpty() ? null : name, List.of(), null));
+                false, chat.truncated(), name.isEmpty() ? null : name, List.of(), null, null));
     }
 
     /**
@@ -119,8 +124,13 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
 
     /** 同一条消息带上消息里点到的实体与翻译键。 */
     public ReceivedChat with(List<MentionedEntity> found, String key) {
+        return with(found, key, detail);
+    }
+
+    /** 同一条消息带上消息里点到的实体、翻译键与补充描述。 */
+    public ReceivedChat with(List<MentionedEntity> found, String key, String extraDetail) {
         return new ReceivedChat(kind, sender, senderId, senderOnline, senderDistance, text, isPrivate, truncated,
-                shownAs, found, key);
+                shownAs, found, key, extraDetail);
     }
 
     /** 把真实几何距离保留 1 位小数；非法或负数返回 null。 */
@@ -129,12 +139,21 @@ public record ReceivedChat(Kind kind, String sender, UUID senderId, boolean send
         return Math.round(raw * 10.0) / 10.0;
     }
 
-    // 只留前 MAX_TEXT 个字：截在一对代理字符中间会留下半个表情，往前退一位。
-    private static String clipped(String text) {
-        String value = text.strip();
-        if (value.length() <= MAX_TEXT) return value;
-        int end = MAX_TEXT;
+    // 只留前 limit 个字：截在一对代理字符中间会留下半个表情，往前退一位。
+    private static String clipAt(String value, int limit) {
+        if (value.length() <= limit) return value;
+        int end = limit;
         if (Character.isHighSurrogate(value.charAt(end - 1))) end--;
         return value.substring(0, end);
+    }
+
+    private static String clipped(String text) {
+        return clipAt(text.strip(), MAX_TEXT);
+    }
+
+    /** 裁剪补充描述：空白返回 null，超长截到 {@value #MAX_DETAIL} 字并避开代理字符边界。 */
+    public static String clipDetail(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        return clipAt(raw.strip(), MAX_DETAIL);
     }
 }

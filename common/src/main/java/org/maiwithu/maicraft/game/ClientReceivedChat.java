@@ -14,6 +14,7 @@ import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.ChatTypeDecoration;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.contents.TranslatableContents;
 
 /**
@@ -103,6 +104,8 @@ public final class ClientReceivedChat {
 
     /** 公屏聊天那一条格式的翻译键（"&lt;名字&gt; 原话"）。 */
     static final String PUBLIC_CHAT_KEY = "chat.type.text";
+    /** 成就与进度播报的翻译键前缀，仅该白名单内的系统消息提取悬停描述文本。 */
+    static final String ADVANCEMENT_KEY_PREFIX = "chat.type.advancement.";
 
     /**
      * 服务器的系统消息；动作栏提示不算聊天。死亡播报这类带着点到的实体与翻译键。
@@ -148,8 +151,11 @@ public final class ClientReceivedChat {
             return ReceivedChat.fromPlayer(withClickCommands(words), listed, line.name(), true, distance, false, self)
                     .map(chat -> chat.with(EntityMentions.in(words), translationKey(words)));
         }
+        String key = translationKey(message);
+        // 仅对成就或进度系统播报提取悬停文本描述，避免把死亡播报、物品悬停或命令按钮说明混入正文外字段。
+        String detail = advancementDetail(message, key);
         return ReceivedChat.fromServer(withClickCommands(message), actionBar)
-                .map(chat -> chat.with(EntityMentions.in(message), translationKey(message)));
+                .map(chat -> chat.with(EntityMentions.in(message), key, detail));
     }
 
     /** 公屏聊天格式里的发言人名字、名字点着的实体（没挂悬停时为 null）和原话。 */
@@ -174,6 +180,114 @@ public final class ClientReceivedChat {
     /** 消息整句是一条翻译（顶层是可翻译内容）时的翻译键，例如 death.attack.explosion.player；不是时为 null。 */
     static String translationKey(Component message) {
         return message.getContents() instanceof TranslatableContents translatable ? translatable.getKey() : null;
+    }
+
+    /**
+     * 从成就与进度播报的悬停文本（{@code SHOW_TEXT}）里提取补充描述。
+     *
+     * <p>只处理翻译键以 {@code chat.type.advancement.} 开头的播报；原版两参数格式里优先扫第二个参数
+     * （成就条目本身），避开插件挂在玩家名上的额外悬停提示。提取后剥离与成就标题重复的首行、
+     * 压缩多余空白与换行，并按长度上限裁剪；没有有效描述时返回 null。
+     */
+    static String advancementDetail(Component message, String translationKey) {
+        if (message == null || translationKey == null || !translationKey.startsWith(ADVANCEMENT_KEY_PREFIX)) {
+            return null;
+        }
+        // 原版成就播报两个参数依次是玩家名与成就名，只扫成就参数可避免误收插件给玩家名挂的悬停文字。
+        Component scanRoot = message;
+        if (message.getContents() instanceof TranslatableContents translatable
+                && translatable.getArgs().length == 2
+                && translatable.getArgs()[1] instanceof Component advancementNode) {
+            scanRoot = advancementNode;
+        }
+        String fullText = collapseInlineWhitespace(message.getString());
+        List<String> collected = new ArrayList<>();
+        collectHoverDetails(scanRoot, fullText, collected);
+        if (collected.isEmpty()) return null;
+        return ReceivedChat.clipDetail(String.join(" ", collected));
+    }
+
+    // 递归遍历组件自身、翻译参数与子节点，读取悬停文本并剥离与标题重复的首行。
+    private static void collectHoverDetails(Component node, String fullText, List<String> out) {
+        if (node == null) return;
+        HoverEvent hover = node.getStyle().getHoverEvent();
+        Component tooltip = hover == null ? null : hover.getValue(HoverEvent.Action.SHOW_TEXT);
+        if (tooltip != null) {
+            String cleaned = cleanAdvancementTooltip(tooltip.getString(), node.getString(), fullText);
+            if (cleaned != null && !out.contains(cleaned)) {
+                out.add(cleaned);
+            }
+        }
+        if (node.getContents() instanceof TranslatableContents translatable) {
+            for (Object arg : translatable.getArgs()) {
+                if (arg instanceof Component child) {
+                    collectHoverDetails(child, fullText, out);
+                }
+            }
+        }
+        for (Component sibling : node.getSiblings()) {
+            collectHoverDetails(sibling, fullText, out);
+        }
+    }
+
+    // 清理成就悬停文本：按行拆开压缩空白，去掉与成就标题重复的首行，再把剩余多行压成紧凑的一段话。
+    private static String cleanAdvancementTooltip(String rawTooltip, String nodeShown, String fullText) {
+        if (rawTooltip == null || rawTooltip.isBlank()) return null;
+        String[] rawLines = rawTooltip.split("\\R");
+        List<String> lines = new ArrayList<>(rawLines.length);
+        for (String rawLine : rawLines) {
+            String line = collapseInlineWhitespace(rawLine);
+            if (!line.isEmpty()) {
+                lines.add(line);
+            }
+        }
+        if (lines.isEmpty()) return null;
+        String title = stripBrackets(collapseInlineWhitespace(nodeShown == null ? "" : nodeShown));
+        String first = lines.getFirst();
+        String firstBare = stripBrackets(first);
+        boolean firstRepeatsTitle = (!title.isEmpty() && (first.equals(title) || firstBare.equals(title)))
+                || (lines.size() > 1 && containsBracketedTitle(fullText, firstBare));
+        if (firstRepeatsTitle) {
+            lines.removeFirst();
+        }
+        if (lines.isEmpty()) return null;
+        return String.join(" ", lines);
+    }
+
+    private static boolean containsBracketedTitle(String fullText, String title) {
+        if (fullText == null || fullText.isEmpty() || title.isEmpty()) return false;
+        return fullText.contains("[" + title + "]") || fullText.contains("【" + title + "】");
+    }
+
+    private static String stripBrackets(String text) {
+        if (text.length() >= 2 && ((text.startsWith("[") && text.endsWith("]"))
+                || (text.startsWith("【") && text.endsWith("】")))) {
+            return text.substring(1, text.length() - 1).strip();
+        }
+        return text;
+    }
+
+    private static String collapseInlineWhitespace(String raw) {
+        if (raw == null || raw.isBlank()) return "";
+        StringBuilder compact = new StringBuilder(raw.length());
+        boolean lastSpace = true;
+        for (int i = 0; i < raw.length(); i++) {
+            char ch = raw.charAt(i);
+            if (Character.isWhitespace(ch)) {
+                if (!lastSpace) {
+                    compact.append(' ');
+                    lastSpace = true;
+                }
+            } else {
+                compact.append(ch);
+                lastSpace = false;
+            }
+        }
+        int len = compact.length();
+        if (len > 0 && compact.charAt(len - 1) == ' ') {
+            compact.setLength(len - 1);
+        }
+        return compact.toString();
     }
 
     /**

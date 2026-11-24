@@ -12,7 +12,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.inventory.drops.ItemsTossed;
+import org.maiwithu.maicraft.game.ReceivedChat;
 import org.maiwithu.maicraft.kernel.ability.AbilityRegistry;
+import org.maiwithu.maicraft.kernel.event.ChatEvent;
 import org.maiwithu.maicraft.kernel.event.ChatEventLog;
 import org.maiwithu.maicraft.kernel.event.EventPublishingGoalRunStore;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -104,5 +106,19 @@ class EventsToolTest {
         assertEquals(PLAYER_A_UUID, tossed.get("to_uuid").getAsString());
         assertEquals("minecraft:bread", tossed.getAsJsonArray("items").get(0).getAsJsonObject().get("id").getAsString());
         assertEquals(2, tossed.getAsJsonArray("items").get(0).getAsJsonObject().get("count").getAsInt());
+    }
+
+    @Test
+    void 聊天事件仅在detail非空时序列化detail字段() {
+        ReceivedChat withDetail = ReceivedChat.fromServer("Alex 获得了进度 [石头时代]", false)
+                .orElseThrow()
+                .with(List.of(), "chat.type.advancement.task", "用你的新镐挖掘圆石");
+        JsonObject withDetailJson = EventsTool.chatEvent(new ChatEvent(1L, withDetail));
+        assertEquals("用你的新镐挖掘圆石", withDetailJson.get("detail").getAsString());
+        assertEquals("chat.type.advancement.task", withDetailJson.get("translation_key").getAsString());
+
+        ReceivedChat withoutDetail = ReceivedChat.fromServer("服务器将在 5 分钟后保存", false).orElseThrow();
+        JsonObject withoutDetailJson = EventsTool.chatEvent(new ChatEvent(2L, withoutDetail));
+        assertFalse(withoutDetailJson.has("detail"));
     }
 }

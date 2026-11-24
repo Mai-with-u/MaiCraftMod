@@ -111,4 +111,17 @@ class ReceivedChatTest {
         assertNull(ReceivedChat.roundDistance(-1.5));
         assertNull(ReceivedChat.fromServer("系统公告", false).orElseThrow().senderDistance());
     }
+
+    @Test
+    void detailIsNormalizedClippedAtSurrogateBoundaryAndBlankBecomesNull() {
+        ReceivedChat base = ReceivedChat.fromServer("Alex 获得了进度 [石头时代]", false).orElseThrow();
+        assertNull(base.detail());
+        assertNull(base.with(base.mentions(), "chat.type.advancement.task", "   \n  ").detail());
+
+        String emoji = "😀";
+        String overlong = "x".repeat(ReceivedChat.MAX_DETAIL - 1) + emoji + "尾巴";
+        ReceivedChat clipped = base.with(base.mentions(), "chat.type.advancement.task", overlong);
+        assertEquals(ReceivedChat.MAX_DETAIL - 1, clipped.detail().length());
+        assertFalse(Character.isHighSurrogate(clipped.detail().charAt(clipped.detail().length() - 1)));
+    }
 }
