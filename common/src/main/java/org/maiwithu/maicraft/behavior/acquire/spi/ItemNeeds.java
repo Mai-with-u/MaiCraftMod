@@ -162,4 +162,21 @@ public interface ItemNeeds {
     default Optional<Action> lookAround(ItemRequest request, Permissions permissions) {
         return Optional.empty();
     }
+
+    /**
+     * 通知问价记忆：当前子问题的报价计算实际撞到了外层正在要的东西（因外层防环而剔除了候选做法或原料）。
+     * 没撞到外层约束的无环子问题可在同轮问价内跨分支复用，只有实际撞到外层依赖的子问题才按外层路径隔离。
+     */
+    default void markOuterDependency() {}
+
+    /** 当前一轮问价的原料问价预算是否已用完；为真时多候选配方与标签展开应提前止损，避免冻住渲染线程。 */
+    default boolean priceBudgetExhausted() {
+        return false;
+    }
+
+    /** 通知问价记忆与预算：本次报价因预算耗尽提前跳过了剩余候选，结果不完整，绝不写入共享缓存且记作预算截断。 */
+    default void markBudgetCut() {}
+
+    /** 通知问价记忆：本次报价因制造来源重入短路返回了降级结果（未排序或跳过远端问价），仅用于本次递归返回，绝不写入共享缓存。 */
+    default void markDegraded() {}
 }

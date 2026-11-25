@@ -24,7 +24,6 @@ import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.UnreachablePlaces;
 import org.maiwithu.maicraft.behavior.inventory.InventorySpace;
-import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.kernel.ability.GoalEstimate;
 import org.maiwithu.maicraft.game.interaction.DigTool;
@@ -64,6 +63,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
      * 等看稳的窗口要盖住它；等太久按给不了收场。
      */
     static final int MAX_CONSULT_WAIT_TICKS = 400;
+    /** 连续多刻仍在等待视野扫描时每隔这么多刻才重新全源问价一次，避免每 50ms 原样重算。 */
+    static final int CONSULT_RECHECK_INTERVAL_TICKS = 5;
     /**
      * 一个来源连着几次只坏在现场几处（这棵树够不着、那块矿挖不下来）、一件没拿到，就当它这次走不通。
      * 玩家常识：连换三处都够不着，这一带先不在这条路上耗了。
@@ -304,18 +305,7 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
     }
 
     @Override public Optional<Double> nearestDistanceBlocks(ItemRequest request, Permissions permissions) {
-        SourceContext context = SourceContext.unscoped(position.currentPosition(), permissions);
-        Optional<Double> nearest = Optional.empty();
-        for (ItemSource source : sources) {
-            if (!Scope.ALL.allows(source.via().name())) continue;
-            if (source.quote(request, context) instanceof SourceQuote.Offer offer) {
-                // 说不准有没有的（没开过的箱子、没读过的随身背包）排在看得见、记得有的后面：要任意木板时，
-                // 没读过的背包对每种原木都报"可能有"、距离 0，原先十几种木板分不出先后，AE 里的云杉排不进前十二种。
-                double distance = offer.cost().distanceBlocks() + (offer.countUnknown() ? PriceAsks.UNKNOWN_STOCK_BLOCKS : 0);
-                if (nearest.isEmpty() || distance < nearest.get()) nearest = Optional.of(distance);
-            }
-        }
-        return nearest;
+        return priceAsks.nearestDistance(request, permissions);
     }
 
     // 问价不拿：最省的一条路的总代价；不算现做时跳过合成、烧炼。只有点名才做的途径（交易）照旧不参与。
@@ -328,6 +318,22 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         return priceAsks.ask(request, permissions, includeMaking).looking();
     }
 
+    @Override public void markOuterDependency() {
+        priceAsks.markOuterDependency();
+    }
+
+    @Override public boolean priceBudgetExhausted() {
+        return priceAsks.budgetExhausted();
+    }
+
+    @Override public void markBudgetCut() {
+        priceAsks.markBudgetCut();
+    }
+
+    @Override public void markDegraded() {
+        priceAsks.markDegraded();
+    }
+
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
     private final class Run implements Action {
 
@@ -336,6 +342,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         private final ItemRequest request;
         /** 问遍来源时已经为"还在看现场"的来源等了几刻。 */
         private int consultWaits;
+        /** 上轮问价期间仍在扫描现场的非制造来源探针：等待期间按刻推进建索引，同时跳过大配方重复展开。 */
+        private List<PriceAsks.ScanProbe> pendingScanProbes = List.of();
+        /** 记录探针时的现场指纹：背包、副手或位置变化时立刻清探针并全源重算。 */
+        private String waitingFingerprint;
         private final Permissions permissions;
         private final Scope scope;
         private final Consumer<String> onDelivered;
@@ -467,22 +477,51 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                 return ActionStatus.done();
             }
             return switch (stage) {
-                // 重新清点后还缺：问遍来源，世界可能已经变了，每一轮都重新问价。
-                case CONSULT -> consult(carried);
+                // 重新清点后还缺：问遍来源，世界可能已经变了，每一轮按刻号与现场指纹做同刻无环复用与扫描节流。
+                case CONSULT -> consult(carried, tick.gameTick());
                 case SPACE -> makeRoom(tick);
                 case RUN -> runStep(tick);
             };
         }
 
-        // 这一轮问价在这一刻里同步算完：做法类来源排做法时回头问的原料价记下来，同一种问法只问遍一次来源，
-        // 挑法和不记时一样；问完就忘，下一轮（下一刻）背包和世界都可能变了，重新问。问得慢时记一行日志。
-        private ActionStatus consult(int carried) {
-            return priceAsks.duringConsult(request.just(target - carried), () -> quoteAndChoose(carried));
+        // 这一轮问价在这一刻里同步算完：有非制造扫描探针时每刻只推进探针保证冷索引原速建段、
+        // 不反复展开大配方；无底层探针时按间隔复查；一旦探针扫完（当刻结果已在记忆中）或现场变化立刻全源重算。
+        private ActionStatus consult(int carried, long gameTick) {
+            String fingerprint = consultFingerprint(carried);
+            if (consultWaits >= 1 && consultWaits < MAX_CONSULT_WAIT_TICKS) {
+                if (!fingerprint.equals(waitingFingerprint)) {
+                    pendingScanProbes = List.of();
+                } else if (pendingScanProbes.isEmpty()
+                        && consultWaits >= 2 && (consultWaits - 1) % CONSULT_RECHECK_INTERVAL_TICKS != 0) {
+                    consultWaits++;
+                    return ActionStatus.progressed();
+                }
+            }
+            return priceAsks.duringConsult(request.just(target - carried), gameTick, fingerprint, () -> {
+                if (consultWaits >= 1 && consultWaits < MAX_CONSULT_WAIT_TICKS && !pendingScanProbes.isEmpty()) {
+                    pendingScanProbes = priceAsks.probePendingScans(pendingScanProbes, digTool, unreachable());
+                    if (!pendingScanProbes.isEmpty()) {
+                        consultWaits++;
+                        return ActionStatus.progressed();
+                    }
+                }
+                return quoteAndChoose(carried, fingerprint);
+            });
+        }
+
+        private String consultFingerprint(int carried) {
+            Run outermost = advancing.peekLast();
+            Set<String> knownNo = outermost == null ? Set.of() : outermost.unobtainable.keySet();
+            List<String> outerPrefer = new ArrayList<>();
+            for (Run run : advancing) outerPrefer.addAll(run.request.prefer());
+            return PriceAsks.stateFingerprint(position.currentPosition(), backpack, offhand, carried,
+                    knownNo, outerPrefer, excluded.size(), unreachable().size(), digTool);
         }
 
         // 问遍所有来源：给得了的按代价排队，给不了的记下原因，超出许可的原样带问题。
-        private ActionStatus quoteAndChoose(int carried) {
+        private ActionStatus quoteAndChoose(int carried, String fingerprint) {
             int stillNeeded = target - carried;
+            ItemRequest askReq = request.just(stillNeeded);
             SourceContext context = SourceContext.scoped(position.currentPosition(), permissions,
                     scope.radiusBlocks(), scope.maxDistanceBlocks()).withDigTool(digTool).withUnreachable(unreachable());
             List<QuoteRound.Answered> answers = new ArrayList<>();
@@ -492,8 +531,10 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                     // via 指定了别条路：这条不参与，也不算"问过没货"，不必写进结果。
                     continue;
                 }
-                // 经问价那边问：这一轮里问了谁、花了多久记在账上，问得慢时说得出是哪个来源拖的。
-                answers.add(new QuoteRound.Answered(source, priceAsks.quote(source, request.just(stillNeeded), context)));
+                // 统一经带 AskFrame 追踪的记忆化入口问价：同步收集未扫完的扫描探针并防范降级/预算截断污染缓存。
+                QuoteQuestion question = priceAsks.questionOf(source, askReq, permissions, false, scope);
+                answers.add(new QuoteRound.Answered(source,
+                        priceAsks.quoteRemembered(source, question, askReq, context)));
             }
             QuoteRound.Sorted sorted = QuoteRound.sort(answers, stillNeeded, scope.maxDistanceBlocks(), excluded);
             // 有来源还没看清现场（视野扫描还在补新方块）：先等它看完再排做法。冷索引时看得见的来源
@@ -501,8 +542,12 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             // 等着看清现场算真实进展（和找东西等视野看稳一样）：这一段有上限，不记的话停滞闸短的任务
             // （用东西缺一件去拿，十秒没进展就判卡住）会在看清之前先把整件事掐掉。
             if (sorted.stillLooking() && ++consultWaits <= MAX_CONSULT_WAIT_TICKS) {
+                pendingScanProbes = priceAsks.scanProbes();
+                waitingFingerprint = fingerprint;
                 return ActionStatus.progressed();
             }
+            pendingScanProbes = List.of();
+            waitingFingerprint = null;
             plan = sorted.candidates();
             if (plan.isEmpty()) {
                 // 等满了还在看现场、或所有来源都给不了：按各自的理由如实收场。
@@ -523,7 +568,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             }
             // 要拿的东西能全并进身上已有的半堆（挖圆石时身上已有 30 块）：不用空格，直接去拿，
             // 不为它先存箱子或丢东西。只认确切物品；按标签要的不知道会拿到哪种，照旧先腾一格。
-            if (room == null && fitsIntoPartialStacks(target - CarriedItems.matching(backpack, offhand, request, tags))) {
+            if (room == null && CarriedItems.fitsIntoPartialStacks(backpack, request,
+                    target - CarriedItems.matching(backpack, offhand, request, tags))) {
                 return startStep();
             }
             if (room == null) {
@@ -548,17 +594,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
                             failed.problem().suggestion()));
                 }
             };
-        }
-
-        // 背包里同种物品的半堆还能再并进几件，够装下这次还缺的就不用腾空格。
-        private boolean fitsIntoPartialStacks(int stillNeeded) {
-            if (request.wanted().isTag() || stillNeeded <= 0) return false;
-            String itemId = request.wanted().itemId();
-            int mergeable = 0;
-            for (BackpackStack stack : backpack.stacks()) {
-                if (stack.itemId().equals(itemId)) mergeable += Math.max(0, stack.maxStackSize() - stack.count());
-            }
-            return mergeable >= stillNeeded;
         }
 
         // 推进当前来源一步；做完就回到清点，做砸了把这个来源划掉、重新问价换下一个；只坏在现场几处的不划，换别处接着拿。
@@ -620,14 +655,8 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
             return ActionStatus.failed(cookingLeft.lastLeft());
         }
 
-        // 这一趟要的东西一件没进包时，别的进了什么：挖了掉的、打了掉的不是要的东西，照实写给 LLM 改线索或换做法；
-        // 什么都没进为空。
         private String otherGains() {
-            Map<String, Integer> gained = CarriedItems.gainedSince(carriedByItemAtStepStart, backpack, offhand);
-            if (gained.isEmpty()) return "";
-            List<String> parts = new ArrayList<>();
-            gained.forEach((itemId, count) -> parts.add(itemId + " " + count + " 个"));
-            return "；进包的是 " + String.join("、", parts) + "，不是要的" + request.wanted().describe();
+            return CarriedItems.describeOtherGains(carriedByItemAtStepStart, backpack, offhand, request);
         }
 
         // 来源动作里没能确认的交互一句一条记进发起任务的结果；只记新交回的，收尾时再问一次也不重复。

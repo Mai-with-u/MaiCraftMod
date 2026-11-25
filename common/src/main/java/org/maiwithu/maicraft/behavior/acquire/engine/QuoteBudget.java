@@ -53,4 +53,14 @@ final class QuoteBudget {
     int refused() {
         return refused;
     }
+
+    /** 来源检测到额度耗尽主动提前止损时同步记一笔拒绝，确保上层估算与缓存感知到本次结果不完整。 */
+    void markRefused() {
+        refused++;
+    }
+
+    /** 额度是否已经耗尽：供多候选配方与标签展开提前止损。 */
+    boolean exhausted() {
+        return used >= limit;
+    }
 }

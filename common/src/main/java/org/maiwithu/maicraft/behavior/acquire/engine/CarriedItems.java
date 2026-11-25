@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.acquire.engine;
 
-import java.util.Map;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -91,6 +93,27 @@ public final class CarriedItems {
         }
         return offhand != null && offhand.heldInOffhand().isPresent()
                 && requirements.sufficient(offhand.heldInOffhand().get().itemId(), blockType);
+    }
+
+    /** 背包里同种物品的半堆还能再并进几件，够装下这次还缺的就不用腾空格。 */
+    static boolean fitsIntoPartialStacks(BackpackView backpack, ItemRequest request, int stillNeeded) {
+        if (request.wanted().isTag() || stillNeeded <= 0) return false;
+        String itemId = request.wanted().itemId();
+        int mergeable = 0;
+        for (BackpackStack stack : backpack.stacks()) {
+            if (stack.itemId().equals(itemId)) mergeable += Math.max(0, stack.maxStackSize() - stack.count());
+        }
+        return mergeable >= stillNeeded;
+    }
+
+    /** 这一趟要的东西一件没进包时，把多进包的其他物品拼成说明句；什么都没进返回空串。 */
+    static String describeOtherGains(Map<String, Integer> before, BackpackView backpack, OffhandContents offhand,
+            ItemRequest request) {
+        Map<String, Integer> gained = gainedSince(before, backpack, offhand);
+        if (gained.isEmpty()) return "";
+        List<String> parts = new ArrayList<>(gained.size());
+        gained.forEach((itemId, count) -> parts.add(itemId + " " + count + " 个"));
+        return "；进包的是 " + String.join("、", parts) + "，不是要的" + request.wanted().describe();
     }
 
 }

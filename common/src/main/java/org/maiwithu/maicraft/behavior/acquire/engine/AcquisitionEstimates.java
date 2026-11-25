@@ -209,7 +209,8 @@ final class AcquisitionEstimates {
             if (!budget.takeQuote()) return null;
             int refusedBefore = budget.refused();
             long started = System.nanoTime();
-            SourceQuote fresh = source.quote(request, context);
+            // 统一走带 AskFrame 追踪的记忆化入口：估算路径同样识别外层依赖、环依赖、预算截断与重入降级，绝不污染无环缓存。
+            SourceQuote fresh = priceAsks.quoteRemembered(source, question, request, context);
             long spent = System.nanoTime() - started;
             nanosBySource.merge(source.describe(), spent, Long::sum);
             slowestQuoteBySource.merge(source.describe(), spent, Math::max);
@@ -217,7 +218,6 @@ final class AcquisitionEstimates {
             // 做法类来源报价时给每条候选做法问原料价，中途把额度问光了：这次报价是拿不全的原料价排的，
             // 不作数也不记下，跟问满了一样说没估完。
             if (budget.refused() != refusedBefore) return null;
-            priceAsks.remember(question, fresh);
             return fresh;
         }
 

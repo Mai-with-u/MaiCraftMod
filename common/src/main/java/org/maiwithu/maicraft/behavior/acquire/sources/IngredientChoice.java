@@ -116,15 +116,20 @@ public final class IngredientChoice {
         for (WantedItem option : options) {
             ItemRequest asked = new ItemRequest(option, Math.max(1, needed), "挑一样可以互换的原料");
             int missing = making.missing(asked, context);
+            if (missing < fewestMissing) {
+                easiest = option;
+                fewestMissing = missing;
+            }
+            // 本轮问价预算已耗尽时不再继续为大标签剩余变体逐一远端问价，并标脏当前帧与预算拒绝，防半截报价入缓存。
+            if (needs.priceBudgetExhausted()) {
+                needs.markBudgetCut();
+                continue;
+            }
             // 手头的料够现做的连现做一起比价；缺料的只看现成的来路，不拿"做一张要先打三只羊"的床去比路程。
             Optional<Double> cost = needs.cheapestCost(asked, context.permissions(), missing == 0);
             if (cost.isPresent() && cost.get() < cheapestCost) {
                 cheapest = option;
                 cheapestCost = cost.get();
-            }
-            if (missing < fewestMissing) {
-                easiest = option;
-                fewestMissing = missing;
             }
         }
         return cheapest != null ? cheapest : easiest;

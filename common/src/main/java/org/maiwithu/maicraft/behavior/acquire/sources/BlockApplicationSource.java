@@ -234,6 +234,7 @@ public final class BlockApplicationSource implements ItemSource {
             int have = carried(item);
             int shortCount = Math.max(0, needed - have);
             boolean pref = prefers(item, prefer);
+            if (shortCount > 0 && skipRemotePricing) needs.markDegraded();
             double cost = shortCount == 0 || skipRemotePricing ? 0
                     : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(item), shortCount, "挑手工涂抹材料"),
                             permissions, true).orElse(Double.MAX_VALUE);
@@ -258,6 +259,7 @@ public final class BlockApplicationSource implements ItemSource {
             int have = carried(item);
             int shortCount = Math.max(0, needed - have);
             boolean pref = prefers(item, prefer);
+            if (shortCount > 0 && skipRemotePricing) needs.markDegraded();
             double cost = shortCount == 0 || skipRemotePricing ? 0
                     : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(item), shortCount, "挑手工涂抹手持物"),
                             permissions, true).orElse(Double.MAX_VALUE);
@@ -315,7 +317,10 @@ public final class BlockApplicationSource implements ItemSource {
     private boolean blockedByOuter(String itemId) {
         Set<String> itemTags = tags.tagsOf(itemId);
         for (ItemRequest outer : outerWanted.get()) {
-            if (outer.wanted().matches(itemId, itemTags)) return true;
+            if (outer.wanted().matches(itemId, itemTags)) {
+                needs.markOuterDependency();
+                return true;
+            }
         }
         return false;
     }

@@ -98,4 +98,20 @@ final class DeferredInnerNeeds implements ItemNeeds {
     @Override public boolean priceStillLooking(ItemRequest request, Permissions permissions, boolean includeMaking) {
         return engine != null && engine.priceStillLooking(request, permissions, includeMaking);
     }
+
+    @Override public void markOuterDependency() {
+        if (engine != null) engine.markOuterDependency();
+    }
+
+    @Override public boolean priceBudgetExhausted() {
+        return engine != null && engine.priceBudgetExhausted();
+    }
+
+    @Override public void markBudgetCut() {
+        if (engine != null) engine.markBudgetCut();
+    }
+
+    @Override public void markDegraded() {
+        if (engine != null) engine.markDegraded();
+    }
 }

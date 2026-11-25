@@ -211,6 +211,7 @@ public final class StrippingSource implements ItemSource {
                 int rawCarried = carried(rawId);
                 int rawShort = Math.max(0, request.count() - rawCarried);
                 boolean preferred = prefers(rawId, strippedId, prefer);
+                if (rawShort > 0 && wasPricing) needs.markDegraded();
                 double fetchCost = rawShort == 0 || wasPricing ? 0
                         : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(rawId), rawShort, "挑去皮用的木料"),
                                 context.permissions(), true).orElse(Double.MAX_VALUE);
@@ -241,7 +242,10 @@ public final class StrippingSource implements ItemSource {
     private boolean blockedByOuter(String itemId) {
         Set<String> itemTags = tags.tagsOf(itemId);
         for (ItemRequest outer : outerWanted.get()) {
-            if (outer.wanted().matches(itemId, itemTags)) return true;
+            if (outer.wanted().matches(itemId, itemTags)) {
+                needs.markOuterDependency();
+                return true;
+            }
         }
         return false;
     }

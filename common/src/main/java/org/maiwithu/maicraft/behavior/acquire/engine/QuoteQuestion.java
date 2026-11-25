@@ -31,4 +31,16 @@ record QuoteQuestion(ItemSource source, WantedItem wanted, int count, List<Strin
         return new QuoteQuestion(source, request.wanted(), request.count(), request.prefer(), request.dropsFrom(),
                 request.foodReport(), permissions, includeMaking, scope, outerWanted);
     }
+
+    /** 去掉外层正在要的东西后的无环通用键：未撞到外层约束的子问题按它存一份，跨任意外层分支复用。 */
+    QuoteQuestion withoutOuter() {
+        return outerWanted.isEmpty() ? this
+                : new QuoteQuestion(source, wanted, count, prefer, dropsFrom, foodReport, permissions,
+                        includeMaking, scope, List.of());
+    }
+
+    /** 这条问法是否带着非空外层约束。 */
+    boolean hasOuter() {
+        return !outerWanted.isEmpty();
+    }
 }

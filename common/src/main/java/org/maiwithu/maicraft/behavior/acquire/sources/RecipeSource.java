@@ -85,6 +85,8 @@ public final class RecipeSource implements ItemSource {
     public static final double SHORTFALL_BLOCKS_PER_ITEM = 32;
     /** 排远近前最多看几种做法：装了加木头的模组时木板有几十种，先全拿来按远近排，再取最近的几种试。 */
     private static final int VARIANT_POOL = 64;
+    /** 候选配方很多（如含数十种木头的抽屉标签）时，先按本地缺料与偏好初筛，最多对前这么多种逐条远端问价，防单刻卡顿。 */
+    private static final int MAX_PRICED_CANDIDATES = 24;
 
     private final Set<WorkstationRecipe.Kind> kinds;
     private final ReadsRecipes recipes;
@@ -398,14 +400,36 @@ public final class RecipeSource implements ItemSource {
                 .filter(recipe -> !consumesOuterWanted(recipe, request))
                 .filter(recipe -> !ingredientsAllUnobtainable(recipe, request))
                 .toList();
-        // 里层问价回来的那一次：不再算材料可得性，按配方注册顺序给出去，问价才能收得住。
-        if (pricingIngredients) return new Ranked(candidates, false);
+        if (candidates.isEmpty()) return new Ranked(candidates, false);
+        // 里层问价回来的那一次：不再算材料可得性，按配方注册顺序给出去，并标明当前帧为降级报价，绝不写入共享缓存。
+        if (pricingIngredients) {
+            needs.markDegraded();
+            return new Ranked(candidates, false);
+        }
+        // 候选极多（如大标签展开数十上百种变体）时，先按零成本本地启发（非缺料同类改造、材料偏好、缺料少、背包可做）初排，
+        // 仅对最靠前的 MAX_PRICED_CANDIDATES 条做远端原料问价；预算耗尽即止损，其余候选按最贵兜底。
+        List<WorkstationRecipe> toPrice = candidates.size() <= MAX_PRICED_CANDIDATES ? candidates
+                : candidates.stream()
+                        .sorted(Comparator.<WorkstationRecipe>comparingInt(candidate -> choice.remakeNeedingMaterials(
+                                        candidate, request.wanted(),
+                                        () -> missingFor(candidate, request.count())) ? 1 : 0)
+                                .thenComparing(MaterialPreference.first(preferred(request), tags))
+                                .thenComparingInt(candidate -> missingFor(candidate, request.count()))
+                                .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
+                                .thenComparingInt(candidate -> candidate.ingredients().size()))
+                        .limit(MAX_PRICED_CANDIDATES)
+                        .toList();
         // 材料可得性逐条算好再排：排法会在比较里反复取同一条的档，逐次问价会把引擎问上很多遍。
         Map<WorkstationRecipe, Double> prices = new HashMap<>();
         boolean stillLooking = false;
         pricingIngredients = true;
         try {
-            for (WorkstationRecipe candidate : candidates) {
+            for (WorkstationRecipe candidate : toPrice) {
+                if (needs.priceBudgetExhausted()) {
+                    // 预算已耗尽主动止损：同步标脏当前帧并记预算拒绝，避免半截比价结果写入共享缓存。
+                    needs.markBudgetCut();
+                    break;
+                }
                 Availability priced = availabilityOf(candidate, request, context);
                 prices.put(candidate, priced.worst());
                 stillLooking |= priced.stillLooking();
@@ -419,7 +443,7 @@ public final class RecipeSource implements ItemSource {
                                 () -> missingFor(candidate, request.count())) ? 1 : 0)
                         .thenComparing(MaterialPreference.first(preferred(request), tags))
                         // 材料可得性在缺几件之前：缺一样近处的料，好过缺一样要出门深挖的。
-                        .thenComparingDouble(prices::get)
+                        .thenComparingDouble(candidate -> prices.getOrDefault(candidate, Double.MAX_VALUE))
                         .thenComparingInt((WorkstationRecipe candidate) -> missingFor(candidate, request.count()))
                         .thenComparingInt(candidate -> inInventory(candidate) ? 0 : 1)
                         .thenComparingInt(candidate -> candidate.ingredients().size())
@@ -514,7 +538,11 @@ public final class RecipeSource implements ItemSource {
             }
         }
         for (ItemRequest wanted : outer) {
-            if (consumesWhatIsWanted(recipe, wanted.wanted())) return true;
+            if (consumesWhatIsWanted(recipe, wanted.wanted())) {
+                // 确实因外层防环剔除了候选配方：通知问价记忆本子问题依赖外层路径，不写入无环通用缓存。
+                needs.markOuterDependency();
+                return true;
+            }
         }
         return false;
     }
