@@ -123,6 +123,18 @@ class MachineConfigureTaskTest {
     }
 
     @Test
+    void 机器给出单项实情说明时_完成摘要直接写明放入实物而非笼统说设置改好了() {
+        Rig rig = new Rig();
+        rig.type.settingValues.put("crafter.slot", "empty");
+        rig.type.onChange.put("crafter.slot", () -> rig.type.settingValues.put("crafter.slot", "minecraft:oak_planks"));
+        rig.type.changeSummary = (key, after) -> "crafter.slot".equals(key)
+                ? Optional.of("已将 " + after + " 放入该格位") : Optional.empty();
+        TaskResult result = rig.run(CELL, Map.of("crafter.slot", "minecraft:oak_planks"));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(result.summary().contains("已将 minecraft:oak_planks 放入该格位"), result.summary());
+    }
+
+    @Test
     void 目标那格没加载_按到不了说() {
         Rig rig = new Rig();
         rig.world.blocks.remove(CELL);

@@ -503,6 +503,69 @@ class MachineRunTaskTest {
     }
 
     @Test
+    void 机器没有自动投料本事_备料前直接失败并引导改用配置而不白跑备料() {
+        Rig rig = new Rig();
+        rig.type.supportsFeeding = false;
+        rig.viewer.putMaking(PLATE, List.of(pressingRecipe()));
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.FAILED, result.status(), result.summary());
+        assertEquals(Problem.Kind.UNSUPPORTED, result.problem().kind());
+        assertEquals(0, rig.needs.requests.size(), "无自动投料能力的机器进备料前直接失败，不发起备料");
+        assertTrue(result.problem().suggestion() != null
+                        && result.problem().suggestion().contains("machine_configure"),
+                String.valueOf(result.problem().suggestion()));
+    }
+
+    @Test
+    void 配方多格重复同名原料_备料合并一次取齐而投料仍逐格投放() {
+        Rig rig = new Rig();
+        List<ShownIngredient> sixteenSlots = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            sixteenSlots.add(ShownIngredient.of(ShownStack.item(INGOT, "安山合金", 1)));
+            int index = i;
+            rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> {
+                if (index == 15) rig.type.output.put(PLATE, 1);
+            }));
+        }
+        ShownRecipe gridRecipe = new ShownRecipe("test:grid/plate", "test:crafting", "动力合成",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                sixteenSlots, List.of(), List.of(ShownStack.item(PLATE, "产物", 1)), null);
+        rig.viewer.putMaking(PLATE, List.of(gridRecipe));
+        rig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 1, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, rig.needs.requests.size(), "16 格同名原料备料阶段合并为 1 条请求，不拆成 16 次单件抓箱");
+        assertEquals(16, rig.needs.requests.getFirst().count(), "合并后的备料总量应为 16");
+        assertEquals(16, rig.type.fedItems.size(), "投料阶段仍保留逐格投放");
+    }
+
+    @Test
+    void 多候选配方优先选随身已有常规原料而非列表第零条虫蚀方块() {
+        Rig rig = new Rig();
+        ShownRecipe infested = new ShownRecipe("test:infested_gravel", "test:milling", "研磨",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                List.of(ShownIngredient.of(ShownStack.item("minecraft:infested_cobblestone", "虫蚀圆石", 1))),
+                List.of(), List.of(ShownStack.item(PLATE, "砾石", 1)), null);
+        ShownRecipe cobble = new ShownRecipe("test:cobble_gravel", "test:milling", "研磨",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                List.of(ShownIngredient.of(ShownStack.item("minecraft:cobblestone", "圆石", 1))),
+                List.of(), List.of(ShownStack.item(PLATE, "砾石", 1)), null);
+        rig.viewer.putMaking(PLATE, List.of(infested, cobble));
+        rig.world.carried.put("minecraft:cobblestone", 8);
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> rig.type.output.put(PLATE, 2)));
+        rig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, true, 5,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(List.of("minecraft:cobblestone"), rig.type.fedItems, "应选随身圆石配方而非第 0 条虫蚀圆石");
+        assertEquals(0, rig.needs.requests.size(), "随身圆石足够，无需额外备料");
+    }
+
+    @Test
     void 随身已有足够原料时不重复备料_差一部分时只请求差额件数() {
         // 身上已有 435 件原料、做两批只要 2 件：一次备料都不发，直接投 2 件。
         Rig enough = new Rig();

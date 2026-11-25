@@ -179,19 +179,38 @@ final class MachineConfigureTask extends PhasedTask<MachineConfigureTask.Phase> 
                         describeMachine() + "改不了「" + currentKey + "」这一项")));
     }
 
-    // 一项改好：记变化与读回，换下一项；全改完才结束。
+    // 一项改好：记变化与读回，换下一项；全改完才结束。若机器类型对单项给出了贴近实情的文案（如放入实物），在结论句直接写清。
     private Next<Phase> itemDone(String after) {
         String before = seenValues.get(currentKey).isEmpty() ? after : firstSeen(currentKey);
         applied.add(new MachineConfigureDetails.Applied(currentKey, before, after));
+        Optional<String> specific = configure() == null ? Optional.empty()
+                : configure().describeChange(currentKey, before, after);
         recordChange(new Change(Change.Kind.BLOCK_CHANGED, type.id(), 1,
-                currentKey + "：" + before + " → " + after));
-        recordProgress("「" + currentKey + "」改成 " + after);
+                specific.orElse(currentKey + "：" + before + " → " + after)));
+        recordProgress(specific.orElse("「" + currentKey + "」改成 " + after));
         pending.remove(currentKey);
         currentKey = pending.isEmpty() ? null : pending.keySet().iterator().next();
         if (currentKey == null) {
-            return Next.done(TaskResult.done(describeMachine() + "的 " + applied.size() + " 项设置都改好了"));
+            return Next.done(TaskResult.done(finishSummary()));
         }
         return Next.stay();
+    }
+
+    // 汇总改设置完成的一句话结论：机器类型给出了具体实情文案（如"已将 <item> 放入该格位"）时直接写出，否则沿用通用设置完成句。
+    private String finishSummary() {
+        MachineSettings settings = configure();
+        if (settings != null) {
+            List<String> specifics = new ArrayList<>();
+            for (MachineConfigureDetails.Applied item : applied) {
+                if (item.before() != null && item.before().equals(item.after())) continue;
+                settings.describeChange(item.key(), item.before(), item.after()).ifPresent(specifics::add);
+            }
+            if (!specifics.isEmpty()) {
+                return describeMachine() + "：" + String.join("；", specifics)
+                        + (specifics.size() < applied.size() ? "（其余设置也已改好）" : "");
+            }
+        }
+        return describeMachine() + "的 " + applied.size() + " 项设置都改好了";
     }
 
     // 停下：一项都没改成按失败；已经改成的照实算数，剩下的进剩余说明。

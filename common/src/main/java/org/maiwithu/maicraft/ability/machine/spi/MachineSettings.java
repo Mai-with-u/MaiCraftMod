@@ -47,4 +47,12 @@ public interface MachineSettings {
     default List<MachineSetting> partSettings(BlockPos host, Direction side) {
         return List.of();
     }
+
+    /**
+     * 一项设置确认改好后，机器类型可给出更贴近现场实情的单句结果说明（例如动力合成器放料写清"已将 X 放入该格位"），
+     * 避免上层误以为只改了过滤标签没放实物；没有专用说法时给空，沿用通用设置完成文案。
+     */
+    default Optional<String> describeChange(String key, String before, String after) {
+        return Optional.empty();
+    }
 }

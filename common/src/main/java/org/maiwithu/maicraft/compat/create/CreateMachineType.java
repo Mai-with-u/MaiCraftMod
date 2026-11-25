@@ -241,8 +241,18 @@ final class CreateMachineType implements MachineType, MachineFeeding, MachineSet
                 request.maxSeconds(), permissions));
     }
 
-    // Create 的机器各有本事：传送带与链条输送机会装安装段，设置项与投料取货都在；部件它没有，不答那一问。
-    @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+    @Override public Optional<String> describeChange(String key, String before, String after) {
+        if (kind.work() == CreateMachineCatalog.Work.CRAFTER) {
+            return CrafterSettings.describeChange(key, before, after);
+        }
+        return Optional.empty();
+    }
+
+    // Create 的机器各有本事：传送带与链条输送机会装安装段，设置项都在；机械合成器按单格放料不支持 machine_run 自动投料，
+    // 它的 feeding 给空，备料前即明确提示改用 machine_configure 配置格位。部件它没有，不答那一问。
+    @Override public Optional<MachineFeeding> feeding() {
+        return kind.work() == CreateMachineCatalog.Work.CRAFTER ? Optional.empty() : Optional.of(this);
+    }
 
     @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
 

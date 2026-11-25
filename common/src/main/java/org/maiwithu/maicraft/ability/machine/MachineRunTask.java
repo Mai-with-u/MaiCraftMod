@@ -183,7 +183,9 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
             }
             fuelRun = true;
             notes.add(describeMachine() + "烧的燃料：" + fuel.note());
-            toGather.add(new FeedPlan.Entry(input.item(), input.count(), false));
+            FeedPlan.Entry fuelEntry = new FeedPlan.Entry(input.item(), input.count(), false);
+            toGather.add(fuelEntry);
+            toFeed.add(fuelEntry);
             return Next.go(Phase.GATHER, "把 " + input.item() + " 当燃料投进" + describeMachine()
                     + "，先备 " + input.count() + " 件");
         }
@@ -192,7 +194,7 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 : Next.go(Phase.RECIPE, "查这台机器做 " + input.item() + " 的配方");
     }
 
-    // 选工序：查到的配方里要有在这台机器上做的；按要做的件数算出几批，原料排进备料队。
+    // 选工序：查到的配方里要有在这台机器上做的；多候选时按存量、主副产与原料常规度择优，不再盲选第 0 条。
     private Next<Phase> pickRecipe(TickContext context) {
         RecipeLookup.Answer answer = services.recipes().making(input.item());
         List<ShownRecipe> atMachine = answer.recipes().stream()
@@ -204,9 +206,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                     "查到的配方里没有在" + describeMachine() + "上做 " + input.item() + " 的" + withoutViewer,
                     "先 lookup 查这台机器能做什么"));
         }
-        recipe = atMachine.get(0);
+        recipe = MachineRecipeChoice.choose(atMachine, input.item(), input.count(), services.world()::carriedCount);
         if (atMachine.size() > 1) {
-            notes.add("查到 " + atMachine.size() + " 条都能在这台机器上做，用了第一条（" + recipe.category() + "）");
+            notes.add("查到 " + atMachine.size() + " 条都能在这台机器上做，优先选了 "
+                    + MachineRecipeChoice.describeChoice(recipe));
         }
         batches = MachineIngredients.batchesNeeded(recipe, input.item(), input.count());
         recordProgress("选中配方 " + recipe.category() + "，要做 " + batches + " 批");
@@ -240,8 +243,18 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
     }
 
     private Next<Phase> queueIngredients() {
-        toGather.addAll(plan.entries());
         notes.addAll(plan.notes());
+        // 没有自动投料能力的机器（例如动力合成器阵列、管道等）在备料前直接明确失败，不白跑去备料。
+        if (feeding == null && !plan.entries().isEmpty()) {
+            return Next.fail(Problem.of(Problem.Kind.UNSUPPORTED,
+                    describeMachine() + "不支持 machine_run 自动投料（没有自动投料方法）",
+                    "如该机器支持配置格位请改用 machine_configure，否则改用 use 或漏斗/管道手动投料"));
+        }
+        // 备料队按同名原料合并总量一次拿齐，投料队保留原计划的逐格投放条目，两段职责彻底分离。
+        toGather.clear();
+        toFeed.clear();
+        toGather.addAll(MachineIngredients.consolidateForGather(plan.entries()));
+        toFeed.addAll(plan.entries());
         // 机内仍占着与这条配方不兼容的物品（腾空过但没腾干净）：备料前直接如实说明，不白跑一趟拿料。
         if (plan.conflict().isPresent()) {
             return Next.fail(cannotFeedProblem(plan.conflict().get()));
@@ -287,13 +300,13 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         };
     }
 
-    // 备料：先扣掉角色随身已有的匹配原料（并刨去前面已排进投料队的同名份额），够数直接进投料队，差一点只去补差额。
+    // 备料：备料队已按同名原料合并成总量，先扣掉角色随身已有的件数，够数直接跳过，差一点一次性补齐差额。
     private Next<Phase> gather(TickContext context) {
         if (action() != null) {
             return switch (runAction(context)) {
                 case ActionStatus.Running running -> Next.stay();
                 case ActionStatus.Done done -> {
-                    toFeed.add(toGather.poll());
+                    toGather.poll();
                     yield Next.go(toGather.isEmpty() ? Phase.FEED : Phase.GATHER,
                             toGather.isEmpty() ? "料备齐了" : "拿到了一样料，接着备下一样");
                 }
@@ -305,12 +318,10 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         while (!toGather.isEmpty()) {
             FeedPlan.Entry next = toGather.peek();
             WantedItem wanted = new WantedItem(next.item());
-            int reserved = toFeed.stream().filter(queued -> queued.item().equals(next.item()))
-                    .mapToInt(FeedPlan.Entry::count).sum();
-            int available = Math.max(0, services.world().carriedCount(wanted) - reserved);
+            int available = Math.max(0, services.world().carriedCount(wanted));
             int missing = next.count() - available;
             if (missing <= 0) {
-                toFeed.add(toGather.poll());
+                toGather.poll();
                 recordProgress("身上已有 " + next.item() + " ×" + available + "，够投 " + next.count() + " 件");
                 continue;
             }

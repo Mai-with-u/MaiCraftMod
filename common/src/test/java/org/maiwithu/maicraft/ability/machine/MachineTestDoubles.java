@@ -225,6 +225,10 @@ final class MachineTestDoubles {
         Function<String, Optional<String>> cannotFeedWhy = itemId -> Optional.empty();
         /** 选配方时这台机器怎么投：测试直接摆整份计划；没摆走标准的按配方投料（乘批数、按配方顺序）。 */
         BiFunction<ShownRecipe, Integer, FeedPlan> planScript;
+        /** 这种机器有没有自动投料本事：默认有，置 false 模拟动力合成器等不支持 machine_run 自动投料的机器。 */
+        boolean supportsFeeding = true;
+        /** 某项设置改好后的专用实情说明；默认空，沿用通用设置文案。 */
+        BiFunction<String, String, Optional<String>> changeSummary = (key, after) -> Optional.empty();
 
         FakeMachineType(String id, String name, MachineRole role, Predicate<BlockState> covers) {
             this.id = id;
@@ -253,8 +257,8 @@ final class MachineTestDoubles {
             return role;
         }
 
-        // 四条本事都在这个替身上，测试要的脚本字段就在替身类里，直接交自己。
-        @Override public Optional<MachineFeeding> feeding() { return Optional.of(this); }
+        // 四条本事都在这个替身上，测试要的脚本字段就在替身类里，直接交自己；supportsFeeding 为假时模拟无自动投料能力的机器。
+        @Override public Optional<MachineFeeding> feeding() { return supportsFeeding ? Optional.of(this) : Optional.empty(); }
 
         @Override public Optional<MachineSettings> settings() { return Optional.of(this); }
 
@@ -330,6 +334,10 @@ final class MachineTestDoubles {
 
         @Override public List<MachineSetting> partSettings(BlockPos host, Direction side) {
             return partSettingsAt != null ? partSettingsAt.apply(host, side) : List.of();
+        }
+
+        @Override public Optional<String> describeChange(String key, String before, String after) {
+            return changeSummary.apply(key, after);
         }
 
         @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {

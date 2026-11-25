@@ -37,10 +37,23 @@ final class CrafterSettings {
         if (reading.isEmpty()) return List.of();
         List<MachineSetting> settings = new ArrayList<>();
         settings.add(new MachineSetting(SLOT, slotValue(reading.get().slot()), List.of(),
-                "这一台格里放什么：写物品 ID（手持它右键正面放进去），empty 空着手右键取出；格里已有别的先取出再放"));
+                "这一台格里实际放什么物品：写物品 ID 会直接手持该物品右键正面把实物放入格位（不是仅设标签），写 empty 会空手右键取出；格里已有别的先取出再放"));
         settings.add(new MachineSetting(POINTING, reading.get().pointing(), List.of("up", "down", "left", "right"),
                 "箭头朝哪：料顺着箭头送到出口那一台；拿扳手右键正面换，一次转一下"));
         return settings;
+    }
+
+    /** 确认改好一项设置后的现场结果说明：放料/清格明确说出实物放入或取出，避免被误解为仅改标签。 */
+    static Optional<String> describeChange(String key, String before, String after) {
+        if (!SLOT.equals(key)) {
+            return Optional.empty();
+        }
+        if (EMPTY.equals(after)) {
+            return Optional.of(before != null && !before.isBlank() && !EMPTY.equals(before)
+                    ? "已从该格位取出 " + before + "（格位已清空）"
+                    : "已将该格位清空");
+        }
+        return Optional.of("已将 " + after + " 放入该格位");
     }
 
     static String slotValue(ItemStack slot) {

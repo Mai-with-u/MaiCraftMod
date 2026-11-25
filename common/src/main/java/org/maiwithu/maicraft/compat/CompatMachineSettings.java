@@ -49,6 +49,10 @@ final class CompatMachineSettings implements MachineSettings {
         return ask(() -> settings.partSettings(host, side), List.of());
     }
 
+    @Override public Optional<String> describeChange(String key, String before, String after) {
+        return ask(() -> settings.describeChange(key, before, after), Optional.empty());
+    }
+
     // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
     private <T> T ask(Supplier<T> read, T whenUnavailable) {
         if (!module.active()) return whenUnavailable;
