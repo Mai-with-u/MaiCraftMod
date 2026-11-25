@@ -63,14 +63,18 @@ public final class ToolCatalog {
                         + "文字里的 in_picture 列出每个编号在图上的位置。看外观、看地图和画、看别人比划的那一处时用；"
                         + "数量、血量、背包、聊天、告示牌的字以 self、scene、detail、events 为准。"
                         + "给 id 时角色闲着就先转头看过去再拍，手上有活时不转头。"
-                        + "参数限定：radius、kind、sections 仅适用于 what=\"world_memory\"（what=\"scene\" 等其他视图不接受 radius）。"
+                        + "参数限定：radius 仅适用于 what=\"world_memory\" 或 what=\"scene\"；kind、sections 仅适用于 what=\"world_memory\"（其他视图不接受）。"
                         + "视图里出现非原版（非 minecraft:）的模组物品、方块或实体 ID 时，响应尾部附去重短词表 mod_labels；全原版时不附。",
                 properties(
                         field("what", "string", "看什么：self、scene（默认）、detail、places（只列记住的地点与档案名）、world_memory、menu、picture", "scene"),
                         field("id", "string", "只在 what=detail 或 picture 时用：观察编号（e12、f3、b5、s2）或地标名；"
                                 + "picture 还收建筑档案名（转过去看那一栋）", null),
                         field("grid", "boolean", "只在 what=scene 时用：true 时附带近处的俯视网格", null),
-                        field("radius", "integer", "仅适用于 what=\"world_memory\"（what=\"scene\" 等其他视图传 radius 会报错）：只列离角色这么近（格）的世界记忆记录", null),
+                        field("radius", "integer", "1 到 48（格），仅适用于 what=\"world_memory\" 或 what=\"scene\"。"
+                        + "world_memory 时：只列离角色这么近（水平距离）的记住的记录。"
+                        + "scene 时：把当下看得见的收窄到这个范围内（水平距离，只能收窄、不能扩大采集范围）：逐只列出的实体、地形特征（按中心点）、营地坑、设施、告示牌、模组的东西按各自距离过滤；"
+                        + "盯着你的敌对生物与没蹲着的玩家是安全信息，不受收窄影响照常列出；声音与 distant_entities、mod_things_farther 计数不过滤；radius 小于 8 时地形特征为空（地形来自 8 格网格聚类）。"
+                        + "注意实体条目的 distance 含高低差，与 radius 的水平口径略有出入", null),
                         field("kind", "string", "只在 what=world_memory 时用：只列这一类记录（container / workstation / site / machine / building / temporary_block）", null),
                         field("with_menu", "boolean", "只在 what=picture 时用：true 时连同此刻开着的界面一起拍（整幅屏幕画面）；"
                                 + "界面认不出、结构化读不出来时用", null),

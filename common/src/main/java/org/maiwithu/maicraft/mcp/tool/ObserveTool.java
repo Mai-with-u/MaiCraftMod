@@ -68,6 +68,8 @@ public final class ObserveTool implements McpTool {
             "container", "workstation", "site", "machine", "building", "temporary_block");
     /** 拍画面时等转头最多多久（毫秒）：闲时看那一回最多转两秒，多给半秒余量。 */
     static final long TURN_WAIT_MILLIS = 2500;
+    /** radius 的上限（格）：采集范围在上游已经定了，radius 只能收窄不能扩大，给个远超采集范围的合理上限挡胡写。 */
+    static final int MAX_RADIUS = 48;
     /** 等下一帧画到取图点最多多久（毫秒）：游戏这一秒都没画出一帧，多半是窗口最小化了。 */
     static final long FRAME_WAIT_MILLIS = 1000;
 
@@ -295,9 +297,14 @@ public final class ObserveTool implements McpTool {
         if (!what.equals("scene") && grid != null) check.error("grid", "grid 只在 what=scene 时用", null);
         if (!what.equals("picture") && withMenu != null) check.error("with_menu", "with_menu 只在 what=picture 时用", null);
         if (!what.equals("picture") && unlabeled != null) check.error("unlabeled", "unlabeled 只在 what=picture 时用", null);
-        if (!what.equals("world_memory") && radius != null) check.error("radius", "radius 只在 what=world_memory 时用", null);
-        if (what.equals("world_memory") && radius != null && radius < 1) {
+        // radius 两种语义：world_memory 只列记住的多近的记录；scene 把当下看得见的收窄到这么近（只能收窄不能扩大）。
+        boolean takesRadius = what.equals("world_memory") || what.equals("scene");
+        if (!takesRadius && radius != null) check.error("radius", "radius 只在 what=world_memory 或 scene 时用", null);
+        if (takesRadius && radius != null && radius < 1) {
             check.error("radius", "radius 至少为 1", "正整数（格）");
+        }
+        if (takesRadius && radius != null && radius > MAX_RADIUS) {
+            check.error("radius", "radius 至多为 " + MAX_RADIUS, "1 到 " + MAX_RADIUS + "（格）");
         }
         if (!what.equals("world_memory") && kind != null) check.error("kind", "kind 只在 what=world_memory 时用", null);
         if (!check.ok()) {
@@ -374,6 +381,10 @@ public final class ObserveTool implements McpTool {
         Protection guard = protection == null ? null : protection.get();
         WorldMemoryView.ContainerOrigin recordOrigin =
                 WorldMemoryView.originFrom(currentScene.facilityKinds(), guard, dimension);
+        // 地形来自 8 格网格聚类，radius 小于 8 时特征本来就在网格范围外，提前说一声免得模型以为没地形。
+        if (what.equals("scene") && radius != null && radius < 8) {
+            notes.add("radius 小于 8：地形特征收不到（地形来自 8 格网格聚类），实体与设施照常按半径过滤");
+        }
         JsonObject view = switch (what) {
             case "self" -> self(currentScene, context);
             case "detail" -> DetailView.of(currentScene, currentMemory, id, dimension, guard, localizedNames)
@@ -388,7 +399,7 @@ public final class ObserveTool implements McpTool {
             case "menu" -> menu();
             default -> SceneView.scene(currentScene, grid,
                     DetailView.facilityOrigin(currentScene.facilityKinds(), currentMemory, recordOrigin),
-                    localizedNames);
+                    localizedNames, radius);
         };
         // 看了自己、周围或某样东西：角色闲着时顺着看过去（开背包、转头、开手边的箱子）。
         // 记忆、界面在世界里没有对应的东西可看，不演；读到的内容照旧当场返回，不等角色看完。

@@ -46,6 +46,17 @@ public final class SceneView {
     public static JsonObject scene(Scene scene, boolean withGrid,
             BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin,
             ReadsLocalizedNames localizedNames) {
+        return scene(scene, withGrid, facilityOrigin, localizedNames, null);
+    }
+
+    /**
+     * 同上，radius 非 null 时是 observe(scene) 的收窄半径（水平距离口径，只能收窄不能扩大采集范围）：
+     * 逐只列出的实体、地形特征（按中心点）、营地坑、设施、告示牌、模组的东西按各自距离过滤；
+     * 盯着角色的敌对生物与非潜行玩家是安全信息，豁免过滤照常逐只列；声音与远处计数保持全局。
+     */
+    public static JsonObject scene(Scene scene, boolean withGrid,
+            BiFunction<WorldPosition, String, ContainerWhose> facilityOrigin,
+            ReadsLocalizedNames localizedNames, Integer radius) {
         JsonObject json = new JsonObject();
         SceneEnvironment environment = scene.environment();
         if (environment != null) {
@@ -57,11 +68,11 @@ public final class SceneView {
         if (scene.self() != null) {
             json.addProperty("facing", scene.self().facingWord());
         }
-        json.addProperty("summary", scene.summary());
+        json.addProperty("summary", scene.summary(radius));
         JsonArray entities = new JsonArray();
-        scene.listedEntities().forEach(entity -> entities.add(entity(entity)));
+        scene.listedEntities(radius).forEach(entity -> entities.add(entity(entity)));
         json.add("entities", entities);
-        // 远处不相干的只按种类计数：种类 → 只数。
+        // 远处不相干的只按种类计数：种类 → 只数。计数保持全局，不随收窄半径变。
         if (!scene.distantCounts().isEmpty()) {
             JsonObject distant = new JsonObject();
             scene.distantCounts().forEach(distant::addProperty);
@@ -78,27 +89,28 @@ public final class SceneView {
         scene.heard().forEach(sound -> heard.add(sound(sound)));
         json.add("heard", heard);
         JsonArray features = new JsonArray();
-        scene.features().forEach(feature -> features.add(feature(feature)));
+        scene.features(radius).forEach(feature -> features.add(feature(feature)));
         json.add("features", features);
         // 营地地面坑：床、箱子、工作站周围深度不低于两格的地面竖坑与爆炸弹坑，有坑时单列出来方便顺手填平。
-        if (!scene.campPits().isEmpty()) {
+        if (!scene.campPits(radius).isEmpty()) {
             JsonArray pits = new JsonArray();
-            scene.campPits().forEach(pit -> pits.add(campPit(pit)));
+            scene.campPits(radius).forEach(pit -> pits.add(campPit(pit)));
             json.add("camp_pits", pits);
         }
         JsonArray facilities = new JsonArray();
-        scene.facilities().forEach(facility -> facilities.add(facility(facility, facilityOrigin)));
+        scene.facilities(radius).forEach(facility -> facilities.add(facility(facility, facilityOrigin)));
         json.add("facilities", facilities);
         // 看得见的告示牌：主播在基地立的路牌、留言，正面的字连成一句带在 text 里。
-        if (!scene.signs().isEmpty()) {
+        if (!scene.signs(radius).isEmpty()) {
             JsonArray signs = new JsonArray();
-            scene.signs().forEach(sign -> signs.add(sign(sign)));
+            scene.signs(radius).forEach(sign -> signs.add(sign(sign)));
             json.add("signs", signs);
         }
         // 模组的东西（电梯、车站、列车、物理结构）按种类分组：每种列最近的几样，其余只报样数。
+        // 远处计数按完整列表算，保持全局：它报的是"没逐个列出的还有几样"，收窄不改变它。
         if (!scene.things().isEmpty()) {
             JsonObject things = new JsonObject();
-            for (SceneThing thing : scene.listedThings()) {
+            for (SceneThing thing : scene.listedThings(radius)) {
                 if (!things.has(thing.category())) things.add(thing.category(), new JsonArray());
                 things.getAsJsonArray(thing.category()).add(thing(thing));
             }

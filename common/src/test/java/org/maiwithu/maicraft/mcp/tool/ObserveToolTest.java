@@ -495,8 +495,31 @@ class ObserveToolTest {
         // 支持按 radius 与 kind 收窄。
         JsonObject filtered = data(observe("{\"what\": \"world_memory\", \"radius\": 25, \"kind\": \"container\"}"));
         assertTrue(filtered.get("records_total").getAsInt() > 0 && filtered.get("records_total").getAsInt() < 30);
-        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"radius\": 16}")));
         assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"places\", \"kind\": \"site\"}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"radius\": 0}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"radius\": 49}")));
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"places\", \"radius\": 16}")));
+    }
+
+    @Test
+    void sceneNarrowsToListedThingsWithinRadiusButKeepsSafetySightings() {
+        // scene 的 radius 把当下看得见的收窄到这么近：4 格外的箱子不再列；
+        // 盯着角色的僵尸是安全信息，豁免过滤照常逐只列；速写按收窄后的口径说。
+        JsonObject narrowedReply = observe("{\"what\": \"scene\", \"radius\": 2}");
+        JsonObject narrowed = data(narrowedReply);
+        var entities = narrowed.getAsJsonArray("entities");
+        assertEquals(1, entities.size(), narrowed::toString);
+        assertEquals("minecraft:zombie", entities.get(0).getAsJsonObject().get("type").getAsString());
+        assertEquals(0, narrowed.getAsJsonArray("facilities").size(), narrowed::toString);
+        assertTrue(narrowed.get("summary").getAsString().contains("收窄到 2 格"), narrowed::toString);
+        assertTrue(narrowedReply.getAsJsonArray("notes").toString().contains("radius 小于 8"),
+                "地形来自 8 格网格聚类，radius 小于 8 时提前说明地形特征收不到：" + narrowedReply);
+
+        // radius 在范围内时箱子照常列。
+        JsonObject roomy = data(observe("{\"what\": \"scene\", \"radius\": 16}"));
+        assertEquals(1, roomy.getAsJsonArray("entities").size());
+        assertEquals(1, roomy.getAsJsonArray("facilities").size());
+        assertEquals("invalid_parameter", errorCode(observe("{\"what\": \"scene\", \"radius\": 49}")));
     }
 
     @Test

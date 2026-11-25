@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.perception.EntitySight;
+import org.maiwithu.maicraft.game.world.ReadsLocalizedNames;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.behavior.perception.NearbyBlocksSight;
@@ -206,5 +207,48 @@ class SceneViewTest {
         scene.updateOnlinePlayers(List.of(
                 new Scene.OnlinePlayer("Alex", "8667ba71-b85a-4004-af54-457a9734eed7")));
         assertFalse(SceneView.scene(scene, false).has("online_players_not_nearby"));
+    }
+
+    @Test
+    void radiusNarrowsTheSceneButKeepsSafetySightingsAndGlobalCounts() {
+        // radius 只能收窄：盯着角色的僵尸是安全信息豁免过滤照常列，9 格外的羊超出半径不再逐只列；
+        // 远处计数保持全局，收窄前后一样；声音不过滤。
+        scene.updateEntities(10, List.of(
+                new EntitySight.Observation(1, "minecraft:zombie", null, null, WorldPosition.here(0, 65, -12),
+                        true, true, true, new EntitySight.Health(14, 20), Map.of(), false, true),
+                new EntitySight.Observation(2, "minecraft:sheep", null, null, WorldPosition.here(9, 64, 0),
+                        true, false, false, null, Map.of(), false, false),
+                new EntitySight.Observation(11, "minecraft:squid", null, null, WorldPosition.here(0, 50, -60),
+                        true, false, false, null, Map.of(), false, true),
+                new EntitySight.Observation(12, "minecraft:squid", null, null, WorldPosition.here(0, 50, -70),
+                        true, false, false, null, Map.of(), false, true)));
+        scene.updateSounds(10, List.of(new SubtitleEar.Event("苦力怕嘶嘶声", WorldPosition.here(2, 64, 2))));
+        scene.updateFacilities(10, NOW, List.of(
+                new NearbyBlocksSight.BlockSighting(WorldPosition.here(-4, 64, 0), "minecraft:chest")));
+        scene.updateGrid(new OverheadGrid.View(new BlockPos(0, 64, -4), 1,
+                new char[][] {{'T', 'T', 'T'}, {'.', '.', '.'}, {'.', '.', '.'}}), 10, NOW);
+
+        JsonObject narrowed = SceneView.scene(scene, false, null, ReadsLocalizedNames.NONE, 5);
+        var entities = narrowed.getAsJsonArray("entities");
+        assertEquals(1, entities.size(), "9 格外的羊超出收窄半径，不再逐只列：" + narrowed);
+        assertEquals("minecraft:zombie", entities.get(0).getAsJsonObject().get("type").getAsString(),
+                "盯着角色的敌对生物豁免过滤照常列");
+        assertEquals(1, narrowed.getAsJsonArray("facilities").size(), "4 格的箱子在半径内照常列");
+        assertEquals(1, narrowed.getAsJsonArray("features").size(), "中心点 4 格的树林在半径内照常列");
+        assertEquals(1, narrowed.getAsJsonArray("heard").size(), "声音不过滤");
+        assertEquals(2, narrowed.getAsJsonObject("distant_entities").get("minecraft:squid").getAsInt(),
+                "远处计数保持全局");
+        assertTrue(narrowed.get("summary").getAsString().contains("收窄到 5 格"), narrowed::toString);
+
+        // 收得更紧时设施与地形也按各自距离收掉：箱子 4 格、树林中心 4 格，都在 2 格半径外。
+        JsonObject tight = SceneView.scene(scene, false, null, ReadsLocalizedNames.NONE, 2);
+        assertEquals(0, tight.getAsJsonArray("facilities").size(), tight::toString);
+        assertEquals(0, tight.getAsJsonArray("features").size(), tight::toString);
+        assertEquals(2, tight.getAsJsonObject("distant_entities").get("minecraft:squid").getAsInt(),
+                "远处计数不随收窄变");
+
+        // 不带 radius 的视图与原来一致：羊在 32 格内照常逐只列。
+        JsonObject unfiltered = SceneView.scene(scene, false);
+        assertEquals(2, unfiltered.getAsJsonArray("entities").size());
     }
 }
