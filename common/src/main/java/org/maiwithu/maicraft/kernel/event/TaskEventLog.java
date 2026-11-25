@@ -57,8 +57,18 @@ public final class TaskEventLog implements TaskEventSink {
      */
     public TaskEvent appendForGoal(TaskEvent.Kind kind, long goalRunId, String ability, String message,
                                    TaskResult.Status status, String selfBrief, List<TaskEvent.ReadyStep> readyNow) {
+        return appendForGoal(kind, goalRunId, ability, message, status, selfBrief, readyNow, null);
+    }
+
+    /**
+     * 记一条目标结束、还带结构化事实的事件（例如收场原因）：宿主同时看得到结论与按字段整理的事实。
+     * 没有事实时给 null，同不带事实的记法。
+     */
+    public TaskEvent appendForGoal(TaskEvent.Kind kind, long goalRunId, String ability, String message,
+                                   TaskResult.Status status, String selfBrief, List<TaskEvent.ReadyStep> readyNow,
+                                   EventFacts facts) {
         return log.append(cursor -> new TaskEvent(cursor, kind, goalRunId, message, status, selfBrief, readyNow,
-                null, ability));
+                facts, ability));
     }
 
     /**

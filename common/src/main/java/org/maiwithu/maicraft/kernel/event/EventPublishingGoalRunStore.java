@@ -6,6 +6,7 @@ import org.maiwithu.maicraft.kernel.goal.GoalRun;
 import org.maiwithu.maicraft.kernel.goal.GoalRunState;
 import org.maiwithu.maicraft.kernel.goal.GoalRunStore;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 import java.util.HashMap;
 import java.util.List;
@@ -167,8 +168,12 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
                 List<TaskEvent.ReadyStep> ready = step ? readyAfter(run) : List.of();
                 String message = step ? run.goal().stepLabel(run.stepOfParent()) + "：" + run.result().summary()
                         : run.result().summary();
+                // 被收掉的目标带上收场原因：状态里被压扁的几种取消（被替换、被取消、起居让位、角色没了）
+                // 按字段分开给；结果自己走到结局的不带。
+                EventFacts facts = closeFacts(run);
                 log.appendForGoal(step ? TaskEvent.Kind.STEP_FINISHED : TaskEvent.Kind.FINISHED, id, run.goal().ability(),
-                        message + readyNote(ready), run.result().status(), selfBrief.current().orElse(null), ready);
+                        message + readyNote(ready), run.result().status(), selfBrief.current().orElse(null), ready,
+                        facts);
             }
         }
     }
@@ -176,6 +181,13 @@ public final class EventPublishingGoalRunStore implements GoalRunStore {
     // 目标的一条事件：记在这个编号上（sequence 的一步记在整件 sequence 上），带上这条事件说的那个能力。
     private void event(TaskEvent.Kind kind, long id, GoalRun run, String message) {
         log.appendForGoal(kind, id, run.goal().ability(), message, null, null, List.of());
+    }
+
+    // 被收掉的目标给一条收场原因事实；结果自己走到结局、或没记下原因的（重启读回）不给。
+    private static EventFacts closeFacts(GoalRun run) {
+        CloseReason why = run.whyClosed();
+        return run.result() != null && run.result().status() == TaskResult.Status.CANCELLED && why != null
+                ? new CloseReasonFacts(why) : null;
     }
 
     // 整件 sequence 还要接着做（这一步做成了，或没做成但写了接着做）才看后面；做完最后一步、要停下的都不看。

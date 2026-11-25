@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.kernel.goal;
 
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,6 +36,8 @@ public final class GoalRun {
     private Question question;
     /** 这次为什么暂停（被临时任务带离原地）；没说原因、没暂停时为 null。不存盘。 */
     private String whyPaused;
+    /** 这次为什么收场（被替换、被取消、起居让位、角色没了）；结果不是取消类时为 null。不存盘：结束事件当场发出，事后不需要。 */
+    private CloseReason whyClosed;
     /** 这次推进里 LLM 已经给过的回答，按先后顺序。 */
     private final List<String> answers = new ArrayList<>();
     /**
@@ -152,9 +155,22 @@ public final class GoalRun {
         whyPaused = null;
     }
 
+    /**
+     * 记下这次为什么收场（被替换、被取消、起居让位、角色没了）：结束事件带上它，宿主与复盘才分得清
+     * 是模型主动换策略、被新目标顶掉、还是角色死亡断线。结果自己走到结局（FINISHED）时不记。
+     * 只在这一局里有，不存盘：结束事件当场发出，重启后不需要补。
+     */
+    public void closedBecause(CloseReason reason) {
+        whyClosed = reason;
+    }
+
+    /** 这次为什么收场；结果自己走到结局、或重启后读回的没有。 */
+    public CloseReason whyClosed() {
+        return whyClosed;
+    }
+
     /** 结束并定下结果；结束只发生一次，之后本记录封存。 */
-    public void finish(TaskResult value, long gameTick) {
-        if (state == GoalRunState.FINISHED) {
+    public void finish(TaskResult value, long gameTick) {        if (state == GoalRunState.FINISHED) {
             throw new IllegalStateException("目标运行 " + id + " 已经结束，不能再改结果");
         }
         result = Objects.requireNonNull(value, "value");

@@ -75,6 +75,7 @@ MaiCraft 按版本记录玩家和 Agent 能感受到的变化。版本号即 `gr
 
 ### 新增
 
+- 目标被收掉时，`finished`（及 sequence 的 `step_finished`）事件按结果状态为 `cancelled` 的收场直接铺 `close_reason` 字段（`replaced`/`cancelled`/`routine_needs_off`/`player_gone`），下游与复盘能分清模型主动换策略取消、被新目标替换、起居让位与角色死亡断线，不再都压成同一种取消。
 - 建筑与机器结构保护区：采掘、自动装水、流体转化、寻路清障、箱顶挖盖、收回工作站及纯坐标直指的破坏或舀取类 `use` 自动避开已登记建筑、在役机器（含流体源格）与耕地周围的非无限灌溉水源；箱子与终端取存以及建筑内成熟作物收割不受影响，需操作受保护格时可先 `observe` 用 `b#` 点名。
 - `design` 新增 `operation=remove_archive`，可显式退役已废弃或已拆除的建筑档案以解除结构保护（原蓝图保留）。
 - 营火与灵魂营火纳入设施观察：`observe(what="scene")` 的设施条目直接显示点燃状态 `lit`，`observe(what="detail")` 实时列出点燃状态、烤位占用与正在烤的食物，并说明烤熟自动弹出规则。

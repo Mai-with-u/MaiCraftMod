@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.kernel.goal.Question;
 import org.maiwithu.maicraft.kernel.param.ParamValues;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
+import org.maiwithu.maicraft.kernel.task.CloseReason;
 
 import java.util.List;
 import java.util.Optional;
@@ -277,5 +278,43 @@ class EventPublishingGoalRunStoreTest {
         store.tick();
         assertEquals(List.of(TaskEvent.Kind.STARTED, TaskEvent.Kind.PAUSED),
                 events(log).stream().map(TaskEvent::kind).toList());
+    }
+
+    @Test
+    void aCancelledGoalCarriesItsCloseReasonOnTheFinishedEvent() throws InterruptedException {
+        // 被收掉的目标：结束事件按字段带上收场原因，压扁成 CANCELLED 的几种收场在下游分得清；
+        // 结果自己走到结局的不带。
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log);
+        GoalRun replaced = new GoalRun(store.nextId(), GOAL);
+        store.save(replaced);
+        replaced.closedBecause(CloseReason.REPLACED);
+        replaced.finish(TaskResult.cancelled("被新目标替换"), 10);
+        store.save(replaced);
+        GoalRun done = new GoalRun(store.nextId(), GOAL);
+        store.save(done);
+        done.finish(TaskResult.done("拆完了"), 20);
+        store.save(done);
+
+        List<TaskEvent> events = events(log);
+        TaskEvent replacedFinished = events.get(1);
+        assertEquals(TaskEvent.Kind.FINISHED, replacedFinished.kind());
+        assertEquals(TaskResult.Status.CANCELLED, replacedFinished.status());
+        assertTrue(replacedFinished.facts() instanceof CloseReasonFacts, replacedFinished.toString());
+        assertEquals(CloseReason.REPLACED, ((CloseReasonFacts) replacedFinished.facts()).closeReason());
+        assertNull(events.get(3).facts());
+    }
+
+    @Test
+    void aGoalThatFinishedItselfCarriesNoCloseReason() throws InterruptedException {
+        // 收场原因只给被收掉的目标；自己走到结局（含失败）的事件上没有事实。
+        TaskEventLog log = new TaskEventLog();
+        EventPublishingGoalRunStore store = new EventPublishingGoalRunStore(new InMemoryGoalRunStore(), log);
+        GoalRun run = new GoalRun(store.nextId(), GOAL);
+        store.save(run);
+        run.finish(TaskResult.failed("没拆成", Problem.of(Problem.Kind.NEED_APPROVAL, "不许拆")), 10);
+        store.save(run);
+
+        assertNull(events(log).get(1).facts());
     }
 }

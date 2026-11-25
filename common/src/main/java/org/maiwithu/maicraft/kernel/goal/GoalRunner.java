@@ -438,6 +438,8 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         }
         ending.remaining(GoalConclusions.stepsNotStarted(goal, goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
         TaskResult cancelled = ending.build();
+        // 收场原因记在运行记录上：结束事件发布时按字段挂上去，状态里压扁成 CANCELLED 的几种收场在下游仍分得清。
+        run.closedBecause(reason);
         settle(closed == null ? cancelled : cancelled.withFactsBefore(List.of(closed)), null);
         return result;
     }
