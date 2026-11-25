@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.debug;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import java.util.Locale;
 import org.maiwithu.maicraft.game.ModIdentity;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
@@ -142,6 +144,51 @@ final class PanelWords {
         if (seconds < 60) return seconds + "s";
         if (seconds < 3600) return (seconds / 60) + "m" + String.format(Locale.ROOT, "%02d", seconds % 60) + "s";
         return (seconds / 3600) + "h" + String.format(Locale.ROOT, "%02d", seconds % 3600 / 60) + "m";
+    }
+
+    /**
+     * 简要档活动兜底行的短词：LLM 最近一次工具调用在干什么。
+     * observe 按看的范围说（观察·周围/自己/记忆/细节……），execute 显示能力名，其余工具起直白短词。
+     */
+    static String activity(StatusSnapshot.ToolCall call) {
+        return switch (call.tool()) {
+            case "observe" -> observeActivity(call.arguments());
+            case "execute" -> executeActivity(call.arguments());
+            case "lookup" -> "查资料";
+            case "goal" -> "管目标";
+            case "events" -> "等事件";
+            default -> call.tool();
+        };
+    }
+
+    // observe 的活动词按 what 参数（省略时是 scene）：宿主反复观察时主播看得出它在看哪一类。
+    private static String observeActivity(String arguments) {
+        String what = text(arguments, "what");
+        return switch (what == null ? "scene" : what) {
+            case "self" -> "观察·自己";
+            case "scene" -> "观察·周围";
+            case "detail" -> "观察·细节";
+            case "places", "world_memory" -> "观察·记忆";
+            case "menu" -> "观察·界面";
+            case "picture" -> "观察·画面";
+            default -> "观察";
+        };
+    }
+
+    // execute 的活动词是能力名：主播看得出角色被派了什么活，不用去读压缩成一行的参数。
+    private static String executeActivity(String arguments) {
+        String abilityId = text(arguments, "ability");
+        return abilityId == null ? "执行" : "执行 " + ability(abilityId);
+    }
+
+    // 参数是压缩成一行截断过的 JSON，截断或不是对象时取不到字段就退回去，不为一行显示解析报错。
+    private static String text(String arguments, String key) {
+        try {
+            JsonObject object = JsonParser.parseString(arguments).getAsJsonObject();
+            return object.has(key) && !object.get(key).isJsonNull() ? object.get(key).getAsString() : null;
+        } catch (RuntimeException parseFailed) {
+            return null;
+        }
     }
 
     /** 游戏刻换成时长（每秒 20 刻）。 */

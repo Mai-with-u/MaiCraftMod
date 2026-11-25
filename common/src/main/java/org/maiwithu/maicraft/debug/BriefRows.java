@@ -24,7 +24,12 @@ final class BriefRows {
     static List<Row> rows(Moment moment) {
         List<Row> rows = new ArrayList<>(goal(moment));
         Row now = now(moment);
-        if (now != null) rows.add(now);
+        if (now != null) {
+            rows.add(now);
+        } else {
+            Row activity = activity(moment);
+            if (activity != null) rows.add(activity);
+        }
         rows.addAll(alerts(moment));
         return rows;
     }
@@ -58,6 +63,39 @@ final class BriefRows {
         return temporary
                 ? Row.of("此刻", ROW_LINES, StatusSentences.layer(top, doing, null, true), PanelColor.WAITING)
                 : Row.of("此刻", ROW_LINES, doing, PanelColor.DOING);
+    }
+
+    /** 最新一次调用距今多久之内还当"最近的活动"显示；超过就不再显示。 */
+    private static final long ACTIVITY_FRESH_MILLIS = 90_000;
+
+    /**
+     * 活动兜底行：此刻没有物理任务推进（now 返回 null）时，拿最近一次工具调用顶上——
+     * 模型只在推理、等事件的时段面板什么都不显示，主播看不出宿主还活着。
+     * 物理任务行存在时任务行优先，这里根本不会被调到。
+     */
+    static Row activity(Moment moment) {
+        List<StatusSnapshot.ToolCall> calls = moment.status().calls();
+        // 只挑运行中或成功的调用当活动：报错的调用不是正在发生的活动，显示了会把主播引向一次失败过的尝试。
+        int latest = -1;
+        for (int i = calls.size() - 1; i >= 0 && latest < 0; i--) {
+            if (calls.get(i).running() || calls.get(i).succeeded()) latest = i;
+        }
+        if (latest < 0) return null;
+        long age = moment.nowMillis() - calls.get(latest).startedAtMillis();
+        // 超过 90 秒的旧活动不再显示：宿主多半已经断开或闲置，陈旧的"观察 · 5m 前"行会让人误以为还在动。
+        if (age > ACTIVITY_FRESH_MILLIS) return null;
+        // 同一个工具连续的调用合成一行 ×N：宿主挂一次 events 等新事件就发一次调用，不合并整屏都是它。
+        int repeats = 1;
+        for (int i = latest - 1; i >= 0; i--) {
+            StatusSnapshot.ToolCall earlier = calls.get(i);
+            if (!earlier.tool().equals(calls.get(latest).tool()) || !(earlier.running() || earlier.succeeded())) break;
+            repeats++;
+        }
+        StatusSnapshot.ToolCall call = calls.get(latest);
+        String text = PanelWords.activity(call) + (repeats > 1 ? " ×" + repeats : "")
+                + " · " + PanelWords.duration(age) + " 前";
+        // 还在跑的用推进色，已经结束的成功调用用弱色：它只是最近的活动，不是正在发生的事。
+        return Row.of("此刻", 1, text, call.running() ? PanelColor.DOING : PanelColor.MINOR);
     }
 
     // 提醒行：必显的五种在前，其余按要紧程度最多三条，多出来的合成一行"还有 N 条"。
