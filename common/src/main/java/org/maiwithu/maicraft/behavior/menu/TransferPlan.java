@@ -33,7 +33,9 @@ public final class TransferPlan {
         /** 光标拿着物品时右键目标格：放下一个。 */
         GIVE_ONE,
         /** 光标拿着物品时右键源格：退回一个。 */
-        PUT_BACK_ONE
+        PUT_BACK_ONE,
+        /** 光标拿着物品时左键源格：余量整份退回源格。 */
+        PUT_BACK_ALL
     }
 
     /** 一步点击：在源格或目标格上做一次原版鼠标操作，items 是这一步移动的物品数。 */
@@ -93,47 +95,120 @@ public final class TransferPlan {
         }
         List<Step> steps = new ArrayList<>();
         int source = sourceCount;
-        int cursor = 0;
-        int deposited = 0;
-        // 反复从源格抓到光标、放进目标格，直到目标收到足额件数：
-        // 源格是超叠槽位且剩余待搬件数不少于一整轮光标上限时，先左键按光标上限抓满一轮整份放下；
-        // 其余情形按原版右键抓半堆（受光标单次上限封顶），每次抓取都让源格严格变少，循环必然结束。
-        while (deposited < amount) {
-            int remaining = amount - deposited;
-            int fullCursor = Math.min(cursorMax, source);
-            final Kind takeKind;
-            final int taken;
-            if (source > cursorMax && fullCursor <= remaining) {
-                takeKind = Kind.TAKE_ALL;
-                taken = fullCursor;
-            } else {
-                takeKind = Kind.TAKE_HALF;
-                // 精妙背包超叠槽空手点右键时先按物品最大堆叠截断到光标上限，再折半向上取整（如 128 圆石点右键实抓 32 个）。
-                taken = (fullCursor + 1) / 2;
+        int remaining = amount;
+        // 先处理超叠槽位（源格件数大于光标单次上限）的整轮抓取与半堆逼近，再在光标可一次抓起的范围内用最少点击策略收尾。
+        while (remaining > 0 && source > cursorMax) {
+            if (remaining >= cursorMax) {
+                source -= cursorMax;
+                remaining -= cursorMax;
+                steps.add(new Step(Where.SOURCE, Kind.TAKE_ALL, cursorMax, "按光标上限抓满一轮"));
+                steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, cursorMax, "整份放进目标格"));
+                continue;
             }
-            cursor = taken;
-            source -= taken;
-            steps.add(new Step(Where.SOURCE, takeKind, taken,
-                    takeKind == Kind.TAKE_ALL ? "按光标上限抓满一轮" : "拿走半堆"));
-            if (cursor <= remaining) {
-                // 手里这堆用得上：整份放进目标格。
-                deposited += cursor;
-                steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, cursor, "整份放进目标格"));
-                cursor = 0;
+            // 精妙背包超叠槽空手点右键时先按物品最大堆叠截断到光标上限，再折半向上取整（如 128 圆石点右键实抓 32 个）。
+            int half = (cursorMax + 1) / 2;
+            source -= half;
+            steps.add(new Step(Where.SOURCE, Kind.TAKE_HALF, half, "拿走半堆"));
+            if (half <= remaining) {
+                remaining -= half;
+                steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, half, "整份放进目标格"));
             } else {
-                // 拿多了：先一个一个放，放够要的量，再把手里剩的一个一个退回原本就装得下的源格。
-                while (deposited < amount) {
-                    cursor -= 1;
-                    deposited += 1;
-                    steps.add(new Step(Where.TARGET, Kind.GIVE_ONE, 1, "放一个"));
+                // 拿多了按 min(待放, 待退) 选更省点击的一侧：少放就逐个放进目标再整份退回源格，少退就逐个退回源格再整份放入目标。
+                int excess = half - remaining;
+                if (remaining < excess) {
+                    for (int i = 0; i < remaining; i++) {
+                        steps.add(new Step(Where.TARGET, Kind.GIVE_ONE, 1, "放一个"));
+                    }
+                    steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ALL, excess, "余量整份退回源格"));
+                } else {
+                    for (int i = 0; i < excess; i++) {
+                        steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ONE, 1, "退回源格一个"));
+                    }
+                    steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, remaining, "整份放进目标格"));
                 }
-                while (cursor > 0) {
-                    cursor -= 1;
-                    source += 1;
-                    steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ONE, 1, "退回源格一个"));
-                }
+                source += excess;
+                remaining = 0;
             }
         }
+        if (remaining > 0) {
+            steps.addAll(minimalStepsWithinCursor(source, remaining));
+        }
         return new TransferPlan(false, List.copyOf(steps));
+    }
+
+    /**
+     * 在单次光标可抓起的普通槽位（1 ≤ amount ≤ source ≤ cursorMax）内计算点击次数最少的搬运步骤：
+     * 比较「整抓后逐放再整退（k+2 击）」「整抓后逐退再整放（n-k+2 击）」与「半抓折半逼近」，取总点击最少的方案；
+     * 例如从 8 件里取 1 件只需 3 击（左键抓 8 → 右键放 1 → 左键把余下 7 件放回空源格），不再退 7 次单件。
+     */
+    private static List<Step> minimalStepsWithinCursor(int source, int amount) {
+        int half = (source + 1) / 2;
+        // 刚好等于半堆（含 1 取 1、16 取 8）：右键半抓加左键整放，2 击直达且不触发整格抓空。
+        if (amount == half) {
+            return List.of(
+                    new Step(Where.SOURCE, Kind.TAKE_HALF, half, "拿走半堆"),
+                    new Step(Where.TARGET, Kind.GIVE_ALL, half, "整份放进目标格"));
+        }
+        // 整格拿走（2 取 2 等）：左键整抓加左键整放，2 击直达。
+        if (amount == source) {
+            return List.of(
+                    new Step(Where.SOURCE, Kind.TAKE_ALL, source, "整份拿起"),
+                    new Step(Where.TARGET, Kind.GIVE_ALL, source, "整份放进目标格"));
+        }
+        int excess = source - amount;
+        // 方案 A/B：左键抓整叠，按 min(amount, source - amount) 决定逐个放目标再整退，还是逐个退源格再整放。
+        List<Step> best = amount <= excess
+                ? takeAllGiveOnesPutBackAll(source, amount)
+                : takeAllPutBackOnesGiveAll(source, amount);
+        // 方案 C：右键先抓半堆。若半堆多于要的量且差额更小，半抓后逐个退回源格再整放目标；若半堆少于要的量，半放后递归余量。
+        if (half > amount && (half - amount) + 2 < best.size()) {
+            best = takeHalfPutBackOnesGiveAll(half, amount);
+        } else if (half < amount) {
+            List<Step> tail = minimalStepsWithinCursor(source - half, amount - half);
+            if (2 + tail.size() < best.size()) {
+                List<Step> combined = new ArrayList<>(2 + tail.size());
+                combined.add(new Step(Where.SOURCE, Kind.TAKE_HALF, half, "拿走半堆"));
+                combined.add(new Step(Where.TARGET, Kind.GIVE_ALL, half, "整份放进目标格"));
+                combined.addAll(tail);
+                best = combined;
+            }
+        }
+        return best;
+    }
+
+    // 左键抓整叠 → 目标格右键逐个放 amount 次 → 左键把余量整份放回已抓空的源格（共 amount + 2 击）。
+    private static List<Step> takeAllGiveOnesPutBackAll(int source, int amount) {
+        int excess = source - amount;
+        List<Step> steps = new ArrayList<>(amount + 2);
+        steps.add(new Step(Where.SOURCE, Kind.TAKE_ALL, source, "整份拿起"));
+        for (int i = 0; i < amount; i++) {
+            steps.add(new Step(Where.TARGET, Kind.GIVE_ONE, 1, "放一个"));
+        }
+        steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ALL, excess, "余量整份退回源格"));
+        return steps;
+    }
+
+    // 左键抓整叠 → 源格右键逐个退回余量 → 目标格左键整份放下（共 (source - amount) + 2 击）。
+    private static List<Step> takeAllPutBackOnesGiveAll(int source, int amount) {
+        int excess = source - amount;
+        List<Step> steps = new ArrayList<>(excess + 2);
+        steps.add(new Step(Where.SOURCE, Kind.TAKE_ALL, source, "整份拿起"));
+        for (int i = 0; i < excess; i++) {
+            steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ONE, 1, "退回源格一个"));
+        }
+        steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, amount, "整份放进目标格"));
+        return steps;
+    }
+
+    // 右键抓半堆 → 源格右键逐个退回多抓的几件 → 目标格左键整份放下（共 (half - amount) + 2 击）。
+    private static List<Step> takeHalfPutBackOnesGiveAll(int half, int amount) {
+        int excess = half - amount;
+        List<Step> steps = new ArrayList<>(excess + 2);
+        steps.add(new Step(Where.SOURCE, Kind.TAKE_HALF, half, "拿走半堆"));
+        for (int i = 0; i < excess; i++) {
+            steps.add(new Step(Where.SOURCE, Kind.PUT_BACK_ONE, 1, "退回源格一个"));
+        }
+        steps.add(new Step(Where.TARGET, Kind.GIVE_ALL, amount, "整份放进目标格"));
+        return steps;
     }
 }

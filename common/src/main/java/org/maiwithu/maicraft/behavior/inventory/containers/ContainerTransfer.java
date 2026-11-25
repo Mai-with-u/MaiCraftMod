@@ -215,7 +215,7 @@ final class ContainerTransfer implements Action {
             switch (step.kind()) {
                 case TAKE_HALF -> clicks.add(new MenuClick(slot, false, 1, true));
                 case TAKE_ALL -> clicks.add(new MenuClick(slot, false, 0, true));
-                case GIVE_ALL -> clicks.add(new MenuClick(slot, false, 0, false));
+                case GIVE_ALL, PUT_BACK_ALL -> clicks.add(new MenuClick(slot, false, 0, false));
                 case GIVE_ONE, PUT_BACK_ONE -> clicks.add(new MenuClick(slot, false, 1, false));
                 case QUICK_MOVE -> clicks.add(new MenuClick(slot, true, 0, false));
             }

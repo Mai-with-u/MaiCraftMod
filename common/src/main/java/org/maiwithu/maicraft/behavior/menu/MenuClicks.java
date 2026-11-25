@@ -28,7 +28,7 @@ public final class MenuClicks {
                 case QUICK_MOVE -> new MenuClick(slotId, true, 0, false);
                 case TAKE_ALL -> new MenuClick(slotId, false, 0, true);
                 case TAKE_HALF -> new MenuClick(slotId, false, 1, true);
-                case GIVE_ALL -> new MenuClick(slotId, false, 0, false);
+                case GIVE_ALL, PUT_BACK_ALL -> new MenuClick(slotId, false, 0, false);
                 case GIVE_ONE, PUT_BACK_ONE -> new MenuClick(slotId, false, 1, false);
             });
         }

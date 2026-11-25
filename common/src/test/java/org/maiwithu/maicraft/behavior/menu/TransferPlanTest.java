@@ -40,40 +40,70 @@ class TransferPlanTest {
     }
 
     @Test
-    void 六十四取四十九放进目标格的是三十二十六一() {
-        // 64 取 49：放进目标格的依次是 32、16、1，多拿的一个一个退回源格。
+    void 六十四取四十九放进目标格的是三十二十六一且只需七击() {
+        // 64 取 49：先折半放 32、16，剩下 16 取 1 时整抓放 1 再整份放回 15，只需 7 击而非逐个退回 7 次。
         TransferPlan plan = TransferPlan.exactAmount(64, 49, 64);
         assertFalse(plan.maySwapTarget(), "指定数量的搬运不许交换目标格");
         List<Integer> given = plan.steps().stream()
                 .filter(step -> step.where() == Where.TARGET)
                 .map(TransferPlan.Step::items)
                 .toList();
-        assertEquals(List.of(32, 16, 1), given, "尾数按二分堆放进去");
-        // 步骤里包括退回：多拿的 8 个里放 1 个、退 7 个。
-        long putBack = plan.steps().stream().filter(step -> step.kind() == Kind.PUT_BACK_ONE).count();
-        assertEquals(7, putBack);
+        assertEquals(List.of(32, 16, 1), given, "尾数按最少点击放进去");
+        assertEquals(7, plan.steps().size(), "32(2击)+16(2击)+1(3击)=7击");
+        long putBackAll = plan.steps().stream().filter(step -> step.kind() == Kind.PUT_BACK_ALL).count();
+        assertEquals(1, putBackAll, "余量一次整份放回源格");
+    }
+
+    @Test
+    void 八件取一件只需三击_整抓放一再整份放回余量() {
+        // 8 取 1：k=1 < n-k=7，左键抓 8 → 目标格右键放 1 → 左键把余下 7 件整份放回空源格（3 击代替 8 击）。
+        TransferPlan plan = TransferPlan.exactAmount(8, 1, 64);
+        assertEquals(3, plan.steps().size());
+        assertEquals(Kind.TAKE_ALL, plan.steps().get(0).kind());
+        assertEquals(Kind.GIVE_ONE, plan.steps().get(1).kind());
+        assertEquals(Kind.PUT_BACK_ALL, plan.steps().get(2).kind());
+        int[] settled = simulate(plan, 8, 64);
+        assertEquals(7, settled[0]);
+        assertEquals(1, settled[1]);
+        assertEquals(0, settled[2]);
+    }
+
+    @Test
+    void 八件取七件只需三击_整抓退一再整份放入目标() {
+        // 8 取 7：n-k=1 < k=7，左键抓 8 → 源格右键退回 1 → 目标格左键整份放 7（3 击）。
+        TransferPlan plan = TransferPlan.exactAmount(8, 7, 64);
+        assertEquals(3, plan.steps().size());
+        assertEquals(Kind.TAKE_ALL, plan.steps().get(0).kind());
+        assertEquals(Kind.PUT_BACK_ONE, plan.steps().get(1).kind());
+        assertEquals(Kind.GIVE_ALL, plan.steps().get(2).kind());
+        int[] settled = simulate(plan, 8, 64);
+        assertEquals(1, settled[0]);
+        assertEquals(7, settled[1]);
+        assertEquals(0, settled[2]);
+    }
+
+    @Test
+    void 六十四件取一件只需三击_不再退回三十一次单件() {
+        TransferPlan plan = TransferPlan.exactAmount(64, 1, 64);
+        assertEquals(3, plan.steps().size());
+        int[] settled = simulate(plan, 64, 64);
+        assertEquals(63, settled[0]);
+        assertEquals(1, settled[1]);
+        assertEquals(0, settled[2]);
     }
 
     @Test
     void 计划执行完源格剩的正好是差额() {
-        // 用计划在数字上走一遍：源格、光标、目标格的数量与预期一致，光标最后为空。
-        int sourceCount = 64;
-        int amount = 49;
-        int source = sourceCount;
-        int cursor = 0;
-        int deposited = 0;
-        for (Step step : TransferPlan.exactAmount(sourceCount, amount, 64).steps()) {
-            switch (step.kind()) {
-                case TAKE_HALF -> { cursor = (source + 1) / 2; source -= cursor; }
-                case GIVE_ALL -> { deposited += cursor; cursor = 0; }
-                case GIVE_ONE -> { cursor -= 1; deposited += 1; }
-                case PUT_BACK_ONE -> { cursor -= 1; source += 1; }
-                case QUICK_MOVE, TAKE_ALL -> throw new IllegalStateException("尾数计划里不该出现整堆步骤");
+        // 覆盖 1..64 内所有 (sourceCount, amount) 组合：模拟后源格剩余、目标收到精确无误差、光标归零。
+        for (int sourceCount = 1; sourceCount <= 64; sourceCount++) {
+            for (int amount = 1; amount <= sourceCount; amount++) {
+                TransferPlan plan = TransferPlan.exactAmount(sourceCount, amount, 64);
+                int[] settled = simulate(plan, sourceCount, 64);
+                assertEquals(sourceCount - amount, settled[0], "源格剩余不对：" + sourceCount + " 取 " + amount);
+                assertEquals(amount, settled[1], "目标收到不对：" + sourceCount + " 取 " + amount);
+                assertEquals(0, settled[2], "光标残留：" + sourceCount + " 取 " + amount);
             }
         }
-        assertEquals(sourceCount - amount, source);
-        assertEquals(amount, deposited);
-        assertEquals(0, cursor);
     }
 
     @Test
@@ -98,13 +128,13 @@ class TransferPlanTest {
 
     @Test
     void 源格两件搬两件整格走尾数计划() {
-        // 源格 2 件、要搬 2 件：拿半堆（1 件）放进目标格，再拿剩下那件放下，源格正好拿空。
+        // 源格 2 件、要搬 2 件：整抓整放 2 击拿空源格。
         TransferPlan plan = TransferPlan.exactAmount(2, 2, 64);
-        List<Integer> given = plan.steps().stream()
-                .filter(step -> step.where() == Where.TARGET)
-                .map(TransferPlan.Step::items)
-                .toList();
-        assertEquals(List.of(1, 1), given, "两件各走一次半堆放进目标格");
+        assertEquals(2, plan.steps().size());
+        int[] settled = simulate(plan, 2, 64);
+        assertEquals(0, settled[0]);
+        assertEquals(2, settled[1]);
+        assertEquals(0, settled[2]);
     }
 
     @Test
@@ -187,6 +217,10 @@ class TransferPlanTest {
                 case PUT_BACK_ONE -> {
                     cursor -= 1;
                     source += 1;
+                }
+                case PUT_BACK_ALL -> {
+                    source += cursor;
+                    cursor = 0;
                 }
                 case QUICK_MOVE -> throw new IllegalStateException("尾数计划里不该出现快速移动");
             }

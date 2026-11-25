@@ -297,9 +297,13 @@ class ContainerTakePlanTest {
                         : (Math.min(cursorMax, source) + 1) / 2;
                 cursor = taken;
                 source -= taken;
-            } else if (click.button() == 0) {
+            } else if (click.button() == 0 && onPlayer) {
                 // 左键整份放进背包格。
                 player += cursor;
+                cursor = 0;
+            } else if (click.button() == 0 && onSource) {
+                // 左键把光标余量整份退回源格（PUT_BACK_ALL）。
+                source += cursor;
                 cursor = 0;
             } else if (onPlayer) {
                 cursor -= 1;
