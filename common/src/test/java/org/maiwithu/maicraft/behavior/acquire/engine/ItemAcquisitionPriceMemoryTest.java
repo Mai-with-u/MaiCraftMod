@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.acquire.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
@@ -11,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.FakeBackpack;
@@ -25,6 +27,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceQuote;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -130,20 +133,362 @@ class ItemAcquisitionPriceMemoryTest {
     }
 
     @Test
-    void 做法不吃的那段外层不同_问价分开记() {
-        // 同一种问法，做法不拿来当原料的那段外层不同（直接要原木，和为砍原木备斧头），做法剔掉的不同、答案可能不同：
-        // 同一段外层问两遍只问一次来源，换了一段外层再问一次，不拿一个答另一个。
+    void 无环子问题不依赖外层约束_切换外层路径后仍复用缓存() {
+        // 容器里有没有木板与外层正在要原木还是木斧无关：未触发外层依赖时，切换外层仍 100% 复用无环缓存。
         CountingChest chest = new CountingChest(new SourceQuote.Offer("记得的箱子", 2, new AcquisitionCost(20, 2), null));
         List<WantedItem> outer = new ArrayList<>(List.of(WantedItem.ofItem("minecraft:oak_log")));
         PriceAsks asks = new PriceAsks(List.of(chest), new FixedSpot(0, 64, 0), () -> List.copyOf(outer));
         asks.during(new QuoteBudget(100), () -> {
             asks.ask(want(PLANKS, 2), PERMISSIONS, true);
-            asks.ask(want(PLANKS, 2), PERMISSIONS, true);
             outer.clear();
             outer.add(WantedItem.ofItem("minecraft:wooden_axe"));
             return asks.ask(want(PLANKS, 2), PERMISSIONS, true);
         });
-        assertEquals(2, chest.asked.get(PLANKS));
+        assertEquals(1, chest.asked.get(PLANKS), "无环子问题应跨外层分支复用，只问 1 次");
+    }
+
+    @Test
+    void 实际撞到外层环依赖的子问题按外层隔离_不污染无环缓存() {
+        // 制造来源在 outer 含原木时因防环剔除了配方并调用 markOuterDependency()：
+        // 该结果按当前外层隔离，换到不含原木的外层时必须重算并得出新报价，绝不复用受污染缓存。
+        List<WantedItem> outer = new ArrayList<>(List.of(WantedItem.ofItem("minecraft:oak_log")));
+        PriceAsks[] holder = new PriceAsks[1];
+        int[] craftCalls = {0};
+        ItemSource outerSensitiveCraft = new ItemSource() {
+            @Override public String describe() { return "受外层影响的合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                craftCalls[0]++;
+                if (outer.contains(WantedItem.ofItem("minecraft:oak_log"))) {
+                    holder[0].markOuterDependency();
+                    return new SourceQuote.Unavailable(describe(), "外层正要原木，跳过这条配方");
+                }
+                return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(outerSensitiveCraft), new FixedSpot(0, 64, 0), () -> List.copyOf(outer));
+        holder[0] = asks;
+
+        PriceAsks.Price[] results = new PriceAsks.Price[2];
+        asks.during(new QuoteBudget(100), () -> {
+            results[0] = asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+            // 相同外层再问一次命中隔离缓存
+            asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+            // 切换外层不再撞环：重算得到有效报价
+            outer.clear();
+            outer.add(WantedItem.ofItem("minecraft:wooden_axe"));
+            results[1] = asks.ask(want(PLANKS, 2), PERMISSIONS, true);
+            return null;
+        });
+
+        assertTrue(results[0].cost().isEmpty(), "撞外层环时无报价");
+        assertTrue(results[1].cost().isPresent(), "换外层后不误用受污染缓存，应正常得出报价");
+        assertEquals(2, craftCalls[0], "同外层复用一次，换外层重算一次，共 2 次");
+    }
+
+    @Test
+    void 大标签多变体配方共享原料_DAG记忆化与预算保护压住问价爆炸() {
+        // 模拟 #functionalstorage:drawer（40 种木头抽屉变体共享 20 种木板与箱子等子问题，且在不同外层分支下反复问价）：
+        // 无环子问题跨分支 100% 复用 + 动手问价预算保护，将原本数万次全源扫描压到百次级以内。
+        int[] leafQuotes = {0};
+        ItemSource leafSource = new ItemSource() {
+            @Override public String describe() { return "模拟箱子"; }
+            @Override public AcquireVia via() { return AcquireVia.CONTAINER; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                leafQuotes[0]++;
+                return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(8, 2), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        List<WantedItem> outer = new ArrayList<>();
+        PriceAsks[] asksHolder = new PriceAsks[1];
+        ItemSource drawerCrafting = new ItemSource() {
+            @Override public String describe() { return "模拟大标签合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                if (!"#functionalstorage:drawer".equals(request.wanted().specifier())) {
+                    return new SourceQuote.Unavailable(describe(), "非抽屉");
+                }
+                // 40 种抽屉配方，每种展开 20 种木板 + 1 种箱子（共 840 次子问价，且模拟不同外层路径）。
+                for (int variant = 0; variant < 40; variant++) {
+                    outer.clear();
+                    outer.add(WantedItem.ofItem("functionalstorage:drawer_" + variant));
+                    asksHolder[0].ask(want("minecraft:chest", 1), PERMISSIONS, true);
+                    for (int plank = 0; plank < 20; plank++) {
+                        asksHolder[0].ask(want("minecraft:plank_" + plank, 6), PERMISSIONS, true);
+                    }
+                }
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 8), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(leafSource, drawerCrafting), new FixedSpot(0, 64, 0),
+                () -> List.copyOf(outer));
+        asksHolder[0] = asks;
+
+        asks.duringConsult(new ItemRequest(WantedItem.ofTag("functionalstorage:drawer"), 1, "测试"),
+                100L, "0,64,0|0:0:0",
+                () -> asks.quote(drawerCrafting,
+                        new ItemRequest(WantedItem.ofTag("functionalstorage:drawer"), 1, "测试"),
+                        SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS)));
+
+        // 20 种木板 + 1 种箱子，无环 DAG 记忆化后仅各问 1 次叶子源（总共 21 次，远低于百次！）。
+        assertEquals(21, leafQuotes[0], "40×21=840 次跨分支问价经 DAG 记忆化应压缩至 21 次真实源扫描");
+    }
+
+    @Test
+    void 同一游戏刻现场未变时复用无环报价_跨刻后重新问价() {
+        CountingChest chest = new CountingChest(new SourceQuote.Offer("记得的箱子", 2, new AcquisitionCost(10, 2), null));
+        PriceAsks asks = new PriceAsks(List.of(chest), new FixedSpot(0, 64, 0), List::of);
+        // 第 50 刻连续两轮 consult，指纹未变：第二轮复用同刻无环缓存，不重问箱子。
+        asks.duringConsult(want(PLANKS, 2), 50L, "0,64,0|1:2:0", () -> asks.ask(want(PLANKS, 2), PERMISSIONS, true));
+        asks.duringConsult(want(PLANKS, 2), 50L, "0,64,0|1:2:0", () -> asks.ask(want(PLANKS, 2), PERMISSIONS, true));
+        assertEquals(1, chest.asked.get(PLANKS), "同刻指纹未变时复用无环缓存");
+        // 第 51 刻跨刻后重新问价。
+        asks.duringConsult(want(PLANKS, 2), 51L, "0,64,0|1:2:0", () -> asks.ask(want(PLANKS, 2), PERMISSIONS, true));
+        assertEquals(2, chest.asked.get(PLANKS), "跨刻后重新问价");
+    }
+
+    @Test
+    void 连续等待扫描期间节流复查_不再每刻原样全源重算() {
+        CountingChest chest = new CountingChest(new SourceQuote.Unavailable("记得的箱子", "没有木板"));
+        // 连续 10 轮都返回 NotYet 模拟冷索引视野扫描未完。
+        SwordCrafting craft = new SwordCrafting(10);
+        ItemAcquisition engine = engine(chest, craft);
+        craft.engine = engine;
+
+        Action action = engine.need(want(SWORD, 1), PERMISSIONS);
+        for (int tick = 1; tick <= 12; tick++) {
+            action.tick(new StubTick(tick));
+        }
+        // 12 刻内因连续 stillLooking 节流（第 1、2 刻后每 5 刻复查一次），全源重算次数大幅低于 12 次。
+        assertTrue(craft.plankPrices.size() <= 5,
+                "连续等待扫描 12 刻不应每刻重算，实际重算次数：" + craft.plankPrices.size());
+    }
+
+    @Test
+    void 预算恰好用满主动止损时标脏当前帧且记预算拒绝_半截报价绝不入缓存() {
+        int[] quoteCalls = {0};
+        PriceAsks[] holder = new PriceAsks[1];
+        ItemSource budgetStoppingSource = new ItemSource() {
+            @Override public String describe() { return "预算止损合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                quoteCalls[0]++;
+                // 第一次问价刚好把额度耗尽后主动止损并调用 markBudgetCut()，结果是半截报价。
+                if (holder[0].budgetExhausted()) {
+                    holder[0].markBudgetCut();
+                    return new SourceQuote.Unavailable(describe(), "预算用满提前止损");
+                }
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(budgetStoppingSource), new FixedSpot(0, 64, 0), List::of);
+        holder[0] = asks;
+
+        // 预算上限设为 1：消耗完 1 次额度后 exhausted()==true 且 refused()==0，再经 markBudgetCut() 标脏。
+        QuoteBudget budget = new QuoteBudget(1);
+        budget.takeQuote();
+        assertEquals(0, budget.refused(), "前置条件：恰好用满时尚未拒绝");
+        asks.during(budget, () -> {
+            QuoteQuestion q = asks.questionOf(budgetStoppingSource, want(PLANKS, 1), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            SourceQuote first = asks.quoteRemembered(budgetStoppingSource, q, want(PLANKS, 1),
+                    SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS));
+            assertTrue(first instanceof SourceQuote.Unavailable);
+            // 预算截断的半截报价绝不能落入缓存，cached 必须为空且 budget.refused() 必须递增。
+            assertEquals(1, budget.refused(), "主动止损必须递增 budget.refused() 让估算层感知不完整");
+            assertEquals(null, asks.cached(q), "预算截断的半截报价绝不写入 remembered 共享缓存");
+            return null;
+        });
+        assertEquals(1, quoteCalls[0]);
+    }
+
+    @Test
+    void 估算路径问价同样压帧追踪外层依赖_绝不污染无环缓存() {
+        // 模拟估算路径先在外层包含 oak_log 时调 quoteRemembered 触发 markOuterDependency()，
+        // 换到不含 oak_log 的外层时不应命中被污染的无环缓存。
+        List<WantedItem> outer = new ArrayList<>(List.of(WantedItem.ofItem("minecraft:oak_log")));
+        PriceAsks[] holder = new PriceAsks[1];
+        ItemSource outerSensitive = new ItemSource() {
+            @Override public String describe() { return "受外层影响的估算合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                if (outer.contains(WantedItem.ofItem("minecraft:oak_log"))) {
+                    holder[0].markOuterDependency();
+                    return new SourceQuote.Unavailable(describe(), "撞外层原木");
+                }
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(outerSensitive), new FixedSpot(0, 64, 0), () -> List.copyOf(outer));
+        holder[0] = asks;
+
+        AcquisitionEstimates estimates = new AcquisitionEstimates(List.of(outerSensitive),
+                new FixedSpot(0, 64, 0), 4, asks, () -> List.copyOf(outer));
+        asks.during(new QuoteBudget(100), () -> {
+            QuoteQuestion withLog = asks.questionOf(outerSensitive, want(PLANKS, 2), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            SourceQuote blocked = asks.quoteRemembered(outerSensitive, withLog, want(PLANKS, 2),
+                    SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS));
+            assertTrue(blocked instanceof SourceQuote.Unavailable);
+            outer.clear();
+            QuoteQuestion withoutLog = asks.questionOf(outerSensitive, want(PLANKS, 2), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            assertEquals(null, asks.cached(withoutLog), "撞外层依赖的结果绝不能落入 withoutOuter 通用缓存");
+            return null;
+        });
+        // 外层已清空，独立估算木板应得到可行估算而非沿用受污染结果。
+        assertTrue(estimates.estimate(want(PLANKS, 2), PERMISSIONS, ItemAcquisition.Scope.ALL).effort().timed());
+    }
+
+    @Test
+    void 制造来源重入短路返回降级报价时绝不写入共享缓存与同刻缓存() {
+        boolean[] reentrant = {true};
+        PriceAsks[] holder = new PriceAsks[1];
+        ItemSource craft = new ItemSource() {
+            @Override public String describe() { return "可重入合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                if (reentrant[0]) {
+                    holder[0].markDegraded();
+                    return new SourceQuote.Unavailable(describe(), "重入降级返回");
+                }
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(craft), new FixedSpot(0, 64, 0), List::of);
+        holder[0] = asks;
+        SourceContext ctx = SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS);
+
+        asks.duringConsult(want(SWORD, 1), 88L, "fp-same", () -> {
+            QuoteQuestion q = asks.questionOf(craft, want(PLANKS, 2), PERMISSIONS, true, null);
+            SourceQuote degraded = asks.quoteRemembered(craft, q, want(PLANKS, 2), ctx);
+            assertTrue(degraded instanceof SourceQuote.Unavailable);
+            assertEquals(null, asks.cached(q), "重入降级报价绝不写入本轮 remembered 缓存");
+            return null;
+        });
+
+        // 同一游戏刻相同指纹下以正常非重入身份再次问价，必须拿到真实 Offer，绝不命中过期降级结果。
+        reentrant[0] = false;
+        SourceQuote normal = asks.duringConsult(want(SWORD, 1), 88L, "fp-same", () -> {
+            QuoteQuestion q = asks.questionOf(craft, want(PLANKS, 2), PERMISSIONS, true, null);
+            return asks.quoteRemembered(craft, q, want(PLANKS, 2), ctx);
+        });
+        assertTrue(normal instanceof SourceQuote.Offer, "降级结果不能污染同刻缓存，正常调用应得出 Offer");
+    }
+
+    @Test
+    void 同刻背包等量替换物品或副手变化时指纹立即失效() {
+        backpack.add("minecraft:oak_planks", 4);
+        String fp1 = PriceAsks.stateFingerprint(new FixedSpot(0, 64, 0).currentPosition(), backpack, offhand, 0,
+                Set.of(), List.of(), 0, 0, null);
+        // 1:1 替换背包物品：总格数与总件数不变，但物品种类变了，指纹必须变化。
+        backpack.stacks.clear();
+        backpack.add("minecraft:spruce_planks", 4);
+        String fp2 = PriceAsks.stateFingerprint(new FixedSpot(0, 64, 0).currentPosition(), backpack, offhand, 0,
+                Set.of(), List.of(), 0, 0, null);
+        assertNotEquals(fp1, fp2, "背包 1:1 替换不同物品必须令同刻指纹失效");
+
+        // 副手新增盾牌：主背包未变，指纹也必须变化。
+        offhand.hold(new BackpackStack("minecraft:shield", 1, 1, true, false, false, false));
+        String fp3 = PriceAsks.stateFingerprint(new FixedSpot(0, 64, 0).currentPosition(), backpack, offhand, 0,
+                Set.of(), List.of(), 0, 0, null);
+        assertNotEquals(fp2, fp3, "副手变化必须令同刻指纹失效");
+
+        // knownUnobtainable 或外层 prefer 变化同样令指纹失效。
+        String fp4 = PriceAsks.stateFingerprint(new FixedSpot(0, 64, 0).currentPosition(), backpack, offhand, 0,
+                Set.of("minecraft:diamond"), List.of(), 0, 0, null);
+        String fp5 = PriceAsks.stateFingerprint(new FixedSpot(0, 64, 0).currentPosition(), backpack, offhand, 0,
+                Set.of("minecraft:diamond"), List.of("oak"), 0, 0, null);
+        assertNotEquals(fp3, fp4);
+        assertNotEquals(fp4, fp5);
+    }
+
+    @Test
+    void 等待冷索引扫描期间每刻持续推进扫描探针而不重复展开大配方_扫完当刻立刻重算() {
+        // 模拟冷索引方块扫描：需要连续被调用 5 次才会扫描完毕并给出报价；
+        // 制造来源报价时会问到该扫描来源。等待期间每刻必须持续推进扫描来源（零减速），
+        // 同时制造来源不再每刻重复展开大配方；第 5 刻扫描完毕后当刻立刻重新问价并定局。
+        int[] scanCalls = {0};
+        ItemSource coldScan = new ItemSource() {
+            @Override public String describe() { return "冷索引扫描"; }
+            @Override public AcquireVia via() { return AcquireVia.MINE; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                if (!PLANKS.equals(request.wanted().specifier())) {
+                    return new SourceQuote.Unavailable(describe(), "只扫木板");
+                }
+                scanCalls[0]++;
+                if (scanCalls[0] < 5) {
+                    return new SourceQuote.NotYet(describe(), "正在建冷索引第 " + scanCalls[0] + " 步");
+                }
+                return new SourceQuote.Offer(describe(), 2, new AcquisitionCost(6, 2), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        int[] craftQuotes = {0};
+        ItemAcquisition[] engineHolder = new ItemAcquisition[1];
+        ItemSource heavyCraft = new ItemSource() {
+            @Override public String describe() { return "大配方合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                if (!SWORD.equals(request.wanted().specifier())) {
+                    return new SourceQuote.Unavailable(describe(), "只做剑");
+                }
+                craftQuotes[0]++;
+                Optional<Double> price = engineHolder[0].cheapestCost(want(PLANKS, 2), PERMISSIONS, false);
+                if (price.isEmpty() && engineHolder[0].priceStillLooking(want(PLANKS, 2), PERMISSIONS, false)) {
+                    return new SourceQuote.NotYet(describe(), "等冷索引扫完木板");
+                }
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 6), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.of(new Action() {
+                    @Override public ActionStatus tick(TickContext tick) {
+                        backpack.add(SWORD, 1);
+                        return ActionStatus.done();
+                    }
+                    @Override public String describe() { return "做剑"; }
+                });
+            }
+        };
+        ItemAcquisition engine = engine(coldScan, heavyCraft);
+        engineHolder[0] = engine;
+
+        Action action = engine.need(want(SWORD, 1), PERMISSIONS);
+        ActionStatus settled = null;
+        int ticks = 0;
+        for (int t = 1; t <= 20; t++) {
+            ticks = t;
+            ActionStatus st = action.tick(new StubTick(t));
+            if (!(st instanceof ActionStatus.Running)) {
+                settled = st;
+                break;
+            }
+        }
+        assertEquals(ActionStatus.done(), settled);
+        // 冷索引需要 5 次推进，第 1~5 刻每刻都推进了冷索引（无 5 倍减速），第 5 刻扫完立刻重算并第 6 刻完成！
+        assertTrue(ticks <= 8, "冷索引扫完应立刻完成，不应被节流拖慢到二十多刻，实际刻数：" + ticks);
+        assertEquals(2, craftQuotes[0], "等待冷索引期间不应重复展开大配方，仅首刻与扫完后各展开 1 次");
+        assertTrue(scanCalls[0] >= 5, "冷索引扫描探针应每刻被持续推进");
     }
 
     /** 记得的箱子替身：只答木板，按给定的答案依次答（用完重复最后一条），记下每样东西被问了几次。 */
