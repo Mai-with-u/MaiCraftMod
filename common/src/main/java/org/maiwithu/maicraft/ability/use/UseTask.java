@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.ability.use;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -19,10 +20,10 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.behavior.interaction.WriteSign;
+import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryKind;
 import org.maiwithu.maicraft.behavior.worldmemory.MemoryRecord;
-import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
 import org.maiwithu.maicraft.kernel.result.Change;
@@ -100,6 +101,10 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private boolean consumedHeldInUse;
     /** 追踪原版营火放食物状态变化，区分食物上火与拿方块贴着营火落块。 */
     private final UseChanges.CampfirePlacement campfirePlacement = new UseChanges.CampfirePlacement();
+    /** 追踪手持方块物品交互前后目标邻格变化，防止该面不收料落块在旁格时误报进料。 */
+    private final UseChanges.AdjacentBlockPlacement adjacentPlacement = new UseChanges.AdjacentBlockPlacement();
+    /** 若非潜行点机器/方块实体却落块在邻格，保存如实说明句供收场回报；没有为 null。 */
+    private String placedBesideSummary;
     /** 出手前背包物品计数快照：用于识别潜行右键拆解或转化进背包的物品。 */
     private Map<String, Integer> backpackBefore = Map.of();
     /** 交互中拆解/转化进背包的产物描述；没有为 null。 */
@@ -180,7 +185,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             Optional<Problem> danger = UseDecider.explosionDanger(services.world().dimension(), target.typeId());
             if (danger.isPresent()) return stop(danger.get());
             if (input.writesText()) {
-                Optional<Problem> unwritable = unwritableSign(target.cell());
+                Optional<Problem> unwritable = UseDecider.unwritableSign(services.world().sign(target.cell()), target);
                 if (unwritable.isPresent()) return stop(unwritable.get());
             }
             // 工作盆对普通固体物品右键既塞不进料，点中侧面还会误写产物过滤框：备手拿料前就说明白，不白跑一趟。
@@ -191,17 +196,6 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         recordProgress("确定了目标：" + target.describe());
         return prepareHand();
-    }
-
-    // 写字只认告示牌：不是告示牌这样用不了；上过蜡的告示牌游戏不让改，右键也打不开编辑界面。
-    private Optional<Problem> unwritableSign(BlockPos cell) {
-        return switch (services.world().sign(cell)) {
-            case NOT_A_SIGN -> Optional.of(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
-                    target.describe() + " 不是告示牌，写不了字", null));
-            case WAXED -> Optional.of(Problem.of(Problem.Kind.REFUSED_BY_GAME,
-                    "告示牌上过蜡，游戏不让再改字", null));
-            case WRITABLE -> Optional.empty();
-        };
     }
 
     // 目标那一片没加载：走过去，加载出来就回去重新找；走过一次还没加载就是到不了。
@@ -381,9 +375,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 interaction = ready;
                 backpackBefore = services.world().backpackCounts();
                 campfirePlacement.beforeInteract(services.world(), target, ready.heldBefore(), input.sneak());
+                adjacentPlacement.beforeInteract(services.world(), target);
                 messageBefore = services.refusal() == null ? null : services.refusal().latestMessage().orElse(null);
                 chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
-                dropsBefore = services.drops() == null ? Set.of() : services.drops().nearby();
+                // 出手前同时留底玩家脚边与目标锚点周边已有掉落物，延伸距离交互下边缘也不漏记旧掉落。
+                dropsBefore = snapshotDropsBefore();
                 // 潜行右键：整一下出手都按着潜行；连着点几下时点完先不起身，下一下直接接上。
                 Action strike = input.sneak() ? services.sneak().sneakingInARow(ready.action()) : ready.action();
                 yield goWith(Phase.INTERACT, strike, input.sneak() ? "到了能动手的位置，按住潜行出手" : "到了能动手的位置，出手");
@@ -471,26 +467,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 approachRetries = 0;
                 // 写字时点开编辑界面只是第一步，字写上去才算这一次做成。
                 if (!input.writesText()) {
-                    appliedTimes++;
-                    worldChangeNotice.run();
-                    boolean handConsumed = UseChanges.consumedHeld(interaction.heldBefore(),
-                            services.world().heldItem().orElse(null));
-                    if (handConsumed) {
-                        consumedHeldInUse = true;
-                        Map<String, Integer> gains = UseChanges.backpackGains(backpackBefore,
-                                services.world().backpackCounts(), interaction.heldBefore());
-                        if (!gains.isEmpty()) {
-                            disassembledSummary = interaction.heldBefore().itemId()
-                                    + " 未放进方块，拆解/转化成了 " + UseChanges.formatGains(gains);
-                        } else {
-                            campfirePlacement.afterConsumed(services.world(), target, interaction, input.sneak(), false);
-                        }
-                    }
-                    if (UseChanges.recordApplied(this::recordChange, services.world(), services.facilities(),
-                            target, interaction, result, backpackBefore)) {
-                        placedIntoUnrecognizedProcessor = true;
-                    }
-                    rememberPlacedFacility();
+                    recordAppliedEffects(result);
                 }
                 yield afterApplied();
             }
@@ -586,9 +563,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         }
         Optional<Map<String, Integer>> contents = looking.contents();
         if (contents.isPresent()) {
-            List<String> lines = new ArrayList<>();
-            contents.get().forEach((itemId, count) -> lines.add(itemId + " ×" + count));
-            openedMenu = lines.isEmpty() ? "空的" : String.join("、", lines);
+            openedMenu = UseSummary.formatMenuContents(contents.get());
             if (target != null && !target.isEntity()) {
                 // 先在把这次开箱写进世界记忆之前记下"此前有没有开过"，回答协议要求的"这一次点开之前开没开过"。
                 WorldPosition spot = new WorldPosition(target.cell().getX(), target.cell().getY(), target.cell().getZ(),
@@ -652,11 +627,43 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 services.world().dimension()), target.typeId(), itemIds, Instant.now());
     }
 
-    // 顺手捡起这一下新掉出来的东西（剪下来的羊毛）：等一小会儿看有没有东西冒出来，有就走过去捡；
-    // 没接上捡东西就直接做下一次或收工。
+    // 生效后按出手前后真实世界变化记账：识别拆解转化、营火上食、邻格落块或未知加工容器，避免误报。
+    private void recordAppliedEffects(InteractionResult result) {
+        appliedTimes++;
+        worldChangeNotice.run();
+        UseChanges.AppliedFinding finding = UseChanges.recordAppliedEffects(this::recordChange, services.world(),
+                services.facilities(), target, interaction, result, backpackBefore,
+                adjacentPlacement, campfirePlacement, input.sneak());
+        if (finding.consumedHeld()) consumedHeldInUse = true;
+        if (finding.disassembledSummary() != null) disassembledSummary = finding.disassembledSummary();
+        if (finding.placedIntoProcessor()) placedIntoUnrecognizedProcessor = true;
+        if (finding.placedBesideSummary() != null) placedBesideSummary = finding.placedBesideSummary();
+        rememberPlacedFacility();
+    }
+
+    // 顺手捡起这一下新掉出来的东西：扫描圆心锚定在被交互目标坐标并收窄因果半径与时长上限，
+    // 防止点机器或方块时反被 6-8 格外运转中的刷料粉碎轮掉落链磁吸漂移。
     private Next<Phase> collectOrNext() {
         if (services.drops() == null) return nextOrDone();
-        return goWith(Phase.COLLECT, services.drops().pickUpNewSince(dropsBefore), "捡起掉出的东西");
+        BlockPos anchor = interactionPickupAnchor();
+        return goWith(Phase.COLLECT,
+                services.drops().pickUpNewSince(dropsBefore, PicksUpDrops.Scope.aroundInteraction(anchor)),
+                "捡起掉出的东西");
+    }
+
+    private BlockPos interactionPickupAnchor() {
+        if (target == null) return services.world().feet();
+        if (!target.isEntity()) return target.cell();
+        return services.world().entity(target.entityId())
+                .map(UseSeams.ReadsWorld.SeenEntity::cell)
+                .orElseGet(services.world()::feet);
+    }
+
+    private Set<Integer> snapshotDropsBefore() {
+        if (services.drops() == null) return Set.of();
+        Set<Integer> before = new HashSet<>(services.drops().nearby());
+        before.addAll(services.drops().nearby(PicksUpDrops.Scope.aroundInteraction(interactionPickupAnchor())));
+        return before;
     }
 
     private Next<Phase> collect(TickContext context) {
@@ -682,39 +689,22 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             if (appliedTimes > 0) appliedTimes--;
             return Next.fail(furnaceNoInsert.get());
         }
+        // 非潜行持方块物品点机器却落块在邻格：扣回本次生效计数、清空临时标记并立即停手，绝不虚计或继续乱放后续次数。
+        if (placedBesideSummary != null) {
+            String message = placedBesideSummary;
+            placedBesideSummary = null;
+            if (appliedTimes > 0) appliedTimes--;
+            return stop(UseDecider.placedBesideProblem(message));
+        }
         if (appliedTimes < input.count()) {
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();
         }
         String tail = doorNow() + (othersAtHome.isEmpty() ? "" : "；它" + othersAtHome);
-        if (placedIntoUnrecognizedProcessor || openedUnrecognizedBlockMenu && consumedHeldInUse) {
-            return Next.done(TaskResult.done(describeTarget()
-                    + "：放进去了，不确认会不会做出东西（确认生效了 " + appliedTimes + " 次）" + tail));
-        }
-        if (openedUnrecognizedBlockMenu) {
-            String note = input.item() != null
-                    ? "：点开了不认识的加工或容器界面，手上的 " + input.item() + " 没有放进去，不确认会不会做出东西，已关上界面"
-                    : "：点开了不认识的界面，看不出里面有什么、也不确认会不会做出东西，已关上界面";
-            return Next.done(TaskResult.done(describeTarget() + note + tail));
-        }
-        // 点开了容器、压印器、驱动器或终端界面读到内容时，直接并入一句话结果，不再把开窗所见藏在细节字段里。
-        String openedNote = openedMenu == null || openedMenu.isBlank() ? "" : "（里面有：" + openedMenu + "）";
-        if (disassembledSummary != null) {
-            return Next.done(TaskResult.done(describeTarget() + "：手上的 " + disassembledSummary + tail));
-        }
-        if (menuInsertion == UseSeams.MenuLook.Insertion.INSERTED && menuInsertItem != null) {
-            return Next.done(TaskResult.done(describeTarget() + "：已把 " + menuInsertItem + " 放进界面" + openedNote + tail));
-        }
-        if (menuInsertion == UseSeams.MenuLook.Insertion.REJECTED && menuInsertItem != null) {
-            return Next.done(TaskResult.done(describeTarget() + "：点开了界面，但手上的 " + menuInsertItem
-                    + " 没有放进去（槽位已满或界面不收此物品）" + openedNote + tail));
-        }
-        // 往原版营火放入食物生效后，按当前点燃状态与烤位占用数给明确结论，不再笼统报“生效了 N 次”。
         String campfireSummary = campfirePlacement.summary(services.world(), target, disassembledSummary != null);
-        if (campfireSummary != null) {
-            return Next.done(TaskResult.done(describeTarget() + "：" + campfireSummary + tail));
-        }
-        return Next.done(TaskResult.done(describeTarget() + "：确认生效了 " + appliedTimes + " 次" + openedNote + tail));
+        return Next.done(UseSummary.finish(new UseSummary.Facts(describeTarget(), input.item(), appliedTimes, tail,
+                placedIntoUnrecognizedProcessor, openedUnrecognizedBlockMenu,
+                consumedHeldInUse, openedMenu, disassembledSummary, menuInsertion, menuInsertItem, campfireSummary)));
     }
 
     // 开关门、活板门、栅栏门：收场时按现场写明门现在开着还是关着，点两下回到原样也看得出来；别的方块不加。
@@ -755,19 +745,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
 
     @Override protected ResultDetails details() {
         Boolean unrecognized = placedIntoUnrecognizedProcessor || openedUnrecognizedBlockMenu ? Boolean.TRUE : null;
-        return new UseDetails(appliedTimes, usedOn(), openedMenu, containerWhose, lastModifiedBy,
-                containerOpenedBefore, signLines, riding, gameMessages, unrecognized);
-    }
-
-    // 这一下是对着空气、方块还是实体用的：没指方块也没指实体（target 省略或 target=here 且没配 face）就是对着空气用。
-    private String usedOn() {
-        if (target != null) return target.isEntity() ? "entity" : "block";
-        if (input.entity() != null) return "entity";
-        if (input.block() != null || input.face() != null) return "block";
-        if (input.target() instanceof Target.Seen seen) {
-            return seen.id().startsWith("e") ? "entity" : "block";
-        }
-        return input.target() == null || input.target() instanceof Target.Here ? "air" : "block";
+        return new UseDetails(appliedTimes, UseDecider.usedOn(target, input), openedMenu, containerWhose,
+                lastModifiedBy, containerOpenedBefore, signLines, riding, gameMessages, unrecognized);
     }
 
     @Override protected List<String> remaining() {
@@ -779,17 +758,6 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     }
 
     @Override protected String describePhase(Phase value) {
-        return switch (value) {
-            case RESOLVE -> "找目标";
-            case TRAVEL -> "走到目标那一片";
-            case FETCH -> "去拿要用的东西";
-            case HAND -> "准备手上的东西";
-            case APPROACH -> "靠近目标";
-            case CLEAR -> "打掉压在目标上面的草木";
-            case INTERACT -> "对目标用一下";
-            case WRITE -> "在告示牌上写字";
-            case LOOK -> "看看点开的界面";
-            case COLLECT -> "捡起掉出的东西";
-        };
+        return UseSummary.describePhase(value);
     }
 }

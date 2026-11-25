@@ -21,6 +21,7 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.vehicle.AbstractMinecart;
 import net.minecraft.world.entity.vehicle.Boat;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.AbstractFurnaceBlock;
@@ -237,6 +238,15 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         ItemStack held = player.getMainHandItem();
         return held.isEmpty() ? Optional.empty()
                 : Optional.of(new Held(BuiltInRegistries.ITEM.getKey(held.getItem()).toString(), held.getCount()));
+    }
+
+    // 只有手持 BlockItem 时才可能回退成向邻格放方块：直接取该 BlockItem 对应的方块注册 ID，覆盖物品与方块不同名的情形。
+    @Override public Optional<String> heldBlockId() {
+        LocalPlayer player = player();
+        if (player == null) return Optional.empty();
+        ItemStack held = player.getMainHandItem();
+        if (held.isEmpty() || !(held.getItem() instanceof BlockItem blockItem)) return Optional.empty();
+        return Optional.of(BuiltInRegistries.BLOCK.getKey(blockItem.getBlock()).toString());
     }
 
     // 统计角色主背包与副手当前每样物品的总件数，用于交互前后比对拆解或转化出的新增物品。

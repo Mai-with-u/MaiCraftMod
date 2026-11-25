@@ -1327,15 +1327,113 @@ class UseTaskTest {
         }
     }
 
+    @Test
+    void 对方块交互顺手捡掉落物时_扫描圆心锚定在目标方块并收窄半径与时长上限() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "create:mechanical_crafter");
+        rig.world.preferredFaces.put(LEVER, Direction.NORTH);
+        rig.interactions.applied("点中正面");
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:oak_planks", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(LEVER, rig.drops.askedScope.anchor(), "扫描圆心应锚定在被交互的目标方块坐标");
+        assertTrue(rig.drops.askedScope.radiusBlocks() <= 4.0, "交互因果半径应收窄，避免吸走远处机器掉落物");
+        assertTrue(rig.drops.askedScope.maxTotalTicks() > 0 && rig.drops.askedScope.maxTotalTicks() <= 160);
+        assertTrue(rig.drops.askedScope.maxTargets() > 0);
+    }
+
+    @Test
+    void 非潜行拿方块物品点带方块实体机器背面_邻格长出方块时失败并扣回计数且不再继续后续次数() {
+        Rig rig = new Rig();
+        BlockPos crafter = new BlockPos(4, 64, 4);
+        BlockPos southNeighbor = crafter.relative(Direction.SOUTH);
+        rig.world.blocks.put(crafter, "create:mechanical_crafter");
+        rig.world.blockEntities.add(crafter);
+        rig.world.preferredFaces.put(crafter, Direction.NORTH);
+        rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:oak_planks", 1);
+        // 显式指定南面（背面）：不覆盖调用方指定的面；交互后手里用完这 1 块、南面空气格长出橡木木板。
+        rig.interactions.placed("minecraft:oak_planks", "放下了方块", () -> {
+            rig.world.held = null;
+            rig.world.blocks.put(southNeighbor, "minecraft:oak_planks");
+        });
+
+        TaskResult result = rig.run(new UseInput(position(crafter), "minecraft:oak_planks", null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, Direction.SOUTH));
+        assertProblem(result, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertEquals(Direction.SOUTH, rig.interactions.lastTarget.face(), "显式指定面时尊重调用方，不强行覆盖");
+        assertEquals(0, ((UseDetails) result.details()).appliedTimes(), "误放旁格时生效计数应扣回为 0，绝不虚计");
+        assertTrue(result.remaining().stream().anyMatch(line -> line.contains("还有 1 次没做")),
+                "应保留未完成剩余次数：" + result.remaining());
+        assertTrue(result.problem().message().contains("未能放入目标方块")
+                        && result.problem().message().contains("(4, 64, 5)"),
+                "应如实报告落在了旁格而非误报进料：" + result.problem().message());
+        assertFalse(result.summary().contains("放进去了"), result.summary());
+        assertNull(((UseDetails) result.details()).unrecognizedProcessor(), "落块在旁格不是塞进未知加工容器");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                && "minecraft:oak_planks".equals(change.what())));
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && "minecraft:oak_planks".equals(change.what())));
+    }
+
+    @Test
+    void 多次非潜行持方块物品点机器背面_首击落块旁格立刻停手不再继续乱放() {
+        Rig rig = new Rig();
+        BlockPos crafter = new BlockPos(4, 64, 4);
+        BlockPos southNeighbor = crafter.relative(Direction.SOUTH);
+        rig.world.blocks.put(crafter, "create:mechanical_crafter");
+        rig.world.blockEntities.add(crafter);
+        rig.world.preferredFaces.put(crafter, Direction.NORTH);
+        rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:oak_planks", 1);
+        rig.interactions.placed("minecraft:oak_planks", "放下了方块", () -> {
+            rig.world.held = null;
+            rig.world.blocks.put(southNeighbor, "minecraft:oak_planks");
+        });
+
+        TaskResult result = rig.run(new UseInput(position(crafter), "minecraft:oak_planks", null, null, 3, 32,
+                List.of(), Permissions.DEFAULT, Direction.SOUTH));
+        assertProblem(result, Problem.Kind.NOT_POSSIBLE_HERE);
+        assertEquals(1, rig.interactions.builds, "首击误放旁格后应立刻停手，不再继续第 2~3 次乱放方块");
+        assertEquals(0, ((UseDetails) result.details()).appliedTimes(), "首击误放不应计入生效次数");
+        assertTrue(result.remaining().stream().anyMatch(line -> line.contains("还有 3 次没做")),
+                "剩余次数应如实保留 3 次：" + result.remaining());
+    }
+
+    @Test
+    void 潜行拿方块物品贴着机器放方块_正常按放方块记账不误报进料或未能放入() {
+        Rig rig = new Rig();
+        BlockPos crafter = new BlockPos(4, 64, 4);
+        BlockPos southNeighbor = crafter.relative(Direction.SOUTH);
+        rig.world.blocks.put(crafter, "create:mechanical_crafter");
+        rig.world.blockEntities.add(crafter);
+        rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:cobblestone", 1);
+        rig.interactions.placed("minecraft:cobblestone", "放下了方块", () -> {
+            rig.world.held = null;
+            rig.world.blocks.put(southNeighbor, "minecraft:cobblestone");
+        });
+
+        TaskResult result = rig.run(new UseInput(position(crafter), "minecraft:cobblestone", null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, Direction.SOUTH, 0, true));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertFalse(result.summary().contains("放进去了"), result.summary());
+        assertFalse(result.summary().contains("未能放入目标方块"), result.summary());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
+                && "minecraft:cobblestone".equals(change.what())));
+    }
+
     private static final class FakeDrops implements PicksUpDrops {
         Set<Integer> before = Set.of();
         Set<Integer> askedSince;
+        PicksUpDrops.Scope askedScope;
         Scripted pickUp;
 
         @Override public Set<Integer> nearby() { return before; }
 
         @Override public Action pickUpNewSince(Set<Integer> since) {
+            return pickUpNewSince(since, PicksUpDrops.Scope.DEFAULT);
+        }
+
+        @Override public Action pickUpNewSince(Set<Integer> since, PicksUpDrops.Scope scope) {
             askedSince = since;
+            askedScope = scope;
             pickUp = new Scripted(2, ActionStatus.done(), () -> { });
             return pickUp;
         }

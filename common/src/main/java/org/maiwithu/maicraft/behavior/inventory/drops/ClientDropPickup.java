@@ -47,9 +47,42 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 public final class ClientDropPickup implements PicksUpDrops {
 
     /** 只认近处的：挖下、剪下的东西就落在动手的地方附近，走远了的不算这一下带出来的。 */
-    private static final double NEARBY_BLOCKS = 8.0;
+    private static final double NEARBY_BLOCKS = Scope.DEFAULT_RADIUS_BLOCKS;
     /** 走到离掉落物这么近就停：原版拾取范围比角色身体每边宽一格，挨着站就吸得进来。 */
     private static final double PICKUP_REACH_BLOCKS = 1.0;
+
+    /**
+     * 掉落物是否处在给定拾取因果域内（纯函数）：
+     * 有固定锚点时圆心锁在被交互方块中心，角色走去捡第一件后圆心不会跟着漂移到邻近运转机器旁。
+     */
+    static boolean withinScope(double itemX, double itemY, double itemZ,
+            double centerX, double centerY, double centerZ, double radiusBlocks) {
+        double dx = itemX - centerX;
+        double dy = itemY - centerY;
+        double dz = itemZ - centerZ;
+        return dx * dx + dy * dy + dz * dz <= radiusBlocks * radiusBlocks;
+    }
+
+    /**
+     * 正在追捡的掉落物是否仍在固定锚点的因果半径内（纯函数）：
+     * 未设固定锚点时恒为真；设了固定锚点时，若掉落物被传送带或水流冲出范围则立刻放弃，不中途追出范围。
+     */
+    static boolean stillInAnchoredScope(double itemX, double itemY, double itemZ, Scope scope) {
+        if (scope == null || scope.anchor() == null) return true;
+        return withinScope(itemX, itemY, itemZ,
+                scope.anchor().getX() + 0.5, scope.anchor().getY() + 0.5, scope.anchor().getZ() + 0.5,
+                scope.radiusBlocks());
+    }
+
+    /**
+     * 单轮顺手拾取是否已触及总耗时上限或最大目标数上限（纯函数）：
+     * 到限即收手，防止附近持续吐料的粉碎轮或产线把拾取阶段无限拖长。
+     */
+    static boolean budgetExhausted(int elapsedTicks, int handledTargets, Scope scope) {
+        if (scope == null) return false;
+        if (scope.maxTotalTicks() > 0 && elapsedTicks >= scope.maxTotalTicks()) return true;
+        return scope.maxTargets() > 0 && handledTargets >= scope.maxTargets();
+    }
 
     // 原版拾取的真实判据（Player.tick）：玩家包围盒向外扩横向 1.0 格、纵向 0.5 格后，与掉落物的
     // 包围盒相交就吸进包。玩家身体半宽 0.3、高一格半多，掉落物是四分之一格的小盒子；按中心距折算，
@@ -137,12 +170,26 @@ public final class ClientDropPickup implements PicksUpDrops {
 
     @Override
     public Set<Integer> nearby() {
+        return nearbyIn(Scope.DEFAULT);
+    }
+
+    @Override
+    public Set<Integer> nearby(Scope scope) {
+        return nearbyIn(scope == null ? Scope.DEFAULT : scope);
+    }
+
+    // 按指定因果域（固定锚点或当前角色、给定半径）扫描可拾取掉落物实体编号。
+    private Set<Integer> nearbyIn(Scope scope) {
         LocalPlayer player = player();
         Set<Integer> ids = new HashSet<>();
         if (player == null) return ids;
+        double cx = scope.anchor() != null ? scope.anchor().getX() + 0.5 : player.getX();
+        double cy = scope.anchor() != null ? scope.anchor().getY() + 0.5 : player.getY();
+        double cz = scope.anchor() != null ? scope.anchor().getZ() + 0.5 : player.getZ();
+        double radius = scope.radiusBlocks();
         for (Entity entity : player.clientLevel.entitiesForRendering()) {
             if ((entity instanceof ItemEntity || ArrowPickups.retrievable(entity, player))
-                    && entity.distanceToSqr(player) <= NEARBY_BLOCKS * NEARBY_BLOCKS) {
+                    && withinScope(entity.getX(), entity.getY(), entity.getZ(), cx, cy, cz, radius)) {
                 ids.add(entity.getId());
             }
         }
@@ -185,7 +232,12 @@ public final class ClientDropPickup implements PicksUpDrops {
 
     @Override
     public Action pickUpNewSince(Set<Integer> before) {
-        return new PickUp(before, null);
+        return new PickUp(before, null, Scope.DEFAULT);
+    }
+
+    @Override
+    public Action pickUpNewSince(Set<Integer> before, Scope scope) {
+        return new PickUp(before, null, scope == null ? Scope.DEFAULT : scope);
     }
 
     /**
@@ -194,7 +246,7 @@ public final class ClientDropPickup implements PicksUpDrops {
      */
     @Override
     public Action pickUpOne(int entityId) {
-        return new PickUp(Set.of(), entityId);
+        return new PickUp(Set.of(), entityId, Scope.DEFAULT);
     }
 
     /**
@@ -226,8 +278,12 @@ public final class ClientDropPickup implements PicksUpDrops {
 
         /** 出手前就在地上的，以及捡不到放弃了的：都不再去碰。 */
         private final Set<Integer> skip;
-        /** 只捡这一件（游戏实体编号）；为 null 时捡脚边新冒出来的全部。 */
+        /** 只捡这一件（游戏实体编号）；为 null 时捡因果域内新冒出来的全部。 */
         private final Integer only;
+        /** 本轮拾取的因果域锚点、半径与总耗时/目标数上限。 */
+        private final Scope scope;
+        /** 本轮拾取累计推进了多少刻：到总耗时上限即收手，防止附近机器持续出料拖住整轮任务。 */
+        private int elapsedTicks;
         private Integer current;
         private BlockPos walkingTo;
         private boolean pickupHeightLocked;
@@ -257,9 +313,10 @@ public final class ClientDropPickup implements PicksUpDrops {
         /** 被叫先到安全处再停、走过去的路上悬在半空：只推进这一趟走路到落地站稳；暂停时清掉。 */
         private boolean stopping;
 
-        PickUp(Set<Integer> before, Integer only) {
+        PickUp(Set<Integer> before, Integer only, Scope scope) {
             this.skip = new HashSet<>(before);
             this.only = only;
+            this.scope = Objects.requireNonNull(scope, "scope");
         }
 
         @Override
@@ -274,6 +331,7 @@ public final class ClientDropPickup implements PicksUpDrops {
                 return ActionStatus.failed(Problem.of(Problem.Kind.WRONG_TIME, "这一刻掌握不到角色，捡不了", null));
             }
             if (cursor == null) cursor = confirmations.cursor(player);
+            elapsedTicks++;
             Entity drop = current == null ? null : player.clientLevel.getEntity(current);
             if (current != null && (drop == null || !drop.isAlive())) {
                 // 地上那件不在了：服务器的拾取包说是本玩家收的才算捡到；没说就是别人拿走或消失了，不冒充捡到。
@@ -296,9 +354,18 @@ public final class ClientDropPickup implements PicksUpDrops {
                         + (drop == null ? "?" : round1(drop.distanceTo(player))) + " 格");
                 current = null;
             }
-            if (current == null && !pickNext(player)) {
-                // 一件都还没看到：掉落物刚生成要过一两刻才同步过来，先等一等再说没有。
-                if (picked == 0 && missed == 0 && ++appearWaited <= APPEAR_TICKS) {
+            // 非点名拾取触及单轮总耗时上限时立即停止追逐当前目标，避免被持续吐料的机器拖死。
+            if (only == null && current != null && scope.maxTotalTicks() > 0 && elapsedTicks >= scope.maxTotalTicks()) {
+                skip.add(current);
+                if (picked == 0) {
+                    gaveUp(drop, "达到单轮拾取时长上限（" + (scope.maxTotalTicks() / 20) + " 秒），先不继续追捡");
+                }
+                current = null;
+            }
+            boolean capped = only == null && budgetExhausted(elapsedTicks, picked + missed, scope);
+            if (current == null && (capped || !pickNext(player))) {
+                // 一件都还没看到且未触及单轮上限：掉落物刚生成要过一两刻才同步过来，先等一等再说没有。
+                if (!capped && picked == 0 && missed == 0 && ++appearWaited <= APPEAR_TICKS) {
                     return ActionStatus.running();
                 }
                 stopWalking();
@@ -313,10 +380,6 @@ public final class ClientDropPickup implements PicksUpDrops {
                             "那一件没捡到（走不过去，或被别人捡走、消失了）"
                                     + (giveUpReasons.isEmpty() ? "" : "：" + String.join("；", giveUpReasons)), null));
                 }
-                // 只有走过去了还躺在地上的才算没捡到；"不见了"多半是几块原木落地并成了一堆、并进去的那堆随后被收进包，
-                // 拿到多少由上层按身上的重新清点。原先一见"不见了"就整个放弃，砍树挖了几格就不挖了。
-                // 捡到了一些、只剩个别够不着的（卡在树叶缝里）：不让一件东西挡住后面，算这一批做完，上层清点后还缺就再挖。
-                // 原先砍 10 根原木捡到 9 根，剩 1 根卡在树冠里，整个采掘被划掉，报"还差 1 个"。
                 if (!noRoom.isEmpty() && picked == 0 && missed == 0) {
                     // 一件都没捡、掉的东西全是背包装不下的：如实说背包满了，不说成走不过去。
                     return ActionStatus.failed(Problem.of(Problem.Kind.INVENTORY_FULL, "背包满了，掉出的 "
@@ -329,7 +392,7 @@ public final class ClientDropPickup implements PicksUpDrops {
 
         // 挑下一件这次新掉出来的、离得最近的东西；点名捡一件时只看那一件还在不在。没有了返回假。
         private boolean pickNext(LocalPlayer player) {
-            Set<Integer> fresh = only == null ? nearby() : stillThere(player, only);
+            Set<Integer> fresh = only == null ? nearbyIn(scope) : stillThere(player, only);
             fresh.removeAll(skip);
             Entity best = null;
             for (int id : fresh) {
@@ -363,6 +426,14 @@ public final class ClientDropPickup implements PicksUpDrops {
 
         // 东西还在滚动：它换了格子就重新起步走向新的那一格。
         private ActionStatus walkToward(LocalPlayer player, Entity drop, TickContext tick) {
+            // 固定锚点拾取途中重检：若掉落物被水流或传送带冲出因果半径，立即放弃不中途追出或升级挖路许可。
+            if (only == null && drop != null && !stillInAnchoredScope(drop.getX(), drop.getY(), drop.getZ(), scope)) {
+                skip.add(current);
+                stopWalking();
+                current = null;
+                clearingLeaves = false;
+                return ActionStatus.running();
+            }
             // 人已经站在原版拾取范围内：不再寻路，原地等它吸进包。挖下的东西就落在旁边时，
             // 走一趟寻路可能按「走不过去」收场，把吸一下就能捡到的贴身东西放弃掉（实机收回临时合成台，
             // 掉落物就在 1-2 格外的平地上，attempts 只说走不过去）。

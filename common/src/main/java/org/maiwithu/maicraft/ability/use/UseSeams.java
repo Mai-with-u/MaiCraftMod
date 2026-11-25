@@ -142,6 +142,14 @@ final class UseSeams {
         /** 角色主手上拿着什么；空手为空。 */
         Optional<Held> heldItem();
 
+        /**
+         * 角色主手拿着的物品若是方块物品（BlockItem），返回放下后会出现在世界里的方块注册 ID；
+         * 空手或拿着非方块物品时为空。离线测试替身默认按主手物品 ID 回退。
+         */
+        default Optional<String> heldBlockId() {
+            return heldItem().map(Held::itemId);
+        }
+
         /** 角色身上（主背包加副手）各物品 ID 的合计件数；用于识别潜行右键拆解或转化出的新增物品。 */
         default Map<String, Integer> backpackCounts() {
             return Map.of();

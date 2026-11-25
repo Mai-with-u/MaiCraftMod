@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 
@@ -139,6 +140,34 @@ final class UseDecider {
                 "原版炉类不支持 use 直接投料（仅打开了界面，手上的 " + requestedItem + " 未放入" + inside
                         + "），请用 obtain(via=\"smelt\") 或 machine_run 烧炼",
                 "烧炼物品请改用 obtain(via=\"smelt\") 或 machine_run；只想查看炉内内容请空手调用 use"));
+    }
+
+    /** 非潜行持方块物品点击机器/带方块实体方块却落块在邻格时的问题结论：立即停手并引导对准收料面或显式潜行。 */
+    static Problem placedBesideProblem(String message) {
+        return Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, message,
+                "检查目标方块实际接收物品的朝向面（或改用 machine_configure 配置机器格位）；若确实想贴着目标放方块，请加 sneak=true");
+    }
+
+    /** 写字只认还能写的告示牌：不是告示牌或已上蜡时直接交回失败问题。 */
+    static Optional<Problem> unwritableSign(UseSeams.ReadsWorld.Sign sign, ResolvedTarget target) {
+        return switch (sign) {
+            case NOT_A_SIGN -> Optional.of(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                    target.describe() + " 不是告示牌，写不了字", null));
+            case WAXED -> Optional.of(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                    "告示牌上过蜡，游戏不让再改字", null));
+            case WRITABLE -> Optional.empty();
+        };
+    }
+
+    /** 判断本次交互是对着空气、方块还是实体用的（纯函数，用于结果细节 used_on）。 */
+    static String usedOn(ResolvedTarget target, UseInput input) {
+        if (target != null) return target.isEntity() ? "entity" : "block";
+        if (input.entity() != null) return "entity";
+        if (input.block() != null || input.face() != null) return "block";
+        if (input.target() instanceof Target.Seen seen) {
+            return seen.id().startsWith("e") ? "entity" : "block";
+        }
+        return input.target() == null || input.target() instanceof Target.Here ? "air" : "block";
     }
 
     /** 计划阶段的一次拒绝：参数怎么改能继续。 */

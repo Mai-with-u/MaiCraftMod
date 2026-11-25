@@ -158,4 +158,42 @@ class ClientDropPickupTest {
         assertTrue(ClientDropPickup.inventoryCaughtUp(Map.of("minecraft:coal", 3), Map.of("minecraft:coal", 3)));
         assertTrue(ClientDropPickup.inventoryCaughtUp(Map.of(), Map.of()));
     }
+
+    @Test
+    void 交互因果域锚定在目标方块_六格外粉碎轮掉落物不入域() {
+        BlockPos crafter = new BlockPos(10, 64, 10);
+        PicksUpDrops.Scope scope = PicksUpDrops.Scope.aroundInteraction(crafter);
+        assertEquals(crafter, scope.anchor());
+        assertTrue(scope.radiusBlocks() <= 4.0, "交互因果半径应收窄至 4 格以内");
+        double cx = crafter.getX() + 0.5;
+        double cy = crafter.getY() + 0.5;
+        double cz = crafter.getZ() + 0.5;
+        // 目标方块旁 2 格内的新掉落物在因果域内，6.5 格外运转中粉碎轮吐出的石英不在因果域内。
+        assertTrue(ClientDropPickup.withinScope(cx + 2.0, cy, cz, cx, cy, cz, scope.radiusBlocks()));
+        assertFalse(ClientDropPickup.withinScope(cx + 6.5, cy, cz, cx, cy, cz, scope.radiusBlocks()));
+    }
+
+    @Test
+    void 单轮总耗时或目标数触及上限即收手_常规采掘保持更宽预算() {
+        PicksUpDrops.Scope interaction = PicksUpDrops.Scope.aroundInteraction(new BlockPos(0, 64, 0));
+        assertFalse(ClientDropPickup.budgetExhausted(interaction.maxTotalTicks() - 1, 0, interaction));
+        assertTrue(ClientDropPickup.budgetExhausted(interaction.maxTotalTicks(), 0, interaction), "达到交互总耗时上限收手");
+        assertTrue(ClientDropPickup.budgetExhausted(10, interaction.maxTargets(), interaction), "达到交互目标数上限收手");
+
+        // 常规采集与捡遗物的默认范围仍允许更长时长与更多目标，不被交互窄上限截断。
+        assertFalse(ClientDropPickup.budgetExhausted(interaction.maxTotalTicks(), interaction.maxTargets(),
+                PicksUpDrops.Scope.DEFAULT));
+        assertTrue(ClientDropPickup.budgetExhausted(PicksUpDrops.Scope.DEFAULT.maxTotalTicks(), 0,
+                PicksUpDrops.Scope.DEFAULT));
+    }
+
+    @Test
+    void 固定锚点拾取途中掉落物被冲出半径时立刻放弃_常规无锚点不受限() {
+        BlockPos crafter = new BlockPos(10, 64, 10);
+        PicksUpDrops.Scope interaction = PicksUpDrops.Scope.aroundInteraction(crafter);
+        assertTrue(ClientDropPickup.stillInAnchoredScope(12.0, 64.5, 10.5, interaction), "仍在锚点 3.5 格内继续捡");
+        assertFalse(ClientDropPickup.stillInAnchoredScope(16.0, 64.5, 10.5, interaction), "被水流或传送带冲出半径立刻放弃");
+        assertTrue(ClientDropPickup.stillInAnchoredScope(100.0, 64.5, 100.0, PicksUpDrops.Scope.DEFAULT),
+                "无固定锚点的常规拾取不受锚点出界约束");
+    }
 }

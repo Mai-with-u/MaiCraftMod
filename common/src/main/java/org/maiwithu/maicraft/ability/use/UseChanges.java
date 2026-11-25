@@ -61,6 +61,51 @@ final class UseChanges {
     static boolean recordApplied(Consumer<Change> record, UseSeams.ReadsWorld world, FacilityKinds facilities,
             ResolvedTarget target, UseSeams.Built.Ready interaction, InteractionResult result,
             Map<String, Integer> backpackBefore) {
+        return recordAppliedDetailed(record, world, facilities, target, interaction, result, backpackBefore,
+                null, false).placedIntoProcessor();
+    }
+
+    /** 一次生效交互的变化判定结论：是否消耗主手、是否塞进未知加工容器、拆解转化说明以及邻格落块说明。 */
+    record AppliedFinding(boolean consumedHeld, boolean placedIntoProcessor, String disassembledSummary,
+            String placedBesideSummary) {}
+
+    /**
+     * 综合分析交互生效后的真实世界变化（拆解转化、营火放食、邻格落块与未知加工容器）并记账，
+     * 把变化识别与状态更新收敛在一处，让任务主类只保留阶段调度。
+     */
+    static AppliedFinding recordAppliedEffects(Consumer<Change> record, UseSeams.ReadsWorld world,
+            FacilityKinds facilities, ResolvedTarget target, UseSeams.Built.Ready interaction,
+            InteractionResult result, Map<String, Integer> backpackBefore,
+            AdjacentBlockPlacement adjacentPlacement, CampfirePlacement campfirePlacement, boolean sneak) {
+        boolean handConsumed = consumedHeld(interaction.heldBefore(), world.heldItem().orElse(null));
+        String disassembled = null;
+        AdjacentBlockPlacement.PlacedBeside placedBeside = null;
+        if (handConsumed) {
+            Map<String, Integer> gains = backpackGains(backpackBefore, world.backpackCounts(),
+                    interaction.heldBefore());
+            if (!gains.isEmpty()) {
+                disassembled = interaction.heldBefore().itemId()
+                        + " 未放进方块，拆解/转化成了 " + formatGains(gains);
+            } else {
+                placedBeside = adjacentPlacement.detect(world, target).orElse(null);
+                campfirePlacement.afterConsumed(world, target, interaction, sneak, false);
+            }
+        }
+        AppliedFinding detail = recordAppliedDetailed(record, world, facilities, target, interaction, result,
+                backpackBefore, placedBeside, sneak);
+        return new AppliedFinding(handConsumed, detail.placedIntoProcessor(), disassembled,
+                detail.placedBesideSummary());
+    }
+
+    /**
+     * 记下这一下确认生效后的变化，同时核对目标邻格是否因该面不收料而回退落下了手持 BlockItem 对应的方块：
+     * 若原本空气/可替换的邻格在交互后长出了与手持方块物品一致的方块，绝不误报"放进去了"，
+     * 记为 BLOCK_PLACED 并在非潜行点击机器/方块实体时如实说明未能放入目标方块。
+     */
+    static AppliedFinding recordAppliedDetailed(Consumer<Change> record, UseSeams.ReadsWorld world,
+            FacilityKinds facilities, ResolvedTarget target, UseSeams.Built.Ready interaction,
+            InteractionResult result, Map<String, Integer> backpackBefore,
+            AdjacentBlockPlacement.PlacedBeside placedBeside, boolean sneak) {
         UseSeams.ReadsWorld.Held after = world.heldItem().orElse(null);
         boolean handConsumed = recordHandChange(record, interaction.heldBefore(), after);
         Map<String, Integer> gained = handConsumed
@@ -68,7 +113,7 @@ final class UseChanges {
                 : Map.of();
         recordBackpackGains(record, gained, interaction.heldBefore(), after);
         if (target == null) {
-            return false;
+            return new AppliedFinding(handConsumed, false, null, null);
         }
         if (target.isEntity()) {
             // 右键马、船、矿车就是骑上去：坐骑换成了它，记成角色的移动；剪毛、挤奶这类记对实体的影响。
@@ -77,7 +122,7 @@ final class UseChanges {
             } else {
                 record.accept(new Change(Change.Kind.ENTITY_AFFECTED, target.typeId(), 1, result.scene()));
             }
-            return false;
+            return new AppliedFinding(handConsumed, false, null, null);
         }
         BlockPos effect = interaction.effectCell();
         if (effect != null && !effect.equals(target.cell())) {
@@ -86,7 +131,18 @@ final class UseChanges {
             String placed = world.blockId(effect).orElse("未加载");
             String onSelf = ItemUseAim.overlapsPlayer(effect, world.feet()) ? "，正是自己站的地方" : "";
             record.accept(new Change(Change.Kind.BLOCK_PLACED, placed, 1, "落在 " + effect.toShortString() + onSelf));
-            return false;
+            return new AppliedFinding(handConsumed, false, null, null);
+        }
+        // 核查目标邻格：若主手消耗且原先空气/可替换的邻格新长出与手持 BlockItem 一致的方块，按落块如实记账，绝不误判进料。
+        if (handConsumed && placedBeside != null) {
+            BlockPos pos = placedBeside.cell();
+            String coord = "(" + pos.getX() + ", " + pos.getY() + ", " + pos.getZ() + ")";
+            boolean misclickedProcessor = !sneak && isUnknownProcessorBlock(world, facilities, target);
+            String note = misclickedProcessor
+                    ? "未能放入目标方块，而是作为方块放在了旁边的 " + coord + "（可能点错了面或该面不收料）"
+                    : "放在了旁边的 " + coord;
+            record.accept(new Change(Change.Kind.BLOCK_PLACED, placedBeside.blockId(), 1, note));
+            return new AppliedFinding(handConsumed, false, null, misclickedProcessor ? note : null);
         }
         // 效果就在目标本身：若主手物品消失且背包新冒出其他物品，说明是拆解/转化进背包，不是塞进了加工容器。
         String now = world.blockId(target.cell()).orElse("未加载");
@@ -102,7 +158,7 @@ final class UseChanges {
             note = now.equals(target.typeId()) ? result.scene() : target.typeId() + " 变成了 " + now;
         }
         record.accept(new Change(Change.Kind.BLOCK_CHANGED, target.typeId(), 1, note));
-        return placedIntoProcessor;
+        return new AppliedFinding(handConsumed, placedIntoProcessor, null, null);
     }
 
     /** 比对交互前后背包统计，找出除原主手物品外新增加的其他物品及其增量。 */
@@ -260,6 +316,65 @@ final class UseChanges {
                 }
             }
             return false;
+        }
+    }
+
+    /**
+     * 追踪手持方块物品（BlockItem）交互前后目标方块邻格的变化：
+     * 若交互前为空气或可替换格的邻格（优先核对 target.relative(face)）在交互后长出了与手持 BlockItem 一致的方块，
+     * 说明这次右键并未把物品放进目标方块，而是回退成了向邻格放置方块。
+     */
+    static final class AdjacentBlockPlacement {
+
+        /** 确认落到邻格的方块坐标与方块 ID。 */
+        record PlacedBeside(BlockPos cell, String blockId) {}
+
+        private String expectedBlockId;
+        private Set<Direction> replaceableBefore = Set.of();
+
+        // 出手前记录手持 BlockItem 对应的方块 ID 以及目标方块六面里哪些邻格此刻是空气或可替换格。
+        void beforeInteract(UseSeams.ReadsWorld world, ResolvedTarget target) {
+            expectedBlockId = null;
+            replaceableBefore = Set.of();
+            if (target == null || target.isEntity()) {
+                return;
+            }
+            Optional<String> heldBlock = world.heldBlockId();
+            if (heldBlock.isEmpty()) {
+                return;
+            }
+            Set<Direction> open = new HashSet<>();
+            for (Direction side : Direction.values()) {
+                if (world.replaceable(target.cell().relative(side))) {
+                    open.add(side);
+                }
+            }
+            if (!open.isEmpty()) {
+                expectedBlockId = heldBlock.get();
+                replaceableBefore = Set.copyOf(open);
+            }
+        }
+
+        // 交互后核查：优先检查指定点击面 target.relative(face)，其次检查其余出手前可替换的邻格。
+        Optional<PlacedBeside> detect(UseSeams.ReadsWorld world, ResolvedTarget target) {
+            if (expectedBlockId == null || target == null || target.isEntity() || replaceableBefore.isEmpty()) {
+                return Optional.empty();
+            }
+            Direction face = target.face();
+            if (face != null && replaceableBefore.contains(face)) {
+                BlockPos beside = target.cell().relative(face);
+                if (world.blockId(beside).map(expectedBlockId::equals).orElse(false)) {
+                    return Optional.of(new PlacedBeside(beside.immutable(), expectedBlockId));
+                }
+            }
+            for (Direction side : replaceableBefore) {
+                if (side == face) continue;
+                BlockPos beside = target.cell().relative(side);
+                if (world.blockId(beside).map(expectedBlockId::equals).orElse(false)) {
+                    return Optional.of(new PlacedBeside(beside.immutable(), expectedBlockId));
+                }
+            }
+            return Optional.empty();
         }
     }
 }
