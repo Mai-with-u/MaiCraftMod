@@ -118,8 +118,8 @@ public final class ClientCompatCatalog {
                                 new CreateValueReads(), new CreateSchematicReads(), new CreateFilterReads(),
                                 new CreateLogisticsReads(), new CreateContraptionReads(), new CreateElevatorReads(),
                                 new CreateRailwayReads())),
-                // 机械动力：喷气背包：按 5.1.2 编译（带的 FlightLib 是 3.2.1），实测实例装的就是它；装了 5.2 及以上不登记。
-                new SupportedMod<>(CreateJetpackCompat.MOD_ID, "机械动力：喷气背包", new VerifiedVersions("5.1.2", "5.2"),
+                // 机械动力：喷气背包：按 5.1.2 编译，已逐项核对 5.2.1（内嵌 FlightLib 4.0.36）全部读写签名一致；装了 5.3 及以上不登记。
+                new SupportedMod<>(CreateJetpackCompat.MOD_ID, "机械动力：喷气背包", new VerifiedVersions("5.1.2", "5.3"),
                         () -> new CreateJetpackCompat(new JetpackReads())),
                 // Sable（物理结构）：按 2.0.3 编译，实测实例装的就是它；装了 2.1 及以上不登记。
                 new SupportedMod<>(SableCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),

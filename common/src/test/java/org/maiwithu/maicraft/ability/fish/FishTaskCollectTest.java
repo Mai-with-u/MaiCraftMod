@@ -172,6 +172,36 @@ class FishTaskCollectTest {
         assertEquals(1, inUse.keep("minecraft:salmon"), "多竿钓鱼进行中刚钓起的鲑鱼应立即受保护");
     }
 
+    @Test
+    void 等鱼咬钩五十秒期间按十秒步长推进等待态描述与进度记录() {
+        StubContext player = new StubContext();
+        player.backpack.add(FishTask.FISHING_ROD, 1);
+        StubTick tick = new StubTick(player);
+        StubHooks hooks = new StubHooks();
+        FishServices services = new FishServices(null, null, null, null, null, hooks,
+                FishServices.nothingProtected(), gains -> {});
+        FishTask task = new FishTask(new FishInput(1, 0, Permissions.DEFAULT), services, Permissions.DEFAULT,
+                FishTask.Phase.WAIT_BITE);
+        task.start(tick);
+
+        String atStart = null;
+        String at20s = null;
+        String at45s = null;
+        for (int i = 1; i <= 950; i++) {
+            TickResult res = task.tick(tick);
+            assertInstanceOf(TickResult.Running.class, res, "正当等咬钩 47.5 秒不应被误判卡住：" + i);
+            tick.advance();
+            if (i == 5) atStart = task.describe();
+            if (i == 400) at20s = task.describe();
+            if (i == 900) at45s = task.describe();
+        }
+        assertTrue(atStart != null && atStart.contains("等鱼咬钩") && atStart.contains("刚落水"), atStart);
+        assertTrue(at20s != null && at20s.contains("已等 20 秒"), at20s);
+        assertTrue(at45s != null && at45s.contains("已等 40 秒"), at45s);
+        assertTrue(task.currentProgress().orElseThrow().ticksSinceProgress() < FishTask.WAIT_BITE_PROGRESS_STEP_TICKS,
+                "等待态每刻推进应定期刷新进度计时，不累计无进展");
+    }
+
     /** 鱼钩事实替身：可切换咬钩与挂钩状态。 */
     private static final class StubHooks implements FishingHookFacts {
         boolean hasHook = true;

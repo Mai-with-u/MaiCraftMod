@@ -67,6 +67,8 @@ class FishTask extends PhasedTask<FishTask.Phase> {
     private static final double AIM_TOLERANCE_COS = 0.99939;
     /** 瞄准方向连续保持这么多刻才出手。 */
     private static final int AIM_SETTLE_TICKS = 2;
+    /** 浮漂正常浮在水面等咬钩时，每隔这么多刻刷新一次等待态进度与状态描述（10 秒），避免正当等鱼 30-55 秒被外层误判无进展唤醒。 */
+    static final int WAIT_BITE_PROGRESS_STEP_TICKS = 200;
 
     enum Phase { CHECK_ROD, GET_ROD, TAKE_ROD, FIND_SPOT, APPROACH, AIM, CAST, WAIT_BITE, REEL, COLLECT, COOLDOWN }
 
@@ -89,6 +91,8 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         int waitTicks;
         /** 最近一刻钩还挂着。 */
         boolean hookSeen;
+        /** 最近一刻浮漂确实落在水里：仅浮漂在水中正常等鱼时按步长汇报等待态，防止卡在岸上也被当成正常等待。 */
+        boolean hookInWater;
     }
 
     /** 收获段的现场：背包基线、动手前的掉落物、捡与腾的动作。 */
@@ -265,15 +269,22 @@ class FishTask extends PhasedTask<FishTask.Phase> {
 
     private Next<Phase> waitBite(TickContext context) {
         cast.hookSeen = services.hooks().hasHook();
+        cast.hookInWater = services.hooks().hookInWater();
         cast.waitTicks++;
         // 中间被别的事插过队、错过了一口，不用收竿重抛：原版鱼跑了会再来咬，钩还在水里就接着等，像人一样。
         // 原先按世界时间隔了一截就当"让位期间咬了没收"，收竿重抛；服务器同步时间一跳就误判，
         // 实机 10-14 一竿刚抛下就收、收了又抛，像右键连点器，连着五次就判抛竿失败收场。
         BiteWatch.Verdict verdict = BiteWatch.judge(new BiteWatch.BiteFacts(cast.hookSeen,
                 services.hooks().isBiting(), services.hooks().hookedEntity(),
-                services.hooks().hookInWater(), cast.waitTicks));
+                cast.hookInWater, cast.waitTicks));
         return switch (verdict.step()) {
-            case WAIT -> Next.stay();
+            case WAIT -> {
+                // 浮漂确实落水且在正常等咬钩窗口内：每 10 秒记一次等待态进展，避免正当钓鱼 33-55 秒被站桩看门狗误判无进展唤醒。
+                if (cast.hookSeen && cast.hookInWater && cast.waitTicks % WAIT_BITE_PROGRESS_STEP_TICKS == 0) {
+                    recordProgress("浮漂在水面等咬钩（已等 " + (cast.waitTicks / 20) + " 秒）");
+                }
+                yield Next.stay();
+            }
             case REEL_IN -> {
                 recordProgress("咬钩了，正在收竿");
                 yield beginReel(ReelReason.KEEP, null, false);
@@ -484,6 +495,31 @@ class FishTask extends PhasedTask<FishTask.Phase> {
         // 导致本竿钓获对不上账，需等记完账再允许低优生存需求插队。
         if (phase() == Phase.COLLECT) return Interruptibility.UNSAFE_TO_STOP;
         return super.interruptibility(context);
+    }
+
+    @Override protected String doing() {
+        if (phase() == Phase.WAIT_BITE && cast.hookSeen && cast.hookInWater) {
+            int bucketSeconds = (cast.waitTicks / WAIT_BITE_PROGRESS_STEP_TICKS) * (WAIT_BITE_PROGRESS_STEP_TICKS / 20);
+            String elapsed = bucketSeconds <= 0 ? "刚落水" : "已等 " + bucketSeconds + " 秒";
+            return "第 " + Math.max(1, casts) + " 竿浮漂在水面等咬钩（" + elapsed + "，正常等鱼中）";
+        }
+        return super.doing();
+    }
+
+    @Override protected String describePhase(Phase value) {
+        return switch (value) {
+            case CHECK_ROD -> "检查鱼竿";
+            case GET_ROD -> "去拿鱼竿";
+            case TAKE_ROD -> "换鱼竿到主手";
+            case FIND_SPOT -> "找钓位";
+            case APPROACH -> "走到钓位";
+            case AIM -> "瞄准水面";
+            case CAST -> "抛竿";
+            case WAIT_BITE -> "等鱼咬钩";
+            case REEL -> "收竿";
+            case COLLECT -> "收钓获";
+            case COOLDOWN -> "短暂冷却";
+        };
     }
 
     @Override protected FishDetails details() {
