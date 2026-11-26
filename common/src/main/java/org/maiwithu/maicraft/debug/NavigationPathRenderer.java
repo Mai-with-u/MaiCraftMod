@@ -16,12 +16,18 @@ import org.maiwithu.maicraft.behavior.navigation.debug.NavigationPathSnapshot;
 
 /**
  * 在世界里画出角色正在走的路线、目的地和下一个要走到的点。路线开关（F9+N）开着、界面没有隐藏时由面板调用；
- * 只读路线，不请求移动。线透过地形显示，隔着墙也看得出路往哪走。
+ * 只读路线，不请求移动。分两遍按深度绘制：先以低透明度画被墙挡住的远段，再用高对比实色画眼前可见段，
+ * 避免远处绕路叠画在近处墙面之前让人误以为路线穿墙。
  */
 public final class NavigationPathRenderer {
-    private static final int ROUTE = 0xCC35D9FF;
-    private static final int STEERING = 0xFFFFD641;
-    private static final int DESTINATION = 0xFF55FF88;
+    /** 眼前可见段颜色（清晰实色，走 LEQUAL 深度测试）。 */
+    private static final int ROUTE_VISIBLE = 0xE635D9FF;
+    private static final int STEERING_VISIBLE = 0xFFFFD641;
+    private static final int DESTINATION_VISIBLE = 0xFF55FF88;
+    /** 墙后遮挡段颜色（显著低透明度弱透视提示，走 GREATER 深度测试）。 */
+    private static final int ROUTE_OCCLUDED = 0x3835D9FF;
+    private static final int STEERING_OCCLUDED = 0x55FFD641;
+    private static final int DESTINATION_OCCLUDED = 0x5555FF88;
     /** 两端都离镜头这么远的线段不画：看不清，也白占绘制。 */
     private static final double DRAW_RANGE = 128;
 
@@ -31,15 +37,28 @@ public final class NavigationPathRenderer {
     public static void render(Camera camera, Matrix4f view, Matrix4f projection, NavigationPathSnapshot route) {
         if (route == null) return;
         Vec3 cameraPosition = camera.getPosition();
+        // 先画墙后被遮挡的低透明弱提示段，再画眼前未被地形挡住的清晰实色段；
+        // 两遍深度条件互斥（GREATER 与 LEQUAL），同一像素不会双重叠色。
+        renderPass(cameraPosition, view, projection, route, OverlayRenderTypes.LINES_OCCLUDED,
+                ROUTE_OCCLUDED, DESTINATION_OCCLUDED, STEERING_OCCLUDED);
+        renderPass(cameraPosition, view, projection, route, OverlayRenderTypes.LINES_VISIBLE,
+                ROUTE_VISIBLE, DESTINATION_VISIBLE, STEERING_VISIBLE);
+    }
+
+    private static void renderPass(Vec3 cameraPosition, Matrix4f view, Matrix4f projection,
+            NavigationPathSnapshot route, RenderType renderType, int routeColor, int destinationColor,
+            int steeringColor) {
         BufferBuilder lines = Tesselator.getInstance().begin(
                 VertexFormat.Mode.LINES, DefaultVertexFormat.POSITION_COLOR_NORMAL);
         List<Vec3> points = route.points();
-        for (int i = 1; i < points.size(); i++) segment(lines, points.get(i - 1), points.get(i), cameraPosition, ROUTE);
-        marker(lines, route.destination(), cameraPosition, DESTINATION, 0.35);
-        marker(lines, route.steeringTarget(), cameraPosition, STEERING, 0.22);
+        for (int i = 1; i < points.size(); i++) {
+            segment(lines, points.get(i - 1), points.get(i), cameraPosition, routeColor);
+        }
+        marker(lines, route.destination(), cameraPosition, destinationColor, 0.35);
+        marker(lines, route.steeringTarget(), cameraPosition, steeringColor, 0.22);
         var mesh = lines.build();
         if (mesh == null) return;
-        OverlayRenderTypes.LINES.setupRenderState();
+        renderType.setupRenderState();
         try {
             // 用原版的临时绘制缓冲区，这里不留跨帧的模型或世界引用。
             VertexBuffer buffer = DefaultVertexFormat.POSITION_COLOR_NORMAL.getImmediateDrawVertexBuffer();
@@ -48,7 +67,7 @@ public final class NavigationPathRenderer {
             buffer.drawWithShader(view, projection, RenderSystem.getShader());
         } finally {
             VertexBuffer.unbind();
-            OverlayRenderTypes.LINES.clearRenderState();
+            renderType.clearRenderState();
         }
     }
 
