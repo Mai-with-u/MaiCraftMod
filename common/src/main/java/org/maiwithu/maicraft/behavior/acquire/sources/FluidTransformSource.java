@@ -98,11 +98,18 @@ public final class FluidTransformSource implements ItemSource {
         TransformSites.Pools pools = sites.pools(at(context.characterAt()), Set.copyOf(plan.get().recipe().fluids()),
                 SEARCH_RADIUS_BLOCKS);
         if (pools.cells().isEmpty()) return Optional.empty();
-        // 备料 → 扔料、等、捡：每样料要份数件，缺的经引擎去拿，身上够的引擎当场清点就算拿到。
+        // 备料 → 扔料、等、捡：逐项先扣掉背包里已携带的数量，仅对净缺口请求引擎去拿；身上全齐则跳过备料直接进扔料流程。
         List<Action> steps = new ArrayList<>();
-        plan.get().needs().forEach((item, count) -> steps.add(services.needs().actionFor(
-                new ItemRequest(WantedItem.ofItem(item), count, "扔进水里做 " + plan.get().recipe().resultId()),
-                context.permissions())));
+        plan.get().needs().forEach((item, count) -> {
+            int carried = CarriedItems.matching(services.backpack(), null, WantedItem.ofItem(item),
+                    services.itemTags());
+            int missing = count - carried;
+            if (missing > 0) {
+                steps.add(services.needs().actionFor(
+                        new ItemRequest(WantedItem.ofItem(item), missing, "扔进水里做 " + plan.get().recipe().resultId()),
+                        context.permissions()));
+            }
+        });
         steps.add(new FluidTransformRun(plan.get(), pools.cells().getFirst(), context.permissions(), services, drops,
                 stepsAside, context.records()));
         return Optional.of(new StepwiseActions("备好料往水里扔，等它变好再捡回来", steps.toArray(Action[]::new)));

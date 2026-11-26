@@ -96,6 +96,39 @@ class FluidTransformSourceTest {
         assertTrue(rig.source.begin(request, stale, context).isEmpty());
     }
 
+    @Test
+    void 身上已有足量原料时跳过备料直接进扔料流程() {
+        // 要 36 颗福鲁伊克斯水晶（需 18 份料）：身上三种原料都已带够，不该再向外发任何备料请求。
+        Rig rig = new Rig();
+        rig.pools.add(new BlockPos(1, 64, 0));
+        rig.carried.add(new BackpackStack(CHARGED, 36, 64, false, false, false, false));
+        rig.carried.add(new BackpackStack("minecraft:redstone", 20, 64, false, false, false, false));
+        rig.carried.add(new BackpackStack("minecraft:quartz", 18, 64, false, false, false, false));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, rig.quote("ae2:fluix_crystal", 36));
+        SourceContext context = SourceContext.unscoped(HERE, Permissions.DEFAULT);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("ae2:fluix_crystal"), 36, "测试");
+        assertTrue(rig.source.begin(request, offer, context).isPresent());
+        assertTrue(rig.asked.isEmpty(), "身上原料全齐时直接进 FluidTransformRun，不请求备料：" + rig.asked);
+    }
+
+    @Test
+    void 身上已有部分原料时只对净缺口请求备料() {
+        // 需 18 份料：充能水晶已有 36 颗（足量跳过），红石已有 10 颗（补 8 颗），下界石英 0 颗（补 18 颗）。
+        Rig rig = new Rig();
+        rig.pools.add(new BlockPos(1, 64, 0));
+        rig.carried.add(new BackpackStack(CHARGED, 36, 64, false, false, false, false));
+        rig.carried.add(new BackpackStack("minecraft:redstone", 10, 64, false, false, false, false));
+        SourceQuote.Offer offer = assertInstanceOf(SourceQuote.Offer.class, rig.quote("ae2:fluix_crystal", 36));
+        SourceContext context = SourceContext.unscoped(HERE, Permissions.DEFAULT);
+        ItemRequest request = new ItemRequest(WantedItem.ofItem("ae2:fluix_crystal"), 36, "测试");
+        assertTrue(rig.source.begin(request, offer, context).isPresent());
+        assertEquals(2, rig.asked.size(), "足量的充能水晶不再请求，只对红石与下界石英的净缺口请求备料：" + rig.asked);
+        assertEquals("minecraft:redstone", rig.asked.get(0).wanted().specifier());
+        assertEquals(8, rig.asked.get(0).count(), "红石要 18 已有 10，只再备 8 颗");
+        assertEquals("minecraft:quartz", rig.asked.get(1).wanted().specifier());
+        assertEquals(18, rig.asked.get(1).count(), "下界石英身上没有，备全量 18 颗");
+    }
+
     /** 离线替身：配方表、现场（在不在世界里、找到哪些水格、扫完没有）、背包与缺东西去拿的记账。 */
     private static final class Rig {
         boolean inWorld = true;
