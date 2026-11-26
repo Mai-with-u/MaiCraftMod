@@ -20,10 +20,12 @@ import net.minecraft.world.phys.Vec3;
  *                     够不够得着仍按 bounds（格子边界上那一面的薄框）估；其余为 null
  * @param removesBlock 这次动手会把这一格拆掉（采集与挖掘）：要挖的正好是脚下那格时，
  *                     先看它下面是什么，岩浆或看不见底的洞不站在它上面，换旁边一格站着挖
- * @param wetFeetAllowed 允许湿脚（成为载具的乘客才有）：站得稳检查里的「泡在液体里」改为分级——
+ * @param wetFeetAllowed 允许湿脚（成为载具的乘客、往液体里扔料才有）：站得稳检查里的「泡在液体里」改为分级——
  *                       脚格进水但头还在水面外的湿位都可用，排序时排到干站位之后：脚下实心的浅水位
  *                       照常站，贴着水面的漂浮位不必有实地；到了之后的核对也放行踩着水漂着的到达。
- *                       头也进了水的深水位照旧拒。其余目标不声明，泡水照旧一票拒
+ *                       头也进了水的深水位照旧拒。其余目标不声明，泡水照旧一票拒。
+                       往液体里扔料的声明它，是因为水里那一格的岸边常没有干位：自然水塘的水面被地面围一圈，
+                       贴着目标水格的四邻多半也是水，干位一票拒会让整片水塘都扔不进去（实机 11-25 的教训）
  * @param requiresSightOnArrival 到达站位后仍必须核对无遮挡视线与原触及距离：桶舀水倒水、水面上放船、装水瓶、
  *                               刷子与抛投物品在服务端按眼睛射线或抛物线结算，不能隔着前景遮挡直发包
  */
@@ -92,12 +94,27 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
      * @param catchHeight 东西落到离这一格底面多高就被接住（格）：工作盆的盆沿、锯面、石磨外圈台面的高度
      */
     public static ApproachTarget forToss(BlockPos cell, double catchHeight) {
+        return tossTarget(cell, catchHeight, false);
+    }
+
+    /**
+     * 往一格液体里扔东西（往水里扔料等它变）：站位除了岸边干位，也挑贴着水面的湿位——
+     * 脚格泡水、头还在水面外的位置照常参选，排在干位之后。自然水塘贴着目标水格的四邻多半也是水，
+     * 不放湿位的话整片水塘常常连一个能站的格子都挑不出来。
+     *
+     * @param catchHeight 东西落到离这一格底面多高就被接住（格）：液面的高度
+     */
+    public static ApproachTarget forTossIntoFluid(BlockPos cell, double catchHeight) {
+        return tossTarget(cell, catchHeight, true);
+    }
+
+    private static ApproachTarget tossTarget(BlockPos cell, double catchHeight, boolean intoFluid) {
         if (!(catchHeight >= 0.0 && catchHeight <= 1.0)) {
             throw new IllegalArgumentException("接住东西的高度要在这一格里：" + catchHeight);
         }
         AABB landing = new AABB(cell.getX(), cell.getY() + catchHeight, cell.getZ(),
                 cell.getX() + 1, cell.getY() + Math.max(1.0, catchHeight + 0.05), cell.getZ() + 1);
-        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null, false, false, true);
+        return new ApproachTarget(InteractionKind.TOSS, cell, landing, null, null, false, intoFluid, true);
     }
 
     /** 标记这次方块目标在到达站位后仍要守住真实视线与原触及距离（桶舀水倒水、装水瓶、水上放船）。 */
@@ -141,8 +158,8 @@ public record ApproachTarget(InteractionKind kind, BlockPos block, AABB bounds, 
         if (removesBlock && kind != InteractionKind.BLOCK) {
             throw new IllegalArgumentException("只有方块目标能带会被拆掉的约束");
         }
-        if (wetFeetAllowed && kind != InteractionKind.ENTITY) {
-            throw new IllegalArgumentException("只有实体的载具目标能带允许湿脚");
+        if (wetFeetAllowed && kind != InteractionKind.ENTITY && kind != InteractionKind.TOSS) {
+            throw new IllegalArgumentException("只有载具目标与往液体里扔的目标能带允许湿脚");
         }
     }
 

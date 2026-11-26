@@ -147,7 +147,7 @@ final class ExplosionTransformRun implements Action {
             List<TossesTogether.Toss> tosses = List.of(
                     new TossesTogether.Toss(ExplosionTransformPlan.SINGULARITY_ITEM, 1, true),
                     new TossesTogether.Toss(loadout.enderItem(), 1, true));
-            activeToss = new TossesTogether(tosses, site.tossAt(), 0.1, permissions, services.approach(),
+            activeToss = new TossesTogether(tosses, site.tossAt(), 0.1, false, permissions, services.approach(),
                     services.toMainhand(), FirstPersonScene::of, Optional.empty());
             current = activeToss;
         }

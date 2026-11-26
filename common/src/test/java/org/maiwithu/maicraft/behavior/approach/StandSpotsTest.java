@@ -402,6 +402,50 @@ class StandSpotsTest {
     }
 
     @Test
+    void 往水里扔料时贴水面的湿位也能当站位_干位仍排在前() {
+        // 实机 11-25 的教训：自然水塘贴着目标水格的四邻多半也是水，只挑干位会整片水塘连一个站位都挑不出。
+        // 目标水格在 (3,64,0)，西邻 (2,64,0) 泡着浅水（头一格露在水面上）：往液体里扔的目标放它参选。
+        world.fluids.add(new BlockPos(2, 64, 0));
+        ApproachTarget water = ApproachTarget.forTossIntoFluid(new BlockPos(3, 64, 0), 0.9);
+        StandSpots.Ranking ranking = find(water);
+        assertTrue(ranking.spots().stream().anyMatch(spot -> spot.feet().equals(new BlockPos(2, 64, 0))),
+                "头露在水面外的浅水位能当选位");
+        // 岸边的干位与湿位都在，干位整组排在湿位前面：先挑干的，干的不够才湿脚。
+        int firstWet = -1;
+        int lastDry = -1;
+        for (int i = 0; i < ranking.spots().size(); i++) {
+            if (world.fluids.contains(ranking.spots().get(i).feet())) {
+                if (firstWet < 0) firstWet = i;
+            } else {
+                lastDry = i;
+            }
+        }
+        assertTrue(lastDry < 0 || firstWet < 0 || lastDry < firstWet, "干位要排在湿位前面");
+        // 口子不外溢：往机器里扔料的目标（不声明进液体）泡水位照旧一票拒。
+        assertEquals("泡在液体里", failureAt(find(ApproachTarget.forToss(new BlockPos(3, 64, 0), 13 / 16.0)),
+                new BlockPos(2, 64, 0)));
+    }
+
+    @Test
+    void 往水里扔料时头也会没进水的位置照旧拒_踩着水漂着算到了() {
+        // 深水：脚格和头一格都泡在水里，湿脚的放行救不了它（生存安全）。
+        world.fluids.add(new BlockPos(2, 64, 0));
+        world.fluids.add(new BlockPos(2, 65, 0));
+        StandSpots.Ranking ranking = find(ApproachTarget.forTossIntoFluid(new BlockPos(3, 64, 0), 0.9));
+        assertEquals("泡在液体里", failureAt(ranking, new BlockPos(2, 64, 0)));
+        // 到了之后的核对：人踩在贴水面的湿位漂着、还没落地，头露在水面上，扔得准就算到。
+        world.fluids.remove(new BlockPos(2, 65, 0));
+        world.feet = new BlockPos(2, 64, 0);
+        world.grounded = false;
+        assertEquals(Optional.empty(),
+                StandSpots.checkArrival(ApproachTarget.forTossIntoFluid(new BlockPos(3, 64, 0), 0.9),
+                        REACH, world, guarded));
+        // 不声明进液体的抛投目标，漂在水里照旧不算到：口子不外溢。
+        assertEquals(Optional.of("还没落地"),
+                StandSpots.checkArrival(ApproachTarget.forToss(new BlockPos(3, 64, 0), 0.9), REACH, world, guarded));
+    }
+
+    @Test
     void 挑方块站位预留停步余量_无内缩站位时零余量兜底_到达复查对齐服务端余量() {
         ApproachTarget 目标块 = ApproachTarget.ofBlock(new BlockPos(5, 65, 0));
         // 平地上近处有大把站位：(0, 64, 0) 离方块边线正好 4.5 格，停在格子西沿就会超属性距离，预留 0.4 格内缩时不选它。

@@ -114,11 +114,11 @@ public final class FluidTransformRun implements Action {
         return switch (current.tick(context)) {
             case ActionStatus.Running running -> running;
             case ActionStatus.Done done -> next == Stage.APPROACH
-                    ? enter(Stage.APPROACH, services.approach().toward(ApproachTarget.forToss(pool, surface(context)), permissions))
+                    ? enter(Stage.APPROACH, services.approach().toward(waterTarget(context), permissions))
                     : startTossing(context);
             case ActionStatus.Failed failed -> stage == Stage.SPLIT
                     // 分不出恰好几件（背包没空格）：照样走，扔的时候只丢份数件。
-                    ? enter(Stage.APPROACH, services.approach().toward(ApproachTarget.forToss(pool, surface(context)), permissions))
+                    ? enter(Stage.APPROACH, services.approach().toward(waterTarget(context), permissions))
                     : stop(failed.problem());
         };
     }
@@ -133,7 +133,7 @@ public final class FluidTransformRun implements Action {
         // 触发的那一样在配方里还当别的料用（一份要两件）：别的料扔完再补扔够它那一份。
         int triggerTotal = plan.needs().get(plan.trigger());
         if (triggerTotal > plan.sets()) tosses.add(new TossesTogether.Toss(plan.trigger(), triggerTotal, false));
-        tossing = new TossesTogether(tosses, pool, surface(context), permissions, services.approach(),
+        tossing = new TossesTogether(tosses, pool, surface(context), true, permissions, services.approach(),
                 services.toMainhand(), FirstPersonScene::of, stepsAside);
         return enter(Stage.TOSS, tossing);
     }
@@ -201,6 +201,11 @@ public final class FluidTransformRun implements Action {
         ClientLevel level = context.player() == null ? null : context.player().level();
         if (level == null) return 0.9;
         return Math.max(0.0, Math.min(1.0, level.getFluidState(pool).getHeight(level, pool)));
+    }
+
+    // 往水里扔料的靠近目标：岸边没有干位时，贴着水面的湿位也要能当站位（自然水塘四邻多半是水）。
+    private ApproachTarget waterTarget(TickContext context) {
+        return ApproachTarget.forTossIntoFluid(pool, surface(context));
     }
 
     private ActionStatus enter(Stage next, Action action) {

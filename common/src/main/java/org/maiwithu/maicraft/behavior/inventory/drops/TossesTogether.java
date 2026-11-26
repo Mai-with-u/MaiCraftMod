@@ -69,6 +69,8 @@ public final class TossesTogether implements Action {
 
     private final List<Toss> tosses;
     private final TossArc.Target target;
+    /** 这一格是液体：挑站位连贴水面的湿位一起要。 */
+    private final boolean intoFluid;
     private final Permissions permissions;
     private final BringsPlayerClose approach;
     private final MovesToMainhand toMainhand;
@@ -92,15 +94,19 @@ public final class TossesTogether implements Action {
 
     /**
      * @param tosses      按先后扔的几样
+     * @param cell        要扔进的那一格
      * @param catchHeight 东西落到离那一格底面多高就被接住（水面的高度）
+     * @param intoFluid   这一格是液体（往水里扔料）：挑站位连贴着水面的湿位一起要，
+     *                    自然水塘贴着目标水格的四邻多半也是水，只挑干位会整片挑不出站位
      * @param stepsAside  扔完退开的走法；没接上时照实写"可能被自己捡回"
      */
-    public TossesTogether(List<Toss> tosses, BlockPos cell, double catchHeight, Permissions permissions,
-            BringsPlayerClose approach, MovesToMainhand toMainhand, Function<PlayerContext, FirstPersonScene> scenes,
-            Optional<StepsAside> stepsAside) {
+    public TossesTogether(List<Toss> tosses, BlockPos cell, double catchHeight, boolean intoFluid,
+            Permissions permissions, BringsPlayerClose approach, MovesToMainhand toMainhand,
+            Function<PlayerContext, FirstPersonScene> scenes, Optional<StepsAside> stepsAside) {
         this.tosses = List.copyOf(tosses);
         if (this.tosses.isEmpty()) throw new IllegalArgumentException("至少扔一样");
         this.target = new TossArc.Target(cell, catchHeight);
+        this.intoFluid = intoFluid;
         this.permissions = Objects.requireNonNull(permissions, "permissions");
         this.approach = Objects.requireNonNull(approach, "approach");
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
@@ -140,10 +146,12 @@ public final class TossesTogether implements Action {
         };
     }
 
-    // 走到那一格正旁边、出手点比水面高一截的站位，规矩和往机器里扔料一样。
+    // 走到那一格正旁边、出手点比接住东西的高度高一截的站位；扔进液体时湿位也参选，其余只挑干位。
     private ActionStatus walk(TickContext context) {
         if (current == null) {
-            current = approach.toward(ApproachTarget.forToss(target.cell(), target.catchHeight()), permissions);
+            current = approach.toward(intoFluid
+                    ? ApproachTarget.forTossIntoFluid(target.cell(), target.catchHeight())
+                    : ApproachTarget.forToss(target.cell(), target.catchHeight()), permissions);
         }
         return switch (current.tick(context)) {
             case ActionStatus.Running running -> running;
