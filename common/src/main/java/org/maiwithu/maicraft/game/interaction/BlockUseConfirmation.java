@@ -41,6 +41,8 @@ final class BlockUseConfirmation implements InteractionConfirmation {
 
     @Override public int stableTicksRequired() { return 1; }
 
+    @Override public boolean expiryMeansNotApplied() { return evidence.expiryMeansNotApplied(); }
+
     @Override public BlockPos effectCell() { return evidence.effectCell(); }
 
     @Override public String describeScene(Function<BlockPos, BlockState> states) {

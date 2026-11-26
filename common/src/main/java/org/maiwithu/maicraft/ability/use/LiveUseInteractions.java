@@ -158,6 +158,17 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         ItemUseAim.Aim aim = planned.get();
         var confirmation = GestureConfirmations.forGesture(aim.confirmation(), aim.effectCell(),
                 InteractionHand.MAIN_HAND, handBefore, level.getBlockState(aim.clickCell()), menuBefore);
+        // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
+        boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
+        // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
+        // "使用手里物品"这一步，船自己沿视线按流体的规则找落点。同样朝目标用手里物品。
+        boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
+        // 非快速连点的普通方块右键（如向充能器等方块实体放料或放方块）：等服务端方块操作确认号回来再采信主手/方块变化，
+        // 防止客户端本地预测（例如充能器本地直接 split(1) 清空主手）在高延迟下抢跑在服务端拒收回滚之前被误判生效。
+        if (!bucket && !ownUse && !target.quick()
+                && aim.confirmation() == ItemUseAim.Confirmation.TARGET_OR_HAND_CHANGES) {
+            confirmation = InteractionConfirmation.requiringBlockAcknowledgement(confirmation);
+        }
         // 空手且不潜行点向装有 ME 终端面板的线缆格时，直接对准终端面板碰撞箱右键，避免命中线缆芯打不开界面。
         if (held == null && !sneakUse && aim.clickCell().equals(cell)) {
             Optional<AABB> panel = networkStorage.get()
@@ -167,11 +178,6 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 return new UseSeams.Built.Ready(use, use::result, gesture, null, menuBefore, aim.effectCell());
             }
         }
-        // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
-        boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
-        // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
-        // "使用手里物品"这一步，船自己沿视线按流体的规则找落点。同样朝目标用手里物品。
-        boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
         // 瞄准阶段已算出明确点击面（例如实心目标按朝向角色算出的面，或空气旁支撑格朝向目标的面）时必须把该面传下去，
         // 保证实际点击的面与 effectCell 预测格一致；否则在点击目标格本身时沿用调用方指定的面。
         Direction clickFace = resolvedClickFace(aim, cell, target.face());

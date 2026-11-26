@@ -246,6 +246,24 @@ public interface InteractionConfirmation {
         };
     }
 
+    /**
+     * 给组合好的确认条件挂上「等待服务端方块操作确认号」的门禁：客户端本地预测提前修改的方块或主手物品，
+     * 必须等到服务端对本次右键预测序号回发校正确认后才可采信，防止高延迟下本地预测抢跑在服务端拒收回滚之前。
+     */
+    public static InteractionConfirmation requiringBlockAcknowledgement(InteractionConfirmation check) {
+        return new InteractionConfirmation() {
+            @Override public Verdict observe(PlayerContext context) { return check.observe(context); }
+            @Override public int stableTicksRequired() { return check.stableTicksRequired(); }
+            @Override public boolean requiresBlockAcknowledgement() { return true; }
+            @Override public Verdict observeAcknowledged(PlayerContext context) { return check.observeAcknowledged(context); }
+            @Override public boolean expiryMeansNotApplied() { return check.expiryMeansNotApplied(); }
+            @Override public BlockPos effectCell() { return check.effectCell(); }
+            @Override public String describeScene(Function<BlockPos, BlockState> states) {
+                return check.describeScene(states);
+            }
+        };
+    }
+
     public static InteractionConfirmation itemUseStopped() {
         return context -> context.localPlayer().isUsingItem() ? Verdict.PENDING : Verdict.APPLIED;
     }

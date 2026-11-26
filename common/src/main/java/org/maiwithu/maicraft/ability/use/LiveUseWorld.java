@@ -38,6 +38,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
@@ -70,6 +71,11 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     @Override public BlockPos feet() {
         LocalPlayer player = player();
         return player == null ? null : player.blockPosition();
+    }
+
+    @Override public Vec3 position() {
+        LocalPlayer player = player();
+        return player == null ? null : player.position();
     }
 
     // 只看那一格所在的区块在不在客户端：高度不影响"那一片加载了没有"。

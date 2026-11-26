@@ -73,4 +73,18 @@ class BlockUseConfirmationTest {
         assertEquals(1, unsubmitted.stableTicksRequired(),
                 "过门之后不再多等稳定刻：服务器编号本身就是一次确认");
     }
+
+    @Test
+    void wrapperPreservesExpiryMeansNotAppliedAndRequiringBlockAcknowledgementFlag() {
+        InteractionConfirmation base = InteractionConfirmation.expiresAsNotApplied(
+                c -> InteractionConfirmation.Verdict.PENDING);
+        InteractionConfirmation gated = InteractionConfirmation.requiringBlockAcknowledgement(base);
+        assertTrue(gated.requiresBlockAcknowledgement(), "门禁包装必须声明等待服务端方块操作确认号");
+        assertTrue(gated.expiryMeansNotApplied(), "门禁包装必须保留过期即没生效语义");
+
+        FakeAcknowledgement sequences = new FakeAcknowledgement();
+        BlockUseConfirmation wrapped = new BlockUseConfirmation(gated, sequences);
+        assertTrue(wrapped.expiryMeansNotApplied(),
+                "BlockUseConfirmation 必须转发内层过期即没生效语义，避免超时退化为未确认");
+    }
 }

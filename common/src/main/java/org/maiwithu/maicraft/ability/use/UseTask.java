@@ -116,6 +116,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
     private List<String> signLines = List.of();
     /** 连着点到哪一刻为止（第一下出手时定）；不连着点为 -1。 */
     private long keepTryingUntil = -1;
+    /** 连点期间的位置跳变监视：原地静止连点若遭遇服务端瞬移或连续异常移位，立刻中止连点。 */
+    private final UseDecider.PositionShiftWatch keepTryingPosition = new UseDecider.PositionShiftWatch();
     private long now;
 
     UseTask(UseInput input, UseServices services) {
@@ -347,6 +349,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             return stop(Problem.of(Problem.Kind.TARGET_GONE, target.describe() + " 已经不在了", "重新 observe"));
         }
         // 上一次站在这一格出手被挡住：换站位时把它排除。不然靠近一核对"这里看得见"就原地不动，又出手、又被挡。
+        keepTryingPosition.reset();
         BlockPos avoid = blockedStand;
         Action toward = avoid == null ? services.close().toward(shape.get(), input.permissions())
                 : services.close().toward(shape.get(), input.permissions(), avoid::equals);
@@ -380,6 +383,8 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 chatMark = services.refusal() == null ? 0 : services.refusal().chatMark();
                 // 出手前同时留底玩家脚边与目标锚点周边已有掉落物，延伸距离交互下边缘也不漏记旧掉落。
                 dropsBefore = snapshotDropsBefore();
+                // 连点模式下冻结出手前站位，用于识别服务端强制瞬移或意外位置跳变。
+                if (input.keepTrying() > 0) keepTryingPosition.beforeClick(services.world().position());
                 // 潜行右键：整一下出手都按着潜行；连着点几下时点完先不起身，下一下直接接上。
                 Action strike = input.sneak() ? services.sneak().sneakingInARow(ready.action()) : ready.action();
                 yield goWith(Phase.INTERACT, strike, input.sneak() ? "到了能动手的位置，按住潜行出手" : "到了能动手的位置，出手");
@@ -423,7 +428,14 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
         now = context.gameTick();
         if (keepTryingUntil < 0 && input.keepTrying() > 0) keepTryingUntil = now + 20L * input.keepTrying();
         return switch (runAction(context)) {
-            case ActionStatus.Running running -> Next.stay();
+            case ActionStatus.Running running -> {
+                // 连点等待确认期间每刻核对位置跳变，先推进动作再检查，避免本刻已生效（如骑乘）却被提前误杀。
+                if (input.keepTrying() > 0) {
+                    Optional<Problem> jumped = keepTryingPosition.checkDuringTick(services.world().position());
+                    if (jumped.isPresent()) yield stop(jumped.get());
+                }
+                yield Next.stay();
+            }
             case ActionStatus.Done done -> settle(interactionResult());
             case ActionStatus.Failed failed -> {
                 InteractionResult result = interactionResult();
@@ -469,6 +481,11 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 if (!input.writesText()) {
                     recordAppliedEffects(result);
                 }
+                // 连点还有剩余次数时若发生非骑乘位置跳变，保留本次已确认的变化与计数并按部分完成立即停手。
+                if (input.keepTrying() > 0 && appliedTimes < input.count() && !ridingTarget()) {
+                    Optional<Problem> jumped = keepTryingPosition.checkDuringTick(services.world().position());
+                    if (jumped.isPresent()) yield stop(jumped.get());
+                }
                 yield afterApplied();
             }
             case UseDecider.Settlement.Unexpected unexpected -> {
@@ -480,9 +497,9 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 yield Next.done(TaskResult.done("确认生效了 " + appliedTimes + " 次；最后这一下现场出乎预料："
                         + unexpected.scene()));
             }
-            // 要求了连着点、还没到时候：这一下没点中（传送带上的东西刚好不在点的那一格），接着点。
-            case UseDecider.Settlement.Unconfirmed unconfirmed when now < keepTryingUntil -> interactNow();
-            case UseDecider.Settlement.NotApplied notApplied when now < keepTryingUntil -> interactNow();
+            // 要求了连着点、还没到时候：先复核连点期间没有发生意外位置跳变，再接着点。
+            case UseDecider.Settlement.Unconfirmed unconfirmed when now < keepTryingUntil -> retryKeepTrying();
+            case UseDecider.Settlement.NotApplied notApplied when now < keepTryingUntil -> retryKeepTrying();
             case UseDecider.Settlement.Unconfirmed unconfirmed -> {
                 recordUnconfirmed(new Change(Change.Kind.OTHER, describeWhat(), 1, unconfirmed.scene()));
                 yield Next.done(UseDecider.unconfirmed(appliedTimes, unconfirmed.scene()));
@@ -496,6 +513,16 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 yield stop(emptyHandCampfire ? UseDecider.campfireEmptyHandProblem() : notApplied.problem());
             }
         };
+    }
+
+    // 连点重试前复核站位：发生单次大幅跳变或连续异常跳动时中止连点，避免继续盲目右键。
+    private Next<Phase> retryKeepTrying() {
+        Optional<Problem> jumped = keepTryingPosition.checkBeforeRetry(services.world().position());
+        return jumped.isPresent() ? stop(jumped.get()) : interactNow();
+    }
+
+    private boolean ridingTarget() {
+        return target != null && target.isEntity() && services.world().riding(target.entityId());
     }
 
     // 出手后动作栏新冒出来的话才算游戏对这一下的回应，出手前就挂着的旧话不算。
@@ -697,6 +724,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
             return stop(UseDecider.placedBesideProblem(message));
         }
         if (appliedTimes < input.count()) {
+            keepTryingPosition.reset();
             recordProgress("第 " + appliedTimes + " 次做完了，做下一次");
             return prepareHand();
         }

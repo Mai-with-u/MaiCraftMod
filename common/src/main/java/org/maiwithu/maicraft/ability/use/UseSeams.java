@@ -9,6 +9,7 @@ import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
@@ -57,6 +58,12 @@ final class UseSeams {
 
         /** 角色脚下那一格；不在世界里为 null。 */
         BlockPos feet();
+
+        /** 角色此刻的精确坐标（用于检测原地连点期间的意外瞬移或位置跳变）；离线替身默认按脚位中心回退。 */
+        default Vec3 position() {
+            BlockPos at = feet();
+            return at == null ? null : Vec3.atBottomCenterOf(at);
+        }
 
         /** 那一格所在的区块加载了没有。 */
         boolean loaded(BlockPos cell);

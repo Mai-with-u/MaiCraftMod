@@ -7,6 +7,8 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
+import net.minecraft.world.phys.Vec3;
+
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -314,6 +316,77 @@ final class UseDecider {
         String before = appliedTimes == 0 ? "" : "前面确认生效了 " + appliedTimes + " 次；";
         return TaskResult.builder(TaskResult.Status.PARTIAL,
                 before + "这一下没能确认有没有生效，不盲目重做：" + scene).build();
+    }
+
+    /**
+     * 连点（keep_trying）期间的位置跳变监视：角色处于原地静止连续右键时，若服务端强制瞬移或位置大幅跳变
+     * （单次位移或累计偏离超过 1.5 格），或者连续两次尝试均出现超过 0.6 格的异常位置跳动，
+     * 立刻中止连点并如实回报，防止误触瞬移道具/服务端权限机制时继续无脑连点导致被踢出。
+     */
+    static final class PositionShiftWatch {
+        /** 单次点击或累计偏离超过该距离（格）即视为意外位置跳变。 */
+        static final double SINGLE_JUMP_THRESHOLD = 1.5;
+        /** 连续多次点击间每次偏移超过该距离（格）即视为连续异常跳动。 */
+        static final double CONSECUTIVE_SHIFT_THRESHOLD = 0.6;
+        /** 连续异常跳动达到此次数即中止连点。 */
+        static final int CONSECUTIVE_SHIFT_LIMIT = 2;
+
+        private Vec3 origin;
+        private Vec3 clickStart;
+        private int consecutiveShifts;
+
+        /** 进入靠近或新一轮交互前清空基准位置，避免把合法走位当成异常跳变。 */
+        void reset() {
+            origin = null;
+            clickStart = null;
+            consecutiveShifts = 0;
+        }
+
+        /** 本次连点出手前冻结位置：首次出手记作整段连点的初始站位。 */
+        void beforeClick(Vec3 current) {
+            if (current == null) return;
+            if (origin == null) origin = current;
+            clickStart = current;
+        }
+
+        /** 交互等待确认的每一刻检查是否发生大幅瞬移或偏离起点过远。 */
+        Optional<Problem> checkDuringTick(Vec3 current) {
+            if (current == null) return Optional.empty();
+            if (clickStart != null && clickStart.distanceTo(current) > SINGLE_JUMP_THRESHOLD) {
+                return Optional.of(jumpProblem(clickStart, current, "交互连点期间角色发生意外位置跳变"));
+            }
+            if (origin != null && origin.distanceTo(current) > SINGLE_JUMP_THRESHOLD) {
+                return Optional.of(jumpProblem(origin, current, "交互连点期间角色偏离原站位过远"));
+            }
+            return Optional.empty();
+        }
+
+        /** 一次连点未生效准备继续下一击前复核：捕获单次大幅跳变与连续异常位置跳动。 */
+        Optional<Problem> checkBeforeRetry(Vec3 current) {
+            Optional<Problem> largeJump = checkDuringTick(current);
+            if (largeJump.isPresent()) return largeJump;
+            if (current == null || clickStart == null) return Optional.empty();
+            double stepDistance = clickStart.distanceTo(current);
+            if (stepDistance > CONSECUTIVE_SHIFT_THRESHOLD) {
+                consecutiveShifts++;
+                if (consecutiveShifts >= CONSECUTIVE_SHIFT_LIMIT) {
+                    return Optional.of(jumpProblem(clickStart, current,
+                            "交互连点期间连续 " + consecutiveShifts + " 次发生异常位置跳动"));
+                }
+            } else {
+                consecutiveShifts = 0;
+            }
+            return Optional.empty();
+        }
+
+        private static Problem jumpProblem(Vec3 from, Vec3 to, String headline) {
+            double distance = from.distanceTo(to);
+            String detail = String.format(Locale.ROOT,
+                    "%s（位移 %.1f 格，从 (%.1f, %.1f, %.1f) 到 (%.1f, %.1f, %.1f)），已中止继续连点",
+                    headline, distance, from.x, from.y, from.z, to.x, to.y, to.z);
+            return Problem.of(Problem.Kind.STUCK, detail,
+                    "先用 observe 检查当前位置、手中物品与周围状态，确认没有误触传送或被外力移位后再继续");
+        }
     }
 
     private UseDecider() {}

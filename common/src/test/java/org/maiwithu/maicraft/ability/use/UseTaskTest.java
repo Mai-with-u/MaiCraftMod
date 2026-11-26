@@ -18,6 +18,7 @@ import java.util.function.Predicate;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -1142,7 +1143,12 @@ class UseTaskTest {
         final Map<BlockPos, Direction> preferredFaces = new HashMap<>();
 
         @Override public String dimension() { return dimension; }
-        @Override public BlockPos feet() { return BlockPos.ZERO; }
+        BlockPos feet = BlockPos.ZERO;
+        Vec3 position;
+        @Override public BlockPos feet() { return feet; }
+        @Override public Vec3 position() {
+            return position != null ? position : Vec3.atBottomCenterOf(feet);
+        }
         @Override public boolean loaded(BlockPos cell) { return !unloaded.contains(cell); }
         @Override public Optional<String> blockId(BlockPos cell) {
             return loaded(cell) ? Optional.of(blocks.getOrDefault(cell, "minecraft:air")) : Optional.empty();
@@ -1417,6 +1423,119 @@ class UseTaskTest {
         assertFalse(result.summary().contains("未能放入目标方块"), result.summary());
         assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED
                 && "minecraft:cobblestone".equals(change.what())));
+    }
+
+    @Test
+    void 连点期间发生单次大幅位置跳变时_立刻中止连点并如实回报() {
+        // 模拟 use(keep_trying=10) 摇曲柄或连点时误触服务端瞬移：第 1 下后位置从 (0.5, 64, 0.5) 跳变 3 格到 (3.5, 64, 0.5)。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.world.feet = new BlockPos(0, 64, 0);
+        rig.interactions.outcome(InteractionResult.notApplied("没反应"),
+                () -> rig.world.position = new Vec3(3.5, 64.0, 0.5));
+        rig.interactions.applied("不该继续点第 2 下");
+
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        assertProblem(result, Problem.Kind.STUCK);
+        assertEquals(1, rig.interactions.builds, "发生大幅位置跳变后必须立刻中止连点，不得继续发送后续点击");
+        assertTrue(result.problem().message().contains("意外位置跳变"), result.problem().message());
+    }
+
+    @Test
+    void 连点期间连续两次异常位置跳动时_中止连点不再继续() {
+        // 单次偏移未超 1.5 格（每次 0.7 格），但连续两次尝试间都发生异常位置跳动（且累计偏离仍未超 1.5 格）：第 2 下后中止。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.world.position = new Vec3(0.5, 64.0, 0.5);
+        rig.interactions.outcome(InteractionResult.notApplied("第 1 下没反应"),
+                () -> rig.world.position = new Vec3(1.2, 64.0, 0.5));
+        rig.interactions.outcome(InteractionResult.unconfirmed("第 2 下说不清"),
+                () -> rig.world.position = new Vec3(0.5, 64.0, 0.5));
+        rig.interactions.applied("不该继续点第 3 下");
+
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        assertProblem(result, Problem.Kind.STUCK);
+        assertEquals(2, rig.interactions.builds, "连续两次异常位置跳动后应中止，不再继续第 3 下");
+        assertTrue(result.problem().message().contains("连续 2 次发生异常位置跳动"), result.problem().message());
+        assertTrue(result.problem().message().contains("位移 0.7 格"),
+                "往返拉回时应报本次点击的实际位移而非相对起点的 0.0 格：" + result.problem().message());
+    }
+
+    @Test
+    void 连点单次交互已生效且伴随合法骑乘或位置跳变时_不误杀并保留已确认变化() {
+        // 1. 合法骑乘（keep_trying=10, count=1）：点中马匹后骑上并伴随 2 格位置变化，应正常 DONE 并记录骑乘变化。
+        Rig mountRig = new Rig();
+        mountRig.seen.put("e1", new ResolvesSeen.Resolved(WorldPosition.here(2, 64, 2), "minecraft:horse", 7));
+        mountRig.world.entities.put(7, new UseSeams.ReadsWorld.SeenEntity("minecraft:horse", new BlockPos(2, 64, 2), true));
+        mountRig.world.position = new Vec3(0.5, 64.0, 0.5);
+        mountRig.interactions.outcome(InteractionResult.applied("骑上了马"), () -> {
+            mountRig.world.ridingId = 7;
+            mountRig.world.position = new Vec3(2.5, 64.0, 0.5);
+        });
+        TaskResult mounted = mountRig.run(new UseInput(new Target.Seen("e1"), null, null, null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        assertEquals(TaskResult.Status.DONE, mounted.status(), mounted.summary());
+        assertEquals(1L, ((UseDetails) mounted.details()).appliedTimes());
+        assertTrue(mounted.changes().stream().anyMatch(change -> change.kind() == Change.Kind.MOVED),
+                "应保留已确认的骑乘变化：" + mounted.changes());
+
+        // 2. 单次方块交互已生效且伴随位置跳变（keep_trying=10, count=1）：已做满次数，不误杀，保留已确认变化。
+        Rig blockRig = new Rig();
+        blockRig.world.blocks.put(LEVER, "minecraft:lever");
+        blockRig.world.position = new Vec3(0.5, 64.0, 0.5);
+        blockRig.interactions.outcome(InteractionResult.applied("拉杆生效"),
+                () -> blockRig.world.position = new Vec3(3.5, 64.0, 0.5));
+        TaskResult applied = blockRig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        assertEquals(TaskResult.Status.DONE, applied.status(), applied.summary());
+        assertEquals(1L, ((UseDetails) applied.details()).appliedTimes());
+        assertTrue(applied.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED
+                && "minecraft:lever".equals(change.what())), "应保留已确认的方块变化：" + applied.changes());
+    }
+
+    @Test
+    void 连点多次交互首击生效但伴随非骑乘位置跳变时_保留首击变化并按部分完成中止后续点击() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.world.position = new Vec3(0.5, 64.0, 0.5);
+        rig.interactions.outcome(InteractionResult.applied("第 1 下生效但发生位置跳变"),
+                () -> rig.world.position = new Vec3(3.5, 64.0, 0.5));
+        rig.interactions.applied("不该继续第 2 下");
+        rig.interactions.applied("不该继续第 3 下");
+
+        TaskResult result = rig.run(new UseInput(position(LEVER), null, "minecraft:lever", null, 3, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(1L, ((UseDetails) result.details()).appliedTimes(), "应保留第 1 次已确认生效的计数");
+        assertEquals(1, rig.interactions.builds, "首击发生非骑乘位置跳变后必须立即停手，不得继续第 2、3 下");
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.BLOCK_CHANGED
+                && "minecraft:lever".equals(change.what())), "应保留第 1 次已确认变化：" + result.changes());
+        assertEquals(Problem.Kind.STUCK, result.problem().kind());
+        assertTrue(result.problem().message().contains("意外位置跳变"), result.problem().message());
+    }
+
+    @Test
+    void 连点期间交互等待刻发生强制瞬移时_立刻中止并收尾当前动作() {
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "minecraft:lever");
+        rig.world.position = new Vec3(0.5, 64.0, 0.5);
+        Scripted waiting = rig.interactions.forever();
+        UseTask task = rig.task(new UseInput(position(LEVER), null, "minecraft:lever", null, 1, 32,
+                List.of(), Permissions.DEFAULT, null, 10));
+        // 推进到进入 INTERACT 等待刻。
+        for (int i = 0; i < 4; i++) {
+            TickResult step = task.tick(rig.tick());
+            assertFalse(step instanceof TickResult.Finished);
+        }
+        // 等待确认期间角色突然被服务端强制瞬移 5 格。
+        rig.world.position = new Vec3(5.5, 64.0, 0.5);
+        TickResult stopped = task.tick(rig.tick());
+        TaskResult result = assertInstanceOf(TickResult.Finished.class, stopped).result();
+        assertProblem(result, Problem.Kind.STUCK);
+        assertTrue(waiting.closed, "中止连点时应由任务基类收尾挂起的交互动作");
+        assertEquals(1, rig.interactions.builds);
     }
 
     private static final class FakeDrops implements PicksUpDrops {
