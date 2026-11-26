@@ -6,7 +6,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
@@ -16,7 +15,6 @@ import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
-import net.minecraft.world.level.block.Rotation;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.ability.machine.spi.InstallReport;
@@ -83,9 +81,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private final WorldMemory memory;
     private final Function<Permissions, ConstructionServices> constructionServices;
 
-    /** 拆整台时施工要落的那份蓝图（档案范围的全清空）；建的时候开工那一刻按现场再定，见 sitePlan。 */
+    /** 拆整台时施工要落的那份蓝图（档案范围的全清空，无可拆方块时为 null）；建的时候开工那一刻按现场再定。 */
     private final Blueprint removal;
-    /** 整机比对用的蓝图：安装段的格保留声明，核对时出"由机器核对"，不冒充逐格放好。 */
+    /** 整机比对用的蓝图：安装段的格保留声明，核对时出"由机器核对"；纯安装段/部件/设置蓝图没有逐格方块时为 null。 */
     private final Blueprint target;
     private final BlockPos anchor;
 
@@ -131,8 +129,12 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         this.memory = memory;
         this.constructionServices = constructionServices;
         this.anchor = new BlockPos(input.anchor().x(), input.anchor().y(), input.anchor().z());
-        this.removal = input.remove() ? removalPlan() : null;
-        this.target = input.remove() ? removal : targetPlan();
+        this.removal = input.remove()
+                ? MachineSitePlans.removalPlan(existingArchive().blueprint(), anchor,
+                        input.anchor().dimension(), services).orElse(null)
+                : null;
+        this.target = input.remove() ? removal
+                : ArchiveCheck.targetPlan(input.blueprint(), anchor, input.anchor().dimension()).orElse(null);
         if (!input.remove()) {
             toInstall.addAll(input.blueprint().installations());
             toMount.addAll(input.blueprint().parts());
@@ -185,7 +187,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     // 已满足：目标是已有档案、补丁没带来任何变化，且结构与机器条目都对 → 一个动作都不做。
     private Next<Phase> precheck() {
         if (input.remove()) {
-            return Next.go(Phase.CONSTRUCT, "按档案范围逐格拆");
+            return removal == null
+                    ? Next.go(Phase.SETTLE, "档案里没有可逐格拆除的方块，直接结算")
+                    : Next.go(Phase.CONSTRUCT, "按档案范围逐格拆");
         }
         if (input.archive() != null && !MachinePatch.changed(input.blueprint(), input.archive().blueprint())) {
             check = compareNow();
@@ -193,9 +197,17 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
                 recordProgress("开始时已和蓝图一致，一个动作都没做");
                 return Next.go(Phase.SETTLE, "开始时已和蓝图一致");
             }
-            return Next.go(Phase.CONSTRUCT, "有没对上的地方，从施工走一遍");
+            return firstBuildPhase("有没对上的地方，从施工走一遍");
         }
-        return Next.go(Phase.CONSTRUCT, "开工：普通格与流体先交给施工引擎");
+        return firstBuildPhase("开工：普通格与流体先交给施工引擎");
+    }
+
+    // 蓝图含逐格方块时先走施工引擎；纯安装段、部件或设置（例如纯 AE2 线缆铺设）跳过逐格施工直接进机器条目。
+    private Next<Phase> firstBuildPhase(String constructWhy) {
+        if (input.blueprint().cells().isEmpty()) {
+            return Next.go(nextWorkPhase(), "蓝图没有逐格方块，跳过逐格施工，直接装机器自己的部分");
+        }
+        return Next.go(Phase.CONSTRUCT, constructWhy);
     }
 
     // 施工：普通格与流体整段交给施工引擎这个子任务；它的核对、备料、清障、倒桶、验收、收临时方块都在里面。
@@ -203,10 +215,17 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     private Next<Phase> construct(TickContext context) {
         boolean later = constructionResult != null;
         if (action() == null) {
-            Optional<Blueprint> site = input.remove() ? Optional.of(removal) : later ? afterInstallPlan() : Optional.of(sitePlan());
+            Optional<Blueprint> site = input.remove() ? Optional.ofNullable(removal)
+                    : later ? afterInstallPlan() : sitePlan();
             if (site.isEmpty()) {
-                laterConstruction = TaskResult.done("压着的安装段都没装成，没有能放的格");
-                return Next.go(nextWorkPhase(), "压在安装段上的格都放不了");
+                if (later) {
+                    laterConstruction = TaskResult.done("压着的安装段都没装成，没有能放的格");
+                    return Next.go(nextWorkPhase(), "压在安装段上的格都放不了");
+                }
+                if (!input.remove() && !afterInstall.isEmpty()) {
+                    constructionResult = TaskResult.done("本遍没有要先放的普通格");
+                }
+                return Next.go(nextWorkPhase(), "没有要交给施工引擎的格，直接装机器自己的部分");
             }
             // 施工包成这一阶段的动作：吃饭、自卫插进来时施工跟着停下松手，建机器提前结束时它按取消收尾。
             prepared = child = new ChildTaskAction(new ConstructionTask(new ConstructionInput(site.get(),
@@ -574,50 +593,19 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return toInstall.isEmpty() && toMount.isEmpty() && toConfigure.isEmpty();
     }
 
-    /**
-     * 施工要落的那份蓝图，开工那一刻按现场定：安装段占的格里，蓝图写了方块的照常交给引擎（传送带两端的轴、
-     * 中间要清空的格），没写的标成由机器放（引擎不放、不清）；已经装成的安装段整段交给机器，不让引擎把带子拆回轴。
-     */
-    private Blueprint sitePlan() {
-        Blueprint laid = Blueprint.at(input.anchor().dimension(), anchor, Rotation.NONE, input.blueprint().cells());
-        Set<BlockPos> settled = installedCells();
-        Set<BlockPos> undeclared = installationCells();
-        Set<BlockPos> notInstalled = installationCells();
-        notInstalled.removeAll(settled);
-        CellPlacements placements = placements();
-        List<PlannedCell> held = new ArrayList<>();
-        List<PlannedCell> adjusted = new ArrayList<>();
-        for (PlannedCell cell : laid.cells()) {
-            undeclared.remove(cell.pos());
-            // 联动放置规则说要等的格落在还没装的安装段上（带漏斗等下面的带子）：这一遍不放，装完安装段再放。
-            if (placements.waitsFor(cell).stream().anyMatch(notInstalled::contains)) {
-                held.add(cell);
-                continue;
-            }
-            adjusted.add(settled.contains(cell.pos()) ? cell.byMachine() : cell);
-        }
-        afterInstall = List.copyOf(held);
-        for (BlockPos left : undeclared) {
-            // 蓝图没逐格声明的安装段格：照样标给机器，引擎不碰，核对时由机器认。
-            adjusted.add(PlannedCell.air(left).byMachine());
-        }
-        return new Blueprint(laid.dimension(), anchor, adjusted);
+    /** 第一遍施工蓝图：委托蓝图筹划按现场安装段状态换算；纯安装段/部件/设置蓝图返回空。 */
+    private Optional<Blueprint> sitePlan() {
+        MachineSitePlans.FirstPass first = MachineSitePlans.firstPass(input.blueprint(), anchor,
+                input.anchor().dimension(), services, placements());
+        afterInstall = first.afterInstall();
+        return first.blueprint();
     }
 
     /** 第二遍施工的蓝图：压在安装段上的格，压着的段装成了才放；段没装成的照实记下不放，全都放不了为空。 */
     private Optional<Blueprint> afterInstallPlan() {
-        Set<BlockPos> notInstalled = installationCells();
-        notInstalled.removeAll(installedCells());
-        CellPlacements placements = placements();
-        List<PlannedCell> ready = new ArrayList<>();
-        for (PlannedCell cell : afterInstall) {
-            if (placements.waitsFor(cell).stream().anyMatch(notInstalled::contains)) {
-                recordAttempt("放 " + cell.pos().toShortString(), "压着的安装段没装成，这一格没放");
-            } else {
-                ready.add(cell);
-            }
-        }
-        return ready.isEmpty() ? Optional.empty() : Optional.of(new Blueprint(input.anchor().dimension(), anchor, ready));
+        return MachineSitePlans.afterInstallPlan(input.blueprint(), anchor, input.anchor().dimension(),
+                afterInstall, services, placements(),
+                pos -> recordAttempt("放 " + pos.toShortString(), "压着的安装段没装成，这一格没放"));
     }
 
     /** 联动的放置规则：哪些格要等别的格先放好，和施工引擎问的是同一张表。 */
@@ -625,65 +613,11 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
         return CellPlacements.of(constructionServices.apply(input.permissions()).placementRules());
     }
 
-    /** 此刻已经按要求装成的安装段占的格：这些格整段由机器管。 */
-    private Set<BlockPos> installedCells() {
-        Set<BlockPos> cells = new LinkedHashSet<>();
-        for (MachineBlueprint.Segment segment : input.blueprint().installations()) {
-            if (services.installedBy(absolute(segment)).isPresent()) {
-                segment.offsets().forEach(offset -> cells.add(anchor.offset(offset)));
-            }
-        }
-        return cells;
-    }
-
-    /** 比对用的蓝图：安装段占的格标成由机器核对，保留原声明，不冒充逐格放好；和看机器的整机比对同一份。 */
-    private Blueprint targetPlan() {
-        return ArchiveCheck.targetPlan(input.blueprint(), anchor, input.anchor().dimension());
-    }
-
-    private Set<BlockPos> installationCells() {
-        Set<BlockPos> cells = new LinkedHashSet<>();
-        for (MachineBlueprint.Segment segment : input.blueprint().installations()) {
-            for (BlockPos offset : segment.offsets()) {
-                cells.add(anchor.offset(offset));
-            }
-        }
-        return cells;
-    }
-
-    /**
-     * 拆整台的施工蓝图：档案 cells 逐格换成清空，安装段只加上它自己放下的格（机械臂、ME 线缆），交给施工引擎挖。
-     * 安装段连到的另一头不拆：实机拆一份只为拉链条的档案，把链条另一头主城竖轴顶上的链条输送机也拆了，主城断了动力。
-     */
-    private Blueprint removalPlan() {
-        MachineBlueprint from = existingArchive().blueprint();
-        Set<BlockPos> declared = new LinkedHashSet<>();
-        List<PlannedCell> cells = new ArrayList<>();
-        for (PlannedCell cell : from.cells()) {
-            cells.add(PlannedCell.air(anchor.offset(cell.pos())));
-            declared.add(anchor.offset(cell.pos()));
-        }
-        for (MachineBlueprint.Segment segment : from.installations()) {
-            for (BlockPos at : placedBy(absolute(segment))) {
-                if (declared.add(at)) {
-                    cells.add(PlannedCell.air(at));
-                }
-            }
-        }
-        return new Blueprint(input.anchor().dimension(), anchor, cells);
-    }
-
-    // 问遍机器类型，认这种安装段的第一家说这一段自己放了哪些格；都不认（模组停用了）就一格不拆，宁可留下也不拆错。
-    private List<BlockPos> placedBy(Installation installation) {
-        for (MachineType type : services.machineTypes()) {
-            Optional<List<BlockPos>> placed = type.installations().orElse(null) == null
-                    ? Optional.empty() : type.installations().get().placedBy(installation);
-            if (placed.isPresent()) return placed.get();
-        }
-        return List.of();
-    }
-
     private BlueprintCheck.Result compareNow() {
+        // 没有逐格方块可比（纯安装段、部件或设置蓝图）：逐格比对视为完成且无差异，最终成败看机器条目核对。
+        if (target == null) {
+            return new BlueprintCheck.Result(Map.of(), Map.of(), true);
+        }
         return BlueprintCheck.compare(target, onStructure == null ? worldView : onStructure.blocks(), Set.of());
     }
 
@@ -710,6 +644,9 @@ final class MachineBuildTask extends PhasedTask<MachineBuildTask.Phase> {
     }
 
     private String describeCheck() {
+        if (target == null) {
+            return "无逐格方块，跳过逐格比对";
+        }
         StringBuilder line = new StringBuilder();
         for (CellState state : CellState.values()) {
             int count = check.count(state);

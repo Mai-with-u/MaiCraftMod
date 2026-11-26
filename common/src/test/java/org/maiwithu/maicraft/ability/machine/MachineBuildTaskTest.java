@@ -504,6 +504,67 @@ Rig rig = new Rig(tempDir);
         assertEquals(1, switching.closes, "建机器收尾，改设置跟着收尾");
     }
 
+    @Test
+    void 纯安装段无逐格方块且无档案_跳过逐格施工直接装段并核对完成() {
+        // 对应 machine_connect(network="me") 且目标无档案时：蓝图 cells 为空、只有 ae2:me_cable 安装段。
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment cable = new MachineBlueprint.Segment("ae2:me_cable",
+                List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)));
+        MachineBlueprint pureCable = new MachineBlueprint(List.of(), List.of(), List.of(cable), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new MachineTestDoubles.Scripted(1,
+                () -> rig.type.installedOk = installation -> true));
+
+        TaskResult result = rig.run(buildInput(pureCable, null, null));
+        assertEquals(TaskResult.Status.DONE, result.status(),
+                result.summary() + " / 问题:" + result.problem() + " / 试过:" + result.attempts());
+        assertEquals(List.of("install:ae2:me_cable"), rig.type.touched, "跳过逐格施工直接装安装段");
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertEquals(Boolean.TRUE, details.checkComplete());
+        assertTrue(details.cells().isEmpty(), "没有逐格方块就不调用逐格施工引擎");
+        assertTrue(details.checkCounts().isEmpty(), "没有逐格方块就不出逐格比对计数");
+        assertEquals(1, details.installations().size());
+        assertTrue(details.installations().getFirst().installed(), "AE2 线缆安装段核对通过");
+        assertNull(details.archiveName(), "无档案施工不生成默认档案名");
+        assertTrue(rig.archives.find("机器").isEmpty());
+    }
+
+    @Test
+    void 纯安装段无逐格方块_装段失败按部分完成报清安装段原因() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment cable = new MachineBlueprint.Segment("ae2:me_cable",
+                List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)));
+        MachineBlueprint pureCable = new MachineBlueprint(List.of(), List.of(), List.of(cable), List.of(), List.of());
+        rig.type.installationOk = installation -> true;
+        rig.type.installActions.add(new FailingInstall(Problem.of(Problem.Kind.NEED_ITEM, "身上没有 AE2 线缆")));
+
+        TaskResult result = rig.run(buildInput(pureCable, null, null));
+        assertEquals(TaskResult.Status.PARTIAL, result.status(), result.summary());
+        assertEquals(Problem.Kind.NEED_ITEM, result.problem().kind());
+        assertTrue(result.problem().message().contains("身上没有 AE2 线缆"), result.problem().message());
+        MachineBuildDetails details = (MachineBuildDetails) result.details();
+        assertFalse(details.installations().getFirst().installed());
+    }
+
+    @Test
+    void 纯安装段档案整机比对不构造空蓝图_按安装段核对结论收口() {
+        Rig rig = new Rig(tempDir);
+        MachineBlueprint.Segment cable = new MachineBlueprint.Segment("ae2:me_cable",
+                List.of(new BlockPos(1, 0, 0), new BlockPos(2, 0, 0)));
+        MachineBlueprint pureCable = new MachineBlueprint(List.of(), List.of(), List.of(cable), List.of(), List.of());
+        MachineArchive archive = MachineArchive.fresh("纯线缆", DIM, ANCHOR, pureCable, null);
+        rig.type.installedOk = installation -> true;
+
+        ArchiveCheck.Result matched = ArchiveCheck.compare(archive, rig.services);
+        assertTrue(matched.allMatch(), "无逐格方块且安装段已装成时整机比对通过");
+        assertEquals(1, matched.installations().size());
+        assertTrue(matched.installations().getFirst().done());
+
+        rig.type.installedOk = installation -> false;
+        ArchiveCheck.Result missing = ArchiveCheck.compare(archive, rig.services);
+        assertFalse(missing.allMatch(), "安装段未装成时整机比对不通过");
+    }
+
     /** 一套离线替身：现场与施工引擎的接缝全在一个假对象上，什么都能一刻做完。 */
     static final class FakeSite implements ConstructionSeams.ReadsSite, ConstructionSeams.PlansPlacement,
             ConstructionSeams.Clicks, DigsBlocks, ItemNeeds, ConstructionSeams.HoldsItem, ConstructionSeams.Guards,

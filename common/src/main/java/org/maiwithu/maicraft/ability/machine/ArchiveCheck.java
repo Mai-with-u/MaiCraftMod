@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -62,8 +63,12 @@ final class ArchiveCheck {
     private ArchiveCheck() {
     }
 
-    /** 比对用的蓝图：偏移落锚点，安装段占的格标成由机器核对，不冒充逐格放好。 */
-    static Blueprint targetPlan(MachineBlueprint blueprint, BlockPos anchor, String dimension) {
+    /** 比对用的蓝图：偏移落锚点，安装段占的格标成由机器核对，不冒充逐格放好；蓝图没有逐格方块时为空。 */
+    static Optional<Blueprint> targetPlan(MachineBlueprint blueprint, BlockPos anchor, String dimension) {
+        // 纯安装段、部件或设置蓝图没有逐格方块：不构造空 Blueprint，交由机器条目逐项核对。
+        if (blueprint.cells().isEmpty()) {
+            return Optional.empty();
+        }
         Blueprint laid = Blueprint.at(dimension, anchor, Rotation.NONE, blueprint.cells());
         Set<BlockPos> machineCells = new LinkedHashSet<>();
         for (MachineBlueprint.Segment segment : blueprint.installations()) {
@@ -73,14 +78,19 @@ final class ArchiveCheck {
         for (PlannedCell cell : laid.cells()) {
             adjusted.add(machineCells.contains(cell.pos()) ? cell.byMachine() : cell);
         }
-        return new Blueprint(laid.dimension(), anchor, adjusted);
+        return Optional.of(new Blueprint(laid.dimension(), anchor, adjusted));
     }
 
     /** 拿档案对现场比一遍。 */
     static Result compare(MachineArchive archive, MachineServices services) {
         // 逐格的部分和建筑的整栋比对是同一份；机器自己再核对安装段与部件。
-        Blueprint target = targetPlan(archive.blueprint(), archive.anchor(), archive.dimension());
-        BlueprintCheck.Report report = BlueprintCheck.report(target, worldOf(services));
+        Optional<Blueprint> target = targetPlan(archive.blueprint(), archive.anchor(), archive.dimension());
+        if (target.isEmpty()) {
+            return new Result(true, Map.of(), List.of(), List.of(),
+                    installations(archive, services, BlockPos::toShortString),
+                    parts(archive, services, BlockPos::toShortString));
+        }
+        BlueprintCheck.Report report = BlueprintCheck.report(target.get(), worldOf(services));
         return new Result(report.complete(), report.counts(), report.differences(), report.extra(),
                 installations(archive, services, BlockPos::toShortString), parts(archive, services, BlockPos::toShortString));
     }
@@ -92,7 +102,12 @@ final class ArchiveCheck {
      * @param structure 读结构地块里的格
      */
     static Result compareOnStructure(MachineArchive archive, MachineServices services, ReadsBlocks structure) {
-        Blueprint target = targetPlan(archive.blueprint(), BlockPos.ZERO, archive.dimension());
+        Optional<Blueprint> target = targetPlan(archive.blueprint(), BlockPos.ZERO, archive.dimension());
+        Function<BlockPos, String> where = cell -> cell.subtract(archive.anchor()).toShortString();
+        if (target.isEmpty()) {
+            return new Result(true, Map.of(), List.of(), List.of(),
+                    installations(archive, services, where), parts(archive, services, where));
+        }
         ReadsBlocks local = new ReadsBlocks() {
             @Override public boolean loaded(BlockPos pos) {
                 return structure.loaded(pos.offset(archive.anchor()));
@@ -102,8 +117,7 @@ final class ArchiveCheck {
                 return structure.state(pos.offset(archive.anchor()));
             }
         };
-        BlueprintCheck.Report report = BlueprintCheck.report(target, local);
-        Function<BlockPos, String> where = cell -> cell.subtract(archive.anchor()).toShortString();
+        BlueprintCheck.Report report = BlueprintCheck.report(target.get(), local);
         return new Result(report.complete(), report.counts(), report.differences(), report.extra(),
                 installations(archive, services, where), parts(archive, services, where));
     }
