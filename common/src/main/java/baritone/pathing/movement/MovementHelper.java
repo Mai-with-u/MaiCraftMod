@@ -270,7 +270,15 @@ public interface MovementHelper extends ActionCosts, Helper {
             return fluidState.getType() instanceof WaterFluid;
         }
 
-        return state.getCollisionShape(bsi.access, new BlockPos(x, y, z)).isEmpty();
+        return canWalkThroughCollision(bsi.access, x, y, z, state);
+    }
+
+    /**
+     * 按世界视图核对当前格碰撞箱是否确认可穿过：后台寻路视图拿不到方块实体时，
+     * 除原版告示牌与旗帜外，所有带方块实体的动态碰撞方块（模组管道、线缆、伪装墙等）一律保守判为不可穿过。
+     */
+    static boolean canWalkThroughCollision(BlockGetter access, int x, int y, int z, BlockState state) {
+        return BlockPassability.hasPassableEmptyCollision(access, new BlockPos(x, y, z), state);
     }
 
     static Ternary fullyPassableBlockState(BlockState state) {
@@ -325,14 +333,14 @@ public interface MovementHelper extends ActionCosts, Helper {
         if (fullyPassable == NO) {
             return false;
         }
-        return state.getCollisionShape(ctx.world(), pos).isEmpty();
+        return BlockPassability.hasPassableEmptyCollision(ctx.world(), pos, state);
     }
 
     /**
      * params retained for backwards compatibility
      */
     static boolean fullyPassablePosition(BlockStateInterface bsi, int x, int y, int z, BlockState state) {
-        return state.getCollisionShape(bsi.access, new BlockPos(x, y, z)).isEmpty();
+        return canWalkThroughCollision(bsi.access, x, y, z, state);
     }
 
     static boolean isReplaceable(int x, int y, int z, BlockState state, BlockStateInterface bsi) {

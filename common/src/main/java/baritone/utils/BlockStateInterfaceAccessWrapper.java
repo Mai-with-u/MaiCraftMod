@@ -39,6 +39,8 @@ public final class BlockStateInterfaceAccessWrapper implements BlockGetter {
     @Nullable
     @Override
     public BlockEntity getBlockEntity(BlockPos pos) {
+        // 后台寻路线程共享主线程的 LevelChunk 实例，直接读取非线程安全的 blockEntities Map 会引发并发异常或变异待建队列，
+        // 因此离线世界视图必须固定返回 null；带方块实体的动态碰撞块统一由通行判断保守拦截，不在此裸读区块 Map。
         return null;
     }
 

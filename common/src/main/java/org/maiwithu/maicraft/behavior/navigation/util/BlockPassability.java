@@ -11,6 +11,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.Container;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.EmptyBlockGetter;
+import net.minecraft.world.level.block.AbstractBannerBlock;
 import net.minecraft.world.level.block.AbstractSkullBlock;
 import net.minecraft.world.level.block.AmethystClusterBlock;
 import net.minecraft.world.level.block.AzaleaBlock;
@@ -27,6 +28,7 @@ import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.PointedDripstoneBlock;
 import net.minecraft.world.level.block.ScaffoldingBlock;
 import net.minecraft.world.level.block.ShulkerBoxBlock;
+import net.minecraft.world.level.block.SignBlock;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.StainedGlassBlock;
 import net.minecraft.world.level.block.StairBlock;
@@ -106,8 +108,31 @@ public final class BlockPassability {
         if (block instanceof CarpetBlock) {
             return true;
         }
-        VoxelShape shape = state.getCollisionShape(level, pos, CollisionContext.empty());
-        return shape.isEmpty();
+        return hasPassableEmptyCollision(level, pos, state);
+    }
+
+    /**
+     * 判断方块在当前世界视图下是否确认无碰撞、允许身体穿过。
+     *
+     * <p>带方块实体的方块（例如模组管道、线缆、伪装墙及移动活塞）其碰撞箱常由方块实体动态计算；
+     * 后台寻路或离线视图拿不到方块实体（{@code getBlockEntity(pos)} 为空）时，许多模组方块会回退返回空形状。
+     * 因此除原版确认永不因方块实体产生动态实心碰撞的告示牌与旗帜外，其余带方块实体且读不到方块实体实例的格子
+     * 一律保守判为不可穿过，防止寻路把管道夹层或伪装墙误当空气。
+     */
+    public static boolean hasPassableEmptyCollision(BlockGetter level, BlockPos pos, BlockState state) {
+        if (state.hasBlockEntity() && level.getBlockEntity(pos) == null
+                && !isKnownPassableBlockEntity(state.getBlock())) {
+            return false;
+        }
+        return state.getCollisionShape(level, pos, CollisionContext.empty()).isEmpty();
+    }
+
+    /**
+     * 原版确认无动态实心碰撞、即使离线缺少方块实体也可安全按碰撞箱判定的方块实体类型：告示牌与旗帜。
+     * 墙挂悬挂告示牌虽属 {@link SignBlock}，但自身顶部横杆碰撞箱非空，仍会被后续碰撞箱检查如实拦下。
+     */
+    public static boolean isKnownPassableBlockEntity(Block block) {
+        return block instanceof SignBlock || block instanceof AbstractBannerBlock;
     }
 
     /**

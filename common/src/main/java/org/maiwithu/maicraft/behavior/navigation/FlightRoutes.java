@@ -112,7 +112,7 @@ public final class FlightRoutes {
     }
 
     private static boolean solid(BlockGetter view, BlockPos pos) {
-        return !view.getBlockState(pos).getCollisionShape(view, pos).isEmpty();
+        return !BlockPassability.hasPassableEmptyCollision(view, pos, view.getBlockState(pos));
     }
 
     /** 人能飘在这一格：脚、头两格都看过、没有碰撞、不是流体与危险格。 */
@@ -123,7 +123,7 @@ public final class FlightRoutes {
     private static boolean clear(BlockGetter view, Predicate<BlockPos> loaded, BlockPos cell) {
         if (!loaded.test(cell)) return false;
         BlockState state = view.getBlockState(cell);
-        return state.getCollisionShape(view, cell).isEmpty() && state.getFluidState().isEmpty()
+        return BlockPassability.hasPassableEmptyCollision(view, cell, state) && state.getFluidState().isEmpty()
                 && !BlockPassability.isHazard(view, cell);
     }
 
