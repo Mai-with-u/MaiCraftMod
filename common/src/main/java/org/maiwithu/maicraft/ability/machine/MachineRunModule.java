@@ -45,6 +45,8 @@ final class MachineRunModule implements AbilityModule {
                             .doc("要做几件；投燃料时是投几件").build(),
                     ParamSpec.of("collect", ParamType.BOOLEAN).defaultValue(true)
                             .doc("做完要不要把出口的东西拿进背包；不要就留在出口").build(),
+                    ParamSpec.of("wait", ParamType.BOOLEAN).defaultValue(true)
+                            .doc("投料开机后要不要等产物出来；false 投完料开机立刻返回，跳过本次收货，可配 timer 回头来取").build(),
                     ParamSpec.of("max_seconds", ParamType.INTEGER).range(1, 3600).defaultValue(300)
                             .doc("最多等产物多久；到点没出够按部分完成收场").build(),
                     ParamSpec.of("file", ParamType.TEXT)
@@ -73,6 +75,7 @@ final class MachineRunModule implements AbilityModule {
         String item = params.has("item") ? params.text("item").toLowerCase(Locale.ROOT) : null;
         int count = (int) (params.has("count") ? params.integer("count") : 1);
         boolean collect = !params.has("collect") || params.bool("collect");
+        boolean wait = !params.has("wait") || params.bool("wait");
         int maxSeconds = (int) (params.has("max_seconds") ? params.integer("max_seconds") : 300);
         String file = params.has("file") ? params.text("file") : null;
         int rotation = (int) (params.has("rotation") ? params.integer("rotation") : 0);
@@ -84,7 +87,7 @@ final class MachineRunModule implements AbilityModule {
             anchor = position(params.json("anchor"));
             if (anchor == null) return invalid("anchor 写成 {\"x\":整数,\"y\":整数,\"z\":整数}");
         }
-        return new StepDecision.Run(new MachineRunInput(step.goal().target(), item, count, collect,
+        return new StepDecision.Run(new MachineRunInput(step.goal().target(), item, count, collect, wait,
                 maxSeconds, step.goal().permissions(), file, anchor, rotation));
     }
 

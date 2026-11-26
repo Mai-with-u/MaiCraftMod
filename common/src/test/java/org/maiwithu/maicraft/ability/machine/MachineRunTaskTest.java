@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.SharedConstants;
@@ -29,8 +31,12 @@ import org.maiwithu.maicraft.behavior.recipe.RecipeLookup;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
+import org.maiwithu.maicraft.kernel.goal.Goal;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.goal.StepContext;
+import org.maiwithu.maicraft.kernel.goal.StepDecision;
 import org.maiwithu.maicraft.kernel.goal.Target;
+import org.maiwithu.maicraft.kernel.param.ParseResult;
 import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -41,6 +47,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.kernel.task.TickResult;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -639,6 +647,96 @@ class MachineRunTaskTest {
         MachineRunDetails details = (MachineRunDetails) loadedResult.details();
         assertTrue(details.notes().stream().anyMatch(note -> note.contains("ae2:silicon_press") && note.contains("不用再放")),
                 details.notes().toString());
+    }
+
+    @Test
+    void wait为假时投料开机后立刻返回成功且跳过等待与收货并附加工周期提示() {
+        Rig rig = new Rig();
+        JsonObject def = new JsonObject();
+        def.addProperty("processing_time", 100);
+        ShownRecipe timedRecipe = new ShownRecipe("test:pressing/plate", "test:pressing", "压制",
+                List.of(ShownStack.item("test:press", "测试压机", 1)),
+                List.of(ShownIngredient.of(ShownStack.item(INGOT, "铁锭", 1))),
+                List.of(), List.of(ShownStack.item(PLATE, "铁板", 1)), def);
+        rig.viewer.putMaking(PLATE, List.of(timedRecipe));
+        // 机器开工时处于停机状态，投料后仍照常走近拨开关启动，随后不等出货立刻收场。
+        rig.type.state = () -> new MachineState(MachineState.Activity.OFFLINE, null, null, List.of(), Map.of(), "");
+        rig.type.feedActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+        rig.type.takeActions.add(new MachineTestDoubles.Scripted(1, () -> { }));
+
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 3, true, false, 300,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertEquals(1, rig.needs.requests.size(), "照常备齐原料");
+        assertEquals(3, rig.needs.requests.getFirst().count());
+        assertEquals(List.of(CELL), rig.clicks.clicked, "停着的机器照常拨开关启动");
+        assertEquals(1, rig.type.takeActions.size(), "wait=false 时跳过本次收货，不消耗取货动作");
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(3, details.fed().getFirst().count());
+        assertEquals(0, details.produced());
+        assertEquals(0, details.collected());
+        assertEquals(0, details.waitedSeconds());
+        assertEquals(0, details.looks());
+        assertTrue(result.summary().contains("已把料放进测试压机并启动"), result.summary());
+        assertTrue(result.summary().contains("不等待出货"), result.summary());
+        assertTrue(result.summary().contains("跳过本次收货"), result.summary());
+        assertTrue(result.summary().contains("单轮约 5 秒") && result.summary().contains("共 3 批约 15 秒"),
+                "摘要按配方 processing_time 给出单轮与总周期秒数提示：" + result.summary());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && INGOT.equals(change.what()) && change.count() == 3));
+        assertTrue(result.changes().stream().noneMatch(change -> change.kind() == Change.Kind.ITEM_GAINED));
+    }
+
+    @Test
+    void wait为假且出口在界面里_跳过开工前窥视与回头看立即完成() {
+        Rig rig = new Rig();
+        rig.menuMachineMakes(2);
+        // 即使出口在界面里且未打开过界面看基线，wait=false 投料启动后也立即成功返回，不阻塞回头看。
+        TaskResult result = rig.run(new MachineRunInput(positionOf(CELL), PLATE, 2, false, false, 300,
+                Permissions.DEFAULT));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertTrue(rig.clicks.lookTicks.isEmpty(), "wait=false 时既不先点开窥视出口基线，也不回头看：" + rig.clicks.lookTicks);
+        MachineRunDetails details = (MachineRunDetails) result.details();
+        assertEquals(2, details.fed().getFirst().count());
+        assertEquals(0, details.looks());
+        assertEquals(0, details.waitedSeconds());
+        assertTrue(result.summary().contains("单轮约 10 秒") && result.summary().contains("共 2 批约 20 秒"),
+                "配方未标时长时按默认 10 秒周期提示：" + result.summary());
+    }
+
+    @Test
+    void 模块解析wait参数_默认真且显式false正确透传() {
+        Rig rig = new Rig();
+        MachineRunModule module = new MachineRunModule(rig.services);
+        ParseResult defaultParsed = module.spec().paramSpecs().parse(
+                JsonParser.parseString("{\"item\":\"minecraft:iron_ingot\",\"count\":2}").getAsJsonObject());
+        assertTrue(defaultParsed.ok(), () -> defaultParsed.errors().toString());
+        StepDecision defaultDecision = module.decide(new StepContext() {
+            @Override public Goal goal() {
+                return Goal.of("maicraft:machine_run", positionOf(CELL), defaultParsed.params());
+            }
+            @Override public int stepIndex() { return 0; }
+            @Override public TickContext tick() { return null; }
+        });
+        MachineRunInput defaultInput = assertInstanceOf(MachineRunInput.class,
+                assertInstanceOf(StepDecision.Run.class, defaultDecision).input());
+        assertTrue(defaultInput.waitForOutput(), "未传 wait 时默认为 true");
+        assertTrue(defaultInput.collect());
+
+        ParseResult noWaitParsed = module.spec().paramSpecs().parse(
+                JsonParser.parseString("{\"item\":\"minecraft:iron_ingot\",\"count\":2,\"wait\":false}").getAsJsonObject());
+        assertTrue(noWaitParsed.ok(), () -> noWaitParsed.errors().toString());
+        StepDecision noWaitDecision = module.decide(new StepContext() {
+            @Override public Goal goal() {
+                return Goal.of("maicraft:machine_run", positionOf(CELL), noWaitParsed.params());
+            }
+            @Override public int stepIndex() { return 0; }
+            @Override public TickContext tick() { return null; }
+        });
+        MachineRunInput noWaitInput = assertInstanceOf(MachineRunInput.class,
+                assertInstanceOf(StepDecision.Run.class, noWaitDecision).input());
+        assertFalse(noWaitInput.waitForOutput(), "显式 wait=false 正确透传");
+        assertTrue(noWaitInput.collect());
     }
 
     /** 交得出实情的投料动作替身：一刻做完，报进去几件与说明。 */

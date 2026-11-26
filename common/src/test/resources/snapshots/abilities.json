@@ -178,7 +178,7 @@
       {
         "ability": "maicraft:machine_run",
         "summary": "用一台机器做东西：备料、投料、开机、等产物、收产物",
-        "parameters": "item?: string, count: integer (1..64) = 1, collect: boolean = true, max_seconds: integer (1..3600) = 300, file?: string, anchor?: object, rotation: integer (0..270) = 0",
+        "parameters": "item?: string, count: integer (1..64) = 1, collect: boolean = true, wait: boolean = true, max_seconds: integer (1..3600) = 300, file?: string, anchor?: object, rotation: integer (0..270) = 0",
         "targets": [
           "here",
           "landmark",
@@ -1219,6 +1219,13 @@
           "type": "boolean",
           "required": false,
           "doc": "做完要不要把出口的东西拿进背包；不要就留在出口",
+          "default": true
+        },
+        {
+          "name": "wait",
+          "type": "boolean",
+          "required": false,
+          "doc": "投料开机后要不要等产物出来；false 投完料开机立刻返回，跳过本次收货，可配 timer 回头来取",
           "default": true
         },
         {

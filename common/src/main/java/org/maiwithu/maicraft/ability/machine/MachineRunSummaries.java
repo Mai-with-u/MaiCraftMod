@@ -10,9 +10,10 @@ import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
+import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 
 /**
- * 用机器做东西时的运行状态与所属网络读数拼装：把机器当刻的活动状态、转速、进度与网络汇总写成给结果阅读的一句话。
+ * 用机器做东西时的运行状态、所属网络读数与周期提示拼装：把机器当刻的活动状态、转速、进度、网络汇总与预估加工时长写成给结果阅读的一句话。
  */
 final class MachineRunSummaries {
 
@@ -55,5 +56,29 @@ final class MachineRunSummaries {
             }
         }
         return line.toString();
+    }
+
+    /**
+     * 预估加工时长的一句话：按配方原始定义给出的周期刻数换算成秒，读不到按常规 10 秒一轮估，
+     * 方便 wait=false 投料开机即走时配 timer 回头收货。
+     */
+    static String describeCycleHint(ShownRecipe recipe, int batches) {
+        int cycleTicks = LookBackSchedule.cycleTicks(recipe == null ? null : recipe.definition());
+        int singleSeconds = Math.max(1, (cycleTicks + 19) / 20);
+        int totalBatches = Math.max(1, batches);
+        int totalSeconds = (int) Math.max(1, ((long) cycleTicks * totalBatches + 19) / 20);
+        if (totalBatches == 1) {
+            return "预计单轮约 " + singleSeconds + " 秒，可配 timer 回头收货";
+        }
+        return "预计单轮约 " + singleSeconds + " 秒，共 " + totalBatches + " 批约 " + totalSeconds
+                + " 秒，可配 timer 回头收货";
+    }
+
+    /** 投料开机即走（wait=false）时的一句话总结。 */
+    static String noWaitSummary(String machineName, boolean fedAny, boolean collectRequested,
+            String cycleHint, String machineReading) {
+        String lead = fedAny ? "已把料放进" + machineName + "并启动" : "已启动" + machineName;
+        String tail = collectRequested ? "（不等待出货，已跳过本次收货，稍后自行来取）" : "（不等待出货）";
+        return lead + tail + "；" + cycleHint + "；机器读数：" + machineReading;
     }
 }

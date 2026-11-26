@@ -64,6 +64,7 @@ public final class ParamNames {
             Map.entry("blueprint", "机器蓝图（JSON 对象）：cells 逐格、parts 部件、installations 安装段、settings 装后设置、processes 声明工序"),
             Map.entry("settings", "要改成的设置（JSON 对象）：键是目标认的设置项（机器的、载具操纵表的、女仆的），值写字符串"),
             Map.entry("collect", "做完要不要把出口的东西拿进背包"),
+            Map.entry("wait", "投料开机后要不要留在原地等产物出来：true（默认）等出货并按 collect 决定是否收进背包，false 投完料、开机就立刻返回，方便配 timer 回头收货"),
             Map.entry("network", "接哪种网络：取值由已登记的网络读取器自报，例如 kinetic / me / energy"),
             Map.entry("source", "来源位置（写法与 target 相同）：接网络时是另一台机器或那张网里任一格，整理搬运时是要搬出物品的来源容器或区域"),
             Map.entry("tier", "附魔台三档报价里选第几档（1..3）：第 n 档消耗 n 级和 n 个青金石"),

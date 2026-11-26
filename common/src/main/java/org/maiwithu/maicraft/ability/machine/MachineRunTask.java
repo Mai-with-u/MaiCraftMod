@@ -267,7 +267,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
                 return Next.fail(cannotFeedProblem(blocked.get()));
             }
         }
-        if (menuExit) {
+        // 不等待出货（wait=false）时不会回头点数新产出，省去开工前打开界面看出口基线的多余动作。
+        if (menuExit && input.waitForOutput()) {
             peeking = services.interactions().lookIntoMenu(cell, input.item(), false, input.permissions())
                     .orElse(null);
             if (peeking != null) {
@@ -436,10 +437,13 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return Next.go(Phase.WAIT, "开关拨过了，等产物");
     }
 
-    // 等产物：出口里目标物品的增长是进展；到量、到时限或久无新货就收，不等死。
+    // 等产物：出口里目标物品的增长是进展；到量、到时限或久无新货就收，不等死。wait=false 时投料开机即直接收场。
     private Next<Phase> waitForOutput(TickContext context) {
         if (input.item() == null) {
             return finishRun(true);
+        }
+        if (!input.waitForOutput()) {
+            return finishWithoutWaiting();
         }
         if (menuExit) {
             return peeking == null ? unseenOutput() : lookBack(context);
@@ -642,6 +646,19 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         return fed.stream().mapToInt(MachineRunDetails.Fed::count).sum();
     }
 
+    // 投料开机即走（wait=false）：不进入轮询或回头看等待，跳过本次收货，附上预估加工周期与机器读数方便调用方配 timer 回头来取。
+    private Next<Phase> finishWithoutWaiting() {
+        String cycleHint = MachineRunSummaries.describeCycleHint(recipe, batches);
+        notes.add(input.collect()
+                ? "wait=false 不等待出货，已跳过本次收货，可配 timer 稍后自行来取"
+                : "wait=false 不等待出货，不收产物，可配 timer 稍后查看");
+        notes.add(cycleHint + "（按配方或常规周期估，实际受加速升级与转速影响）");
+        String machine = describeState(type.state(cell)) + describeNetworks();
+        String summary = MachineRunSummaries.noWaitSummary(describeMachine(), !fed.isEmpty(), input.collect(),
+                cycleHint, machine);
+        return Next.done(TaskResult.done(summary));
+    }
+
     // 收尾：出了要的量算完成，差一点按部分完成，机器读数与网络读数一起给。
     private Next<Phase> finishRun(boolean justSwitchedOn) {
         String machine = describeState(type.state(cell)) + describeNetworks();
@@ -729,6 +746,9 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         if (fuelRun) {
             int unfed = input.count() - fuelDelivered();
             return unfed <= 0 ? List.of() : List.of("还有 " + unfed + " 件燃料 " + input.item() + " 没投进去");
+        }
+        if (!input.waitForOutput()) {
+            return toFeed.isEmpty() ? List.of() : List.of("还有 " + toFeed.size() + " 项料没投进" + describeMachine());
         }
         int left = input.count() - watch.produced;
         if (input.item() == null || left <= 0) {
