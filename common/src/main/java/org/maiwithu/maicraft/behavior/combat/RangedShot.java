@@ -96,6 +96,12 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         return modShot != null ? modShot.fired() : fired;
     }
 
+    /** 这一箭已提交放箭或扣扳机，正在等待游戏确认发射结果。 */
+    @Override
+    public boolean firing() {
+        return modShot == null && stage == Stage.FIRING;
+    }
+
     /** 正在转头对准、快要放了：走位这几刻站住，别把准星带偏。 */
     public boolean aiming() {
         if (modShot != null) return modShot.aiming();
@@ -126,6 +132,15 @@ public final class RangedShot implements Action, RangedCombat.Fires {
         if (stage == Stage.DONE) return ActionStatus.done();
         if (player == null || player.localPlayer() == null || player.interactionSender() == null) {
             return ActionStatus.running();
+        }
+        // 已经松手放箭或扣下弩扳机（Stage.FIRING）：箭已离弦，必须继续把放箭确认走完并置 fired=true，
+        // 不能因为近处目标在一刻内被这支箭射死就提前返回而漏记发射归属。
+        if (stage == Stage.FIRING) {
+            if (pending != null && !pending.terminal()) {
+                pending = player.interactionSender().poll(player, pending);
+                if (!pending.terminal()) return ActionStatus.running();
+            }
+            return settleFire(player);
         }
         Entity target = player.level() == null ? null : player.level().getEntity(targetId);
         if (target == null || !target.isAlive()) {

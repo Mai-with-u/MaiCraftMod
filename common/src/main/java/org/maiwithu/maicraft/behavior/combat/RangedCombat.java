@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.behavior.combat;
 
+import java.util.OptionalInt;
+
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -24,9 +26,10 @@ public final class RangedCombat {
     /** 连着这么多箭没射出去就交回近战。 */
     private static final int MAX_MISFIRES = 2;
 
-    /** 射一箭的动作报得出这一箭射没射出去（游戏确认了放箭）；报不出的按没射出去算。 */
+    /** 射一箭的动作报得出这一箭射没射出去（游戏确认了放箭），以及是否正处于等待放箭确认窗口；报不出的按否算。 */
     public interface Fires {
         boolean fired();
+        default boolean firing() { return false; }
     }
 
     private Action shot;
@@ -50,6 +53,31 @@ public final class RangedCombat {
     /** 正在用弓（有一箭在拉、在装、在瞄）。 */
     public boolean shooting() {
         return shot != null;
+    }
+
+    /** 正在等待已松手/已扣扳机的这一箭得到游戏发射确认。 */
+    public boolean isFiring() {
+        return shot instanceof Fires ranged && ranged.firing();
+    }
+
+    /** 当前这一箭瞄准的目标实体 ID；没在射为 -1。 */
+    public int shotTarget() {
+        return shot == null ? -1 : shotTarget;
+    }
+
+    /**
+     * 推进已进入放箭确认阶段（FIRING）的一箭：即使目标已在一刻内死亡，仍推进直到放箭确认落定，
+     * 确认射出后返回目标实体 ID 并收尾，未完成则保持原状态等下一刻。
+     */
+    public OptionalInt pollFiring(TickContext context) {
+        if (!isFiring()) return OptionalInt.empty();
+        int targetId = shotTarget;
+        ActionStatus status = shot.tick(context);
+        if (status instanceof ActionStatus.Running) return OptionalInt.empty();
+        boolean fired = shot instanceof Fires ranged && ranged.fired();
+        misfires = status instanceof ActionStatus.Failed ? misfires + 1 : 0;
+        close();
+        return fired ? OptionalInt.of(targetId) : OptionalInt.empty();
     }
 
     /** 正在快放手对准的那几刻：脚要站住、不转头，迈步会把准星带偏。 */

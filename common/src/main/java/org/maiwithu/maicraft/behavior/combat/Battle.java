@@ -176,15 +176,10 @@ public final class Battle {
         if (retreating) retreat.noteChasers(field);
         // 打龙：先记战况（水晶少了哪颗、龙倒没倒下、回血回到哪儿），再定打法。
         if (dragon != null) dragon.observe(context, field);
-        // 走不到而记下的那只自己贴上来了（看得见、够得着）：不再当走不到，照常近身打，不对着贴脸的怪拉弓。
-        // 实机 10-14 一只尸壳被记成走不到，贴到 0.6 格时还在拉弓射它。
-        for (Battlefield.Foe foe : field.foes()) {
-            if (walkedOut.contains(foe.id()) && foe.threat().visible() && foe.threat().withinReach(field.me().reach())) {
-                walkedOut.remove(foe.id());
-                unreachable.remove(foe.id());
-                outOfReachScenes.remove(foe.id());
-            }
-        }
+        // 目标在确认窗口内一刀或一箭倒下、从活体名单消失时，先把已在途的命中或放箭确认走完，不提前丢弃。
+        Moment inFlight = settleInFlightAttack(context, field);
+        if (inFlight != null) { doing = inFlight.doing(); return inFlight; }
+        reopenApproachedTargets(field);
         // 被打下柱顶（击退、柱子被炸）：不再算站在高处。
         if (perched && field.me().y() < perchY - 0.5) perched = false;
         // 有能打回去的火球冲我飞来：先把它打回去，别的打法这几刻让开（恶魂隔着十几格放火球，凑近战够不着它）。
@@ -533,6 +528,34 @@ public final class Battle {
         return new Moment(State.FINISHED, "打完了", false, false, false, -1, null, cornered);
     }
 
+    // 走不到而记下的那只自己贴上来了（看得见、够得着）：不再当走不到，照常近身打，不对着贴脸的怪拉弓。
+    private void reopenApproachedTargets(Battlefield field) {
+        for (Battlefield.Foe foe : field.foes()) {
+            if (walkedOut.contains(foe.id()) && foe.threat().visible() && foe.threat().withinReach(field.me().reach())) {
+                walkedOut.remove(foe.id());
+                unreachable.remove(foe.id());
+                outOfReachScenes.remove(foe.id());
+            }
+        }
+    }
+
+    // 目标在确认窗口内一刀或一箭倒下时，继续把已在途的近战命中或远程放箭确认走完，防止一刀秒杀被丢弃误判未命中。
+    private Moment settleInFlightAttack(TickContext context, Battlefield field) {
+        if (limbs.hasInFlightStrike() && field.foes().stream().noneMatch(f -> f.id() == limbs.strikeTarget())) {
+            int id = limbs.strikeTarget();
+            OptionalInt hit = limbs.pollInFlightStrike(context);
+            if (hit.isPresent()) return new Moment(State.FIGHTING, "确认近战命中", true, true, false, hit.getAsInt(), null, cornered);
+            if (limbs.hasInFlightStrike()) return new Moment(State.HOLDING, "等待近战命中确认", false, false, false, id, null, cornered);
+        }
+        if (bow.isFiring() && field.foes().stream().noneMatch(f -> f.id() == bow.shotTarget())) {
+            int id = bow.shotTarget();
+            OptionalInt fired = bow.pollFiring(context);
+            if (fired.isPresent()) return new Moment(State.SHOOTING, "确认放箭", true, false, true, fired.getAsInt(), null, cornered);
+            if (bow.isFiring()) return new Moment(State.HOLDING, "等待放箭确认", false, false, false, id, null, cornered);
+        }
+        return null;
+    }
+
     /**
      * 近身的距离带：冷却好了内沿是它够得着我、外沿是我稳稳够得着它；冷却中退到它够不着外 0.35 到 1.2 格。
      * 两边手一样长（打玩家）没有"我够得着它够不着"的缝，冷却好了才短暂凑进去出手；苦力怕守在点火距离外。
@@ -718,33 +741,25 @@ public final class Battle {
         return dragon == null ? Optional.empty() : Optional.of(dragon.report());
     }
 
-    /**
-     * 撤离往哪一侧靠：每次挑撤离落点时问一次家（没记过家就给打点）的水平位置 {x, z}，给空就只按追兵反方向跑。
-     * 自卫给它，点名战斗不给。
-     */
-    public void retreatToward(Function<TickContext, double[]> side) {
-        homeSide = side == null ? context -> null : side;
+    /** 撤离往哪一侧靠：每次挑撤离落点时问一次家（没记过家就给打点）的水平位置 {x, z}，给空就只按追兵反方向跑。 */
+    public void retreatToward(Function<TickContext, double[]> side) { homeSide = side == null ? context -> null : side; }
+
+    /** 当前正等待服务端命中或放箭确认的目标实体编号；无在途确认返回 -1。 */
+    public int inFlightAttackTarget() {
+        return limbs.hasInFlightStrike() ? limbs.strikeTarget() : bow.isFiring() ? bow.shotTarget() : -1;
     }
 
     /** 已在撤离（甩开前不回头）。 */
-    public boolean retreating() {
-        return retreating;
-    }
+    public boolean retreating() { return retreating; }
 
     /** 寻路说走不到、或出手连着被拒的那些：结果里写够不着谁，自卫记一阵不再为它插进来。 */
-    public Set<Integer> unreachable() {
-        return Set.copyOf(unreachable);
-    }
+    public Set<Integer> unreachable() { return Set.copyOf(unreachable); }
 
     /** 其中寻路到站了却还够不着的：谁、当时在哪一侧、差几格，一只一句；收场时如实交代。 */
-    public Map<Integer, String> outOfReachScenes() {
-        return Map.copyOf(outOfReachScenes);
-    }
+    public Map<Integer, String> outOfReachScenes() { return Map.copyOf(outOfReachScenes); }
 
     /** 撤离连着走不通，正在背水一战。 */
-    public boolean cornered() {
-        return cornered;
-    }
+    public boolean cornered() { return cornered; }
 
     public Interruptibility interruptibility() {
         if (dragon != null && dragonActive) return dragon.interruptibility();
@@ -754,10 +769,7 @@ public final class Battle {
         return Interruptibility.WORKING;
     }
 
-    /**
-     * 先到安全处再停：走位的寻路、垫高正悬在半空就先落地站稳，落地才算停稳；站在地上走位、出手时现在就能停。
-     * 血线破了的本能接管不走这里，照旧直接插进来。
-     */
+    /** 先到安全处再停：走位的寻路、垫高正悬在半空就先落地站稳，落地才算停稳；站在地上走位、出手时现在就能停。 */
     public boolean stopSafely() {
         boolean byWalk = limbs.walk() != null && limbs.walk().stopSafely();
         boolean byPillar = pillar != null && pillar.stopSafely();
@@ -770,15 +782,8 @@ public final class Battle {
                 && (pillar == null || pillar.stoppedSafely());
     }
 
-    public String describe() {
-        return doing;
-    }
+    public String describe() { return doing; }
 
-    /**
-     * 这一仗包成分阶段任务手上的一件事：引擎每刻读回的是战况不是动作状态，包一层让任务基类的暂停、收尾、
-     * 先到安全处再停、能不能打断都够得着它；每刻推进仍由任务自己调 {@link #tick}，读回战况再定下一步。点名战斗和跟随帮打共用这一份。
-     */
-    public Action asAction() {
-        return new BattleAction(this);
-    }
+    /** 这一仗包成分阶段任务手上的一件事：引擎每刻读回的是战况不是动作状态，包一层让任务基类够得着它。 */
+    public Action asAction() { return new BattleAction(this); }
 }

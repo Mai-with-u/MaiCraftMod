@@ -8,21 +8,25 @@ import org.maiwithu.maicraft.kernel.result.ResultDetails;
 /**
  * 战斗的结果细节。
  *
- * @param weapon      这场实际拿着打的那件
- * @param hits        确认打中的下数
- * @param shots       游戏确认了放箭的箭数（弓、弩、联动远程各算一发）
- * @param arrowsSpent 这一仗箭净少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null。
- *                    只算这一仗自己的；插进来的自卫射的、捡的在结果的变化（changes）里按它自己那一笔记
+ * @param defeated       确认由角色自己命中并击败的目标（"类型（实体 n）"）
+ * @param diedOtherwise  战场内已倒下但角色本次战斗从未命中过的目标（同伴或环境等外因击杀，不计入自己击败数）
+ * @param lostTrack      点名目标里在确认击败前不见了的（走远或卸载）
+ * @param weapon         这场实际拿着打的那件
+ * @param hits           确认打中的下数
+ * @param shots          游戏确认了放箭的箭数（弓、弩、联动远程各算一发）
+ * @param arrowsSpent    这一仗箭净少了几支：背包里箭的只数开打与打着时的差，捡回的已抵掉；读不到背包为 null。
+ *                       只算这一仗自己的；插进来的自卫射的、捡的在结果的变化（changes）里按它自己那一笔记
  * @param arrowsPickedUp 这一仗自己捡回几支箭（射出去插在近处又捡起来的）
- * @param reachIssue  点名目标里走不到跟前、也射不到的
- * @param retreat     撤离收场时为什么撤；没撤为空
+ * @param reachIssue     点名目标里走不到跟前、也射不到的
+ * @param retreat        撤离收场时为什么撤；没撤为空
  */
-public record FightDetails(List<String> defeated, List<String> lostTrack, boolean fled, String threatVerdict,
-                    String weapon, int hits, int shots, Integer arrowsSpent, int arrowsPickedUp,
+public record FightDetails(List<String> defeated, List<String> diedOtherwise, List<String> lostTrack, boolean fled,
+                    String threatVerdict, String weapon, int hits, int shots, Integer arrowsSpent, int arrowsPickedUp,
                     List<String> reachIssue, String retreat,
                     List<String> lootGained, DragonDetails dragon) implements ResultDetails {
     public FightDetails {
         defeated = List.copyOf(defeated);
+        diedOtherwise = List.copyOf(diedOtherwise);
         lostTrack = List.copyOf(lostTrack);
         reachIssue = List.copyOf(reachIssue);
         lootGained = List.copyOf(lootGained);

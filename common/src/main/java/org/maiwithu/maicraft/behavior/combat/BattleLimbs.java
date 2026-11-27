@@ -2,6 +2,7 @@
 package org.maiwithu.maicraft.behavior.combat;
 
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
@@ -200,6 +201,37 @@ public final class BattleLimbs {
             return Optional.of(new Footwork.Hazard(sidestepFrom[0], sidestepFrom[1], SIDESTEP_CLEARANCE));
         }
         return Optional.empty();
+    }
+
+    /** 手上是否有已提交等待确认的在途近战打击。 */
+    public boolean hasInFlightStrike() {
+        return strike != null && strikeTarget >= 0;
+    }
+
+    /** 正在进行中的近战打击目标实体 ID；没在出手为 -1。 */
+    public int strikeTarget() {
+        return strike == null ? -1 : strikeTarget;
+    }
+
+    /**
+     * 推进手上已经在途的近战打击而不发起新攻击：用于目标一刀倒下进入死亡动画、
+     * 战场准备切目标或收尾前把已挥出那一刀的确认窗口走完，防止一刀秒杀被丢弃误判未命中。
+     * 确认命中返回该目标 ID，仍在等待确认或失败返回空。
+     */
+    public OptionalInt pollInFlightStrike(TickContext context) {
+        if (strike == null) return OptionalInt.empty();
+        int targetId = strikeTarget;
+        ActionStatus status = strike.tick(context);
+        if (status instanceof ActionStatus.Done) {
+            LOG.debug("[出手] 在途打击 #{} 得到游戏确认", targetId);
+            dropStrike();
+            rejects = 0;
+            return OptionalInt.of(targetId);
+        }
+        if (status instanceof ActionStatus.Failed) {
+            dropStrike();
+        }
+        return OptionalInt.empty();
     }
 
     /** 手上这一下出手；没在出手为 null（暂停、能不能打断按动作逐个问）。 */

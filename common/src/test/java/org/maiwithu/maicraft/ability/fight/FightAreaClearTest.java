@@ -17,13 +17,15 @@ import java.util.UUID;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
-import org.maiwithu.maicraft.behavior.combat.Footwork;
-import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
+import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.combat.RangedCombat;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
 import org.maiwithu.maicraft.behavior.combat.WeaponChoice;
+import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
+import org.maiwithu.maicraft.kernel.result.Change;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
@@ -79,18 +81,37 @@ class FightAreaClearTest {
             return threat == null ? null : new Observed(threat.x(), threat.y(), threat.z(), threat.distance(), false);
         }
 
+        /** 每次近战出手需几刻确认完成；默认 1 刻，设为 2 可模拟真实一刀秒杀时的两刻确认窗口。 */
+        int strikeConfirmTicks = 1;
+
         @Override public Action strike(TickContext context, int entityId) {
             struck.add(entityId);
             // 一刀下去就倒：下一刻观察得到死亡，威胁列表里也没了它。
             alive.remove(entityId);
             dead.add(entityId);
-            return done();
+            if (strikeConfirmTicks <= 1) return done();
+            int needed = strikeConfirmTicks;
+            return new Action() {
+                private int ticks;
+                @Override public ActionStatus tick(TickContext context) {
+                    return ++ticks < needed ? ActionStatus.running() : ActionStatus.done();
+                }
+                @Override public String describe() { return "多刻确认一刀"; }
+            };
         }
 
         @Override public Action walk(GoalCompiler.Compiled goal) { return done(); }
-        @Override public Action shoot(TickContext context, int entityId) { return done(); }
-        @Override public boolean canShoot(TickContext context) { return false; }
-        @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
+        boolean canBow;
+        final List<Integer> shot = new ArrayList<>();
+
+        @Override public Action shoot(TickContext context, int entityId) {
+            shot.add(entityId);
+            alive.remove(entityId);
+            dead.add(entityId);
+            return new FiredAction();
+        }
+        @Override public boolean canShoot(TickContext context) { return canBow; }
+        @Override public boolean hasMeleeWeapon(TickContext context) { return !canBow; }
         @Override public int ticksToReady(TickContext context) { return 0; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
         @Override public void lowerGuard() {}
@@ -114,6 +135,12 @@ class FightAreaClearTest {
 
                 @Override public String describe() { return "一下"; }
             };
+        }
+
+        private static final class FiredAction implements Action, RangedCombat.Fires {
+            @Override public ActionStatus tick(TickContext context) { return ActionStatus.done(); }
+            @Override public boolean fired() { return true; }
+            @Override public String describe() { return "射出一箭"; }
         }
     }
 
@@ -187,5 +214,102 @@ class FightAreaClearTest {
 
         assertNotNull(result);
         assertTrue(field.struck.contains(4), field.struck.toString());
+    }
+
+    @Test
+    void onlyHitTargetsCountAsDefeatedWhenCompanionsKillOthers() {
+        // 区域清扫视野内 4 只僵尸：近处实体 1 被角色亲手命中击败，远处实体 2、3、4 未被角色命中却被同伴击杀。
+        field.zombie(1, 2, true);
+        field.zombie(2, 12, true);
+        field.zombie(3, 14, true);
+        field.zombie(4, 16, true);
+
+        TaskResult result = run(40, () -> {
+            field.alive.remove(2);
+            field.alive.remove(3);
+            field.alive.remove(4);
+            field.dead.add(2);
+            field.dead.add(3);
+            field.dead.add(4);
+        });
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(List.of("minecraft:zombie（实体 1）"), details.defeated(), "只有亲手命中的 1 只记入 defeated");
+        assertEquals(3, details.diedOtherwise().size(), "同伴击杀的 3 只应单列在 diedOtherwise：" + details.diedOtherwise());
+        int affectedCount = result.changes().stream()
+                .filter(change -> change.kind() == Change.Kind.ENTITY_AFFECTED)
+                .mapToInt(Change::count).sum();
+        assertEquals(1, affectedCount, "ENTITY_AFFECTED 仅统计自己命中的目标：" + result.changes());
+        assertTrue(result.summary().contains("击败了 1 个目标") && result.summary().contains("另有 3 个目标因其他原因倒下"),
+                "摘要不得虚报四杀：" + result.summary());
+    }
+
+    @Test
+    void zeroHitsWhileCompanionsClearAreaReportsNoSelfDefeats() {
+        // 视野内 3 只怪都在远处，角色零命中前同伴已把它们全部清完：defeated 为空、不虚报击败、任务正常收工不卡住。
+        field.zombie(10, 12, true);
+        field.zombie(11, 14, true);
+        field.zombie(12, 16, true);
+
+        TaskResult result = run(40, () -> {
+            field.alive.clear();
+            field.dead.addAll(Set.of(10, 11, 12));
+        });
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertTrue(details.defeated().isEmpty(), "角色零命中，defeated 必须为空：" + details.defeated());
+        assertEquals(3, details.diedOtherwise().size(), "三只被同伴清掉的怪应记进 diedOtherwise");
+        assertTrue(result.changes().stream().noneMatch(change -> change.kind() == Change.Kind.ENTITY_AFFECTED),
+                "零命中不应记 ENTITY_AFFECTED：" + result.changes());
+        assertTrue(result.summary().contains("没有确认由自己击败") && result.summary().contains("另有 3 个目标因其他原因倒下"),
+                result.summary());
+    }
+
+    @Test
+    void rangedShotTargetCountsAsDefeatedWhileUntouchedCompanionKillDoesNot() {
+        // 持弓远程射击实体 20 确认放箭后其倒下，应记入 defeated；同时另一只未射击的实体 21 倒下，应记入 diedOtherwise。
+        field.canBow = true;
+        field.zombie(20, 10, true);
+        field.zombie(21, 18, true);
+
+        TaskResult result = run(40, () -> {
+            field.alive.remove(21);
+            field.dead.add(21);
+        });
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(List.of("minecraft:zombie（实体 20）"), details.defeated(), "远程确认放箭击杀的怪应进 defeated");
+        assertEquals(List.of("minecraft:zombie（实体 21）"), details.diedOtherwise(), "未射击的怪倒下应进 diedOtherwise");
+    }
+
+    @Test
+    void multiTickOneShotKillDuringAreaClearStillCountsAsDefeatedWhileCompanionKillDoesNot() {
+        // 区域清扫 3 只怪：1、2 号在近处被角色依次两刻确认窗口一刀秒杀，3 号在远处被同伴击杀。
+        // 切换目标到 2 号前，1 号的在途确认窗口必须走完并归入 defeated，3 号归入 diedOtherwise。
+        field.strikeConfirmTicks = 2;
+        field.zombie(1, 2, true);
+        field.zombie(2, 2.5, true);
+        field.zombie(3, 15, true);
+
+        TaskResult result = run(50, () -> {
+            field.alive.remove(3);
+            field.dead.add(3);
+        });
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(2, details.defeated().size(), "两只一刀秒杀的怪都应归入 defeated：" + details.defeated());
+        assertTrue(details.defeated().contains("minecraft:zombie（实体 1）"));
+        assertTrue(details.defeated().contains("minecraft:zombie（实体 2）"));
+        assertEquals(List.of("minecraft:zombie（实体 3）"), details.diedOtherwise(), "同伴击杀的 3 号应进 diedOtherwise");
+        assertEquals(2, result.changes().stream().filter(c -> c.kind() == Change.Kind.ENTITY_AFFECTED)
+                .mapToInt(Change::count).sum(), "ENTITY_AFFECTED 应准确记为 2");
     }
 }

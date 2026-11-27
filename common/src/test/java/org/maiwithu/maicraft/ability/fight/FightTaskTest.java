@@ -13,11 +13,13 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import net.minecraft.world.entity.Entity;
 import org.junit.jupiter.api.Test;
 import net.minecraft.core.BlockPos;
 import org.maiwithu.maicraft.behavior.combat.Footwork;
+import org.maiwithu.maicraft.behavior.combat.RangedCombat;
 import org.maiwithu.maicraft.behavior.navigation.WalkReport;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.TravelFakes;
@@ -103,9 +105,15 @@ class FightTaskTest {
 
         /** 出手动作每刻回什么；默认一挥就中。 */
         ActionStatus strikeStatus = ActionStatus.done();
+        /** 自定义出手动作工厂（用于模拟多刻确认窗口）；为 null 时按 strikeStatus 生成。 */
+        Supplier<Action> customStrike;
+        /** 自定义远程动作工厂与开关（用于模拟近距放箭多刻确认窗口）。 */
+        Supplier<Action> customShoot;
+        boolean bowReady;
+        boolean meleeReady = true;
 
         @Override public Action strike(TickContext context, int entityId) {
-            return action("打 " + entityId, strikeStatus);
+            return customStrike != null ? customStrike.get() : action("打 " + entityId, strikeStatus);
         }
 
         /** 普通替身走到每刻回什么；默认一直在走。 */
@@ -123,9 +131,11 @@ class FightTaskTest {
 
         final List<Footwork.Step> steps = new ArrayList<>();
 
-        @Override public Action shoot(TickContext context, int entityId) { return action("射 " + entityId, ActionStatus.running()); }
-        @Override public boolean canShoot(TickContext context) { return false; }
-        @Override public boolean hasMeleeWeapon(TickContext context) { return true; }
+        @Override public Action shoot(TickContext context, int entityId) {
+            return customShoot != null ? customShoot.get() : action("射 " + entityId, ActionStatus.running());
+        }
+        @Override public boolean canShoot(TickContext context) { return bowReady; }
+        @Override public boolean hasMeleeWeapon(TickContext context) { return meleeReady; }
         @Override public int ticksToReady(TickContext context) { return 0; }
         @Override public void guard(TickContext context, double distance, boolean aboutToStrike) {}
         @Override public void lowerGuard() {}
@@ -225,7 +235,7 @@ class FightTaskTest {
     @Test
     void namedTargetDefeatedThenItsDropIsPickedUpRightThere() {
         // 实机：点名打倒一只羊后结果写"没捡到掉落物"，羊肉留在地上——点名打完直接收场，没走拾荒这一步。
-        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
         task.start(new Tick(0));
         task.tick(new Tick(0));
         task.tick(new Tick(1));
@@ -249,7 +259,7 @@ class FightTaskTest {
     @Test
     void namedTargetSeenDyingCountsAsDefeated() {
         // 打到倒地（死亡动画里还查得到、但已不算活着）：这就是击败的证据。
-        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
         task.start(new Tick(0));
         task.tick(new Tick(0));
         task.tick(new Tick(1));
@@ -374,7 +384,7 @@ class FightTaskTest {
     void arrowsPickedBackUpDuringLootAreRecordedOneByOneWithoutDoubleCounting() {
         // 实机：打完回倒下点捡回 4 支箭，结果 arrows_picked_up 4，变化里却只有 1 条 item_gained arrow，净值和背包差 3——
         // 捡回的箭按背包数逐支记成收获；拾荒按服务器拾取包记的收获里箭不再重复记，别的东西照记。
-        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
         moves.arrows = 10;
         task.start(new Tick(0));
         for (long t = 0; t < 3; t++) task.tick(new Tick(t));
@@ -403,7 +413,7 @@ class FightTaskTest {
         // 实机：三场里两场 arrows_spent 比背包净少少 1 支——最后一箭射出时游戏只确认了放箭，
         // 背包里那一支的扣减要等服务器隔一两刻同步过来；目标一倒下战斗阶段就换成拾荒，最后一次记数在它入账前。
         // 拾荒那几刻接着记，收场时那一支也算进去。
-        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
         moves.arrows = 27;
         task.start(new Tick(0));
         task.tick(new Tick(0));
@@ -490,9 +500,9 @@ class FightTaskTest {
 
     @Test
     void longWalkBackToTheKillSpotKeepsProgressWhileItIsMoving() {
-        // 倒下的地方离人几十格：走回去是一趟长路。走到在路上不逐刻自报进展（只说「还在走」），
+        // 角色先在近处命中过目标，随后目标在几十格外倒下：走回去是一趟长路。走到在路上不逐刻自报进展（只说「还在走」），
         // 进展要从脚位挪格读——不读的话走得好好的也会半路被停滞判定按卡住收掉，捡回就此作废。
-        targets.now = new SeenTargets.Observed(60, 64, 60, 85, false);
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
         task.start(new Tick(0));
         for (long t = 0; t < 3; t++) task.tick(new Tick(t));
         targets.now = new SeenTargets.Observed(60, 64, 60, 85, true);
@@ -517,6 +527,27 @@ class FightTaskTest {
     }
 
     @Test
+    void namedTargetKilledByOthersWithoutHitIsRecordedInDiedOtherwise() {
+        // 点名目标在 12 格外，角色还未打中就已倒下（同伴或环境击杀）：不算自己击败，单独记进 diedOtherwise，任务正常结束不卡住。
+        targets.now = new SeenTargets.Observed(12, 64, 5, 13, false);
+        task.start(new Tick(0));
+        for (long t = 0; t < 3; t++) task.tick(new Tick(t));
+        targets.now = new SeenTargets.Observed(12, 64, 5, 13, true);
+        TaskResult result = null;
+        for (long t = 3; t < 20 && result == null; t++) {
+            if (task.tick(new Tick(t)) instanceof TickResult.Finished finished) result = finished.result();
+        }
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertTrue(details.defeated().isEmpty(), "未命中过的点名目标不得算自己击败：" + details.defeated());
+        assertEquals(List.of("minecraft:zombie（实体 7）"), details.diedOtherwise());
+        assertTrue(result.changes().stream().noneMatch(change -> change.kind() == Change.Kind.ENTITY_AFFECTED),
+                result.changes().toString());
+    }
+
+    @Test
     void namedTargetThatVanishesIsNotCountedAsDefeated() {
         // 打着打着不见了（走远或被别的东西打死）：不算击败，以没做成收场并说明跟丢了。
         targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false);
@@ -533,5 +564,87 @@ class FightTaskTest {
         FightDetails details = (FightDetails) result.details();
         assertTrue(details.defeated().isEmpty(), details.defeated().toString());
         assertEquals(List.of("minecraft:zombie（实体 7）"), details.lostTrack());
+    }
+
+    @Test
+    void oneShotMeleeKillAcrossMultiTickConfirmationStillCountsAsDefeatedAndLoots() {
+        // 真实一刀秒杀确认窗口：第 1 刻挥出后返回 Running（等 2 刻稳定确认），同刻目标已进入死亡动画（dead=true），
+        // 第 2 刻确认落定返回 Done；不能在目标刚死时提前丢弃在途确认或误归入 diedOtherwise，且必须进入拾荒。
+        targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, false, true);
+        moves.customStrike = () -> new Action() {
+            private int ticks;
+            @Override public ActionStatus tick(TickContext context) {
+                ticks++;
+                if (ticks == 1) {
+                    targets.now = new SeenTargets.Observed(1, 64, 1, 1.5, true, true);
+                    return ActionStatus.running();
+                }
+                return ActionStatus.done();
+            }
+            @Override public String describe() { return "多刻确认近战一刀"; }
+        };
+        moves.gained.add(new FightMoves.Gained("minecraft:rotten_flesh", 1));
+
+        TaskResult result = run(30);
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(List.of("minecraft:zombie（实体 7）"), details.defeated(), "一刀秒杀在确认窗口落定后必须计入 defeated");
+        assertTrue(details.diedOtherwise().isEmpty(), "一刀秒杀不得误记入 diedOtherwise：" + details.diedOtherwise());
+        assertEquals(1, details.hits(), "应计入 1 次近战确认命中");
+        assertTrue(moves.started.contains("捡掉落物"), "击败后应正常进入拾荒阶段：" + moves.started);
+        assertEquals(1, result.changes().stream().filter(c -> c.kind() == Change.Kind.ENTITY_AFFECTED)
+                .mapToInt(Change::count).sum(), "应计入 1 次 ENTITY_AFFECTED");
+    }
+
+    @Test
+    void closeRangeOneShotRangedKillAcrossConfirmationStillCountsAsDefeated() {
+        // 近距一箭秒杀：第 1 刻松手放箭进入 firing 确认窗口并返回 Running，同时目标已死；
+        // 第 2 刻放箭确认落定（fired=true），目标必须归入 defeated 而非 diedOtherwise。
+        targets.now = new SeenTargets.Observed(8, 64, 0, 8.0, false, true);
+        moves.bowReady = true;
+        moves.meleeReady = false;
+        moves.walkStatus = ActionStatus.done();
+        // 用带 RangedCombat.Fires 的包装类暴露 firing()/fired() 供 Battle 识别在途放箭确认。
+        moves.customShoot = () -> new MultiTickShot(() -> targets.now = new SeenTargets.Observed(8, 64, 0, 8.0, true, true));
+
+        TaskResult result = run(30);
+
+        assertNotNull(result);
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        FightDetails details = (FightDetails) result.details();
+        assertEquals(List.of("minecraft:zombie（实体 7）"), details.defeated(), "一箭秒杀确认落定后应计入 defeated");
+        assertTrue(details.diedOtherwise().isEmpty(), "一箭秒杀不得误记入 diedOtherwise：" + details.diedOtherwise());
+        assertEquals(1, details.shots(), "应计入 1 箭确认放箭");
+        assertTrue(moves.started.contains("捡掉落物"), "远程击杀后应正常走回倒下点捡掉落物：" + moves.started);
+    }
+
+    /** 模拟两刻放箭确认窗口的远程替身：第 1 刻松手进入 firing 并让目标倒下，第 2 刻确认 fired=true。 */
+    private static final class MultiTickShot implements Action, RangedCombat.Fires {
+        private final Runnable killOnRelease;
+        private int ticks;
+        private boolean firingNow;
+        private boolean firedNow;
+
+        MultiTickShot(Runnable killOnRelease) {
+            this.killOnRelease = killOnRelease;
+        }
+
+        @Override public ActionStatus tick(TickContext context) {
+            ticks++;
+            if (ticks == 1) {
+                firingNow = true;
+                killOnRelease.run();
+                return ActionStatus.running();
+            }
+            firingNow = false;
+            firedNow = true;
+            return ActionStatus.done();
+        }
+
+        @Override public boolean firing() { return firingNow; }
+        @Override public boolean fired() { return firedNow; }
+        @Override public String describe() { return "两刻确认放箭"; }
     }
 }

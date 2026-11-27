@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.interaction.InteractionAction;
 import org.maiwithu.maicraft.behavior.inventory.hands.ClientMovesToMainhand;
 import org.maiwithu.maicraft.game.interaction.Interaction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
+import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
@@ -61,8 +62,16 @@ public final class MeleeStrike implements Action {
         PlayerContext player = context.player();
         current = player;
         Entity target = player == null || player.level() == null ? null : this.target.apply(player.level());
-        if (target == null || player.localPlayer() == null || player.interactionSender() == null) {
-            return ActionStatus.done();
+        if (player == null || player.localPlayer() == null || player.interactionSender() == null) {
+            return ActionStatus.running();
+        }
+        // 已挥出的一刀交给交互动作继续走完确认窗口，哪怕目标在确认期间进入死亡动画或消失，也不提前中止误丢命中确认。
+        if (attack != null) {
+            return attack.tick(context);
+        }
+        // 还没挥刀前目标就已不在或死亡：按未出手失败收尾，避免调用方把未挥刀的收场误记为命中。
+        if (target == null || !target.isAlive()) {
+            return ActionStatus.failed(Problem.of(Problem.Kind.TARGET_GONE, "出手前目标已不在或已倒下", null));
         }
         if (!armed) {
             if (arming == null) arming = chooseArming(player.localPlayer(), target).orElse(null);

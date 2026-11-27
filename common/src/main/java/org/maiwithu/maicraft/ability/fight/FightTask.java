@@ -82,10 +82,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private final List<SeenTargets.Locked> named = new ArrayList<>();
     /** 区域清扫要清的这一批：开打那一刻半径内看得见的敌对生物的实体编号；点名时为空。 */
     private final Set<Integer> batch = new HashSet<>();
-    /** 打过的（批里的、途中还手的）：看它们有没有倒下。实体编号到类型。 */
+    /** 战场里关注的敌对生物（批里的、途中还手的）：用于观察它们是否倒下并移出待清名单。实体编号到类型。 */
     private final Map<Integer, String> engaged = new HashMap<>();
-    /** 已确认击败的目标（"类型（实体 n）"）。 */
+    /** 本次战斗中角色实际命中（近战确认打中）或确认射箭攻击过的实体 ID：只有命中过的目标倒下才记入自己击败。 */
+    private final Set<Integer> hitTargets = new HashSet<>();
+    /** 已确认由自己命中并击败的目标（"类型（实体 n）"）。 */
     private final Set<String> defeated = new LinkedHashSet<>();
+    /** 战场内已倒下但角色从未命中过的目标（同伴击杀或环境外因死亡）：移出待清清单，绝不计入自己击败数。 */
+    private final Set<String> diedOtherwise = new LinkedHashSet<>();
     /** 点名目标在确认击败前就不见了（走远、被别的东西打死）：不算击败，单独交代。 */
     private final List<String> lostTrack = new ArrayList<>();
     /** 拾荒捡到的：物品。 */
@@ -226,16 +230,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private Next<Phase> assess(TickContext context) {
         if (dragonEntity >= 0) return assessDragon(context);
-        if (named.isEmpty()) {
-            // 区域清扫先认下这一批：此刻半径内看得见的；墙后、地下看不见的不算，之后新刷的也不算。
-            for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
-                if (threat.visible() && threat.kind() != ThreatAssessment.Kind.PLAYER
-                        && (input.entityType() == null || threat.type().equals(input.entityType()))) {
-                    batch.add(threat.entityId());
-                    engaged.put(threat.entityId(), threat.type());
-                }
-            }
-        }
+        selectAreaBatch(context);
         ThreatAssessment.Assessment assessment = ThreatAssessment.assess(mySide(context), foesOf(context));
         verdict = assessment.verdict();
         if (verdict == ThreatAssessment.Verdict.OUTMATCHED) {
@@ -278,15 +273,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (!melee) {
             recordAttempt("龙趴着时砍龙头", "身上没有近战武器：趴着的龙箭射不动，只能等它飞起来再射");
         }
-        if (named.isEmpty()) {
-            for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
-                if (threat.visible() && threat.kind() != ThreatAssessment.Kind.PLAYER
-                        && (input.entityType() == null || threat.type().equals(input.entityType()))) {
-                    batch.add(threat.entityId());
-                    engaged.put(threat.entityId(), threat.type());
-                }
-            }
-        }
+        selectAreaBatch(context);
         verdict = ThreatAssessment.assess(mySide(context), foesOf(context)).verdict();
         experienceBefore = moves.experience(context);
         battle = new Battle(senses, moves, new Roster(),
@@ -296,6 +283,18 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         fightCursor = moves.dropCursor(context);
         arrows.note(moves.arrowsCarried(context));
         return Next.go(Phase.FIGHT, crystals.isEmpty() ? "开打末影龙" : "开打末影龙：先射 " + crystals.size() + " 颗末影水晶");
+    }
+
+    // 区域清扫开打前先认下这一批：此刻半径内看得见的敌对生物；墙后、地下看不见与之后新刷的不算。
+    private void selectAreaBatch(TickContext context) {
+        if (!named.isEmpty()) return;
+        for (CombatSenses.Threat threat : senses.threats(context, input.radius())) {
+            if (threat.visible() && threat.kind() != ThreatAssessment.Kind.PLAYER
+                    && (input.entityType() == null || threat.type().equals(input.entityType()))) {
+                batch.add(threat.entityId());
+                engaged.put(threat.entityId(), threat.type());
+            }
+        }
     }
 
     // 还有水晶却没有能射的：说清还剩几颗、在哪。
@@ -362,15 +361,9 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     private static String activityName(DragonArena.Activity activity) {
         return switch (activity) {
-            case CIRCLING -> "盘旋";
-            case STRAFING -> "扫射";
-            case CHARGING -> "冲撞";
-            case LANDING -> "降落";
-            case WATCHING -> "趴着扫视";
-            case ROARING -> "趴着吼";
-            case BREATHING -> "趴着喷龙息";
-            case TAKING_OFF -> "起飞";
-            case DYING -> "死亡动画里";
+            case CIRCLING -> "盘旋"; case STRAFING -> "扫射"; case CHARGING -> "冲撞";
+            case LANDING -> "降落"; case WATCHING -> "趴着扫视"; case ROARING -> "趴着吼";
+            case BREATHING -> "趴着喷龙息"; case TAKING_OFF -> "起飞"; case DYING -> "死亡动画里";
         };
     }
 
@@ -381,6 +374,27 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             interludeArrowsTaken = 0;
             interludeArrowsPickedUp = 0;
         }
+        // 先推进战斗引擎：让已出手那一刀或那一箭在目标倒下的同一刻完成确认并入账 hitTargets，避免把一刀秒杀误判为同伴击杀。
+        Battle.Moment moment = battle.tick(context);
+        // 打龙：这一刻引擎刚看到龙倒下或不见了，收场前先记上，免得把跟丢的龙当成够不着。
+        noteDragon();
+        if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
+        // 近战确认命中与远程确认放箭时记下对应目标 ID，供后续结算击杀归属，避免把同伴击杀的怪算成自己击败。
+        if (moment.struck()) {
+            hits++;
+            if (moment.targetId() >= 0) hitTargets.add(moment.targetId());
+        }
+        // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里，但确认朝该目标放箭计入本次战斗交火归属。
+        if (moment.fired()) {
+            shots++;
+            if (moment.targetId() >= 0) hitTargets.add(moment.targetId());
+            LOG.info("[战斗] 射出第 {} 箭，游戏确认了放箭", shots);
+        }
+        // 箭少了几支按背包数，不按射了几箭推：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
+        noteArrows(context);
+        if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
+        if (moment.progressed()) recordProgress(moment.doing());
+        // 再核对倒下名单：若目标尚有在途攻击确认未落定，noteDefeats 会暂缓结算到下一刻确认完成。
         noteDefeats(context);
         if (dragonEntity >= 0) {
             Next<Phase> ending = dragonEnding(context);
@@ -390,20 +404,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             // 点名目标都有了着落（打倒或跟丢）：就地捡一下掉落物再收场。
             return lastKillSpot == null ? Next.done(settled()) : Next.go(Phase.LOOT, "点名的都打倒了，就地捡一下");
         }
-        Battle.Moment moment = battle.tick(context);
-        // 打龙：这一刻引擎刚看到龙倒下或不见了，收场前先记上，免得把跟丢的龙当成够不着。
-        noteDragon();
-        if (moment.struck() || moment.fired()) weaponUsed = moves.mainHand(context);
-        if (moment.struck()) hits++;
-        // 射出去的箭另记：箭中没中服务器不单独回话，不混进"确认打中"的下数里（实机 10-14 拿弓清掉三只尸壳，hits 写 0 看着像没打）。
-        if (moment.fired()) {
-            shots++;
-            LOG.info("[战斗] 射出第 {} 箭，游戏确认了放箭", shots);
-        }
-        // 箭少了几支按背包数，不按射了几箭推：取消拉弓时被原版松手放出去的箭不会报"射出"，只有背包知道。
-        noteArrows(context);
-        if (moment.targetId() >= 0 && moment.state() != Battle.State.EVADING) rememberEngaged(context, moment.targetId());
-        if (moment.progressed()) recordProgress(moment.doing());
         return switch (moment.state()) {
             case ESCAPED -> {
                 // 甩开了：撤离成功不等于任务成功，目标没死就以失败收场，写明为什么撤与出路；
@@ -431,24 +431,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     // 名单：点名的（还没倒下、没跟丢）或清扫的这一批，外加途中真打了角色的；给了 count 打够了就只还手。
     // 打龙时龙不在名单里，由引擎里龙的那一套打。
     private final class Roster implements Battlefield.Roster {
-        @Override
-        public boolean fightsDragon() {
-            return dragonEntity >= 0;
-        }
-
-        @Override
-        public int dragonId() {
-            return dragonEntity;
-        }
-
+        @Override public boolean fightsDragon() { return dragonEntity >= 0; }
+        @Override public int dragonId() { return dragonEntity; }
         // 打龙时水晶爆炸范围碰到这次任务额外保护的地标，就不射那颗。
-        @Override
-        public Set<String> protectedLandmarks() {
-            return landmarks();
-        }
+        @Override public Set<String> protectedLandmarks() { return landmarks(); }
 
-        @Override
-        public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
+        @Override public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
             if (threat.entityId() == dragonEntity) return false;
             // 途中真打了角色的怪一并处理；没点名的玩家不自动还手，打不打他由 LLM 定。
             if (attacker && threat.kind() != ThreatAssessment.Kind.PLAYER) return true;
@@ -457,14 +445,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             return batch.contains(threat.entityId());
         }
 
-        @Override
-        public boolean primary(CombatSenses.Threat threat) {
+        @Override public boolean primary(CombatSenses.Threat threat) {
             if (threat.entityId() == dragonEntity) return false;
             return named.isEmpty() ? batch.contains(threat.entityId()) : remainingNamed().contains(threat.entityId());
         }
 
-        @Override
-        public List<Integer> namedIds() {
+        @Override public List<Integer> namedIds() {
             if (countReached()) return List.of();
             List<Integer> ids = new ArrayList<>(remainingNamed());
             ids.remove(Integer.valueOf(dragonEntity));
@@ -485,35 +471,54 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private List<Integer> remainingNamed() {
         List<Integer> ids = new ArrayList<>();
         for (SeenTargets.Locked locked : named) {
-            if (!defeated.contains(describeOf(locked)) && !lostTrack.contains(describeOf(locked))) ids.add(locked.entityId());
+            String name = describeOf(locked);
+            if (!defeated.contains(name) && !diedOtherwise.contains(name) && !lostTrack.contains(name)) {
+                ids.add(locked.entityId());
+            }
         }
         return ids;
     }
 
-    // 谁倒下了：点名的逐个核对（不见了记跟丢），打过的逐个看有没有倒下；倒下的地方留给拾荒。
+    // 谁倒下了：只有角色本次战斗实际命中或射击过的目标倒下才算自己击败，未命中却倒下的另记并移出待清清单；
+    // 目标身上还有在途近战命中或放箭确认等待落定时暂缓归类，等确认窗口走完再定归属。
     private void noteDefeats(TickContext context) {
         noteDragon();
+        int inFlight = battle == null ? -1 : battle.inFlightAttackTarget();
         for (SeenTargets.Locked locked : named) {
             if (locked.entityId() == dragonEntity) continue;
             String name = describeOf(locked);
-            if (defeated.contains(name) || lostTrack.contains(name)) continue;
+            if (defeated.contains(name) || diedOtherwise.contains(name) || lostTrack.contains(name)) continue;
             SeenTargets.Observed observed = seenTargets.observe(context, locked.entityId());
             if (observed == null) {
-                // 消失的点名目标：不算击败，记进"跟丢了"，结果里按没打成交代。
+                if (locked.entityId() == inFlight) continue;
                 lostTrack.add(name);
             } else if (observed.dead()) {
-                markDefeated(name, locked.type(), observed);
+                if (hitTargets.contains(locked.entityId())) markDefeated(name, locked.type(), observed);
+                else if (locked.entityId() != inFlight) markDiedOtherwise(locked.entityId(), name);
             }
         }
         for (var entry : List.copyOf(engaged.entrySet())) {
-            SeenTargets.Observed observed = seenTargets.observe(context, entry.getKey());
+            int entityId = entry.getKey();
+            SeenTargets.Observed observed = seenTargets.observe(context, entityId);
             if (observed == null) {
-                engaged.remove(entry.getKey());
+                if (entityId == inFlight) continue;
+                engaged.remove(entityId);
+                batch.remove(entityId);
             } else if (observed.dead()) {
-                engaged.remove(entry.getKey());
-                markDefeated(entry.getValue() + "（实体 " + entry.getKey() + "）", entry.getValue(), observed);
+                if (!hitTargets.contains(entityId) && entityId == inFlight) continue;
+                engaged.remove(entityId);
+                batch.remove(entityId);
+                String name = entry.getValue() + "（实体 " + entityId + "）";
+                if (hitTargets.contains(entityId)) markDefeated(name, entry.getValue(), observed);
+                else markDiedOtherwise(entityId, name);
             }
         }
+    }
+
+    // 战场内倒下但角色从未命中过的目标：从待清批次移出避免卡住，单列记账，绝不计入自己击败数或世界变化。
+    private void markDiedOtherwise(int entityId, String name) {
+        batch.remove(entityId);
+        diedOtherwise.add(name);
     }
 
     // 龙：看到死亡动画算击败（原版不会回头）；没看到死亡动画龙就不见了，算跟丢，不冒充打死。龙不掉东西，不拾荒。
@@ -634,15 +639,22 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return Battlefield.assessedFoes(counted, attackers);
     }
 
-    // 收场：点名目标有跟丢的、够不着的就不算全打完——一个都没确认击败是没做成，打掉一部分是做成一部分。
+    // 收场：点名目标有跟丢的、够不着的就不算全打完；自己击败的与同伴/外因击杀的在摘要里分开交代，绝不虚报击败数。
     private TaskResult settled() {
         if (currentContext != null) noteArrows(currentContext);
-        String summary = defeated.isEmpty() ? "打完了，没有确认击败的目标"
-                : "击败了 " + defeated.size() + " 个目标" + (lootGained.isEmpty() ? "，没捡到掉落物" : "，捡到 " + lootGained.size() + " 组掉落物");
-        // 打龙：龙不掉东西，不说"没捡到掉落物"；另外顺手打倒的照数。
+        String otherwisePart = diedOtherwise.isEmpty() ? ""
+                : "；另有 " + diedOtherwise.size() + " 个目标因其他原因倒下";
+        String summary;
         if (dragonDefeated) {
             summary = "打败了末影龙" + (defeated.size() > 1 ? "，另外击败了 " + (defeated.size() - 1) + " 个目标" : "")
-                    + (lootGained.isEmpty() ? "" : "，捡到 " + lootGained.size() + " 组掉落物");
+                    + (lootGained.isEmpty() ? "" : "，捡到 " + lootGained.size() + " 组掉落物") + otherwisePart;
+        } else if (defeated.isEmpty()) {
+            summary = diedOtherwise.isEmpty() ? "打完了，没有确认击败的目标"
+                    : "打完了，没有确认由自己击败的目标" + otherwisePart;
+        } else {
+            summary = "击败了 " + defeated.size() + " 个目标"
+                    + (lootGained.isEmpty() ? "，没捡到掉落物" : "，捡到 " + lootGained.size() + " 组掉落物")
+                    + otherwisePart;
         }
         List<String> unreached = new ArrayList<>();
         for (SeenTargets.Locked locked : named) {
@@ -705,21 +717,6 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         currentKey = null;
     }
 
-    // 推进当前动作：做完或失败都收尾，下一刻重新决定。
-    private void stepCurrent(TickContext context, String what) {
-        if (current == null) {
-            return;
-        }
-        ActionStatus status = current.tick(context);
-        if (status instanceof ActionStatus.Done || status instanceof ActionStatus.Failed) {
-            recordProgress(status instanceof ActionStatus.Failed failed
-                    ? what + "没成：" + failed.problem().message() : what + "：一轮结束");
-            dropCurrent();
-        } else if (status instanceof ActionStatus.Running running && running.progressed()) {
-            recordProgress(what);
-        }
-    }
-
     // 记一笔此刻背包里的箭；离开背包的箭随手记成消耗（各种箭合在一起按 minecraft:arrow 记），调用方拿结果对背包的账
     // 时能对上；捡回的由拾荒按服务器的拾取包另记，不在这里重复。
     private void noteArrows(TickContext context) {
@@ -745,8 +742,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         for (SeenTargets.Locked locked : named) {
             if (battle != null && battle.unreachable().contains(locked.entityId())) unreached.add(describeOf(locked));
         }
-        return new FightDetails(List.copyOf(defeated), lostTrack, fled, verdictName(), weaponUsed, hits, shots,
-                arrows.spentOrNull(), arrows.pickedUp(), unreached,
+        return new FightDetails(List.copyOf(defeated), List.copyOf(diedOtherwise), lostTrack, fled, verdictName(),
+                weaponUsed, hits, shots, arrows.spentOrNull(), arrows.pickedUp(), unreached,
                 retreatWhy, lootGained, dragonDetails());
     }
 
