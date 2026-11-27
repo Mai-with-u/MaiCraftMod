@@ -174,6 +174,11 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
 
     // 对工作盆直接右键有效的物品：除名字认得的桶瓶、海绵、扳手外，还认扳手与桶标签，以及用完留空容器的装液物品。
     @Override public boolean interactsWithBasin(String itemOrTag) {
+        return isBasinInteractItem(itemOrTag);
+    }
+
+    /** 复用同一份工作盆直接交互物品判定，供世界读端与交互组装共用。 */
+    static boolean isBasinInteractItem(String itemOrTag) {
         if (UseDecider.interactsWithBasinById(itemOrTag)) return true;
         if (itemOrTag == null || itemOrTag.startsWith("#")) return false;
         ResourceLocation id = ResourceLocation.tryParse(StackKey.parse(itemOrTag.toLowerCase(Locale.ROOT)).itemId());

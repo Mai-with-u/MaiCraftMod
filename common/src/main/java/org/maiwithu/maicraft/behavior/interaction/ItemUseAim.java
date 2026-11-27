@@ -108,10 +108,12 @@ public final class ItemUseAim {
      * @param above                    目标正上方那一格：空着，还是压着什么；锄和锹要求上方敞开
      * @param ignitesItself            目标本身是不是能点着的方块（TNT、未点燃的营火/蜡烛/蜡烛蛋糕），点它本身就生效
      * @param alreadyLit               目标本身是不是已经点着的营火、蜡烛或蜡烛蛋糕（无需再点，且绝不落回往旁边空气点火）
+     * @param acceptsFluidDirectly     目标本身是不是能直接通过方块右键接收流体的方块（例如工作盆、炼药锅），
+     *                                 为真时持流体桶直接右键目标方块本体，严禁往外侧邻格泼水
      */
     public record Around(BlockPos feet, Set<Direction> solidNeighbors,
                          Set<Direction> rightClickableNeighbors, AboveCell above,
-                         boolean ignitesItself, boolean alreadyLit) {
+                         boolean ignitesItself, boolean alreadyLit, boolean acceptsFluidDirectly) {
         public Around {
             Objects.requireNonNull(feet, "feet");
             Objects.requireNonNull(above, "above");
@@ -119,10 +121,17 @@ public final class ItemUseAim {
             rightClickableNeighbors = Set.copyOf(rightClickableNeighbors);
         }
 
-        /** 不指定已点燃标记时的兼容构造（默认未点着）。 */
+        /** 不指定已点燃与直倒流体标记时的兼容构造。 */
         public Around(BlockPos feet, Set<Direction> solidNeighbors,
                       Set<Direction> rightClickableNeighbors, AboveCell above, boolean ignitesItself) {
-            this(feet, solidNeighbors, rightClickableNeighbors, above, ignitesItself, false);
+            this(feet, solidNeighbors, rightClickableNeighbors, above, ignitesItself, false, false);
+        }
+
+        /** 不指定直倒流体标记时的兼容构造（默认不直接接收流体）。 */
+        public Around(BlockPos feet, Set<Direction> solidNeighbors,
+                      Set<Direction> rightClickableNeighbors, AboveCell above,
+                      boolean ignitesItself, boolean alreadyLit) {
+            this(feet, solidNeighbors, rightClickableNeighbors, above, ignitesItself, alreadyLit, false);
         }
 
         /** 目标正上方是不是空气。 */
@@ -219,7 +228,11 @@ public final class ItemUseAim {
             case BRUSH ->
                 Optional.of(new Aim(target, target, Confirmation.BLOCK_TURNS_INTO, "点目标本身，按住直到刷完"));
             case SCOOP -> aimScoop(nature, target);
-            case POUR -> aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS, face);
+            // 可直接通过方块右键接收流体的方块（工作盆、炼药锅等）：直接点目标方块本体并等主手或方块变化，不往外侧邻格泼水。
+            case POUR -> around.acceptsFluidDirectly()
+                    ? Optional.of(new Aim(target, target, face, Confirmation.TARGET_OR_HAND_CHANGES,
+                            "对可直倒流体的目标方块本身倒流体"))
+                    : aimEffect(gesture, target, nature, around, Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS, face);
             // 本身是营火、蜡烛且已经点着时不再点，避免落回往旁边空气格乱点火；
             // 未点燃的营火、蜡烛、蜡烛蛋糕与 TNT 点着后是目标方块状态本身发生变化，不是生成明火方块，用 BLOCK_TURNS_INTO 确认。
             case IGNITE -> around.alreadyLit() ? Optional.empty()

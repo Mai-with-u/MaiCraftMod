@@ -256,4 +256,32 @@ class ItemUseAimTest {
         assertTrue(emptyHand.isPresent());
         assertEquals(Direction.WEST, emptyHand.get().clickFace());
     }
+
+    @Test
+    void pouringAtBlockThatAcceptsFluidDirectlyAimsTargetItself() {
+        // 工作盆、炼药锅等能直接通过方块右键接收流体的方块：直接点目标方块本体，绝不算出外侧邻格往旁边泼水。
+        ItemUseAim.Around directAccept = new ItemUseAim.Around(feet, Set.of(), Set.of(), STONE_ABOVE, false, false, true);
+        Optional<ItemUseAim.Aim> aim = ItemUseAim.aim(ItemUseAim.Gesture.POUR, target,
+                ItemUseAim.CellNature.SOLID, directAccept);
+        assertTrue(aim.isPresent());
+        assertEquals(target, aim.get().clickCell());
+        assertEquals(target, aim.get().effectCell(), "效果应落在目标方块本体而非外侧邻格");
+        assertEquals(ItemUseAim.Confirmation.TARGET_OR_HAND_CHANGES, aim.get().confirmation());
+
+        // 显式指定点击面时保留该面，但仍点目标本体不落邻格。
+        Optional<ItemUseAim.Aim> withFace = ItemUseAim.aim(ItemUseAim.Gesture.POUR, target,
+                ItemUseAim.CellNature.SOLID, directAccept, Direction.UP);
+        assertTrue(withFace.isPresent());
+        assertEquals(target, withFace.get().clickCell());
+        assertEquals(target, withFace.get().effectCell());
+        assertEquals(Direction.UP, withFace.get().clickFace());
+
+        // 普通实心方块（acceptsFluidDirectly=false）仍维持往朝向角色的外侧邻格倒水。
+        ItemUseAim.Around plainSolid = new ItemUseAim.Around(feet, Set.of(), Set.of(), STONE_ABOVE, false, false, false);
+        Optional<ItemUseAim.Aim> normalPour = ItemUseAim.aim(ItemUseAim.Gesture.POUR, target,
+                ItemUseAim.CellNature.SOLID, plainSolid);
+        assertTrue(normalPour.isPresent());
+        assertEquals(target.east(), normalPour.get().effectCell());
+        assertEquals(ItemUseAim.Confirmation.HAND_EMPTIES_OR_FLUID_APPEARS, normalPour.get().confirmation());
+    }
 }

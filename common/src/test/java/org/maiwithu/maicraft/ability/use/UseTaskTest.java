@@ -1000,6 +1000,32 @@ class UseTaskTest {
         assertEquals(TaskResult.Status.DONE, poured.status(), poured.summary());
     }
 
+    @Test
+    void 持水桶点工作盆直倒进目标本体_手桶变空正常结算不误报拆解或落旁格() {
+        // 模拟实机：手持水桶右键工作盆本体（effectCell == 目标格），服务端确认后主手水桶变空桶，背包相应多 1 个空桶。
+        Rig rig = new Rig();
+        rig.world.blocks.put(LEVER, "create:basin");
+        rig.world.blockEntities.add(LEVER);
+        rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:water_bucket", 1);
+        rig.world.backpackCounts.put("minecraft:water_bucket", 1);
+        rig.interactions.scriptDirectPour("minecraft:water_bucket", "工作盆接收了水", () -> {
+            rig.world.held = new UseSeams.ReadsWorld.Held("minecraft:bucket", 1);
+            rig.world.backpackCounts.clear();
+            rig.world.backpackCounts.put("minecraft:bucket", 1);
+        });
+
+        TaskResult result = rig.run(rig.input(position(LEVER), "minecraft:water_bucket", null, null, 1));
+        assertEquals(TaskResult.Status.DONE, result.status(), result.summary());
+        assertFalse(result.summary().contains("拆解"), "空桶留存不是物品拆解：" + result.summary());
+        assertFalse(result.summary().contains("不确认会不会做出东西"), "直倒流体进工作盆不按未知加工容器误报：" + result.summary());
+        assertTrue(result.changes().stream().noneMatch(change -> change.kind() == Change.Kind.BLOCK_PLACED),
+                "严禁把水泼进邻格并记为 BLOCK_PLACED：" + result.changes());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_CONSUMED
+                && "minecraft:water_bucket".equals(change.what())), result.changes().toString());
+        assertTrue(result.changes().stream().anyMatch(change -> change.kind() == Change.Kind.ITEM_GAINED
+                && "minecraft:bucket".equals(change.what())), result.changes().toString());
+    }
+
     private static Target position(BlockPos cell) {
         return new Target.Position(cell.getX(), cell.getY(), cell.getZ(), null);
     }
@@ -1161,7 +1187,9 @@ class UseTaskTest {
         }
         @Override public Optional<BlockPos> ground(int x, int z) { return Optional.empty(); }
         final Set<BlockPos> blockEntities = new HashSet<>();
+        final Map<String, Integer> backpackCounts = new HashMap<>();
         @Override public boolean hasBlockEntity(BlockPos cell) { return blockEntities.contains(cell); }
+        @Override public Map<String, Integer> backpackCounts() { return Map.copyOf(backpackCounts); }
         @Override public Optional<Boolean> doorOpen(BlockPos cell) { return Optional.ofNullable(doors.get(cell)); }
         @Override public Optional<Direction> preferredInteractFace(BlockPos cell) {
             return Optional.ofNullable(preferredFaces.get(cell));
@@ -1203,6 +1231,18 @@ class UseTaskTest {
         /** 一次放东西的生效：出手前手上拿着它，动作收场时世界出现放下的方块。 */
         void placed(String itemId, String scene, Runnable onWorldChanged) {
             script(InteractionResult.applied(scene), onWorldChanged, new UseSeams.ReadsWorld.Held(itemId, 1));
+        }
+
+        /** 一次持流体桶直接右键目标方块本体倒流体的生效（effectCell 为目标格本身，手势为 POUR）。 */
+        void scriptDirectPour(String bucketItemId, String scene, Runnable onEnd) {
+            InteractionResult result = InteractionResult.applied(scene);
+            UseSeams.ReadsWorld.Held held = new UseSeams.ReadsWorld.Held(bucketItemId, 1);
+            InteractionResult[] settled = {null};
+            Scripted action = new Scripted(2, ActionStatus.done(), () -> {
+                settled[0] = result;
+                onEnd.run();
+            });
+            script.add(new UseSeams.Built.Ready(action, () -> settled[0], ItemUseAim.Gesture.POUR, held, 0, LEVER));
         }
 
         // 动作结束时给出结论；没生效、没能确认的按交互动作的惯例报失败，结论照样读得到。

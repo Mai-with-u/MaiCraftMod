@@ -16,6 +16,7 @@ import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.AbstractCauldronBlock;
 import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.CandleBlock;
@@ -47,9 +48,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * 组装这一下交互的生产实现：出手前冻结现场，按手上实际拿着的东西归手势，按手势挑点哪一格、怎样算生效。
  *
  * <p>对实体用：按右键生物的那一份确认（手上变了、点开了界面、骑了上去、它坐下或被驯服、它被收起……）。写告示牌：编辑界面打开才算点上了。
- * 桶和船按自己的射线或使用行为作用（舀只认源格、倒在被点面外面、放船由船自己找落点），
- * 所以它们是"朝那一格使用手里的物品"，不是右键准星下的方块；其余都是右键要点的那一格。
- * 方块有没有自己的右键行为、能不能直接点着，按方块的种类与它给不给界面判断，不按名字猜。
+ * 桶和船按自己的射线或使用行为作用（舀只认源格、对普通方块倒在被点面外面、放船由船自己找落点），
+ * 所以它们走"朝那一格使用手里的物品"；但非潜行持流体桶点工作盆、炼药锅等能直接接收流体的方块时，改为直接右键目标方块本体而非往外侧邻格泼水；
+ * 其余都是右键要点的那一格。方块有没有自己的右键行为、能不能直接点着，按方块的种类与它给不给界面判断，不按名字猜。
  */
 final class LiveUseInteractions implements UseSeams.BuildsInteraction {
 
@@ -147,7 +148,10 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             return new UseSeams.Built.Ready(brush, brush::result, gesture, held, menuBefore, null);
         }
         ItemUseAim.CellNature nature = natureOf(state);
-        ItemUseAim.Around around = aroundOf(level, player, cell, state);
+        // 非潜行持流体桶点工作盆、炼药锅等方块时直接走方块右键接收流体；显式潜行时保留原版绕过方块右键的语义。
+        boolean acceptsFluid = gesture == ItemUseAim.Gesture.POUR && held != null
+                && acceptsFluidDirectly(state, held.itemId(), sneakUse);
+        ItemUseAim.Around around = aroundOf(level, player, cell, state, acceptsFluid);
         Optional<ItemUseAim.Aim> planned = ItemUseAim.aim(gesture, cell, nature, around, target.face());
         if (planned.isEmpty()) {
             // 锄、锹被上面一下就能打掉的野生草木挡着：交给任务先过许可、打掉它，再回来出手。
@@ -158,14 +162,12 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         ItemUseAim.Aim aim = planned.get();
         var confirmation = GestureConfirmations.forGesture(aim.confirmation(), aim.effectCell(),
                 InteractionHand.MAIN_HAND, handBefore, level.getBlockState(aim.clickCell()), menuBefore);
-        // 桶按自己的射线作用：朝效果那一格使用手里的物品；别的东西右键要点的那一格。
-        boolean bucket = gesture == ItemUseAim.Gesture.SCOOP || gesture == ItemUseAim.Gesture.POUR;
-        // 放船这类（OWN_USE）点不进方块：原版玩家点水面放船，也是对格右键没有反应后落到
-        // "使用手里物品"这一步，船自己沿视线按流体的规则找落点。同样朝目标用手里物品。
-        boolean ownUse = gesture == ItemUseAim.Gesture.OWN_USE;
-        // 非快速连点的普通方块右键（如向充能器等方块实体放料或放方块）：等服务端方块操作确认号回来再采信主手/方块变化，
-        // 防止客户端本地预测（例如充能器本地直接 split(1) 清空主手）在高延迟下抢跑在服务端拒收回滚之前被误判生效。
-        if (!bucket && !ownUse && !target.quick()
+        // 舀源格、对普通方块/空气倒水以及放船走「朝效果格使用手里的物品」；
+        // 对工作盆、炼药锅等能直接通过方块右键接收流体的方块倒水时，必须走方块右键本身，严禁往外侧邻格泼水。
+        boolean useToward = usesHeldItemToward(gesture, around);
+        // 非快速连点的普通方块右键（含往工作盆/炼药锅直倒流体、向充能器放料或放方块）：等服务端方块操作确认号回来再采信主手/方块变化，
+        // 防止客户端本地预测在高延迟下抢跑在服务端拒收回滚之前被误判生效。
+        if (!useToward && !target.quick()
                 && aim.confirmation() == ItemUseAim.Confirmation.TARGET_OR_HAND_CHANGES) {
             confirmation = InteractionConfirmation.requiringBlockAcknowledgement(confirmation);
         }
@@ -181,7 +183,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         // 瞄准阶段已算出明确点击面（例如实心目标按朝向角色算出的面，或空气旁支撑格朝向目标的面）时必须把该面传下去，
         // 保证实际点击的面与 effectCell 预测格一致；否则在点击目标格本身时沿用调用方指定的面。
         Direction clickFace = resolvedClickFace(aim, cell, target.face());
-        if (!bucket && !ownUse && ItemUseAim.sneaksPastOffhandShield(
+        if (!useToward && ItemUseAim.sneaksPastOffhandShield(
                 gesture, player.getOffhandItem().is(Items.SHIELD))) {
             // 主手持斧且副手持盾时，原版非潜行右键会被当成举盾直接跳过：改发潜行右键让原版执行去皮、刮铜或除蜡。
             SneakingUse use = clickFace != null
@@ -190,12 +192,37 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                     : interactions.useBlockSneaking(aim.clickCell(), sneak, confirmation);
             return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
         }
-        AimAndInteract use = bucket || ownUse
+        AimAndInteract use = useToward
                 ? interactions.useHeldItemToward(aim.effectCell(), InteractionHand.MAIN_HAND, confirmation)
                 : clickFace != null ? interactions.useBlockFace(aim.clickCell(), clickFace, confirmation)
                 : target.quick() ? interactions.useBlockQuickly(aim.clickCell(), confirmation)
                 : interactions.useBlock(aim.clickCell(), confirmation);
         return new UseSeams.Built.Ready(use, use::result, gesture, held, menuBefore, aim.effectCell());
+    }
+
+    /**
+     * 决定本次交互走「朝效果格使用手持物品」还是「直接右键目标方块」：
+     * 空桶舀源格、放船以及对普通实心方块/空气格倒流体走前者；持流体桶对工作盆、炼药锅等可直倒流体方块必须走后者。
+     */
+    static boolean usesHeldItemToward(ItemUseAim.Gesture gesture, ItemUseAim.Around around) {
+        if (gesture == ItemUseAim.Gesture.OWN_USE || gesture == ItemUseAim.Gesture.SCOOP) return true;
+        return gesture == ItemUseAim.Gesture.POUR && !around.acceptsFluidDirectly();
+    }
+
+    /**
+     * 判断目标方块此刻能否通过方块右键直接接收手持流体桶（不把流体泼进外侧邻格）：
+     * 涵盖原版炼药锅家族（AbstractCauldronBlock）与可接流体的机械动力工作盆；显式潜行时返回 false 以保留原版绕过方块行为的语义。
+     */
+    static boolean acceptsFluidDirectly(BlockState state, String heldItemId, boolean sneakUse) {
+        return !sneakUse && acceptsFluidDirectly(state, heldItemId);
+    }
+
+    /** 同上，默认非潜行。 */
+    static boolean acceptsFluidDirectly(BlockState state, String heldItemId) {
+        if (state == null || heldItemId == null || heldItemId.isBlank()) return false;
+        if (state.getBlock() instanceof AbstractCauldronBlock) return true;
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return UseDecider.BASIN_BLOCK.equals(blockId) && LiveUseWorld.isBasinInteractItem(heldItemId);
     }
 
     /**
@@ -241,8 +268,9 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
                 : ItemUseAim.CellNature.SOLID;
     }
 
-    // 出手前的目标周围事实：能当支撑面的邻居、自己有右键行为的邻居、上方是否敞开、能不能点着它本身。
-    private static ItemUseAim.Around aroundOf(ClientLevel level, LocalPlayer player, BlockPos cell, BlockState state) {
+    // 出手前的目标周围事实：能当支撑面的邻居、自己有右键行为的邻居、上方是否敞开、能不能点着它本身、能否直倒流体。
+    private static ItemUseAim.Around aroundOf(ClientLevel level, LocalPlayer player, BlockPos cell, BlockState state,
+            boolean acceptsFluidDirectly) {
         Set<Direction> solid = new HashSet<>();
         Set<Direction> clickable = new HashSet<>();
         for (Direction direction : Direction.values()) {
@@ -252,7 +280,7 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             if (handlesRightClick(level, at, neighbor)) clickable.add(direction);
         }
         return new ItemUseAim.Around(player.blockPosition(), solid, clickable,
-                aboveOf(level, cell.above()), ignitesItself(state), alreadyLit(state));
+                aboveOf(level, cell.above()), ignitesItself(state), alreadyLit(state), acceptsFluidDirectly);
     }
 
     // 目标正上方那一格：空着；压着什么，是不是一下就能打掉的野生草木（草木按种类认，种的、树苗不算；

@@ -78,9 +78,12 @@ final class UseChanges {
             InteractionResult result, Map<String, Integer> backpackBefore,
             AdjacentBlockPlacement adjacentPlacement, CampfirePlacement campfirePlacement, boolean sneak) {
         boolean handConsumed = consumedHeld(interaction.heldBefore(), world.heldItem().orElse(null));
+        boolean directPourIntoTarget = interaction.gesture() == ItemUseAim.Gesture.POUR
+                && target != null && !target.isEntity()
+                && target.cell().equals(interaction.effectCell());
         String disassembled = null;
         AdjacentBlockPlacement.PlacedBeside placedBeside = null;
-        if (handConsumed) {
+        if (handConsumed && !directPourIntoTarget) {
             Map<String, Integer> gains = backpackGains(backpackBefore, world.backpackCounts(),
                     interaction.heldBefore());
             if (!gains.isEmpty()) {
@@ -144,11 +147,13 @@ final class UseChanges {
             record.accept(new Change(Change.Kind.BLOCK_PLACED, placedBeside.blockId(), 1, note));
             return new AppliedFinding(handConsumed, false, null, misclickedProcessor ? note : null);
         }
-        // 效果就在目标本身：若主手物品消失且背包新冒出其他物品，说明是拆解/转化进背包，不是塞进了加工容器。
+        // 效果就在目标本身：持流体桶直倒进工作盆/炼药锅后主手变空桶，属于正常倒流体入目标方块，不当作拆解或未知加工容器。
+        boolean directPourIntoTarget = interaction.gesture() == ItemUseAim.Gesture.POUR
+                && target.cell().equals(effect);
         String now = world.blockId(target.cell()).orElse("未加载");
-        boolean disassembled = handConsumed && !gained.isEmpty();
-        boolean placedIntoProcessor = handConsumed && !disassembled && now.equals(target.typeId())
-                && isUnknownProcessorBlock(world, facilities, target);
+        boolean disassembled = !directPourIntoTarget && handConsumed && !gained.isEmpty();
+        boolean placedIntoProcessor = !directPourIntoTarget && handConsumed && !disassembled
+                && now.equals(target.typeId()) && isUnknownProcessorBlock(world, facilities, target);
         String note;
         if (disassembled) {
             note = "手上的 " + interaction.heldBefore().itemId() + " 未放进方块，而是拆解/转化成了背包里的 " + formatGains(gained);
