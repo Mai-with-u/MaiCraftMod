@@ -19,6 +19,10 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.approach.BringsPlayerClose;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
+import org.maiwithu.maicraft.behavior.inventory.hands.BatchHotbarPlan;
+import org.maiwithu.maicraft.behavior.inventory.hands.HotbarSelection;
+import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.hands.StagesHotbar;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -28,7 +32,6 @@ import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.inventory.hands.MovesToMainhand;
 
 /**
  * 把几样东西一口气扔进同一格、扔完马上退开：往水里扔料等它变（AE2 的转化）就是这样做的。
@@ -56,7 +59,7 @@ public final class TossesTogether implements Action {
         }
     }
 
-    private enum Stage { APPROACH, LEAN, HAND, AIM, THROW, STEP_AWAY, FINISHED }
+    private enum Stage { PREPARE, APPROACH, LEAN, HAND, AIM, THROW, STEP_AWAY, FINISHED }
 
     /** 往前贴最多走这么多刻。 */
     private static final int LEAN_TICKS = 15;
@@ -77,7 +80,10 @@ public final class TossesTogether implements Action {
     private final Function<PlayerContext, FirstPersonScene> scenes;
     private final Optional<StepsAside> stepsAside;
 
-    private Stage stage = Stage.APPROACH;
+    private Stage stage;
+    /** 每项投掷在投前预置好的快捷栏格号（0..8）；空位不足未预置的项为 -1，投掷时平滑回退单样换手。 */
+    private List<Integer> stagedSlots;
+    private StagesHotbar staging;
     private int index;
     private Action current;
     private int leanTicks;
@@ -103,6 +109,17 @@ public final class TossesTogether implements Action {
     public TossesTogether(List<Toss> tosses, BlockPos cell, double catchHeight, boolean intoFluid,
             Permissions permissions, BringsPlayerClose approach, MovesToMainhand toMainhand,
             Function<PlayerContext, FirstPersonScene> scenes, Optional<StepsAside> stepsAside) {
+        this(tosses, cell, catchHeight, intoFluid, permissions, approach, toMainhand, scenes, stepsAside, null);
+    }
+
+    /**
+     * 同上，接受调用方在靠近水边前已完成批量预置的快捷栏槽位表：已预置时直接靠近开扔，
+     * 不再重复开背包；传 null 时由本动作在靠近前自动批量预置。
+     */
+    public TossesTogether(List<Toss> tosses, BlockPos cell, double catchHeight, boolean intoFluid,
+            Permissions permissions, BringsPlayerClose approach, MovesToMainhand toMainhand,
+            Function<PlayerContext, FirstPersonScene> scenes, Optional<StepsAside> stepsAside,
+            List<Integer> preStagedSlots) {
         this.tosses = List.copyOf(tosses);
         if (this.tosses.isEmpty()) throw new IllegalArgumentException("至少扔一样");
         this.target = new TossArc.Target(cell, catchHeight);
@@ -112,6 +129,25 @@ public final class TossesTogether implements Action {
         this.toMainhand = Objects.requireNonNull(toMainhand, "toMainhand");
         this.scenes = Objects.requireNonNull(scenes, "scenes");
         this.stepsAside = Objects.requireNonNull(stepsAside, "stepsAside");
+        this.stagedSlots = preStagedSlots == null ? List.of() : List.copyOf(preStagedSlots);
+        this.stage = preStagedSlots == null ? Stage.PREPARE : Stage.APPROACH;
+    }
+
+    /**
+     * 按投掷列表计算每项在投前批量预置快捷栏时应准备的净份数：
+     * 同一种物品在配方里分两次扔时（例如触发物先精确扔 sets 件、其余料扔完后再补扔剩余份数），
+     * 后一项按增量计算所需件数，避免多占格子或与第一份互相抢槽。
+     */
+    public static List<BatchHotbarPlan.Request> stagingRequests(List<Toss> tosses) {
+        Map<String, Integer> plannedByItem = new LinkedHashMap<>();
+        List<BatchHotbarPlan.Request> requests = new ArrayList<>(tosses.size());
+        for (Toss toss : tosses) {
+            int prior = plannedByItem.getOrDefault(toss.itemId(), 0);
+            int delta = Math.max(1, toss.count() - prior);
+            plannedByItem.put(toss.itemId(), Math.max(prior, toss.count()));
+            requests.add(new BatchHotbarPlan.Request(toss.itemId(), delta, toss.exact()));
+        }
+        return List.copyOf(requests);
     }
 
     /** 每样确认丢出去了几件。 */
@@ -136,6 +172,7 @@ public final class TossesTogether implements Action {
             return ActionStatus.running();
         }
         return switch (stage) {
+            case PREPARE -> prepare(context);
             case APPROACH -> walk(context);
             case LEAN -> lean(player);
             case HAND -> hand(context);
@@ -144,6 +181,20 @@ public final class TossesTogether implements Action {
             case STEP_AWAY -> stepAway(context);
             case FINISHED -> ActionStatus.done();
         };
+    }
+
+    // 靠近前一次性把本轮要连扔的原料分槽预置进不同快捷栏格并关上背包；空位不足或预置失败时平滑进入靠近，投掷时按单样换手回退。
+    private ActionStatus prepare(TickContext context) {
+        if (staging == null) {
+            staging = new StagesHotbar(stagingRequests(tosses));
+            current = staging;
+        }
+        ActionStatus status = staging.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        // 仅在批量预置全部确认完成时采纳预置槽位表；中途失败时清空槽位表，投掷时按单样换手平滑回退。
+        stagedSlots = status instanceof ActionStatus.Done ? staging.stagedSlots() : List.of();
+        staging = null;
+        return enter(Stage.APPROACH);
     }
 
     // 走到那一格正旁边、出手点比接住东西的高度高一截的站位；扔进液体时湿位也参选，其余只挑干位。
@@ -186,14 +237,21 @@ public final class TossesTogether implements Action {
         if (index >= tosses.size()) return enter(started ? Stage.STEP_AWAY : Stage.FINISHED);
         Toss toss = tosses.get(index);
         if (current == null) {
-            if (heldCount(player, toss.itemId()) > 0) return enter(Stage.AIM);
-            Optional<Action> move = toMainhand.moveToMainhand(toss.itemId());
-            if (move.isEmpty()) {
-                notes.add(toss.itemId() + " 换不到主手，没扔够");
-                index++;
-                return ActionStatus.running();
+            // 优先使用投前批量预置好的快捷栏格：直接按数字键切槽，不在水边重新开背包，也不误选到同物品的另一叠。
+            int stagedSlot = index < stagedSlots.size() ? stagedSlots.get(index) : -1;
+            if (stagedSlot >= 0 && slotHasItem(player, stagedSlot, toss.itemId())) {
+                if (player.localPlayer().getInventory().selected == stagedSlot) return enter(Stage.AIM);
+                current = new HotbarSelection(stagedSlot);
+            } else {
+                if (heldCount(player, toss.itemId()) > 0) return enter(Stage.AIM);
+                Optional<Action> move = toMainhand.moveToMainhand(toss.itemId());
+                if (move.isEmpty()) {
+                    notes.add(toss.itemId() + " 换不到主手，没扔够");
+                    index++;
+                    return ActionStatus.running();
+                }
+                current = move.get();
             }
-            current = move.get();
         }
         return switch (current.tick(context)) {
             case ActionStatus.Running running -> running;
@@ -340,6 +398,13 @@ public final class TossesTogether implements Action {
         return ActionStatus.failed(problem);
     }
 
+    private static boolean slotHasItem(PlayerContext player, int slot, String itemId) {
+        var inventory = player.localPlayer().getInventory();
+        if (slot < 0 || slot >= inventory.getContainerSize()) return false;
+        ItemStack stack = inventory.getItem(slot);
+        return !stack.isEmpty() && idOf(stack).equals(itemId);
+    }
+
     private int heldCount(PlayerContext player, String itemId) {
         ItemStack held = scenes.apply(player).heldItem(InteractionHand.MAIN_HAND);
         return held != null && !held.isEmpty() && idOf(held).equals(itemId) ? held.getCount() : 0;
@@ -389,6 +454,7 @@ public final class TossesTogether implements Action {
     public String describe() {
         String where = target.cell().toShortString();
         return switch (stage) {
+            case PREPARE -> current == null ? "把本轮原料预置进快捷栏" : current.describe();
             case APPROACH -> current == null ? "走到 " + where + " 旁边" : current.describe();
             case LEAN -> "往 " + where + " 贴近一点";
             case HAND -> "把 " + tosses.get(Math.min(index, tosses.size() - 1)).itemId() + " 换到主手";

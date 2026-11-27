@@ -11,18 +11,18 @@ import java.util.Set;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 
+import org.maiwithu.maicraft.behavior.acquire.cook.FluidTransformPlan;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
-import org.maiwithu.maicraft.behavior.inventory.hands.SplitsToHand;
 import org.maiwithu.maicraft.behavior.inventory.drops.StepsAside;
 import org.maiwithu.maicraft.behavior.inventory.drops.TossesTogether;
+import org.maiwithu.maicraft.behavior.inventory.hands.StagesHotbar;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -32,18 +32,16 @@ import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.TickContext;
-import org.maiwithu.maicraft.behavior.acquire.sources.TransformWatch;
-import org.maiwithu.maicraft.behavior.acquire.cook.FluidTransformPlan;
 
 /**
  * 料备齐以后往一格静水里扔料、等它变、捡回来，像玩家一样：
- * 触发的那一样换到主手只留份数件 → 走到水边 → 记下脚边已有的掉落物 → 先扔触发的那一样、再把别的料整组扔进同一格 →
- * 退开 → 看着那格水等产物冒出来 → 把扔料以后新冒出来的都捡回来（产物加没用完的料）。
+ * 靠近水边前先把本轮要扔的几样原料按份数分槽预置进不同的快捷栏格 → 走到水边 → 记下脚边已有的掉落物 →
+ * 直接切快捷栏一口气连扔进同一格 → 退开 → 看着那格水等产物冒出来 → 把扔料以后新冒出来的都捡回来（产物加没用完的料）。
  * 产物进没进背包由引擎按身上清点；一件都没变出来按这里扔不成收场，引擎换别的路。
  */
 public final class FluidTransformRun implements Action {
 
-    private enum Stage { HAND, SPLIT, APPROACH, TOSS, WAIT, COLLECT, FINISHED }
+    private enum Stage { PREPARE, APPROACH, TOSS, WAIT, COLLECT, FINISHED }
 
     /** 数产物的范围：那一格周围这么远（产物在触发的那件料那一格里冒出来，带一点随机速度）。 */
     private static final double PRODUCT_RADIUS = 2.5;
@@ -56,8 +54,10 @@ public final class FluidTransformRun implements Action {
     private final Optional<StepsAside> stepsAside;
     private final TaskRecords records;
 
-    private Stage stage = Stage.HAND;
+    private Stage stage = Stage.PREPARE;
     private Action current;
+    private StagesHotbar staging;
+    private List<Integer> stagedSlots = List.of();
     private TossesTogether tossing;
     private Set<Integer> before = Set.of();
     private TransformWatch watch;
@@ -82,9 +82,8 @@ public final class FluidTransformRun implements Action {
             return ActionStatus.running();
         }
         return switch (stage) {
-            case HAND -> hand(context);
-            case SPLIT -> step(context, Stage.APPROACH);
-            case APPROACH -> step(context, Stage.TOSS);
+            case PREPARE -> prepare(context);
+            case APPROACH -> approach(context);
             case TOSS -> toss(context);
             case WAIT -> waitFor(player);
             case COLLECT -> collect(context);
@@ -92,50 +91,48 @@ public final class FluidTransformRun implements Action {
         };
     }
 
-    // 触发的那一样换到主手，再只留份数件：扔的时候它先下水，多扔一件就多耗一件。
-    private ActionStatus hand(TickContext context) {
-        if (current == null) {
-            if (heldCount(context.player(), plan.trigger()) > 0) return enter(Stage.SPLIT, new SplitsToHand(plan.sets()));
-            Optional<Action> move = services.toMainhand().moveToMainhand(plan.trigger());
-            if (move.isEmpty()) {
-                return stop(Problem.of(Problem.Kind.NEED_ITEM, "身上没有 " + plan.trigger() + "，或换不到主手"));
-            }
-            current = move.get();
+    // 靠近水边前一次性把本轮要连扔的 2–3 样原料按所需份数分槽预置进不同快捷栏格并关上背包，
+    // 避免贴在水边投掷中途开背包换料超过原版 40 刻拾取冷却；空位不足时平滑继续，投掷循环按单样换手回退。
+    private ActionStatus prepare(TickContext context) {
+        if (staging == null) {
+            staging = new StagesHotbar(TossesTogether.stagingRequests(buildTosses(plan)));
+            current = staging;
         }
-        return switch (current.tick(context)) {
-            case ActionStatus.Running running -> running;
-            case ActionStatus.Done done -> enter(Stage.SPLIT, new SplitsToHand(plan.sets()));
-            case ActionStatus.Failed failed -> stop(failed.problem());
-        };
+        ActionStatus status = staging.tick(context);
+        if (status instanceof ActionStatus.Running) return status;
+        // 仅在批量预置全部确认完成时采纳预置槽位表；中途失败时清空槽位表，投掷循环按单样换手平滑回退。
+        stagedSlots = status instanceof ActionStatus.Done ? staging.stagedSlots() : List.of();
+        staging = null;
+        return enter(Stage.APPROACH, services.approach().toward(waterTarget(context), permissions));
     }
 
-    // 只留份数件、走到水边：做完进下一步；走到水边后记下脚边已有的掉落物，之后只捡新冒出来的。
-    private ActionStatus step(TickContext context, Stage next) {
+    // 走到水边：到达后记下脚边已有的掉落物，之后只捡新冒出来的，再启动连扔。
+    private ActionStatus approach(TickContext context) {
         return switch (current.tick(context)) {
             case ActionStatus.Running running -> running;
-            case ActionStatus.Done done -> next == Stage.APPROACH
-                    ? enter(Stage.APPROACH, services.approach().toward(waterTarget(context), permissions))
-                    : startTossing(context);
-            case ActionStatus.Failed failed -> stage == Stage.SPLIT
-                    // 分不出恰好几件（背包没空格）：照样走，扔的时候只丢份数件。
-                    ? enter(Stage.APPROACH, services.approach().toward(waterTarget(context), permissions))
-                    : stop(failed.problem());
+            case ActionStatus.Done done -> startTossing(context);
+            case ActionStatus.Failed failed -> stop(failed.problem());
         };
     }
 
     private ActionStatus startTossing(TickContext context) {
         before = drops.nearby();
+        List<TossesTogether.Toss> tosses = buildTosses(plan);
+        tossing = new TossesTogether(tosses, pool, surface(context), true, permissions, services.approach(),
+                services.toMainhand(), FirstPersonScene::of, stepsAside, stagedSlots);
+        return enter(Stage.TOSS, tossing);
+    }
+
+    // 按配方构造连扔清单：先精确扔出触发物份数，再扔其余原料，若触发物在配方中一份需多件则最后补扔够数。
+    static List<TossesTogether.Toss> buildTosses(FluidTransformPlan.Plan plan) {
         List<TossesTogether.Toss> tosses = new ArrayList<>();
         tosses.add(new TossesTogether.Toss(plan.trigger(), plan.sets(), true));
         plan.needs().forEach((item, count) -> {
             if (!item.equals(plan.trigger())) tosses.add(new TossesTogether.Toss(item, count, false));
         });
-        // 触发的那一样在配方里还当别的料用（一份要两件）：别的料扔完再补扔够它那一份。
         int triggerTotal = plan.needs().get(plan.trigger());
         if (triggerTotal > plan.sets()) tosses.add(new TossesTogether.Toss(plan.trigger(), triggerTotal, false));
-        tossing = new TossesTogether(tosses, pool, surface(context), true, permissions, services.approach(),
-                services.toMainhand(), FirstPersonScene::of, stepsAside);
-        return enter(Stage.TOSS, tossing);
+        return List.copyOf(tosses);
     }
 
     // 扔：一口气扔完退开；一件都没扔出去就是这里扔不成。
@@ -222,11 +219,6 @@ public final class FluidTransformRun implements Action {
         return ActionStatus.failed(problem);
     }
 
-    private static int heldCount(PlayerContext player, String itemId) {
-        ItemStack held = player.localPlayer().getItemInHand(InteractionHand.MAIN_HAND);
-        return !held.isEmpty() && idOf(held).equals(itemId) ? held.getCount() : 0;
-    }
-
     private static String idOf(ItemStack stack) {
         return BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
     }
@@ -247,7 +239,7 @@ public final class FluidTransformRun implements Action {
 
     @Override public String describe() {
         return switch (stage) {
-            case HAND, SPLIT -> "把 " + plan.trigger() + " 换到主手、只留 " + plan.sets() + " 件";
+            case PREPARE -> current == null ? "把本轮转化原料预置进快捷栏" : current.describe();
             case APPROACH -> "走到 " + pool.toShortString() + " 的水边";
             case TOSS -> current == null ? "往水里扔料" : current.describe();
             case WAIT -> "看着水面等它变成 " + plan.recipe().resultId();
