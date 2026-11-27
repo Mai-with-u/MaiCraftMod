@@ -229,6 +229,12 @@ dependencies {
     compileOnly("maven.modrinth:touhou-little-maid:${touhoulittlemaid_version}") { transitive = false }
     // 农夫乐事厨锅：读方块实体同步过来的槽与供热判定，编译用实测实例装的 1.3.2。
     compileOnly("maven.modrinth:farmers-delight:${farmersdelight_version}") { transitive = false }
+    // ExtendedAE 与前置 Glodium：读写端直接调用公开方块实体、菜单与网络包，只编译不打包。
+    compileOnly("maven.modrinth:extended-ae:${extendedae_version}") { transitive = false }
+    compileOnly("maven.modrinth:glodium:${glodium_version}") { transitive = false }
+    // 高级 AE（AdvancedAE）与内嵌库 ae2addonlib：反应仓与输出方向子菜单的读写端直接调用公开类，只编译不打包。
+    compileOnly("maven.modrinth:advancedae:${advancedae_version}") { transitive = false }
+    compileOnly("io.github.pedroksl:ae2addonlib:${ae2addonlib_version}") { transitive = false }
     jarJar(implementation('org.xerial:sqlite-jdbc')) {
         version { strictly "[${sqlite_jdbc_version},4.0)"; prefer sqlite_jdbc_version }
     }

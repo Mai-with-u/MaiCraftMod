@@ -158,7 +158,8 @@ final class MachineRunTask extends PhasedTask<MachineRunTask.Phase> {
         // 蓝图桌写蓝图、蓝图加农炮照蓝图施工：不按配方投料，整段交给机器类型；给了蓝图却不是这种机器就当场说。
         Optional<FullRun> whole = feeding == null ? Optional.empty()
                 : feeding.fullRun(cell, new RunRequest(input.item(), input.count(), input.file(),
-                        input.anchor(), input.rotation(), input.maxSeconds()), input.permissions());
+                        input.anchor(), input.rotation(), input.maxSeconds(), input.waitForOutput()),
+                        input.permissions());
         if (whole.isPresent()) {
             fullRun = whole.get();
             prepared = fullRun;
