@@ -9,6 +9,7 @@ import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.advancedae.AdvancedAeCompat;
 import org.maiwithu.maicraft.compat.appmek.AppMekCompat;
 import org.maiwithu.maicraft.compat.backpack.BackpackCompat;
 import org.maiwithu.maicraft.compat.sable.SableCompat;
@@ -18,6 +19,7 @@ import org.maiwithu.maicraft.compat.flightcontrol.FlightControlCompat;
 import org.maiwithu.maicraft.compat.createjetpack.CreateJetpackCompat;
 import org.maiwithu.maicraft.compat.create.CreateCompat;
 import org.maiwithu.maicraft.compat.emi.EmiCompat;
+import org.maiwithu.maicraft.compat.extendedae.ExtendedAeCompat;
 import org.maiwithu.maicraft.compat.farmersdelight.FarmersDelightCompat;
 import org.maiwithu.maicraft.compat.ftbquests.FtbQuestsCompat;
 import org.maiwithu.maicraft.compat.jei.JeiCompat;
@@ -36,6 +38,7 @@ import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminalMenu;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTerminals;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTools;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsTransforms;
+import org.maiwithu.maicraft.neoforge.compat.advancedae.AdvancedAeClientReads;
 import org.maiwithu.maicraft.neoforge.compat.appmek.AppliedMekanisticsReads;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackItems;
 import org.maiwithu.maicraft.neoforge.compat.backpack.SophisticatedBackpackMenus;
@@ -56,6 +59,7 @@ import org.maiwithu.maicraft.neoforge.compat.create.CreateLogisticsReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateSchematicReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateValueReads;
 import org.maiwithu.maicraft.neoforge.compat.emi.EmiClientReads;
+import org.maiwithu.maicraft.neoforge.compat.extendedae.ExtendedAeClientReads;
 import org.maiwithu.maicraft.neoforge.compat.farmersdelight.FarmersDelightClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientReads;
 import org.maiwithu.maicraft.neoforge.compat.ftbquests.FtbQuestsClientSends;
@@ -146,6 +150,12 @@ public final class ClientCompatCatalog {
                         () -> new FarmersDelightCompat(new FarmersDelightClientReads())),
                 // 应用机械（Applied Mekanistics）：按 1.6.3 编译；装了 1.7 及以上不登记，实测通过后再放宽。
                 new SupportedMod<>(AppMekCompat.MOD_ID, "应用机械", new VerifiedVersions("1.6.3", "1.7"),
-                        () -> new AppMekCompat(new AppliedMekanisticsReads(), externalKeys)));
+                        () -> new AppMekCompat(new AppliedMekanisticsReads(), externalKeys)),
+                // 高级 AE（AdvancedAE）：按 1.6.11 编译（实测实例版本为 1.6.11-1.21.1）；装了 1.7 及以上不登记。
+                new SupportedMod<>(AdvancedAeCompat.MOD_ID, "高级 AE", new VerifiedVersions("1.6.11", "1.7"),
+                        () -> new AdvancedAeCompat(new AdvancedAeClientReads())),
+                // AE2 扩展（ExtendedAE）：按 1.21-2.2.35 编译，已逐类核对实测实例 1.21-2.2.33-neoforge 签名一致；装了 1.21-2.3 及以上不登记。
+                new SupportedMod<>(ExtendedAeCompat.MOD_ID, "AE2 扩展", new VerifiedVersions("1.21-2.2.33", "1.21-2.3"),
+                        () -> new ExtendedAeCompat(new ExtendedAeClientReads())));
     }
 }

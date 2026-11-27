@@ -8,12 +8,16 @@ import org.maiwithu.maicraft.compat.VerifiedVersions;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsDeviceServerReads;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsDeviceServerReadsExtras;
 import org.maiwithu.maicraft.neoforge.compat.ae2.AppliedEnergisticsGridReads;
+import org.maiwithu.maicraft.neoforge.compat.advancedae.AdvancedAeDeviceServerReads;
 import org.maiwithu.maicraft.neoforge.compat.create.CreateTrainScheduleReads;
+import org.maiwithu.maicraft.neoforge.compat.extendedae.ExtendedAeDeviceServerReads;
 import org.maiwithu.maicraft.neoforge.compat.mekanism.MekanismNetworkServerReads;
 import org.maiwithu.maicraft.neoforge.compat.sable.SableForceServerReads;
 import org.maiwithu.maicraft.server.compat.ServerCompatModule;
 import org.maiwithu.maicraft.server.compat.ae2.Ae2ServerCompat;
+import org.maiwithu.maicraft.server.compat.advancedae.AdvancedAeServerCompat;
 import org.maiwithu.maicraft.server.compat.create.CreateServerCompat;
+import org.maiwithu.maicraft.server.compat.extendedae.ExtendedAeServerCompat;
 import org.maiwithu.maicraft.server.compat.mekanism.MekanismServerCompat;
 import org.maiwithu.maicraft.server.compat.sable.SableServerCompat;
 
@@ -43,6 +47,12 @@ public final class ServerCompatCatalog {
                         () -> new MekanismServerCompat(new MekanismNetworkServerReads())),
                 // Sable：质量、重心、各处的力只在服务端，看载具的受力经只读操作 sable.body 回答。
                 new SupportedMod<>(SableServerCompat.MOD_ID, "Sable 物理结构", new VerifiedVersions("2.0.3", "2.1"),
-                        () -> new SableServerCompat(new SableForceServerReads())));
+                        () -> new SableServerCompat(new SableForceServerReads())),
+                // 高级 AE：反应仓的进度、缓冲电量、自动输出、允许输出面与升级卡经只读操作 advanced_ae.device 回答。
+                new SupportedMod<>(AdvancedAeServerCompat.MOD_ID, "高级 AE", new VerifiedVersions("1.6.11", "1.7"),
+                        () -> new AdvancedAeServerCompat(new AdvancedAeDeviceServerReads())),
+                // AE2 扩展：单台扩展机器储罐、进度、无线对端与组装矩阵集群统计经只读操作 extendedae.device 回答。
+                new SupportedMod<>(ExtendedAeServerCompat.MOD_ID, "AE2 扩展", new VerifiedVersions("1.21-2.2.33", "1.21-2.3"),
+                        () -> new ExtendedAeServerCompat(new ExtendedAeDeviceServerReads())));
     }
 }

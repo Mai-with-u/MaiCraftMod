@@ -17,15 +17,17 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
  */
 public final class ModFeatures {
 
-    private static final Map<String, String> FEATURE_BY_MOD_ID = Map.of(
-            "ae2", "ae2",
-            "appmek", "appmek",
-            "create", "create",
-            "ftbquests", "ftb_quests",
-            "mekanism", "mekanism",
-            "sable", "sable",
-            "sophisticatedbackpacks", "sophisticated_backpacks",
-            "touhou_little_maid", "touhou_little_maid");
+    private static final Map<String, String> FEATURE_BY_MOD_ID = Map.ofEntries(
+            Map.entry("advanced_ae", "advanced_ae"),
+            Map.entry("ae2", "ae2"),
+            Map.entry("appmek", "appmek"),
+            Map.entry("create", "create"),
+            Map.entry("extendedae", "extendedae"),
+            Map.entry("ftbquests", "ftb_quests"),
+            Map.entry("mekanism", "mekanism"),
+            Map.entry("sable", "sable"),
+            Map.entry("sophisticatedbackpacks", "sophisticated_backpacks"),
+            Map.entry("touhou_little_maid", "touhou_little_maid"));
 
     /** 进世界登记全部能力时顺带交回给世界现场复用的实例。 */
     record WorldAbilities(List<CarriedBackpack> carriedBackpacks,
