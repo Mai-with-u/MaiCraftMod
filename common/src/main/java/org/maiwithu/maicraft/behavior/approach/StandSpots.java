@@ -130,32 +130,108 @@ public final class StandSpots {
         }
         // 可达性口径收尾：比角色此刻脚底高出一跳以上的候选排到同层与更低的之后。
         // 稳定排序，同档之内保持代价顺序；不剔除——有楼梯、能垫脚时它们照样能到，只是不先试。
-        // 声明允许湿脚的目标按干、湿两组各排各的：干位整组在湿位前面的规矩不变。
+        // 声明允许湿脚的目标按干、湿两组各排各的：干位整组在湿位前面的规矩不变；湿位组内优先脚踩池底的浅水位，避开深水。
+        // 投掷目标在同档内再优先挑背离目标方向有 2–3 格退路的站位，防止扔完退不开把料吸回包里。
         if (target.wetFeetAllowed()) {
             int firstWet = 0;
             while (firstWet < spots.size() && !world.inFluid(spots.get(firstWet).feet())) {
                 firstWet++;
             }
-            orderByReachability(spots.subList(0, firstWet), current, world);
-            orderByReachability(spots.subList(firstWet, spots.size()), current, world);
+            orderByReachability(spots.subList(0, firstWet), current, target, world, false);
+            orderByReachability(spots.subList(firstWet, spots.size()), current, target, world, true);
         } else {
-            orderByReachability(spots, current, world);
+            orderByReachability(spots, current, target, world, false);
         }
         return new Ranking(spots, rejected);
     }
 
     /**
      * 把候选按可达档排好（稳定，档内保持代价顺序）：要爬的整档挪到与角色同层或更低的之后；
-     * 同一档里旁边一侧是深落差的（崖边、窄台）挪到后面，尽量不站在边沿上干活，别处都站不了才站。
+     * 同一档里旁边一侧是深落差的（崖边、窄台）挪到后面，尽量不站在边沿上干活，别处都站不了才站；
+     * 湿位组内优先浅水（脚踩实地）避开深水漂浮；投掷目标优先背离目标方向有 2–3 格可走退路的站位。
      */
-    private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet, ApproachWorldView world) {
-        // 崖边要往下数落差，每个站位排序前先看一次记下：比较时不再每比一对就重数四面。
+    private static void orderByReachability(List<StandSpot> spots, BlockPos currentFeet, ApproachTarget target,
+                                            ApproachWorldView world, boolean wetGroup) {
+        // 崖边、浅水与投掷退路在排序前各算一次记下：比较时不再每比一对就重复查四面。
         Map<BlockPos, Integer> edge = new HashMap<>();
+        Map<BlockPos, Integer> deepWater = wetGroup ? new HashMap<>() : null;
+        Map<BlockPos, Integer> retreat = target.kind() == InteractionKind.TOSS ? new HashMap<>() : null;
         for (StandSpot spot : spots) {
-            edge.computeIfAbsent(spot.feet(), feet -> besideDeepDrop(feet, world) ? 1 : 0);
+            BlockPos feet = spot.feet();
+            edge.computeIfAbsent(feet, at -> besideDeepDrop(at, world) ? 1 : 0);
+            if (deepWater != null) {
+                deepWater.computeIfAbsent(feet, at -> deepWaterTier(at, world));
+            }
+            if (retreat != null) {
+                retreat.computeIfAbsent(feet, at -> tossRetreatTier(at, target.anchorBlock(), world));
+            }
         }
-        spots.sort(Comparator.<StandSpot>comparingInt(spot -> climbTier(spot.feet(), currentFeet))
-                .thenComparingInt(spot -> edge.get(spot.feet())));
+        Comparator<StandSpot> order = Comparator.comparingInt(spot -> climbTier(spot.feet(), currentFeet));
+        if (deepWater != null) {
+            order = Comparator.<StandSpot>comparingInt(spot -> deepWater.get(spot.feet())).thenComparing(order);
+        }
+        order = order.thenComparingInt(spot -> edge.get(spot.feet()));
+        if (retreat != null) {
+            order = order.thenComparingInt(spot -> retreat.get(spot.feet()));
+        }
+        spots.sort(order);
+    }
+
+    /** 湿位深浅档：脚下非液体且有实心底是 0 档浅水，脚下仍是水或悬空漂浮是 1 档深水（需要频繁换气）。 */
+    static int deepWaterTier(BlockPos feet, ApproachWorldView world) {
+        return !world.inFluid(feet.below()) && world.solidFloor(feet) ? 0 : 1;
+    }
+
+    /**
+     * 投掷站位退路档：0 档为背离目标方向连续有至少 2 格可走退路（3 格最佳），
+     * 1 档为正后方受阻但左右侧向有至少 2 格可走退路，2 档为四周退路不足 2 格。
+     */
+    static int tossRetreatTier(BlockPos feet, BlockPos targetCell, ApproachWorldView world) {
+        Direction away = horizontalAway(feet, targetCell);
+        if (away == null) return 2;
+        if (retreatWalkableSteps(feet, away, world) >= 2) return 0;
+        if (retreatWalkableSteps(feet, away.getClockWise(), world) >= 2
+                || retreatWalkableSteps(feet, away.getCounterClockWise(), world) >= 2) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private static Direction horizontalAway(BlockPos feet, BlockPos targetCell) {
+        int dx = feet.getX() - targetCell.getX();
+        int dz = feet.getZ() - targetCell.getZ();
+        if (dx == 0 && dz == 0) return null;
+        if (Math.abs(dx) >= Math.abs(dz)) return dx > 0 ? Direction.EAST : Direction.WEST;
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    // 沿指定水平方向检查能否连续走出最多 3 格退路（支持同层或上下 1 格台阶），避开墙体、深落差、岩浆与深水。
+    private static int retreatWalkableSteps(BlockPos start, Direction dir, ApproachWorldView world) {
+        BlockPos cursor = start;
+        int steps = 0;
+        for (int i = 0; i < 3; i++) {
+            BlockPos next = nextRetreatCell(cursor, dir, world);
+            if (next == null) break;
+            cursor = next;
+            steps++;
+        }
+        return steps;
+    }
+
+    private static BlockPos nextRetreatCell(BlockPos from, Direction dir, ApproachWorldView world) {
+        BlockPos flat = from.relative(dir);
+        if (retreatStandable(flat, world)) return flat;
+        BlockPos up = flat.above();
+        // 迈上一格台阶前须确认起跳格头顶有足够净空（避免顶头跳不上去）。
+        if (world.isLoaded(from.above()) && world.headroom(from.above()) && retreatStandable(up, world)) return up;
+        BlockPos down = flat.below();
+        if (world.isLoaded(flat) && world.headroom(flat) && retreatStandable(down, world)) return down;
+        return null;
+    }
+
+    private static boolean retreatStandable(BlockPos feet, ApproachWorldView world) {
+        return world.isLoaded(feet) && world.solidFloor(feet) && world.headroom(feet)
+                && world.dropBelow(feet) <= MAX_DROP && !world.inFluid(feet) && !world.lavaBeside(feet);
     }
 
     /** 旁边一侧空着、往下三格以上没有落脚面就算深落差：站在那儿干活，一脚踩空就摔得掉血。 */

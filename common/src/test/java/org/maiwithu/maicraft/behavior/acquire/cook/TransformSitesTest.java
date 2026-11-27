@@ -85,6 +85,56 @@ class TransformSitesTest {
         assertEquals(List.of(near, far, crowdedNear), order);
     }
 
+    @Test
+    void 优先挑有两三格退路的浅水岸边格_避开贴墙窄坑与深水区() {
+        // 1) 距离最近但处于 2 格深水中央、四周无干岸的水格。
+        BlockPos deepCenter = new BlockPos(2, 64, 0);
+        Pond world = new Pond();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                world.blocks.put(deepCenter.offset(dx, 0, dz), Blocks.WATER.defaultBlockState());
+                world.blocks.put(deepCenter.offset(dx, -1, dz), Blocks.WATER.defaultBlockState());
+                world.blocks.put(deepCenter.offset(dx, -2, dz), Blocks.STONE.defaultBlockState());
+            }
+        }
+        // 2) 中距离但贴墙无退路的窄水坑（干岸后面紧贴两格石墙）。
+        BlockPos crampedPool = new BlockPos(10, 64, 0);
+        world.blocks.put(crampedPool, Blocks.WATER.defaultBlockState());
+        world.blocks.put(crampedPool.below(), Blocks.STONE.defaultBlockState());
+        for (Direction side : Direction.Plane.HORIZONTAL) {
+            world.blocks.put(crampedPool.relative(side), Blocks.STONE.defaultBlockState());
+            world.blocks.put(crampedPool.relative(side).above(), Blocks.STONE.defaultBlockState());
+            world.blocks.put(crampedPool.relative(side).above(2), Blocks.STONE.defaultBlockState());
+        }
+        // 只留西边 1 格能站，且紧挨着西边的退路是墙。
+        world.blocks.remove(crampedPool.west().above());
+        world.blocks.remove(crampedPool.west().above(2));
+        world.blocks.put(crampedPool.west(2).above(), Blocks.STONE.defaultBlockState());
+        world.blocks.put(crampedPool.west(2).above(2), Blocks.STONE.defaultBlockState());
+
+        // 3) 稍远但浅水且岸边背离水格方向有 3 格宽敞平地退路的水格。
+        BlockPos openShallow = new BlockPos(15, 64, 0);
+        world.blocks.put(openShallow, Blocks.WATER.defaultBlockState());
+        world.blocks.put(openShallow.below(), Blocks.STONE.defaultBlockState());
+        for (int step = 1; step <= 4; step++) {
+            world.blocks.put(openShallow.east(step), Blocks.STONE.defaultBlockState());
+        }
+
+        TransformSites.Pool deepEval = TransformSites.evaluate(world, deepCenter, 2.0, false);
+        TransformSites.Pool crampedEval = TransformSites.evaluate(world, crampedPool, 10.0, false);
+        TransformSites.Pool openEval = TransformSites.evaluate(world, openShallow, 15.0, false);
+
+        assertFalse(deepEval.shallow(), "两格水深不应判为浅水");
+        assertFalse(deepEval.hasDryBank(), "深水中央四邻全是水，没有干岸");
+        assertTrue(crampedEval.hasDryBank() && crampedEval.retreatDepth() == 0, "贴墙窄坑应识别为无退路");
+        assertTrue(openEval.shallow() && openEval.hasDryBank() && openEval.retreatDepth() >= 3,
+                "浅水岸边且有 3 格平地应拿满退路评分");
+
+        List<BlockPos> ordered = TransformSites.order(List.of(deepEval, crampedEval, openEval));
+        assertEquals(List.of(openShallow, crampedPool, deepCenter), ordered,
+                "排序应优先有退路的浅水岸边，其次贴墙干岸，最后才是深水中央");
+    }
+
     /** 摆了几格方块的世界替身，其余是空气。 */
     private static final class Pond implements BlockGetter {
         final Map<BlockPos, BlockState> blocks = new HashMap<>();

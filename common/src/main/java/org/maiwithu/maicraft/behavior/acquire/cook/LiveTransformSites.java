@@ -67,7 +67,8 @@ public final class LiveTransformSites implements TransformSites {
             WorldPosition spot = new WorldPosition(hit.getX(), hit.getY(), hit.getZ(), dimension);
             if (!isAllowedPool(services.protection(), spot)) continue;
             boolean crowded = !level.getEntitiesOfClass(ItemEntity.class, new AABB(hit).inflate(CROWD_RADIUS)).isEmpty();
-            pools.add(new Pool(hit.immutable(), distance, crowded));
+            // 综合评估水深、干岸站位与退路步数，优先避开深水区和贴墙无退路的窄水坑。
+            pools.add(TransformSites.evaluate(level, hit.immutable(), distance, crowded));
         }
         return new Pools(TransformSites.order(pools), result.complete());
     }

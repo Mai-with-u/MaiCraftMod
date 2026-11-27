@@ -558,6 +558,55 @@ class StandSpotsTest {
         assertEquals("要挖的那格下面是岩浆", StandSpots.underfootFailure(目标格, 岩浆底));
     }
 
+    @Test
+    void 投水站位优先背离水格有两三格退路的方向_避开背后贴墙位() {
+        // 水格在 (5, 64, 0)，角色脚在 (3, 65, 0)：西侧岸位 (4, 65, 0) 离角色最近，但西侧四周全是完整竖墙无退路，
+        // 东侧岸位 (6, 65, 0) 稍远但向东有 3 格开阔退路——投掷站位应优先选有退路的东侧。
+        BlockPos 水格 = new BlockPos(5, 64, 0);
+        world.feet = new BlockPos(3, 65, 0);
+        world.fluids.add(水格);
+        // 用贯穿上下层的竖墙把西侧站位 (4, 65, 0) 的正后方与南北侧全部封死，并封住南北岸候选以便直接对比东西两侧。
+        for (int y = 63; y <= 67; y++) {
+            world.lowCeiling.add(new BlockPos(3, y, 0));
+            world.lowCeiling.add(new BlockPos(4, y, 1));
+            world.lowCeiling.add(new BlockPos(4, y, -1));
+            world.lowCeiling.add(new BlockPos(5, y, 1));
+            world.lowCeiling.add(new BlockPos(5, y, -1));
+            if (y != 65) {
+                world.lowCeiling.add(new BlockPos(4, y, 0));
+                world.lowCeiling.add(new BlockPos(6, y, 0));
+            }
+        }
+        StandSpots.Ranking ranking = find(ApproachTarget.forTossIntoFluid(水格, 0.9));
+        assertFalse(ranking.spots().isEmpty());
+        assertEquals(new BlockPos(6, 65, 0), ranking.spots().getFirst().feet(),
+                "背离水格方向有 2–3 格退路的东侧站位应排在贴墙无退路的西侧之前：" + ranking.spots());
+    }
+
+    @Test
+    void 整片水域无干岸只能踩湿位时_浅水脚踩实地优先于深水漂浮() {
+        // 水格在 (5, 64, 0)，角色在西侧；所有岸边干位都没有实地，只剩西侧深水漂浮位 (4, 64, 0) 与东侧 1 格浅水位 (6, 64, 0)。
+        BlockPos 水格 = new BlockPos(5, 64, 0);
+        BlockPos 西侧深水 = new BlockPos(4, 64, 0);
+        BlockPos 东侧浅水 = new BlockPos(6, 64, 0);
+        StubWorld 水塘世界 = new StubWorld() {
+            @Override public boolean solidFloor(BlockPos feet) {
+                return feet.equals(东侧浅水);
+            }
+
+            @Override public boolean inFluid(BlockPos feet) {
+                return feet.equals(水格) || feet.equals(西侧深水) || feet.equals(西侧深水.below())
+                        || feet.equals(东侧浅水);
+            }
+        };
+        水塘世界.feet = new BlockPos(3, 64, 0);
+        StandSpots.Ranking ranking = StandSpots.find(ApproachTarget.forTossIntoFluid(水格, 0.9),
+                REACH, 水塘世界, walking, guarded);
+        assertEquals(2, ranking.spots().size(), "应筛出西侧深水与东侧浅水两个湿位：" + ranking.spots());
+        assertEquals(东侧浅水, ranking.spots().getFirst().feet(),
+                "即便西侧深水更近，也应优先站脚踩池底的 1 格浅水，避开需频繁换气的深水漂浮位");
+    }
+
     private String failureAt(StandSpots.Ranking ranking, BlockPos feet) {
         List<RejectedSpot> matches = ranking.rejected().stream()
                 .filter(spot -> spot.feet().equals(feet)).toList();
