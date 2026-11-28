@@ -17,21 +17,17 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.AbstractCauldronBlock;
-import net.minecraft.world.level.block.ButtonBlock;
 import net.minecraft.world.level.block.CampfireBlock;
 import net.minecraft.world.level.block.CandleBlock;
 import net.minecraft.world.level.block.CandleCakeBlock;
-import net.minecraft.world.level.block.DoorBlock;
-import net.minecraft.world.level.block.FenceGateBlock;
-import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TntBlock;
-import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
+import org.maiwithu.maicraft.behavior.interaction.BlockRightClickBehavior;
 import org.maiwithu.maicraft.behavior.interaction.GestureConfirmations;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -277,7 +273,10 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             BlockPos at = cell.relative(direction);
             BlockState neighbor = level.getBlockState(at);
             if (!neighbor.isAir() && neighbor.getFluidState().isEmpty()) solid.add(direction);
-            if (handlesRightClick(level, at, neighbor)) clickable.add(direction);
+            // 挑支撑面比"改不改动世界"的判断多认一类：带方块实体的（告示牌、讲台这类）也会截走手里的东西。
+            if (neighbor.hasBlockEntity() || BlockRightClickBehavior.handlesOwnRightClick(level, at, neighbor)) {
+                clickable.add(direction);
+            }
         }
         return new ItemUseAim.Around(player.blockPosition(), solid, clickable,
                 aboveOf(level, cell.above()), ignitesItself(state), alreadyLit(state), acceptsFluidDirectly);
@@ -290,15 +289,6 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         if (state.isAir()) return ItemUseAim.AboveCell.OPEN;
         boolean oneHit = NaturalBlocks.wildPlant(state) && state.getDestroySpeed(level, above) == 0;
         return new ItemUseAim.AboveCell(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), oneHit);
-    }
-
-    // 右键会先触发方块自己的行为：开界面的（箱子、熔炉、工作台、织布机）、带方块实体的、门与活板门、
-    // 栅栏门、按钮、拉杆。手里的东西点上去会被它截走，倒流体、点火挑支撑面时避开。
-    private static boolean handlesRightClick(ClientLevel level, BlockPos at, BlockState state) {
-        if (state.hasBlockEntity() || state.getMenuProvider(level, at) != null) return true;
-        var block = state.getBlock();
-        return block instanceof DoorBlock || block instanceof TrapDoorBlock || block instanceof FenceGateBlock
-                || block instanceof ButtonBlock || block instanceof LeverBlock;
     }
 
     // 点它本身就能点着：TNT，还没点着且未含水的营火、蜡烛、蜡烛蛋糕。

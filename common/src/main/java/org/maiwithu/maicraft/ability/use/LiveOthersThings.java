@@ -27,6 +27,7 @@ import net.minecraft.world.level.block.LeverBlock;
 import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
+import org.maiwithu.maicraft.behavior.interaction.BlockRightClickBehavior;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.RightClickMounts;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
@@ -86,8 +87,9 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         }
         BlockState state = level.getBlockState(target.cell());
         Block block = state.getBlock();
-        boolean operates = block instanceof DoorBlock || block instanceof TrapDoorBlock
-                || block instanceof FenceGateBlock || block instanceof ButtonBlock || block instanceof LeverBlock
+        // 右键先触发方块自己行为的（开门、按按钮、开界面，认法见 BlockRightClickBehavior）是操作不是改动；
+        // 敲钟、睡床同样只是操作，算进这里；只是收纳摆设的方块实体不带界面，不算。
+        boolean operates = BlockRightClickBehavior.handlesOwnRightClick(level, target.cell(), state)
                 || block instanceof BellBlock || block instanceof BedBlock;
         // 有界面的方块点开是打开看看（手里拿着方块也是先开界面）；开关门、按按钮这类是操作不是改动。
         return !(operates || state.getMenuProvider(level, target.cell()) != null);
