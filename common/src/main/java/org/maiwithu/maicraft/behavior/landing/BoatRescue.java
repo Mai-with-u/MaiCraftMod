@@ -17,6 +17,7 @@ import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.InteractionSubmission;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.PlayerInput;
@@ -44,7 +45,8 @@ public final class BoatRescue implements CatchesFall {
     private PlayerContext current;
     private Phase phase;
     private UUID boatId;
-    private PendingInteraction pending;
+    /** 放船、上船各一次的提交与确认（先后共用，同一时刻只有一次在途）：收下、逐刻结算与收尾由它推进。 */
+    private final InteractionSubmission submission = new InteractionSubmission();
     private BoatRecovery recovery;
     private boolean failed, complete, owned, ready, mounted, airborneObserved, mountSubmitted;
     private String detail = "正在准备用船接住自己";
@@ -141,7 +143,7 @@ public final class BoatRescue implements CatchesFall {
             fail("还没坐上船就落地了，伤害由游戏结算");
             return;
         }
-        if (pending != null && !settle(context)) return;
+        if (submission.awaitingConfirmation() && !settle(context)) return;
         switch (phase) {
             case ITEM -> takeItem(context, player);
             case PLACE -> place(context, player);
@@ -178,11 +180,8 @@ public final class BoatRescue implements CatchesFall {
         fail(reason);
         if (item != null) item.abandon(context, reason);
         if (recovery != null) recovery.cancel(context, reason);
-        if (pending != null && !pending.terminal()) {
-            // 用船物品右键水面也在等确认的现在归物品使用的边界收场，不再按一次性提交误交还。
-            context.interactionSender().settleForTaskBoundary(context, pending, reason);
-        }
-        pending = null;
+        // 还在等确认的放船或上船按动作种类交边界路由收场（用船物品右键水面归物品使用的边界收场）。
+        submission.settleForTaskBoundary(context, reason);
         // 已经坐在船里：按一下潜行下来，不把人留在船上交给下一件事。
         if (context.localPlayer().isPassenger()) {
             context.input().applyMovement(new PlayerInput.Movement(0, 0, false, true, false), context.clientTick());
@@ -225,13 +224,13 @@ public final class BoatRescue implements CatchesFall {
         for (Boat boat : context.level().getEntitiesOfClass(Boat.class, BoatSpace.boatBox(plan.spawn()).inflate(2))) {
             boatsBefore.add(boat.getUUID());
         }
-        PendingInteraction submitted = context.interactionSender().useItem(context, item.hand(),
-                InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS);
-        // 提交入口这一刻不收：船下一刻再放，落点与现场记账随真的提交重新来。
+        PendingInteraction submitted = submission.submit(context, c -> c.interactionSender().useItem(c,
+                item.hand(), InteractionConfirmation.serverObservedEntity(this::observePlacement),
+                CONFIRM_TIMEOUT_TICKS));
+        // 提交入口这一刻不收：船下一刻原样再放，落点与现场记账随真的提交重新来。
         if (submitted == null) return;
         itemsBefore = count(player);
         detail = "船放出去了，等服务器那边出现这条船";
-        pending = submitted;
     }
 
     // 落点附近恰好新出现一条普通船就是它；同时冒出两条说不清是哪条，按对不上收场。
@@ -271,15 +270,15 @@ public final class BoatRescue implements CatchesFall {
         if (!player.canInteractWithEntity(boat, 0) || !BoatSpace.aimedAt(context, boat) || !context.canInteractThisTick()
                 || player.isShiftKeyDown()) return;
         UUID target = boatId;
-        PendingInteraction submitted = context.interactionSender().interact(context, boat, item == null ? InteractionHand.MAIN_HAND : item.hand(),
+        PendingInteraction submitted = submission.submit(context, c -> c.interactionSender().interact(c, boat,
+                item == null ? InteractionHand.MAIN_HAND : item.hand(),
                 InteractionConfirmation.serverObservedEntity(live -> target.equals(vehicleId(live.localPlayer()))
                         ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING),
-                CONFIRM_TIMEOUT_TICKS);
+                CONFIRM_TIMEOUT_TICKS));
         // 提交入口这一刻不收：下一刻原样再点，人还没坐上去就还有机会。
         if (submitted == null) return;
         mountSubmitted = true;
         detail = "对准船坐上去，等服务器确认";
-        pending = submitted;
     }
 
     // 坐稳：船停住、上船后过了一刻、摔落清零了，才找下船的那一边；四周都下不去就转头找，等一个能站住的方向。
@@ -352,14 +351,12 @@ public final class BoatRescue implements CatchesFall {
 
     // 等放船、上船的确认；没确认就如实失败，不再放第二条、不再右键别的东西。
     private boolean settle(PlayerContext context) {
-        pending = context.interactionSender().poll(context, pending);
-        if (!pending.terminal()) return false;
-        if (pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
-            fail((phase == Phase.PLACE ? "放船" : "上船") + "没得到服务器确认：" + pending.detail());
-            pending = null;
+        PendingInteraction settled = submission.poll(context);
+        if (settled == null) return false;
+        if (settled.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
+            fail((phase == Phase.PLACE ? "放船" : "上船") + "没得到服务器确认：" + settled.detail());
             return false;
         }
-        pending = null;
         if (phase == Phase.PLACE) {
             phase = Phase.MOUNT;
         } else if (phase == Phase.MOUNT) {
