@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,6 +53,16 @@ import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.recipe.ShownStack;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.inventory.containers.MenuFeed;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
+import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
+import org.maiwithu.maicraft.compat.ae2.Ae2Terminals;
+import org.maiwithu.maicraft.compat.ae2.Ae2Transforms;
+import org.maiwithu.maicraft.compat.ae2.NoGrid;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberLayout;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberSource;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberTake;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.BackpackView;
 import org.maiwithu.maicraft.game.player.GearSlotName;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 
 /** 读现场时 ME 线缆抄成一段段：每段一格接一格、后面一段挨着前面的，部件照抄，只有部件的格写进说明。 */
 class MeCableCopiesTest {

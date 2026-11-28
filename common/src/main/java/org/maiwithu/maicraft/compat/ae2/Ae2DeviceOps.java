@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineType;
 
 /**
  * AE2 各类设备的轻量化操作委托接缝：按设备种类编号（例如 ae2:charger、ae2:cable_bus、ae2:vibration_chamber）

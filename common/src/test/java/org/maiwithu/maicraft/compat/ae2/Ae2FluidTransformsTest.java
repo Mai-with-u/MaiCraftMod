@@ -16,6 +16,7 @@ import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2Patterns;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 

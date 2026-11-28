@@ -18,7 +18,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 
-import org.maiwithu.maicraft.compat.ae2.Ae2Patterns;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2Patterns;
 
 /**
  * AE2 样板的读写端：样板主要产出什么用 AE2 公开的样板解码，样板供应器界面里哪几格放样板

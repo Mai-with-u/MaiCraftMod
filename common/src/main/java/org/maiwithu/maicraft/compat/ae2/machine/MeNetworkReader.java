@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,6 +19,8 @@ import org.maiwithu.maicraft.ability.machine.spi.NetworkReader;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ServerNetworkReadings;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 
 /**
@@ -28,7 +30,7 @@ import org.maiwithu.maicraft.game.player.PlayerContext;
  * 过了就重问，重问期间的读数写明是几秒前的数据，问话没收回时 summaryPending 为真，交付方等它到账再交。
  * 客户端看得见的也一起给：这一片里有没有控制器方块、控制器亮没亮。服务器没装 MaiCraft 的 AE2 读数时如实说读不到。
  */
-final class MeNetworkReader implements NetworkReader {
+public final class MeNetworkReader implements NetworkReader {
 
     static final NetworkKind KIND = new NetworkKind("me",
             "应用能源2 的 ME 网络：线缆把控制器、驱动器、接口、终端连起来的一张网，共用频道、能量与存储");
@@ -46,11 +48,11 @@ final class MeNetworkReader implements NetworkReader {
     /** 向服务端要整网读数：问、收、没答上重问、标明数据时刻。 */
     private final ServerNetworkReadings server;
 
-    MeNetworkReader(Ae2Compat compat, PlayerServices services) {
+    public MeNetworkReader(Ae2Compat compat, PlayerServices services) {
         this(compat, services, System::currentTimeMillis);
     }
 
-    MeNetworkReader(Ae2Compat compat, PlayerServices services, LongSupplier now) {
+    public MeNetworkReader(Ae2Compat compat, PlayerServices services, LongSupplier now) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");
         this.now = Objects.requireNonNull(now, "now");

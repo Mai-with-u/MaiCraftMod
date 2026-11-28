@@ -33,8 +33,18 @@ import org.maiwithu.maicraft.compat.CompatRegistry;
 import org.maiwithu.maicraft.compat.ExternalKeyWrappers;
 import org.maiwithu.maicraft.compat.ae2.advanced.Ae2Advanced;
 import org.maiwithu.maicraft.compat.ae2.advanced.Ae2AdvancedReads;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberLayout;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberSource;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2DriveLayout;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineKnowledge;
 import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineReads;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2MachineType;
 import org.maiwithu.maicraft.compat.ae2.machine.Ae2Machines;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2PatternProviderLayout;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2Patterns;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2SkyChestLayout;
+import org.maiwithu.maicraft.compat.ae2.machine.MeNetworkReader;
 import org.maiwithu.maicraft.compat.ae2.part.Ae2PartControl;
 import org.maiwithu.maicraft.compat.ae2.tool.Ae2ToolReads;
 import org.maiwithu.maicraft.compat.ae2.tool.Ae2Tools;
@@ -251,7 +261,7 @@ public final class Ae2Compat extends CompatModule {
     }
 
     /** 注册 ID 换成方块对象；注册表里没有的不算进来。 */
-    static Set<Block> blocksOf(List<String> ids) {
+    public static Set<Block> blocksOf(List<String> ids) {
         Set<Block> blocks = new HashSet<>();
         for (String id : ids) {
             ResourceLocation key = ResourceLocation.tryParse(id);

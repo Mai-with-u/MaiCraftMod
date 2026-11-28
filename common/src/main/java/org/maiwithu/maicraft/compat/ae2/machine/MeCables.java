@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +21,9 @@ import org.maiwithu.maicraft.behavior.approach.PlacementSpots;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.behavior.interaction.HandThenClick;
 import org.maiwithu.maicraft.behavior.interaction.StepsInOrder;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;

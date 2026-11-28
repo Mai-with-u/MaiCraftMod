@@ -27,6 +27,7 @@ import org.maiwithu.maicraft.compat.ModApiMismatch;
 import org.maiwithu.maicraft.compat.CompatModule;
 import org.maiwithu.maicraft.compat.SupportedMod;
 import org.maiwithu.maicraft.compat.VerifiedVersions;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2SkyChestLayout;
 import org.maiwithu.maicraft.game.loader.LoaderEnvironment;
 import org.maiwithu.maicraft.game.world.FurnaceFuels;
 

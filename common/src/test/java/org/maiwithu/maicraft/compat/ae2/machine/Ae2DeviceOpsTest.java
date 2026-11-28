@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +31,14 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
+import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
+import org.maiwithu.maicraft.compat.ae2.Ae2Terminals;
+import org.maiwithu.maicraft.compat.ae2.Ae2Transforms;
+import org.maiwithu.maicraft.compat.ae2.NoGrid;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.behavior.inventory.hands.GearChanges;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;

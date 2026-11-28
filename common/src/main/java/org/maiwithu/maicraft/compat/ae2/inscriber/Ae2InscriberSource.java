@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,6 +35,7 @@ import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.world.ObservationVisibility;
 import org.maiwithu.maicraft.game.world.ScanTargets;
@@ -52,7 +53,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 取回占槽物品进角色背包，归入容器途径（{@code via=container}），而绝不把 {@code ae2:inscriber} 标成通用储物容器，
  * 从而彻底杜绝存东西或腾背包把不相干的杂物塞进压印器。
  */
-final class Ae2InscriberSource implements ItemSource {
+public final class Ae2InscriberSource implements ItemSource {
 
     private static final String INSCRIBER_ID = "ae2:inscriber";
     private static final int SEARCH_RADIUS_BLOCKS = 32;
@@ -66,12 +67,12 @@ final class Ae2InscriberSource implements ItemSource {
     private final ScanTargets scanTargets;
     private final BiFunction<BlockPos, Permissions, MenuOpening> openings;
 
-    Ae2InscriberSource(Ae2Compat compat, PlayerServices services) {
+    public Ae2InscriberSource(Ae2Compat compat, PlayerServices services) {
         this(compat, services, (at, permissions) -> new ClientMenuOpening(at, permissions,
                 services.menuLayouts(), services.approach(), services.interactions(), services.context()));
     }
 
-    Ae2InscriberSource(Ae2Compat compat, PlayerServices services,
+    public Ae2InscriberSource(Ae2Compat compat, PlayerServices services,
             BiFunction<BlockPos, Permissions, MenuOpening> openings) {
         this.compat = Objects.requireNonNull(compat, "compat");
         this.services = Objects.requireNonNull(services, "services");

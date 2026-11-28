@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.List;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineRole;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 
@@ -12,7 +13,7 @@ import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
  * 频道与控制器的规矩、样板编码与供应器概况，并列出 6 篇进阶专题知识页入口。
  * 每种设备的配方与细部手册去物品资料页与专题页看。
  */
-final class Ae2MachineKnowledge implements KnowledgeSource {
+public final class Ae2MachineKnowledge implements KnowledgeSource {
 
     static final String INDEX = "maicraft://knowledge/machine/ae2/index";
 

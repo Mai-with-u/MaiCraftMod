@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -12,6 +12,7 @@ import net.minecraft.world.item.ItemStack;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
 
 /**
  * 压印器界面的布局证明：实机菜单 0..3 为升级格、4..39 为角色背包、40..43 为四个工作格，

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.List;
 import java.util.Objects;
@@ -8,19 +8,20 @@ import java.util.Set;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 
 /**
  * 样板供应器界面的布局证明：角色背包那一侧是普通的 36 格；容器那一侧只认放样板的那几格，
  * 退回格（网络放不回去的东西暂存处）不点。哪几格放样板按 AE2 自己给界面槽位标的用途认。
  */
-final class Ae2PatternProviderLayout implements MenuLayoutProof {
+public final class Ae2PatternProviderLayout implements MenuLayoutProof {
 
     /** 样板供应器的菜单类型（方块与线缆上的部件共用）。类别：游戏事实（AE2 PatternProviderMenu）。 */
     static final String PROVIDER_MENU = "ae2:pattern_provider";
 
     private final Ae2Compat compat;
 
-    Ae2PatternProviderLayout(Ae2Compat compat) {
+    public Ae2PatternProviderLayout(Ae2Compat compat) {
         this.compat = Objects.requireNonNull(compat, "compat");
     }
 

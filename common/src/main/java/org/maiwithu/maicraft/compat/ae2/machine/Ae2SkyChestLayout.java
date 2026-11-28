@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.List;
 import java.util.Set;
@@ -17,7 +17,7 @@ import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
 public final class Ae2SkyChestLayout implements MenuLayoutProof {
 
     /** 陨石箱点开的界面。这里是菜单类型的注册 ID，不是方块 ID。类别：游戏事实（AE2 菜单类型注册，SkyChestMenu）。 */
-    static final String SKY_CHEST_MENU = "ae2:skychest";
+    public static final String SKY_CHEST_MENU = "ae2:skychest";
 
     /** 陨石箱的存储槽数（9 列 4 行）。 */
     private static final int SKY_CHEST_SLOTS = 36;

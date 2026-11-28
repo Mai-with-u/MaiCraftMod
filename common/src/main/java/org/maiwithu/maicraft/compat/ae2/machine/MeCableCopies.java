@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -17,6 +17,7 @@ import net.minecraft.core.Direction;
 import org.maiwithu.maicraft.ability.machine.spi.Installation;
 import org.maiwithu.maicraft.ability.machine.spi.MachineCopy;
 import org.maiwithu.maicraft.ability.machine.spi.PartCell;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 
 /**
  * 读现场时 ME 线缆格怎么抄回机器蓝图，纯函数。线缆不是能直接放的方块，是一格一格接上的：

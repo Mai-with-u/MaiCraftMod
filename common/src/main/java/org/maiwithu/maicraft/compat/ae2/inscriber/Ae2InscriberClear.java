@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import java.util.List;
 import java.util.Objects;
@@ -30,7 +30,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 与当前目标配方不兼容的物品（早先遗留的半成品、异种模板、中断残留物或异种输出）时，
  * 自动走过去点开压印器界面，只把冲突工作格里的物品快速移动取回角色背包，不动兼容模板与升级卡槽（4..7），腾空后关窗。
  */
-final class Ae2InscriberClear implements Action {
+public final class Ae2InscriberClear implements Action {
 
     /** 打开界面并清出冲突工作格、关上界面的总期限（刻）。 */
     private static final int GIVE_UP_TICKS = 20 * 20;
@@ -46,7 +46,7 @@ final class Ae2InscriberClear implements Action {
     private Problem failure;
     private int waited;
 
-    Ae2InscriberClear(ShownRecipe recipe, int batches, MenuOpening opening, Set<String> placedPlates) {
+    public Ae2InscriberClear(ShownRecipe recipe, int batches, MenuOpening opening, Set<String> placedPlates) {
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.batches = Math.max(1, batches);
         this.opening = Objects.requireNonNull(opening, "opening");

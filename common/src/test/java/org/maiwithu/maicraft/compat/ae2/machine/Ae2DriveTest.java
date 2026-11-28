@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 
 /**
  * AE2 驱动器十槽读数与 DriveMenu 布局证明的离线测试：核实十槽存储元件与指示灯状态完整透出、

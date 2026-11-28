@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +33,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * <p>既防止借来的唯一模板压完忘在机器里，也避免单台压印器紧接着压第二种模板或压处理器时被上一轮模板堵死。
  * 产物的看见数与拿回数只按目标产物结算，不把顺手收回的模板混进产出计数。
  */
-final class Ae2InscriberTake implements OutputLook {
+public final class Ae2InscriberTake implements OutputLook {
 
     /** 点开以后取回产物与模板、关上界面的总期限（刻）。 */
     private static final int GIVE_UP_TICKS = 20 * 20;
@@ -55,7 +55,7 @@ final class Ae2InscriberTake implements OutputLook {
     private int taken;
     private int waited;
 
-    Ae2InscriberTake(String itemId, Set<String> ownPlates, MenuOpening opening, Supplier<PlayerContext> contexts) {
+    public Ae2InscriberTake(String itemId, Set<String> ownPlates, MenuOpening opening, Supplier<PlayerContext> contexts) {
         this.itemId = Objects.requireNonNull(itemId, "itemId");
         this.ownPlates = Objects.requireNonNull(ownPlates, "ownPlates");
         this.opening = Objects.requireNonNull(opening, "opening");

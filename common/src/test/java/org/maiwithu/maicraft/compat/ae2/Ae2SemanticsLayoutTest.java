@@ -27,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.compat.ModApiMismatch;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
+import org.maiwithu.maicraft.compat.ae2.machine.Ae2Patterns;
 
 /**
  * 声明式 AE2 槽位语义布局证明与 Ae2MenuSlots 入口测试：

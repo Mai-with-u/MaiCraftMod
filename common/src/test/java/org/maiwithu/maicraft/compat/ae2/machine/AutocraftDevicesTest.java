@@ -20,7 +20,6 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
-import org.maiwithu.maicraft.compat.ae2.Ae2Patterns;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 
 /**

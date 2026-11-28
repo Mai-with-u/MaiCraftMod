@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -32,7 +32,7 @@ import org.maiwithu.maicraft.game.world.ItemMatch;
  * 若机器模板格里已经放着匹配的模板则 0 张要补；压制模式（{@code mode=press}）做处理器时顶、底印制板会随每批消耗，
  * 照常按批数乘算。无论哪种模式，顶、底格物料都排在中间输入格主料之前先放，否则压印器界面会因未配好模板拒收中间格。
  */
-final class Ae2InscriberPlates {
+public final class Ae2InscriberPlates {
 
     private static final String INSCRIBER_ID = "ae2:inscriber";
     private static final String PRESS_MODE = "press";
@@ -170,7 +170,7 @@ final class Ae2InscriberPlates {
     }
 
     /** 物品 ID 本身是不是压印模板（未经过配方计数直接投料时的兜底识别）。 */
-    static boolean isPressItemId(String itemId) {
+    public static boolean isPressItemId(String itemId) {
         return itemId != null && !ItemMatch.isTag(itemId) && itemId.endsWith("_press");
     }
 
@@ -201,7 +201,7 @@ final class Ae2InscriberPlates {
     }
 
     /** 这条配方在这台压印器上怎么投，一次算清的结论：投料顺序、说明与机内冲突。 */
-    record MachinePlan(List<FeedPlan.Entry> entries, List<String> notes, Optional<String> conflict) {
+    public record MachinePlan(List<FeedPlan.Entry> entries, List<String> notes, Optional<String> conflict) {
     }
 
     /**
@@ -209,7 +209,7 @@ final class Ae2InscriberPlates {
      * 排在中间主料之前、做几批都只投 1 张，机内已有匹配模板的跳过并留一句说明；机内占着不兼容物的给冲突说明。
      * 只看配方定义与同步过来的四个工作格，不碰现场。
      */
-    static MachinePlan plan(ShownRecipe recipe, int batches, Optional<Ae2Inscribers.Slots> currentSlots) {
+    public static MachinePlan plan(ShownRecipe recipe, int batches, Optional<Ae2Inscribers.Slots> currentSlots) {
         Optional<Ae2Inscribers.Inputs> slots = currentSlots.map(Ae2Inscribers.Slots::toInputs);
         List<FeedPlan.Entry> first = new ArrayList<>();
         List<FeedPlan.Entry> main = new ArrayList<>();

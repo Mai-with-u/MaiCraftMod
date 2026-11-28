@@ -20,6 +20,7 @@ import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
+import org.maiwithu.maicraft.compat.ae2.Ae2SemanticsLayout;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.menu.MenuActions;
 import org.maiwithu.maicraft.game.menu.PendingMenuAction;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,6 +19,10 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
+import org.maiwithu.maicraft.compat.ae2.Ae2Terminals;
+import org.maiwithu.maicraft.compat.ae2.NoGrid;
 
 /** 样板供应器：每种样板按产出记一项、值是 in / out，没开过界面读作 unknown；界面只认放样板的格子。 */
 class Ae2PatternsTest {

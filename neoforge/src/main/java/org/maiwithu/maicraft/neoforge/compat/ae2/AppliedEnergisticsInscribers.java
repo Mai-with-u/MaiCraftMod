@@ -11,7 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
-import org.maiwithu.maicraft.compat.ae2.Ae2Inscribers;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
 
 /**
  * AE2 压印器的读写端：压印器的四个工作格随方块实体的同步包下发（顶模板、底模板、输入、输出），

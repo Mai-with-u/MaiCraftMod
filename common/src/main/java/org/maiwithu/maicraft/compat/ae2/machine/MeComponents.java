@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -10,6 +10,8 @@ import java.util.function.Function;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 
 /**
  * 在客户端看出哪些 ME 设备连成一张网，纯函数：线缆往哪几面连着是 AE2 画出来的，沿着它走；

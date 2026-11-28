@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,6 +18,10 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 
 import org.junit.jupiter.api.Test;
 
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2TerminalMenu;
+import org.maiwithu.maicraft.compat.ae2.Ae2Terminals;
+import org.maiwithu.maicraft.compat.ae2.NoGrid;
 import org.maiwithu.maicraft.game.interaction.DigToolRule;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;

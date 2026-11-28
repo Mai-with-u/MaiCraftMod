@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.MountedPart;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkSummary;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
 
 /**
  * AE2 机器这一半的判断：客户端看连通（线缆按画出来的连接、设备贴着就连）、设备读数换成运行状态、

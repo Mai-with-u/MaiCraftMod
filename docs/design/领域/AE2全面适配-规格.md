@@ -39,7 +39,7 @@
 | 阶段 4 | 知识层补强（中文主题资料 + GuideME 按需只读检索） | `lookup` | 否 |
 
 **既有能力衔接**：
-- 既有 `compat.ae2` 包根保留共享入口 `Ae2Compat`、设备目录 `Ae2MachineCatalog`、主类型路由 `Ae2MachineType`、终端取存与缺口合成、压印器基础流程、驱动器十槽读数、陨石箱布局及 ME 网络读取器。
+- 既有 `compat.ae2` 包根保留共享入口 `Ae2Compat`、设备目录 `Ae2MachineCatalog`、终端取存与缺口合成、无线绑定与转化配方；机器类型路由 `Ae2MachineType`、ME 网络读取器、线缆施工、样板供应器、驱动器十槽读数与陨石箱布局在 `compat.ae2.machine`；压印器一族在 `compat.ae2.inscriber`。
 - 本轮新增模块按领域落入 `compat.ae2.machine`、`compat.ae2.part`、`compat.ae2.tool`、`compat.ae2.advanced` 四个子包，单向依赖包根，互不形成环；服务端扩展落入 `server.compat.ae2`；NeoForge 读写端按同样边界分文件放在 `neoforge.compat.ae2`。
 
 ## 2 真人怎么玩
@@ -66,7 +66,7 @@
 #### 3.1.2 设备操作委托与目录扩展
 
 - `Ae2MachineCatalog` 补齐本轮新增设备种类：`ae2:crank`（木质曲柄，单机控制）、`ae2:sky_stone_tank`（陨石储罐，单机存储）、`ae2:growth_accelerator`（水晶催生器，联网加工）、`ae2:cell_workbench`（元件工作台，单机控制）、`ae2:spatial_pylon`（空间塔，联网存储）、`ae2:spatial_io_port`（空间传输站，联网存储）、`ae2:spatial_anchor`（空间锚，联网控制），同时保留全部既有 18 种设备（含 `ae2:io_port` 显示名统一为「ME IO 传输站」）。
-- `Ae2MachineType` 抽出内部委托接口 `Ae2DeviceOps`（按 `kind.id()` 路由 `extraReadings`、`feeding`、`settings`、`installations`、`partSettings`，全部提供默认空实现），使四路实现分别落在 `machine` / `part` / `tool` / `advanced` 子包，避免单文件超行。
+- `compat.ae2.machine.Ae2MachineType` 抽出内部委托接口 `Ae2DeviceOps`（按 `kind.id()` 路由 `extraReadings`、`feeding`、`settings`、`installations`、`partSettings`，全部提供默认空实现），使四路实现分别落在 `machine` / `part` / `tool` / `advanced` 子包，避免单文件超行。
 
 #### 3.1.3 服务端只读操作扩展（`ae2.network` 与 `ae2.device`）
 
@@ -366,7 +366,7 @@
 
 #### 3.6.5 知识层补强
 
-- **中文主题资料（`Ae2MachineKnowledge` 扩充）**：拆分为清晰的按主题索引条目（日常单机与曲柄、自动合成与样板编码、线缆部件与 P2P 配对、磁盘分区与网络运维、量子环与空间存储、手持工具装填与补电），覆盖全部新增设备、设置键与核心避坑提示。
+- **中文主题资料（`compat.ae2.machine.Ae2MachineKnowledge` 扩充）**：拆分为清晰的按主题索引条目（日常单机与曲柄、自动合成与样板编码、线缆部件与 P2P 配对、磁盘分区与网络运维、量子环与空间存储、手持工具装填与补电），覆盖全部新增设备、设置键与核心避坑提示。
 - **GuideME 手册按需只读检索（`compat.ae2.tool.Ae2GuideKnowledge`）**：实现 `KnowledgeSource`，启动时扫描 AE2 jar 资源 `assets/ae2/ae2guide/**/*.md` 的 YAML frontmatter（`item_ids`、`title`、`categories`）建轻量索引；`entriesAbout(registryId)` 命中对应条目，`read(uri)` 按需读取正文并剥离 `<GameScene>`、`<BlockImage>`、`<RecipeFor>` 等 GuideME JSX 标签，保留文字与 `<ItemLink>` 文本供 LLM 查阅深层机制。
 
 ## 4 能力与接口挂接总览
@@ -421,8 +421,9 @@
 | 包 / 位置 | 职责 |
 | --- | --- |
 | `behavior.inventory`、`ability.machine.spi`、`behavior.survival.defense.spi` | 4 处公共 SPI 极小补丁（`CombinedCarriedBackpacks`、`MachineSettings.partSettings`、`ItemSettings.holds(..., Player, ...)`、`RangedWeapon.shotFired`） |
-| `compat.ae2`（包根） | 共享入口 `Ae2Compat`、设备目录 `Ae2MachineCatalog`、主类型路由 `Ae2MachineType`、内部委托 `Ae2DeviceOps`、语义布局 `Ae2SemanticsLayout` / `Ae2MenuSlots` 及既有终端/网络/压印器基础 |
-| `compat.ae2.machine` | 充能器含曲柄 `FullRun`、振动室 `FuelUse`、物质聚合器、ME 箱子、陨石储罐、水晶催生器、样板编码终端、样板管理终端、样板供应器全设置、分子组装室、压印器设置补全、合成 CPU 控制、合成终端 3×3 手搓 |
+| `compat.ae2`（包根） | 共享入口 `Ae2Compat`、设备目录 `Ae2MachineCatalog`、内部委托 `Ae2DeviceOps`、语义布局 `Ae2SemanticsLayout` / `Ae2MenuSlots`，以及终端取存、无线绑定、转化配方 |
+| `compat.ae2.machine` | 机器类型 `Ae2MachineType`、设备目录资料、ME 网络读数（`MeNetworkReader` / `MeComponents` / `MeLines`）、线缆施工（`MeCables` / `MeCableCopies` / `CableGeometry`）、样板供应器（`PatternChange` / `PatternSettings` / `Ae2Patterns` / `Ae2PatternProviderLayout`）、驱动器与陨石箱布局，加上充能器含曲柄 `FullRun`、振动室 `FuelUse`、物质聚合器、ME 箱子、陨石储罐、水晶催生器、样板编码终端、样板管理终端、样板供应器全设置、分子组装室、压印器设置补全、合成 CPU 控制、合成终端 3×3 手搓 |
+| `compat.ae2.inscriber` | 压印器一族：读写接缝 `Ae2Inscribers`、界面布局证明 `Ae2InscriberLayout`、投料判断 `Ae2InscriberPlates`、投料前清理 `Ae2InscriberClear`、收产物 `Ae2InscriberTake`、工作格单取来源 `Ae2InscriberSource` |
 | `compat.ae2.part` | 全线缆部件按面配置（输入/输出/存储总线、ME 接口、成型/破坏面板、标准/能量发信器、存储/转换监视器、6 种 P2P）、元件工作台、ME IO 传输站（`CellTransfer`）、无线访问点增幅卡与公式 |
 | `compat.ae2.tool` | 石英扳手（`DismantleTool` / `PlacementRules`）、10 种便携存储元件（`PortableCellBackpack` / `PortableCellSource`）、石英切割刀、上色器、内存卡、网络工具箱、物质炮（`MatterCannonWeapon`）、熵变仪、充能法杖、陨石罗盘（`MeteoriteCompassSight`）、GuideME 知识源（`Ae2GuideKnowledge`） |
 | `compat.ae2.advanced` | 量子环与量子链接仓（`QuantumRing` / `QuantumLink`）、奇点爆炸转化来源（`Ae2ExplosionTransformSource`）、空间存储（`SpatialPylons` / `SpatialTransfer` / `SpatialAnchor`） |

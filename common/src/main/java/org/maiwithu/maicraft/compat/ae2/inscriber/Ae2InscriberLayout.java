@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.inscriber;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -11,6 +11,8 @@ import java.util.function.Function;
 import org.maiwithu.maicraft.behavior.menu.MenuLayout;
 import org.maiwithu.maicraft.behavior.menu.MenuSlots;
 import org.maiwithu.maicraft.behavior.menu.spi.MenuLayoutProof;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuSlots;
 
 /**
  * 压印器界面的布局证明：优先经 {@link Ae2MenuSlots} 按 AE2 槽位语义识别四个工作格（顶模板、底模板、

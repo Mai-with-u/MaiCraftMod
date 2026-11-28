@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.EnumSet;
 import java.util.Optional;
@@ -14,6 +14,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import org.maiwithu.maicraft.ability.machine.spi.ExchangePoint;
 import org.maiwithu.maicraft.ability.machine.spi.LineMaterials;
 import org.maiwithu.maicraft.ability.machine.spi.NetworkKind;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
 
 /**
  * ME 网的接线线材：福鲁伊克斯玻璃线缆（不带颜色，和任何颜色的线缆都连），不分方向、六面都接，拐弯也是它。

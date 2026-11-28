@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-package org.maiwithu.maicraft.compat.ae2;
+package org.maiwithu.maicraft.compat.ae2.machine;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -48,6 +48,14 @@ import org.maiwithu.maicraft.behavior.menu.MenuOutputLook;
 import org.maiwithu.maicraft.behavior.recipe.ShownIngredient;
 import org.maiwithu.maicraft.behavior.recipe.ShownRecipe;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
+import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
+import org.maiwithu.maicraft.compat.ae2.Ae2MachineCatalog;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberClear;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberPlates;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2InscriberTake;
+import org.maiwithu.maicraft.compat.ae2.inscriber.Ae2Inscribers;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -58,7 +66,7 @@ import org.maiwithu.maicraft.kernel.task.Action;
  * 控制器什么状态、线缆格各面装着什么部件。线缆格还管两件 AE2 自己的装法：一段线缆（安装段，种类是线缆物品 ID）
  * 与线缆某一面上的部件。网络本身的频道、能量、存储由 ME 网络读取器经服务端读。
  */
-final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettings, MachineInstallations,
+public final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettings, MachineInstallations,
         MachineParts {
 
     private final Ae2MachineCatalog.Kind kind;
@@ -75,12 +83,12 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
     /** 按设备编号路由进来的扩展操作委托（无扩展时为 null，走默认基础实现）。 */
     private final Ae2DeviceOps ops;
 
-    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+    public Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks) {
         this(kind, compat, inscribers, services, blocks, Map.of());
     }
 
-    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+    public Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks, Map<String, Ae2DeviceOps> deviceOps) {
         this(kind, compat, inscribers, services, blocks,
                 (at, permissions) -> new ClientMenuOpening(at, permissions, services.menuLayouts(),
@@ -88,12 +96,12 @@ final class Ae2MachineType implements MachineType, MachineFeeding, MachineSettin
                 deviceOps);
     }
 
-    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+    public Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks, BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings) {
         this(kind, compat, inscribers, services, blocks, menuOpenings, Map.of());
     }
 
-    Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
+    public Ae2MachineType(Ae2MachineCatalog.Kind kind, Ae2Compat compat, Ae2Inscribers inscribers, PlayerServices services,
             Set<Block> blocks, BiFunction<BlockPos, Permissions, MenuOpening> menuOpenings,
             Map<String, Ae2DeviceOps> deviceOps) {
         this.kind = Objects.requireNonNull(kind, "kind");
