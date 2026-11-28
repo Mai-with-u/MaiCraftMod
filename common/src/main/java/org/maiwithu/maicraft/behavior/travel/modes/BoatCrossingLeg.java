@@ -25,6 +25,7 @@ import org.maiwithu.maicraft.behavior.navigation.WalkRun;
 import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.travel.spi.TravelLeg;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.InteractionSubmission;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -78,7 +79,8 @@ final class BoatCrossingLeg implements TravelLeg {
     private Set<UUID> boatsBefore = Set.of();
     private int boatItemsBefore;
     private boolean boatPlaced;
-    private PendingInteraction pending;
+    /** 放船那一下的提交与确认：收下、逐刻结算与边界收尾都由它推进。 */
+    private final InteractionSubmission boatPlacement = new InteractionSubmission();
     private long lastTick = Long.MIN_VALUE;
     private int afterDismountTicks;
     /** 放船前转头对准已经等了几刻。 */
@@ -120,14 +122,14 @@ final class BoatCrossingLeg implements TravelLeg {
             releaseKeys(live);
             return failed("划船途中人接回了角色，这一段停下", Problem.Kind.STUCK, null);
         }
-        if (pending != null) {
+        if (boatPlacement.awaitingConfirmation()) {
             ActionStatus settled = settlePending(live);
             if (settled != null) return settled;
         }
         // 被要求停下、还没坐上船（备船、走到岸边、放船、走过去坐上）：停在原地，不再放船、上船、划出去；
         // 手上那一下要先收尾（走路跳在半空）就先推进它到落地站稳，再收掉它停下。放船等确认的那一下等完再停；
         // 正好这一刻已经坐进船里的，照划船时被叫停的样子在水面停下。
-        if (stopRequested && pending == null && step != Step.ROW && step != Step.DISMOUNT && step != Step.SETTLE
+        if (stopRequested && !boatPlacement.awaitingConfirmation() && step != Step.ROW && step != Step.DISMOUNT && step != Step.SETTLE
                 && !(live.localPlayer().getVehicle() instanceof Boat)) {
             if (current != null && !current.stoppedSafely()) {
                 current.tick(context);
@@ -286,12 +288,12 @@ final class BoatCrossingLeg implements TravelLeg {
         for (Boat boat : live.level().getEntitiesOfClass(Boat.class, new AABB(plan.launchWater()).inflate(2))) {
             boatsBefore.add(boat.getUUID());
         }
-        PendingInteraction submitted = live.interactionSender().useItem(live, InteractionHand.MAIN_HAND,
-                InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS);
-        // 提交入口这一刻不收：船下一刻再放，现场记账下一刻随真的提交重新来。
+        PendingInteraction submitted = boatPlacement.submit(live, c -> c.interactionSender().useItem(c,
+                InteractionHand.MAIN_HAND,
+                InteractionConfirmation.serverObservedEntity(this::observePlacement), CONFIRM_TIMEOUT_TICKS));
+        // 提交入口这一刻不收：船下一刻原样再放，现场记账下一刻随真的提交重新来。
         if (submitted == null) return ActionStatus.running();
         boatItemsBefore = countBoatItems(live);
-        pending = submitted;
         return ActionStatus.progressed();
     }
 
@@ -458,11 +460,10 @@ final class BoatCrossingLeg implements TravelLeg {
 
     // 等放船的确认：确认过了接着去坐船，没确认如实失败，不放第二条、不右键别的东西。回了非空表示这段有了结论。
     private ActionStatus settlePending(PlayerContext live) {
-        pending = live.interactionSender().poll(live, pending);
-        if (!pending.terminal()) return null;
-        Problem problem = pending.status() == PendingInteraction.Status.CONFIRMED_APPLIED ? null
-                : Problem.of(Problem.Kind.UNREACHABLE, pending.detail());
-        pending = null;
+        PendingInteraction settled = boatPlacement.poll(live);
+        if (settled == null) return null;
+        Problem problem = settled.status() == PendingInteraction.Status.CONFIRMED_APPLIED ? null
+                : Problem.of(Problem.Kind.UNREACHABLE, settled.detail());
         if (problem != null) {
             return failed("放船没得到服务器确认：" + problem.message(), problem.kind(), null);
         }
@@ -585,13 +586,10 @@ final class BoatCrossingLeg implements TravelLeg {
         }
         // 放船那一下还等在确认窗里这段就被替换或取消：等待记录写明「到期限或玩家变更时结算」，
         // 玩家变更就是现在。到什么算什么地如实结算并放掉等待占位，新任务的第一次出手不被它挡住。
-        if (pending != null && !pending.terminal()) {
-            PlayerContext live = services.context().get();
-            if (live != null) {
-                live.interactionSender().settleForTaskBoundary(live, pending, "行程段被替换，放船的确认不再等");
-            }
+        PlayerContext live = services.context().get();
+        if (live != null) {
+            boatPlacement.settleForTaskBoundary(live, "行程段被替换，放船的确认不再等");
         }
-        pending = null;
     }
 
     @Override public List<Change> changes() {
