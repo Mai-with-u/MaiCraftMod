@@ -18,6 +18,7 @@ import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.SelfIgnitingBlocks;
 import org.maiwithu.maicraft.behavior.interaction.SignEditor;
 import org.maiwithu.maicraft.behavior.interaction.WriteSign;
 import org.maiwithu.maicraft.behavior.inventory.drops.PicksUpDrops;
@@ -508,7 +509,7 @@ final class UseTask extends PhasedTask<UseTask.Phase> {
                 // 空手右键原版营火无效果且游戏没有给其他拒绝提示时，直接给出营火不支持右键取物的游戏事实。
                 boolean emptyHandCampfire = notApplied.problem().kind() == Problem.Kind.NOT_POSSIBLE_HERE
                         && target != null && !target.isEntity() && interaction.heldBefore() == null
-                        && (UseChanges.CAMPFIRE_BLOCKS.contains(target.typeId())
+                        && (SelfIgnitingBlocks.isCampfire(target.typeId())
                                 || services.world().campfire(target.cell()).isPresent());
                 yield stop(emptyHandCampfire ? UseDecider.campfireEmptyHandProblem() : notApplied.problem());
             }

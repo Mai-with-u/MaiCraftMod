@@ -15,6 +15,7 @@ import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.SelfIgnitingBlocks;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.kernel.result.Change;
 
@@ -26,9 +27,6 @@ import org.maiwithu.maicraft.kernel.result.Change;
  * 变成了黑曜石，就记黑曜石。对实体用时骑上了记移动，其余记对实体的影响。
  */
 final class UseChanges {
-
-    /** 原版营火方块：烤制行为遵循固定原版规则（点燃后约 30 秒烤熟自动弹出），不属于不认识的加工容器。 */
-    static final Set<String> CAMPFIRE_BLOCKS = Set.of("minecraft:campfire", "minecraft:soul_campfire");
 
     /** 带方块实体但只是收纳摆设或感测装置、不是加工容器的原版方块：排除后其余吃掉手中物品的方块实体按未知加工容器如实说明。 */
     private static final Set<String> NON_PROCESSOR_BLOCK_ENTITIES = Set.of(
@@ -214,7 +212,8 @@ final class UseChanges {
     private static boolean isUnknownProcessorBlock(UseSeams.ReadsWorld world, FacilityKinds facilities,
             ResolvedTarget target) {
         String typeId = target.typeId();
-        if (typeId == null || CAMPFIRE_BLOCKS.contains(typeId)
+        // 原版营火（含灵魂营火，认法见 SelfIgnitingBlocks）烤制遵循固定原版规则，不属于不认识的加工容器。
+        if (typeId == null || SelfIgnitingBlocks.isCampfire(typeId)
                 || NON_PROCESSOR_BLOCK_ENTITIES.contains(typeId) || FacilityKinds.isBed(typeId)) {
             return false;
         }

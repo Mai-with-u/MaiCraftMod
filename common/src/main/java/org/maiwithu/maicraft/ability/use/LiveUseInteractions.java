@@ -17,17 +17,13 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.AbstractCauldronBlock;
-import net.minecraft.world.level.block.CampfireBlock;
-import net.minecraft.world.level.block.CandleBlock;
-import net.minecraft.world.level.block.CandleCakeBlock;
-import net.minecraft.world.level.block.TntBlock;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
 
 import org.maiwithu.maicraft.behavior.acquire.mining.NaturalBlocks;
 import org.maiwithu.maicraft.behavior.interaction.AimAndInteract;
 import org.maiwithu.maicraft.behavior.interaction.BlockRightClickBehavior;
+import org.maiwithu.maicraft.behavior.interaction.SelfIgnitingBlocks;
 import org.maiwithu.maicraft.behavior.interaction.GestureConfirmations;
 import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.Interactions;
@@ -279,7 +275,8 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
             }
         }
         return new ItemUseAim.Around(player.blockPosition(), solid, clickable,
-                aboveOf(level, cell.above()), ignitesItself(state), alreadyLit(state), acceptsFluidDirectly);
+                aboveOf(level, cell.above()), SelfIgnitingBlocks.ignitesItself(state),
+                SelfIgnitingBlocks.alreadyLit(state), acceptsFluidDirectly);
     }
 
     // 目标正上方那一格：空着；压着什么，是不是一下就能打掉的野生草木（草木按种类认，种的、树苗不算；
@@ -289,34 +286,5 @@ final class LiveUseInteractions implements UseSeams.BuildsInteraction {
         if (state.isAir()) return ItemUseAim.AboveCell.OPEN;
         boolean oneHit = NaturalBlocks.wildPlant(state) && state.getDestroySpeed(level, above) == 0;
         return new ItemUseAim.AboveCell(BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString(), oneHit);
-    }
-
-    // 点它本身就能点着：TNT，还没点着且未含水的营火、蜡烛、蜡烛蛋糕。
-    static boolean ignitesItself(BlockState state) {
-        if (state.getBlock() instanceof TntBlock
-                || CampfireBlock.canLight(state)
-                || CandleBlock.canLight(state)
-                || CandleCakeBlock.canLight(state)) {
-            return true;
-        }
-        // 同时按方块类与属性兜底，确保未加载数据包方块标签的离线测试与原版一致识别未点燃且未含水的营火、蜡烛与蜡烛蛋糕。
-        boolean ignitableBlock = state.getBlock() instanceof CampfireBlock
-                || state.getBlock() instanceof CandleBlock
-                || state.getBlock() instanceof CandleCakeBlock;
-        if (!ignitableBlock || !state.hasProperty(BlockStateProperties.LIT)
-                || state.getValue(BlockStateProperties.LIT)) {
-            return false;
-        }
-        return !state.hasProperty(BlockStateProperties.WATERLOGGED)
-                || !state.getValue(BlockStateProperties.WATERLOGGED);
-    }
-
-    // 目标本身就是营火、蜡烛或蜡烛蛋糕，且此刻已经点着：不需要再点，也绝不能落回往旁边空气格点火。
-    static boolean alreadyLit(BlockState state) {
-        return (state.getBlock() instanceof CampfireBlock
-                || state.getBlock() instanceof CandleBlock
-                || state.getBlock() instanceof CandleCakeBlock)
-                && state.hasProperty(BlockStateProperties.LIT)
-                && state.getValue(BlockStateProperties.LIT);
     }
 }

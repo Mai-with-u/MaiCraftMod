@@ -38,6 +38,7 @@ import org.maiwithu.maicraft.behavior.interaction.HoldsSneak;
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
 import org.maiwithu.maicraft.behavior.interaction.InteractionVerdict;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.SelfIgnitingBlocks;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.FakeBlockTags;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
@@ -181,20 +182,20 @@ class CampfireUseTest {
         BlockState tnt = Blocks.TNT.defaultBlockState();
         BlockState stone = Blocks.STONE.defaultBlockState();
 
-        assertTrue(LiveUseInteractions.alreadyLit(litCampfire));
-        assertFalse(LiveUseInteractions.ignitesItself(litCampfire));
-        assertFalse(LiveUseInteractions.alreadyLit(unlitCampfire));
-        assertTrue(LiveUseInteractions.ignitesItself(unlitCampfire));
+        assertTrue(SelfIgnitingBlocks.alreadyLit(litCampfire));
+        assertFalse(SelfIgnitingBlocks.ignitesItself(litCampfire));
+        assertFalse(SelfIgnitingBlocks.alreadyLit(unlitCampfire));
+        assertTrue(SelfIgnitingBlocks.ignitesItself(unlitCampfire));
 
-        assertTrue(LiveUseInteractions.alreadyLit(litCandle));
-        assertTrue(LiveUseInteractions.ignitesItself(unlitCandle));
-        assertTrue(LiveUseInteractions.alreadyLit(litCake));
-        assertTrue(LiveUseInteractions.ignitesItself(unlitCake));
+        assertTrue(SelfIgnitingBlocks.alreadyLit(litCandle));
+        assertTrue(SelfIgnitingBlocks.ignitesItself(unlitCandle));
+        assertTrue(SelfIgnitingBlocks.alreadyLit(litCake));
+        assertTrue(SelfIgnitingBlocks.ignitesItself(unlitCake));
 
-        assertFalse(LiveUseInteractions.alreadyLit(tnt));
-        assertTrue(LiveUseInteractions.ignitesItself(tnt));
-        assertFalse(LiveUseInteractions.alreadyLit(stone));
-        assertFalse(LiveUseInteractions.ignitesItself(stone));
+        assertFalse(SelfIgnitingBlocks.alreadyLit(tnt));
+        assertTrue(SelfIgnitingBlocks.ignitesItself(tnt));
+        assertFalse(SelfIgnitingBlocks.alreadyLit(stone));
+        assertFalse(SelfIgnitingBlocks.ignitesItself(stone));
 
         ResolvedTarget resolved = ResolvedTarget.block(CAMPFIRE, "minecraft:campfire", "b1");
         ItemUseAim.Around alreadyLitAround = new ItemUseAim.Around(

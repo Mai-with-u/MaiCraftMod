@@ -40,6 +40,7 @@ import net.minecraft.world.phys.Vec3;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.behavior.interaction.RightClickMounts;
+import org.maiwithu.maicraft.behavior.interaction.SelfIgnitingBlocks;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.StackKey;
@@ -124,7 +125,7 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         ClientLevel level = level();
         if (level == null || !level.isLoaded(cell)) return Optional.empty();
         BlockState state = level.getBlockState(cell);
-        if (!(state.getBlock() instanceof CampfireBlock)) return Optional.empty();
+        if (!SelfIgnitingBlocks.isCampfire(state.getBlock())) return Optional.empty();
         boolean lit = state.hasProperty(CampfireBlock.LIT) && state.getValue(CampfireBlock.LIT);
         int occupied = 0;
         int capacity = 4;
