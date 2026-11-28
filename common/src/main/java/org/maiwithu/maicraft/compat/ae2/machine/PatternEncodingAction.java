@@ -15,15 +15,13 @@ import net.minecraft.world.item.Items;
 
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -34,19 +32,18 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 调 encode() 前核验当前模式配方有效，无效直接报 INVALID_PARAMETER 绝不调 encode() →
  * 缺空白样板报 NEED_ITEM → 编码完成后取出新编码样板回背包再关窗。
  */
-final class PatternEncodingAction implements Action {
+final class PatternEncodingAction extends Ae2MenuWork {
 
     private static final String BLANK_PATTERN_ID = "ae2:blank_pattern";
 
-    private enum Stage {
-        OPEN, CLEAR_OLD_OUTPUT, WAIT_OLD_CLEARED, SET_MODE_AND_CLEAR, WAIT_MODE_SYNC,
+    private enum Step {
+        CLEAR_OLD_OUTPUT, WAIT_OLD_CLEARED, SET_MODE_AND_CLEAR, WAIT_MODE_SYNC,
         WRITE_SLOTS, WAIT_RECIPE_SYNC, ENSURE_BLANK, COMMIT_ENCODE, WAIT_ENCODED,
-        TAKE_ENCODED, WAIT_TAKEN, CLOSE, DONE
+        TAKE_ENCODED, WAIT_TAKEN
     }
 
     private final BlockPos host;
     private final Direction side;
-    private final MenuOpening opening;
     private final Ae2Compat compat;
     private final Ae2MachineReads reads;
     private final Ae2MachineCache cache;
@@ -57,11 +54,7 @@ final class PatternEncodingAction implements Action {
     private final String singleKey;
     private final String singleValue;
 
-    private Stage stage = Stage.OPEN;
-    private OpenedMenu menu;
-    private Action closing;
-    private int waited;
-    private Problem problem;
+    private Step step;
     private String encodedOutputNote = "";
 
     /** 完整样板编码构造器。 */
@@ -88,9 +81,9 @@ final class PatternEncodingAction implements Action {
     PatternEncodingAction(BlockPos host, Direction side, MenuOpening opening, Ae2Compat compat,
             Ae2MachineReads reads, Ae2MachineCache cache, PatternEncodingRequest request,
             String rawRequestValue, String singleKey, String singleValue) {
+        super(opening, "样板编码终端界面没打开");
         this.host = host.immutable();
         this.side = side;
-        this.opening = Objects.requireNonNull(opening, "opening");
         this.compat = Objects.requireNonNull(compat, "compat");
         this.reads = Objects.requireNonNull(reads, "reads");
         this.cache = Objects.requireNonNull(cache, "cache");
@@ -98,11 +91,11 @@ final class PatternEncodingAction implements Action {
         this.rawRequestValue = rawRequestValue;
         this.singleKey = singleKey;
         this.singleValue = singleValue;
+        this.step = request == null ? Step.SET_MODE_AND_CLEAR : Step.CLEAR_OLD_OUTPUT;
     }
 
-    @Override public ActionStatus tick(TickContext tick) {
-        return switch (stage) {
-            case OPEN -> open(tick);
+    @Override protected ActionStatus work(TickContext tick) {
+        return switch (step) {
             case CLEAR_OLD_OUTPUT -> clearOldOutput();
             case WAIT_OLD_CLEARED -> waitOldCleared();
             case SET_MODE_AND_CLEAR -> setModeAndClear();
@@ -114,54 +107,41 @@ final class PatternEncodingAction implements Action {
             case WAIT_ENCODED -> waitEncoded();
             case TAKE_ENCODED -> takeEncoded();
             case WAIT_TAKEN -> waitTaken();
-            case CLOSE -> closeMenu(tick);
-            case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         };
-    }
-
-    private ActionStatus open(TickContext tick) {
-        ActionStatus status = opening.tick(tick);
-        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        if (!(status instanceof ActionStatus.Done)) return status;
-        menu = opening.opened().orElse(null);
-        if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "样板编码终端界面没打开"));
-        waited = 0;
-        stage = request == null ? Stage.SET_MODE_AND_CLEAR : Stage.CLEAR_OLD_OUTPUT;
-        return ActionStatus.progressed();
     }
 
     // 编码前第一步：若输出槽里已有旧编码样板，先移回背包，防止洗掉旧样板或覆盖失败。
     private ActionStatus clearOldOutput() {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "样板编码终端界面同步超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "样板编码终端界面同步超时"));
         }
         if (!view.get().hasEncodedPattern()) {
-            stage = Stage.SET_MODE_AND_CLEAR;
+            step = Step.SET_MODE_AND_CLEAR;
             return ActionStatus.progressed();
         }
         List<Integer> outSlots = compat.menuSlotsOf("ENCODED_PATTERN");
         if (outSlots.isEmpty()) {
-            return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "找不到样板编码终端的输出样板槽"));
+            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "找不到样板编码终端的输出样板槽"));
         }
-        if (!menu.quickMove(outSlots.getFirst())) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "无法从样板编码终端输出槽移出旧编码样板"));
+        if (!menu().quickMove(outSlots.getFirst())) {
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "无法从样板编码终端输出槽移出旧编码样板"));
         }
-        waited = 0;
-        stage = Stage.WAIT_OLD_CLEARED;
+        resetWait();
+        step = Step.WAIT_OLD_CLEARED;
         return ActionStatus.progressed();
     }
 
     private ActionStatus waitOldCleared() {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isPresent() && !view.get().hasEncodedPattern()) {
-            stage = Stage.SET_MODE_AND_CLEAR;
+            step = Step.SET_MODE_AND_CLEAR;
             return ActionStatus.progressed();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                 "输出槽里已有编码样板且无法取回背包（可能背包已满），拒绝覆盖或洗掉旧样板"));
     }
 
@@ -169,20 +149,20 @@ final class PatternEncodingAction implements Action {
     private ActionStatus setModeAndClear() {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "样板编码终端界面同步超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "样板编码终端界面同步超时"));
         }
         if (request == null) {
             return applySingleSetting(view.get());
         }
         if (!reads.sendEncodeMode(request.mode())) {
-            return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法切换编码模式至 " + request.mode()));
+            return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法切换编码模式至 " + request.mode()));
         }
         reads.sendEncodeClear();
         if (request.substitute() != null) reads.sendEncodeSubstitute(request.substitute());
         if (request.substituteFluids() != null) reads.sendEncodeSubstituteFluids(request.substituteFluids());
-        waited = 0;
-        stage = Stage.WAIT_MODE_SYNC;
+        resetWait();
+        step = Step.WAIT_MODE_SYNC;
         return ActionStatus.progressed();
     }
 
@@ -195,7 +175,7 @@ final class PatternEncodingAction implements Action {
             default -> false;
         };
         if (!sent) {
-            return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+            return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                     "无法发送样板编码终端设置 " + singleKey + "=" + singleValue));
         }
         String mode = "encode_mode".equals(singleKey)
@@ -207,7 +187,7 @@ final class PatternEncodingAction implements Action {
         Ae2MachineCache.EncodingCache prev = cache.encoding(host, side).orElse(null);
         cache.putEncoding(host, side, new Ae2MachineCache.EncodingCache(mode, sub, subFluids, stone,
                 prev == null ? "" : prev.lastRequest(), prev == null ? "" : prev.lastOutput()));
-        return beginClose(null);
+        return closeWith(null);
     }
 
     // 不仅要核对模式已切到目标模式，还要等待 clear() 确实把旧网格清空，防止同模式下旧配方残留绕过后续校验。
@@ -216,12 +196,12 @@ final class PatternEncodingAction implements Action {
         if (view.isPresent()
                 && request.mode().equals(PatternEncodingRequest.normalizeMode(view.get().mode()))
                 && isGridCleared(view.get())) {
-            stage = Stage.WRITE_SLOTS;
-            waited = 0;
+            step = Step.WRITE_SLOTS;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.STUCK,
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.STUCK,
                 "等待样板编码终端切换模式 " + request.mode() + " 并清空旧网格超时"));
     }
 
@@ -244,11 +224,11 @@ final class PatternEncodingAction implements Action {
             default -> false;
         };
         if (!ok) {
-            return beginClose(Problem.of(Problem.Kind.INVALID_PARAMETER,
+            return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER,
                     "无法向样板编码终端写入目标模式的幽灵槽（请检查物品、流体或化学品 ID）"));
         }
-        waited = 0;
-        stage = Stage.WAIT_RECIPE_SYNC;
+        resetWait();
+        step = Step.WAIT_RECIPE_SYNC;
         return ActionStatus.progressed();
     }
 
@@ -310,51 +290,52 @@ final class PatternEncodingAction implements Action {
 
     // 关键防洗样板门槛：先等至少一刻让服务端新槽位同步回来，再确认当前模式配方有效，无效绝不发 encode()！
     private ActionStatus waitRecipeSync() {
-        if (++waited == 1) return ActionStatus.running();
+        boolean elapsed = syncWaitElapsed();
+        if (waitedTicks() == 1) return ActionStatus.running();
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isPresent()) {
             Optional<String> invalid = PatternEncodingRequest.validateMenuBeforeEncode(request, view.get());
             if (invalid.isEmpty()) {
-                stage = Stage.ENSURE_BLANK;
-                waited = 0;
+                step = Step.ENSURE_BLANK;
+                resetWait();
                 return ActionStatus.progressed();
             }
-            if (waited > Ae2MenuActionSupport.SYNC_WAIT_TICKS) {
-                return beginClose(Problem.of(Problem.Kind.INVALID_PARAMETER, invalid.get()));
+            if (elapsed) {
+                return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, invalid.get()));
             }
             return ActionStatus.running();
         }
-        if (waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.STUCK, "等待样板编码配方核验同步超时"));
+        if (!elapsed) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.STUCK, "等待样板编码配方核验同步超时"));
     }
 
     // 确保空白样板槽里有 ae2:blank_pattern，没有则从角色背包移入，背包也没有报 NEED_ITEM。
     private ActionStatus ensureBlankPattern() {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "读取空白样板槽超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "读取空白样板槽超时"));
         }
         if (view.get().blankPatternCount() > 0) {
-            stage = Stage.COMMIT_ENCODE;
+            step = Step.COMMIT_ENCODE;
             return ActionStatus.progressed();
         }
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (reading.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "读取背包空白样板超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "读取背包空白样板超时"));
         }
         int playerBlankSlot = findBlankPatternSlot(reading.get());
         if (playerBlankSlot < 0) {
-            return beginClose(Problem.of(Problem.Kind.NEED_ITEM,
+            return closeWith(Problem.of(Problem.Kind.NEED_ITEM,
                     "缺少空白样板（ae2:blank_pattern），请先备好空白样板再编码"));
         }
-        if (!menu.quickMove(playerBlankSlot)) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "无法将背包里的空白样板移入样板编码终端"));
+        if (!menu().quickMove(playerBlankSlot)) {
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "无法将背包里的空白样板移入样板编码终端"));
         }
-        waited = 0;
-        stage = Stage.COMMIT_ENCODE;
+        resetWait();
+        step = Step.COMMIT_ENCODE;
         return ActionStatus.progressed();
     }
 
@@ -362,19 +343,19 @@ final class PatternEncodingAction implements Action {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isEmpty()) return ActionStatus.running();
         if (view.get().blankPatternCount() <= 0) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.NEED_ITEM, "空白样板未能放入样板编码终端"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.NEED_ITEM, "空白样板未能放入样板编码终端"));
         }
         // 发送 encode() 前最后一次防洗样板确认。
         Optional<String> invalid = PatternEncodingRequest.validateMenuBeforeEncode(request, view.get());
         if (invalid.isPresent()) {
-            return beginClose(Problem.of(Problem.Kind.INVALID_PARAMETER, invalid.get()));
+            return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, invalid.get()));
         }
         if (!reads.sendEncodeCommit()) {
-            return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "发送样板编码指令失败"));
+            return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME, "发送样板编码指令失败"));
         }
-        waited = 0;
-        stage = Stage.WAIT_ENCODED;
+        resetWait();
+        step = Step.WAIT_ENCODED;
         return ActionStatus.progressed();
     }
 
@@ -382,25 +363,25 @@ final class PatternEncodingAction implements Action {
         Optional<Ae2MachineReads.PatternEncodingMenuView> view = reads.openPatternEncodingMenu();
         if (view.isPresent() && view.get().hasEncodedPattern()) {
             encodedOutputNote = view.get().encodedPatternOutputId() == null ? "" : view.get().encodedPatternOutputId();
-            stage = Stage.TAKE_ENCODED;
-            waited = 0;
+            step = Step.TAKE_ENCODED;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.STUCK, "已发编码指令，但输出槽一直没出现已编码样板"));
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.STUCK, "已发编码指令，但输出槽一直没出现已编码样板"));
     }
 
     private ActionStatus takeEncoded() {
         List<Integer> outSlots = compat.menuSlotsOf("ENCODED_PATTERN");
         if (outSlots.isEmpty()) {
-            return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "找不到输出样板槽以收回编码样板"));
+            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "找不到输出样板槽以收回编码样板"));
         }
-        if (!menu.quickMove(outSlots.getFirst())) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "无法从输出槽收回刚编好的样板"));
+        if (!menu().quickMove(outSlots.getFirst())) {
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "无法从输出槽收回刚编好的样板"));
         }
-        waited = 0;
-        stage = Stage.WAIT_TAKEN;
+        resetWait();
+        step = Step.WAIT_TAKEN;
         return ActionStatus.progressed();
     }
 
@@ -411,10 +392,10 @@ final class PatternEncodingAction implements Action {
             cache.putEncoding(host, side, new Ae2MachineCache.EncodingCache(
                     snap.mode(), snap.substitute(), snap.substituteFluids(),
                     snap.stonecuttingRecipeId(), rawRequestValue, encodedOutputNote));
-            return beginClose(null);
+            return closeWith(null);
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "已编出样板但无法取回背包（可能背包已满）"));
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "已编出样板但无法取回背包（可能背包已满）"));
     }
 
     private static int findBlankPatternSlot(MenuContent.Reading reading) {
@@ -427,40 +408,7 @@ final class PatternEncodingAction implements Action {
         return -1;
     }
 
-    private ActionStatus closeMenu(TickContext tick) {
-        if (closing == null) closing = menu.closing();
-        ActionStatus status = closing.tick(tick);
-        if (status instanceof ActionStatus.Running) return status;
-        closing = null;
-        return finish(problem);
-    }
-
-    private ActionStatus beginClose(Problem cause) {
-        problem = cause;
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
-    }
-
-    private ActionStatus finish(Problem cause) {
-        problem = cause;
-        stage = Stage.DONE;
-        return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
-    }
-
-    @Override public void pause() {
-        if (closing != null) closing.pause();
-        else if (menu == null) opening.pause();
-    }
-
-    @Override public void close() {
-        if (closing != null) closing.close();
-        if (menu != null && stage != Stage.DONE) menu.abandon();
-        else if (menu == null) opening.close();
-    }
-
-    @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-
-    @Override public String describe() {
+    @Override protected String doing() {
         return request == null
                 ? "调整样板编码终端设置 " + singleKey + "=" + singleValue
                 : "在样板编码终端按 " + request.mode() + " 模式编码样板";
