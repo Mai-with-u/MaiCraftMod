@@ -5,6 +5,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -20,6 +25,27 @@ import org.maiwithu.maicraft.behavior.acquire.cook.ReadsToolRequirements;
 public final class CarriedItems {
 
     private CarriedItems() {}
+
+    /**
+     * 全身背包（含盔甲与副手格）里注册名正是 itemId 的东西共几件：直接读角色背包本体，
+     * 与上面的主格清点是两种问法——充能器补电这类要看见每一个格里的带电工具，主格清点看不见。
+     */
+    public static int countInWholeInventory(Inventory inventory, String itemId) {
+        int total = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
+    }
+
+    /** 主手（选中的快捷栏格）拿的是不是注册名正是 itemId 的东西；和玩家主手读到的是同一格。 */
+    public static boolean mainhandHolds(Inventory inventory, String itemId) {
+        ItemStack held = inventory.getSelected();
+        return !held.isEmpty() && BuiltInRegistries.ITEM.getKey(held.getItem()).toString().equals(itemId);
+    }
 
     /** 身上（主背包与副手）有多少件请求要的东西。 */
     public static int matching(BackpackView backpack, OffhandContents offhand,
