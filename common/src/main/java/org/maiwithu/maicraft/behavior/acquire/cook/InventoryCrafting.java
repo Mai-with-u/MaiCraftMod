@@ -56,12 +56,49 @@ final class InventoryCrafting implements Action {
         ActionStatus settle(PendingMenuAction.Status status);
     }
 
+    /** 背包合成所需的只读角色界面视图：生产读取真实本地玩家背包，离线单测通过替身驱动状态机。 */
+    interface InventoryView {
+        boolean hasPlayer(PlayerContext player);
+
+        boolean onInventoryMenu(PlayerContext player);
+
+        ItemStack slotItem(PlayerContext player, int slot);
+
+        int carriedCount(PlayerContext player, String itemId);
+
+        boolean recipeUnlocked(PlayerContext player, RecipeHolder<?> holder);
+    }
+
+    private static final InventoryView LIVE_VIEW = new InventoryView() {
+        @Override public boolean hasPlayer(PlayerContext player) {
+            return player != null && player.localPlayer() != null;
+        }
+
+        @Override public boolean onInventoryMenu(PlayerContext player) {
+            return player.localPlayer().containerMenu == player.localPlayer().inventoryMenu;
+        }
+
+        @Override public ItemStack slotItem(PlayerContext player, int slot) {
+            return player.localPlayer().inventoryMenu.getSlot(slot).getItem();
+        }
+
+        @Override public int carriedCount(PlayerContext player, String itemId) {
+            var item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(itemId));
+            return player.localPlayer().getInventory().countItem(item);
+        }
+
+        @Override public boolean recipeUnlocked(PlayerContext player, RecipeHolder<?> holder) {
+            return player.localPlayer().getRecipeBook().contains(holder);
+        }
+    };
+
     private final RecipeHolder<?> holder;
     private final WorkstationRecipe recipe;
     private final int targetItems;
     private final Supplier<PlayerContext> contexts;
     /** 发起任务的记账口：每取一次货记一笔做出的东西，结果里的变化能和背包净变化对得上；null 不记。 */
     private final TaskRecords records;
+    private final InventoryView view;
 
     private Stage stage = Stage.OPEN;
     private int waited;
@@ -85,17 +122,23 @@ final class InventoryCrafting implements Action {
      */
     InventoryCrafting(RecipeHolder<?> holder, WorkstationRecipe recipe, int times, Supplier<PlayerContext> contexts,
             TaskRecords records) {
+        this(holder, recipe, times, contexts, records, LIVE_VIEW);
+    }
+
+    InventoryCrafting(RecipeHolder<?> holder, WorkstationRecipe recipe, int times, Supplier<PlayerContext> contexts,
+            TaskRecords records, InventoryView view) {
         this.holder = Objects.requireNonNull(holder, "holder");
         this.recipe = Objects.requireNonNull(recipe, "recipe");
         this.targetItems = times * recipe.resultCount();
         this.contexts = Objects.requireNonNull(contexts, "contexts");
         this.records = records;
+        this.view = Objects.requireNonNull(view, "view");
     }
 
     @Override
     public ActionStatus tick(TickContext tick) {
         PlayerContext player = tick.player();
-        if (player == null || player.localPlayer() == null) {
+        if (!view.hasPlayer(player)) {
             return ActionStatus.running();
         }
         if (stage == Stage.FINISHED) {
@@ -120,7 +163,7 @@ final class InventoryCrafting implements Action {
         if (!player.menuActions().ensureVisible(player)) {
             return ActionStatus.running();
         }
-        if (player.localPlayer().containerMenu != player.localPlayer().inventoryMenu) {
+        if (!view.onInventoryMenu(player)) {
             return giveUp(player, Problem.of(Problem.Kind.REFUSED_BY_GAME,
                     "开着别的界面，用不了背包的合成格，做不了" + recipe.result().describe()));
         }
@@ -141,8 +184,7 @@ final class InventoryCrafting implements Action {
         if (!ready(player)) {
             return ActionStatus.running();
         }
-        InventoryMenu menu = player.localPlayer().inventoryMenu;
-        ItemStack output = menu.getSlot(RESULT_SLOT).getItem();
+        ItemStack output = view.slotItem(player, RESULT_SLOT);
         if (!output.isEmpty()) {
             int before = carriedResults(player);
             ItemStack shown = output.copy();
@@ -154,7 +196,9 @@ final class InventoryCrafting implements Action {
                         if (gained > 0 && records != null) {
                             records.change(Change.of(Change.Kind.ITEM_GAINED, recipe.result().itemId(), gained));
                         }
-                        if (status == PendingMenuAction.Status.CONFIRMED_NOT_APPLIED) {
+                        // 取成品只有服务端确认生效且背包真收到物品才算推进；背包满时服务端拒移且常不回包导致
+                        // UNCERTAIN，或确认后实际一件未进包（gained <= 0），均立刻按背包已满收手关屏，不再空点死循环。
+                        if (status != PendingMenuAction.Status.CONFIRMED_APPLIED || gained <= 0) {
                             return giveUp(player, Problem.of(Problem.Kind.INVENTORY_FULL,
                                     "产出格的" + recipe.result().describe() + "收不进背包，背包可能满了"));
                         }
@@ -162,11 +206,11 @@ final class InventoryCrafting implements Action {
                     });
         }
         // 配方簿里这条还没解锁就直接逐格摆；解锁了先走配方簿，没摆上（原料带附魔、改过名配方簿不认）也改逐格摆。
-        if (!byHand && !player.localPlayer().getRecipeBook().contains(holder)) {
+        if (!byHand && !view.recipeUnlocked(player, holder)) {
             byHand = true;
         }
         if (byHand) {
-            return placeByHand(player, menu);
+            return placeByHand(player);
         }
         return submit(player.menuActions().placeRecipe(player, holder, false, resultShown(), CLICK_TIMEOUT_TICKS),
                 status -> {
@@ -177,9 +221,9 @@ final class InventoryCrafting implements Action {
 
     // 逐格摆一轮：合成格里有上一份留下的东西先快速移动回背包，格子空了再按身上的料排一轮；
     // 身上的料一份都摆不满就如实说缺料。
-    private ActionStatus placeByHand(PlayerContext player, InventoryMenu menu) {
+    private ActionStatus placeByHand(PlayerContext player) {
         for (int slot : GRID_SLOTS) {
-            ItemStack left = menu.getSlot(slot).getItem();
+            ItemStack left = view.slotItem(player, slot);
             if (left.isEmpty()) continue;
             ItemStack shown = left.copy();
             return submit(player.menuActions().click(player, slot, 0, ClickType.QUICK_MOVE,
@@ -192,7 +236,7 @@ final class InventoryCrafting implements Action {
         List<ItemStack> carried = new ArrayList<>();
         for (int slot = FIRST_CARRIED_SLOT; slot < END_CARRIED_SLOT; slot++) {
             carriedSlots.add(slot);
-            carried.add(menu.getSlot(slot).getItem());
+            carried.add(view.slotItem(player, slot));
         }
         int stillToMake = Math.max(1, (targetItems - produced + recipe.resultCount() - 1) / recipe.resultCount());
         Optional<CraftingGridFill> fill = CraftingGridFill.plan(holder, 2, GRID_SLOTS, RESULT_SLOT, carriedSlots,
@@ -221,8 +265,8 @@ final class InventoryCrafting implements Action {
     }
 
     // 点到的格子变了（变空、变少或换了东西）才算这一下生效。
-    private static MenuConfirmation slotChanged(int slot, ItemStack before) {
-        return (player, click) -> ItemStack.matches(player.localPlayer().containerMenu.getSlot(slot).getItem(), before)
+    private MenuConfirmation slotChanged(int slot, ItemStack before) {
+        return (player, click) -> ItemStack.matches(view.slotItem(player, slot), before)
                 ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
     }
 
@@ -277,19 +321,18 @@ final class InventoryCrafting implements Action {
 
     // 背包里有几件这次要做的东西：取货前后各数一次，差就是这次真收进来的。
     private int carriedResults(PlayerContext player) {
-        var item = BuiltInRegistries.ITEM.get(ResourceLocation.parse(recipe.result().itemId()));
-        return player.localPlayer().getInventory().countItem(item);
+        return view.carriedCount(player, recipe.result().itemId());
     }
 
     // 摆料的确认条件：产出格出了东西才算摆上（合成格里的料对上了配方）。
-    private static MenuConfirmation resultShown() {
-        return (player, click) -> player.localPlayer().inventoryMenu.getSlot(RESULT_SLOT).getItem().isEmpty()
+    private MenuConfirmation resultShown() {
+        return (player, click) -> view.slotItem(player, RESULT_SLOT).isEmpty()
                 ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
     }
 
     // 取货的确认条件：产出格变了（变空、换了东西）才算拿走。
-    private static MenuConfirmation resultChanged(ItemStack before) {
-        return (player, click) -> ItemStack.matches(player.localPlayer().inventoryMenu.getSlot(RESULT_SLOT).getItem(), before)
+    private MenuConfirmation resultChanged(ItemStack before) {
+        return (player, click) -> ItemStack.matches(view.slotItem(player, RESULT_SLOT), before)
                 ? MenuConfirmation.Verdict.PENDING : MenuConfirmation.Verdict.APPLIED;
     }
 
@@ -318,7 +361,7 @@ final class InventoryCrafting implements Action {
     // 收尾时没有本刻的上下文：取当刻的角色，不在世界里就不用关。
     private PlayerContext currentPlayer() {
         PlayerContext player = contexts.get();
-        return player == null || player.localPlayer() == null ? null : player;
+        return view.hasPlayer(player) ? player : null;
     }
 
     @Override
