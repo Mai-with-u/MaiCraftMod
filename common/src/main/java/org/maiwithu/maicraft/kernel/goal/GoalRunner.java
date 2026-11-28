@@ -157,7 +157,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
      */
     public void giveUp(TaskResult why) {
         if (result != null) return;
-        settle(why, null);
+        settle(why, null, null);
     }
 
     /** 这条推进的记录；LLM 查询目标进展时看的就是它。 */
@@ -366,7 +366,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             TaskResult failure = TaskResult.failed("目标推进时程序出错", Problem.of(Problem.Kind.INTERNAL_ERROR,
                     exception.getClass().getSimpleName()
                             + (exception.getMessage() == null ? "" : "：" + exception.getMessage())));
-            return settle(closed == null ? failure : failure.withFactsBefore(List.of(closed)), context);
+            return settle(failure, closed, context);
         }
     }
 
@@ -440,7 +440,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         TaskResult cancelled = ending.build();
         // 收场原因记在运行记录上：结束事件发布时按字段挂上去，状态里压扁成 CANCELLED 的几种收场在下游仍分得清。
         run.closedBecause(reason);
-        settle(closed == null ? cancelled : cancelled.withFactsBefore(List.of(closed)), null);
+        settle(cancelled, closed, null);
         return result;
     }
 
@@ -542,7 +542,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         if (taskResult.status() != TaskResult.Status.DONE) {
             // 没做成又没要求回来再决定：带着完整事实结束目标，排在后面的任务不再做。
             queuedInputs = null;
-            return settle(taskResult, context);
+            return settle(taskResult, null, context);
         }
         if (queuedInputs != null && !queuedInputs.isEmpty()) {
             finishedResults.add(taskResult);
@@ -552,7 +552,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             }
             return startTask(queuedInputs.removeFirst().get(), false, context);
         }
-        return settle(taskResult, context);
+        return settle(taskResult, null, context);
     }
 
     /** 重新问能力对当前这一步的决定，并按决定行事。 */
@@ -576,7 +576,7 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
             return TickResult.RUNNING;
         }
         if (decision instanceof StepDecision.Finish finish) {
-            return settle(finish.result(), context);
+            return settle(finish.result(), null, context);
         }
         if (decision instanceof StepDecision.Run runTask) {
             queuedInputs = null;
@@ -672,10 +672,10 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         run.recordStepResult(stepResult);
         Goal step = goal.steps().get(index);
         if (stepResult.status() != TaskResult.Status.DONE && step.onFailure() == Goal.OnFailure.STOP) {
-            return settle(GoalConclusions.sequenceResult(goal, finishedResults, index + 1), context);
+            return settle(GoalConclusions.sequenceResult(goal, finishedResults, index + 1), null, context);
         }
         if (index + 1 >= goal.steps().size()) {
-            return settle(GoalConclusions.sequenceResult(goal, finishedResults, goal.steps().size()), context);
+            return settle(GoalConclusions.sequenceResult(goal, finishedResults, goal.steps().size()), null, context);
         }
         run.advanceToStep(index + 1);
         save();
@@ -713,8 +713,15 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         return closed;
     }
 
-    /** 结束目标：把临时任务与前面已经结束的任务的事实并进结论，记录随之存盘，之后本推进封存。 */
-    private TickResult settle(TaskResult ending, TickContext context) {
+    /**
+     * 终结的收场编排：手上任务收场时交代的现场垫进结论最前面，再并上前面已经结束的任务与临时任务交代的事实，
+     * 记录随之存盘，之后本推进封存。放弃、按原因取消收场、推进出错三条终结路径共用，
+     * 收尾到头的取消经取消收场也到这里；手上的任务收不收、按什么原因收是各入口自己的本质决定，收好的结果传进来。
+     */
+    private TickResult settle(TaskResult ending, TaskResult closedChild, TickContext context) {
+        if (closedChild != null) {
+            ending = ending.withFactsBefore(List.of(closedChild));
+        }
         // 先只并上这个目标自己前面任务的事实交给存储链补一笔（动了预留的扣掉），再把临时任务交代的接到最前面：
         // 饿了吃掉留着的那口、自卫垫的方块是保命，不算下令的目标动了预留。
         TaskResult own = store.settling(run, ending.withFactsBefore(finishedResults));
