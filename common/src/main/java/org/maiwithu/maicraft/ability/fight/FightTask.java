@@ -12,12 +12,12 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.Supplier;
 
-import net.minecraft.core.BlockPos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.maiwithu.maicraft.behavior.combat.AfterFight;
+import org.maiwithu.maicraft.behavior.combat.ArrowChanges;
 import org.maiwithu.maicraft.behavior.combat.ArrowsSpent;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
@@ -25,9 +25,6 @@ import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.DragonArena;
 import org.maiwithu.maicraft.behavior.combat.DragonCombat;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
-import org.maiwithu.maicraft.behavior.navigation.WalkRun;
-import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.behavior.survival.SuicideWayOut;
 import org.maiwithu.maicraft.kernel.interrupt.ThreatResponder;
 import org.maiwithu.maicraft.kernel.progress.ProgressTracker;
@@ -103,9 +100,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     private int shots;
     /** 这一仗箭少了几支：按背包里箭的只数开打与打着时的差算，和射出去几箭各记各的。 */
     private final ArrowsSpent arrows = new ArrowsSpent();
-    /** 已经记进变化的箭：消耗、捡回各几支；每多一支就补记一支，中途按卡住、撤离收场的结果里也有这笔。 */
-    private int arrowsRecorded;
-    private int arrowsPickedUpRecorded;
+    /** 箭账补记成变化：新离开的记消耗、新捡回的记收获，每多一支补一支，中途按卡住、撤离收场的结果里也有这笔。 */
+    private final ArrowChanges arrowChanges = new ArrowChanges();
     /** 插进来的事（自卫插曲、吃饭）自己认下的箭：消耗、捡回各几支；回来接着打时拿它把那段的账分开，用过就清。 */
     private int interludeArrowsTaken;
     private int interludeArrowsPickedUp;
@@ -130,17 +126,12 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
     /** 开打前的经验：结果写这一仗得了多少。 */
     private FightMoves.Experience experienceBefore;
 
-    /** 拾荒正在做的那一步（走向某件掉落物）。 */
-    private Action current;
-    private String currentKey;
-    /** 回倒下点这一趟的进展观察：脚位挪一格记一次前进。 */
-    private final WalkProgress walkProgress = new WalkProgress();
+    /** 战后打扫：回倒下点、捡这一仗掉出来的东西，与自卫共用一份。 */
+    private final AfterFight aftermath;
+    /** 打扫登记进手上：暂停、先停稳、收尾由基类逐个转给它。 */
+    private boolean aftermathInHand;
     /** 开打那一刻的掉落物确认序号：这之后冒出来的掉落才是这一仗带出来的。 */
     private long fightCursor;
-    /** 拾荒先回到最后一只倒下的地方：远处的掉落进不了"身边"的名单。 */
-    private boolean atKillSpot;
-    /** 捡这一仗掉出来的东西（共用的捡掉落物）。 */
-    private Action pickup;
     private final SuicideWayOut wayOut;
 
     FightTask(FightInput input, CombatSenses senses, SeenTargets seenTargets, FightMoves moves,
@@ -158,6 +149,7 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         this.moves = Objects.requireNonNull(moves, "moves");
         this.consent = Objects.requireNonNull(consent, "consent");
         this.wayOut = Objects.requireNonNull(wayOut, "wayOut");
+        this.aftermath = new AfterFight(moves, this::recordProgress, this::stopping);
     }
 
     @Override protected Action enter(Phase phase) { return null; }
@@ -170,8 +162,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     @Override
     protected String doing() {
-        if (pickup != null) return pickup.describe();
-        if (current != null) return current.describe();
+        String afterFight = aftermath.currentDescribe();
+        if (afterFight != null) return afterFight;
         return battle == null ? "观察战场" : battle.describe();
     }
 
@@ -563,48 +555,26 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         if (lastKillSpot == null) {
             return Next.done(settled());
         }
-        if (!atKillSpot) {
-            double[] self = moves.selfPosition(context);
-            if (Math.hypot(self[0] - lastKillSpot[0], self[2] - lastKillSpot[2]) <= KILL_SPOT_NEAR) {
-                atKillSpot = true;
-                dropCurrent();
-            } else {
-                keep("回到倒下的地方", () -> moves.walk(GoalCompiler.near(
-                        BlockPos.containing(lastKillSpot[0], lastKillSpot[1], lastKillSpot[2]), KILL_SPOT_NEAR)));
-                if (current.tick(context) instanceof ActionStatus.Running running) {
-                    // 回倒下点的进展从走到运行的脚位读（走到进展 WalkProgress，与自卫走回打点共用）：
-                    // 几十格的回程靠 progressed 攒不出进展记录，走得好好的也会被停滞判定按卡住收掉。
-                    // 测试里的替身动作不是走到运行，退回按动作状态记进展。
-                    if (current instanceof WalkRun walk) {
-                        walkProgress.note(walk).ifPresent(feet ->
-                                recordProgress("回到倒下的地方：走到 " + feet.toShortString()));
-                    } else if (running.progressed()) {
-                        recordProgress("回到倒下的地方捡掉落");
-                    }
-                    return Next.stay();
-                }
-                // 收尾途中落地报的"已停下"不是走到了：站着等外层停下，接着做时再看离倒下的地方多远。
-                if (stopping()) return Next.stay();
-                // 走到了或走不到都照样捡：站在原地，够得着的先收，收不到的由捡的动作如实交代。
-                atKillSpot = true;
-                dropCurrent();
+        holdAftermathOnce();
+        // 回倒下点这一段与自卫走回打点共用一份（战后打扫）：走到或走不到都照样捡，
+        // 站在原地够得着的先收，收不到的由捡的动作如实交代。
+        switch (aftermath.walkBack(context, new AfterFight.Spot(lastKillSpot, KILL_SPOT_NEAR, KILL_SPOT_NEAR),
+                "回到倒下的地方", () -> "回到倒下的地方捡掉落")) {
+            case WALKING, WAITING_TO_STOP -> {
+                return Next.stay();
             }
+            case NEAR, WALK_ENDED, WALK_FAILED -> { }
         }
-        if (pickup == null) {
-            pickup = moves.pickUpNewSince(moves.dropsLyingBefore(context, fightCursor));
-            hold(pickup);
+        switch (aftermath.pickUp(context, () -> moves.pickUpNewSince(moves.dropsLyingBefore(context, fightCursor)))) {
+            case PICKING -> {
+                return Next.stay();
+            }
+            case PICKED -> { }
         }
-        ActionStatus status = pickup.tick(context);
-        if (status instanceof ActionStatus.Running running) {
-            if (running.progressed()) recordProgress(pickup.describe());
-            return Next.stay();
+        String pickupProblem = aftermath.pickupProblem();
+        if (pickupProblem != null) {
+            recordAttempt("捡这一仗掉出来的东西", pickupProblem);
         }
-        if (status instanceof ActionStatus.Failed failed) {
-            recordAttempt("捡这一仗掉出来的东西", failed.problem().message());
-        }
-        pickup.close();
-        release(pickup);
-        pickup = null;
         for (FightMoves.Gained gained : moves.pickedUpSince(context, fightCursor)) {
             lootGained.add(gained.item());
             // 箭由背包的箭账逐支记成收获（noteArrows），这里不重复记；其余东西按服务器的拾取包记。
@@ -613,6 +583,14 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
             }
         }
         return Next.done(settled());
+    }
+
+    // 打扫接进基类的手上动作：暂停、先停稳、收尾跟着扇出；登记一次就够。
+    private void holdAftermathOnce() {
+        if (!aftermathInHand) {
+            hold(aftermath);
+            aftermathInHand = true;
+        }
     }
 
     /** 离最后一只倒下的地方这么近就开始捡（格）。 */
@@ -696,43 +674,13 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
         return locked.type() + "（实体 " + locked.entityId() + "）";
     }
 
-    // 沿用进行中的动作：同一件事不每刻重建；换了一件事才收尾旧的再起新的。
-    private void keep(String key, Supplier<Action> make) {
-        if (current != null && !key.equals(currentKey)) {
-            dropCurrent();
-        }
-        if (current == null) {
-            current = make.get();
-            hold(current);
-            currentKey = key;
-        }
-    }
-
-    private void dropCurrent() {
-        if (current != null) {
-            current.close();
-            release(current);
-            current = null;
-        }
-        currentKey = null;
-    }
-
     // 记一笔此刻背包里的箭；离开背包的箭随手记成消耗（各种箭合在一起按 minecraft:arrow 记），调用方拿结果对背包的账
     // 时能对上；捡回的由拾荒按服务器的拾取包另记，不在这里重复。
     private void noteArrows(TickContext context) {
         arrows.note(moves.arrowsCarried(context));
         // 离开背包的、捡回的逐支配平：离开的记消耗，捡回的记收获（各种箭合在一起按 minecraft:arrow 记），
         // 调用方拿结果对背包的账时两本都对得上。拾荒那边按服务器拾取包记的收获不含箭，不重复。
-        int unrecorded = arrows.taken() - arrowsRecorded;
-        if (unrecorded > 0) {
-            recordChange(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", unrecorded));
-            arrowsRecorded = arrows.taken();
-        }
-        int unrecordedPickup = arrows.pickedUp() - arrowsPickedUpRecorded;
-        if (unrecordedPickup > 0) {
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, "minecraft:arrow", unrecordedPickup));
-            arrowsPickedUpRecorded = arrows.pickedUp();
-        }
+        arrowChanges.record(arrows.taken(), arrows.pickedUp(), this::recordChange);
     }
 
     @Override
@@ -790,7 +738,8 @@ final class FightTask extends PhasedTask<FightTask.Phase> implements ThreatRespo
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
-        if (current != null) return current.interruptibility();
+        Interruptibility afterFight = aftermath.currentInterruptibility();
+        if (afterFight != null) return afterFight;
         return battle != null ? battle.interruptibility() : Interruptibility.WORKING;
     }
 }
