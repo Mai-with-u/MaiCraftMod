@@ -21,6 +21,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.InteractionSubmission;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.NetworkDelay;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -55,6 +56,9 @@ public final class LandingRescue implements CatchesFall {
     private LandingPlan plan;
     private LandingItemInHand item;
     private PlayerContext current;
+    /** 放置、舀水那一下的提交与确认：收下、逐刻结算与边界收尾由它推进。 */
+    private final InteractionSubmission placement = new InteractionSubmission();
+    /** 收回阶段的挖掘等待（持续挖掘不走一次性提交，逐刻续挖与停手分开推进）。 */
     private PendingInteraction pending;
     private BlockState placed;
     private BlockState beforePlacement;
@@ -209,9 +213,9 @@ public final class LandingRescue implements CatchesFall {
         if (settledAway(context, player)) return;
         if (!failed && item != null && !item.ready() && !prepareInFlight(context, player)) return;
         if (!failed) aim(context, player);
-        if (pending != null) {
+        if (pending != null || placement.awaitingConfirmation()) {
             settle(context);
-            if (pending != null) return;
+            if (pending != null || placement.awaitingConfirmation()) return;
         }
         if (afterTouchdown(context, player)) return;
         if (!failed) trySubmit(context, player);
@@ -264,8 +268,9 @@ public final class LandingRescue implements CatchesFall {
         current = context;
         fail(reason);
         if (item != null) item.abandon(context, reason);
+        // 挖掘发停手、喝水这类物品使用按「玩家变更时结算」收场，收场种类的分辨归边界路由。
+        placement.settleForTaskBoundary(context, reason);
         if (pending != null && !pending.terminal()) {
-            // 挖掘发停手、喝水这类物品使用按「玩家变更时结算」收场，收场种类的分辨归边界路由。
             context.interactionSender().settleForTaskBoundary(context, pending, reason);
         }
         pending = null;
@@ -303,9 +308,9 @@ public final class LandingRescue implements CatchesFall {
             displacedStableTicks = 0;
             return false;
         }
-        if (pending != null) {
+        if (pending != null || placement.awaitingConfirmation()) {
             settle(context);
-            if (pending != null) return true;
+            if (pending != null || placement.awaitingConfirmation()) return true;
         }
         if (++displacedStableTicks >= dwell(context)) {
             if (item != null) item.abandon(context, "落到了别处");
@@ -429,50 +434,68 @@ public final class LandingRescue implements CatchesFall {
                     ? InteractionConfirmation.Verdict.APPLIED : InteractionConfirmation.Verdict.PENDING;
         };
         try {
-            var sender = context.interactionSender();
-            PendingInteraction placed = plan.aid() == LandingAid.WATER
-                    ? sender.useItem(context, hand, confirmation, CONFIRM_TIMEOUT_TICKS)
-                    : sender.useBlock(context, hand, hit, confirmation, CONFIRM_TIMEOUT_TICKS);
+            PendingInteraction placed = placement.submit(context, c -> plan.aid() == LandingAid.WATER
+                    ? c.interactionSender().useItem(c, hand, confirmation, CONFIRM_TIMEOUT_TICKS)
+                    : c.interactionSender().useBlock(c, hand, hit, confirmation, CONFIRM_TIMEOUT_TICKS));
             // 提交入口这一刻不收：窗口下一刻还开着就原样再放，不算放不出去。
             if (placed == null) return;
             beforePlacement = context.level().getBlockState(plan.cell());
             submitted = true;
             detail = name(plan.aid()) + "放出去了，等游戏确认";
-            pending = placed;
         } catch (RuntimeException unavailable) {
             fail("放" + name(plan.aid()) + "这一下提交不出去：" + unavailable.getMessage());
         }
     }
 
-    // 等放置或收回的确认：挖的那一下快到期限还没好就停手，没到就接着挖。
+    // 等放置或收回的确认：收回的挖掘逐刻推进（快到期先停手，没到接着挖），放置只等结论。
     void settle(PlayerContext context) {
+        if (pending != null) {
+            settleCleaning(context);
+        } else if (placement.awaitingConfirmation()) {
+            settlePlacement(context);
+        }
+    }
+
+    // 挖的那一下快到期限还没好就停手，没到就接着挖。
+    private void settleCleaning(PlayerContext context) {
         var sender = context.interactionSender();
         try {
-            boolean breaking = cleaning && pending.kind() == PendingInteraction.Kind.BREAK_BLOCK;
-            if (breaking && !pending.terminal() && context.clientTick() >= pending.deadlineTick() - 1
+            if (!pending.terminal() && context.clientTick() >= pending.deadlineTick() - 1
                     && context.canInteractThisTick()) {
                 pending = sender.cancelBreaking(context, pending);
             }
             pending = sender.poll(context, pending);
             if (!pending.terminal()) {
-                if (breaking && context.canInteractThisTick()) pending = sender.continueBreaking(context, pending);
+                if (context.canInteractThisTick()) pending = sender.continueBreaking(context, pending);
                 return;
             }
             if (pending.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
-                fail((cleaning ? "收回" : "放") + name(plan.aid()) + "没得到游戏确认：" + pending.detail());
-            } else if (cleaning) {
+                fail("收回" + name(plan.aid()) + "没得到游戏确认：" + pending.detail());
+            } else {
                 changes.add(new Change(plan.cell(), placed, context.level().getBlockState(plan.cell())));
                 removed = true;
                 stableTicks = 0;
                 detail = "收回了自己放的" + name(plan.aid()) + "，等拿走后站稳";
+            }
+            pending = null;
+        } catch (RuntimeException unavailable) {
+            pending = null;
+            fail("等确认时出错：" + unavailable.getMessage());
+        }
+    }
+
+    private void settlePlacement(PlayerContext context) {
+        try {
+            PendingInteraction settled = placement.poll(context);
+            if (settled == null) return;
+            if (settled.status() != PendingInteraction.Status.CONFIRMED_APPLIED) {
+                fail("放" + name(plan.aid()) + "没得到游戏确认：" + settled.detail());
             } else {
                 placed = context.level().getBlockState(plan.cell());
                 changes.add(new Change(plan.cell(), beforePlacement, placed));
                 detail = name(plan.aid()) + "放下了，等落地";
             }
-            pending = null;
         } catch (RuntimeException unavailable) {
-            pending = null;
             fail("等确认时出错：" + unavailable.getMessage());
         }
     }
