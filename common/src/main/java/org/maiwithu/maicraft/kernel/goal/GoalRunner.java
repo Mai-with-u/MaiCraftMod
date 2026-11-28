@@ -422,25 +422,11 @@ public final class GoalRunner implements Task, SurvivalNeedsOff, RoutineNeedsOff
         if (result != null) {
             return result;
         }
-        // 还在跑的任务按同样的原因收尾，交代已经发生的变化；目标的结论是"被取消 / 被替换 / 角色没了"，
-        // 任务交代的没做完的部分（停在哪、差多远）并进结论，它结的细节原样带上——
-        // 调用方在结论里就能看到现场，不用再查一次位置。
+        // 还在跑的任务按同样的原因收尾，交代已经发生的变化；目标的结论是"被取消 / 被替换 / 角色没了"。
         TaskResult closed = closeRunningChild(reason);
-        List<String> closedRemaining = closed == null ? List.of() : closed.remaining();
-        String summary = GoalConclusions.cancelledSummary(reason);
-        if (!closedRemaining.isEmpty()) {
-            summary = summary + "：" + String.join("；", closedRemaining);
-        }
-        TaskResult.Builder ending = TaskResult.builder(TaskResult.Status.CANCELLED, summary);
-        if (closed != null) {
-            ending.remaining(closedRemaining);
-            ending.details(closed.details());
-        }
-        ending.remaining(GoalConclusions.stepsNotStarted(goal, goal.steps().isEmpty() ? 0 : run.stepIndex() + 1));
-        TaskResult cancelled = ending.build();
         // 收场原因记在运行记录上：结束事件发布时按字段挂上去，状态里压扁成 CANCELLED 的几种收场在下游仍分得清。
         run.closedBecause(reason);
-        settle(cancelled, closed, null);
+        settle(GoalConclusions.cancelledConclusion(goal, reason, closed, run.stepIndex() + 1), closed, null);
         return result;
     }
 

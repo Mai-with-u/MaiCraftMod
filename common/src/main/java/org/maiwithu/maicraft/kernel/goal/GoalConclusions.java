@@ -61,6 +61,25 @@ final class GoalConclusions {
         return goal.steps().get(index).stepLabel(index);
     }
 
+    /**
+     * 目标没走到自己的结论就被收掉时的取消型结论：手上任务交代的没做完的部分（停在哪、差多远）并进结论句，
+     * 它结的细节原样带上，还没开始的步骤列在剩下的部分——调用方在结论里就能看到现场，不用再查一次位置。
+     */
+    static TaskResult cancelledConclusion(Goal goal, CloseReason reason, TaskResult closedChild, int fromStep) {
+        List<String> closedRemaining = closedChild == null ? List.of() : closedChild.remaining();
+        String summary = cancelledSummary(reason);
+        if (!closedRemaining.isEmpty()) {
+            summary = summary + "：" + String.join("；", closedRemaining);
+        }
+        TaskResult.Builder ending = TaskResult.builder(TaskResult.Status.CANCELLED, summary);
+        if (closedChild != null) {
+            ending.remaining(closedRemaining);
+            ending.details(closedChild.details());
+        }
+        ending.remaining(stepsNotStarted(goal, goal.steps().isEmpty() ? 0 : fromStep));
+        return ending.build();
+    }
+
     // 目标没走到自己的结论就被收掉时，结论句按收掉的原因说：被取消、被新任务替换、角色没了，或主任务不要起居打断。
     static String cancelledSummary(CloseReason reason) {
         return switch (reason) {
