@@ -13,6 +13,8 @@ import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.StepwiseActions;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuTakeRound;
+import org.maiwithu.maicraft.behavior.menu.MenuTakeRun;
+import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
@@ -78,7 +80,7 @@ public final class MenuTerminalTakes implements TerminalTakes {
     }
 
     /** 从终端取货的动作：点开并等同步 → 一轮取货（逐笔取、下单插页、放好光标、关上都在里面），跨刻推进。 */
-    private final class TakeAction implements Action {
+    private final class TakeAction extends MenuTakeRun {
 
         /** 一次取货的总期限（刻）：走过去加上最多六十几下单件取，一分钟足够；到点如实收场，不在一台终端上耗死。 */
         private static final long GIVE_UP_TICKS = 20L * 60;
@@ -91,11 +93,8 @@ public final class MenuTerminalTakes implements TerminalTakes {
         private final WaitsForCraft craft;
         /** 终端取货的差异点：下一笔怎么出怎么发、收场前放光标。 */
         private final TakeMoves moves;
-        /** 界面核对过之后的一轮取货：逐笔、记账、放光标、关界面都走它；重开交接后换新一轮。 */
-        private MenuTakeRound round;
         /** 重开前的没能确认记账，跟着会话走，别跟着被丢掉的一轮丢掉。 */
         private final List<String> carriedNotes = new ArrayList<>();
-        private long waited;
         /** 站在终端前等成品时被生存需求打断过：回来先重新打开终端接着等，不当成取完了。 */
         private boolean reopenAfterPause;
         /** 交接重开做完了：外层丢掉旧的一轮，重新走打开与核对。 */
@@ -113,19 +112,43 @@ public final class MenuTerminalTakes implements TerminalTakes {
             this.moves = new TakeMoves(session, craft, lookOnly, allowCrafting);
         }
 
-        @Override public ActionStatus tick(TickContext tick) {
-            if (reopenAfterPause) return resumeAfterPause();
-            // 下了单（或在等之前下的单）时，下单那几页与等成品另有期限，总期限跟着放宽。
-            long limit = craft.involved()
+        // 打开与核对：走到、点开、核对是这台、等网络读数同步；核对过了外壳建一轮取货交给流程。
+        // 核对里发现开错了、没连上、存货一直没同步：照常收场（记存货、放光标、关界面）。
+        @Override protected Opening openSegment(TickContext tick) {
+            TerminalTurn turn = sync.proceed(tick);
+            if (turn instanceof TerminalTurn.Stay(ActionStatus status)) return new Opening.Proceed(status);
+            if (turn instanceof TerminalTurn.Synced) return new Opening.MenuReady(session.menu());
+            if (turn instanceof TerminalTurn.WrapUp(Problem reason, boolean evenIfTaken)) {
+                // 就算已经取到一些也按失败交回的口径留给下单那边；打开与核对阶段的失败照常收场。
+                moves.failedAtOpen(reason);
+                return new Opening.MenuReady(session.menu());
+            }
+            if (turn instanceof TerminalTurn.FinishNow(Problem reason)) {
+                // 界面刚打开就被关上了：不用放光标、不用关，直接收场。
+                moves.stashReason(reason);
+                return new Opening.Finish(result());
+            }
+            // 打开与核对不会走到下单与重开；照常推进。
+            return new Opening.Proceed(ActionStatus.progressed());
+        }
+
+        @Override protected MenuTakeRound newRound(OpenedMenu opened) {
+            return new MenuTakeRound(opened, List.of(new TakeWant()), new RoundEndings());
+        }
+
+        @Override protected Optional<MenuContent.Reading> currentReading() {
+            return session.reading();
+        }
+
+        // 下了单（或在等之前下的单）时，下单那几页与等成品另有期限，总期限跟着放宽。
+        @Override protected long limitTicks() {
+            return craft.involved()
                     ? GIVE_UP_TICKS + CraftOrdering.MOST_TICKS + CraftWait.TOTAL_TICKS : GIVE_UP_TICKS;
-            if (++waited > limit) return checkTimeout(tick);
-            if (round == null) return openSegment(tick);
-            return tickRound(tick);
         }
 
         // 总期限到了：还没在收场路上的就地收场（不再盘下一笔，照常放光标、关界面、出结论）；
         // 界面还没点开的直接按超时收场；已经在收场路上的照原样走完。
-        private ActionStatus checkTimeout(TickContext tick) {
+        @Override protected ActionStatus onTimeout(TickContext tick) {
             Problem timeout = Problem.of(Problem.Kind.STUCK,
                     "从 " + session.access().describe() + " 取货超时", null);
             if (round != null && !round.atClosing()) {
@@ -134,52 +157,23 @@ public final class MenuTerminalTakes implements TerminalTakes {
             }
             if (round == null && session.menu() != null) {
                 moves.failedAtOpen(timeout);
-                round = newRound();
+                round = newRound(session.menu());
                 return ActionStatus.progressed();
             }
             if (round == null) return result();
-            return tickRound(tick);
+            return roundReturned(round.tick(tick, session.reading()));
         }
 
-        // 打开与核对：走到、点开、核对是这台、等网络读数同步；核对过了建一轮取货交给流程。
-        // 核对里发现开错了、没连上、存货一直没同步：照常收场（记存货、放光标、关界面）。
-        private ActionStatus openSegment(TickContext tick) {
-            TerminalTurn turn = sync.proceed(tick);
-            if (turn instanceof TerminalTurn.Stay(ActionStatus status)) return status;
-            if (turn instanceof TerminalTurn.Synced) {
-                round = newRound();
-                return ActionStatus.progressed();
-            }
-            if (turn instanceof TerminalTurn.WrapUp(Problem reason, boolean evenIfTaken)) {
-                // 就算已经取到一些也按失败交回的口径留给下单那边；打开与核对阶段的失败照常收场。
-                moves.failedAtOpen(reason);
-                round = newRound();
-                return ActionStatus.progressed();
-            }
-            if (turn instanceof TerminalTurn.FinishNow(Problem reason)) {
-                // 界面刚打开就被关上了：不用放光标、不用关，直接收场。
-                moves.stashReason(reason);
-                return result();
-            }
-            // 打开与核对不会走到下单与重开；照常推进。
-            return ActionStatus.progressed();
-        }
-
-        // 一轮取货推进一刻：终态前先问一句是不是交接重开了——是就丢掉旧的一轮，重新走打开与核对，不算取完。
-        private ActionStatus tickRound(TickContext tick) {
-            ActionStatus status = round.tick(tick, session.reading());
+        // 一轮取货返回后先问一句是不是交接重开了——是就丢掉旧的一轮，重新走打开与核对，不算取完。
+        @Override protected ActionStatus roundReturned(ActionStatus status) {
             if (status instanceof ActionStatus.Running) return status;
             if (restarted) {
                 carriedNotes.addAll(round.unconfirmedFacts());
-                round = null;
+                discardRound();
                 restarted = false;
                 return ActionStatus.progressed();
             }
             return status;
-        }
-
-        private MenuTakeRound newRound() {
-            return new MenuTakeRound(session.menu(), List.of(new TakeWant()), new RoundEndings());
         }
 
         // 关掉此刻的终端重新打开：下单开工了（或等成品被打断回来），等读数同步后建新一轮接着取，账跟着会话走。
@@ -191,12 +185,42 @@ public final class MenuTerminalTakes implements TerminalTakes {
 
         // 等成品时被打断过（饿了去吃、天黑去睡）：界面已经关了，作业留在网络里接着做。回来重新走到终端前打开，
         // 接着等同一单——等过的时间照算、不重复下单；打断前还没确认的那一下如实记下，不再等它。
-        private ActionStatus resumeAfterPause() {
+        @Override protected ActionStatus resumeFromPause() {
+            if (!reopenAfterPause) return null;
             reopenAfterPause = false;
             if (round != null) carriedNotes.addAll(round.unconfirmedFacts());
-            round = null;
+            discardRound();
             reopen();
             return ActionStatus.progressed();
+        }
+
+        @Override protected void pauseOpening() {
+            session.opening().pause();
+        }
+
+        // 被生存需求打断：站在终端前等成品时打断的，回来接着等（记下交接，回来重开）；取现货时打断的就此收场，
+        // 界面关上，取到多少由引擎清点。
+        @Override protected void pausing() {
+            if (round != null && !round.done() && moves.betweenActions()) {
+                reopenAfterPause = true;
+                round.abandonQuietly();
+            }
+            pauseOpening();
+            session.abandonMenu();
+        }
+
+        @Override protected void closeOpening() {
+            session.opening().close();
+        }
+
+        // 此刻能不能被生存需求打断：光标收放还在等游戏确认时停不得（外壳另看手上的取货一笔）；
+        // 站在终端前等网络做成品是两件事之间的空当，饿了吃一口、天黑去睡都能插进来，作业留在网络里接着做；其余是正常干活。
+        @Override protected boolean extraUnsafeToStop() {
+            return moves.unsafeToStop();
+        }
+
+        @Override protected Interruptibility whenIdle() {
+            return round != null && moves.betweenActions() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
         }
 
         // 收场：取到了就算做完（数量由引擎清点）；一件都没取到就按收场原因失败，让引擎换别的路。
@@ -212,31 +236,6 @@ public final class MenuTerminalTakes implements TerminalTakes {
             String unconfirmed = facts.isEmpty() ? "" : "；没能确认的：" + String.join("；", facts);
             return ActionStatus.failed(Problem.of(reason.kind(), reason.message() + unconfirmed,
                     reason.suggestion()));
-        }
-
-        // 被生存需求打断：界面关上。站在终端前等成品时打断的，回来接着等；取现货时打断的就此收场，取到多少由引擎清点。
-        @Override public void pause() {
-            if (round != null && !round.done() && moves.betweenActions()) {
-                reopenAfterPause = true;
-                round.abandonQuietly();
-            }
-            session.opening().pause();
-            session.abandonMenu();
-        }
-
-        // 此刻能不能被生存需求打断：一下取货、放下、放回网络还在等游戏确认时停不得，光标上可能拿着东西；
-        // 站在终端前等网络做成品是两件事之间的空当，饿了吃一口、天黑去睡都能插进来，作业留在网络里接着做；其余是正常干活。
-        @Override public Interruptibility interruptibility() {
-            if ((round != null && round.unsafeToStop()) || moves.unsafeToStop()) {
-                return Interruptibility.UNSAFE_TO_STOP;
-            }
-            return round != null && moves.betweenActions() ? Interruptibility.BETWEEN_ACTIONS : Interruptibility.WORKING;
-        }
-
-        // 收尾：打开动作一并收尾；一轮还没收场的，先撒手（点出去的那几下交回没能确认）再请游戏关上界面。
-        @Override public void close() {
-            session.opening().close();
-            if (round != null && !round.done()) round.close(true);
         }
 
         @Override public String describe() {
