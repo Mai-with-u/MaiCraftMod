@@ -401,9 +401,9 @@ public final class RecipeSource implements ItemSource {
                 .filter(recipe -> !ingredientsAllUnobtainable(recipe, request))
                 .toList();
         if (candidates.isEmpty()) return new Ranked(candidates, false);
-        // 里层问价回来的那一次：不再算材料可得性，按配方注册顺序给出去，并标明当前帧为降级报价，绝不写入共享缓存。
+        // 里层问价回来的那一次（重入短路）：不再算材料可得性，按配方注册顺序给出去；
+        // 这趟是降级报价，引擎从帧栈认出重入，绝不写入共享缓存。
         if (pricingIngredients) {
-            needs.markDegraded();
             return new Ranked(candidates, false);
         }
         // 候选极多（如大标签展开数十上百种变体）时，先按零成本本地启发（非缺料同类改造、材料偏好、缺料少、背包可做）初排，
@@ -425,11 +425,8 @@ public final class RecipeSource implements ItemSource {
         pricingIngredients = true;
         try {
             for (WorkstationRecipe candidate : toPrice) {
-                if (needs.priceBudgetExhausted()) {
-                    // 预算已耗尽主动止损：同步标脏当前帧并记预算拒绝，避免半截比价结果写入共享缓存。
-                    needs.markBudgetCut();
-                    break;
-                }
+                // 预算耗尽后剩余候选的原料问价会被引擎拒绝并按最贵垫底；这趟报价不完整
+                // 由引擎在帧结束时凭额度耗尽自己认定，来源不必标脏。
                 Availability priced = availabilityOf(candidate, request, context);
                 prices.put(candidate, priced.worst());
                 stillLooking |= priced.stillLooking();

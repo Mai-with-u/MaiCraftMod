@@ -234,7 +234,7 @@ public final class BlockApplicationSource implements ItemSource {
             int have = carried(item);
             int shortCount = Math.max(0, needed - have);
             boolean pref = prefers(item, prefer);
-            if (shortCount > 0 && skipRemotePricing) needs.markDegraded();
+            // 重入时跳过远端问价是降级报价：引擎从帧栈认出重入，这趟结果不入共享缓存。
             double cost = shortCount == 0 || skipRemotePricing ? 0
                     : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(item), shortCount, "挑手工涂抹材料"),
                             permissions, true).orElse(Double.MAX_VALUE);
@@ -259,7 +259,7 @@ public final class BlockApplicationSource implements ItemSource {
             int have = carried(item);
             int shortCount = Math.max(0, needed - have);
             boolean pref = prefers(item, prefer);
-            if (shortCount > 0 && skipRemotePricing) needs.markDegraded();
+            // 重入时跳过远端问价是降级报价：引擎从帧栈认出重入，这趟结果不入共享缓存。
             double cost = shortCount == 0 || skipRemotePricing ? 0
                     : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(item), shortCount, "挑手工涂抹手持物"),
                             permissions, true).orElse(Double.MAX_VALUE);

@@ -211,7 +211,7 @@ public final class StrippingSource implements ItemSource {
                 int rawCarried = carried(rawId);
                 int rawShort = Math.max(0, request.count() - rawCarried);
                 boolean preferred = prefers(rawId, strippedId, prefer);
-                if (rawShort > 0 && wasPricing) needs.markDegraded();
+                // 重入时跳过远端问价是降级报价：引擎从帧栈认出重入，这趟结果不入共享缓存。
                 double fetchCost = rawShort == 0 || wasPricing ? 0
                         : needs.cheapestCost(new ItemRequest(WantedItem.ofItem(rawId), rawShort, "挑去皮用的木料"),
                                 context.permissions(), true).orElse(Double.MAX_VALUE);
