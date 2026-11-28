@@ -7,17 +7,15 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 
+import org.maiwithu.maicraft.behavior.combat.AfterFight;
+import org.maiwithu.maicraft.behavior.combat.ArrowChanges;
 import org.maiwithu.maicraft.behavior.combat.Battle;
 import org.maiwithu.maicraft.behavior.combat.BattleMoves;
 import org.maiwithu.maicraft.behavior.combat.Battlefield;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.combat.ThreatAssessment;
-import org.maiwithu.maicraft.behavior.navigation.WalkProgress;
-import org.maiwithu.maicraft.behavior.navigation.WalkRun;
-import org.maiwithu.maicraft.behavior.navigation.goal.GoalCompiler;
 import org.maiwithu.maicraft.kernel.event.TaskEvent;
 import org.maiwithu.maicraft.kernel.event.TaskEventSink;
 import org.maiwithu.maicraft.kernel.interrupt.AnnouncesFinish;
@@ -62,6 +60,11 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     /** 打点圆心到追击上限（只比水平距离）。 */
     static final double CHASE_LIMIT = 16.0;
 
+    /** 位移打点多近算回到（只比水平距离）。 */
+    private static final double RETURN_DRIFT = 1.5;
+    /** 走回打点的寻路目标多近算走到。 */
+    private static final double RETURN_WALK_RADIUS = 1.0;
+
     /** 危险刚离开的观察期（刻）；太短会把边界上进一出的怪漏掉。 */
     static final int WATCH_TICKS = 40;
 
@@ -78,9 +81,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private double healthAtStart = -1;
     private int watchTicksLeft;
     private boolean reportedCornered;
-    private Action walkBack;
-    /** 走回打点这一趟的进展观察：脚位挪一格记一次前进。 */
-    private final WalkProgress walkProgress = new WalkProgress();
+    /** 战后打扫：捡这一仗掉出来的东西、走回打点，与点名战斗共用一份。 */
+    private final AfterFight aftermath;
     /** 刚决定换去的阶段：外壳在换阶段时被基类收尾，靠它分清是换阶段还是任务真结束。 */
     private Phase goingTo;
     /** 收尾走不回打点，或被陌生玩家打了：主任务不能悄悄续上。 */
@@ -95,10 +97,10 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
     private final Set<Integer> strangers = new LinkedHashSet<>();
     /** 这一场打掉了谁、拿什么打、挥中几下、射了几箭。 */
     private final DefenseTally tally = new DefenseTally();
+    /** 箭账补记成变化：新离开的记消耗、新捡回的记收获，每多一支补一支。 */
+    private final ArrowChanges arrowChanges = new ArrowChanges();
     /** 开打时身边已经躺着的掉落物：不是这一仗的，打完不去捡。没接捡掉落物为 null。 */
     private Set<Integer> dropsBefore;
-    /** 正在捡这一仗掉出来的东西。 */
-    private Action pickup;
 
     SelfDefenseTask(CombatSenses senses, BattleMoves moves, TaskEventSink events, SelfDefenseNeed need) {
         super("自卫", Phase.ENGAGE, new ProgressTracker(STUCK_AFTER_TICKS, Long.MAX_VALUE));
@@ -106,6 +108,7 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         this.moves = Objects.requireNonNull(moves, "moves");
         this.events = Objects.requireNonNull(events, "events");
         this.need = Objects.requireNonNull(need, "need");
+        this.aftermath = new AfterFight(moves, this::recordProgress, this::stopping);
         this.battle = new Battle(senses, moves, new Battlefield.Roster() {
             @Override public boolean wanted(CombatSenses.Threat threat, boolean attacker, boolean chasing) {
                 return SelfDefenseTask.this.wanted(threat, attacker, chasing);
@@ -228,22 +231,13 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         tally.noteArrows(context, moves);
         recordTally();
         if (moment.state() != Battle.State.FINISHED) {
-            closePickup();
+            // 捡拾在外壳换阶段收尾时结清：回去打，回来重新捡剩下的。
             return go(Phase.ENGAGE, "捡东西时又有威胁出现，继续打");
         }
-        if (pickup == null) pickup = need.drops().pickUpNewSince(dropsBefore);
-        ActionStatus status = pickup.tick(context);
-        if (status instanceof ActionStatus.Running running) {
-            if (running.progressed()) recordProgress(pickup.describe());
+        if (aftermath.pickUp(context, () -> need.drops().pickUpNewSince(dropsBefore)) == AfterFight.PickStep.PICKING) {
             return Next.stay();
         }
-        closePickup();
         return go(Phase.RETURN, "这一仗掉出来的东西捡完了，走回打点");
-    }
-
-    private void closePickup() {
-        if (pickup != null) pickup.close();
-        pickup = null;
     }
 
     private Next<Phase> back(TickContext context) {
@@ -252,54 +246,36 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         tally.noteArrows(context, moves);
         recordTally();
         if (battle.tick(context).state() != Battle.State.FINISHED) {
-            if (walkBack != null) walkBack.close();
-            walkBack = null;
             return go(Phase.ENGAGE, "走回打点的路上又有威胁，回去应对");
         }
         double drift = distanceFromAnchor(context);
         double heartsLost = heartsLost(context);
-        if (drift < 1.5) {
-            need.ignoreUnreachable(battle.unreachable(), context.gameTick());
-            finishFacts = "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心";
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
-                    .details(details(drift, heartsLost)).build());
-        }
-        if (walkBack == null) {
-            // 收尾途中不另起一趟走回打点：站着等外层停下。
-            if (stopping()) return Next.stay();
-            BlockPos cell = BlockPos.containing(anchor[0], anchor[1], anchor[2]);
-            walkBack = moves.walk(GoalCompiler.near(cell, 1.0));
-        }
-        ActionStatus status = walkBack.tick(context);
-        if (status instanceof ActionStatus.Failed) {
-            // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
-            displaced = true;
-            need.ignoreUnreachable(battle.unreachable(), context.gameTick());
-            double[] self = moves.selfPosition(context);
-            String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
-            displacedWhy = "自卫打完走不回打点，" + whereNow(context);
-            // 守着原地的主任务会暂停等下一步指示（暂停说明里写着为什么停）；在哪做都一样的从这里接着做。
-            events.publish(TaskEvent.Kind.NEED_UNHANDLED,
-                    "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where + "；" + tally.describe());
-            return Next.done(TaskResult.builder(TaskResult.Status.DONE,
-                            "自卫结束；人停在了 " + where + "，回不去原来的打点")
-                    .details(details(drift, heartsLost)).build());
-        }
-        // 走回打点的进展从走到运行的脚位读（走到进展 WalkProgress，与点名战斗回倒下点共用）：
-        // 撤离后几十格的长路靠 progressed 永远攒不出进展记录，人走得好好的也会被停滞判定按
-        // 「自『观察期还剩 1 刻』没有新进展」收掉。测试里的替身动作不是走到运行，退回按动作状态记进展。
-        if (walkBack instanceof WalkRun walk) {
-            walkProgress.note(walk).ifPresent(feet -> recordProgress("走回打点：走到 " + feet.toShortString()));
-        } else if (status instanceof ActionStatus.Running running && running.progressed()) {
-            recordProgress(walkBack.describe());
-        }
-        if (status instanceof ActionStatus.Done) {
-            // 收尾途中落地报的"已停下"不是走回了：这一趟留着，站着等外层停下，接着做时再看离打点多远。
-            if (stopping()) return Next.stay();
-            walkBack.close();
-            walkBack = null;
-        }
-        return Next.stay();
+        // 走回打点这一段与点名战斗回倒下点共用一份（战后打扫）：位移 1.5 格内算回到，
+        // 寻路目标是 1.0 格；收尾途中落地报的「已停下」不算走回了，也不另起一趟。
+        return switch (aftermath.walkBack(context,
+                new AfterFight.Spot(anchor, RETURN_DRIFT, RETURN_WALK_RADIUS), "走回打点", aftermath::walkDescribe)) {
+            case NEAR -> {
+                need.ignoreUnreachable(battle.unreachable(), context.gameTick());
+                finishFacts = "位移 " + Math.round(drift) + " 格，掉了约 " + Math.round(heartsLost) + " 颗心";
+                yield Next.done(TaskResult.builder(TaskResult.Status.DONE, "自卫结束，回到打点继续干活")
+                        .details(details(drift, heartsLost)).build());
+            }
+            case WALK_FAILED -> {
+                // 走不回去：不冒充回到了岗位。主任务停在半路，事件里说明停在了哪里。
+                displaced = true;
+                need.ignoreUnreachable(battle.unreachable(), context.gameTick());
+                double[] self = moves.selfPosition(context);
+                String where = Math.round(self[0]) + ", " + Math.round(self[1]) + ", " + Math.round(self[2]);
+                displacedWhy = "自卫打完走不回打点，" + whereNow(context);
+                // 守着原地的主任务会暂停等下一步指示（暂停说明里写着为什么停）；在哪做都一样的从这里接着做。
+                events.publish(TaskEvent.Kind.NEED_UNHANDLED,
+                        "自卫结束但走不回打点（还差 " + Math.round(drift) + " 格），停在了 " + where + "；" + tally.describe());
+                yield Next.done(TaskResult.builder(TaskResult.Status.DONE,
+                                "自卫结束；人停在了 " + where + "，回不去原来的打点")
+                        .details(details(drift, heartsLost)).build());
+            }
+            case WALKING, WAITING_TO_STOP, WALK_ENDED -> Next.stay();
+        };
     }
 
     /**
@@ -363,8 +339,8 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
 
     @Override
     public Interruptibility interruptibility(TickContext context) {
-        if (pickup != null) return pickup.interruptibility();
-        return walkBack != null ? walkBack.interruptibility() : battle.interruptibility();
+        Interruptibility afterFight = aftermath.currentInterruptibility();
+        return afterFight != null ? afterFight : battle.interruptibility();
     }
 
     /** 引擎与走回打点接进基类的暂停与收尾：基类持有的是这个外壳。 */
@@ -377,23 +353,18 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
         @Override
         public void pause() {
             battle.pause();
-            if (walkBack != null) walkBack.pause();
-            if (pickup != null) pickup.pause();
+            aftermath.pause();
         }
 
         // 被叫先到安全处再停：引擎的走位、走回打点、捡东西逐个转过去，悬在半空的先落地，都停稳了自卫才算停稳。
         @Override
         public boolean stopSafely() {
-            boolean byBattle = battle.stopSafely();
-            boolean byWalkBack = walkBack != null && walkBack.stopSafely();
-            boolean byPickup = pickup != null && pickup.stopSafely();
-            return byBattle || byWalkBack || byPickup;
+            return battle.stopSafely() || aftermath.stopSafely();
         }
 
         @Override
         public boolean stoppedSafely() {
-            return battle.stoppedSafely() && (walkBack == null || walkBack.stoppedSafely())
-                    && (pickup == null || pickup.stoppedSafely());
+            return battle.stoppedSafely() && aftermath.stoppedSafely();
         }
 
         @Override
@@ -404,36 +375,22 @@ final class SelfDefenseTask extends PhasedTask<SelfDefenseTask.Phase>
             boolean battleGoesOn = goingTo != null;
             goingTo = null;
             if (!battleGoesOn) battle.close();
-            if (walkBack != null) walkBack.close();
-            walkBack = null;
-            closePickup();
+            // 换阶段时捡拾与走回的那一趟跟着结清：回去打或任务结束都从这里重新起步。
+            aftermath.close();
         }
 
         @Override
         public String describe() {
-            if (pickup != null) return pickup.describe();
-            return walkBack != null ? walkBack.describe() : battle.describe();
+            String afterFight = aftermath.currentDescribe();
+            return afterFight != null ? afterFight : battle.describe();
         }
     }
-
-    /** 已经记进变化的箭：离开背包的、捡回的各几支；每多一支补记一支。 */
-    private int arrowsTakenRecorded;
-    private int arrowsPickedUpRecorded;
 
     // 这一场打掉的、射掉的、捡回的箭随手记成变化：自卫插在主任务身上，收场后结果并进主任务，
     // 调用方拿主任务的结果对背包和世界的账时，这一段的变化也在里面（各种箭合在一起按 minecraft:arrow 记）。
     private void recordTally() {
         for (String type : tally.takeNewDefeats()) recordChange(Change.of(Change.Kind.ENTITY_AFFECTED, type, 1));
-        int taken = tally.arrowsTaken() - arrowsTakenRecorded;
-        if (taken > 0) {
-            recordChange(Change.of(Change.Kind.ITEM_CONSUMED, "minecraft:arrow", taken));
-            arrowsTakenRecorded = tally.arrowsTaken();
-        }
-        int pickedUp = tally.arrowsPickedUp() - arrowsPickedUpRecorded;
-        if (pickedUp > 0) {
-            recordChange(Change.of(Change.Kind.ITEM_GAINED, "minecraft:arrow", pickedUp));
-            arrowsPickedUpRecorded = tally.arrowsPickedUp();
-        }
+        arrowChanges.record(tally.arrowsTaken(), tally.arrowsPickedUp(), this::recordChange);
     }
 
     private DefenseDetails details(double drift, double heartsLost) {
