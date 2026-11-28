@@ -21,18 +21,17 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineSetting;
 import org.maiwithu.maicraft.ability.machine.spi.MachineSettings;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
 import org.maiwithu.maicraft.compat.ae2.Ae2Grid;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -272,91 +271,72 @@ final class CableMachinePartOps implements Ae2DeviceOps {
     }
 
     /** 线缆版样板供应器放取样板动作：遍历全部 9 个样板槽而非写死槽 0，绝不顶掉已有其他样板。 */
-    private static final class CablePatternSwapAction implements Action {
+    private static final class CablePatternSwapAction extends Ae2MenuWork {
 
-        private enum Stage { OPEN, READ, WAIT, CLOSE, DONE }
+        private enum Step { READ, WAIT }
 
         private final BlockPos host;
         private final Direction side;
         private final String output;
         private final boolean wantInside;
-        private final MenuOpening opening;
         private final Ae2Compat compat;
         private final Ae2MachineCache cache;
 
-        private Stage stage = Stage.OPEN;
-        private OpenedMenu menu;
-        private Action closing;
-        private int waited;
-        private Problem problem;
+        private Step step = Step.READ;
 
         CablePatternSwapAction(BlockPos host, Direction side, String output, boolean wantInside,
                 MenuOpening opening, Ae2Compat compat, Ae2MachineCache cache) {
+            super(opening, "线缆版样板供应器界面没打开");
             this.host = host.immutable();
             this.side = side;
             this.output = output;
             this.wantInside = wantInside;
-            this.opening = opening;
             this.compat = compat;
             this.cache = cache;
         }
 
-        @Override public ActionStatus tick(TickContext tick) {
+        @Override protected ActionStatus work(TickContext tick) {
             ClientLevel level = tick.player() == null ? null : tick.player().level();
-            return switch (stage) {
-                case OPEN -> open(tick);
+            return switch (step) {
                 case READ -> read(level);
                 case WAIT -> await(level);
-                case CLOSE -> closeMenu(tick);
-                case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
             };
         }
 
-        private ActionStatus open(TickContext tick) {
-            ActionStatus status = opening.tick(tick);
-            if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-            if (!(status instanceof ActionStatus.Done)) return status;
-            menu = opening.opened().orElse(null);
-            if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "线缆版样板供应器界面没打开"));
-            waited = 0;
-            stage = Stage.READ;
-            return ActionStatus.progressed();
-        }
-
         private ActionStatus read(ClientLevel level) {
-            Optional<MenuContent.Reading> reading = menu.reading();
+            Optional<MenuContent.Reading> reading = menu().reading();
             if (reading.isEmpty()) {
-                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                return beginClose(Problem.of(Problem.Kind.STUCK, "线缆版样板供应器界面同步超时"));
+                if (!syncWaitElapsed()) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK, "线缆版样板供应器界面同步超时"));
             }
             List<String> inside = readOutputs(reading.get().containerSnapshots(), level);
             savePatterns(inside);
-            if (inside.contains(output) == wantInside) return beginClose(null);
+            if (inside.contains(output) == wantInside) return closeWith(null);
             int slot = wantInside ? findPlayerPattern(reading.get(), level) : findContainerPattern(reading.get(), level);
             if (slot < 0) {
-                return beginClose(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有产出 " + output + " 的编码样板"));
+                return closeWith(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有产出 " + output + " 的编码样板"));
             }
             if (wantInside && reading.get().containerSnapshots().stream().noneMatch(SlotSnapshot::isEmpty)) {
-                return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "线缆版样板供应器 9 个样板格已满"));
+                return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "线缆版样板供应器 9 个样板格已满"));
             }
-            if (!menu.quickMove(slot)) {
-                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                return beginClose(Problem.of(Problem.Kind.STUCK, "无法移动线缆版样板供应器的样板槽"));
+            if (!menu().quickMove(slot)) {
+                if (!syncWaitElapsed()) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK, "无法移动线缆版样板供应器的样板槽"));
             }
-            waited = 0;
-            stage = Stage.WAIT;
+            resetWait();
+            step = Step.WAIT;
             return ActionStatus.progressed();
         }
 
         private ActionStatus await(ClientLevel level) {
-            Optional<MenuContent.Reading> reading = menu.reading();
+            Optional<MenuContent.Reading> reading = menu().reading();
             if (reading.isPresent()) {
                 List<String> inside = readOutputs(reading.get().containerSnapshots(), level);
                 savePatterns(inside);
-                if (inside.contains(output) == wantInside) return beginClose(null);
+                if (inside.contains(output) == wantInside) return closeWith(null);
             }
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "等待线缆版样板供应器样板移动确认超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "等待线缆版样板供应器样板移动确认超时"));
         }
 
         private List<String> readOutputs(List<SlotSnapshot> snaps, ClientLevel level) {
@@ -399,39 +379,7 @@ final class CableMachinePartOps implements Ae2DeviceOps {
                     inside));
         }
 
-        private ActionStatus closeMenu(TickContext tick) {
-            if (closing == null) closing = menu.closing();
-            ActionStatus status = closing.tick(tick);
-            if (status instanceof ActionStatus.Running) return status;
-            closing = null;
-            return finish(problem);
-        }
-
-        private ActionStatus beginClose(Problem cause) {
-            problem = cause;
-            stage = Stage.CLOSE;
-            return ActionStatus.progressed();
-        }
-
-        private ActionStatus finish(Problem cause) {
-            problem = cause;
-            stage = Stage.DONE;
-            return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
-        }
-
-        @Override public void pause() {
-            if (closing != null) closing.pause();
-            else if (menu == null) opening.pause();
-        }
-
-        @Override public void close() {
-            if (closing != null) closing.close();
-            if (menu != null && stage != Stage.DONE) menu.abandon();
-            else if (menu == null) opening.close();
-        }
-
-        @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-        @Override public String describe() {
+        @Override protected String doing() {
             return (wantInside ? "放进" : "拿出") + "线缆版样板供应器里产出 " + output + " 的样板";
         }
     }
