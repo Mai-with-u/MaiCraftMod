@@ -14,6 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.behavior.acquire.spi.AcquireVia;
+import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemSource;
 import org.maiwithu.maicraft.behavior.acquire.spi.SourceContext;
@@ -28,6 +29,8 @@ import org.maiwithu.maicraft.behavior.travel.spi.TravelVia;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeDocument;
 import org.maiwithu.maicraft.kernel.knowledge.KnowledgeSource;
 import org.maiwithu.maicraft.kernel.result.Problem;
+import org.maiwithu.maicraft.kernel.task.Action;
+import org.maiwithu.maicraft.kernel.task.TaskRecords;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
@@ -69,7 +72,7 @@ class CompatDegradedAnswerTest {
                 untouched.touch();
                 return null;
             }
-            @Override public Optional<org.maiwithu.maicraft.kernel.task.Action> begin(
+            @Override public Optional<Action> begin(
                     ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
                 untouched.touch();
                 return Optional.empty();
@@ -96,9 +99,9 @@ class CompatDegradedAnswerTest {
                 untouched.touch();
                 return 5;
             }
-            @Override public Optional<org.maiwithu.maicraft.kernel.task.Action> store(
-                    org.maiwithu.maicraft.game.player.BackpackStack stack,
-                    org.maiwithu.maicraft.kernel.task.TaskRecords records) {
+            @Override public Optional<Action> store(
+                    BackpackStack stack,
+                    TaskRecords records) {
                 untouched.touch();
                 return Optional.empty();
             }
