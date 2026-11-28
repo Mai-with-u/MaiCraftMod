@@ -8,13 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.Map;
 import java.util.Optional;
 
-import net.minecraft.SharedConstants;
-import net.minecraft.server.Bootstrap;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
-
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.maiwithu.maicraft.game.player.BackpackStack;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
@@ -28,12 +21,6 @@ class CarriedItemsTest {
     private final FakeBackpack backpack = new FakeBackpack(36);
     private final FakeOffhand offhand = new FakeOffhand();
     private final FakeTags tags = new FakeTags();
-
-    @BeforeAll
-    static void bootMinecraft() {
-        SharedConstants.tryDetectVersion();
-        Bootstrap.bootStrap();
-    }
 
     @Test
     void 主背包与副手一起数() {
@@ -97,30 +84,5 @@ class CarriedItemsTest {
                         return toolItemId.equals("minecraft:diamond_pickaxe");
                     }
                 }));
-    }
-
-    @Test
-    void 全身背包按注册名清点含盔甲与副手格() {
-        Inventory inventory = new Inventory(null);
-        inventory.setItem(3, new ItemStack(Items.COAL, 5));
-        inventory.setItem(12, new ItemStack(Items.COAL, 7));
-        inventory.setItem(36, new ItemStack(Items.COAL, 2));
-        inventory.setItem(40, new ItemStack(Items.COAL));
-        inventory.setItem(20, new ItemStack(Items.STICK));
-        assertEquals(15, CarriedItems.countInWholeInventory(inventory, "minecraft:coal"),
-                "主格、盔甲格与副手格里的煤一起数，别的东西不算");
-        assertEquals(0, CarriedItems.countInWholeInventory(inventory, "minecraft:iron_ingot"), "身上没有就数出 0");
-    }
-
-    @Test
-    void 主手查验读选中的快捷栏格() {
-        Inventory inventory = new Inventory(null);
-        inventory.setItem(0, new ItemStack(Items.DIAMOND_PICKAXE));
-        inventory.selected = 0;
-        assertTrue(CarriedItems.mainhandHolds(inventory, "minecraft:diamond_pickaxe"), "选中格拿的就是主手");
-        inventory.selected = 3;
-        inventory.setItem(3, new ItemStack(Items.STICK));
-        assertFalse(CarriedItems.mainhandHolds(inventory, "minecraft:diamond_pickaxe"), "换格之后主手不再是它");
-        assertTrue(CarriedItems.mainhandHolds(inventory, "minecraft:stick"), "换了格按新选中格查验");
     }
 }

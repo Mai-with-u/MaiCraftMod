@@ -7,7 +7,6 @@ import java.util.function.Function;
 
 import net.minecraft.world.entity.player.Inventory;
 
-import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
@@ -62,7 +61,7 @@ public final class StagesToMainhand implements Action {
         }
         if (current == null) {
             Inventory inventory = wholeInventory.apply(player);
-            if (CarriedItems.countInWholeInventory(inventory, itemId) > 0) {
+            if (WholeInventory.count(inventory, itemId) > 0) {
                 Optional<Action> hold = services.toMainhand().moveToMainhand(itemId);
                 if (hold.isEmpty()) {
                     return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "无法将 " + itemId + " 换到主手"));
@@ -80,7 +79,7 @@ public final class StagesToMainhand implements Action {
         current.close();
         current = null;
         if (status instanceof ActionStatus.Failed failed) return failed;
-        return CarriedItems.mainhandHolds(wholeInventory.apply(player), itemId)
+        return WholeInventory.mainhandHolds(wholeInventory.apply(player), itemId)
                 ? ActionStatus.done() : ActionStatus.progressed();
     }
 

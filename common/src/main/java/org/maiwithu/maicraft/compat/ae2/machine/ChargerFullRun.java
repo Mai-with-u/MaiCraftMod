@@ -15,10 +15,10 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
-import org.maiwithu.maicraft.behavior.acquire.engine.CarriedItems;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ApproachThenUse;
 import org.maiwithu.maicraft.behavior.inventory.hands.StagesToMainhand;
+import org.maiwithu.maicraft.behavior.inventory.hands.WholeInventory;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -392,12 +392,12 @@ final class ChargerFullRun implements FullRun {
     }
 
     private void recordBaseline(PlayerContext player) {
-        carriedTargetBefore = CarriedItems.countInWholeInventory(player.localPlayer().getInventory(), request.item());
+        carriedTargetBefore = WholeInventory.count(player.localPlayer().getInventory(), request.item());
         carriedToolEnergyBefore = maxToolEnergy(player, request.item());
     }
 
     private boolean confirmedCollected(PlayerContext player) {
-        int nowCount = CarriedItems.countInWholeInventory(player.localPlayer().getInventory(), request.item());
+        int nowCount = WholeInventory.count(player.localPlayer().getInventory(), request.item());
         if (nowCount > carriedTargetBefore) return true;
         return toolRechargeMode && maxToolEnergy(player, request.item()) > carriedToolEnergyBefore + 0.01;
     }
