@@ -10,6 +10,7 @@ import java.util.Set;
 import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.interaction.InteractionResult;
+import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
 import org.maiwithu.maicraft.kernel.goal.Target;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.result.TaskResult;
@@ -52,11 +53,6 @@ final class UseDecider {
         }
         return problems;
     }
-
-    /** 没有自然结束、要凭时机松手的物品不接，写明该用哪个能力。 */
-    static final Set<String> TIMED_RELEASE_ITEMS = Set.of(
-            "minecraft:bow", "minecraft:crossbow", "minecraft:trident",
-            "minecraft:shield", "minecraft:spyglass", "minecraft:fishing_rod");
 
     /** 机械动力工作盆的方块 ID。 */
     static final String BASIN_BLOCK = "create:basin";
@@ -181,7 +177,7 @@ final class UseDecider {
             return Optional.empty();
         }
         String id = lower(item);
-        if (TIMED_RELEASE_ITEMS.contains(id)) {
+        if (ItemUseAim.endsOnlyWhenReleased(item)) {
             return Optional.of(new Rejection(
                     item + " 要凭时机松手（弓、弩、三叉戟、盾牌、望远镜、钓竿），use 不接受",
                     id.endsWith("fishing_rod") ? "钓鱼用 fish" : "打怪用 fight"));

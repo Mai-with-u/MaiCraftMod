@@ -156,18 +156,25 @@ public final class ItemUseAim {
         }
     }
 
-    /** 没有自然结束、要凭时机松手的物品；本能力不接受，计划阶段直接拒绝并指向对应能力。 */
-    private static final Set<String> TIMED_RELEASE_ITEMS = Set.of(
+    // 没有自然结束、要凭玩家自己挑时机松手才结束的物品：拉弓瞄准、举盾格挡、望远镜看清、钓竿等咬钩
+    // 都没有"用一下就完"的结束时刻。全仓只认这一批；手势归为不支持，需要它们的能力按各自的专门方式接。
+    private static final Set<String> ENDS_ONLY_WHEN_RELEASED = Set.of(
             "minecraft:bow", "minecraft:crossbow", "minecraft:trident",
             "minecraft:shield", "minecraft:spyglass", "minecraft:fishing_rod");
 
     private ItemUseAim() {}
 
+    /** 手上的这件东西是不是右键没有自然结束、要凭时机松手才结束的物品（弓、弩、三叉戟、盾、望远镜、钓鱼竿）。 */
+    public static boolean endsOnlyWhenReleased(String heldItemId) {
+        if (heldItemId == null || heldItemId.isBlank()) return false;
+        return ENDS_ONLY_WHEN_RELEASED.contains(heldItemId.toLowerCase(Locale.ROOT));
+    }
+
     /** 按手上的物品 ID 归出手势；空手传 null 或空白。 */
     public static Gesture gestureOf(String heldItemId) {
         if (heldItemId == null || heldItemId.isBlank()) return Gesture.EMPTY_HAND;
         String id = heldItemId.toLowerCase(Locale.ROOT);
-        if (TIMED_RELEASE_ITEMS.contains(id)) return Gesture.UNSUPPORTED;
+        if (endsOnlyWhenReleased(heldItemId)) return Gesture.UNSUPPORTED;
         if (id.endsWith(":bucket")) return Gesture.SCOOP;
         if (id.endsWith("_bucket")) return Gesture.POUR;
         if (id.endsWith(":flint_and_steel") || id.endsWith(":fire_charge")) return Gesture.IGNITE;
