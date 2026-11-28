@@ -15,15 +15,13 @@ import net.minecraft.core.Direction;
 
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -32,9 +30,9 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 经公开 PatternSlot 读取可见容器分组（绝不反射 PatternAccessTermScreen），
  * 选中同组容器 serverId 列表后发 QuickMovePatternPacket 送入并核对背包样板减少 1 张再关窗。
  */
-final class PatternAccessAction implements Action {
+final class PatternAccessAction extends Ae2MenuWork {
 
-    private enum Stage { OPEN, SEND, WAIT_MOVED, CLOSE, DONE }
+    private enum Step { SEND, WAIT_MOVED }
 
     /** 解析后的送入目标：目标分组名与样板主产物 ID。 */
     record PutTarget(String groupName, String outputItemId) {
@@ -54,17 +52,12 @@ final class PatternAccessAction implements Action {
     private final Direction side;
     private final PutTarget target;
     private final String rawValue;
-    private final MenuOpening opening;
     private final Ae2Compat compat;
     private final Ae2MachineReads reads;
     private final Ae2MachineCache cache;
 
-    private Stage stage = Stage.OPEN;
-    private OpenedMenu menu;
-    private Action closing;
+    private Step step = Step.SEND;
     private int sourcePlayerSlot = -1;
-    private int waited;
-    private Problem problem;
 
     PatternAccessAction(BlockPos host, Direction side, PutTarget target, String rawValue,
             Ae2Compat compat, Ae2MachineReads reads, Ae2MachineCache cache,
@@ -76,82 +69,67 @@ final class PatternAccessAction implements Action {
 
     PatternAccessAction(BlockPos host, Direction side, PutTarget target, String rawValue, MenuOpening opening,
             Ae2Compat compat, Ae2MachineReads reads, Ae2MachineCache cache) {
+        super(opening, "样板管理终端界面没打开");
         this.host = host.immutable();
         this.side = side;
         this.target = Objects.requireNonNull(target, "target");
         this.rawValue = Objects.requireNonNull(rawValue, "rawValue");
-        this.opening = Objects.requireNonNull(opening, "opening");
         this.compat = Objects.requireNonNull(compat, "compat");
         this.reads = Objects.requireNonNull(reads, "reads");
         this.cache = Objects.requireNonNull(cache, "cache");
     }
 
-    @Override public ActionStatus tick(TickContext tick) {
-        ClientLevel level = tick.player() == null ? null : tick.player().level();
-        return switch (stage) {
-            case OPEN -> open(tick);
-            case SEND -> sendQuickMove(level);
+    @Override protected ActionStatus work(TickContext tick) {
+        return switch (step) {
+            case SEND -> sendQuickMove(tick.player() == null ? null : tick.player().level());
             case WAIT_MOVED -> waitMoved();
-            case CLOSE -> closeMenu(tick);
-            case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         };
-    }
-
-    private ActionStatus open(TickContext tick) {
-        ActionStatus status = opening.tick(tick);
-        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        if (!(status instanceof ActionStatus.Done)) return status;
-        menu = opening.opened().orElse(null);
-        if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "样板管理终端界面没打开"));
-        waited = 0;
-        stage = Stage.SEND;
-        return ActionStatus.progressed();
     }
 
     private ActionStatus sendQuickMove(ClientLevel level) {
         Optional<Ae2MachineReads.PatternAccessMenuView> view = reads.openPatternAccessMenu();
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (view.isEmpty() || reading.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "样板管理终端界面同步超时"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "样板管理终端界面同步超时"));
         }
         if (!view.get().linked()) {
-            return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "样板管理终端未连上 ME 网络"));
+            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "样板管理终端未连上 ME 网络"));
         }
         sourcePlayerSlot = findPatternSlot(reading.get(), level);
         if (sourcePlayerSlot < 0) {
-            return beginClose(Problem.of(Problem.Kind.NEED_ITEM,
+            return closeWith(Problem.of(Problem.Kind.NEED_ITEM,
                     "背包里没有产出 " + target.outputItemId() + " 的单张编码样板"));
         }
         // QuickMovePatternPacket 服务端硬校验所有 allowedIds 必须同属一个 PatternContainerGroup。
         List<Long> allowedIds = selectGroupServerIds(view.get().visibleContainers(), target.groupName());
         if (allowedIds.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.NOT_FOUND,
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.NOT_FOUND,
                     "样板管理终端当前可见容器中找不到分组 " + target.groupName()
                             + "（可直接对目标样板供应器调用 machine_configure）"));
         }
         if (!reads.sendQuickMovePattern(view.get().containerId(), sourcePlayerSlot, allowedIds)) {
-            return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "发送快速送入样板包失败"));
+            return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME, "发送快速送入样板包失败"));
         }
-        waited = 0;
-        stage = Stage.WAIT_MOVED;
+        resetWait();
+        step = Step.WAIT_MOVED;
         return ActionStatus.progressed();
     }
 
     private ActionStatus waitMoved() {
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (reading.isPresent()) {
             SlotSnapshot after = playerSlotSnapshot(reading.get(), sourcePlayerSlot);
             if (after.isEmpty()) {
                 String shown = reads.openPatternAccessMenu()
                         .map(Ae2MachineReads.PatternAccessMenuView::showProviders).orElse("visible");
                 cache.putAccess(host, side, new Ae2MachineCache.AccessCache(shown, rawValue));
-                return beginClose(null);
+                return closeWith(null);
             }
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-        return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                 "样板未能送入分组 " + target.groupName() + "（目标供应器可能已满，或分子组装室/机器样板类型不匹配）"));
     }
 
@@ -201,40 +179,7 @@ final class PatternAccessAction implements Action {
         return SlotSnapshot.empty();
     }
 
-    private ActionStatus closeMenu(TickContext tick) {
-        if (closing == null) closing = menu.closing();
-        ActionStatus status = closing.tick(tick);
-        if (status instanceof ActionStatus.Running) return status;
-        closing = null;
-        return finish(problem);
-    }
-
-    private ActionStatus beginClose(Problem cause) {
-        problem = cause;
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
-    }
-
-    private ActionStatus finish(Problem cause) {
-        problem = cause;
-        stage = Stage.DONE;
-        return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
-    }
-
-    @Override public void pause() {
-        if (closing != null) closing.pause();
-        else if (menu == null) opening.pause();
-    }
-
-    @Override public void close() {
-        if (closing != null) closing.close();
-        if (menu != null && stage != Stage.DONE) menu.abandon();
-        else if (menu == null) opening.close();
-    }
-
-    @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-
-    @Override public String describe() {
+    @Override protected String doing() {
         return "经样板管理终端向 " + target.groupName() + " 放入产出 " + target.outputItemId() + " 的样板";
     }
 }
