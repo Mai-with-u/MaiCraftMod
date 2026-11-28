@@ -10,7 +10,6 @@ import org.maiwithu.maicraft.behavior.inventory.hands.LiveDigToolRule;
 import org.maiwithu.maicraft.behavior.permission.FarmlandIrrigation;
 import org.maiwithu.maicraft.behavior.permission.FunctionalBlocks;
 import java.io.IOException;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.nio.file.Path;
@@ -21,7 +20,6 @@ import java.util.function.Supplier;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.client.player.LocalPlayer;
 
 import org.maiwithu.maicraft.behavior.approach.UnreachableFromHere;
@@ -36,13 +34,10 @@ import org.maiwithu.maicraft.behavior.navigation.baritone.BaritoneInternals;
 import org.maiwithu.maicraft.behavior.navigation.baritone.ClearanceWhitelist;
 import org.maiwithu.maicraft.behavior.permission.ClientCreatureSituations;
 import org.maiwithu.maicraft.behavior.permission.ClientVillagers;
-import org.maiwithu.maicraft.behavior.perception.spi.ModSight;
-import org.maiwithu.maicraft.behavior.perception.spi.ModThing;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationObstacles;
 import org.maiwithu.maicraft.behavior.navigation.baritone.NavigationProtection;
 import org.maiwithu.maicraft.behavior.navigation.baritone.SolidEntityObstacles;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
-import org.maiwithu.maicraft.behavior.inventory.containers.StandingContainers;
 import org.maiwithu.maicraft.behavior.permission.LowValueTerrainBlocks;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.OwnershipMap;
@@ -64,6 +59,7 @@ import org.maiwithu.maicraft.behavior.perception.ClientSubtitleEar;
 import org.maiwithu.maicraft.behavior.perception.FacilityKinds;
 import org.maiwithu.maicraft.behavior.perception.OverheadGrid;
 import org.maiwithu.maicraft.behavior.perception.Scene;
+import org.maiwithu.maicraft.behavior.perception.SceneRefresher;
 import org.maiwithu.maicraft.behavior.perception.bodylanguage.NonverbalExchange;
 import org.maiwithu.maicraft.behavior.combat.CombatSenses;
 import org.maiwithu.maicraft.behavior.interaction.NativeBlockBreaking;
@@ -124,8 +120,8 @@ import org.slf4j.LoggerFactory;
  * 进世界时创建、退世界时丢弃的这一份现场：世界记忆、感知场景，并把能力按清单登记进客户端共用的注册表。
  *
  * <p>世界身份由握手认出（存档自己的世界编号，服务器没报时按存档目录或服务器地址算），记忆按身份分开存；连到另一个世界时这份现场整体丢弃，
- * 不把上一个世界的东西带过来。每刻由启动侧把当刻的角色上下文交给 {@link #observe}，
- * 各路读端从这里读出观察事实，交给场景整理。
+ * 不把上一个世界的东西带过来。每刻由启动侧先刷新保护侧快照、再调感知入口把周围看一遍、最后冲刷连拆通报
+ * （见 {@link #observe}），各路读端读当刻的观察事实，交给场景整理。
  */
 public final class WorldScope {
     private static final Logger LOG = LoggerFactory.getLogger(WorldScope.class);
@@ -157,24 +153,20 @@ public final class WorldScope {
     /** 设施分类：容器与工作设施按这个世界同步过来的方块标签认。 */
     private final FacilityKinds kinds;
     private final Scene scene;
-    /** 这一刻在看的玩家现场：设施观察的读端跨刻复用一个，每刻从这里读现场。 */
-    private PlayerContext observing;
+    /** 每刻看一眼周围的感知入口：看的顺序、到期失效与稀有撞见都在它里面，构造时接上各路读端。 */
+    private SceneRefresher sceneRefresh;
     /**
      * 设施观察的读端：只建一个。每刻新建会每刻重新遍历整张方块注册表找床（大型整合包里几万种方块），
      * 还会每刻重复登记同一批方块，扫描索引的引用计数只增不减。告示牌也由它读，牌子上的字按画面上显示的读：
-     * 客户端开着文字过滤时读过滤后的那一份。
+     * 客户端开着文字过滤时读过滤后的那一份。当刻的现场由感知入口每刻在读设施前换上。
      */
     private final ClientNearbyBlocksSight facilitySight;
     /** 洞口观察的读端：扫一圈要两秒上下，跨刻接着扫，只建一个。 */
     private final ClientCaveOpeningSight openingSight = new ClientCaveOpeningSight();
     /** 营地地面坑的读端：每两秒扫一轮营地内的地面竖坑与爆炸弹坑，填坑能力也复用同一份。 */
-    private final ClientCampPitSight campPitSight;
+    private ClientCampPitSight campPitSight;
     /** 看见罕见目标的读端：每刻看有没有 Boss 进入前方视野，每半秒看有没有天然稀有矿脉进入视野，去重后发事件。 */
     private final ClientRareSightingWatch rareSightings;
-    /** 联动模组的观察（电梯、车站、列车、物理结构）：场景每次刷新时问。 */
-    private final List<ModSight> modSights;
-    /** 模组的东西在角色周围多大范围里看（格）。 */
-    private static final int THINGS_RADIUS = 64;
     private final TravelProgressListener travelProgress = new LatestTravelProgress();
     /** 闲时看：闲着时像人一样看看；看什么从这个世界的场景来，开箱看到的记进这个世界的记忆。 */
     private final IdleLooking idleLooking;
@@ -282,7 +274,9 @@ public final class WorldScope {
         reserved.attach(new StoredReservations(documents, identity.key()));
         this.kinds = new FacilityKinds(new RegistryBlockTags());
         this.scene = new Scene(memory, kinds);
-        this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> observing, kinds, minecraft::isTextFilteringEnabled);
+        // 设施读端跨刻复用一个；当刻的现场供给接在感知入口上（它在读设施前先换上这一刻的角色）。
+        // 这行先建读端、感知入口后建：供给的取数在每刻读设施时才发生，那时入口已经建好。
+        this.facilitySight = new ClientNearbyBlocksSight(blockScans, () -> sceneRefresh.observingContext(), kinds, minecraft::isTextFilteringEnabled);
         // 保护判断：归属记录按区块问服务端，区域读每刻抄一份的快照，地标问世界记忆。
         this.ownership = new OwnershipMap(session, minecraft.player.getUUID().toString());
         this.regions = freshRegions(memory);
@@ -298,11 +292,9 @@ public final class WorldScope {
         installNavigationProtection();
         // 原版硬碰撞实体（船、运输船、潜影贝）与联动模组的移动结构一并交给寻路：静态挡路绕开走，正在动的先等它过去。
         NavigationObstacles.install(SolidEntityObstacles.with(compat.obstacleSources()));
-        this.modSights = compat.modSights();
         // 当刻角色的供给者：感知、背包、聊天、看界面都从它拿这一刻的角色，不留到下一刻。
         Supplier<PlayerContext> now = () -> playerControl.activeContext().orElse(null);
-        ClientCreatureSituations creatures = new ClientCreatureSituations(now, trusted);
-        this.campPitSight = assembleCampPitSight(creatures);
+        ClientCreatureSituations creatures = assemblePerceptionReads(now);
         // 死亡不掉落：单人读本机，连服务器读服务端握手时报的（改了再推）；寻死、寻死出路和 observe(self) 读同一份。
         this.keepInventory = new KeepInventoryRule(() -> session.capabilities().keepInventory());
         GeneratedTerrain generatedTerrain = generatedTerrain(session);
@@ -312,7 +304,7 @@ public final class WorldScope {
         this.idleLooking = IdleLooking.live(now, scene, memory, kinds, protection, compat.menuLayouts(), interactions,
                 compat::recipePages, instanceConfig.idleLooking());
         // 原生挖掘走生存需求共用的那套挖掘基础代码，每次要挖一格开一份；动了别人放的方块一并入账。
-        Supplier<NativeBlockBreaking> diggings = () -> new NativeBlockBreaking(interactionSender, menuActions, digTools, othersNotice);
+        Supplier<NativeBlockBreaking> diggings = diggingsOnSurvivalBases(interactionSender, menuActions, digTools, othersNotice);
         // 能力按清单登记进客户端全程共用的注册表，并拿回当前世界的随身背包、挖掘加速与连锁统计账本。
         this.worldAbilities = AbilityCatalog.registerInWorld(new AbilityCatalog.Deps(
                 characterReads(now, suicideWayOut),
@@ -336,12 +328,35 @@ public final class WorldScope {
                 || memory.recordsNear(pos, 2.5).stream().anyMatch(rec -> rec.kind() == MemoryKind.MACHINE));
     }
 
+    // 感知侧的跨刻读端在这里接齐：营地坑读端与填坑能力共用一份，感知入口把各路读端接成每刻一遍的扫描。
+    // 俯视网格读当刻的角色上下文，以角色所在方块为中心画一张。
+    private ClientCreatureSituations assemblePerceptionReads(Supplier<PlayerContext> now) {
+        ClientCreatureSituations creatures = new ClientCreatureSituations(now, trusted);
+        this.campPitSight = assembleCampPitSight(creatures);
+        this.sceneRefresh = new SceneRefresher(scene, kinds,
+                new ClientSelfSight(now),
+                new ClientEnvironmentSight(now),
+                new ClientEntitySight(now, trusted),
+                facilitySight,
+                new ClientSubtitleEar(() -> subtitles),
+                tickCurrent -> OverheadGrid.render(tickCurrent.level(),
+                        tickCurrent.localPlayer().blockPosition(), OverheadGrid.DEFAULT_RADIUS),
+                openingSight, campPitSight, rareSightings, compat.modSights());
+        return creatures;
+    }
+
     // 当刻角色全身读端按同一份角色供给者组装：背包、副手、饱食、口粮、装备、状态效果、合身度、坐标与寻死出路。
     private static CharacterReads characterReads(Supplier<PlayerContext> now, SuicideWayOut suicideWayOut) {
         return new CharacterReads(now, PlayerViews.backpack(now), LiveCarryReads.offhand(now),
                 PlayerViews.hunger(now), PlayerViews.foods(now), PlayerViews.equipment(now),
                 PlayerViews.effects(now), PlayerViews.gearFit(now),
                 LiveCarryReads.characterPosition(now), suicideWayOut);
+    }
+
+    // 原生挖掘的基础代码：每次要挖一格开一份，动了别人放的方块经连拆通报入账。
+    private static Supplier<NativeBlockBreaking> diggingsOnSurvivalBases(InteractionSender interactionSender,
+            MenuActions menuActions, LiveDigToolRule digTools, OthersThingsNotice othersNotice) {
+        return () -> new NativeBlockBreaking(interactionSender, menuActions, digTools, othersNotice);
     }
 
     // 对外通道：公屏聊天、世界刻号（没进世界按 0 兜底）、事件流、计时器、服务端会话与聊天事件流。
@@ -415,8 +430,8 @@ public final class WorldScope {
     }
 
     /**
-     * 每刻的世界扫描：各路读端读当刻的观察事实，交给场景整理并发观察编号。
-     * 没有角色基准时整理不出方位，先等自身观察，别的什么都不整理。
+     * 每刻的世界扫描：先把保护判断要的现场刷新一遍，再调感知入口把周围看一遍，最后冲刷连拆通报。
+     * 没有角色（还没进世界、人接管中）这一刻什么都不做。
      *
      * @param goalUnderway 主目标在推进（含 sequence 一步接一步地做、等回答）：到期但东西还在的观察编号照留
      */
@@ -426,54 +441,16 @@ public final class WorldScope {
             return;
         }
         // 保护判断要的现场先刷新：维度、记住的区域、自己的家、结构保护区快照、角色周围的方块归属。
+        // 这些快照是启动侧自己建的，刷新归建它的一方；维度是 volatile，寻路在后台线程上问保护时按它定位置。
         dimension = current.level().dimension().location().toString();
         regions.refresh();
         long nowMillis = System.currentTimeMillis();
         ownHome.refresh(nowMillis);
         structureProtection.refresh(nowMillis);
         ownership.tick(dimension, player.blockPosition());
-        Instant when = Instant.now();
-        var self = new ClientSelfSight(() -> current).current();
-        if (self == null) {
-            return;
-        }
-        scene.updateSelf(self);
-        scene.updateEnvironment(new ClientEnvironmentSight(() -> current).current());
-        scene.updateEntities(gameTick, new ClientEntitySight(() -> current, trusted).nearby());
-        scene.updateSounds(gameTick, new ClientSubtitleEar(() -> subtitles).recent());
-        // 玩家列表（Tab）：在线但不在实体观察里的玩家只有列表能证明——超出玩家同步半径的
-        // 玩家根本不同步实体，不把这条报出来，"附近没有玩家"就会被误读成"服务器上没有玩家"。
-        List<Scene.OnlinePlayer> online = new ArrayList<>();
-        for (OnlinePlayers.Online listed : OnlinePlayers.online(current)) {
-            online.add(new Scene.OnlinePlayer(listed.name(), listed.uuid()));
-        }
-        scene.updateOnlinePlayers(List.copyOf(online));
-        // 俯视网格以角色为中心画一张：地形特征从网格里聚出来，路过成片的树顺路记产地线索。
-        scene.updateGrid(OverheadGrid.render(current.level(), player.blockPosition(), OverheadGrid.DEFAULT_RADIUS),
-                gameTick, when);
-        // 设施观察：容器、工作设施与床三类都查——容器与工作设施按方块标签认（模组的箱子、损坏的铁砧都算），
-        // 床按方块类型名认；三类都报观察编号，只有容器与工作设施写进世界记忆。
-        observing = current;
-        scene.updateFacilities(gameTick, when, facilitySight.nearby(kinds.facilityBlockTypes()),
-                StandingContainers.ReadsCells.inLevel(current.level())::blockIdAt);
-        // 看得见的告示牌连同牌子上的字：主播在基地立的路牌、留言，observe 里读得到。
-        scene.updateSigns(gameTick, facilitySight.signs());
-        // 洞口与峡谷：每刻扫一小段，扫完一圈才换上这一圈看到的；看见的顺路记进世界记忆。
-        openingSight.tick(current).ifPresent(found -> scene.updateOpenings(gameTick, when, found));
-        // 营地地面坑：两秒或挪过六格扫一轮营地内的地面竖坑与爆炸弹坑，给观察编号方便顺手填平。
-        campPitSight.tick(current, gameTick).ifPresent(found -> scene.updateCampPits(gameTick, found));
-        // 模组的东西：电梯、车站、列车、物理结构，联动模组各自报角色附近看得到的。
-        List<ModThing> things = new ArrayList<>();
-        AABB around = new AABB(player.blockPosition()).inflate(THINGS_RADIUS);
-        for (ModSight sight : modSights) {
-            sight.sight(current.level(), player, around, things::add);
-        }
-        scene.updateModThings(gameTick, things);
-        // 目标在推进时，LLM 排好的后几步点的还是开头看到的编号：到期时先看东西还在不在，还在就留着；
-        // 没有目标在推进时到期就失效。
-        scene.expire(gameTick, goalUnderway ? entry -> scene.seen().stillThere(current.level(), entry) : null);
-        // 实体观察编号刚刷新完，核对眼前视野有没有新撞见的 Boss 或露出来的天然稀有矿脉。
-        rareSightings.tick(current, gameTick, when);
+        // 每刻看一眼周围：看的顺序、先自身后其余、到期失效与稀有撞见都是感知入口的实现细节。
+        sceneRefresh.refresh(current, gameTick, goalUnderway);
+        // 动了别人放的东西的连拆账到点收段发事件。
         othersNotice.flushDue(gameTick);
     }
 
