@@ -10,6 +10,7 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.behavior.interaction.FirstPersonScene;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
+import org.maiwithu.maicraft.game.interaction.InteractionSubmission;
 import org.maiwithu.maicraft.game.interaction.PendingInteraction;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
@@ -39,7 +40,8 @@ public final class ThrowsItems implements Action {
     private int remaining;
     /** 提交了却没等到确认的那一下计划丢几件：丢弃不可逆，调用方按没能确认记账。 */
     private int unconfirmed;
-    private PendingInteraction pending;
+    /** 投掷那一下的提交与确认：收下、逐刻结算与收尾都由它推进。 */
+    private final InteractionSubmission submission = new InteractionSubmission();
     /** 这次提交时计划丢出的件数：整份抛是一格的数量，零头抛是 1。 */
     private int plannedThisThrow;
     private Problem failure;
@@ -81,7 +83,7 @@ public final class ThrowsItems implements Action {
 
     /** 此刻是不是有一次投掷提交了、还在等游戏确认：这时停下，那一下丢没丢出去说不清。 */
     public boolean awaitingConfirmation() {
-        return pending != null && !pending.terminal();
+        return submission.awaitingConfirmation();
     }
 
     @Override
@@ -90,7 +92,7 @@ public final class ThrowsItems implements Action {
         if (!player.isCurrent() || player.interactionSender() == null) {
             return ActionStatus.running();
         }
-        if (pending != null) {
+        if (submission.awaitingConfirmation()) {
             return awaitConfirmation(player);
         }
         if (batch != null) {
@@ -129,26 +131,19 @@ public final class ThrowsItems implements Action {
         }
         plannedThisThrow = held.getCount() <= remaining ? held.getCount() : 1;
         ItemStack before = held.copy();
-        PendingInteraction submitted = player.interactionSender().dropSelected(player, before, plannedThisThrow > 1,
-                InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before),
-                CONFIRM_TIMEOUT_TICKS);
-        // 提交入口这一刻不收：东西留在手上，下一刻再丢。
+        InteractionConfirmation confirmation =
+                InteractionConfirmation.heldItemChanged(InteractionHand.MAIN_HAND, before);
+        PendingInteraction submitted = submission.submit(player, c ->
+                c.interactionSender().dropSelected(c, before, plannedThisThrow > 1, confirmation,
+                        CONFIRM_TIMEOUT_TICKS));
+        // 提交入口这一刻不收：东西留在手上，下一刻原样再交。
         if (submitted == null) return ActionStatus.running();
-        pending = submitted;
         return ActionStatus.progressed();
     }
 
     private ActionStatus awaitConfirmation(PlayerContext player) {
-        if (!pending.terminal()) {
-            pending = player.interactionSender().poll(player, pending);
-            if (pending != null && !pending.terminal()) return ActionStatus.running();
-        }
-        if (pending == null) {
-            unconfirmed = plannedThisThrow;
-            return ActionStatus.failed(stuck("投掷的确认记录没了，说不清丢没丢出去"));
-        }
-        PendingInteraction settled = pending;
-        pending = null;
+        PendingInteraction settled = submission.poll(player);
+        if (settled == null) return ActionStatus.running();
         return switch (settled.status()) {
             case CONFIRMED_APPLIED -> {
                 remaining -= plannedThisThrow;
@@ -203,14 +198,14 @@ public final class ThrowsItems implements Action {
     @Override
     public Interruptibility interruptibility() {
         if (batch != null) return batch.interruptibility();
-        return pending != null && !pending.terminal()
+        return submission.awaitingConfirmation()
                 ? Interruptibility.UNSAFE_TO_STOP
                 : Interruptibility.WORKING;
     }
 
     @Override
     public String describe() {
-        if (pending != null && !pending.terminal()) {
+        if (submission.awaitingConfirmation()) {
             return "等游戏确认这次投掷（" + itemId + "，还剩 " + remaining + " 件）";
         }
         return "正在丢" + itemId + "（还剩 " + remaining + " 件）";
