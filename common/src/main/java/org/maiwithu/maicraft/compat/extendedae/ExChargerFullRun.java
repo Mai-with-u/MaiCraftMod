@@ -13,10 +13,9 @@ import net.minecraft.world.item.ItemStack;
 
 import org.maiwithu.maicraft.ability.machine.spi.FullRun;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
-import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ApproachThenUse;
+import org.maiwithu.maicraft.behavior.inventory.hands.StagesToMainhand;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -162,25 +161,14 @@ final class ExChargerFullRun implements FullRun {
             return afterBatchInserted();
         }
         if (step == null) {
-            int carried = countCarried(player, inputItemId);
-            if (carried > 0) {
-                Optional<Action> hold = services.toMainhand().moveToMainhand(inputItemId);
-                if (hold.isEmpty()) {
-                    return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "无法将 " + inputItemId + " 换到主手"));
-                }
-                step = hold.get();
-            } else if (toolRechargeMode) {
-                return ActionStatus.failed(Problem.of(Problem.Kind.NEED_ITEM, "身上没有待补电的 " + inputItemId));
-            } else {
-                step = services.needs().actionFor(
-                        new ItemRequest(WantedItem.ofItem(inputItemId), stillToInsert, "扩展充能器原料"), permissions);
-            }
+            step = new StagesToMainhand(services, permissions, inputItemId, stillToInsert, "扩展充能器原料",
+                    toolRechargeMode ? "身上没有待补电的 " + inputItemId : null,
+                    context -> context.localPlayer().getInventory());
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Running) return status;
         finishStep();
-        if (status instanceof ActionStatus.Failed) return status;
-        if (!holdingItem(player, inputItemId)) return ActionStatus.progressed();
+        if (status instanceof ActionStatus.Failed failed) return failed;
         stage = Stage.INSERT_SLOT;
         return ActionStatus.progressed();
     }
@@ -327,23 +315,6 @@ final class ExChargerFullRun implements FullRun {
             if (power.isPresent() && !power.get().full()) return true;
         }
         return false;
-    }
-
-    private static int countCarried(PlayerContext player, String itemId) {
-        int total = 0;
-        Inventory inv = player.localPlayer().getInventory();
-        for (int i = 0; i < inv.getContainerSize(); i++) {
-            ItemStack stack = inv.getItem(i);
-            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) {
-                total += stack.getCount();
-            }
-        }
-        return total;
-    }
-
-    private static boolean holdingItem(PlayerContext player, String itemId) {
-        ItemStack held = player.localPlayer().getMainHandItem();
-        return !held.isEmpty() && BuiltInRegistries.ITEM.getKey(held.getItem()).toString().equals(itemId);
     }
 
     private void finishStep() {
