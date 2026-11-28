@@ -34,7 +34,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 /**
  * 营地地面坑的客户端扫描读端：每两秒或角色挪过六格刷新一轮场景里的营地坑，同时支持填坑任务在动手前即时复核。
  */
-public final class ClientCampPitSight {
+public class ClientCampPitSight {
 
     /** 场景扫描的刷新间隔（刻，2 秒）。 */
     private static final long REFRESH_TICKS = 40;
@@ -49,6 +49,12 @@ public final class ClientCampPitSight {
     public ClientCampPitSight(Campground campground, Predicate<WorldPosition> insideStructure) {
         this.campground = Objects.requireNonNull(campground, "campground");
         this.insideStructure = Objects.requireNonNull(insideStructure, "insideStructure");
+    }
+
+    /** 只给替身子类用：替身重写全部入口，不接真实读数。 */
+    protected ClientCampPitSight() {
+        this.campground = null;
+        this.insideStructure = null;
     }
 
     /** 按节拍刷新场景里的营地地面坑；不到刷新点时返回空表示沿用上一轮结果。 */

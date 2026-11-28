@@ -40,7 +40,7 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
  * 看见罕见目标的客户端观察读端：每刻从周围渲染实体里认 Boss，每隔半秒从方块扫描索引里找眼前看得清的天然稀有矿脉，
  * 交给 {@link RareSightings} 去重并发事件。
  */
-public final class ClientRareSightingWatch {
+public class ClientRareSightingWatch {
 
     /** 通用 Boss 实体标签（NeoForge 与 Fabric 共用）。 */
     private static final TagKey<EntityType<?>> BOSSES_TAG =
@@ -74,6 +74,15 @@ public final class ClientRareSightingWatch {
         this.ownership = Objects.requireNonNull(ownership, "ownership");
         Objects.requireNonNull(memory, "memory");
         this.sightings = new RareSightings(events, memory, (spot, blockId) -> alreadyInWorldMemory(memory, spot, blockId));
+    }
+
+    /** 只给替身子类用：替身重写全部入口，不接真实读数。 */
+    protected ClientRareSightingWatch() {
+        this.scans = null;
+        this.registered = null;
+        this.seenIds = null;
+        this.ownership = null;
+        this.sightings = null;
     }
 
     /** 每刻随世界扫描推进：先看周围有没有 Boss 进入视野，到半秒间隔再看眼前有没有露出来的稀有矿脉。 */

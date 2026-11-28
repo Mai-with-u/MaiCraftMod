@@ -23,7 +23,7 @@ import org.maiwithu.maicraft.game.world.ObservationVisibility;
  * <p>能进人按碰撞外形为空、不是液体算：门（关着开着都一样）挡住往里量，有门的房子不会被当成洞；
  * 地表跳过树叶和树干，两棵大树中间不会被当成一道沟。视线走观察共用的遮挡判断，墙后的不算看见。
  */
-public final class ClientCaveOpeningSight implements CaveOpenings.Ground {
+public class ClientCaveOpeningSight implements CaveOpenings.Ground {
 
     private CaveOpenings.Sweep sweep;
     private String sweepDimension;
