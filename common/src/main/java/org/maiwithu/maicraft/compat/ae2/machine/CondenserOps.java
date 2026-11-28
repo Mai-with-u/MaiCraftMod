@@ -22,16 +22,15 @@ import org.maiwithu.maicraft.ability.machine.spi.MachineState;
 import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
 import org.maiwithu.maicraft.compat.ae2.Ae2DeviceOps;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -203,9 +202,9 @@ final class CondenserOps implements Ae2DeviceOps {
      * 打开界面 → 若模式不符则切换至目标模式 → 只从角色背包挑选低值普通杂物投入黑洞槽 →
      * 一旦输出槽出现目标产物立即取回背包，直至达到目标数量或背包低值杂物耗尽。
      */
-    static final class CondenserFullRun implements FullRun {
+    static final class CondenserFullRun extends Ae2MenuWork implements FullRun {
 
-        private enum Stage { OPEN, ENSURE_MODE, WAIT_MODE_SYNC, FEED_OR_TAKE, WAIT_TAKE, WAIT_FEED, CLOSE, DONE }
+        private enum Step { ENSURE_MODE, WAIT_MODE_SYNC, FEED_OR_TAKE, WAIT_TAKE, WAIT_FEED }
 
         private final BlockPos at;
         private final String targetItem;
@@ -214,19 +213,14 @@ final class CondenserOps implements Ae2DeviceOps {
         private final Ae2Compat compat;
         private final Ae2MachineReads reads;
         private final Ae2MachineCache cache;
-        private final MenuOpening opening;
 
         private final List<String> notes = new ArrayList<>();
-        private Stage stage = Stage.OPEN;
-        private OpenedMenu menu;
-        private Action closing;
+        private Step step = Step.ENSURE_MODE;
         private int produced;
         private int modeCycles;
         private String modeBeforeSend;
         private int trackedSlot = -1;
         private int trackedCountBefore;
-        private int waited;
-        private Problem problem;
 
         CondenserFullRun(BlockPos at, String targetItem, int targetCount, String wantedMode,
                 Ae2Compat compat, Ae2MachineReads reads, Ae2MachineCache cache,
@@ -237,6 +231,7 @@ final class CondenserOps implements Ae2DeviceOps {
 
         CondenserFullRun(BlockPos at, String targetItem, int targetCount, String wantedMode,
                 Ae2Compat compat, Ae2MachineReads reads, Ae2MachineCache cache, MenuOpening opening) {
+            super(opening, "物质聚合器界面没打开");
             this.at = at.immutable();
             this.targetItem = targetItem;
             this.targetCount = targetCount;
@@ -244,63 +239,48 @@ final class CondenserOps implements Ae2DeviceOps {
             this.compat = compat;
             this.reads = reads;
             this.cache = cache;
-            this.opening = opening;
         }
 
         @Override public int produced() { return produced; }
         @Override public boolean complete() { return produced >= targetCount; }
         @Override public List<String> notes() { return List.copyOf(notes); }
 
-        @Override public ActionStatus tick(TickContext tick) {
-            return switch (stage) {
-                case OPEN -> open(tick);
+        @Override protected ActionStatus work(TickContext tick) {
+            return switch (step) {
                 case ENSURE_MODE -> ensureMode();
                 case WAIT_MODE_SYNC -> waitModeSync();
                 case FEED_OR_TAKE -> feedOrTake();
                 case WAIT_TAKE -> waitTake();
                 case WAIT_FEED -> waitFeed();
-                case CLOSE -> closeMenu(tick);
-                case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
             };
-        }
-
-        private ActionStatus open(TickContext tick) {
-            ActionStatus status = opening.tick(tick);
-            if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-            if (!(status instanceof ActionStatus.Done)) return status;
-            menu = opening.opened().orElse(null);
-            if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "物质聚合器界面没打开"));
-            stage = Stage.ENSURE_MODE;
-            waited = 0;
-            return ActionStatus.progressed();
         }
 
         // 发完一次模式切换包后必须等待 @GuiSync 回传新模式，绝不连发触发误超时。
         private ActionStatus ensureMode() {
             Optional<Ae2MachineReads.CondenserMenuView> view = reads.openCondenserMenu();
             if (view.isEmpty()) {
-                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                return beginClose(Problem.of(Problem.Kind.STUCK, "物质聚合器界面同步超时"));
+                if (!syncWaitElapsed()) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK, "物质聚合器界面同步超时"));
             }
             cache.putCondenser(at, view.get());
             if (wantedMode.equals(view.get().mode())) {
                 String hint = capacityHint(view.get().mode(), view.get().storageComponentId());
                 if (!hint.startsWith("组件容量足够")) notes.add(hint);
-                waited = 0;
-                stage = Stage.FEED_OR_TAKE;
+                resetWait();
+                step = Step.FEED_OR_TAKE;
                 return ActionStatus.progressed();
             }
             if (modeCycles >= 4) {
-                return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME,
                         "物质聚合器未能切到模式 " + wantedMode));
             }
             if (!compat.sendConfigButton("condenser_output", false)) {
-                return beginClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法发送物质聚合器模式切换包"));
+                return closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法发送物质聚合器模式切换包"));
             }
             modeBeforeSend = view.get().mode();
             modeCycles++;
-            waited = 0;
-            stage = Stage.WAIT_MODE_SYNC;
+            resetWait();
+            step = Step.WAIT_MODE_SYNC;
             return ActionStatus.progressed();
         }
 
@@ -308,37 +288,37 @@ final class CondenserOps implements Ae2DeviceOps {
             Optional<Ae2MachineReads.CondenserMenuView> view = reads.openCondenserMenu();
             if (view.isPresent() && !view.get().mode().equals(modeBeforeSend)) {
                 cache.putCondenser(at, view.get());
-                waited = 0;
-                stage = Stage.ENSURE_MODE;
+                resetWait();
+                step = Step.ENSURE_MODE;
                 return ActionStatus.progressed();
             }
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK,
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK,
                     "物质聚合器模式切换后一直未同步新值（仍为 " + modeBeforeSend + "）"));
         }
 
         // 先收产出并等输出槽真实减少再累加，再投低值杂物并等背包槽变化；发包受阻受超时保护。
         private ActionStatus feedOrTake() {
-            Optional<MenuContent.Reading> reading = menu.reading();
+            Optional<MenuContent.Reading> reading = menu().reading();
             if (reading.isEmpty()) {
-                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                return beginClose(Problem.of(Problem.Kind.STUCK, "物质聚合器界面槽位同步超时"));
+                if (!syncWaitElapsed()) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK, "物质聚合器界面槽位同步超时"));
             }
             reads.openCondenserMenu().ifPresent(v -> cache.putCondenser(at, v));
-            if (produced >= targetCount) return beginClose(null);
+            if (produced >= targetCount) return closeWith(null);
             List<Integer> outputSlots = compat.menuSlotsOf("MACHINE_OUTPUT");
             if (!outputSlots.isEmpty()) {
                 int outSlot = outputSlots.getFirst();
                 SlotSnapshot outSnap = snapshotBySlot(reading.get(), outSlot);
                 if (!outSnap.isEmpty() && targetItem.equals(outSnap.key())) {
-                    if (!menu.quickMove(outSlot)) {
-                        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                        return beginClose(Problem.of(Problem.Kind.STUCK, "无法从物质聚合器输出槽取出 " + targetItem));
+                    if (!menu().quickMove(outSlot)) {
+                        if (!syncWaitElapsed()) return ActionStatus.running();
+                        return closeWith(Problem.of(Problem.Kind.STUCK, "无法从物质聚合器输出槽取出 " + targetItem));
                     }
                     trackedSlot = outSlot;
                     trackedCountBefore = outSnap.count();
-                    waited = 0;
-                    stage = Stage.WAIT_TAKE;
+                    resetWait();
+                    step = Step.WAIT_TAKE;
                     return ActionStatus.progressed();
                 }
             }
@@ -348,52 +328,52 @@ final class CondenserOps implements Ae2DeviceOps {
                         .map(v -> "；当前蓄能 " + v.storedPower() + "/" + v.requiredEnergy()
                                 + "，" + capacityHint(v.mode(), v.storageComponentId()))
                         .orElse("");
-                return beginClose(Problem.of(Problem.Kind.NEED_ITEM,
+                return closeWith(Problem.of(Problem.Kind.NEED_ITEM,
                         "背包里已没有可投入物质聚合器的低值杂物（圆石/泥土/沙砾/地狱岩等）" + compNote));
             }
             SlotSnapshot trashSnap = playerSnapshotBySlot(reading.get(), trashSlot);
-            if (!menu.quickMove(trashSlot)) {
-                if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-                return beginClose(Problem.of(Problem.Kind.STUCK, "无法将低值杂物投入物质聚合器"));
+            if (!menu().quickMove(trashSlot)) {
+                if (!syncWaitElapsed()) return ActionStatus.running();
+                return closeWith(Problem.of(Problem.Kind.STUCK, "无法将低值杂物投入物质聚合器"));
             }
             trackedSlot = trashSlot;
             trackedCountBefore = trashSnap.count();
-            waited = 0;
-            stage = Stage.WAIT_FEED;
+            resetWait();
+            step = Step.WAIT_FEED;
             return ActionStatus.progressed();
         }
 
         private ActionStatus waitTake() {
-            Optional<MenuContent.Reading> reading = menu.reading();
+            Optional<MenuContent.Reading> reading = menu().reading();
             if (reading.isPresent()) {
                 SlotSnapshot now = snapshotBySlot(reading.get(), trackedSlot);
                 int nowCount = now.isEmpty() ? 0 : now.count();
                 if (nowCount < trackedCountBefore) {
                     produced += (trackedCountBefore - nowCount);
-                    waited = 0;
-                    if (produced >= targetCount) return beginClose(null);
-                    stage = Stage.FEED_OR_TAKE;
+                    resetWait();
+                    if (produced >= targetCount) return closeWith(null);
+                    step = Step.FEED_OR_TAKE;
                     return ActionStatus.progressed();
                 }
             }
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "物质聚合器输出槽里的 " + targetItem + " 未能取出（背包可能已满）"));
         }
 
         private ActionStatus waitFeed() {
-            Optional<MenuContent.Reading> reading = menu.reading();
+            Optional<MenuContent.Reading> reading = menu().reading();
             if (reading.isPresent()) {
                 SlotSnapshot now = playerSnapshotBySlot(reading.get(), trackedSlot);
                 int nowCount = now.isEmpty() ? 0 : now.count();
                 if (nowCount < trackedCountBefore) {
-                    waited = 0;
-                    stage = Stage.FEED_OR_TAKE;
+                    resetWait();
+                    step = Step.FEED_OR_TAKE;
                     return ActionStatus.progressed();
                 }
             }
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
-            return beginClose(Problem.of(Problem.Kind.STUCK, "向物质聚合器投入杂物后背包槽位一直未减少"));
+            if (!syncWaitElapsed()) return ActionStatus.running();
+            return closeWith(Problem.of(Problem.Kind.STUCK, "向物质聚合器投入杂物后背包槽位一直未减少"));
         }
 
         /** 仅挑选低值普通杂物，保护工具、武器、装备和贵重物品不被黑洞槽销毁。 */
@@ -425,40 +405,7 @@ final class CondenserOps implements Ae2DeviceOps {
             return SlotSnapshot.empty();
         }
 
-        private ActionStatus closeMenu(TickContext tick) {
-            if (closing == null) closing = menu.closing();
-            ActionStatus status = closing.tick(tick);
-            if (status instanceof ActionStatus.Running) return status;
-            closing = null;
-            return finish(problem);
-        }
-
-        private ActionStatus beginClose(Problem cause) {
-            problem = cause;
-            stage = Stage.CLOSE;
-            return ActionStatus.progressed();
-        }
-
-        private ActionStatus finish(Problem cause) {
-            problem = cause;
-            stage = Stage.DONE;
-            return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
-        }
-
-        @Override public void pause() {
-            if (closing != null) closing.pause();
-            else if (menu == null) opening.pause();
-        }
-
-        @Override public void close() {
-            if (closing != null) closing.close();
-            if (menu != null && stage != Stage.DONE) menu.abandon();
-            else if (menu == null) opening.close();
-        }
-
-        @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-
-        @Override public String describe() {
+        @Override protected String doing() {
             return "在物质聚合器中生产 " + targetItem + "（" + produced + "/" + targetCount + "）";
         }
     }
