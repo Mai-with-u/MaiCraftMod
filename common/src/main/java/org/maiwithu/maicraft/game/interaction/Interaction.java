@@ -1,13 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package org.maiwithu.maicraft.game.interaction;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
-
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.LivingEntity;
@@ -15,9 +10,7 @@ import net.minecraft.world.entity.projectile.ProjectileUtil;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.phys.AABB;
-import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -32,7 +25,7 @@ import org.maiwithu.maicraft.game.world.InteractionRange;
 
 /**
  * 把一次鼠标操作分成几刻完成：先瞄准，再出手，再观察有没有生效。
- * 左键方块是持续挖掘，左键实体是攻击；右键分别对应点方块、点实体或使用手中物品。
+ * 左键实体是攻击，右键空气是使用手中物品（点按一下或持续按住）。
  * 它负责停步、转头和点击，不会自己走近目标。需要靠近时由外层任务先寻路。
  * 交互提交、容器界面与按键入口都从构造函数传入；每刻推进时传入当刻的角色上下文。
  */
@@ -82,46 +75,26 @@ public final class Interaction {
     }
 
     private static final int CONFIRM_TIMEOUT_TICKS = 20;
-    /** 原版 {@code Minecraft.rightClickDelay}：持续右键时每经过此间隔会重新触发一次。 */
-    private static final int RIGHT_CLICK_DELAY = 4;
-    /** 表示持续按住的高重复次数；拥有该操作的任务会在时限到达或行为完成后停止它。 */
-    private static final int CONTINUOUS = 1_000_000;
 
     private final LocalPlayer player;
     private final InteractionSender sender;
     private final MenuActions menuActions;
     private final PlayerInput playerInput;
     private final Button button;
-    private final BlockPos block;     // 非空时表示方块目标。
     private final Entity entity;      // 非空时表示实体目标。
     private final InteractionHand hand;
     private final Timing timing;
 
-    private final BlockDigger digger; // 仅左键破坏方块时使用。
-    private BlockHitResult presetHit; // 右键方块时可携带调用方已解析的精确命中，供放置使用。
-    private BlockHitResult submittedBlockHit;
-    private BlockPos requiredBlockPos;
-    private Block requiredBlock;
-    /**
-     * 是否允许点方块／实体已确认没有生效后，再使用手里的物品，例如扔出雪球。
-     * 确认超时或结果不一致时停下来检查现场，不能再追加一次物品使用。
-     * 精确 useBlock 默认关闭；forHit 的调用方自行决定是否开启。
-     */
-    private boolean itemFallthrough;
     /** 左键打实体时由调用方给的"打成了"条件（展示框这类不掉血的目标）；为 null 时按活物挨打的三证据确认。 */
     private InteractionConfirmation strikeConfirmation;
     private PendingMenuAction closePending;
     private PendingInteraction pending;
-    private PendingInteraction lastUsePending;
-    private boolean fallingThrough;
     private boolean releasing;
     private int fires;
-    private boolean finishRequested;
     private int cooldown;             // 距下一次重复点击还需等待的游戏刻数。
     private int held;                 // 右键空气时，物品已持续使用的游戏刻数。
     private boolean hardFail;         // 一次点击遇到不可恢复错误时阻止后续操作。
     private String failReason = "交互没成";
-    private String lastUseResult = "还没出手";
     /** 近战上一次记下的"还没出手"原因。 */
     private String lastAttackWait = "";
     /** 镜头已经转到位、准星却连着落在方块或空气上的刻数：到了上限这一下按打不到收场，不无限等。 */
@@ -133,7 +106,7 @@ public final class Interaction {
     private Vec3 trackedEntityAim;
 
     private Interaction(LocalPlayer player, InteractionSender sender, MenuActions menuActions,
-                        PlayerInput playerInput, Button button, BlockPos block, Entity entity,
+                        PlayerInput playerInput, Button button, Entity entity,
                         InteractionHand hand, Timing timing) {
         this.player = player;
         this.sender = sender;
@@ -141,27 +114,16 @@ public final class Interaction {
         this.menuActions = menuActions;
         this.playerInput = playerInput;
         this.button = button;
-        this.block = block == null ? null : block.immutable();
         this.entity = entity;
         this.hand = hand;
         this.timing = timing;
-        // 照准星点一下的原始左键：手上拿着什么就用什么挖，不替点的人换工具。
-        this.digger = (button == Button.ATTACK && block != null)
-                ? new BlockDigger(player, sender, menuActions, playerInput, DigToolRule.HELD) : null;
-    }
-
-    /** 左键破坏方块：按住直至方块消失；创造模式立即破坏，生存模式按时间推进。 */
-    public static Interaction attackBlock(PlayerContext context, InteractionSender sender, MenuActions menuActions,
-                                          PlayerInput playerInput, BlockPos pos) {
-        return new Interaction(context.localPlayer(), sender, menuActions, playerInput,
-                Button.ATTACK, pos, null, InteractionHand.MAIN_HAND, Timing.hold());
     }
 
     /** 左键攻击实体一次，并遵循原版攻击冷却。 */
     public static Interaction attackEntity(PlayerContext context, InteractionSender sender, MenuActions menuActions,
                                            PlayerInput playerInput, Entity target) {
         return new Interaction(context.localPlayer(), sender, menuActions, playerInput,
-                Button.ATTACK, null, target, InteractionHand.MAIN_HAND, Timing.once());
+                Button.ATTACK, target, InteractionHand.MAIN_HAND, Timing.once());
     }
 
     /**
@@ -175,76 +137,11 @@ public final class Interaction {
         return interaction;
     }
 
-    /** 右键 {@code pos} 方块，用手持物品放置方块或激活目标。 */
-    public static Interaction useBlock(PlayerContext context, InteractionSender sender, MenuActions menuActions,
-                                       PlayerInput playerInput, BlockPos pos, InteractionHand hand) {
-        return new Interaction(context.localPlayer(), sender, menuActions, playerInput,
-                Button.USE, pos, null, hand, Timing.once());
-    }
-
-    /** 右键调用方预先解析的方块命中；放置或精确激活已提供支撑面，因此跳过重新射线并直接对 {@code hit} 操作。 */
-    public static Interaction useBlock(PlayerContext context, InteractionSender sender, MenuActions menuActions,
-                                       PlayerInput playerInput, BlockHitResult hit, InteractionHand hand) {
-        Interaction interaction = new Interaction(context.localPlayer(), sender, menuActions, playerInput,
-                Button.USE, hit.getBlockPos(), null, hand, Timing.once());
-        interaction.presetHit = hit;
-        return interaction;
-    }
-
     /** 按给定 {@link Timing} 在空气中右键使用手持物品；{@code hold()} 用于吃完食物，{@code hold(n)} 用于拉弓后放箭。 */
     public static Interaction useInAir(PlayerContext context, InteractionSender sender, MenuActions menuActions,
                                        PlayerInput playerInput, InteractionHand hand, Timing timing) {
         return new Interaction(context.localPlayer(), sender, menuActions, playerInput,
-                Button.USE, null, null, hand, timing);
-    }
-
-    /**
-     * 根据准星命中的东西决定做法：左键方块就挖，左键实体就打，右键则交互或使用物品。
-     * holdTicks 为零表示点一下；非零时对实体／方块反复点，对空气则持续使用物品。
-     * 实体／方块的最长按住时间由外层任务控制，这里只设置一个很大的重复次数。
-     * 创建时记住目标，真正出手前仍会检查准星；左键空气直接返回 null，表示没有可做的动作。
-     *
-     * @param itemFallthrough 点击已确认未生效时，是否允许再尝试使用手里的物品。
-     */
-    public static Interaction forHit(PlayerContext context, InteractionSender sender, MenuActions menuActions,
-                                     PlayerInput playerInput, HitResult hit, Button button, int holdTicks,
-                                     boolean itemFallthrough) {
-        LocalPlayer player = context.localPlayer();
-        boolean hold = holdTicks != 0;
-        switch (hit.getType()) {
-            case BLOCK -> {
-                BlockHitResult blockHit = (BlockHitResult) hit;
-                if (button == Button.ATTACK) {
-                    return attackBlock(context, sender, menuActions, playerInput, blockHit.getBlockPos());
-                }
-                Interaction interaction = new Interaction(player, sender, menuActions, playerInput,
-                        Button.USE, blockHit.getBlockPos(), null, InteractionHand.MAIN_HAND,
-                        hold ? Timing.repeat(CONTINUOUS, RIGHT_CLICK_DELAY) : Timing.once());
-                interaction.presetHit = blockHit;   // 复用原生已确认的命中，避免重新计算射线。
-                interaction.itemFallthrough = itemFallthrough;
-                return interaction;
-            }
-            case ENTITY -> {
-                Entity target = ((EntityHitResult) hit).getEntity();
-                if (button == Button.ATTACK) {
-                    return new Interaction(player, sender, menuActions, playerInput, Button.ATTACK,
-                            null, target, InteractionHand.MAIN_HAND,
-                            hold ? Timing.repeat(CONTINUOUS, 1) : Timing.once());
-                }
-                Interaction interaction = new Interaction(player, sender, menuActions, playerInput,
-                        Button.USE, null, target, InteractionHand.MAIN_HAND,
-                        hold ? Timing.repeat(CONTINUOUS, RIGHT_CLICK_DELAY) : Timing.once());
-                interaction.itemFallthrough = itemFallthrough;
-                return interaction;
-            }
-            default -> {   // MISS 表示准星指向空气。
-                if (button == Button.ATTACK) {
-                    return null;
-                }
-                Timing t = hold ? (holdTicks > 0 ? Timing.hold(holdTicks) : Timing.hold()) : Timing.once();
-                return useInAir(context, sender, menuActions, playerInput, InteractionHand.MAIN_HAND, t);
-            }
-        }
+                Button.USE, null, hand, timing);
     }
 
     /**
@@ -257,11 +154,11 @@ public final class Interaction {
         Vec3 eye = player.getEyePosition();
         Vec3 reachVec = player.getViewVector(1.0f).scale(reach);
         Vec3 end = eye.add(reachVec);
-        BlockHitResult block = level.clip(new ClipContext(
+        AABB box = player.getBoundingBox().expandTowards(reachVec).inflate(1.0);
+        HitResult block = level.clip(new ClipContext(
                 eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
         double maxSq = block.getType() == HitResult.Type.MISS
                 ? reach * reach : block.getLocation().distanceToSqr(eye);
-        AABB box = player.getBoundingBox().expandTowards(reachVec).inflate(1.0);
         EntityHitResult ent = ProjectileUtil.getEntityHitResult(
                 player, eye, end, box, e -> !e.isSpectator() && e.isPickable(), maxSq);
         return ent != null ? ent : block;   // 实体比方块命中更近时优先返回实体，否则返回方块命中或未命中。
@@ -271,45 +168,7 @@ public final class Interaction {
         return failReason;
     }
 
-    /** 原生点击已发出时先结算，不能为恢复空手而移动刚取回的工件，破坏库存确认依据。 */
-    public boolean awaitingConfirmation() { return pending != null; }
-
-    /** 固定语义目标身份，避免把预计放置后的方块误当成新的输入目标。 */
-    public Interaction requireBlock(BlockPos position, Block required) {
-        if (required != null && position == null) throw new IllegalArgumentException("点名要点的方块就要给出它的位置");
-        requiredBlockPos = position == null ? null : position.immutable();
-        requiredBlock = required;
-        return this;
-    }
-
-    // 需要特定方块时，每次新右键前都核对它还在那里，防止箱子被换成别的东西后继续点。
-    private boolean requiredBlockPresent() {
-        if (requiredBlock == null || player.level().isLoaded(requiredBlockPos)
-                && player.level().getBlockState(requiredBlockPos).is(requiredBlock)) return true;
-        failReason = "要点的方块在出手前变了或没加载";
-        hardFail = true;
-        return false;
-    }
-
-    /** 走位更新后续订同一近战目标的可见瞄准；不发攻击、不改移动，真正出手仍由下一次 tick 核对射线。 */
-    public void renewEntityAttackAim() {
-        if (button != Button.ATTACK || pending != null || entity == null || !entity.isAlive()
-                || player.level().getEntity(entity.getId()) != entity || hardFail) return;
-        playerInput.lookAt(player, stableEntityAimPoint(entity));
-    }
-
-    /** 挥击已经提交时必须继续等它的确认结果；尚未提交的瞄准才允许因对手退出射程而撤销。 */
-    public boolean entityAttackSubmitted() { return button == Button.ATTACK && pending != null; }
-
-    /** 只结算已提交的这一刀；死亡、丢失和任务收尾期间均不重新瞄准、点击或发包。 */
-    public Status pollSubmittedEntityAttack(PlayerContext context) {
-        if (button != Button.ATTACK || entity == null || pending == null)
-            return hardFail ? Status.FAILED : fires > 0 ? Status.DONE : Status.RUNNING;
-        if (settleAttack(context)) { fires++; return Status.DONE; }
-        return hardFail ? Status.FAILED : Status.RUNNING;
-    }
-
-    // 先处理还没关好的界面，再分别推进挖方块、对空气使用物品或离散点击。
+    // 先处理还没关好的界面，再推进对空气使用物品或对实体的攻击。
     // 已经发出的动作优先等结果，不因这次动作刚打开了箱子就立刻把箱子关上。
     public Status tick(PlayerContext context) {
         if (pending == null
@@ -320,13 +179,10 @@ public final class Interaction {
                 return menuStatus;
             }
         }
-        if (button == Button.ATTACK && block != null) {
-            return breakBlock(context);                // 方块破坏本身就是持续操作。
-        }
-        if (button == Button.USE && block == null && entity == null) {
+        if (button == Button.USE && entity == null) {
             return useAir(context);
         }
-        return discrete(context);                      // 攻击实体或使用方块、实体。
+        return discrete(context);
     }
 
     /** 容器界面打开时不向世界发送攻击或使用按键，避免点击穿过菜单。 */
@@ -353,43 +209,6 @@ public final class Interaction {
         return Status.FAILED;
     }
 
-    // ---- 左键方块：持续破坏 ----
-
-    // 目标已经是空气就算挖完；否则交给 BlockDigger 逐刻挖。看不到可挖面时区分太远还是被挡住。
-    private Status breakBlock(PlayerContext context) {
-        if (!player.level().isLoaded(block)) {
-            failReason = "目标方块不在客户端已加载的范围里";
-            return Status.FAILED;
-        }
-        if (player.level().getBlockState(block).isAir()) return Status.DONE;
-        BlockDigger.DigResult result = digger.digStep(context, block);
-        if (result == BlockDigger.DigResult.BROKE_TARGET) {
-            return Status.DONE;
-        }
-        if (result == BlockDigger.DigResult.NO_ROOM) {
-            failReason = "背包没有空格放手上的东西，腾不出空手";
-            return Status.FAILED;
-        }
-        if (result == BlockDigger.DigResult.MISSING_TOOL) {
-            failReason = "dig_tool 点名的工具不在身上，这一格没挖";
-            return Status.FAILED;
-        }
-        if (result == BlockDigger.DigResult.REFUSED) {
-            failReason = digger.refusalWhy() != null ? digger.refusalWhy() : "方块挖掘被拒绝，仍在原位";
-            return Status.FAILED;
-        }
-        if (result == BlockDigger.DigResult.NO_SHOT) {
-            double reach = InteractionRange.blockReach(player);
-            boolean beyondReach = player.getEyePosition().distanceToSqr(Vec3.atCenterOf(block))
-                    > reach * reach;
-            failReason = beyondReach
-                    ? "目标方块超出了伸手够得着的距离"
-                    : "目标方块没有看得见、能安全下手的面，也没有能挖开的遮挡通过去";
-            return Status.FAILED;
-        }
-        return Status.RUNNING;
-    }
-
     // ---- 右键空气：点按或持续使用食物、弓等物品 ----
 
     // 例如吃东西：先按一次右键，观察手中物品、菜单或使用状态，再决定继续按住还是松开。
@@ -397,7 +216,6 @@ public final class Interaction {
     private Status useAir(PlayerContext context) {
         playerInput.halt(player);
         if (pending == null) {
-            if (!requiredBlockPresent()) return Status.FAILED;
             if (player.isUsingItem()) {
                 failReason = "手上已经在用别的东西，没去动它";
                 return Status.FAILED;
@@ -463,26 +281,18 @@ public final class Interaction {
         return Status.RUNNING;
     }
 
-    // ---- 离散操作：攻击实体或使用方块、实体（单次或重复） ----
+    // ---- 离散操作：攻击实体（单次） ----
 
     // 一次点击没确认完就不计次；确认一次后先等间隔，再开始下一次。
     private Status discrete(PlayerContext context) {
-        // 有限持续操作到期后只结算已经发出的这一次，不能在最后一个确认尚未完成时宣布整段成功。
-        if (finishRequested && pending == null) {
-            if (fires > 0 && !hardFail) return Status.DONE;
-            failReason = "限定次数的交互结束了，一次都没确认生效"; return Status.FAILED;
-        }
         if (cooldown > 0) {
             cooldown--;
             return Status.RUNNING;
         }
-        boolean fired = switch (button) {
-            case ATTACK -> fireAttackEntity(context);
-            case USE -> entity != null ? fireUseEntity(context) : fireUseBlock(context);
-        };
+        boolean fired = fireAttackEntity(context);
         if (hardFail) return Status.FAILED;
         if (!fired) return Status.RUNNING;             // 攻击冷却未结束时等待，不将其视为失败。
-        if (++fires >= timing.limit || finishRequested) return Status.DONE;
+        if (++fires >= timing.limit) return Status.DONE;
         cooldown = timing.interval;
         return Status.RUNNING;
     }
@@ -569,166 +379,6 @@ public final class Interaction {
         return false;
     }
 
-    // 每次新点击都重新瞄准目标。指定面的操作还必须让当前准星真正落在那个面上。
-    private boolean fireUseBlock(PlayerContext context) {
-        if (pending != null) {
-            return settleUse(context, "右键方块");
-        }
-        if (!requiredBlockPresent()) return false;
-        if (!player.level().isLoaded(block)) {
-            failReason = "目标方块不在客户端已加载的范围里";
-            hardFail = true;
-            return false;
-        }
-        playerInput.halt(player);
-        BlockHitResult hit;
-        if (presetHit != null) {
-            playerInput.lookAt(player, presetHit.getLocation());
-            HitResult aimed = nativeRaytrace(player, InteractionRange.blockReach(player));
-            if (!(aimed instanceof BlockHitResult blockHit)
-                    || !blockHit.getBlockPos().equals(block)
-                    || blockHit.getDirection() != presetHit.getDirection()) {
-                return false;
-            }
-            hit = blockHit;
-        } else {
-            playerInput.lookAt(player, Vec3.atCenterOf(block));
-            hit = raycastBlock();
-            if (hit == null) {
-                return false;
-            }
-        }
-        if (!aimReady(hit.getLocation()) || !context.canInteractThisTick()) {
-            return false;
-        }
-        if (fallingThrough) {
-            ItemStack before = player.getItemInHand(hand).copy();
-            PendingInteraction submitted = sender.useItem(
-                    context, hand, UseConfirmations.itemUse(player, hand, before),
-                    CONFIRM_TIMEOUT_TICKS);
-            // 提交入口这一刻不收：不算失败，下一刻原样再点。
-            if (submitted == null) return false;
-            pending = submitted;
-        } else {
-            PendingInteraction submitted = sender.useBlock(
-                    context, hand, hit, UseConfirmations.blockUse(player, hit, hand),
-                    CONFIRM_TIMEOUT_TICKS);
-            // 提交入口这一刻不收：不算失败，下一刻原样再点，也不把预想面记成已点击。
-            if (submitted == null) return false;
-            pending = submitted;
-            // 仅记录真正交给原生右键入口的面，选站位时的预想朝向不能当作已点击方向。
-            submittedBlockHit = hit;
-        }
-        return false;
-    }
-
-    // 确认成功才计次；只有明确未生效才允许物品兜底，超时后必须保留原确认并交回现场检查。
-    private boolean settleUse(PlayerContext context, String action) {
-        pending = sender.poll(context, pending);
-        if (!pending.terminal()) {
-            return false;
-        }
-        PendingInteraction.Status status = pending.status();
-        String detail = pending.detail();
-        lastUsePending = pending;
-        pending = null;
-        if (status == PendingInteraction.Status.CONFIRMED_APPLIED) {
-            lastUseResult = "已确认（" + action + "）";
-            fallingThrough = false;
-            return true;
-        }
-        if (status == PendingInteraction.Status.CONFIRMED_NOT_APPLIED
-                && itemFallthrough && !fallingThrough) {
-            fallingThrough = true;
-            return false;
-        }
-        // 失败的提交必须携带提交现场的插桩事实，否则“点击被谁拒了”只能靠猜。
-        String trace = lastUsePending.useOnTrace();
-        failReason = action + "没得到确认：" + detail + (trace.isEmpty() ? "" : "；" + trace);
-        hardFail = true;
-        return false;
-    }
-
-    /**
-     * 最近一次使用动作的简短说明。目前成功时只写已确认，未出手时为还没出手，
-     * 不包含原版每只手的 PASS／FAIL 返回值，也不能拿这段文字代替成品检查。
-     */
-    public String lastUseResult() {
-        return lastUseResult;
-    }
-    public BlockHitResult submittedBlockHit() { return submittedBlockHit; }
-
-    /** 没观察到变化不等于没发生；让任务和完成通知保留原生点击的确认边界，避免再次互换已装好的材料。 */
-    public Map<String, Object> useEvidence() {
-        if (button != Button.USE) return Map.of();
-        var last = pending == null ? lastUsePending : pending;
-        if (last == null) return Map.of();
-        boolean uncertain = last.status() != PendingInteraction.Status.CONFIRMED_APPLIED
-                && last.status() != PendingInteraction.Status.CONFIRMED_NOT_APPLIED;
-        var evidence = new LinkedHashMap<String, Object>(Map.of("submission_attempted", true,
-                "native_action_status", last.status().name(),
-                "native_action_kind", last.kind().name(), "outcome_uncertain", uncertain,
-                "mechanical_retry_allowed", last.status() == PendingInteraction.Status.CONFIRMED_NOT_APPLIED));
-        // 提交现场（点击面、客户端预测结果、预测包是否发出）与结算后的落格权威状态
-        // （客户端已在服务器确认后校正）一起进证据，实机确认可直接对出服务端对这次点击的处理结果。
-        String trace = last.useOnTrace();
-        if (!trace.isEmpty()) evidence.put("use_on_trace", trace);
-        if (last.kind() == PendingInteraction.Kind.USE_BLOCK && submittedBlockHit != null) {
-            // 提交格命中不等于面正确：落格与门框效应都发生在被点面的相邻格，面必须可核对。
-            evidence.put("submitted_face", submittedBlockHit.getDirection().getName());
-            BlockPos cell = submittedBlockHit.getBlockPos().relative(submittedBlockHit.getDirection());
-            evidence.put("settlement_placement_cell", cell.toShortString() + "="
-                    + BuiltInRegistries.BLOCK.getKey(
-                            player.level().getBlockState(cell).getBlock()));
-        }
-        return evidence;
-    }
-
-    // 目标仍活着、准星也确实点到它，才提交交互；需要物品兜底时仍沿用相同目标检查。
-    private boolean fireUseEntity(PlayerContext context) {
-        if (pending != null) {
-            return settleUse(context, "右键实体");
-        }
-        if (entity == null || !entity.isAlive()) {
-            failReason = "要点的实体已经不在了";
-            hardFail = true;
-            return false;
-        }
-        playerInput.halt(player);
-        playerInput.lookAt(player, entity.getEyePosition());
-        if (!aimReady(entity.getEyePosition())) {
-            return false;
-        }
-        // 右键实体与左键实体一样按实体触及距离算：原版准星够不到的实体，人也点不到。
-        HitResult aimed = nativeRaytrace(player, InteractionRange.entityReach(player));
-        if (!(aimed instanceof EntityHitResult entityHit)
-                || entityHit.getEntity() != entity || !context.canInteractThisTick()) {
-            return false;
-        }
-        if (fallingThrough) {
-            ItemStack before = player.getItemInHand(hand).copy();
-            PendingInteraction submitted = sender.useItem(
-                    context, hand, UseConfirmations.itemUse(player, hand, before),
-                    CONFIRM_TIMEOUT_TICKS);
-            // 提交入口这一刻不收：不算失败，下一刻原样再点。
-            if (submitted == null) return false;
-            pending = submitted;
-        } else {
-            PendingInteraction submitted = sender.interact(
-                    context, entity, hand, EntityUseConfirmation.of(player, entity, hand),
-                    CONFIRM_TIMEOUT_TICKS);
-            // 提交入口这一刻不收：不算失败，下一刻原样再点。
-            if (submitted == null) return false;
-            pending = submitted;
-        }
-        return false;
-    }
-
-    // 实际视线与目标差不超过 7° 才算转头到位；后续射线检查还要确认没有点到别的东西。
-    private boolean aimReady(Vec3 target) {
-        return withinAimTolerance(player.getViewVector(1.0f), target.subtract(player.getEyePosition()));
-    }
-
     /** 视线方向与"眼睛到瞄点"差不超过 7°：转头到位的那条线。 */
     static boolean withinAimTolerance(Vec3 view, Vec3 toAimPoint) {
         if (toAimPoint.lengthSqr() < 1.0e-8) return true;
@@ -756,32 +406,16 @@ public final class Interaction {
         return trackedEntityAim;
     }
 
-    /** 从眼部沿当前视线发射射线，并确认首先命中指定方块。 */
-    private BlockHitResult raycastBlock() {
-        Level level = player.level();
-        Vec3 eye = player.getEyePosition();
-        Vec3 look = player.getViewVector(1.0f);
-        double reach = InteractionRange.blockReach(player);
-        Vec3 end = eye.add(look.x * reach, look.y * reach, look.z * reach);
-        BlockHitResult hit = level.clip(new ClipContext(
-                eye, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
-        if (hit.getType() == HitResult.Type.BLOCK && hit.getBlockPos().equals(block)) {
-            return hit;
-        }
-        return null;
-    }
-
     /** 停止发出操作；原生使用动作的松开仍有确认，必须交由运行时完成结算。 */
-    // 挖掘交给 digger 取消；正在持续使用物品就发出松开，然后停止移动。
-    // 普通方块／实体点击的未确认记录没有在此退役，外层结束时仍需处理它。
+    // 正在持续使用物品就发出松开，然后停止移动。
+    // 未确认记录没有在此退役，外层结束时仍需处理它。
     public void stop(PlayerContext context) {
-        if (digger != null) digger.cancel(context);
         plants.stop(context);
         if (pending != null && pending.kind() == PendingInteraction.Kind.USE_ITEM
                 && player.isUsingItem() && !releasing) {
             // 本刻没有交互机会时不发松开：按住使用键的投影两刻内自然过期，原版就看到松键。
             if (context.canInteractThisTick()
-                    && (sender.ownsItemUse(pending) || block != null || entity != null || !timing.hold)) {
+                    && (sender.ownsItemUse(pending) || entity != null || !timing.hold)) {
                 PendingInteraction released = sender.releaseUsingItem(context, pending);
                 if (released != null) {
                     pending = released;
@@ -791,10 +425,4 @@ public final class Interaction {
         }
         playerInput.halt(player);
     }
-    public void finishRepeating() { finishRequested = true; }
-    /** 羊被本次剪毛或染色后只结算在途点击，不能把动作造成的属性变化当成选错目标。 */
-    public boolean entityActionSubmitted() {
-        return entity != null && (pending != null || lastUsePending != null || fires > 0);
-    }
-    public int confirmedUses() { return fires; }
 }
