@@ -7,7 +7,6 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.core.BlockPos;
@@ -21,9 +20,9 @@ import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -36,10 +35,8 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 优先级子菜单（{@code ae2:priority}）、发信器阈值，以及升级卡槽与元件槽的放取。
  * 每次改完在关闭界面前刷新本地缓存，确保配置任务下一刻读回立即命中。
  */
-final class Ae2MenuConfigAction implements Action {
+final class Ae2MenuConfigAction extends Ae2MenuWork {
 
-    /** 一次发包或换页等待游戏同步回显的刻数上限。 */
-    private static final int WAIT_TICKS = 40;
     /** 枚举配置按钮防无限打转上限（AE2 所有枚举设置最多不超过 8 项）。 */
     private static final int MAX_CYCLE_STEPS = 12;
 
@@ -63,43 +60,37 @@ final class Ae2MenuConfigAction implements Action {
                 Ae2PartKeys.StockValue stockValue) {
     }
 
-    private enum Stage { OPEN, SYNC, APPLY, SUB_OPEN, SUB_APPLY, SUB_RETURN, SLOT_PICK, SLOT_PLACE, SLOT_RETURN, CLOSE, DONE }
+    private enum Step { SYNC, APPLY, SUB_OPEN, SUB_APPLY, SUB_RETURN, SLOT_PICK, SLOT_PLACE, SLOT_RETURN }
 
     private final Ae2Compat compat;
     private final Ae2PartControl control;
     private final Ae2PartCache cache;
-    private final PlayerServices services;
     private final Spec spec;
-    private final Supplier<MenuOpening> openingFactory;
     private final Set<String> seenCycleValues = new LinkedHashSet<>();
 
-    private Stage stage = Stage.OPEN;
-    private MenuOpening opening;
-    private OpenedMenu menu;
-    private Action closing;
-    private int waited;
+    private Step step = Step.SYNC;
     private int cycleSteps;
     private boolean sent;
+    /** 不等同步回显、只等固定几刻的短等待（分区/清空等两三刻结算）单独计数。 */
+    private int settleWaited;
     private int targetMenuSlot = -1;
     private int sourcePlayerSlot = -1;
     private String wantedSlotItem;
-    private Problem problem;
     private boolean applied;
 
     Ae2MenuConfigAction(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache, PlayerServices services,
                         Spec spec, Permissions permissions) {
-        this(compat, control, cache, services, spec, () -> defaultOpening(control, services, spec, permissions));
+        this(compat, control, cache, services, spec, defaultOpening(control, services, spec, permissions));
     }
 
     /** 离线测试用构造：允许注入菜单打开替身。 */
     Ae2MenuConfigAction(Ae2Compat compat, Ae2PartControl control, Ae2PartCache cache, PlayerServices services,
-                        Spec spec, Supplier<MenuOpening> openingFactory) {
+                        Spec spec, MenuOpening opening) {
+        super(opening, spec.label() + "的界面没打开");
         this.compat = Objects.requireNonNull(compat, "compat");
         this.control = Objects.requireNonNull(control, "control");
         this.cache = Objects.requireNonNull(cache, "cache");
-        this.services = Objects.requireNonNull(services, "services");
         this.spec = Objects.requireNonNull(spec, "spec");
-        this.openingFactory = Objects.requireNonNull(openingFactory, "openingFactory");
     }
 
     // 线缆部件按部件世界坐标盒点开，方块设备直接点整格。
@@ -113,9 +104,19 @@ final class Ae2MenuConfigAction implements Action {
                 services.interactions(), services.toMainhand(), services.context());
     }
 
-    @Override public ActionStatus tick(TickContext context) {
-        return switch (stage) {
-            case OPEN -> open(context);
+    // 优先级与备料数量需要服务端换页至子菜单，提前向已打开界面声明合法换页路径。
+    @Override protected void menuOpened(OpenedMenu menu) {
+        if (spec.kind() == Kind.PRIORITY) {
+            menu.followPageSwaps((from, to) -> control.isMenuType(to, Ae2PartKeys.MENU_PRIORITY)
+                    || control.isMenuType(to, spec.expectedMenuId()));
+        } else if (spec.kind() == Kind.STOCK_SLOT) {
+            menu.followPageSwaps((from, to) -> control.isMenuType(to, Ae2PartKeys.MENU_SET_STOCK_AMOUNT)
+                    || control.isMenuType(to, Ae2PartKeys.MENU_INTERFACE));
+        }
+    }
+
+    @Override protected ActionStatus work(TickContext tick) {
+        return switch (step) {
             case SYNC -> waitSync();
             case APPLY -> apply();
             case SUB_OPEN -> waitSubOpen();
@@ -124,47 +125,25 @@ final class Ae2MenuConfigAction implements Action {
             case SLOT_PICK -> slotPick();
             case SLOT_PLACE -> slotPlace();
             case SLOT_RETURN -> slotReturn();
-            case CLOSE -> closeMenu(context);
-            case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         };
-    }
-
-    private ActionStatus open(TickContext context) {
-        if (opening == null) opening = openingFactory.get();
-        ActionStatus status = opening.tick(context);
-        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        if (!(status instanceof ActionStatus.Done)) return status;
-        menu = opening.opened().orElse(null);
-        if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, spec.label() + "的界面没打开"));
-        // 优先级与备料数量需要服务端换页至子菜单，提前向已打开界面声明合法换页路径。
-        if (spec.kind() == Kind.PRIORITY) {
-            menu.followPageSwaps((from, to) -> control.isMenuType(to, Ae2PartKeys.MENU_PRIORITY)
-                    || control.isMenuType(to, spec.expectedMenuId()));
-        } else if (spec.kind() == Kind.STOCK_SLOT) {
-            menu.followPageSwaps((from, to) -> control.isMenuType(to, Ae2PartKeys.MENU_SET_STOCK_AMOUNT)
-                    || control.isMenuType(to, Ae2PartKeys.MENU_INTERFACE));
-        }
-        stage = Stage.SYNC;
-        waited = 0;
-        return ActionStatus.progressed();
     }
 
     private ActionStatus waitSync() {
         Optional<Ae2PartControl.OpenMenuSnapshot> snapshot = control.readOpenMenu();
-        if (snapshot.isPresent() && menu.reading().isPresent()) {
-            stage = Stage.APPLY;
-            waited = 0;
+        if (snapshot.isPresent() && menu().reading().isPresent()) {
+            step = Step.APPLY;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, spec.label() + "的界面内容一直没同步过来"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, spec.label() + "的界面内容一直没同步过来"));
         }
         return ActionStatus.running();
     }
 
     private ActionStatus apply() {
         Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
-        if (opt.isEmpty()) return closeWith(Problem.of(Problem.Kind.TARGET_GONE, spec.label() + "的界面被关掉了"));
+        if (opt.isEmpty()) return stop(Problem.of(Problem.Kind.TARGET_GONE, spec.label() + "的界面被关掉了"));
         Ae2PartControl.OpenMenuSnapshot snap = opt.get();
         return switch (spec.kind()) {
             case CONFIG_BUTTON -> applyConfigButton(snap);
@@ -187,9 +166,9 @@ final class Ae2MenuConfigAction implements Action {
         if (sent) {
             if (!seenCycleValues.contains(current)) {
                 sent = false;
-                waited = 0;
-            } else if (++waited > WAIT_TICKS) {
-                return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                resetWait();
+            } else if (syncWaitElapsed()) {
+                return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         spec.label() + "的「" + spec.localKey() + "」切换没有生效（当前仍为 " + current
                                 + "，请检查是否缺少对应的模糊卡/红石卡/合成卡）"));
             } else {
@@ -197,14 +176,14 @@ final class Ae2MenuConfigAction implements Action {
             }
         }
         if (!seenCycleValues.add(current) || ++cycleSteps > MAX_CYCLE_STEPS) {
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     spec.label() + "的「" + spec.localKey() + "」在可选值之间打转，未能切到 " + spec.wantedValue()));
         }
         if (!compat.sendConfigButton(spec.ae2SettingName(), false)) {
-            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 AE2 配置切换包：" + spec.ae2SettingName()));
+            return stop(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 AE2 配置切换包：" + spec.ae2SettingName()));
         }
         sent = true;
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
@@ -216,14 +195,14 @@ final class Ae2MenuConfigAction implements Action {
         if (current != null && current == want) return succeed(snap);
         if (!sent) {
             if (!control.selectKeyType(type, want)) {
-                return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "不支持切换导入类型 " + type));
+                return stop(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "不支持切换导入类型 " + type));
             }
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, spec.label() + "切换导入类型 " + type + " 后一直没回显"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, spec.label() + "切换导入类型 " + type + " 后一直没回显"));
         }
         return ActionStatus.running();
     }
@@ -231,20 +210,20 @@ final class Ae2MenuConfigAction implements Action {
     // 元件工作台的模糊模式直接写进元件物品组件，绝不走 ConfigButtonPacket。
     private ActionStatus applyWorkbenchFuzzy(Ae2PartControl.OpenMenuSnapshot snap) {
         if (snap.cellSlots().isEmpty() || snap.cellSlots().getFirst().isEmpty()) {
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "元件工作台里还没有放入存储元件，无法设置模糊模式"));
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "元件工作台里还没有放入存储元件，无法设置模糊模式"));
         }
         String current = snap.settings().getOrDefault("fuzzy_mode", "");
         if (current.equals(spec.wantedValue())) return succeed(snap);
         if (!sent) {
             if (!control.setCellWorkbenchFuzzy(spec.wantedValue())) {
-                return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的模糊模式：" + spec.wantedValue()));
+                return stop(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的模糊模式：" + spec.wantedValue()));
             }
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "元件工作台设置模糊模式后一直没回显"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "元件工作台设置模糊模式后一直没回显"));
         }
         return ActionStatus.running();
     }
@@ -256,21 +235,21 @@ final class Ae2MenuConfigAction implements Action {
         if (sent) {
             if (!seenCycleValues.contains(current)) {
                 sent = false;
-                waited = 0;
-            } else if (++waited > WAIT_TICKS) {
-                return closeWith(Problem.of(Problem.Kind.STUCK, "元件工作台切换复制模式后一直没回显"));
+                resetWait();
+            } else if (syncWaitElapsed()) {
+                return stop(Problem.of(Problem.Kind.STUCK, "元件工作台切换复制模式后一直没回显"));
             } else {
                 return ActionStatus.running();
             }
         }
         if (!seenCycleValues.add(current) || ++cycleSteps > 4) {
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "元件工作台切不到复制模式 " + spec.wantedValue()));
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "元件工作台切不到复制模式 " + spec.wantedValue()));
         }
         if (!compat.sendMenuAction("nextCopyMode")) {
-            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 nextCopyMode 动作"));
+            return stop(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 nextCopyMode 动作"));
         }
         sent = true;
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
@@ -278,13 +257,13 @@ final class Ae2MenuConfigAction implements Action {
     private ActionStatus applyNoArgAction(Ae2PartControl.OpenMenuSnapshot snap) {
         if (!sent) {
             if (!compat.sendMenuAction(spec.wantedValue())) {
-                return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "发不出动作 " + spec.wantedValue()));
+                return stop(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "发不出动作 " + spec.wantedValue()));
             }
             sent = true;
-            waited = 0;
+            settleWaited = 0;
             return ActionStatus.progressed();
         }
-        if (++waited < 3) return ActionStatus.running();
+        if (++settleWaited < 3) return ActionStatus.running();
         return succeed(snap);
     }
 
@@ -292,7 +271,7 @@ final class Ae2MenuConfigAction implements Action {
     private ActionStatus applyFilterSlot(Ae2PartControl.OpenMenuSnapshot snap) {
         Optional<Ae2PartControl.MenuSlotEntry> found = Ae2PartSnapshots.slotAt(snap.configSlots(), spec.slotIndex());
         if (found.isEmpty()) {
-            return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER,
+            return stop(Problem.of(Problem.Kind.INVALID_PARAMETER,
                     spec.label() + "没有过滤槽 filter." + spec.slotIndex()));
         }
         Ae2PartControl.MenuSlotEntry slot = found.get();
@@ -300,7 +279,7 @@ final class Ae2MenuConfigAction implements Action {
             String tip = spec.slotIndex() >= Ae2PartKeys.BASE_FILTER_SLOTS
                     ? "过滤槽 filter." + spec.slotIndex() + " 尚未解锁，请先插入容量卡（" + Ae2PartKeys.CAPACITY_CARD + "）"
                     : "过滤槽 filter." + spec.slotIndex() + " 当前未启用（请先放入存储元件或切换保留模式）";
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, tip));
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, tip));
         }
         boolean wantEmpty = spec.wantedValue().equalsIgnoreCase(Ae2PartKeys.EMPTY);
         if ((wantEmpty && slot.isEmpty()) || (!wantEmpty && Ae2PartSnapshots.matchesFilterTarget(slot, spec.wantedValue()))) {
@@ -309,17 +288,17 @@ final class Ae2MenuConfigAction implements Action {
         if (!sent) {
             Optional<ItemStack> filter = control.filterStackOf(spec.wantedValue());
             if (filter.isEmpty()) {
-                return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的过滤物品、流体或化学品：" + spec.wantedValue()));
+                return stop(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的过滤物品、流体或化学品：" + spec.wantedValue()));
             }
             if (!compat.sendSetFilter(slot.menuIndex(), filter.get())) {
-                return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法写入过滤槽 filter." + spec.slotIndex()));
+                return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法写入过滤槽 filter." + spec.slotIndex()));
             }
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "写入过滤槽 filter." + spec.slotIndex() + " 后一直没回显"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "写入过滤槽 filter." + spec.slotIndex() + " 后一直没回显"));
         }
         return ActionStatus.running();
     }
@@ -328,7 +307,7 @@ final class Ae2MenuConfigAction implements Action {
     private ActionStatus applyStockSlot(Ae2PartControl.OpenMenuSnapshot snap) {
         Optional<Ae2PartControl.MenuSlotEntry> found = Ae2PartSnapshots.slotAt(snap.configSlots(), spec.slotIndex());
         if (found.isEmpty()) {
-            return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "ME 接口没有备料槽 stock." + spec.slotIndex()));
+            return stop(Problem.of(Problem.Kind.INVALID_PARAMETER, "ME 接口没有备料槽 stock." + spec.slotIndex()));
         }
         Ae2PartControl.MenuSlotEntry slot = found.get();
         Ae2PartKeys.StockValue wanted = spec.stockValue();
@@ -336,52 +315,46 @@ final class Ae2MenuConfigAction implements Action {
         if (wanted.empty()) {
             if (!sent) {
                 if (!compat.sendSetFilter(slot.menuIndex(), ItemStack.EMPTY)) {
-                    return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法清空备料槽 stock." + spec.slotIndex()));
+                    return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法清空备料槽 stock." + spec.slotIndex()));
                 }
                 sent = true;
-                waited = 0;
+                resetWait();
                 return ActionStatus.progressed();
             }
-            return ++waited > WAIT_TICKS
-                    ? closeWith(Problem.of(Problem.Kind.STUCK, "清空备料槽后一直没回显"))
-                    : ActionStatus.running();
+            if (syncWaitElapsed()) return stop(Problem.of(Problem.Kind.STUCK, "清空备料槽后一直没回显"));
+            return ActionStatus.running();
         }
         // 目标物还没写进过滤槽：先用 SET_FILTER 写进去，写好后再看要不要换页改数量。
         if (!Ae2PartSnapshots.matchesFilterTarget(slot, wanted.targetId())) {
             if (!sent) {
                 Optional<ItemStack> filter = control.filterStackOf(wanted.targetId());
                 if (filter.isEmpty()) {
-                    return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的备料物品、流体或化学品：" + wanted.targetId()));
+                    return stop(Problem.of(Problem.Kind.INVALID_PARAMETER, "不认识的备料物品、流体或化学品：" + wanted.targetId()));
                 }
                 if (!compat.sendSetFilter(slot.menuIndex(), filter.get())) {
-                    return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法设备料槽 stock." + spec.slotIndex()));
+                    return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "无法设备料槽 stock." + spec.slotIndex()));
                 }
                 sent = true;
-                waited = 0;
+                resetWait();
                 return ActionStatus.progressed();
             }
-            return ++waited > WAIT_TICKS
-                    ? closeWith(Problem.of(Problem.Kind.STUCK, "设备料物品后一直没回显"))
-                    : ActionStatus.running();
+            if (syncWaitElapsed()) return stop(Problem.of(Problem.Kind.STUCK, "设备料物品后一直没回显"));
+            return ActionStatus.running();
         }
         // 物品已匹配，但还需要设置数量：发 setAmount 打开 ae2:set_stock_amount 子界面。
         if (!compat.sendMenuIntAction("setAmount", spec.slotIndex())) {
-            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "发不出打开备料数量子界面的动作 setAmount"));
+            return stop(Problem.of(Problem.Kind.UNSUPPORTED, "发不出打开备料数量子界面的动作 setAmount"));
         }
-        stage = Stage.SUB_OPEN;
-        sent = false;
-        waited = 0;
+        enterStep(Step.SUB_OPEN);
         return ActionStatus.progressed();
     }
 
     // 优先级：发 SwitchGuisPacket 打开 ae2:priority 子菜单。
     private ActionStatus startPriority(Ae2PartControl.OpenMenuSnapshot snap) {
         if (!compat.openSubMenu(Ae2PartKeys.MENU_PRIORITY)) {
-            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "打不开优先级子界面"));
+            return stop(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "打不开优先级子界面"));
         }
-        stage = Stage.SUB_OPEN;
-        sent = false;
-        waited = 0;
+        enterStep(Step.SUB_OPEN);
         return ActionStatus.progressed();
     }
 
@@ -390,13 +363,11 @@ final class Ae2MenuConfigAction implements Action {
         String subId = spec.kind() == Kind.PRIORITY ? Ae2PartKeys.MENU_PRIORITY : Ae2PartKeys.MENU_SET_STOCK_AMOUNT;
         Optional<Ae2PartControl.OpenMenuSnapshot> snap = control.readOpenMenu();
         if (snap.isPresent() && snap.get().menuTypeId().equals(subId)) {
-            stage = Stage.SUB_APPLY;
-            sent = false;
-            waited = 0;
+            enterStep(Step.SUB_APPLY);
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "等待切换到子界面 " + subId + " 超时"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "等待切换到子界面 " + subId + " 超时"));
         }
         return ActionStatus.running();
     }
@@ -404,33 +375,31 @@ final class Ae2MenuConfigAction implements Action {
     // 在子菜单里提交目标优先级或备料数量：优先级需手动返回父菜单，备料数量由 AE2 自动返回。
     private ActionStatus applySub() {
         Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
-        if (opt.isEmpty()) return closeWith(Problem.of(Problem.Kind.TARGET_GONE, "子界面意外关掉了"));
+        if (opt.isEmpty()) return stop(Problem.of(Problem.Kind.TARGET_GONE, "子界面意外关掉了"));
         Ae2PartControl.OpenMenuSnapshot snap = opt.get();
         if (spec.kind() == Kind.PRIORITY) {
             int wanted = Integer.parseInt(spec.wantedValue());
             if (!sent) {
                 if (snap.priority().isEmpty() || snap.priority().getAsInt() != wanted) {
                     if (!compat.sendMenuIntAction("setPriority", wanted)) {
-                        return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 setPriority 动作"));
+                        return stop(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 setPriority 动作"));
                     }
                 }
                 sent = true;
-                waited = 0;
+                settleWaited = 0;
                 return ActionStatus.progressed();
             }
-            if (++waited < 2) return ActionStatus.running();
+            if (++settleWaited < 2) return ActionStatus.running();
             compat.returnToParentMenu();
-            stage = Stage.SUB_RETURN;
-            waited = 0;
+            enterStep(Step.SUB_RETURN);
             return ActionStatus.progressed();
         }
         // SetStockAmountMenu：发 setStockAmount(amount)，服务端会自动返回 InterfaceMenu。
         int amount = spec.stockValue().amount();
         if (!compat.sendMenuIntAction("setStockAmount", amount)) {
-            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 setStockAmount 动作"));
+            return stop(Problem.of(Problem.Kind.UNSUPPORTED, "发不出 setStockAmount 动作"));
         }
-        stage = Stage.SUB_RETURN;
-        waited = 0;
+        enterStep(Step.SUB_RETURN);
         return ActionStatus.progressed();
     }
 
@@ -444,17 +413,17 @@ final class Ae2MenuConfigAction implements Action {
                 if (slot.isPresent() && Ae2PartSnapshots.matchesStock(slot.get(), spec.stockValue())) {
                     return succeed(snap);
                 }
-                if (++waited <= WAIT_TICKS) return ActionStatus.running();
+                if (!syncWaitElapsed()) return ActionStatus.running();
                 // 数量可能被服务端上限截断，把实际值刷入缓存后按实情收场。
                 Ae2PartSnapshots.flushToCache(cache, spec.pos(), spec.side(), snap, null, null);
                 long actual = slot.map(Ae2PartControl.MenuSlotEntry::count).orElse(0L);
-                return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+                return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         "备料数量写入后实际为 " + actual + "，与要求的 " + spec.stockValue().amount() + " 不一致（可能超过单格上限）"));
             }
             return succeed(snap);
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "子界面没有退回 " + spec.label() + " 的主界面"));
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "子界面没有退回 " + spec.label() + " 的主界面"));
         }
         return ActionStatus.running();
     }
@@ -467,13 +436,13 @@ final class Ae2MenuConfigAction implements Action {
         }
         if (!sent) {
             if (!compat.sendMenuLongAction("setReportingValue", wanted)) {
-                return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "发不出 setReportingValue 动作"));
+                return stop(Problem.of(Problem.Kind.UNSUPPORTED, spec.label() + "发不出 setReportingValue 动作"));
             }
             sent = true;
-            waited = 0;
+            settleWaited = 0;
             return ActionStatus.progressed();
         }
-        if (++waited < 2) return ActionStatus.running();
+        if (++settleWaited < 2) return ActionStatus.running();
         return succeed(snap);
     }
 
@@ -482,11 +451,11 @@ final class Ae2MenuConfigAction implements Action {
         List<Ae2PartControl.MenuSlotEntry> group = spec.isCellSlot() ? snap.cellSlots() : snap.upgradeSlots();
         Optional<Ae2PartControl.MenuSlotEntry> found = Ae2PartSnapshots.slotAt(group, spec.slotIndex());
         if (found.isEmpty()) {
-            return closeWith(Problem.of(Problem.Kind.INVALID_PARAMETER, spec.label() + "没有槽位 " + spec.localKey()));
+            return stop(Problem.of(Problem.Kind.INVALID_PARAMETER, spec.label() + "没有槽位 " + spec.localKey()));
         }
         Ae2PartControl.MenuSlotEntry slot = found.get();
         if (!slot.enabled()) {
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     spec.label() + "的 " + spec.localKey() + " 当前未激活（超出当前元件支持的升级槽数量）"));
         }
         targetMenuSlot = slot.menuIndex();
@@ -500,15 +469,15 @@ final class Ae2MenuConfigAction implements Action {
         if (!wantEmpty && wantedSlotItem.equals(slot.itemId())) return succeed(snap);
         // 要清空或先腾出异物：Shift 快速移回角色背包。
         if (!slot.isEmpty()) {
-            if (menu.busy()) return ActionStatus.running();
+            if (menu().busy()) return ActionStatus.running();
             if (!sent) {
-                if (!menu.quickMove(targetMenuSlot)) return ActionStatus.running();
+                if (!menu().quickMove(targetMenuSlot)) return ActionStatus.running();
                 sent = true;
-                waited = 0;
+                resetWait();
                 return ActionStatus.progressed();
             }
-            if (++waited > WAIT_TICKS) {
-                return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
+            if (syncWaitElapsed()) {
+                return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                         "从" + spec.label() + "的 " + spec.localKey() + " 取出原有物品失败（背包可能已满）"));
             }
             return ActionStatus.running();
@@ -516,78 +485,75 @@ final class Ae2MenuConfigAction implements Action {
         // 目标槽已空，找背包里有没有要放进去的升级卡或元件。
         sourcePlayerSlot = findPlayerSlot(wantedSlotItem);
         if (sourcePlayerSlot < 0) {
-            return closeWith(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有 " + wantedSlotItem + "，无法放入 " + spec.localKey()));
+            return stop(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有 " + wantedSlotItem + "，无法放入 " + spec.localKey()));
         }
-        stage = Stage.SLOT_PICK;
-        sent = false;
-        waited = 0;
+        enterStep(Step.SLOT_PICK);
         return ActionStatus.progressed();
     }
 
     private ActionStatus slotPick() {
-        if (menu.busy()) return ActionStatus.running();
-        if (!menu.cursorEmpty() && wantedSlotItem.equals(menu.cursor().key())) {
-            stage = Stage.SLOT_PLACE;
-            sent = false;
-            waited = 0;
+        if (menu().busy()) return ActionStatus.running();
+        if (!menu().cursorEmpty() && wantedSlotItem.equals(menu().cursor().key())) {
+            enterStep(Step.SLOT_PLACE);
             return ActionStatus.progressed();
         }
         if (!sent) {
-            if (!menu.click(sourcePlayerSlot, 0)) return ActionStatus.running();
-            menu.noteCursorTakenFrom(sourcePlayerSlot);
+            if (!menu().click(sourcePlayerSlot, 0)) return ActionStatus.running();
+            menu().noteCursorTakenFrom(sourcePlayerSlot);
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        return ++waited > WAIT_TICKS
-                ? closeWith(Problem.of(Problem.Kind.STUCK, "从背包拿起 " + wantedSlotItem + " 一直没生效"))
-                : ActionStatus.running();
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "从背包拿起 " + wantedSlotItem + " 一直没生效"));
+        }
+        return ActionStatus.running();
     }
 
     private ActionStatus slotPlace() {
-        if (menu.busy()) return ActionStatus.running();
+        if (menu().busy()) return ActionStatus.running();
         Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
-        if (opt.isEmpty()) return closeWith(Problem.of(Problem.Kind.TARGET_GONE, spec.label() + "的界面被关掉了"));
+        if (opt.isEmpty()) return stop(Problem.of(Problem.Kind.TARGET_GONE, spec.label() + "的界面被关掉了"));
         List<Ae2PartControl.MenuSlotEntry> group = spec.isCellSlot() ? opt.get().cellSlots() : opt.get().upgradeSlots();
         Optional<Ae2PartControl.MenuSlotEntry> slot = Ae2PartSnapshots.slotAt(group, spec.slotIndex());
         if (slot.isPresent() && wantedSlotItem.equals(slot.get().itemId())) {
-            if (menu.cursorEmpty()) return succeed(opt.get());
-            stage = Stage.SLOT_RETURN;
-            sent = false;
-            waited = 0;
+            if (menu().cursorEmpty()) return succeed(opt.get());
+            enterStep(Step.SLOT_RETURN);
             return ActionStatus.progressed();
         }
         if (!sent) {
             // 右键放单件，避免把一整组升级卡全压在光标上或导致拒收。
-            if (!menu.click(targetMenuSlot, 1)) return ActionStatus.running();
+            if (!menu().click(targetMenuSlot, 1)) return ActionStatus.running();
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        return ++waited > WAIT_TICKS
-                ? closeWith(Problem.of(Problem.Kind.REFUSED_BY_GAME,
-                        spec.label() + "的 " + spec.localKey() + " 不接受 " + wantedSlotItem))
-                : ActionStatus.running();
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.REFUSED_BY_GAME,
+                    spec.label() + "的 " + spec.localKey() + " 不接受 " + wantedSlotItem));
+        }
+        return ActionStatus.running();
     }
 
     private ActionStatus slotReturn() {
-        if (menu.busy()) return ActionStatus.running();
-        if (menu.cursorEmpty()) {
-            return control.readOpenMenu().map(this::succeed).orElseGet(() -> closeWith(null));
+        if (menu().busy()) return ActionStatus.running();
+        if (menu().cursorEmpty()) {
+            return control.readOpenMenu().map(this::succeed).orElseGet(() -> stop(null));
         }
         if (!sent) {
-            if (!menu.click(sourcePlayerSlot, 0)) return ActionStatus.running();
+            if (!menu().click(sourcePlayerSlot, 0)) return ActionStatus.running();
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        return ++waited > WAIT_TICKS
-                ? closeWith(Problem.of(Problem.Kind.STUCK, "把手里余下的 " + wantedSlotItem + " 放回背包超时"))
-                : ActionStatus.running();
+        if (syncWaitElapsed()) {
+            return stop(Problem.of(Problem.Kind.STUCK, "把手里余下的 " + wantedSlotItem + " 放回背包超时"));
+        }
+        return ActionStatus.running();
     }
 
     private int findPlayerSlot(String itemId) {
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (reading.isEmpty()) return -1;
         List<SlotSnapshot> snaps = reading.get().playerSnapshots();
         List<Integer> ids = reading.get().playerSlotIds();
@@ -603,50 +569,33 @@ final class Ae2MenuConfigAction implements Action {
     private ActionStatus succeed(Ae2PartControl.OpenMenuSnapshot snapshot) {
         applied = true;
         Ae2PartSnapshots.flushToCache(cache, spec.pos(), spec.side(), snapshot, spec.localKey(), spec.wantedValue());
-        return closeWith(null);
+        return stop(null);
     }
 
-    private ActionStatus closeWith(Problem reason) {
+    // 没改成就要收场：也趁界面还开着读一次最新配置刷进缓存，让下一次读回拿到实际值而不是旧值。
+    private ActionStatus stop(Problem reason) {
         if (reason != null && !applied) {
             control.readOpenMenu().ifPresent(snap -> Ae2PartSnapshots.flushToCache(cache, spec.pos(), spec.side(),
                     snap, null, null));
         }
-        problem = reason;
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
+        return closeWith(reason);
     }
 
-    private ActionStatus closeMenu(TickContext context) {
-        if (closing == null) closing = menu.closing();
-        ActionStatus status = closing.tick(context);
-        if (status instanceof ActionStatus.Running) return status;
-        closing = null;
-        return finish(problem);
+    // 换步骤：发包与等待计时归零，等两三刻结算的短等待也从头计。
+    private void enterStep(Step next) {
+        step = next;
+        sent = false;
+        resetWait();
+        settleWaited = 0;
     }
 
-    private ActionStatus finish(Problem reason) {
-        problem = reason;
-        stage = Stage.DONE;
-        return reason == null ? ActionStatus.done() : ActionStatus.failed(reason);
-    }
-
-    @Override public void pause() {
-        if (opening != null && menu == null) opening.pause();
-        if (closing != null) closing.pause();
-    }
-
-    @Override public void close() {
-        if (closing != null) closing.close();
-        if (menu != null && stage != Stage.DONE) menu.abandon();
-        else if (opening != null && menu == null) opening.close();
-    }
-
+    // 光标上拿着升级卡或元件时停不得：拿起、放进、放回三段被关掉会落在流程外。
     @Override public Interruptibility interruptibility() {
-        return stage == Stage.SLOT_PICK || stage == Stage.SLOT_PLACE || stage == Stage.SLOT_RETURN
+        return step == Step.SLOT_PICK || step == Step.SLOT_PLACE || step == Step.SLOT_RETURN
                 ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
     }
 
-    @Override public String describe() {
+    @Override protected String doing() {
         return "修改" + spec.label() + "的「" + spec.localKey() + "」为 " + spec.wantedValue().toLowerCase(Locale.ROOT);
     }
 }

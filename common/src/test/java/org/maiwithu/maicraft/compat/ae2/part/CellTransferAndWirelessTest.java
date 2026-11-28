@@ -70,14 +70,14 @@ class CellTransferAndWirelessTest {
                 Ae2PartKeys.MENU_CELL_TRANSFER, Ae2MenuConfigAction.Kind.CONFIG_BUTTON, "operation_mode", "fill",
                 "operation_mode", -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                opSpec, () -> PartTestFakes.immediateOpening(session))));
+                opSpec, PartTestFakes.immediateOpening(session))));
 
         session.closed = false;
         Ae2MenuConfigAction.Spec rsSpec = new Ae2MenuConfigAction.Spec(AT, null, "ME IO 传输站",
                 Ae2PartKeys.MENU_CELL_TRANSFER, Ae2MenuConfigAction.Kind.CONFIG_BUTTON, "redstone_mode", "ignore",
                 "redstone_controlled", -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                rsSpec, () -> PartTestFakes.immediateOpening(session))));
+                rsSpec, PartTestFakes.immediateOpening(session))));
 
         Map<String, Object> readings = ops.extraReadings(AT, null);
         assertEquals("fill", readings.get("operation_mode"));
@@ -99,7 +99,7 @@ class CellTransferAndWirelessTest {
 
         RunRequest request = new RunRequest("minecraft:chest", 1, null, null, 0, 5);
         CellTransferRun run = new CellTransferRun(session, cache, AT, request,
-                () -> PartTestFakes.immediateOpening(session));
+                PartTestFakes.immediateOpening(session));
 
         ActionStatus status = ActionStatus.running();
         boolean simulatedTransfer = false;
@@ -172,7 +172,7 @@ class CellTransferAndWirelessTest {
 
         // 1. 0 -> 16：从背包 20 张里放入 16 张，背包留 4 张，缓存刷新为 16。
         WirelessBoosterChange add = new WirelessBoosterChange(session, cache, AT, 16, "minecraft:redstone",
-                () -> PartTestFakes.immediateOpening(session));
+                PartTestFakes.immediateOpening(session));
         assertInstanceOf(ActionStatus.Done.class, runToEnd(add));
         assertEquals(16, session.wirelessBoosters);
         assertEquals(4, session.playerSlots.get(100).count());
@@ -181,7 +181,7 @@ class CellTransferAndWirelessTest {
         // 2. 16 -> 10：按差额取出 6 张回到背包，槽内留 10 张，缓存刷新为 10。
         session.closed = false;
         WirelessBoosterChange shrink = new WirelessBoosterChange(session, cache, AT, 10, "minecraft:redstone",
-                () -> PartTestFakes.immediateOpening(session));
+                PartTestFakes.immediateOpening(session));
         assertInstanceOf(ActionStatus.Done.class, runToEnd(shrink));
         assertEquals(10, session.wirelessBoosters);
         assertEquals(10, cache.syncedBoosters(AT, ServerReads.NONE).orElseThrow());
@@ -189,7 +189,7 @@ class CellTransferAndWirelessTest {
         // 3. 10 -> 40（身上不够 30 张）：如实报 NEED_ITEM。
         session.closed = false;
         WirelessBoosterChange shortage = new WirelessBoosterChange(session, cache, AT, 40, "minecraft:redstone",
-                () -> PartTestFakes.immediateOpening(session));
+                PartTestFakes.immediateOpening(session));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, runToEnd(shortage));
         assertEquals(Problem.Kind.NEED_ITEM, failed.problem().kind());
         assertFalse(failed.problem().message().isBlank());
@@ -205,7 +205,7 @@ class CellTransferAndWirelessTest {
         Ae2PartCache cache = new Ae2PartCache();
 
         WirelessBoosterChange shrink = new WirelessBoosterChange(session, cache, AT, 6, "minecraft:redstone",
-                () -> PartTestFakes.immediateOpening(session));
+                PartTestFakes.immediateOpening(session));
         assertInstanceOf(ActionStatus.Done.class, runToEnd(shrink));
         assertEquals(6, session.wirelessBoosters);
         assertTrue(session.cursorEmpty());

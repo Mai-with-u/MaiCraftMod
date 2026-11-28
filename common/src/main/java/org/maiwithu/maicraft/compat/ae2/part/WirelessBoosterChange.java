@@ -5,19 +5,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 
 import org.maiwithu.maicraft.behavior.menu.ClientMenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.kernel.goal.Permissions;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
 import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
@@ -27,114 +25,89 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 只操作 {@code STORAGE} 槽（不碰无线终端绑定输入/输出格），按差额放入或取出
  * {@code ae2:wireless_booster}，关窗前把最新张数刷新到会话缓存。
  */
-final class WirelessBoosterChange implements Action {
+final class WirelessBoosterChange extends Ae2MenuWork {
 
-    private static final int WAIT_TICKS = 40;
-
-    private enum Stage { OPEN, SYNC, ADJUST, RETURN_CURSOR, CLOSE, DONE }
+    private enum Step { SYNC, ADJUST, RETURN_CURSOR }
 
     private final Ae2PartControl control;
     private final Ae2PartCache cache;
     private final BlockPos pos;
     private final int wanted;
     private final String boosterItemId;
-    private final Supplier<MenuOpening> openingFactory;
 
-    private Stage stage = Stage.OPEN;
-    private MenuOpening opening;
-    private OpenedMenu menu;
-    private Action closing;
-    private int waited;
+    private Step step = Step.SYNC;
     private int boosterSlot = -1;
     private int returnSlot = -1;
     private int lastBoosterCount = -1;
     private int lastCursorCount = -1;
     private boolean sent;
-    private Problem problem;
 
     WirelessBoosterChange(Ae2PartControl control, Ae2PartCache cache, PlayerServices services, BlockPos pos,
                           int wanted, Permissions permissions) {
         this(control, cache, pos, wanted, Ae2PartKeys.WIRELESS_BOOSTER,
-                () -> new ClientMenuOpening(pos, null, permissions, services.menuLayouts(),
+                new ClientMenuOpening(pos, null, permissions, services.menuLayouts(),
                         services.approach(), services.interactions(), services.toMainhand(), services.context()));
     }
 
     /** 离线测试用构造：允许注入菜单打开替身与替身增幅卡物品 ID。 */
     WirelessBoosterChange(Ae2PartControl control, Ae2PartCache cache, BlockPos pos, int wanted, String boosterItemId,
-                          Supplier<MenuOpening> openingFactory) {
+                          MenuOpening opening) {
+        super(opening, "无线访问点的界面没打开");
         this.control = Objects.requireNonNull(control, "control");
         this.cache = Objects.requireNonNull(cache, "cache");
         this.pos = pos.immutable();
         this.wanted = wanted;
         this.boosterItemId = Objects.requireNonNull(boosterItemId, "boosterItemId");
-        this.openingFactory = Objects.requireNonNull(openingFactory, "openingFactory");
     }
 
-    @Override public ActionStatus tick(TickContext context) {
-        return switch (stage) {
-            case OPEN -> open(context);
+    @Override protected ActionStatus work(TickContext tick) {
+        return switch (step) {
             case SYNC -> waitSync();
             case ADJUST -> adjust();
             case RETURN_CURSOR -> returnCursor();
-            case CLOSE -> closeMenu(context);
-            case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         };
-    }
-
-    private ActionStatus open(TickContext context) {
-        if (opening == null) opening = openingFactory.get();
-        ActionStatus status = opening.tick(context);
-        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        if (!(status instanceof ActionStatus.Done)) return status;
-        menu = opening.opened().orElse(null);
-        if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面没打开"));
-        stage = Stage.SYNC;
-        waited = 0;
-        return ActionStatus.progressed();
     }
 
     private ActionStatus waitSync() {
         Optional<Ae2PartControl.OpenMenuSnapshot> snap = control.readOpenMenu();
-        if (snap.isPresent() && menu.reading().isPresent()) {
+        if (snap.isPresent() && menu().reading().isPresent()) {
             if (snap.get().storageSlots().isEmpty()) {
-                return closeWith(Problem.of(Problem.Kind.UNSUPPORTED, "无线访问点界面认不出增幅卡槽"));
+                return stop(Problem.of(Problem.Kind.UNSUPPORTED, "无线访问点界面认不出增幅卡槽"));
             }
             boosterSlot = snap.get().storageSlots().getFirst().menuIndex();
-            stage = Stage.ADJUST;
-            waited = 0;
+            step = Step.ADJUST;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (++waited > WAIT_TICKS) {
-            return closeWith(Problem.of(Problem.Kind.STUCK, "无线访问点界面一直没同步完成"));
-        }
-        return ActionStatus.running();
+        if (!syncWaitElapsed()) return ActionStatus.running();
+        return stop(Problem.of(Problem.Kind.STUCK, "无线访问点界面一直没同步完成"));
     }
 
     // 按当前增幅卡数量与目标值的差额逐步放入或取出，每步等服务端回显后再走下一步。
     private ActionStatus adjust() {
-        if (menu.busy()) return ActionStatus.running();
+        if (menu().busy()) return ActionStatus.running();
         Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (opt.isEmpty() || reading.isEmpty()) {
-            return closeWith(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面被关掉了"));
+            return stop(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面被关掉了"));
         }
         int have = currentBoosters(opt.get());
-        int cursorCount = menu.cursorEmpty() ? 0 : menu.cursor().count();
+        int cursorCount = menu().cursorEmpty() ? 0 : menu().cursor().count();
         if (sent) {
             if (have != lastBoosterCount || cursorCount != lastCursorCount) {
                 sent = false;
-                waited = 0;
-            } else if (++waited > WAIT_TICKS) {
-                return closeWith(Problem.of(Problem.Kind.STUCK, "调整无线增幅卡数量时界面一直没变化"));
+                resetWait();
+            } else if (syncWaitElapsed()) {
+                return stop(Problem.of(Problem.Kind.STUCK, "调整无线增幅卡数量时界面一直没变化"));
             } else {
                 return ActionStatus.running();
             }
         }
         if (have == wanted) {
-            if (menu.cursorEmpty()) return completeWith(have);
-            stage = Stage.RETURN_CURSOR;
+            if (menu().cursorEmpty()) return completeWith(have);
+            step = Step.RETURN_CURSOR;
             sent = false;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
         if (have < wanted) {
@@ -145,103 +118,103 @@ final class WirelessBoosterChange implements Action {
 
     private ActionStatus addBooster(MenuContent.Reading reading, int have) {
         int need = wanted - have;
-        if (menu.cursorEmpty()) {
+        if (menu().cursorEmpty()) {
             int carryTotal = countCarriedBoosters(reading);
             if (carryTotal < need) {
-                return closeWith(Problem.of(Problem.Kind.NEED_ITEM,
+                return stop(Problem.of(Problem.Kind.NEED_ITEM,
                         "背包里无线增幅卡不够：还需要 " + need + " 张 " + boosterItemId
                                 + "，身上只有 " + carryTotal + " 张"));
             }
             int slot = findCarriedBoosterSlot(reading);
-            if (slot < 0) return closeWith(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有 " + boosterItemId));
-            if (!menu.click(slot, 0)) return ActionStatus.running();
-            menu.noteCursorTakenFrom(slot);
+            if (slot < 0) return stop(Problem.of(Problem.Kind.NEED_ITEM, "背包里没有 " + boosterItemId));
+            if (!menu().click(slot, 0)) return ActionStatus.running();
+            menu().noteCursorTakenFrom(slot);
             returnSlot = slot;
             lastBoosterCount = have;
             lastCursorCount = 0;
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
         // 光标上拿着增幅卡：需要数量大于等于手上整堆就左键全放，否则右键放 1 张。
-        int button = menu.cursor().count() <= need ? 0 : 1;
-        if (!menu.click(boosterSlot, button)) return ActionStatus.running();
+        int button = menu().cursor().count() <= need ? 0 : 1;
+        if (!menu().click(boosterSlot, button)) return ActionStatus.running();
         lastBoosterCount = have;
-        lastCursorCount = menu.cursor().count();
+        lastCursorCount = menu().cursor().count();
         sent = true;
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
     private ActionStatus removeBooster(MenuContent.Reading reading, int have) {
-        if (wanted == 0 && menu.cursorEmpty()) {
-            if (!menu.quickMove(boosterSlot)) return ActionStatus.running();
+        if (wanted == 0 && menu().cursorEmpty()) {
+            if (!menu().quickMove(boosterSlot)) return ActionStatus.running();
             lastBoosterCount = have;
             lastCursorCount = 0;
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
-        if (menu.cursorEmpty()) {
-            if (!menu.click(boosterSlot, 0)) return ActionStatus.running();
-            menu.noteCursorTakenFrom(boosterSlot);
+        if (menu().cursorEmpty()) {
+            if (!menu().click(boosterSlot, 0)) return ActionStatus.running();
+            menu().noteCursorTakenFrom(boosterSlot);
             returnSlot = findEmptyOrStackablePlayerSlot(reading);
             lastBoosterCount = have;
             lastCursorCount = 0;
             sent = true;
-            waited = 0;
+            resetWait();
             return ActionStatus.progressed();
         }
         // 若进入减卡分支时光标上已有残余物品，先回收到背包再继续，避免停在 running 死等。
-        stage = Stage.RETURN_CURSOR;
+        step = Step.RETURN_CURSOR;
         returnSlot = -1;
         sent = false;
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
     // 把光标里剩余增幅卡放回背包：单格堆叠上限 64 满后光标若仍有余量，自动换下一空格分批放完。
     private ActionStatus returnCursor() {
-        if (menu.busy()) return ActionStatus.running();
-        if (menu.cursorEmpty()) {
+        if (menu().busy()) return ActionStatus.running();
+        if (menu().cursorEmpty()) {
             Optional<Ae2PartControl.OpenMenuSnapshot> opt = control.readOpenMenu();
             if (opt.isPresent() && currentBoosters(opt.get()) != wanted) {
-                stage = Stage.ADJUST;
+                step = Step.ADJUST;
                 sent = false;
-                waited = 0;
+                resetWait();
                 return ActionStatus.progressed();
             }
             return completeWith(wanted);
         }
-        int cursorCount = menu.cursor().count();
+        int cursorCount = menu().cursor().count();
         if (sent) {
             if (cursorCount < lastCursorCount) {
                 // 上一次点击已把部分增幅卡补满该格，重置状态重新找下一格放剩余部分。
                 sent = false;
-                waited = 0;
+                resetWait();
                 returnSlot = -1;
-            } else if (++waited > WAIT_TICKS) {
-                return closeWith(Problem.of(Problem.Kind.STUCK, "把余下的无线增幅卡放回背包超时"));
+            } else if (syncWaitElapsed()) {
+                return stop(Problem.of(Problem.Kind.STUCK, "把余下的无线增幅卡放回背包超时"));
             } else {
                 return ActionStatus.running();
             }
         }
-        Optional<MenuContent.Reading> reading = menu.reading();
-        if (reading.isEmpty()) return closeWith(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面被关掉了"));
+        Optional<MenuContent.Reading> reading = menu().reading();
+        if (reading.isEmpty()) return stop(Problem.of(Problem.Kind.TARGET_GONE, "无线访问点的界面被关掉了"));
         int target = returnSlot >= 0 ? returnSlot : findEmptyOrStackablePlayerSlot(reading.get());
         if (target < 0) {
-            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "背包已满，放不下取出的无线增幅卡"));
+            return stop(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "背包已满，放不下取出的无线增幅卡"));
         }
-        if (!menu.click(target, 0)) return ActionStatus.running();
+        if (!menu().click(target, 0)) return ActionStatus.running();
         lastCursorCount = cursorCount;
         sent = true;
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
     private ActionStatus completeWith(int boosters) {
         cache.recordLocal(pos, null, Map.of("boosters", Integer.toString(boosters)), Map.of("boosters", boosters));
-        return closeWith(null);
+        return stop(null);
     }
 
     private static int currentBoosters(Ae2PartControl.OpenMenuSnapshot snap) {
@@ -286,46 +259,21 @@ final class WirelessBoosterChange implements Action {
         return -1;
     }
 
-    private ActionStatus closeWith(Problem reason) {
+    // 收场前界面还开着就把最新增幅卡张数刷进缓存：做成与没做成都要给下一次读回最新现场。
+    private ActionStatus stop(Problem reason) {
         if (reason != null) {
             control.readOpenMenu().ifPresent(snap -> Ae2PartSnapshots.flushToCache(cache, pos, null, snap, null, null));
         }
-        problem = reason;
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
+        return closeWith(reason);
     }
 
-    private ActionStatus closeMenu(TickContext context) {
-        if (closing == null) closing = menu.closing();
-        ActionStatus status = closing.tick(context);
-        if (status instanceof ActionStatus.Running) return status;
-        closing = null;
-        return finish(problem);
-    }
-
-    private ActionStatus finish(Problem reason) {
-        problem = reason;
-        stage = Stage.DONE;
-        return reason == null ? ActionStatus.done() : ActionStatus.failed(reason);
-    }
-
-    @Override public void pause() {
-        if (opening != null && menu == null) opening.pause();
-        if (closing != null) closing.pause();
-    }
-
-    @Override public void close() {
-        if (closing != null) closing.close();
-        if (menu != null && stage != Stage.DONE) menu.abandon();
-        else if (opening != null && menu == null) opening.close();
-    }
-
+    // 光标上拿着增幅卡时停不得，一关界面它就落进流程外。
     @Override public Interruptibility interruptibility() {
-        return stage == Stage.ADJUST || stage == Stage.RETURN_CURSOR
+        return step == Step.ADJUST || step == Step.RETURN_CURSOR
                 ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
     }
 
-    @Override public String describe() {
+    @Override protected String doing() {
         return "调整无线访问点的增幅卡数量为 " + wanted;
     }
 }

@@ -57,7 +57,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_IMPORT_BUS, Ae2MenuConfigAction.Kind.KEY_TYPE, "key_type.fluid", "true",
                 null, -1, false, null);
         ActionStatus keyStatus = runToEnd(new Ae2MenuConfigAction(compat, session, cache, services, keyTypeSpec,
-                () -> PartTestFakes.immediateOpening(session)));
+                PartTestFakes.immediateOpening(session)));
         assertInstanceOf(ActionStatus.Done.class, keyStatus);
         assertTrue(session.log.contains("selectKeyType:fluid:true"));
         assertTrue(session.log.stream().noneMatch(entry -> entry.startsWith("config:")));
@@ -69,7 +69,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_IMPORT_BUS, Ae2MenuConfigAction.Kind.FILTER_SLOT, "filter.20", "minecraft:iron_ingot",
                 null, 20, false, null);
         ActionStatus failStatus = runToEnd(new Ae2MenuConfigAction(compat, session, cache, services, lockedFilter,
-                () -> PartTestFakes.immediateOpening(session)));
+                PartTestFakes.immediateOpening(session)));
         ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, failStatus);
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, failed.problem().kind());
         assertTrue(failed.problem().message().contains("ae2:capacity_card"));
@@ -91,7 +91,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_STORAGE_BUS, Ae2MenuConfigAction.Kind.CONFIG_BUTTON, "access", "write",
                 "access", -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                accessSpec, () -> PartTestFakes.immediateOpening(session))));
+                accessSpec, PartTestFakes.immediateOpening(session))));
         assertEquals("write", cache.peekSettings(HOST, Direction.WEST, ServerReads.NONE).get("access"));
         assertEquals("minecraft:barrel", cache.readingsFor(HOST, Direction.WEST, ServerReads.NONE).get("connected_to"));
 
@@ -101,7 +101,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_STORAGE_BUS, Ae2MenuConfigAction.Kind.NO_ARG_ACTION, "action", "partition",
                 null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                partitionSpec, () -> PartTestFakes.immediateOpening(session))));
+                partitionSpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.log.contains("action:partition"));
         assertEquals("partition", cache.settingsFor(HOST, Direction.WEST, ServerReads.NONE).get("action"));
         assertFalse(cache.settingsFor(HOST, Direction.WEST, ServerReads.NONE).containsKey("action"));
@@ -112,7 +112,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_STORAGE_BUS, Ae2MenuConfigAction.Kind.PRIORITY, "priority", "25",
                 null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                prioritySpec, () -> PartTestFakes.immediateOpening(session))));
+                prioritySpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.swapFollowed);
         assertTrue(session.log.contains("openSub:ae2:priority"));
         assertTrue(session.log.contains("intAction:setPriority:25"));
@@ -133,7 +133,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_INTERFACE, Ae2MenuConfigAction.Kind.STOCK_SLOT, "stock.0", "minecraft:iron_ingot 16",
                 null, 0, false, stock);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                spec, () -> PartTestFakes.immediateOpening(session))));
+                spec, PartTestFakes.immediateOpening(session))));
 
         assertTrue(session.swapFollowed);
         assertTrue(session.log.contains("setFilter:46:minecraft:iron_ingot"));
@@ -154,7 +154,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_STORAGE_LEVEL_EMITTER, Ae2MenuConfigAction.Kind.REPORTING_VALUE, "reporting_value",
                 "128", null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                emitterSpec, () -> PartTestFakes.immediateOpening(session))));
+                emitterSpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.log.contains("longAction:setReportingValue:128"));
         assertEquals("128", cache.peekSettings(HOST, Direction.SOUTH, ServerReads.NONE).get("reporting_value"));
 
@@ -189,7 +189,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_CELL_WORKBENCH, Ae2MenuConfigAction.Kind.WORKBENCH_FUZZY, "fuzzy_mode", "percent_75",
                 null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                fuzzySpec, () -> PartTestFakes.immediateOpening(session))));
+                fuzzySpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.log.contains("workbenchFuzzy:percent_75"));
         assertTrue(session.log.stream().noneMatch(line -> line.startsWith("config:")));
         assertEquals("percent_75", cache.peekSettings(HOST, null, ServerReads.NONE).get("fuzzy_mode"));
@@ -200,7 +200,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_CELL_WORKBENCH, Ae2MenuConfigAction.Kind.WORKBENCH_COPY_MODE, "copy_mode",
                 "keep_on_remove", null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                copySpec, () -> PartTestFakes.immediateOpening(session))));
+                copySpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.log.contains("action:nextCopyMode"));
         assertEquals("keep_on_remove", cache.peekSettings(HOST, null, ServerReads.NONE).get("copy_mode"));
 
@@ -210,7 +210,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_CELL_WORKBENCH, Ae2MenuConfigAction.Kind.ITEM_SLOT, "upgrade.0",
                 "minecraft:redstone", null, 0, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                upgradeOk, () -> PartTestFakes.immediateOpening(session))));
+                upgradeOk, PartTestFakes.immediateOpening(session))));
         assertEquals("minecraft:redstone", session.upgradeSlots.getFirst().itemId());
         assertEquals(1, session.playerSlots.get(100).count());
 
@@ -220,7 +220,7 @@ class Ae2MenuConfigActionTest {
                 "minecraft:redstone", null, 5, false, null);
         ActionStatus.Failed disabledFail = assertInstanceOf(ActionStatus.Failed.class,
                 runToEnd(new Ae2MenuConfigAction(compat, session, cache, services, upgradeDisabled,
-                        () -> PartTestFakes.immediateOpening(session))));
+                        PartTestFakes.immediateOpening(session))));
         assertEquals(Problem.Kind.NOT_POSSIBLE_HERE, disabledFail.problem().kind());
     }
 
@@ -240,7 +240,7 @@ class Ae2MenuConfigActionTest {
                 Ae2PartKeys.MENU_IMPORT_BUS, Ae2MenuConfigAction.Kind.KEY_TYPE, "key_type.chemical", "true",
                 null, -1, false, null);
         assertInstanceOf(ActionStatus.Done.class, runToEnd(new Ae2MenuConfigAction(compat, session, cache, services,
-                chemKeySpec, () -> PartTestFakes.immediateOpening(session))));
+                chemKeySpec, PartTestFakes.immediateOpening(session))));
         assertTrue(session.log.contains("selectKeyType:chemical:true"));
         assertEquals("true", cache.peekSettings(HOST, Direction.NORTH, ServerReads.NONE).get("key_type.chemical"));
 
