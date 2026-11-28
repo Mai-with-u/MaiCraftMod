@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -29,33 +28,24 @@ public final class CompatItemSettings implements ItemSettings {
     }
 
     @Override public boolean covers(ItemStack stack) {
-        return ask(() -> settings.covers(stack), false);
+        return DegradedAnswer.ask(module, () -> settings.covers(stack), false);
     }
 
     @Override public List<MachineSetting> settings(ItemStack stack) {
-        return ask(() -> settings.settings(stack), List.of());
+        return DegradedAnswer.ask(module, () -> settings.settings(stack), List.of());
     }
 
     @Override public boolean holds(ItemStack stack, String key, String wanted) {
-        return ask(() -> settings.holds(stack, key, wanted), false);
+        return DegradedAnswer.ask(module, () -> settings.holds(stack, key, wanted), false);
     }
 
     @Override public boolean holds(ItemStack stack, Player player, String key, String wanted) {
-        return ask(() -> settings.holds(stack, player, key, wanted), false);
+        return DegradedAnswer.ask(module, () -> settings.holds(stack, player, key, wanted), false);
     }
 
     @Override public Optional<Action> change(int inventorySlot, Map<String, String> wanted, Permissions permissions) {
-        return ask(() -> settings.change(inventorySlot, wanted, permissions), Optional.<Action>empty())
+        return DegradedAnswer.ask(module, () -> settings.change(inventorySlot, wanted, permissions), Optional.<Action>empty())
                 .map(action -> CompatAction.of(module, action));
     }
 
-    // 问一句：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 }

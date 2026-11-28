@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.compat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -25,32 +24,23 @@ public final class CompatRangedWeapon implements RangedWeapon {
     }
 
     @Override public boolean covers(ItemStack stack) {
-        return ask(() -> weapon.covers(stack), false);
+        return DegradedAnswer.ask(module, () -> weapon.covers(stack), false);
     }
 
     @Override public Optional<Shot> nextShot(ItemStack stack, Player player) {
-        return ask(() -> weapon.nextShot(stack, player), Optional.empty());
+        return DegradedAnswer.ask(module, () -> weapon.nextShot(stack, player), Optional.empty());
     }
 
     @Override public List<Shot> possibleShots(ItemStack stack, Player player) {
-        return ask(() -> weapon.possibleShots(stack, player), List.of());
+        return DegradedAnswer.ask(module, () -> weapon.possibleShots(stack, player), List.of());
     }
 
     @Override public boolean usesInternalAmmo() {
-        return ask(weapon::usesInternalAmmo, false);
+        return DegradedAnswer.ask(module, weapon::usesInternalAmmo, false);
     }
 
     @Override public boolean shotFired(ItemStack before, ItemStack after, Player player) {
-        return ask(() -> weapon.shotFired(before, after, player), false);
+        return DegradedAnswer.ask(module, () -> weapon.shotFired(before, after, player), false);
     }
 
-    // 问一句：停用了或对不上时给"不认"的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 }

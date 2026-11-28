@@ -30,7 +30,7 @@ final class CompatMachineInstallations implements MachineInstallations {
 
     // 停用或接口对不上时不编形状原因，交回一句用不了，审阅照实报。
     @Override public Optional<String> installationProblem(Installation installation) {
-        return ask(() -> installations.installationProblem(installation), Optional.of(disabled()));
+        return DegradedAnswer.ask(module, () -> installations.installationProblem(installation), Optional.of(DegradedAnswer.reason(module)));
     }
 
     @Override public Optional<Action> install(Installation installation, Permissions permissions) {
@@ -43,38 +43,26 @@ final class CompatMachineInstallations implements MachineInstallations {
     }
 
     @Override public boolean installed(Installation installation) {
-        return ask(() -> installations.installed(installation), false);
+        return DegradedAnswer.ask(module, () -> installations.installed(installation), false);
     }
 
     @Override public Optional<List<BlockPos>> placedBy(Installation installation) {
-        return ask(() -> installations.placedBy(installation), Optional.empty());
+        return DegradedAnswer.ask(module, () -> installations.placedBy(installation), Optional.empty());
     }
 
     // 模组停用或对不上时说不管：组装载具照旧直接拉杆，结果里写明没查胶。
     @Override public Optional<List<Installation>> stickTogether(Set<BlockPos> cells) {
-        return ask(() -> installations.stickTogether(cells), Optional.<List<Installation>>empty());
+        return DegradedAnswer.ask(module, () -> installations.stickTogether(cells), Optional.<List<Installation>>empty());
     }
 
     @Override public int stickPreference() {
-        return ask(installations::stickPreference, 0);
+        return DegradedAnswer.ask(module, installations::stickPreference, 0);
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 
     // 要一个动作：给出的动作包一层，推进到一半停用时如实按不支持收场。
     private Optional<Action> act(Supplier<Optional<Action>> make) {
-        return ask(make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
+        return DegradedAnswer.ask(module, make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
     }
 
-    private String disabled() {
-        return module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明");
-    }
 }

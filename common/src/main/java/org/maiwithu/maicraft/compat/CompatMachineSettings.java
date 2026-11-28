@@ -29,7 +29,7 @@ final class CompatMachineSettings implements MachineSettings {
     }
 
     @Override public List<MachineSetting> settings(BlockPos at) {
-        return ask(() -> settings.settings(at), List.of());
+        return DegradedAnswer.ask(module, () -> settings.settings(at), List.of());
     }
 
     @Override public Optional<Action> change(BlockPos at, String key, String value, Permissions permissions) {
@@ -37,7 +37,7 @@ final class CompatMachineSettings implements MachineSettings {
     }
 
     @Override public List<MachineSetting> settingsOnStructure(String structureId, BlockPos at) {
-        return ask(() -> settings.settingsOnStructure(structureId, at), List.of());
+        return DegradedAnswer.ask(module, () -> settings.settingsOnStructure(structureId, at), List.of());
     }
 
     @Override public Optional<Action> changeOnStructure(String structureId, BlockPos at, String key, String value,
@@ -46,25 +46,16 @@ final class CompatMachineSettings implements MachineSettings {
     }
 
     @Override public List<MachineSetting> partSettings(BlockPos host, Direction side) {
-        return ask(() -> settings.partSettings(host, side), List.of());
+        return DegradedAnswer.ask(module, () -> settings.partSettings(host, side), List.of());
     }
 
     @Override public Optional<String> describeChange(String key, String before, String after) {
-        return ask(() -> settings.describeChange(key, before, after), Optional.empty());
+        return DegradedAnswer.ask(module, () -> settings.describeChange(key, before, after), Optional.empty());
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 
     // 要一个动作：给出的动作包一层，推进到一半停用时如实按不支持收场。
     private Optional<Action> act(Supplier<Optional<Action>> make) {
-        return ask(make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
+        return DegradedAnswer.ask(module, make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
     }
 }

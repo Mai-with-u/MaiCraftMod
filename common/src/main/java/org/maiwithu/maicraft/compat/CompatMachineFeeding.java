@@ -38,7 +38,7 @@ final class CompatMachineFeeding implements MachineFeeding {
 
     // 停用或接口对不上时不编现场摆法原因，交回空。
     @Override public Optional<String> whyCannotFeed(BlockPos at, String itemId) {
-        return ask(() -> feeding.whyCannotFeed(at, itemId), Optional.empty());
+        return DegradedAnswer.ask(module, () -> feeding.whyCannotFeed(at, itemId), Optional.empty());
     }
 
     @Override public Optional<Action> take(BlockPos at, String itemId, int count, Permissions permissions) {
@@ -46,36 +46,27 @@ final class CompatMachineFeeding implements MachineFeeding {
     }
 
     @Override public Optional<FullRun> fullRun(BlockPos at, RunRequest request, Permissions permissions) {
-        return ask(() -> feeding.fullRun(at, request, permissions), Optional.<FullRun>empty())
+        return DegradedAnswer.ask(module, () -> feeding.fullRun(at, request, permissions), Optional.<FullRun>empty())
                 .map(run -> CompatAction.fullRun(module, run));
     }
 
     @Override public FuelUse fuelUse(BlockPos at) {
-        return ask(() -> feeding.fuelUse(at), FuelUse.RECIPE);
+        return DegradedAnswer.ask(module, () -> feeding.fuelUse(at), FuelUse.RECIPE);
     }
 
     @Override public Optional<IngredientFeed> ingredientFeed(BlockPos at, ShownIngredient ingredient, long amount) {
-        return ask(() -> feeding.ingredientFeed(at, ingredient, amount), Optional.empty());
+        return DegradedAnswer.ask(module, () -> feeding.ingredientFeed(at, ingredient, amount), Optional.empty());
     }
 
     // 停用或接口对不上时按标准的按配方投料给一份计划：冲突与腾空动作都为空，投料动作给不出。
     @Override public FeedPlan plan(BlockPos at, ShownRecipe recipe, int batches, Permissions permissions) {
-        return ask(() -> feeding.plan(at, recipe, batches, permissions),
+        return DegradedAnswer.ask(module, () -> feeding.plan(at, recipe, batches, permissions),
                 MachineFeeding.standard(null, at, recipe, batches));
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 
     // 要一个动作：给出的动作包一层，推进到一半停用时如实按不支持收场。
     private Optional<Action> act(Supplier<Optional<Action>> make) {
-        return ask(make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
+        return DegradedAnswer.ask(module, make, Optional.<Action>empty()).map(action -> CompatAction.of(module, action));
     }
 }
