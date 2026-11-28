@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -19,6 +18,7 @@ import org.maiwithu.maicraft.ability.machine.spi.RunRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
+import org.maiwithu.maicraft.behavior.interaction.ApproachThenUse;
 import org.maiwithu.maicraft.behavior.spi.PlayerServices;
 import org.maiwithu.maicraft.game.interaction.InteractionConfirmation;
 import org.maiwithu.maicraft.game.player.PlayerContext;
@@ -204,8 +204,8 @@ final class ChargerFullRun implements FullRun {
                             ? InteractionConfirmation.Verdict.PENDING
                             : InteractionConfirmation.Verdict.APPLIED)
                     .orElse(InteractionConfirmation.Verdict.PENDING);
-            step = new ApproachThenUse(at, ApproachTarget.ofBlock(at), permissions, services,
-                    () -> services.interactions().useBlock(at, inserted));
+            step = new ApproachThenUse("靠近并右键 " + at.toShortString(), ApproachTarget.ofBlock(at),
+                    permissions, services, () -> services.interactions().useBlock(at, inserted));
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Running) return status;
@@ -303,8 +303,8 @@ final class ChargerFullRun implements FullRun {
                                 : InteractionConfirmation.Verdict.PENDING)
                         .orElse(InteractionConfirmation.Verdict.APPLIED));
         turningCrank = true;
-        step = new ApproachThenUse(targetCrank, ApproachTarget.ofBlock(targetCrank), permissions, services,
-                () -> services.interactions().useBlock(targetCrank, turned));
+        step = new ApproachThenUse("靠近并右键 " + targetCrank.toShortString(), ApproachTarget.ofBlock(targetCrank),
+                permissions, services, () -> services.interactions().useBlock(targetCrank, turned));
         return ActionStatus.progressed();
     }
 
@@ -324,8 +324,8 @@ final class ChargerFullRun implements FullRun {
                             ? InteractionConfirmation.Verdict.APPLIED
                             : InteractionConfirmation.Verdict.PENDING)
                     .orElse(InteractionConfirmation.Verdict.APPLIED);
-            step = new ApproachThenUse(at, ApproachTarget.ofBlock(at), permissions, services,
-                    () -> services.interactions().useBlock(at, ejected));
+            step = new ApproachThenUse("靠近并右键 " + at.toShortString(), ApproachTarget.ofBlock(at),
+                    permissions, services, () -> services.interactions().useBlock(at, ejected));
         }
         ActionStatus status = step.tick(tick);
         if (status instanceof ActionStatus.Running) return status;
@@ -466,45 +466,5 @@ final class ChargerFullRun implements FullRun {
 
     @Override public String describe() {
         return "使用充能器充能 " + request.item() + "（" + produced + "/" + targetCount() + "）";
-    }
-
-    /** 先靠近目标再执行一次交互动作的小组合。 */
-    private static final class ApproachThenUse implements Action {
-        private final BlockPos targetPos;
-        private final ApproachTarget target;
-        private final Permissions permissions;
-        private final PlayerServices services;
-        private final Supplier<Action> useFactory;
-        private boolean approached;
-        private Action current;
-
-        ApproachThenUse(BlockPos targetPos, ApproachTarget target, Permissions permissions,
-                PlayerServices services, Supplier<Action> useFactory) {
-            this.targetPos = targetPos;
-            this.target = target;
-            this.permissions = permissions;
-            this.services = services;
-            this.useFactory = useFactory;
-        }
-
-        @Override public ActionStatus tick(TickContext tick) {
-            if (current == null) {
-                current = approached ? useFactory.get() : services.approach().toward(target, permissions);
-            }
-            ActionStatus status = current.tick(tick);
-            if (status instanceof ActionStatus.Running) return status;
-            current.close();
-            current = null;
-            if (status instanceof ActionStatus.Failed) return status;
-            if (!approached) {
-                approached = true;
-                return ActionStatus.progressed();
-            }
-            return ActionStatus.done();
-        }
-
-        @Override public void pause() { if (current != null) current.pause(); }
-        @Override public void close() { if (current != null) { current.close(); current = null; } }
-        @Override public String describe() { return "靠近并右键 " + targetPos.toShortString(); }
     }
 }
