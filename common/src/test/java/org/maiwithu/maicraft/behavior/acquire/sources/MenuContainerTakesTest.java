@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.maiwithu.maicraft.behavior.inventory.containers.KnownContainer;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.menu.MenuChannel;
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
@@ -40,6 +41,7 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.spi.WantedItem;
 import org.maiwithu.maicraft.behavior.acquire.spi.ItemRequest;
 import org.maiwithu.maicraft.behavior.acquire.spi.StarvingFoodReport;
+import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
 import org.maiwithu.maicraft.behavior.permission.StorageUse;
 
 /** 开箱取货按量拿：整堆够用整堆拿，尾数按件拿够就停；点不出去时下一刻再点，不当成背包放不下。 */
@@ -550,7 +552,8 @@ class MenuContainerTakesTest {
     private MenuContainerTakes takes(FakeBox box) {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         return new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box), at -> false);
+                (at, permissions) -> new OpenAtOnce(box), at -> false,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
     private static KnownContainer boxAt() {
@@ -578,7 +581,8 @@ class MenuContainerTakesTest {
     private Action takesNeverOpening() {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new NeverOpens(), at -> false);
+                (at, permissions) -> new NeverOpens(), at -> false,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
         return takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), 5, "工具准备"),
                 Permissions.DEFAULT).orElseThrow();
@@ -590,7 +594,8 @@ class MenuContainerTakesTest {
                 (at, permissions) -> {
                     opens.incrementAndGet();
                     return new OpenAtOnce(box);
-                }, at -> false);
+                }, at -> false,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
     /** 替身通报：已经绑到这只箱子上，面包最多拿 2 个，别的不认；拿到了记下来。 */
@@ -613,7 +618,8 @@ class MenuContainerTakesTest {
         BoundReport allowance = new BoundReport();
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box), at -> false);
+                (at, permissions) -> new OpenAtOnce(box), at -> false,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
         Action take = takes.take(new KnownContainer("bob 的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:bread"), 8, "饿了，弄点吃的")
                         .withFoodReport(allowance)), Permissions.DEFAULT).orElseThrow();
@@ -633,7 +639,8 @@ class MenuContainerTakesTest {
         BoundReport allowance = new BoundReport();
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box), at -> false);
+                (at, permissions) -> new OpenAtOnce(box), at -> false,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
         Action take = takes.take(new KnownContainer("bob 的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 List.of(new ItemRequest(WantedItem.ofItem("minecraft:beef"), 8, "饿了，弄点吃的")
                         .withFoodReport(allowance)), Permissions.DEFAULT).orElseThrow();
@@ -650,7 +657,8 @@ class MenuContainerTakesTest {
     private MenuContainerTakes machineTakes(FakeBox box) {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         return new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box), at -> true);
+                (at, permissions) -> new OpenAtOnce(box), at -> true,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
     }
 
     private static Action take(MenuContainerTakes takes, int count) {
@@ -667,7 +675,8 @@ class MenuContainerTakesTest {
     private Action takes(FakeBox box, int count, boolean feedsMachine) {
         WorldMemory memory = new WorldMemory(new DocumentStore(temp.resolve("state.sqlite")), "world-1");
         MenuContainerTakes takes = new MenuContainerTakes(itemId -> Set.of(), memory, () -> null,
-                (at, permissions) -> new OpenAtOnce(box), at -> feedsMachine);
+                (at, permissions) -> new OpenAtOnce(box), at -> feedsMachine,
+                OthersThingsNotice.NONE, RareLootNotice.NONE);
         return takes.take(new KnownContainer("家门口的箱子", WorldPosition.here(10, 64, 5), "minecraft:chest"),
                 new ItemRequest(WantedItem.ofItem("minecraft:iron_ingot"), count, "工具准备"),
                 Permissions.DEFAULT).orElseThrow();

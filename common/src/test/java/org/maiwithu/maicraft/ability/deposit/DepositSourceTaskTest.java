@@ -30,6 +30,7 @@ import org.maiwithu.maicraft.behavior.acquire.sources.ContainerBatchTakes;
 import org.maiwithu.maicraft.behavior.acquire.sources.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.inventory.ItemsToKeep;
 import org.maiwithu.maicraft.behavior.inventory.containers.ContainerChooser;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.inventory.containers.SpotsContainers;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
@@ -472,7 +473,7 @@ class DepositSourceTaskTest {
                         return new ImmediateOpening(chests.get(pos));
                     },
                     at -> false,
-                    notice);
+                    notice, RareLootNotice.NONE);
             DepositSeams.ClearsOffhand offhandSeam = new DepositSeams.ClearsOffhand() {
                 @Override public Optional<BackpackStack> held() {
                     return offhand.isEmpty() ? Optional.empty() : Optional.of(toBackpackStack(offhand));

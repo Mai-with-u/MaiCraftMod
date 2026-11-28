@@ -28,6 +28,7 @@ import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuLayouts;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
 import org.maiwithu.maicraft.behavior.menu.MenuTakeRound;
+import org.maiwithu.maicraft.behavior.menu.MenuTakeRun;
 import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
@@ -40,7 +41,6 @@ import org.maiwithu.maicraft.kernel.goal.WorldPosition;
 import org.maiwithu.maicraft.kernel.result.Problem;
 import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.ReportsUnconfirmed;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
@@ -84,21 +84,11 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
     private final Map<String, Integer> fullestFeeders = new HashMap<>();
 
     /**
+     * 生产接入：打开动作在这里拼（走到够得着的地方、右键点开、认领并等同步），供料判断按现场认；
+     * 动别人东西与稀罕战利品两个通报器都给全，不用的那样传 NONE。
+     *
      * @param layouts 认得出哪些界面：原版加上联动模组证明过的（例如模组的箱子）
      */
-    public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
-            WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts) {
-        this(close, interactions, tags, memory, contexts, layouts, OthersThingsNotice.NONE, RareLootNotice.NONE);
-    }
-
-    /** 生产接入动别人东西的通报器：确认从别人放的容器里拿走了东西时合发一条事件。 */
-    public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
-            WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts,
-            OthersThingsNotice othersNotice) {
-        this(close, interactions, tags, memory, contexts, layouts, othersNotice, RareLootNotice.NONE);
-    }
-
-    /** 生产同时接入动别人东西与稀罕战利品两个通报器。 */
     public MenuContainerTakes(BringsPlayerClose close, Interactions interactions, ReadsItemTags tags,
             WorldMemory memory, Supplier<PlayerContext> contexts, MenuLayouts layouts,
             OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
@@ -108,28 +98,7 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
         }, othersNotice, rareLootNotice);
     }
 
-    /** 打开箱子的动作由调用方给：生产走靠近与右键点开，替身接入（离线测试）换自己的打开动作。 */
-    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
-            BiFunction<BlockPos, Permissions, MenuOpening> openings) {
-        this(tags, memory, contexts, openings, at -> {
-            PlayerContext player = contexts.get();
-            return player != null && player.level() != null && ContainerFeeds.feedsAutomation(player.level(), at);
-        }, OthersThingsNotice.NONE, RareLootNotice.NONE);
-    }
-
-    /** 供料判断也由调用方给：替身接入时换成替身。 */
-    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
-            BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine) {
-        this(tags, memory, contexts, openings, feedsMachine, OthersThingsNotice.NONE, RareLootNotice.NONE);
-    }
-
-    /** 全参入口：替掉打开动作、供料判断与通报器的调用方（含离线测试）都用它。 */
-    public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
-            BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine,
-            OthersThingsNotice othersNotice) {
-        this(tags, memory, contexts, openings, feedsMachine, othersNotice, RareLootNotice.NONE);
-    }
-
+    /** 替身接入（离线测试与替身接线）：打开动作与供料判断由调用方给，通报器不用的传 NONE。 */
     public MenuContainerTakes(ReadsItemTags tags, WorldMemory memory, Supplier<PlayerContext> contexts,
             BiFunction<BlockPos, Permissions, MenuOpening> openings, Predicate<BlockPos> feedsMachine,
             OthersThingsNotice othersNotice, RareLootNotice rareLootNotice) {
@@ -138,8 +107,8 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
         this.contexts = Objects.requireNonNull(contexts, "contexts");
         this.openings = Objects.requireNonNull(openings, "openings");
         this.feedsMachine = Objects.requireNonNull(feedsMachine, "feedsMachine");
-        this.othersNotice = othersNotice == null ? OthersThingsNotice.NONE : othersNotice;
-        this.rareLootNotice = rareLootNotice == null ? RareLootNotice.NONE : rareLootNotice;
+        this.othersNotice = Objects.requireNonNull(othersNotice, "othersNotice");
+        this.rareLootNotice = Objects.requireNonNull(rareLootNotice, "rareLootNotice");
     }
 
     // 生产的打开方式：走到够得着的地方、右键点开、认领并等同步；走过去能动多少地形按这次任务的许可来。
@@ -168,7 +137,7 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
     }
 
     /** 开一次箱取几样的动作：点开 → 逐样搬 → 关上，跨刻推进；没能确认的点击经交回接缝原样交回。 */
-    private final class TakeAction implements Action, ReportsUnconfirmed, ReportsTakeSettlement {
+    private final class TakeAction extends MenuTakeRun implements ReportsUnconfirmed, ReportsTakeSettlement {
 
         private final KnownContainer container;
         /** 这一趟要拿的几样：引擎路径按要货单逐条，整批搬按取货单；每样带自己的匹配与缺口。 */
@@ -181,11 +150,6 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
         private final String wantedText;
         /** 按取货单整批搬时收场要算结算账。 */
         private final boolean batch;
-        /** 认领到的界面：读数、点击与关闭都经它。 */
-        private OpenedMenu menu;
-        /** 界面认下来之后的一轮取货：逐样盘、记账、关箱都走它。 */
-        private MenuTakeRound round;
-        private int waited;
         /** 机器料箱只剩一半、一样没拿时的说明：关上界面后以它收场；别的情况为 null。 */
         private Problem held;
         /** 点不开容器时的原因：打开动作失败时记下；点开过或还没试完时为 null。 */
@@ -243,30 +207,55 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
             this.opening = openings.apply(at, permissions);
         }
 
-        @Override
-        public ActionStatus tick(TickContext tick) {
-            // 总期限从点开箱子算起：走过去的那段路由走到自己管（有没有进展、走不走得到），
-            // 连走路一起算会让六十格外的箱子还没走到就"开箱取货超时"。
-            if (menu != null && ++waited > GIVE_UP_TICKS) {
-                // 总期限到了还在一笔上：点出去没等到结果的那几下照实交回，再以卡住收场。
-                round.abandonAndNote("总期限到了");
-                return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开箱取货超时：" + container.name(), null));
-            }
-            if (menu == null) return open(tick);
-            return round.tick(tick, menu.reading());
-        }
-
         // 点开：走不到、点不开、界面认不出或一直没同步，都把打开动作的原因原样交回，引擎换路。
-        private ActionStatus open(TickContext tick) {
+        @Override protected Opening openSegment(TickContext tick) {
             ActionStatus status = opening.tick(tick);
             if (status instanceof ActionStatus.Failed failed) {
                 openFailure = failed.problem();
             }
-            if (!(status instanceof ActionStatus.Done)) return status;
-            menu = opening.opened().orElseThrow();
+            if (!(status instanceof ActionStatus.Done)) return new Opening.Proceed(status);
+            return new Opening.MenuReady(opening.opened().orElseThrow());
+        }
+
+        @Override protected MenuTakeRound newRound(OpenedMenu opened) {
+            return new MenuTakeRound(opened, List.copyOf(wants), new RoundEndings());
+        }
+
+        @Override protected Optional<MenuContent.Reading> currentReading() {
+            return menu().reading();
+        }
+
+        @Override protected long limitTicks() {
+            return GIVE_UP_TICKS;
+        }
+
+        // 总期限从点开箱子算起：走过去的那段路由走到自己管（有没有进展、走不走得到），
+        // 连走路一起算会让六十格外的箱子还没走到就"开箱取货超时"。
+        @Override protected boolean limitCounting() {
+            return round != null;
+        }
+
+        // 总期限到了还在一笔上：点出去没等到结果的那几下照实交回，再以卡住收场。
+        @Override protected ActionStatus onTimeout(TickContext tick) {
+            round.abandonAndNote("总期限到了");
+            return ActionStatus.failed(Problem.of(Problem.Kind.STUCK, "开箱取货超时：" + container.name(), null));
+        }
+
+        @Override protected void menuOpened() {
             snapshotBackpackAtOpen();
-            round = new MenuTakeRound(menu, List.copyOf(wants), new RoundEndings());
-            return ActionStatus.progressed();
+        }
+
+        @Override protected void pauseOpening() {
+            opening.pause();
+        }
+
+        @Override protected void closeOpening() {
+            opening.close();
+        }
+
+        @Override protected void roundClosed() {
+            if (!batch) reportRareLoot();
+            reportOthersTook();
         }
 
         // 机器料箱里这种东西见过最满的时候有几件。一次没拿够、引擎回头再开，留一半还按那时候算，
@@ -302,33 +291,6 @@ public final class MenuContainerTakes implements ContainerBatchTakes {
             Map<String, Integer> contents = reading.containerContents();
             memory.rememberContainerOpened(currentPosition(), currentBlockType(),
                     List.copyOf(contents.keySet()), Instant.now());
-        }
-
-        // 光标上拿着东西的那几下停不得：半途撒手会把拆出来的尾数交给关界面的流程，先等它放进背包。
-        // 界面还没点开时（round 只在界面认领后才建）没有在点的笔，照常报"在做"；
-        // 这时被打断由打开动作自己收手，回来引擎按身上的清点再决定。
-        // 控制循环每刻都会来问这一句，不能在这里抛：一抛整刻的推进被跳过，动作到不了终态，临时任务永远占着身体。
-        @Override
-        public Interruptibility interruptibility() {
-            return round != null && round.unsafeToStop() ? Interruptibility.UNSAFE_TO_STOP : Interruptibility.WORKING;
-        }
-
-        // 被生存需求打断：正在走、正在点的先停住；界面开着就请游戏关上，回来时引擎按身上的清点再决定。
-        @Override
-        public void pause() {
-            opening.pause();
-            if (menu != null) menu.abandon();
-        }
-
-        // 收尾：打开动作一并收尾；一轮还没收场的，先撒手（点出去的那几下交回没能确认）、结算已确认拿走的部分，再请游戏关上界面。
-        @Override
-        public void close() {
-            opening.close();
-            if (round != null) {
-                round.close(true);
-                if (!batch) reportRareLoot();
-                reportOthersTook();
-            }
         }
 
         @Override

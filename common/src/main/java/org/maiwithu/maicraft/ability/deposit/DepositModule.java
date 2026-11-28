@@ -17,6 +17,7 @@ import org.maiwithu.maicraft.behavior.acquire.mining.CollectsBlocks;
 import org.maiwithu.maicraft.behavior.acquire.sources.MenuContainerTakes;
 import org.maiwithu.maicraft.behavior.acquire.engine.ReadsItemTags;
 import org.maiwithu.maicraft.behavior.inventory.containers.ClientSpotsContainers;
+import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.inventory.containers.StoresInContainer;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.behavior.perception.Scene;
@@ -105,7 +106,7 @@ public final class DepositModule implements AbilityModule {
                 new LiveCreatureStorage(scene, contexts, layouts, close, interactions, toMainhand, sneaks),
                 // 来源容器取货与取物走同一份开箱搬货实现：点开、逐笔搬、刷世界记忆、通报、关上只有一份。
                 new MenuContainerTakes(close, interactions, tags, memory, contexts, layouts,
-                        storing.othersNotice())), backpack);
+                        storing.othersNotice(), RareLootNotice.NONE)), backpack);
     }
 
     @Override public AbilitySpec spec() {
