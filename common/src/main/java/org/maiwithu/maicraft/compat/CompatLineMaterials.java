@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.compat;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -36,16 +35,16 @@ final class CompatLineMaterials implements LineMaterials {
     @Override public BlockState straight(Direction.Axis axis) { return materials.straight(axis); }
 
     @Override public Optional<BlockState> turn(Direction.Axis in, Direction.Axis out) {
-        return ask(() -> materials.turn(in, out), Optional.empty());
+        return DegradedAnswer.ask(module, () -> materials.turn(in, out), Optional.empty());
     }
 
     // 读不出来时当它会接上：宁可不在那一格放线材，也不冒险把别的网连进来。
     @Override public boolean joins(BlockState neighbor) {
-        return ask(() -> materials.joins(neighbor), true);
+        return DegradedAnswer.ask(module, () -> materials.joins(neighbor), true);
     }
 
     @Override public Set<Direction> connectedFaces(BlockState piece) {
-        return ask(() -> materials.connectedFaces(piece), Set.of(Direction.values()));
+        return DegradedAnswer.ask(module, () -> materials.connectedFaces(piece), Set.of(Direction.values()));
     }
 
     @Override public Optional<String> laidAsInstallation() {
@@ -53,17 +52,9 @@ final class CompatLineMaterials implements LineMaterials {
     }
 
     @Override public Optional<Span> span() {
-        return ask(materials::span, Optional.<Span>empty()).map(GuardedSpan::new);
+        return DegradedAnswer.ask(module, materials::span, Optional.<Span>empty()).map(GuardedSpan::new);
     }
 
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 
     /** 跨越也包一层：已有的那一头读不出连接数就当连不了，形状规则读不出就当不合。 */
     private final class GuardedSpan implements Span {
@@ -77,18 +68,18 @@ final class CompatLineMaterials implements LineMaterials {
 
         @Override public BlockState end() { return span.end(); }
 
-        @Override public boolean isEnd(BlockState state) { return ask(() -> span.isEnd(state), false); }
+        @Override public boolean isEnd(BlockState state) { return DegradedAnswer.ask(module, () -> span.isEnd(state), false); }
 
         @Override public Direction.Axis endAxis() { return span.endAxis(); }
 
         @Override public int reach() { return span.reach(); }
 
         @Override public Optional<String> problem(BlockPos from, BlockPos to) {
-            return ask(() -> span.problem(from, to), Optional.of(module.name() + "的联动读不出这一跨的规则"));
+            return DegradedAnswer.ask(module, () -> span.problem(from, to), Optional.of(module.name() + "的联动读不出这一跨的规则"));
         }
 
         @Override public boolean acceptsLink(BlockPos existingEnd) {
-            return ask(() -> span.acceptsLink(existingEnd), false);
+            return DegradedAnswer.ask(module, () -> span.acceptsLink(existingEnd), false);
         }
     }
 }

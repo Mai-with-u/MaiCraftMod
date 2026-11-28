@@ -28,12 +28,7 @@ public final class CompatQuestBookOperations implements QuestBookOperations {
     }
 
     @Override public Optional<QuestView> quest(String questId) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return operations.quest(questId);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> operations.quest(questId), Optional.empty());
     }
 
     @Override public boolean submit(String questId, String requirementId) {
