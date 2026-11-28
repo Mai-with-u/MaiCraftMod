@@ -13,10 +13,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.animal.horse.AbstractHorse;
 import net.minecraft.world.entity.npc.AbstractVillager;
-import net.minecraft.world.entity.vehicle.AbstractMinecart;
-import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.HoeItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -31,6 +28,7 @@ import net.minecraft.world.level.block.TrapDoorBlock;
 import net.minecraft.world.level.block.state.BlockState;
 
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.RightClickMounts;
 import org.maiwithu.maicraft.behavior.inventory.containers.RareLootNotice;
 import org.maiwithu.maicraft.behavior.permission.ContainerWhose;
 import org.maiwithu.maicraft.behavior.permission.OthersThingsNotice;
@@ -80,9 +78,11 @@ final class LiveOthersThings implements UseSeams.OthersThings {
         if (level == null) return true;
         if (target.isEntity()) {
             Entity entity = level.getEntity(target.entityId());
-            // 空手骑上去、空手找村民交易不改动它；手里拿着东西对生物用（剪毛、挤奶、喂、染、拴、命名）都算。
-            return heldItem != null || entity == null || !(entity instanceof Boat || entity instanceof AbstractMinecart
-                    || entity instanceof AbstractHorse || entity instanceof AbstractVillager);
+            // 空手骑上载具（认法见 RightClickMounts）、空手找村民交易不改动它；
+            // 村民是交易不是骑乘，所以这里在载具之外多认一个村民。
+            // 手里拿着东西对生物用（剪毛、挤奶、喂、染、拴、命名）都算。
+            return heldItem != null || entity == null
+                    || !(RightClickMounts.mountsWithEmptyHand(entity) || entity instanceof AbstractVillager);
         }
         BlockState state = level.getBlockState(target.cell());
         Block block = state.getBlock();

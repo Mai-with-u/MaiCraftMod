@@ -18,9 +18,6 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.animal.horse.AbstractHorse;
-import net.minecraft.world.entity.vehicle.AbstractMinecart;
-import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -42,6 +39,7 @@ import net.minecraft.world.phys.Vec3;
 
 import org.maiwithu.maicraft.behavior.approach.ApproachTarget;
 import org.maiwithu.maicraft.behavior.interaction.ItemUseAim;
+import org.maiwithu.maicraft.behavior.interaction.RightClickMounts;
 import org.maiwithu.maicraft.behavior.inventory.spi.NetworkStorage;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.game.player.StackKey;
@@ -291,7 +289,7 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
     @Override public Optional<ApproachTarget> approachTarget(ResolvedTarget target, boolean writesSign, boolean sneak) {
         if (target.isEntity()) {
             return entityById(target.entityId()).map(entity ->
-                    rideableVehicle(entity) ? ApproachTarget.ofVehicle(entity.getBoundingBox())
+                    RightClickMounts.mountsWithEmptyHand(entity) ? ApproachTarget.ofVehicle(entity.getBoundingBox())
                             : ApproachTarget.ofEntity(entity.getBoundingBox()));
         }
         if (!writesSign) {
@@ -336,12 +334,6 @@ final class LiveUseWorld implements UseSeams.ReadsWorld {
         ClientLevel level = level();
         Entity entity = level == null ? null : level.getEntity(entityId);
         return entity == null || entity.isRemoved() ? Optional.empty() : Optional.of(entity);
-    }
-
-    // 原版空手右键就骑上去的载具：船、矿车、马这一族（骆驼也是马的分支）。与"别人的东西"里
-    // 「空手骑上船、矿车、马不改动世界」认的是同一批；村民是交易不是骑乘，不在这批里。
-    private static boolean rideableVehicle(Entity entity) {
-        return entity instanceof Boat || entity instanceof AbstractMinecart || entity instanceof AbstractHorse;
     }
 
     private ClientLevel level() {
