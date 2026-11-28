@@ -16,14 +16,12 @@ import net.minecraft.world.item.crafting.ShapedRecipe;
 
 import org.maiwithu.maicraft.behavior.menu.MenuContent;
 import org.maiwithu.maicraft.behavior.menu.MenuOpening;
-import org.maiwithu.maicraft.behavior.menu.OpenedMenu;
 import org.maiwithu.maicraft.behavior.menu.SlotSnapshot;
 import org.maiwithu.maicraft.compat.ae2.Ae2Compat;
+import org.maiwithu.maicraft.compat.ae2.Ae2MenuWork;
 import org.maiwithu.maicraft.game.player.PlayerContext;
 import org.maiwithu.maicraft.kernel.result.Problem;
-import org.maiwithu.maicraft.kernel.task.Action;
 import org.maiwithu.maicraft.kernel.task.ActionStatus;
-import org.maiwithu.maicraft.kernel.task.Interruptibility;
 import org.maiwithu.maicraft.kernel.task.TickContext;
 
 /**
@@ -34,17 +32,19 @@ import org.maiwithu.maicraft.kernel.task.TickContext;
  * 否则发 CRAFT_ITEM 拿单次成品到光标 → 点背包空位/可堆叠格放下并核对入包 →
  * 完工调用 clearCraftingGrid() 退网（放不下再 clearToPlayerInventory() 退包）→ 关窗。
  */
-final class CraftingTermAction implements Action {
+final class CraftingTermAction extends Ae2MenuWork {
 
     /** 仅当剩余需求至少满一整组时才使用 CRAFT_SHIFT，防止要 1~2 件却把网内材料搓成 64 件。F 游戏事实。 */
     static final int SHIFT_CRAFT_THRESHOLD = 64;
 
-    private enum Stage {
-        OPEN, FILL_GRID, WAIT_RESULT, TAKE_RESULT, WAIT_TAKEN,
-        PLACE_CURSOR, WAIT_PLACED, CLEAR_GRID, WAIT_CLEAR, CLOSE, DONE
+    /** 完工清格的等待上限（刻），比同步等待短：清格退料只是收尾。 */
+    private static final int CLEAR_WAIT_TICKS = 15;
+
+    private enum Step {
+        ENTER, FILL_GRID, WAIT_RESULT, TAKE_RESULT, WAIT_TAKEN,
+        PLACE_CURSOR, WAIT_PLACED, CLEAR_GRID, WAIT_CLEAR
     }
 
-    private final MenuOpening opening;
     private final String recipeId;
     private final List<ItemStack> templates9;
     private final String wantedItemId;
@@ -52,22 +52,21 @@ final class CraftingTermAction implements Action {
     private final Ae2Compat compat;
     private final Ae2MachineReads reads;
 
-    private Stage stage = Stage.OPEN;
-    private OpenedMenu menu;
-    private Action closing;
+    private Step step = Step.ENTER;
     private int resultSlotIndex = -1;
     private boolean lastUsedShift;
     private int carriedBefore;
     private int cursorCountBefore;
     private int crafted;
-    private int waited;
+    private int clearWaited;
     private boolean clearedToNetwork;
     private boolean clearedToPlayer;
-    private Problem problem;
+    /** 走清格收场时带上的结局：做成时为空，做不下去时是原因。 */
+    private Problem closingProblem;
 
     CraftingTermAction(MenuOpening opening, String recipeId, List<ItemStack> templates9,
             String wantedItemId, int wantedCount, Ae2Compat compat, Ae2MachineReads reads) {
-        this.opening = Objects.requireNonNull(opening, "opening");
+        super(opening, "合成终端界面没打开");
         this.recipeId = recipeId;
         this.templates9 = List.copyOf(Objects.requireNonNull(templates9, "templates9"));
         this.wantedItemId = Objects.requireNonNull(wantedItemId, "wantedItemId");
@@ -104,10 +103,10 @@ final class CraftingTermAction implements Action {
         return items.length == 0 ? ItemStack.EMPTY : items[0].copyWithCount(1);
     }
 
-    @Override public ActionStatus tick(TickContext tick) {
+    @Override protected ActionStatus work(TickContext tick) {
         PlayerContext player = tick.player();
-        return switch (stage) {
-            case OPEN -> open(tick, player);
+        return switch (step) {
+            case ENTER -> enter(player);
             case FILL_GRID -> fillGrid();
             case WAIT_RESULT -> waitResult();
             case TAKE_RESULT -> takeResult(player);
@@ -116,28 +115,20 @@ final class CraftingTermAction implements Action {
             case WAIT_PLACED -> waitPlaced();
             case CLEAR_GRID -> clearGrid();
             case WAIT_CLEAR -> waitClear();
-            case CLOSE -> closeMenu(tick);
-            case DONE -> problem == null ? ActionStatus.done() : ActionStatus.failed(problem);
         };
     }
 
-    private ActionStatus open(TickContext tick, PlayerContext player) {
-        ActionStatus status = opening.tick(tick);
-        if (status instanceof ActionStatus.Failed failed) return finish(failed.problem());
-        if (!(status instanceof ActionStatus.Done)) return status;
-        menu = opening.opened().orElse(null);
-        if (menu == null) return finish(Problem.of(Problem.Kind.TARGET_GONE, "合成终端界面没打开"));
-        // 按语义定位 3×3 合成格与产物格，免疫有线/无线槽序差异及网络工具箱动态 9 槽偏移。
+    // 界面开好先认槽位：按语义定位 3×3 合成格与产物格，免疫有线/无线槽序差异及网络工具箱动态 9 槽偏移。
+    private ActionStatus enter(PlayerContext player) {
         List<Integer> gridSlots = compat.menuSlotsOf("CRAFTING_GRID");
         List<Integer> resultSlots = compat.menuSlotsOf("CRAFTING_RESULT");
         if (gridSlots.size() < 9 || resultSlots.isEmpty()) {
-            return beginClose(Problem.of(Problem.Kind.UNSUPPORTED,
+            return closeWith(Problem.of(Problem.Kind.UNSUPPORTED,
                     "当前打开的界面缺少 3×3 合成格（CRAFTING_GRID）或产物格（CRAFTING_RESULT）"));
         }
         resultSlotIndex = resultSlots.getFirst();
         carriedBefore = countInPlayer(player);
-        waited = 0;
-        stage = Stage.FILL_GRID;
+        step = Step.FILL_GRID;
         return ActionStatus.progressed();
     }
 
@@ -145,28 +136,28 @@ final class CraftingTermAction implements Action {
     private ActionStatus fillGrid() {
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+            if (!syncWaitElapsed()) return ActionStatus.running();
             return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "合成终端界面同步超时"));
         }
         if (!view.get().linked()) {
-            return beginClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "合成终端未连上 ME 网络"));
+            return closeWith(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE, "合成终端未连上 ME 网络"));
         }
         if (!reads.sendFillCraftingGrid(recipeId, templates9)) {
             return beginClearThenClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法发送合成终端填料包"));
         }
-        waited = 0;
-        stage = Stage.WAIT_RESULT;
+        resetWait();
+        step = Step.WAIT_RESULT;
         return ActionStatus.progressed();
     }
 
     private ActionStatus waitResult() {
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isPresent() && wantedItemId.equals(view.get().resultItemId()) && view.get().resultCount() > 0) {
-            waited = 0;
-            stage = Stage.TAKE_RESULT;
+            resetWait();
+            step = Step.TAKE_RESULT;
             return ActionStatus.progressed();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+        if (!syncWaitElapsed()) return ActionStatus.running();
         return beginClearThenClose(Problem.of(Problem.Kind.NEED_ITEM,
                 "合成终端 3×3 合成格未能凑齐 " + wantedItemId + " 的材料（网络与背包均缺料）"));
     }
@@ -178,19 +169,19 @@ final class CraftingTermAction implements Action {
         if (!reads.sendCraftResult(resultSlotIndex, lastUsedShift)) {
             return beginClearThenClose(Problem.of(Problem.Kind.REFUSED_BY_GAME, "无法发送合成终端取产物包"));
         }
-        waited = 0;
-        stage = Stage.WAIT_TAKEN;
+        resetWait();
+        step = Step.WAIT_TAKEN;
         return ActionStatus.progressed();
     }
 
     // CRAFT_SHIFT 直接进入玩家背包；CRAFT_ITEM 成品落在鼠标光标，需监测光标后点背包槽放进背包。
     private ActionStatus waitTaken(PlayerContext player) {
         if (!lastUsedShift) {
-            SlotSnapshot cursor = menu.cursor();
+            SlotSnapshot cursor = menu().cursor();
             if (!cursor.isEmpty() && wantedItemId.equals(cursor.key())) {
                 cursorCountBefore = cursor.count();
-                waited = 0;
-                stage = Stage.PLACE_CURSOR;
+                resetWait();
+                step = Step.PLACE_CURSOR;
                 return ActionStatus.progressed();
             }
         }
@@ -199,18 +190,18 @@ final class CraftingTermAction implements Action {
             crafted += (now - carriedBefore);
             return afterBatchPlaced();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+        if (!syncWaitElapsed()) return ActionStatus.running();
         return beginClearThenClose(crafted > 0 ? null
                 : Problem.of(Problem.Kind.STUCK, "合成终端已发取产物操作，但光标和背包均未收到 " + wantedItemId));
     }
 
     // 将光标上由 CRAFT_ITEM 拿到的成品点进玩家背包（优先同物未满堆叠格，其次空格），防止关窗丢在地上。
     private ActionStatus placeCursor() {
-        SlotSnapshot cursor = menu.cursor();
+        SlotSnapshot cursor = menu().cursor();
         if (cursor.isEmpty()) return afterBatchPlaced();
-        Optional<MenuContent.Reading> reading = menu.reading();
+        Optional<MenuContent.Reading> reading = menu().reading();
         if (reading.isEmpty()) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+            if (!syncWaitElapsed()) return ActionStatus.running();
             return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "读取玩家背包槽位超时"));
         }
         int destSlot = findDestinationPlayerSlot(reading.get(), cursor);
@@ -218,31 +209,31 @@ final class CraftingTermAction implements Action {
             return beginClearThenClose(Problem.of(Problem.Kind.NOT_POSSIBLE_HERE,
                     "背包已满，无法把合成出的 " + wantedItemId + " 从光标放进背包"));
         }
-        if (!menu.click(destSlot, 0)) {
-            if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+        if (!menu().click(destSlot, 0)) {
+            if (!syncWaitElapsed()) return ActionStatus.running();
             return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "无法点击背包槽放下光标上的合成成品"));
         }
         cursorCountBefore = cursor.count();
-        waited = 0;
-        stage = Stage.WAIT_PLACED;
+        resetWait();
+        step = Step.WAIT_PLACED;
         return ActionStatus.progressed();
     }
 
     private ActionStatus waitPlaced() {
-        SlotSnapshot cursor = menu.cursor();
+        SlotSnapshot cursor = menu().cursor();
         int nowCount = cursor.isEmpty() ? 0 : cursor.count();
         if (nowCount < cursorCountBefore) {
             crafted += (cursorCountBefore - nowCount);
             if (nowCount > 0) {
                 // 原堆叠格已满仍有余量留在光标：再找下一个空格继续放完。
                 cursorCountBefore = nowCount;
-                waited = 0;
-                stage = Stage.PLACE_CURSOR;
+                resetWait();
+                step = Step.PLACE_CURSOR;
                 return ActionStatus.progressed();
             }
             return afterBatchPlaced();
         }
-        if (++waited <= Ae2MenuActionSupport.SYNC_WAIT_TICKS) return ActionStatus.running();
+        if (!syncWaitElapsed()) return ActionStatus.running();
         return beginClearThenClose(Problem.of(Problem.Kind.STUCK, "点击背包槽后光标上的成品一直未放下"));
     }
 
@@ -250,11 +241,11 @@ final class CraftingTermAction implements Action {
         if (crafted >= wantedCount) return beginClearThenClose(null);
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isPresent() && wantedItemId.equals(view.get().resultItemId()) && view.get().resultCount() > 0) {
-            stage = Stage.TAKE_RESULT;
+            step = Step.TAKE_RESULT;
         } else {
-            stage = Stage.FILL_GRID;
+            step = Step.FILL_GRID;
         }
-        waited = 0;
+        resetWait();
         return ActionStatus.progressed();
     }
 
@@ -278,63 +269,42 @@ final class CraftingTermAction implements Action {
     private ActionStatus clearGrid() {
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isEmpty() || !view.get().gridOccupied()) {
-            stage = Stage.CLOSE;
-            return ActionStatus.progressed();
+            return closeWith(closingProblem);
         }
         if (!clearedToNetwork) {
             clearedToNetwork = true;
             reads.sendClearCraftingGrid(false);
-            waited = 0;
-            stage = Stage.WAIT_CLEAR;
+            clearWaited = 0;
+            step = Step.WAIT_CLEAR;
             return ActionStatus.progressed();
         }
         if (!clearedToPlayer) {
             clearedToPlayer = true;
             reads.sendClearCraftingGrid(true);
-            waited = 0;
-            stage = Stage.WAIT_CLEAR;
+            clearWaited = 0;
+            step = Step.WAIT_CLEAR;
             return ActionStatus.progressed();
         }
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
+        return closeWith(closingProblem);
     }
 
     private ActionStatus waitClear() {
         Optional<Ae2MachineReads.CraftingTermMenuView> view = reads.openCraftingTermMenu();
         if (view.isEmpty() || !view.get().gridOccupied()) {
-            stage = Stage.CLOSE;
-            return ActionStatus.progressed();
+            return closeWith(closingProblem);
         }
-        if (++waited <= 15) return ActionStatus.running();
-        stage = clearedToPlayer ? Stage.CLOSE : Stage.CLEAR_GRID;
+        if (++clearWaited <= CLEAR_WAIT_TICKS) return ActionStatus.running();
+        if (clearedToPlayer) return closeWith(closingProblem);
+        step = Step.CLEAR_GRID;
         return ActionStatus.progressed();
     }
 
-    private ActionStatus closeMenu(TickContext tick) {
-        if (closing == null) closing = menu.closing();
-        ActionStatus status = closing.tick(tick);
-        if (status instanceof ActionStatus.Running) return status;
-        closing = null;
-        return finish(problem);
-    }
-
+    // 收场前先清合成格：结局记下，清完再按结局关窗收尾。
     private ActionStatus beginClearThenClose(Problem cause) {
-        problem = cause;
-        stage = Stage.CLEAR_GRID;
-        waited = 0;
+        closingProblem = cause;
+        step = Step.CLEAR_GRID;
+        clearWaited = 0;
         return ActionStatus.progressed();
-    }
-
-    private ActionStatus beginClose(Problem cause) {
-        problem = cause;
-        stage = Stage.CLOSE;
-        return ActionStatus.progressed();
-    }
-
-    private ActionStatus finish(Problem cause) {
-        problem = cause;
-        stage = Stage.DONE;
-        return cause == null ? ActionStatus.done() : ActionStatus.failed(cause);
     }
 
     private int countInPlayer(PlayerContext player) {
@@ -349,7 +319,7 @@ final class CraftingTermAction implements Action {
             }
             return total;
         }
-        return menu == null ? 0 : menu.reading().map(r -> {
+        return menu().reading().map(r -> {
             int total = 0;
             for (SlotSnapshot snap : r.playerSnapshots()) {
                 if (!snap.isEmpty() && wantedItemId.equals(snap.key())) total += snap.count();
@@ -358,20 +328,7 @@ final class CraftingTermAction implements Action {
         }).orElse(0);
     }
 
-    @Override public void pause() {
-        if (closing != null) closing.pause();
-        else if (menu == null) opening.pause();
-    }
-
-    @Override public void close() {
-        if (closing != null) closing.close();
-        if (menu != null && stage != Stage.DONE) menu.abandon();
-        else if (menu == null) opening.close();
-    }
-
-    @Override public Interruptibility interruptibility() { return Interruptibility.WORKING; }
-
-    @Override public String describe() {
+    @Override protected String doing() {
         return "在合成终端 3×3 合成格手搓 " + wantedItemId + "（" + crafted + "/" + wantedCount + "）";
     }
 }
