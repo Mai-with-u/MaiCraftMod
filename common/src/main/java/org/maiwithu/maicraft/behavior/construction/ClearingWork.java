@@ -46,6 +46,8 @@ final class ClearingWork extends ConstructionWork {
 
     /** 同一格"走不到跟前"最多换几次站位重新走近。 */
     private static final int MAX_RESPOTS = 2;
+    /** 清障单次走近透传给靠近动作的内部总预算（提前 20 刻于外层 400 刻兜底自主收场并落盘不可达记忆）。 */
+    private static final long APPROACH_WALK_BUDGET_TICKS = Math.max(1L, BringsPlayerClose.WALK_PATIENCE_TICKS - 20L);
     /** 挖掉下方方块后，若上方压着重力方块，最多等几刻确认它有没有塌下来重占原格（覆盖实体化调度+1格自由落体+同步）。 */
     private static final int GRAVITY_SETTLE_TICKS = 12;
     /** 同一格因为上方重力方块连环塌落最多连续重清几次，防止无限砂塔死循环。 */
@@ -97,7 +99,7 @@ final class ClearingWork extends ConstructionWork {
             // （挖掘射线够不着，一格吃满施工的停滞闸）。
             if (interrupted) {
                 interrupted = false;
-                begin(services.close().toward(digTarget(), permissions),
+                begin(services.close().toward(digTarget(), permissions, at -> false, APPROACH_WALK_BUDGET_TICKS),
                         "走回 " + cell.pos().toShortString() + " 跟前");
                 return ActionStatus.progressed();
             }
@@ -140,7 +142,8 @@ final class ClearingWork extends ConstructionWork {
                 continue;
             }
             step = Step.APPROACH;
-            begin(services.close().toward(digTarget(), permissions), "走到 " + pos.toShortString() + " 跟前");
+            begin(services.close().toward(digTarget(), permissions, at -> false, APPROACH_WALK_BUDGET_TICKS),
+                    "走到 " + pos.toShortString() + " 跟前");
             return ActionStatus.progressed();
         }
         cell = null;
@@ -395,7 +398,7 @@ final class ClearingWork extends ConstructionWork {
             // 等人站高了一层、旁边清出了能走的路再回头。结果里只转述结论句，经过已经记进试过的办法。
             if (respots < MAX_RESPOTS) {
                 respots++;
-                begin(services.close().toward(digTarget(), permissions),
+                begin(services.close().toward(digTarget(), permissions, at -> false, APPROACH_WALK_BUDGET_TICKS),
                         "换个站位再走 " + cell.pos().toShortString() + " 跟前");
                 return ActionStatus.progressed();
             }

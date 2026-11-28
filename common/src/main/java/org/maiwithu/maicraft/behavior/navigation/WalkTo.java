@@ -24,4 +24,12 @@ public interface WalkTo {
      * @param permit  这次走到被允许动多少地形
      */
     WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit);
+
+    /**
+     * 开始一次走到，并指定半截路无进展的止损上限（刻）。
+     * 局部靠近站位时可传入更紧凑的上限，避免与长途出行共享同一宽松耐心；默认实现沿用常规长途容忍。
+     */
+    default WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit, int partialRouteLimitTicks) {
+        return start(target, permit);
+    }
 }

@@ -188,12 +188,16 @@ final class PlacementOrder {
     }
 
     /**
-     * 计算单次走近站位的超时预算（刻）：目标格距当前脚位不足 3 格属于近距避让微调，
-     * 缩短至 80 刻以快速切换候选面或延后当前格；远距走近保持常规耐心（400 刻）。
+     * 计算单次走近站位的超时预算（刻）：仅同层或上下 1 格且水平距离不足 3 格的近距避让微调缩短至 80 刻，
+     * 以便快速切换候选面或延后当前格；高出 2 格以上的墙体/屋顶格与远距走近保持常规耐心（400 刻），
+     * 避免外层 80 刻提前强杀切断靠近动作内部的半截路止损与不可达记忆。
      */
     static long approachPatienceTicks(BlockPos feet, BlockPos target) {
         if (feet == null || target == null) return BringsPlayerClose.WALK_PATIENCE_TICKS;
-        return feet.distSqr(target) < SHORT_APPROACH_DISTANCE * SHORT_APPROACH_DISTANCE
+        if (Math.abs(target.getY() - feet.getY()) > 1) return BringsPlayerClose.WALK_PATIENCE_TICKS;
+        long dx = target.getX() - feet.getX();
+        long dz = target.getZ() - feet.getZ();
+        return dx * dx + dz * dz < SHORT_APPROACH_DISTANCE * SHORT_APPROACH_DISTANCE
                 ? SHORT_APPROACH_PATIENCE_TICKS : BringsPlayerClose.WALK_PATIENCE_TICKS;
     }
 }

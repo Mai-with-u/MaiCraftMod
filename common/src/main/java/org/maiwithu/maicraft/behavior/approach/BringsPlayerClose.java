@@ -33,6 +33,16 @@ public interface BringsPlayerClose {
     }
 
     /**
+     * 同上，并由调用方按需指定本次靠近内部走向站位的总耐心上限（刻）：
+     * 外层任务对单次走近挂了超时（如施工砌筑/清障）时传入略短于外层上限的预算，
+     * 让靠近动作在外层强杀前自主收场并写入 8 格邻域不可达记忆；
+     * 传 {@link Long#MAX_VALUE} 或不指定预算时，正常完好整路不设总走步硬上限。
+     */
+    default Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid, long walkBudgetTicks) {
+        return toward(target, permissions, avoid);
+    }
+
+    /**
      * 同上，靠近过程里要跟着任务结果走的事实（要挖的方块在脚下、旁边站不了就地挖，下面是什么）
      * 记进这份任务记账口。默认实现收不到这些事实，只有生产实现记。
      */

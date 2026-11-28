@@ -76,21 +76,26 @@ public final class LiveApproaches implements BringsPlayerClose {
 
     @Override
     public Action toward(ApproachTarget target, Permissions permissions) {
-        return toward(target, permissions, at -> false);
+        return toward(target, permissions, at -> false, null, Long.MAX_VALUE);
     }
 
     @Override
     public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid) {
-        return toward(target, permissions, avoid, null);
+        return toward(target, permissions, avoid, null, Long.MAX_VALUE);
+    }
+
+    @Override
+    public Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid, long walkBudgetTicks) {
+        return toward(target, permissions, avoid, null, walkBudgetTicks);
     }
 
     @Override
     public Action toward(ApproachTarget target, Permissions permissions, TaskRecords records) {
-        return toward(target, permissions, at -> false, records);
+        return toward(target, permissions, at -> false, records, Long.MAX_VALUE);
     }
 
     private Action toward(ApproachTarget target, Permissions permissions, ProtectedCells avoid,
-            TaskRecords records) {
+            TaskRecords records, long walkBudgetTicks) {
         // 每个靠近动作各走各的一趟：路上能动多少地形按这次任务的许可折算成地形许可，
         // 靠近动作与站位补救都拿同一份走到入口与许可自己去上路，暂停与收尾互不牵连。
         // 调用方不许踩的格（放方块时的目标格）并进受保护格判断，能不能挖某一格由走到实现方把关。
@@ -99,7 +104,8 @@ public final class LiveApproaches implements BringsPlayerClose {
         StandOpener opener = new LiveStandOpener(context, permission, permissions, reach, walks, permit, avoid, tools,
                 othersNotice);
         return new Approach(target, reach, world, LiveApproaches::straightCost,
-                avoid, walks, new LiveStraightWalks(context), permit, opener, permissions, records, unreachable);
+                avoid, walks, new LiveStraightWalks(context), permit, opener, permissions, records, unreachable,
+                walkBudgetTicks);
     }
 
     /** 当刻的距离数值：交互距离读角色属性，眼高按当时姿态取，到达余量读握手状态。 */

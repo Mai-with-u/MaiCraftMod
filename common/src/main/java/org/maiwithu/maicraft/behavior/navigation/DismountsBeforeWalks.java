@@ -57,6 +57,11 @@ public final class DismountsBeforeWalks implements WalkTo {
         return new Run(walks.start(target, permit));
     }
 
+    @Override
+    public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit, int partialRouteLimitTicks) {
+        return new Run(walks.start(target, permit, partialRouteLimitTicks));
+    }
+
     /** 包着走到运行的先下车那一段：乘客位上先下车，下来了原样推进里面的运行。 */
     private final class Run implements WalkRun {
 

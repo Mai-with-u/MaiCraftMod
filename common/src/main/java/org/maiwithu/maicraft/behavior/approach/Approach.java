@@ -46,6 +46,14 @@ public final class Approach implements Action {
 
     private static final Logger LOG = LoggerFactory.getLogger(Approach.class);
 
+    /**
+     * 靠近局部站位时的半截路止损上限（8 秒）：与执行段单步自愈错开，又显著短于长途出行的 30 秒容忍，
+     * 使高处/隔断站位的单趟或合并重算都能快速收场。
+     */
+    static final int LOCAL_PARTIAL_ROUTE_LIMIT_TICKS = 160;
+    /** 构造方未显式传入总走步上限时的默认值：完好整路不设硬时长限制，避免误杀中远距找床、翻箱与采矿。 */
+    static final long UNBOUNDED_WALK_BUDGET = Long.MAX_VALUE;
+
     /** 动作内部的推进位置：先确认原地，再逐个候选走过去（三格内平地先试直走），最后才补救。 */
     private enum Stage { CHECK_HERE, NEXT_SPOT, SHORT_WALK, WALKING, OPENING }
 
@@ -64,6 +72,8 @@ public final class Approach implements Action {
     private final TaskRecords records;
     /** 记得的"从这里到不了"：跨越一次次靠近，同一个目标运行里有效。 */
     private final UnreachableFromHere unreachable;
+    /** 调用方按需指定的走向站位总预算（刻）；默认 {@link #UNBOUNDED_WALK_BUDGET} 不设总时长硬上限。 */
+    private final long walkBudgetTicks;
     /** 这次靠近从哪出发：记"从这里到不了"时按它算同一片起点。 */
     private BlockPos start;
     /** 正在走的是剩下几个站位合起来的那一趟；没有为 0。 */
@@ -77,6 +87,8 @@ public final class Approach implements Action {
     private Action stroll;
     /** 已叫这趟安全停、还在等落地：落地站稳前原地等着，不把停稳当作到了，也不重新上路。 */
     private boolean holdingStop;
+    /** 本次靠近已累计在走向站位上推进了多少刻（仅计非收尾的走步推进刻，暂停不计）。 */
+    private int walkTicks;
 
     private Stage stage = Stage.CHECK_HERE;
     private final Deque<StandSpot> pending = new ArrayDeque<>();
@@ -104,6 +116,15 @@ public final class Approach implements Action {
                     WalkCost walking, ProtectedCells guarded, WalkTo walks, StraightWalks strolls,
                     TerrainPermit permit, StandOpener opener, Permissions permissions, TaskRecords records,
                     UnreachableFromHere unreachable) {
+        this(target, reach, world, walking, guarded, walks, strolls, permit, opener, permissions, records,
+                unreachable, UNBOUNDED_WALK_BUDGET);
+    }
+
+    /** 带可选走步总预算的构造器：挂了外层超时（如施工）的调用方传入略短于外层的预算，让靠近提前收场落缓存。 */
+    public Approach(ApproachTarget target, ReachRules reach, ApproachWorldView world,
+                    WalkCost walking, ProtectedCells guarded, WalkTo walks, StraightWalks strolls,
+                    TerrainPermit permit, StandOpener opener, Permissions permissions, TaskRecords records,
+                    UnreachableFromHere unreachable, long walkBudgetTicks) {
         this.target = target;
         this.reach = reach;
         this.world = world;
@@ -116,6 +137,7 @@ public final class Approach implements Action {
         this.permissions = permissions;
         this.records = records;
         this.unreachable = unreachable;
+        this.walkBudgetTicks = walkBudgetTicks <= 0 ? UNBOUNDED_WALK_BUDGET : walkBudgetTicks;
     }
 
     @Override public ActionStatus tick(TickContext context) {
@@ -271,7 +293,8 @@ public final class Approach implements Action {
      */
     private void startWalk(BlockPos feet, boolean wetSpot) {
         closeWalk();
-        walk = walks.start(wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet), permit);
+        walk = walks.start(wetSpot ? GoalCompiler.interact(feet) : GoalCompiler.standOn(feet),
+                permit, LOCAL_PARTIAL_ROUTE_LIMIT_TICKS);
     }
 
     // 换下一趟前先把上一趟收掉、交出身体。
@@ -290,6 +313,9 @@ public final class Approach implements Action {
             walk.resume();
             return ActionStatus.running();
         }
+        if (!holdingStop && walkBudgetTicks < UNBOUNDED_WALK_BUDGET && ++walkTicks > walkBudgetTicks) {
+            return walkBudgetExhausted();
+        }
         ActionStatus status = walk.tick(context);
         // 收尾途中落地停稳了：原地等外层停下，不把停稳当作到了，也不重新上路。
         if (holdingStop && walk.report().state() == WalkReport.State.STOPPED) return ActionStatus.running();
@@ -306,8 +332,22 @@ public final class Approach implements Action {
         };
     }
 
-    // 一趟没走通：合起来的那一趟也不行就记下从这里到不了、收场；单个站位从这里到不了且还剩站位，
-    // 把剩下的合起来再算一次；别的原因照常换下一个站位。
+    // 多趟走向站位累计耗满 19 秒仍走不到：抢在外层 400 刻强杀前自己收场并写入 8 格邻域不可达记忆，
+    // 防止外层直接 close() 切断不可达缓存导致施工在邻格反复重试。
+    private ActionStatus walkBudgetExhausted() {
+        closeWalk();
+        if (merged > 0) {
+            recordTried("剩下 " + merged + " 个站位合起来再算", "走近耗时过久仍未到达");
+        } else if (current != null) {
+            recordTried(current.feet(), "走近耗时过久仍未到达");
+            dropUnclimbableRest(current.feet());
+        }
+        return unreachableFromHere();
+    }
+
+    // 一趟没走通：合起来的那一趟也不行就记下从这里到不了、收场；单个高处站位走不通时先批删其余高处候选，
+    // 避免再把一批爬不上去的高处站位合并白算一趟；若属于从这里到不了且还剩同层或更低候选，合起来再算一次；
+    // 别的原因照常换下一个站位。
     private ActionStatus walkFailed(Problem problem) {
         boolean noRouteFromHere = walk.report().noRouteFromHere();
         if (merged > 0) {
@@ -315,8 +355,8 @@ public final class Approach implements Action {
             return unreachableFromHere();
         }
         recordTried(current.feet(), "这条路走不通：" + problem.message());
-        if (noRouteFromHere && !mergeTried && !pending.isEmpty()) return mergeRest();
         dropUnclimbableRest(current.feet());
+        if (noRouteFromHere && !mergeTried && !pending.isEmpty()) return mergeRest();
         stage = Stage.NEXT_SPOT;
         return ActionStatus.progressed();
     }
@@ -334,7 +374,7 @@ public final class Approach implements Action {
         current = null;
         LOG.debug("[maicraft-approach] 站位从这里到不了，剩下 {} 个合起来再算一次，靠近{}", merged, describeTarget());
         closeWalk();
-        walk = walks.start(GoalCompiler.anyStance(dry, wet), permit);
+        walk = walks.start(GoalCompiler.anyStance(dry, wet), permit, LOCAL_PARTIAL_ROUTE_LIMIT_TICKS);
         return ActionStatus.progressed();
     }
 

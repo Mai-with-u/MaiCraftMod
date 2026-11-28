@@ -29,7 +29,11 @@ final class StubMoves implements WalkTo {
     final List<BlockPos> begun = new ArrayList<>();
     /** 每趟上路时编译出的导航目标，测试用它核对湿脚位与干站位的差别。 */
     final List<GoalCompiler.Compiled> goals = new ArrayList<>();
+    /** 每趟上路时传入的局部半截路止损刻数，测试核对靠近传短上限而不砍长途全局上限。 */
+    final List<Integer> partialLimits = new ArrayList<>();
     final Deque<ActionStatus> script = new ArrayDeque<>();
+    /** 走完脚本后若一直返回 Running（演走不完触发靠近内部总耐心收场），设此项为 true。 */
+    boolean keepRunning;
     /** 收掉（close）过的运行次数。 */
     int closes;
     int pauses;
@@ -55,6 +59,11 @@ final class StubMoves implements WalkTo {
         goals.add(target);
         heading = target.goal().center();
         return new StubRun();
+    }
+
+    @Override public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit, int partialRouteLimitTicks) {
+        partialLimits.add(partialRouteLimitTicks);
+        return start(target, permit);
     }
 
     /** 测试里把角色挪回原点用。 */
@@ -109,7 +118,8 @@ final class StubMoves implements WalkTo {
                 stopTicks++;
                 return landed() ? ActionStatus.done() : ActionStatus.running();
             }
-            ActionStatus status = script.isEmpty() ? ActionStatus.done() : script.poll();
+            ActionStatus status = script.isEmpty() ? (keepRunning ? ActionStatus.running() : ActionStatus.done())
+                    : script.poll();
             if (status instanceof ActionStatus.Failed failure) failed = failure;
             if (status instanceof ActionStatus.Done && heading != null) {
                 world.feet = heading;

@@ -227,7 +227,12 @@ public final class BaritoneInternals implements WalkTo, ReadsPlacedBlocks {
 
     @Override
     public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit) {
-        var run = new BaritoneWalkRun(this, target, permit);
+        return start(target, permit, PartialRouteWatch.LIMIT_TICKS);
+    }
+
+    @Override
+    public WalkRun start(GoalCompiler.Compiled target, TerrainPermit permit, int partialRouteLimitTicks) {
+        var run = new BaritoneWalkRun(this, target, permit, partialRouteLimitTicks);
         // 上一次运行还在路上：新请求排队，等旧运行交出身体才上路；排队者被更新的请求顶掉时如实结算。
         if (queued != null) queued.abandon();
         queued = run;

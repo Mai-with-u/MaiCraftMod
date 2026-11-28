@@ -102,8 +102,8 @@ final class BaritoneWalkRun implements WalkRun {
     private final MovingObstacleWait obstacleWait = new MovingObstacleWait();
     /** 刚从停稳里续走：下一刻驱动时进展计时重新起算、按原目标重新算路。 */
     private boolean resumed;
-    /** 只有半截路时看人有没有离目标更近：半分钟没更近就交还上层换个去处。 */
-    private final PartialRouteWatch partialRoute = new PartialRouteWatch();
+    /** 只有半截路时看人有没有离目标更近：持续没更近就交还上层收场或换个去处（上限随长途/局部靠近场景定）。 */
+    private final PartialRouteWatch partialRoute;
     /** 水下呼吸预算是在数还是让开：情形变了记一行调试日志。 */
     private final UnderwaterBudgetNotes underwaterNotes = new UnderwaterBudgetNotes();
     /** 刚列了新障碍、还没能安全撤路线：落地站稳后重算一次绕行。 */
@@ -121,11 +121,16 @@ final class BaritoneWalkRun implements WalkRun {
     private static final long IDLE_BEFORE_YIELD_TICKS = 2;
 
     BaritoneWalkRun(BaritoneInternals owner, GoalCompiler.Compiled target, TerrainPermit permit) {
+        this(owner, target, permit, PartialRouteWatch.LIMIT_TICKS);
+    }
+
+    BaritoneWalkRun(BaritoneInternals owner, GoalCompiler.Compiled target, TerrainPermit permit, int partialRouteLimitTicks) {
         this.owner = owner;
         this.clicks = new EngineClicks(owner.digTools());
         this.target = target;
         this.permit = permit;
         this.goal = target.goal();
+        this.partialRoute = new PartialRouteWatch(partialRouteLimitTicks);
         // 引擎目标带着现场读格：要求站实的目标搜索时就要干地终点，引擎别在水面上收线。
         this.engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         this.progress = new WalkRunProgress(goal, owner.suicideWayOut());
@@ -135,43 +140,23 @@ final class BaritoneWalkRun implements WalkRun {
         this.staging = new HotbarStaging(owner, hands, new HotbarStaging.Run() {
             @Override public boolean done() { return progress.done(); }
             @Override public void fail(Problem problem, BlockPos feet) { progress.fail(problem, feet); }
-            @Override public void standingStill(long clientTick) { displacement.restart(clientTick); }
+            @Override public void standingStill(long clientTick) { holdProgress(clientTick); }
         });
     }
 
-    NavGoal goal() {
-        return goal;
-    }
-
+    NavGoal goal() { return goal; }
     /** 此刻生效的地形许可：卡坑脱困中是临时升过的那一档。 */
-    TerrainPermit permit() {
-        return escape.effective();
-    }
-
+    TerrainPermit permit() { return escape.effective(); }
     /** 这段路的卡坑脱困：每次的经过、挖开的别人的方块、此刻放没放开别人的普通方块。 */
-    TrapEscape escape() {
-        return escape;
-    }
-
+    TrapEscape escape() { return escape; }
     // 被困在家里正拆墙出去时，家里四周的外壳也算这一趟的保护格：只许挖选中的那一两格。
-    LongSet sacredCells() {
-        return homeWayOut.withShell(target.sacred());
-    }
-
+    LongSet sacredCells() { return homeWayOut.withShell(target.sacred()); }
     /** 被困在家里选中要拆的那一两格墙；没在拆为空。 */
-    LongSet breakableCells() {
-        return homeWayOut.breakable();
-    }
-
+    LongSet breakableCells() { return homeWayOut.breakable(); }
     /** 身体不许进的格子：这一趟卡住两次被列为障碍的面前格。 */
-    LongSet noEntryCells() {
-        return stalls.obstacles();
-    }
-
+    LongSet noEntryCells() { return stalls.obstacles(); }
     /** 卡住后为这扇门（下半格）登记的目标开关状态；没有登记为 null，按门板朝向判断。 */
-    Boolean passageOpen(BlockPos passage) {
-        return stalls.wantOpen(passage);
-    }
+    Boolean passageOpen(BlockPos passage) { return stalls.wantOpen(passage); }
 
     /**
      * 记下这段路上自己垫的一格：只有右键得到游戏确认、那一格确实长出了方块才记。
@@ -188,9 +173,7 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /** 这段路为开路挖掉的方块："x, y, z 的 方块ID"。 */
-    List<String> broken() {
-        return clicks.brokenSoFar();
-    }
+    List<String> broken() { return clicks.brokenSoFar(); }
 
     /** 这段路垫上的方块格子。 */
     List<BlockPos> placements() {
@@ -201,14 +184,9 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /** 这段路上每次落地救援的经过：放了什么、收没收回、掉没掉血。 */
-    List<String> landings() {
-        return landing.notes();
-    }
-
+    List<String> landings() { return landing.notes(); }
     /** 落地救援正在进行：寻路引擎的通用超时不能把它丢下。 */
-    boolean landingInProgress() {
-        return landing.inProgress();
-    }
+    boolean landingInProgress() { return landing.inProgress(); }
 
     /** 上路：把目标交给引擎并让它开始第一次算路。 */
     void activate(PlayerContext context) {
@@ -225,14 +203,9 @@ final class BaritoneWalkRun implements WalkRun {
     }
 
     /** 这一刻有人推进它。 */
-    void markDriven(long clientTick) {
-        lastDrivenTick = clientTick;
-    }
-
+    void markDriven(long clientTick) { lastDrivenTick = clientTick; }
     /** 拥有身体却已经连续几刻没人推进：任务被生存需求暂停，或调用方没收尾就丢下了它。 */
-    boolean idleAt(long clientTick) {
-        return clientTick - lastDrivenTick >= IDLE_BEFORE_YIELD_TICKS;
-    }
+    boolean idleAt(long clientTick) { return clientTick - lastDrivenTick >= IDLE_BEFORE_YIELD_TICKS; }
 
     /**
      * 把身体让给排队的运行：按"已停下"结算，松开引擎。被暂停的任务恢复后让运行从原地接着走；
@@ -292,7 +265,7 @@ final class BaritoneWalkRun implements WalkRun {
         goal = next.goal();
         engineGoal = new MaiCraftGoalAdapter(goal, () -> lastContext == null ? null : lastContext.level());
         partialRoute.reset();
-        // 换了目标是一次新的算路：上限重新起算，不把上一个目标耗掉的时间算到新目标头上。
+        displacement.resetPacing(); // 换目标后从新目标重算折返圈，免得跟人绕圈被误判折返
         planningCeiling.restart();
         progress.retarget(goal);
         probe.cancel();
@@ -374,7 +347,10 @@ final class BaritoneWalkRun implements WalkRun {
         if (waitsForMovingObstacle(context, player, pathing, engine)) return; // 前方有正在动的东西：原地等它过去
         // 从家里拆墙出来了：停下把墙补回去，补完按原目标接着走；被叫停就不再补，照常按停下收场。
         if (homeWayOut.holdsPlayer(context, player, clicks, hands, owner, displacement, progress.stopRequested(),
-                () -> resumeAfterRefill(engine, context))) return;
+                () -> resumeAfterRefill(engine, context))) {
+            partialRoute.hold(context.clientTick());
+            return;
+        }
         boolean routePresent = pathing.getCurrent() != null;
         boolean calculating = pathing.getInProgress().isPresent();
 
@@ -429,6 +405,8 @@ final class BaritoneWalkRun implements WalkRun {
         }
         if (replanWhenSafe && pathing.isSafeToCancel()) {
             replanWhenSafe = false;
+            displacement.resetPacing();
+            partialRoute.reset();
             pathing.forceCancel();
             engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
         }
@@ -488,13 +466,21 @@ final class BaritoneWalkRun implements WalkRun {
         }
         if (doing != EngineClicks.Doing.NOTHING) {
             displacement.confirm(context.clientTick());
+            partialRoute.hold(context.clientTick());
         }
     }
 
-    // 一次自我修正的重新算路：位移与算路上限都重新记账；这些路数自己有次数上限，上限不替它们收场。
+    // 合法停等（备料换手、落地救援、等移动障碍、收拾装备）：位移重算且顺延半截路起算刻，不扣走路耐心。
+    private void holdProgress(long tick) {
+        displacement.restart(tick);
+        partialRoute.hold(tick);
+    }
+
+    // 一次自我修正的重新算路：位移、折返锚点、半截路与算路上限全部重新记账。
     private void replannedFrom(long tick) {
         displacement.restart(tick);
         planningCeiling.restart();
+        partialRoute.reset();
     }
 
     // 人交回了角色：从当时的位置重新算路；人操作的那段不算"长时间没进展"。
@@ -555,7 +541,7 @@ final class BaritoneWalkRun implements WalkRun {
         return switch (landing.beforeEngine(context, player, pathing)) {
             case ENGINE -> false;
             case HOLD -> {
-                displacement.restart(context.clientTick());
+                holdProgress(context.clientTick());
                 lastLandingHoldTick = context.clientTick();
                 yield true;
             }
@@ -573,7 +559,7 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean waitsForMovingObstacle(PlayerContext context, LocalPlayer player, PathingBehavior pathing,
                                            IBaritone engine) {
         if (progress.stopRequested() || !obstacleWait.holdsRoute(context, player, pathing, engine)) return false;
-        displacement.restart(context.clientTick());
+        holdProgress(context.clientTick());
         return true;
     }
 
@@ -581,10 +567,12 @@ final class BaritoneWalkRun implements WalkRun {
     private void watchProgress(PlayerContext context, LocalPlayer player, IBaritone engine, boolean routePresent,
                                boolean working, BlockPos feet) {
         Vec3 position = player.position();
-        displacement.observe(position.x, position.y, position.z, context.clientTick());
+        displacement.observe(position.x, position.y, position.z, context.clientTick(), routePresent);
         boolean progressed = displacement.recent(context.clientTick(), 1);
         var dispatchAction = dispatch.observe(context.clientTick(), true, routePresent || working, progressed);
         if (dispatchAction == NavigationDispatchWatchdog.Action.RESTART && !routePresent) {
+            displacement.resetPacing();
+            partialRoute.reset();
             engine.getCustomGoalProcess().setGoalAndPath(engineGoal);
         } else if (dispatchAction == NavigationDispatchWatchdog.Action.FAIL) {
             progress.fail(Problem.of(Problem.Kind.INTERNAL_ERROR, "寻路引擎长时间没有给出路线", null), feet);
@@ -595,9 +583,12 @@ final class BaritoneWalkRun implements WalkRun {
         } else if (!progress.stopRequested() && routePresent
                 && displacement.stalledTicks(context.clientTick()) > STALL_LIMIT_TICKS) {
             progress.fail(Problem.of(Problem.Kind.STUCK, "沿路线行走时长时间没有进展", null), feet);
+        } else if (!progress.stopRequested() && routePresent && displacement.pacing(context.clientTick())) {
+            // 持路行走期间在原地两格小圈里水平往返折返超 8 秒：标成从这里到不了，交给靠近批删高处或合并余位。
+            progress.failNoRoute(Problem.of(Problem.Kind.UNREACHABLE, "在原地小范围内反复往返折返，无法继续靠近目标", null), feet);
         } else if (!progress.stopRequested() && partialRouteStalled(engine, feet, context.clientTick())) {
-            progress.fail(Problem.of(Problem.Kind.STUCK,
-                    "路线到不了目标，只能往那边走半截，来回走了半分钟也没离目标更近", null), feet);
+            // 只有半截路且在当前场景上限内没离目标更近两格：标成从这里到不了，交还上层收场或换路。
+            progress.failNoRoute(Problem.of(Problem.Kind.UNREACHABLE, "路线到不了目标，只能往那边走半截，持续没能离目标更近", null), feet);
         }
     }
 
@@ -704,10 +695,10 @@ final class BaritoneWalkRun implements WalkRun {
     private boolean tendingGear(PlayerContext context, LocalPlayer player, PathingBehavior pathing, IBaritone engine) {
         if (progress.done()) return false;
         switch (gear.tick(context, player, pathing, engine, staging.busy())) {
-            case BUSY -> { return true; }
-            case FINISHED -> displacement.restart(context.clientTick());
+            case BUSY -> { holdProgress(context.clientTick()); return true; }
+            case FINISHED -> holdProgress(context.clientTick());
             case FAILED -> {
-                displacement.restart(context.clientTick());
+                holdProgress(context.clientTick());
                 progress.fail(gear.problem(), player.blockPosition());
             }
             case FREE -> { }

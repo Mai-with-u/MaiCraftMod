@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.OptionalLong;
 
 import net.minecraft.core.BlockPos;
@@ -34,8 +35,13 @@ class ApproachFromHereTest {
     private final UnreachableFromHere unreachable = new UnreachableFromHere(() -> OptionalLong.of(goalRun));
 
     private Approach approach(StubMoves moves) {
+        return approach(moves, Approach.UNBOUNDED_WALK_BUDGET);
+    }
+
+    private Approach approach(StubMoves moves, long walkBudgetTicks) {
         return new Approach(ApproachTarget.ofBlock(CHEST), REACH, world, new StubWalkCost(), new StubGuarded(),
-                moves, new StubStrolls(world), TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable);
+                moves, new StubStrolls(world), TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable,
+                walkBudgetTicks);
     }
 
     private static ActionStatus noRoute() {
@@ -162,5 +168,91 @@ class ApproachFromHereTest {
         assertEquals(Problem.Kind.UNREACHABLE, recalled.problem().kind());
         assertTrue(recalled.problem().message().contains("这次目标里刚试过"), recalled.problem().message());
         assertEquals(0, again.begun.size(), "记住了就不再重新挑站位");
+    }
+
+    @Test
+    void highSpotNoRouteDropsRestAndRemembersUnreachableInOneWalk() {
+        // 高处墙体或屋顶只有比角色高出一跳以上的候选站位：首趟半截路或折返按从这里到不了收场时，
+        // 先批量丢弃其余高处候选，不必再花第二趟合并重算，并直接写入 8 格邻域不可达记忆；
+        // 随后角色停在邻格再要靠近同一高处目标时一步不走直接收场。
+        world.grounded = false;
+        world.feet = new BlockPos(0, 64, 0);
+        BlockPos highBlock = new BlockPos(3, 70, 0);
+        world.hidden = (eye, target) -> eye.y() < 69.0;
+        StubMoves moves = new StubMoves(world,
+                ActionStatus.failed(Problem.of(Problem.Kind.UNREACHABLE, "路线到不了目标，只能往那边走半截，持续没能离目标更近")));
+        moves.noRouteFromHere = true;
+        ApproachTarget highTarget = ApproachTarget.ofBlock(highBlock);
+        Approach first = new Approach(highTarget, REACH, world, new StubWalkCost(), new StubGuarded(),
+                moves, new StubStrolls(world), TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable);
+
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, runToEnd(first));
+        assertEquals(Problem.Kind.UNREACHABLE, failed.problem().kind());
+        assertEquals(1, moves.begun.size(), "高处站位首趟到不了后直接批删其余高处候选，不再白跑第二趟");
+        assertTrue(first.tried().stream().anyMatch(attempt -> attempt.tried().contains("一跳")
+                && attempt.result().contains("不再挨个爬")), first.tried().toString());
+
+        // 角色挪到邻格（仍在 8 格邻域内）再尝试靠近同一高处目标：直接命中不可达记忆，零算路收场。
+        world.feet = new BlockPos(2, 64, 1);
+        StubMoves secondMoves = new StubMoves(world);
+        Approach second = new Approach(highTarget, REACH, world, new StubWalkCost(), new StubGuarded(),
+                secondMoves, new StubStrolls(world), TerrainPermit.WALK_ONLY, null, Permissions.DEFAULT, null, unreachable);
+        ActionStatus.Failed recalled = assertInstanceOf(ActionStatus.Failed.class, second.tick(new StubTick(1)));
+        assertEquals(Problem.Kind.UNREACHABLE, recalled.problem().kind());
+        assertTrue(recalled.problem().message().contains("这次目标里刚试过"), recalled.problem().message());
+        assertEquals(0, secondMoves.begun.size(), "邻格复用 8 格不可达记忆，不再重复上路");
+    }
+
+    @Test
+    void defaultApproachWithoutWalkBudgetDoesNotCutOffNormalLongWalk() {
+        // 默认不设总走步硬上限（供找床、翻箱、采矿等中远距完整路径使用）：正常整路连走 500 刻绝不误杀，
+        // 也不污染写入 8 格不可达记忆。
+        world.grounded = false;
+        world.feet = new BlockPos(0, 64, 0);
+        StubMoves moves = new StubMoves(world);
+        moves.keepRunning = true;
+        Approach unbounded = approach(moves);
+
+        ActionStatus status = ActionStatus.running();
+        for (int tick = 1; tick <= 500; tick++) {
+            status = unbounded.tick(new StubTick(tick));
+            assertInstanceOf(ActionStatus.Running.class, status, "无总预算时正常长途整路不应被提前腰斩，tick=" + tick);
+        }
+        assertEquals(List.of(Approach.LOCAL_PARTIAL_ROUTE_LIMIT_TICKS), moves.partialLimits,
+                "仍向下传递局部半截路止损上限以防半截路空转");
+        assertEquals(0, moves.closes, "正常走途中不应强行收掉走路运行");
+    }
+
+    @Test
+    void approachWithExplicitWalkBudgetSelfClosesIntoUnreachableBeforeOuterTimeout() {
+        // 施工等挂了外层超时（如 400 刻）的调用方显式传入略短预算（380 刻）：
+        // 即便多趟累加逼近外层超时，靠近也在内部预算到点时自主收尾并写入 8 格不可达记忆，不再被外层强杀切断缓存。
+        world.grounded = false;
+        world.feet = new BlockPos(0, 64, 0);
+        StubMoves moves = new StubMoves(world);
+        moves.keepRunning = true;
+        long explicitBudget = BringsPlayerClose.WALK_PATIENCE_TICKS - 20L;
+        Approach bounded = approach(moves, explicitBudget);
+
+        ActionStatus status = ActionStatus.running();
+        int ticks = 0;
+        while (status instanceof ActionStatus.Running && ticks < BringsPlayerClose.WALK_PATIENCE_TICKS) {
+            status = bounded.tick(new StubTick(++ticks));
+        }
+        ActionStatus.Failed failed = assertInstanceOf(ActionStatus.Failed.class, status,
+                "显式传预算时应早于外层 400 刻预算自主收场，实际推进刻数：" + ticks);
+        assertEquals(Problem.Kind.UNREACHABLE, failed.problem().kind());
+        assertTrue(ticks < BringsPlayerClose.WALK_PATIENCE_TICKS, "必须早于外层 400 刻强杀收场：" + ticks);
+        assertEquals(List.of(Approach.LOCAL_PARTIAL_ROUTE_LIMIT_TICKS), moves.partialLimits,
+                "靠近动作应向下传递局部半截路止损上限");
+        assertEquals(1, moves.closes, "自主收场时必须关掉手上走路运行");
+
+        // 随后从邻格再次靠近同一对象：直接命中 8 格不可达记忆，一步不走立刻收场。
+        world.feet = new BlockPos(2, 64, 1);
+        StubMoves secondMoves = new StubMoves(world);
+        ActionStatus.Failed recalled = assertInstanceOf(ActionStatus.Failed.class,
+                approach(secondMoves, explicitBudget).tick(new StubTick(1)));
+        assertEquals(Problem.Kind.UNREACHABLE, recalled.problem().kind());
+        assertEquals(0, secondMoves.begun.size(), "内部超时收场已落入 8 格不可达记忆，邻格零算路直接收场");
     }
 }

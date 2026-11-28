@@ -487,12 +487,14 @@ final class PlacingWork extends ConstructionWork {
         return ActionStatus.progressed();
     }
 
-    // 走到能点这一面的站位：避开放下后会占住的格，以及这一面已经站过却点不到的位置；近距避让按短步距预算限时。
+    // 走到能点这一面的站位：避开放下后会占住的格，以及这一面已经站过却点不到的位置；
+    // 透传略短于外层限时的走步总预算（80 刻或 400 刻均提前 20 刻），让靠近在外层强杀前自主收场并写入不可达记忆。
     private void approach(PlacementAttempt.Candidate candidate) {
         Set<BlockPos> avoid = Set.copyOf(poorSpots);
         approachPatience = PlacementOrder.approachPatienceTicks(services.site().feet(), attempt.cell.pos());
+        long walkBudget = Math.max(1L, approachPatience - 20L);
         begin(services.close().toward(PlacementSpots.faceTarget(candidate.clicked(), candidate.face()), permissions,
-                        PlacementSpots.avoiding(attempt.occupied(), avoid::contains)),
+                        PlacementSpots.avoiding(attempt.occupied(), avoid::contains), walkBudget),
                 "走到能点 " + candidate.clicked().toShortString() + " " + candidate.face() + " 面的位置");
     }
 

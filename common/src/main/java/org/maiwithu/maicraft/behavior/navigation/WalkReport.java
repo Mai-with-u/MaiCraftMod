@@ -12,8 +12,9 @@ import org.maiwithu.maicraft.kernel.result.Problem;
  * @param feet         这一刻脚所在的方块格；还没开始观察（正在算路）时为 null
  * @param crossedWater 这段路到目前为止有没有泅渡
  * @param problem      走不下去的原因；只有失败的状态有
- * @param noRouteFromHere 走不通的原因是"从这里到不了"：连续算路 15 秒没有路线、水下为换气停下 3 次都没靠近，
- *                     或算路引擎重算与脱困之后仍定案没有路；靠近据此不再一个个站位空算。只有失败的状态会是 true
+ * @param noRouteFromHere 走不通的原因是"从这里到不了"：连续算路 15 秒没有路线、半截路持续没靠近、
+ *                     原地小范围往返折返、水下为换气停下 3 次都没靠近，或算路引擎重算与脱困之后仍定案没有路；
+ *                     靠近据此不再一个个站位空算。只有失败的状态会是 true
  */
 public record WalkReport(State state, BlockPos feet, boolean crossedWater, Problem problem, boolean noRouteFromHere) {
 

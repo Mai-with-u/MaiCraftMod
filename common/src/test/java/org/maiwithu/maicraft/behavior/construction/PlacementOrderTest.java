@@ -258,10 +258,13 @@ class PlacementOrderTest {
     void 近距避让移动超时缩短至80刻_超时迅速切候选面不卡死400刻() {
         assertEquals(PlacementOrder.SHORT_APPROACH_PATIENCE_TICKS,
                 PlacementOrder.approachPatienceTicks(new BlockPos(0, 64, 0), new BlockPos(2, 64, 0)),
-                "距离 2 格 (< 3 格) 走近超时应缩短为 80 刻");
+                "同层距离 2 格 (< 3 格) 走近超时应缩短为 80 刻");
         assertEquals(BringsPlayerClose.WALK_PATIENCE_TICKS,
                 PlacementOrder.approachPatienceTicks(new BlockPos(0, 64, 0), new BlockPos(3, 64, 0)),
                 "距离达到 3 格及以上保持 400 刻常规耐心");
+        assertEquals(BringsPlayerClose.WALK_PATIENCE_TICKS,
+                PlacementOrder.approachPatienceTicks(new BlockPos(0, 64, 0), new BlockPos(1, 66, 0)),
+                "高出 2 格的墙体/屋顶格即便三维距离不足 3 格也保持 400 刻耐心，不被 80 刻强杀切断不可达缓存");
 
         // 角色距目标格 (1,64,0) 仅 1 格，目标格有底面与西面两处支撑：第一面走近一直卡住，
         // 应在第 80 刻后立刻超时切到第二面并顺利放完，总耗时远小于旧 400 刻。
