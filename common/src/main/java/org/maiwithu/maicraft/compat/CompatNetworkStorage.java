@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.compat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -31,13 +30,13 @@ public final class CompatNetworkStorage implements NetworkStorage {
     }
 
     @Override public boolean reachable(TerminalSearch search) {
-        return ask(() -> storage.reachable(search), false);
+        return DegradedAnswer.ask(module, () -> storage.reachable(search), false);
     }
 
     // 挑到的存的动作同样包一层；停用或接口对不上时按"没有能用的终端"说。
     @Override public TerminalPick store(List<BackpackStack> stacks, String purpose, TerminalSearch search,
             TaskRecords records) {
-        TerminalPick pick = ask(() -> storage.store(stacks, purpose, search, records),
+        TerminalPick pick = DegradedAnswer.ask(module, () -> storage.store(stacks, purpose, search, records),
                 new TerminalPick.NotFound(module.name() + " 的联动用不了，存不进网络"));
         if (!(pick instanceof TerminalPick.Chosen chosen)) return pick;
         Action wrapped = chosen.storing() instanceof ReportsStoreProblem reporting
@@ -48,17 +47,17 @@ public final class CompatNetworkStorage implements NetworkStorage {
 
     // 读最近记下的网络存货快照：模组已停用或接口对不上时返回空表。
     @Override public List<RememberedNetwork> rememberedNetworks() {
-        return ask(storage::rememberedNetworks, List.of());
+        return DegradedAnswer.ask(module, storage::rememberedNetworks, List.of());
     }
 
     // 找这一格装着的终端面板包围盒：停用或接口对不上时按没有面板处理，退回普通方块点击。
     @Override public Optional<AABB> terminalPanelAt(BlockPos cell, Direction preferredSide) {
-        return ask(() -> storage.terminalPanelAt(cell, preferredSide), Optional.empty());
+        return DegradedAnswer.ask(module, () -> storage.terminalPanelAt(cell, preferredSide), Optional.empty());
     }
 
     // 认领刚点开的终端界面并包装查看动作：推进中模组停用或报错时由包装层按不支持安全收尾。
     @Override public Optional<TerminalLook> openTerminalLook(BlockPos clickedCell, Direction clickedFace) {
-        Optional<TerminalLook> opened = ask(() -> storage.openTerminalLook(clickedCell, clickedFace), Optional.empty());
+        Optional<TerminalLook> opened = DegradedAnswer.ask(module, () -> storage.openTerminalLook(clickedCell, clickedFace), Optional.empty());
         return opened.map(look -> new Looking(module, look));
     }
 
@@ -90,13 +89,4 @@ public final class CompatNetworkStorage implements NetworkStorage {
         }
     }
 
-    // 问一句：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 }

@@ -3,7 +3,6 @@ package org.maiwithu.maicraft.compat;
 
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.item.Item;
@@ -26,20 +25,11 @@ public final class CompatDismantleTool implements DismantleTool {
     }
 
     @Override public Optional<Item> toolFor(BlockState state) {
-        return ask(() -> tool.toolFor(state), Optional.empty());
+        return DegradedAnswer.ask(module, () -> tool.toolFor(state), Optional.empty());
     }
 
     @Override public Optional<Action> dismantle(BlockPos cell) {
-        return ask(() -> tool.dismantle(cell), Optional.<Action>empty()).map(action -> new CompatAction(module, action));
+        return DegradedAnswer.ask(module, () -> tool.dismantle(cell), Optional.<Action>empty()).map(action -> new CompatAction(module, action));
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 }

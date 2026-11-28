@@ -23,11 +23,7 @@ final class CompatStowBeforeWalking implements StowBeforeWalking {
     }
 
     @Override public Optional<Action> stow(PlayerContext context) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return stow.stow(context).map(action -> CompatAction.of(module, action));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> stow.stow(context), Optional.<Action>empty())
+                .map(action -> CompatAction.of(module, action));
     }
 }

@@ -31,14 +31,7 @@ public final class CompatMenuLayoutProof implements MenuLayoutProof {
     }
 
     @Override public MenuLayout.Layout classify(MenuSlots slots, List<Integer> playerSlots, List<Integer> otherSlots) {
-        if (!module.active()) {
-            return new MenuLayout.Unsupported(module.name() + "的联动已停用："
-                    + module.disabledReason().orElse("原因不明") + "，这个界面一格都不点");
-        }
-        try {
-            return module.call("判定界面两侧", () -> proof.classify(slots, playerSlots, otherSlots));
-        } catch (ModApiMismatch broken) {
-            return new MenuLayout.Unsupported(broken.getMessage() + "，这个界面一格都不点");
-        }
+        return DegradedAnswer.ask(module, () -> module.call("判定界面两侧", () -> proof.classify(slots, playerSlots, otherSlots)),
+                why -> new MenuLayout.Unsupported(why + "，这个界面一格都不点"));
     }
 }

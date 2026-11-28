@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.compat;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.phys.BlockHitResult;
@@ -30,38 +29,29 @@ public final class CompatBreakAccelerator implements BreakAccelerator {
 
     @Override public boolean available() {
         // 联动还开着且当前服务端真正接收连锁包才算可用：observe(self) 的 mod_features 照此报实情。
-        return ask(module, accelerator::available, false);
+        return DegradedAnswer.ask(module, accelerator::available, false);
     }
 
     @Override public Optional<ChainKeyHold> hold(ChainShape shape, Predicate<BlockPos> mayBreak) {
-        return ask(module, () -> accelerator.hold(shape, mayBreak), Optional.<ChainKeyHold>empty())
+        return DegradedAnswer.ask(module, () -> accelerator.hold(shape, mayBreak), Optional.<ChainKeyHold>empty())
                 .map(hold -> new Guarded(module, hold));
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private static <T> T ask(CompatModule module, Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 
     /** 包一层的连锁键：停用后第一下之前答只挖这一格，挖着的答键丢了，松键答已松开。 */
     private record Guarded(CompatModule module, ChainKeyHold hold) implements ChainKeyHold {
 
         @Override public Readiness ready(PlayerContext context, BlockHitResult hit) {
-            return ask(module, () -> hold.ready(context, hit),
+            return DegradedAnswer.ask(module, () -> hold.ready(context, hit),
                     new Readiness.Single("连锁挖的联动停用了：" + module.disabledReason().orElse("接口对不上")));
         }
 
         @Override public boolean keep(PlayerContext context) {
-            return ask(module, () -> hold.keep(context), false);
+            return DegradedAnswer.ask(module, () -> hold.keep(context), false);
         }
 
         @Override public boolean release(PlayerContext context) {
-            return ask(module, () -> hold.release(context), true);
+            return DegradedAnswer.ask(module, () -> hold.release(context), true);
         }
     }
 }

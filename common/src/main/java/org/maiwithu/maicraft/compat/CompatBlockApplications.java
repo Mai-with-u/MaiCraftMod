@@ -31,11 +31,6 @@ final class CompatBlockApplications implements BlockApplications {
 
     @Override
     public List<BlockApplication> recipes(Level level) {
-        if (!module.active()) return List.of();
-        try {
-            return applications.recipes(level);
-        } catch (ModApiMismatch broken) {
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, () -> applications.recipes(level), List.of());
     }
 }

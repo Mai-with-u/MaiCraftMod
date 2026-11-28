@@ -29,42 +29,21 @@ public final class CompatNetworkReader implements NetworkReader {
     }
 
     @Override public Optional<String> membership(BlockPos at) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return reader.membership(at);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> reader.membership(at), Optional.empty());
     }
 
     // 线材要读模组的方块与连接数：停用了就当这种网不会接线，读的时候对不上也收住。
     @Override public Optional<LineMaterials> lineMaterials() {
-        if (!module.active()) return Optional.empty();
-        try {
-            return reader.lineMaterials().map(materials -> new CompatLineMaterials(module, materials));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> reader.lineMaterials(), Optional.<LineMaterials>empty())
+                .map(materials -> new CompatLineMaterials(module, materials));
     }
 
     @Override public boolean summaryPending(String networkId) {
-        if (!module.active()) return false;
-        try {
-            return reader.summaryPending(networkId);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> reader.summaryPending(networkId), false);
     }
 
     @Override public NetworkSummary summary(String networkId) {
-        if (!module.active()) {
-            return NetworkSummary.unreadable(networkId,
-                    module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"));
-        }
-        try {
-            return reader.summary(networkId);
-        } catch (ModApiMismatch broken) {
-            return NetworkSummary.unreadable(networkId, broken.getMessage());
-        }
+        return DegradedAnswer.ask(module, () -> reader.summary(networkId),
+                why -> NetworkSummary.unreadable(networkId, why));
     }
 }

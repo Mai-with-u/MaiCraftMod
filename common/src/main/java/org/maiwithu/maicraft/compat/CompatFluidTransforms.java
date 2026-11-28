@@ -29,12 +29,6 @@ final class CompatFluidTransforms implements FluidTransforms {
     }
 
     @Override public List<FluidTransform> recipes(Level level) {
-        if (!module.active()) return List.of();
-        try {
-            return transforms.recipes(level);
-        } catch (ModApiMismatch broken) {
-            // 已经停用，联动入口的日志里写过原因。
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, () -> transforms.recipes(level), List.of());
     }
 }

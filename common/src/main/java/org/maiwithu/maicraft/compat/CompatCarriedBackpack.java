@@ -4,7 +4,6 @@ package org.maiwithu.maicraft.compat;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
 
 import org.maiwithu.maicraft.behavior.inventory.spi.CarriedBackpack;
 import org.maiwithu.maicraft.game.player.BackpackStack;
@@ -26,24 +25,16 @@ public final class CompatCarriedBackpack implements CarriedBackpack {
     }
 
     @Override public int freeSlots() {
-        return ask(backpack::freeSlots, 0);
+        return DegradedAnswer.ask(module, backpack::freeSlots, 0);
     }
 
     @Override public Optional<Action> store(BackpackStack stack, TaskRecords records) {
-        return ask(() -> backpack.store(stack, records), Optional.<Action>empty())
+        return DegradedAnswer.ask(module, () -> backpack.store(stack, records), Optional.<Action>empty())
                 .map(action -> CompatAction.of(module, action));
     }
 
     @Override public List<CarriedPack> carried() {
-        return ask(backpack::carried, List.of());
+        return DegradedAnswer.ask(module, backpack::carried, List.of());
     }
 
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
 }

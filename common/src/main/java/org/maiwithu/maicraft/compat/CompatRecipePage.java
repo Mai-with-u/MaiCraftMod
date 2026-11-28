@@ -20,11 +20,6 @@ public final class CompatRecipePage implements OpensRecipePage {
     }
 
     @Override public boolean open(String itemId, boolean uses) {
-        if (!module.active()) return false;
-        try {
-            return page.open(itemId, uses);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> page.open(itemId, uses), false);
     }
 }

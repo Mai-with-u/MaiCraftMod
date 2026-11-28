@@ -24,12 +24,7 @@ public final class CompatQuestBookOperations implements QuestBookOperations {
     }
 
     @Override public QuestBookStatus status() {
-        if (!module.active()) return QuestBookStatus.unusable(disabled());
-        try {
-            return operations.status();
-        } catch (ModApiMismatch broken) {
-            return QuestBookStatus.unusable(broken.getMessage());
-        }
+        return DegradedAnswer.ask(module, operations::status, QuestBookStatus::unusable);
     }
 
     @Override public Optional<QuestView> quest(String questId) {
@@ -55,15 +50,6 @@ public final class CompatQuestBookOperations implements QuestBookOperations {
 
     // 发送：停用了或对不上时就是没发出去，能力按"没发出去"如实结束，不补发。
     private boolean send(BooleanSupplier sending) {
-        if (!module.active()) return false;
-        try {
-            return sending.getAsBoolean();
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
-    }
-
-    private String disabled() {
-        return module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明");
+        return DegradedAnswer.ask(module, sending::getAsBoolean, false);
     }
 }
