@@ -3,6 +3,7 @@ package org.maiwithu.maicraft.behavior.acquire.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayDeque;
@@ -392,6 +393,91 @@ class ItemAcquisitionPriceMemoryTest {
             return asks.quoteRemembered(craft, q, want(PLANKS, 2), ctx);
         });
         assertTrue(normal instanceof SourceQuote.Offer, "降级结果不能污染同刻缓存，正常调用应得出 Offer");
+    }
+
+    @Test
+    void 预算在本帧问价期间耗尽的报价不完整_引擎收帧时标脏不入缓存() {
+        // 做法来源排候选时额度中途用完就静默收场（剩余候选不问也不报告）：引擎收帧时看到额度已尽，
+        // 认定这趟报价不完整，不入缓存，并补记一笔预算拒绝让估算感知"没估完"。
+        CountingChest chest = new CountingChest(new SourceQuote.Offer("记得的箱子", 2, new AcquisitionCost(20, 2), null));
+        PriceAsks[] holder = new PriceAsks[1];
+        int[] craftQuotes = {0};
+        // 排候选问两遍原料价（正好把额度 2 用完），随后不再问任何价就报出结果：来源自己没报告截断。
+        ItemSource quietCutCraft = new ItemSource() {
+            @Override public String describe() { return "静默截断的合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                // 只有排木板做法这一趟才回头问原料价；里层问木棍、线的报价直接答，不再往下问。
+                if (!PLANKS.equals(request.wanted().specifier())) {
+                    return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(0, 4), null);
+                }
+                craftQuotes[0]++;
+                holder[0].ask(want("minecraft:stick", 1), PERMISSIONS, true);
+                holder[0].ask(want("minecraft:string", 1), PERMISSIONS, true);
+                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(chest, quietCutCraft), new FixedSpot(0, 64, 0), List::of);
+        holder[0] = asks;
+        SourceContext ctx = SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS);
+
+        QuoteBudget budget = new QuoteBudget(2);
+        asks.during(budget, () -> {
+            QuoteQuestion q = asks.questionOf(quietCutCraft, want(PLANKS, 1), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            SourceQuote result = asks.quoteRemembered(quietCutCraft, q, want(PLANKS, 1), ctx);
+            assertTrue(result instanceof SourceQuote.Offer);
+            assertEquals(null, asks.cached(q), "预算在本帧内耗尽的半截报价绝不写入共享缓存");
+            assertEquals(1, budget.refused(), "used=" + budget.used() + " refused=" + budget.refused());
+            return null;
+        });
+        assertEquals(1, craftQuotes[0]);
+    }
+
+    @Test
+    void 同一来源还没答完又被问到_重入答案不入共享缓存_干净答案照常复用() {
+        // 做法来源排先后途中回头问别的原料，里层问价又落到它自己头上：里层这趟是重入短路，
+        // 引擎从帧栈认出同一来源还开着帧，标脏不入缓存；之后不带重入的干净答案照常入缓存复用。
+        PriceAsks[] holder = new PriceAsks[1];
+        int[] craftQuotes = {0};
+        ItemSource reentrantCraft = new ItemSource() {
+            @Override public String describe() { return "会重入的合成"; }
+            @Override public AcquireVia via() { return AcquireVia.CRAFT; }
+            @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
+                craftQuotes[0]++;
+                // 排木板的做法先后时回头问木棍的价：这次里层问价又落到本来源头上，重入短路。
+                if (PLANKS.equals(request.wanted().specifier())) {
+                    holder[0].ask(want("minecraft:stick", 1), PERMISSIONS, true);
+                }
+                return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(0, 4), null);
+            }
+            @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
+                return Optional.empty();
+            }
+        };
+        PriceAsks asks = new PriceAsks(List.of(reentrantCraft), new FixedSpot(0, 64, 0), List::of);
+        holder[0] = asks;
+        SourceContext ctx = SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS);
+
+        asks.during(new QuoteBudget(100), () -> {
+            asks.ask(want(PLANKS, 1), PERMISSIONS, true);
+            QuoteQuestion stick = asks.questionOf(reentrantCraft, want("minecraft:stick", 1), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            assertEquals(null, asks.cached(stick), "重入短路的里层报价绝不写入共享缓存");
+            // 重入已随帧吸收污染外层，木板这趟也不入缓存：再问一次要真问，里层木棍同样两趟各真问一次。
+            asks.ask(want(PLANKS, 1), PERMISSIONS, true);
+            assertEquals(4, craftQuotes[0], "两趟木板加两趟里层木棍都不入缓存，共真问 4 次");
+            QuoteQuestion clean = asks.questionOf(reentrantCraft, want("minecraft:string", 1), PERMISSIONS, false,
+                    ItemAcquisition.Scope.ALL);
+            asks.quoteRemembered(reentrantCraft, clean, want("minecraft:string", 1), ctx);
+            assertNotNull(asks.cached(clean), "帧干净时报价照常入缓存");
+            asks.quoteRemembered(reentrantCraft, clean, want("minecraft:string", 1), ctx);
+            assertEquals(5, craftQuotes[0], "干净答案第二次直接复用缓存，不再问来源");
+            return null;
+        });
     }
 
     @Test

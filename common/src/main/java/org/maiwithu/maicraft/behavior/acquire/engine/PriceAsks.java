@@ -217,12 +217,28 @@ final class PriceAsks {
         SourceQuote known = cached(question);
         if (known != null) return known;
         AskFrame frame = new AskFrame();
+        frame.source = source;
+        // 同一来源的报价还没算完又被问到（做法来源排先后时回头问原料价）：里层这趟是重入短路，
+        // 拿不到排好的完整答案，由引擎在压帧时认出来，不等来源自己报告。
+        for (AskFrame open : frames) {
+            if (open.source == source) {
+                frame.degraded = true;
+                break;
+            }
+        }
+        boolean exhaustedAtEntry = budget != null && budget.exhausted();
         frames.push(frame);
         SourceQuote fresh;
         try {
             fresh = quote(source, request, context);
         } finally {
             frames.pop();
+            // 收帧时额度已经用完：这趟报价途中发生过预算截断（来源静默跳过剩余候选引擎看不见，
+            // 但额度耗尽一定发生在这趟里），结果不完整，不入缓存，并补记一笔预算拒绝让估算感知没估完。
+            if (budget != null && budget.exhausted()) {
+                frame.budgetCut = true;
+                if (!exhaustedAtEntry) budget.markRefused();
+            }
             AskFrame parent = frames.peek();
             if (parent != null) parent.absorb(frame);
         }
@@ -419,6 +435,8 @@ final class PriceAsks {
 
     /** 单层子问题问价的依赖标记：只要碰到外层拦截、递归环、预算截断或重入降级，就不把结果写入无环通用缓存。 */
     private static final class AskFrame {
+        /** 这层子问题在向哪个来源问价：用来认出同一来源还没答完又被问到（重入短路）。 */
+        ItemSource source;
         boolean touchedOuter;
         boolean touchedCycle;
         boolean budgetCut;
