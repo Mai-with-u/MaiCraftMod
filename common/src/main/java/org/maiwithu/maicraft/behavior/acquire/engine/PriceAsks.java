@@ -99,27 +99,9 @@ final class PriceAsks {
         if (current != null) current.touchedOuter = true;
     }
 
-    /** 通知当前帧与预算：来源因预算耗尽主动提前止损，结果不完整，不可写入共享缓存并记作预算拒绝。 */
-    void markBudgetCut() {
-        AskFrame current = frames.peek();
-        if (current != null) current.budgetCut = true;
-        if (budget != null) budget.markRefused();
-    }
-
-    /** 通知当前帧：制造来源因重入返回了降级报价（未排序或跳过远端问价），绝不写入共享缓存与同刻缓存。 */
-    void markDegraded() {
-        AskFrame current = frames.peek();
-        if (current != null) current.degraded = true;
-    }
-
     /** 取出本轮动手问价收集到的非制造扫描探针（供等待扫描期间按刻推进冷索引建段）。 */
     List<ScanProbe> scanProbes() {
         return consultScanProbes == null ? List.of() : List.copyOf(consultScanProbes);
-    }
-
-    /** 当前一轮问价的预算是否已耗尽：供多候选配方与标签展开提前止损。 */
-    boolean budgetExhausted() {
-        return budget != null && budget.exhausted();
     }
 
     /** 查记忆中的价：先查无环通用键（跨外层分支 100% 复用），未命中再查带外层隔离键与同刻无环缓存。 */

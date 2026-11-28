@@ -322,17 +322,6 @@ public final class ItemAcquisition implements ItemNeeds, StartsAcquisition {
         priceAsks.markOuterDependency();
     }
 
-    @Override public boolean priceBudgetExhausted() {
-        return priceAsks.budgetExhausted();
-    }
-
-    @Override public void markBudgetCut() {
-        priceAsks.markBudgetCut();
-    }
-
-    @Override public void markDegraded() {
-        priceAsks.markDegraded();
-    }
 
     /** 一场获取的执行：清点 → 问价挑路 → 腾格子 → 用一个来源 → 再清点，直到够数或路都走完。 */
     private final class Run implements Action {

@@ -103,15 +103,4 @@ final class DeferredInnerNeeds implements ItemNeeds {
         if (engine != null) engine.markOuterDependency();
     }
 
-    @Override public boolean priceBudgetExhausted() {
-        return engine != null && engine.priceBudgetExhausted();
-    }
-
-    @Override public void markBudgetCut() {
-        if (engine != null) engine.markBudgetCut();
-    }
-
-    @Override public void markDegraded() {
-        if (engine != null) engine.markDegraded();
-    }
 }

@@ -275,29 +275,22 @@ class ItemAcquisitionPriceMemoryTest {
     }
 
     @Test
-    void 预算恰好用满主动止损时标脏当前帧且记预算拒绝_半截报价绝不入缓存() {
+    void 额度已尽的报价一律标脏当前帧_半截报价绝不入缓存() {
+        // 额度用完后再问来源：这趟报价无论来源自己有没有发现额度问题，引擎收帧时一律标脏，不入缓存。
         int[] quoteCalls = {0};
-        PriceAsks[] holder = new PriceAsks[1];
         ItemSource budgetStoppingSource = new ItemSource() {
             @Override public String describe() { return "预算止损合成"; }
             @Override public AcquireVia via() { return AcquireVia.CRAFT; }
             @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
                 quoteCalls[0]++;
-                // 第一次问价刚好把额度耗尽后主动止损并调用 markBudgetCut()，结果是半截报价。
-                if (holder[0].budgetExhausted()) {
-                    holder[0].markBudgetCut();
-                    return new SourceQuote.Unavailable(describe(), "预算用满提前止损");
-                }
-                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+                return new SourceQuote.Unavailable(describe(), "额度已尽时的回答");
             }
             @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
                 return Optional.empty();
             }
         };
         PriceAsks asks = new PriceAsks(List.of(budgetStoppingSource), new FixedSpot(0, 64, 0), List::of);
-        holder[0] = asks;
 
-        // 预算上限设为 1：消耗完 1 次额度后 exhausted()==true 且 refused()==0，再经 markBudgetCut() 标脏。
         QuoteBudget budget = new QuoteBudget(1);
         budget.takeQuote();
         assertEquals(0, budget.refused(), "前置条件：恰好用满时尚未拒绝");
@@ -307,9 +300,8 @@ class ItemAcquisitionPriceMemoryTest {
             SourceQuote first = asks.quoteRemembered(budgetStoppingSource, q, want(PLANKS, 1),
                     SourceContext.unscoped(new FixedSpot(0, 64, 0).currentPosition(), PERMISSIONS));
             assertTrue(first instanceof SourceQuote.Unavailable);
-            // 预算截断的半截报价绝不能落入缓存，cached 必须为空且 budget.refused() 必须递增。
-            assertEquals(1, budget.refused(), "主动止损必须递增 budget.refused() 让估算层感知不完整");
-            assertEquals(null, asks.cached(q), "预算截断的半截报价绝不写入 remembered 共享缓存");
+            assertEquals(null, asks.cached(q), "额度已尽时的报价一律不入 remembered 共享缓存");
+            assertEquals(0, budget.refused(), "耗尽发生在进帧之前，不补记新的预算拒绝");
             return null;
         });
         assertEquals(1, quoteCalls[0]);
@@ -358,17 +350,19 @@ class ItemAcquisitionPriceMemoryTest {
 
     @Test
     void 制造来源重入短路返回降级报价时绝不写入共享缓存与同刻缓存() {
+        // 做法来源排先后途中回头问木棍的价，里层问价落到它自己头上：引擎从帧栈认出重入短路，
+        // 里层与被污染的外层报价都不入缓存；同一刻以正常身份再问必须拿到真实报价。
         boolean[] reentrant = {true};
         PriceAsks[] holder = new PriceAsks[1];
         ItemSource craft = new ItemSource() {
             @Override public String describe() { return "可重入合成"; }
             @Override public AcquireVia via() { return AcquireVia.CRAFT; }
             @Override public SourceQuote quote(ItemRequest request, SourceContext context) {
-                if (reentrant[0]) {
-                    holder[0].markDegraded();
+                if (PLANKS.equals(request.wanted().specifier()) && reentrant[0]) {
+                    holder[0].ask(want("minecraft:stick", 1), PERMISSIONS, true);
                     return new SourceQuote.Unavailable(describe(), "重入降级返回");
                 }
-                return new SourceQuote.Offer(describe(), 1, new AcquisitionCost(0, 4), null);
+                return new SourceQuote.Offer(describe(), request.count(), new AcquisitionCost(0, 4), null);
             }
             @Override public Optional<Action> begin(ItemRequest request, SourceQuote.Offer offer, SourceContext context) {
                 return Optional.empty();
@@ -383,6 +377,8 @@ class ItemAcquisitionPriceMemoryTest {
             SourceQuote degraded = asks.quoteRemembered(craft, q, want(PLANKS, 2), ctx);
             assertTrue(degraded instanceof SourceQuote.Unavailable);
             assertEquals(null, asks.cached(q), "重入降级报价绝不写入本轮 remembered 缓存");
+            QuoteQuestion stick = asks.questionOf(craft, want("minecraft:stick", 1), PERMISSIONS, true, null);
+            assertEquals(null, asks.cached(stick), "重入触发的里层报价同样不入缓存");
             return null;
         });
 
