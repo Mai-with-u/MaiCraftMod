@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.function.Supplier;
+
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
@@ -48,15 +48,15 @@ public final class CompatMachineType implements MachineType {
     @Override public MachineRole role() { return type.role(); }
 
     @Override public boolean covers(BlockState state) {
-        return ask(() -> type.covers(state), false);
+        return DegradedAnswer.ask(module, () -> type.covers(state), false);
     }
 
     @Override public List<ExchangePoint> exchangePoints(BlockState state, BlockPos at) {
-        return ask(() -> type.exchangePoints(state, at), List.of());
+        return DegradedAnswer.ask(module, () -> type.exchangePoints(state, at), List.of());
     }
 
     @Override public MachineState state(BlockPos at) {
-        if (!module.active()) return MachineState.unknown(disabled());
+        if (!module.active()) return MachineState.unknown(DegradedAnswer.reason(module));
         try {
             return type.state(at);
         } catch (ModApiMismatch broken) {
@@ -65,25 +65,25 @@ public final class CompatMachineType implements MachineType {
     }
 
     @Override public Optional<NetworkLoad> load(BlockState state) {
-        return ask(() -> type.load(state), Optional.empty());
+        return DegradedAnswer.ask(module, () -> type.load(state), Optional.empty());
     }
 
     @Override public List<MachineState.Shown> output(BlockPos at) {
-        return ask(() -> type.output(at), List.of());
+        return DegradedAnswer.ask(module, () -> type.output(at), List.of());
     }
 
     @Override public boolean outputVisible(BlockPos at) {
-        return ask(() -> type.outputVisible(at), true);
+        return DegradedAnswer.ask(module, () -> type.outputVisible(at), true);
     }
 
     // 模组停用或对不上时不说产物掉在哪：machine_run 照出口读不读得到那一条走，读不到的如实说。
     @Override public Optional<AABB> dropArea(BlockPos at) {
-        return ask(() -> type.dropArea(at), Optional.empty());
+        return DegradedAnswer.ask(module, () -> type.dropArea(at), Optional.empty());
     }
 
     // 模组停用后不替它抄：交回空，机器能力照抄方块，抄出来的格照实写着建不回来。
     @Override public Optional<MachineCopy> copy(Map<BlockPos, BlockState> cells) {
-        return ask(() -> type.copy(cells), Optional.empty());
+        return DegradedAnswer.ask(module, () -> type.copy(cells), Optional.empty());
     }
 
     // 本事各包各的：里面没有的本事给空，有的包一层再交出去。
@@ -103,17 +103,4 @@ public final class CompatMachineType implements MachineType {
         return type.parts().map(parts -> new CompatMachineParts(module, parts));
     }
 
-    // 读一样东西：停用了或对不上时给"用不了"时的那个答案。
-    private <T> T ask(Supplier<T> read, T whenUnavailable) {
-        if (!module.active()) return whenUnavailable;
-        try {
-            return read.get();
-        } catch (ModApiMismatch broken) {
-            return whenUnavailable;
-        }
-    }
-
-    private String disabled() {
-        return module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明");
-    }
 }
