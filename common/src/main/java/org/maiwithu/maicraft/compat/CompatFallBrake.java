@@ -27,12 +27,8 @@ final class CompatFallBrake implements FallBrake {
     }
 
     @Override public Optional<CatchesFall> brake(PlayerContext context) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return brake.brake(context).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> brake.brake(context), Optional.<CatchesFall>empty())
+                .map(Guarded::new);
     }
 
     /** 刹的过程每一步都收住模组接口对不上：之后算没接住。 */

@@ -42,7 +42,7 @@ public final class CompatTravelMode implements TravelMode {
     // 问报价：停用了或对不上就答"这里没有这种方式"，原因写明是哪个模组。
     @Override public void offer(TravelRequest request, OfferSink sink) {
         if (!module.active()) {
-            sink.decline(Problem.Kind.UNSUPPORTED, module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"));
+            sink.decline(Problem.Kind.UNSUPPORTED, DegradedAnswer.reason(module));
             return;
         }
         try {
@@ -54,12 +54,7 @@ public final class CompatTravelMode implements TravelMode {
 
     // 非它不可吗：停用了或对不上就不是（没法用它，就别拦着别的方式）。
     @Override public boolean claims(TravelRequest request) {
-        if (!module.active()) return false;
-        try {
-            return mode.claims(request);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> mode.claims(request), false);
     }
 
     // 这种方式自己的参数：进世界时登记一次，停用后照样认得（给了会如实答用不了）。
@@ -69,14 +64,7 @@ public final class CompatTravelMode implements TravelMode {
 
     // 开跑这一段：停用了或对不上就给一段当场以不支持收场的，人没动，行程从原地接着规划。
     @Override public TravelLeg start(TravelRequest request, TravelOffer offer) {
-        if (!module.active()) {
-            return new Refused(module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"));
-        }
-        try {
-            return new Leg(module, mode.start(request, offer));
-        } catch (ModApiMismatch broken) {
-            return new Refused(broken.getMessage());
-        }
+        return DegradedAnswer.ask(module, () -> new Leg(module, mode.start(request, offer)), Refused::new);
     }
 
     /** 开不了跑的一段：第一刻就以不支持收场。 */

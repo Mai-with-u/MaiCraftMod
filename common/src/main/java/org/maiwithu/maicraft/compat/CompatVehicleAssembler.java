@@ -23,12 +23,8 @@ final class CompatVehicleAssembler implements VehicleAssembler {
     }
 
     @Override public Optional<Run> start(Request request) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return assembler.start(request).map(run -> new Guarded(module, run));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> assembler.start(request), Optional.<Run>empty())
+                .map(run -> new Guarded(module, run));
     }
 
     /** 跑起来的一次：推进、暂停、收尾按动作那一层收住；结局只读它自己记下的。 */

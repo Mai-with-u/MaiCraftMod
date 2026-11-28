@@ -31,12 +31,8 @@ final class CompatMaidSettings implements MaidSettings {
     }
 
     @Override public Optional<Maid> maid(PlayerContext context, Entity creature) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return settings.maid(context, creature).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> settings.maid(context, creature), Optional.<Maid>empty())
+                .map(Guarded::new);
     }
 
     /** 包一层的女仆：读名字碰到对不上时给一句说明，开始改时对不上第一刻按不支持收场。 */

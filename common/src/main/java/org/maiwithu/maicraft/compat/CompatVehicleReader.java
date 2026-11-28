@@ -23,31 +23,17 @@ final class CompatVehicleReader implements VehicleReader {
     }
 
     @Override public Optional<String> carrying() {
-        if (!module.active()) return Optional.empty();
-        try {
-            return reader.carrying();
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> reader.carrying(), Optional.empty());
     }
 
     @Override public Optional<View> read(String structureId) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return reader.read(structureId);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> reader.read(structureId), Optional.empty());
     }
 
     // 受力要问服务端、等几刻：询问照转给联动，逐刻 poll 时再包一层，问到一半停用也有个收场。
     @Override public Optional<BalanceQuery> balance(String structureId, boolean ballast) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return reader.balance(structureId, ballast).map(query -> new GuardedQuery(module, query));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> reader.balance(structureId, ballast), Optional.<BalanceQuery>empty())
+                .map(query -> new GuardedQuery(module, query));
     }
 
     /** 一次受力的询问：模组停用或接口对不上时给一份读不到的受力，写明原因。 */

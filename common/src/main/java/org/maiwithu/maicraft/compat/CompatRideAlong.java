@@ -27,11 +27,7 @@ final class CompatRideAlong implements RideAlong {
 
     @Override
     public Optional<Action> board(PlayerContext context, Entity vehicle, Permissions permissions) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return ride.board(context, vehicle, permissions).map(action -> CompatAction.of(module, action));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> ride.board(context, vehicle, permissions), Optional.<Action>empty())
+                .map(action -> CompatAction.of(module, action));
     }
 }

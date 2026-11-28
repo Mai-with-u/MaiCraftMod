@@ -30,12 +30,8 @@ final class CompatGomokuBoards implements GomokuBoards {
     }
 
     @Override public Optional<Board> board(PlayerContext context, BlockPos at) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return boards.board(context, at).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> boards.board(context, at), Optional.<Board>empty())
+                .map(Guarded::new);
     }
 
     /** 包一层的棋盘：开始下时对不上，第一刻按不支持收场。 */

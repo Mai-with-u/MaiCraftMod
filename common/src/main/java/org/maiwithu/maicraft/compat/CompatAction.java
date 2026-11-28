@@ -100,16 +100,9 @@ class CompatAction implements Action {
         }
     }
 
-    @Override public ActionStatus tick(TickContext context) {
-        if (!module.active()) {
-            return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED,
-                    module.name() + "的联动已停用：" + module.disabledReason().orElse("原因不明"), null));
-        }
-        try {
-            return action.tick(context);
-        } catch (ModApiMismatch broken) {
-            return ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, broken.getMessage(), null));
-        }
+    public ActionStatus tick(TickContext context) {
+        return DegradedAnswer.ask(module, () -> action.tick(context),
+                why -> ActionStatus.failed(Problem.of(Problem.Kind.UNSUPPORTED, why, null)));
     }
 
     // 暂停与收尾也可能碰到模组：对不上时不再往外抛，收尾照常结束。

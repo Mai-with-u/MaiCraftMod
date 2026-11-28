@@ -30,12 +30,8 @@ final class CompatTalkTo implements TalkTo {
     }
 
     @Override public Optional<Listener> listener(PlayerContext context, Entity creature) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return talk.listener(context, creature).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> talk.listener(context, creature), Optional.<Listener>empty())
+                .map(Guarded::new);
     }
 
     /** 包一层的听法：读名字、长度、在不在想都可能碰模组，对不上时如实说听不了。 */

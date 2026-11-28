@@ -23,38 +23,18 @@ final class CompatFlightStabilizers implements FlightStabilizers {
     }
 
     @Override public Optional<Setup> read(String structureId) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return stabilizers.read(structureId);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> stabilizers.read(structureId), Optional.empty());
     }
 
     @Override public boolean holdAltitude(String structureId, BlockPos local, double y) {
-        if (!module.active()) return false;
-        try {
-            return stabilizers.holdAltitude(structureId, local, y);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> stabilizers.holdAltitude(structureId, local, y), false);
     }
 
     @Override public boolean switchOn(String structureId, BlockPos local) {
-        if (!module.active()) return false;
-        try {
-            return stabilizers.switchOn(structureId, local);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> stabilizers.switchOn(structureId, local), false);
     }
 
     @Override public boolean setHorizontalSpeed(String structureId, BlockPos local, double speed) {
-        if (!module.active()) return false;
-        try {
-            return stabilizers.setHorizontalSpeed(structureId, local, speed);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> stabilizers.setHorizontalSpeed(structureId, local, speed), false);
     }
 }

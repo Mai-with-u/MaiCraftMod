@@ -26,13 +26,9 @@ final class CompatLandingMaterials implements LandingMaterials {
         this.materials = Objects.requireNonNull(materials, "materials");
     }
 
-    @Override public Optional<Action> fetch(PlayerContext context, List<String> itemIds) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return materials.fetch(context, itemIds).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+    public Optional<Action> fetch(PlayerContext context, List<String> itemIds) {
+        return DegradedAnswer.ask(module, () -> materials.fetch(context, itemIds), Optional.<Action>empty())
+                .map(Guarded::new);
     }
 
     @Override public String describe() {

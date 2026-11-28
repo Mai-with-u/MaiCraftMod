@@ -21,12 +21,8 @@ final class CompatTrainScheduler implements TrainScheduler {
     }
 
     @Override public Optional<Run> schedule(Request request) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return scheduler.schedule(request).map(run -> new Guarded(module, run));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> scheduler.schedule(request), Optional.<Run>empty())
+                .map(run -> new Guarded(module, run));
     }
 
     /** 跑起来的一次：推进、暂停、收尾按动作那一层收住；经过只读它自己记下的。 */

@@ -25,11 +25,6 @@ final class CompatObstacleSource implements ObstacleSource {
     }
 
     @Override public void obstacles(Level level, Player viewer, AABB region, ObstacleSink sink) {
-        if (!module.active()) return;
-        try {
-            source.obstacles(level, viewer, region, sink);
-        } catch (ModApiMismatch broken) {
-            // 已经停用，联动入口的日志里写过原因。
-        }
+        DegradedAnswer.run(module, () -> source.obstacles(level, viewer, region, sink));
     }
 }

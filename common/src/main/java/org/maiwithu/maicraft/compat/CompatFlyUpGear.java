@@ -23,21 +23,11 @@ final class CompatFlyUpGear implements FlyUpGear {
     }
 
     @Override public Optional<Reach> reach(PlayerContext context) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return gear.reach(context);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> gear.reach(context), Optional.empty());
     }
 
     @Override public boolean ready(PlayerContext context) {
-        if (!module.active()) return false;
-        try {
-            return gear.ready(context);
-        } catch (ModApiMismatch broken) {
-            return false;
-        }
+        return DegradedAnswer.ask(module, () -> gear.ready(context), false);
     }
 
     @Override public Action prepare(PlayerContext context) {

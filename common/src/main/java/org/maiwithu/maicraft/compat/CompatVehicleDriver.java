@@ -24,39 +24,22 @@ final class CompatVehicleDriver implements VehicleDriver {
     }
 
     @Override public Optional<WorldPosition> boardAt(String structureId) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return driver.boardAt(structureId);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> driver.boardAt(structureId), Optional.empty());
     }
 
     @Override public Optional<Action> board(String structureId, Permissions permissions) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return driver.board(structureId, permissions).map(action -> new CompatAction(module, action));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> driver.board(structureId, permissions), Optional.<Action>empty())
+                .map(action -> new CompatAction(module, action));
     }
 
     @Override public Optional<Run> test(TestRequest request) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return driver.test(request).map(run -> new Guarded(module, run));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> driver.test(request), Optional.<Run>empty())
+                .map(run -> new Guarded(module, run));
     }
 
     @Override public Optional<Run> drive(DriveRequest request) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return driver.drive(request).map(run -> new Guarded(module, run));
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> driver.drive(request), Optional.<Run>empty())
+                .map(run -> new Guarded(module, run));
     }
 
     /** 跑起来的一次：推进、暂停、收尾按动作那一层收住；经过只读它自己记下的。 */

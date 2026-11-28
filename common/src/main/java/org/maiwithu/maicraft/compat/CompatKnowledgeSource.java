@@ -23,69 +23,27 @@ public final class CompatKnowledgeSource implements KnowledgeSource {
     }
 
     @Override public List<KnowledgeDocument.Entry> entries() {
-        if (!module.active()) {
-            return List.of();
-        }
-        try {
-            return source.entries();
-        } catch (ModApiMismatch broken) {
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, source::entries, List.of());
     }
 
     @Override public KnowledgeDocument read(String uri) {
-        if (!module.active()) {
-            return null;
-        }
-        try {
-            return source.read(uri);
-        } catch (ModApiMismatch broken) {
-            return null;
-        }
+        return DegradedAnswer.ask(module, () -> source.read(uri), (KnowledgeDocument) null);
     }
 
     @Override public List<KnowledgeDocument.Entry> searchCandidates(String query) {
-        if (!module.active()) {
-            return List.of();
-        }
-        try {
-            return source.searchCandidates(query);
-        } catch (ModApiMismatch broken) {
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, () -> source.searchCandidates(query), List.of());
     }
 
     @Override public List<KnowledgeDocument.Entry> searchCandidates(String query, boolean approximate) {
-        if (!module.active()) {
-            return List.of();
-        }
-        try {
-            return source.searchCandidates(query, approximate);
-        } catch (ModApiMismatch broken) {
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, () -> source.searchCandidates(query, approximate), List.of());
     }
 
     @Override public List<KnowledgeDocument.Entry> entriesAbout(String registryId) {
-        if (!module.active()) {
-            return List.of();
-        }
-        try {
-            return source.entriesAbout(registryId);
-        } catch (ModApiMismatch broken) {
-            return List.of();
-        }
+        return DegradedAnswer.ask(module, () -> source.entriesAbout(registryId), List.of());
     }
 
     @Override public JsonArray templates() {
-        if (!module.active()) {
-            return new JsonArray();
-        }
-        try {
-            return source.templates();
-        } catch (ModApiMismatch broken) {
-            return new JsonArray();
-        }
+        return DegradedAnswer.ask(module, source::templates, new JsonArray());
     }
 
     @Override public String status() {

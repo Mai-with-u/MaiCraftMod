@@ -26,11 +26,6 @@ final class CompatModSight implements ModSight {
     }
 
     @Override public void sight(ClientLevel level, Player viewer, AABB region, Consumer<ModThing> sink) {
-        if (!module.active()) return;
-        try {
-            sight.sight(level, viewer, region, sink);
-        } catch (ModApiMismatch broken) {
-            // 已经停用，联动入口的日志里写过原因。
-        }
+        DegradedAnswer.run(module, () -> sight.sight(level, viewer, region, sink));
     }
 }

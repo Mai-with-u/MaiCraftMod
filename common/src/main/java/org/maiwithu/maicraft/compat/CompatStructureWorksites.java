@@ -29,12 +29,8 @@ final class CompatStructureWorksites implements StructureWorksites {
     }
 
     @Override public Optional<Worksite> at(String structureId) {
-        if (!module.active()) return Optional.empty();
-        try {
-            return worksites.at(structureId).map(Guarded::new);
-        } catch (ModApiMismatch broken) {
-            return Optional.empty();
-        }
+        return DegradedAnswer.ask(module, () -> worksites.at(structureId), Optional.<Worksite>empty())
+                .map(Guarded::new);
     }
 
     /** 一个工地：读现场的几样按模组还在不在兜一层。 */
@@ -50,21 +46,11 @@ final class CompatStructureWorksites implements StructureWorksites {
         }
 
         @Override public boolean present() {
-            if (!module.active()) return false;
-            try {
-                return worksite.present();
-            } catch (ModApiMismatch broken) {
-                return false;
-            }
+            return DegradedAnswer.ask(module, worksite::present, false);
         }
 
         @Override public boolean moving() {
-            if (!module.active()) return false;
-            try {
-                return worksite.moving();
-            } catch (ModApiMismatch broken) {
-                return false;
-            }
+            return DegradedAnswer.ask(module, worksite::moving, false);
         }
 
         @Override public String name() {
@@ -72,12 +58,7 @@ final class CompatStructureWorksites implements StructureWorksites {
         }
 
         @Override public Optional<BlockPos> assembler() {
-            if (!module.active()) return Optional.empty();
-            try {
-                return worksite.assembler();
-            } catch (ModApiMismatch broken) {
-                return Optional.empty();
-            }
+            return DegradedAnswer.ask(module, worksite::assembler, Optional.empty());
         }
 
         @Override public BlockPos plotCenter() {
@@ -113,12 +94,7 @@ final class CompatStructureWorksites implements StructureWorksites {
         }
 
         @Override public void forgetScan() {
-            if (!module.active()) return;
-            try {
-                worksite.forgetScan();
-            } catch (ModApiMismatch broken) {
-                // 模组断了也就没有要重读的了。
-            }
+            DegradedAnswer.run(module, worksite::forgetScan);
         }
     }
 }
