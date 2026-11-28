@@ -113,12 +113,15 @@ class ConstructionTaskTest {
         /** 生物还要挡几下才走开（按被它挡住的次数算）；一直不走为最大值。 */
         int creatureStaysFor = Integer.MAX_VALUE;
 
+        final Set<BlockPos> unloadedCells = new HashSet<>();
+        ConstructionSeams.Travels travel;
+
         Fake ground(int y) {
             for (int x = -3; x <= 8; x++) for (int z = -3; z <= 8; z++) world.put(new BlockPos(x, y, z), STONE);
             return this;
         }
 
-        @Override public boolean loaded(BlockPos pos) { return true; }
+        @Override public boolean loaded(BlockPos pos) { return !unloadedCells.contains(pos); }
         @Override public BlockState state(BlockPos pos) { return world.getOrDefault(pos, AIR); }
         @Override public String dimension() { return DIM; }
         @Override public BlockPos feet() { return feet; }
@@ -300,7 +303,7 @@ class ConstructionTaskTest {
         @Override public boolean lavaSpreadsFar() { return nether; }
 
         ConstructionServices services() {
-            return new ConstructionServices(this, this, this, this, this, this, this, this, this, null, dismantlers, rules);
+            return new ConstructionServices(this, this, this, this, this, this, this, this, this, travel, dismantlers, rules);
         }
     }
 
@@ -1264,5 +1267,103 @@ class ConstructionTaskTest {
         assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
         assertEquals(2, fake.digCalls, "开挖前快照应触发等待并在第 10 刻捕获重填共挖 2 次");
         assertEquals(Blocks.STONE_BRICKS, fake.state(cell).getBlock());
+    }
+
+    @Test
+    void 施工运行中描述带出已完成总格数与剩余格数() {
+        // 4 格蓝图（离散布置走常规就近序）：1 格开工已满足，1 格受保护跳过（离脚位最近先判定排除），2 格待砌；
+        // 核对前报总格数，砌筑途中实时更新已完成/总格数、剩余格数，并真实断言到跳过格数输出分支。
+        Fake fake = new Fake().ground(63);
+        BlockPos matched = new BlockPos(0, 64, 0);
+        BlockPos guarded = new BlockPos(0, 64, 3);
+        BlockPos first = new BlockPos(3, 64, 0);
+        BlockPos second = new BlockPos(6, 64, 0);
+        fake.world.put(matched, STONE);
+        fake.protectedCells.add(guarded);
+        fake.carried.put("minecraft:stone", 4);
+        fake.feet = new BlockPos(0, 64, 4);
+        // 每次走近停留 2 刻，确保放每一格前都能读到实时 doing() 快照。
+        fake.stuckApproach = new Action() {
+            private int ticks;
+
+            @Override public ActionStatus tick(TickContext context) {
+                return ++ticks % 2 == 0 ? ActionStatus.done() : ActionStatus.running();
+            }
+
+            @Override public String describe() { return "走向工地站位"; }
+        };
+        Blueprint blueprint = wall(STONE, matched, guarded, first, second);
+        Task task = new ConstructionTask(new ConstructionInput(blueprint, Permissions.DEFAULT, "建石墙"), fake.services());
+
+        // 核对前尚未盘点各格结局，只写总格数，不误报已完成 0 格。
+        assertTrue(task.describe().contains("共 4 格"), task.describe());
+
+        boolean sawSkippedInitial = false;
+        boolean sawSkippedAdvance = false;
+        TaskResult finished = null;
+        for (long tick = 1; tick <= 200 && finished == null; tick++) {
+            TickResult step = task.tick(at(tick));
+            if (step instanceof TickResult.Finished done) {
+                finished = done.result();
+                break;
+            }
+            String doing = task.currentProgress().orElseThrow().doing();
+            if (doing.contains("砌筑") && doing.contains("已完成 1/4 格（剩 2 格，跳过 1 格）")) {
+                sawSkippedInitial = true;
+            }
+            if (doing.contains("砌筑") && doing.contains("已完成 2/4 格（剩 1 格，跳过 1 格）")) {
+                sawSkippedAdvance = true;
+            }
+        }
+        assertNotNull(finished, "施工应在 200 刻内收尾");
+        assertTrue(sawSkippedInitial, "受保护格排除后应真实显示已完成 1/4 格（剩 2 格，跳过 1 格）");
+        assertTrue(sawSkippedAdvance, "放下一格后应推进到已完成 2/4 格（剩 1 格，跳过 1 格）");
+        assertEquals(TaskResult.Status.PARTIAL, finished.status(), finished.summary());
+    }
+
+    @Test
+    void 未加载格前往加载途中不把未加载格错报为跳过() {
+        // 蓝图两格初始均未加载：CHECK 阶段先走过去加载区块，途中未加载格仍待核对，
+        // doing 应显示已完成 0/2 格（剩 2 格），绝不能错算成“跳过 2 格”。
+        Fake fake = new Fake().ground(63);
+        BlockPos a = new BlockPos(0, 64, 0);
+        BlockPos b = new BlockPos(2, 64, 0);
+        fake.unloadedCells.add(a);
+        fake.unloadedCells.add(b);
+        fake.carried.put("minecraft:stone", 2);
+        fake.travel = (where, perms) -> Optional.of(new Action() {
+            private int ticks;
+
+            @Override public ActionStatus tick(TickContext context) {
+                if (++ticks >= 3) {
+                    fake.unloadedCells.clear();
+                    return ActionStatus.done();
+                }
+                return ActionStatus.running();
+            }
+
+            @Override public String describe() { return "走向未加载工地"; }
+        });
+        Task task = new ConstructionTask(new ConstructionInput(wall(STONE, a, b), Permissions.DEFAULT, "建石墙"),
+                fake.services());
+
+        boolean sawLoadingProgress = false;
+        TaskResult finished = null;
+        for (long tick = 1; tick <= 200 && finished == null; tick++) {
+            TickResult step = task.tick(at(tick));
+            if (step instanceof TickResult.Finished done) {
+                finished = done.result();
+                break;
+            }
+            String doing = task.currentProgress().orElseThrow().doing();
+            if (doing.contains("走向未加载工地")) {
+                assertTrue(doing.contains("已完成 0/2 格（剩 2 格）"), doing);
+                assertFalse(doing.contains("跳过"), "未加载格前往加载途中绝不能报为跳过：" + doing);
+                sawLoadingProgress = true;
+            }
+        }
+        assertNotNull(finished, "加载区块后施工应在 200 刻内完成");
+        assertTrue(sawLoadingProgress, "应观察到前往加载区块阶段的进度文案");
+        assertEquals(TaskResult.Status.DONE, finished.status(), finished.summary());
     }
 }

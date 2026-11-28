@@ -221,6 +221,25 @@ final class ConstructionSite {
         if (!cells.contains(pos)) cells.add(pos.immutable());
     }
 
+    /** 蓝图声明的总格数。 */
+    int totalCells() {
+        return endings.size();
+    }
+
+    /** 此刻已被排除或放弃的未完成格数（受保护、挖不动或放弃；不含尚未走去加载核对的未加载格）。 */
+    int skippedWork() {
+        int count = 0;
+        for (Map.Entry<BlockPos, CellEnding> entry : endings.entrySet()) {
+            if (notDone(entry.getValue()) && excluded.contains(entry.getKey())) count++;
+        }
+        return count;
+    }
+
+    /** 此刻仍待施工或待加载核对的未完成格数（不含已被排除或放弃的格）。 */
+    int remainingWork() {
+        return Math.max(0, notDone() - skippedWork());
+    }
+
     /** 全部格都对了（或这次放好、清好、倒好、交给机器）。 */
     boolean allSettled() {
         return notDone() == 0;

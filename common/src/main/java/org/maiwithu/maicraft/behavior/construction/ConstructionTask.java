@@ -295,6 +295,27 @@ public final class ConstructionTask extends PhasedTask<ConstructionTask.Phase> {
         return left;
     }
 
+    // 运行中进度描述自然带上已完成/总格数与剩余待做格数（有受保护或放弃格时一并写明跳过数），
+    // 让外层查目标进展时一眼看清整体推进程度，而不只看到单格坐标。
+    @Override protected String doing() {
+        String actionDoing = super.doing();
+        int total = site.totalCells();
+        if (total <= 0) return actionDoing;
+        String progress;
+        if (!started) {
+            progress = "共 " + total + " 格";
+        } else {
+            int notDone = site.notDone();
+            int done = total - notDone;
+            int skipped = site.skippedWork();
+            int remaining = site.remainingWork();
+            progress = skipped > 0
+                    ? "已完成 " + done + "/" + total + " 格（剩 " + remaining + " 格，跳过 " + skipped + " 格）"
+                    : "已完成 " + done + "/" + total + " 格（剩 " + remaining + " 格）";
+        }
+        return actionDoing == null ? progress : progress + "，" + actionDoing;
+    }
+
     @Override protected String describePhase(Phase value) {
         return switch (value) {
             case CHECK -> "对图核对";
